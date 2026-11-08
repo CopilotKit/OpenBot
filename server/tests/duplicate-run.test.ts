@@ -78,6 +78,27 @@ describe("what a copy runs on", () => {
     });
   });
 
+  test.each(["remote_ag_ui", "remote_mastra"] as const)(
+    "a %s copy keeps standing instructions and leaves credentials behind",
+    (type) => {
+      const endpoint = "https://theirs.invalid/ag-ui";
+      const standingInstructions = "Ask the person to sign in.";
+      expect(
+        runForDuplicate(
+          {
+            type,
+            configuration: {
+              endpoint,
+              standingInstructions,
+              auth: { header: "Authorization", credentialId: "cred_1" },
+            },
+          },
+          managed,
+        ),
+      ).toEqual({ type, configuration: { endpoint, standingInstructions } });
+    },
+  );
+
   test("falls back to the managed Bot only when the source runs on nothing of its own", () => {
     expect(
       runForDuplicate({ type: "built_in", configuration: {} }, managed),

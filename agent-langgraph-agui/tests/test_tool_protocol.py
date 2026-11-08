@@ -268,6 +268,36 @@ async def test_only_provider_auth_status_emits_model_refresh_code(
         assert "controlled provider refusal" in errors[-1]["message"]
 
 
+# OpenAI's answer to a run offered 202 tools, captured from its API on 2026-11-07. Seen on OpenBot
+# Desktop as "Error code: 400 - Invalid 'tools': array too long. …" in red under the person's message.
+OPENAI_TOO_MANY_TOOLS = (
+    400,
+    {
+        "error": {
+            "message": "Invalid 'tools': array too long. Expected an array with maximum length "
+            "128, but got an array with length 202 instead.",
+            "type": "invalid_request_error",
+            "param": "tools",
+            "code": "array_above_max_length",
+        }
+    },
+)
+
+
+@pytest.mark.asyncio
+async def test_a_provider_refusal_is_marked_as_one_for_the_server_to_say_in_words(boundary):
+    boundary["model_refusal"] = OPENAI_TOO_MANY_TOOLS
+    events = await run_protocol(run_input([]), allow_error=True)
+    assert events[-1]["type"] == "RUN_ERROR", "every run ends with a terminal event"
+    # The provider's words, which the server keeps for its log and reads to notice a retired model,
+    # marked as a refusal so it tells the person in words (server/src/agents/provider-refusal.ts).
+    assert events[-1]["code"] == "OPENBOT_MODEL_REFUSED"
+    assert events[-1]["message"] == (
+        "Error code: 400 - Invalid 'tools': array too long. Expected an array with maximum "
+        "length 128, but got an array with length 202 instead."
+    )
+
+
 # The providers' own billing refusals: xAI's and OpenAI's captured from their APIs on 2026-11-05
 # (the xAI team id zeroed), Anthropic's as its API answers it.
 XAI_SPENDING_LIMIT = (

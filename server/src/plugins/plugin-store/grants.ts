@@ -5,6 +5,7 @@ import type { StoreContext } from "./context";
 import {
   type GrantedPlugins,
   grantTargetType,
+  initiatedBy,
   type PluginKind,
   toolNameFor,
 } from "./model";
@@ -52,6 +53,7 @@ export function grantMethods(context: StoreContext) {
         eventType: "configuration.changed",
         targetType: grantTargetType(kind),
         targetId: ref,
+        ...initiatedBy(by),
         payload: {
           actor: by,
           change: "plugin_granted",
@@ -59,6 +61,54 @@ export function grantMethods(context: StoreContext) {
           ref,
           bot: agentId,
           ...(as === "owner" ? { grantedAs: "owner" } : {}),
+        },
+      });
+    },
+
+    /**
+     * Give a Bot several tools of one app at once, each as an administrator's grant, with ONE row on
+     * the trail for all of them: `refs` in the payload, the app as the target.
+     *
+     * For what OpenBot gives every Bot by itself: Routines' tools at every start, and in the personal
+     * edition every tool of an app. One row per tool filled Activity with twenty-one rows the day an
+     * upgrade added seven goal tools to Routines on a computer with three Bots. One row per Bot says
+     * what happened.
+     */
+    async grantTools(
+      app: string,
+      refs: string[],
+      agentId: string,
+      by: string,
+    ): Promise<void> {
+      if (refs.length === 0) return;
+      await database
+        .insert(pluginGrants)
+        .values(
+          refs.map((ref) => ({
+            kind: "mcp",
+            ref,
+            agentId,
+            grantedBy: by,
+            grantedAs: "admin" as const,
+          })),
+        )
+        .onConflictDoUpdate({
+          target: [pluginGrants.kind, pluginGrants.ref, pluginGrants.agentId],
+          set: { grantedBy: by, grantedAs: "admin", updatedAt: new Date() },
+        });
+
+      await recordAuditEvent(auditStore, {
+        eventType: "configuration.changed",
+        targetType: "mcp_server",
+        targetId: app,
+        ...initiatedBy(by),
+        payload: {
+          actor: by,
+          change: "plugin_granted",
+          kind: "mcp",
+          app,
+          refs,
+          bot: agentId,
         },
       });
     },
@@ -96,6 +146,7 @@ export function grantMethods(context: StoreContext) {
           eventType: "configuration.changed",
           targetType: grantTargetType("mcp"),
           targetId: ref,
+          ...initiatedBy(by),
           payload: {
             actor: by,
             change: "plugin_revoked",
@@ -128,6 +179,7 @@ export function grantMethods(context: StoreContext) {
         eventType: "configuration.changed",
         targetType: grantTargetType(kind),
         targetId: ref,
+        ...initiatedBy(by),
         payload: {
           actor: by,
           change: "plugin_revoked",
@@ -188,6 +240,7 @@ export function grantMethods(context: StoreContext) {
             toolName: toolNameFor(ref),
             description: row.description,
             inputSchema: row.inputSchema as Record<string, unknown>,
+            destructive: row.destructive,
           };
         });
 

@@ -4,5 +4,7 @@
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>OpenBot uses your microphone for dictation and voice conversations.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>OpenBot turns what you say while you teach a Bot into text, on this Mac. Your voice never leaves it.</string>
 </dict>
 </plist>

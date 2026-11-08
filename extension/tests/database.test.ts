@@ -8,6 +8,7 @@ import {
   STORES,
   tx,
 } from "../src/shared/database";
+import { rejection } from "./support/rejection";
 
 // Installed per test rather than by "fake-indexeddb/auto": that import sets the globals once at module
 // load, and another file's teardown in the same `bun test` process can delete them afterwards.
@@ -123,11 +124,12 @@ describe("recorder database", () => {
       return requestToPromise(t.objectStore("meta").get("n"));
     });
     expect(value).toBe(7);
-    await expect(
+    const thrown = await rejection(
       tx(db, ["meta"], "readwrite", () => {
         throw new Error("boom");
       }),
-    ).rejects.toThrow("boom");
+    );
+    expect((thrown as Error | undefined)?.message).toBe("boom");
     db.close();
   });
 
@@ -143,12 +145,13 @@ describe("recorder database", () => {
 
   test("tx rejects when work touches the transaction after it has finished", async () => {
     const db = await openRecorderDatabase(freshName());
-    await expect(
+    const thrown = await rejection(
       tx(db, ["meta"], "readwrite", async (t) => {
         await new Promise((resolve) => setTimeout(resolve, 20));
         t.objectStore("meta").put("late", "k");
       }),
-    ).rejects.toThrow();
+    );
+    expect(thrown).toBeInstanceOf(Error);
     const stored = await tx(db, ["meta"], "readonly", (t) =>
       requestToPromise(t.objectStore("meta").get("k")),
     );
@@ -163,12 +166,11 @@ describe("recorder database", () => {
         t.objectStore("events").add({ trajectoryId: "t", seq: 0 }),
       ),
     );
-    const error = await tx(db, ["events"], "readwrite", (t) => {
-      t.objectStore("events").add({ trajectoryId: "t", seq: 0 });
-      return "ok";
-    }).then(
-      () => undefined,
-      (e: unknown) => e,
+    const error = await rejection(
+      tx(db, ["events"], "readwrite", (t) => {
+        t.objectStore("events").add({ trajectoryId: "t", seq: 0 });
+        return "ok";
+      }),
     );
     expect((error as Error | undefined)?.name).toBe("ConstraintError");
     db.close();

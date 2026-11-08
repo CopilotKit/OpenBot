@@ -18,13 +18,22 @@ import {
  *
  * A coworker with no token can still hold a conversation. What it cannot do is reach anything outside
  * one, which is the right default for a URL somebody pasted.
+ *
+ * A Bot OpenBot runs itself, the harness picked in setup, is handed OpenBot's key on every run and
+ * uses its tools with none of its own. The panel says so and offers nothing to generate: it used to
+ * tell the personal starter it "can't use tools" while it searched the web and used the browser.
  */
+export const KEY_FROM_OPENBOT =
+  "OpenBot runs this Bot, so it can use its tools without a key.";
+
 export function CallbackTokenPanel({
   agentId,
   hasToken,
+  fromOpenBot = false,
 }: {
   agentId: string;
   hasToken: boolean;
+  fromOpenBot?: boolean;
 }) {
   const queryClient = useQueryClient();
   const issue = useMutation(issueCallbackTokenMutationOptions(queryClient));
@@ -34,11 +43,24 @@ export function CallbackTokenPanel({
   const [token, setToken] = useState<string | null>(null);
   const error = issue.error ?? revoke.error;
 
+  const heading = (
+    <h2 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+      Key for tools
+    </h2>
+  );
+
+  if (fromOpenBot) {
+    return (
+      <section className="mt-6 grid gap-2">
+        {heading}
+        <p className="text-muted-foreground text-sm">{KEY_FROM_OPENBOT}</p>
+      </section>
+    );
+  }
+
   return (
     <section className="mt-6 grid gap-2">
-      <h2 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-        Key for tools
-      </h2>
+      {heading}
 
       <p className="text-muted-foreground text-sm">
         {hasToken

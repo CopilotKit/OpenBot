@@ -123,5 +123,8 @@ test("a complete table with a short last row is still refused", () => {
     />,
   );
 
-  expect(view.getByText(/Waiting for complete table data/)).toBeTruthy();
+  // Refused as a failure: nothing more is coming, so it does not wait.
+  expect(view.getByText("Couldn't show the data table.")).toBeTruthy();
+  expect(view.queryByText(/Waiting for complete table data/)).toBeNull();
+  expect(view.queryByRole("table")).toBeNull();
 });

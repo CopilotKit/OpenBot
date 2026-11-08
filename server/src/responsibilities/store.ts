@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import type { Database } from "../db/client";
+import { routines } from "../db/schema/coworker";
 import {
   responsibilities,
   responsibilityEvents,
@@ -10,6 +11,7 @@ import {
 import { workItems } from "../db/schema/work";
 import { RESPONSIBILITY_RUN_KIND } from "./engine";
 import {
+  type GoalRepeats,
   parseResponsibilityEvent,
   parseResponsibilityInput,
   parseResponsibilityPatch,
@@ -17,6 +19,8 @@ import {
   ResponsibilityNotFoundError,
   ResponsibilityRefusedError,
   type ResponsibilityStore,
+  routineRunsGoal,
+  whyItRepeats,
 } from "./types";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -59,6 +63,50 @@ export function createResponsibilityStore(
       .insert(workItems)
       .values({ kind: RESPONSIBILITY_RUN_KIND, key, payload: { runId } })
       .onConflictDoNothing();
+  }
+  /**
+   * Why this goal runs again and again (`GoalRepeats`), read where it already lives: its own flag,
+   * its subscriptions, its enabled triggers, and the enabled routines of its Bot that run it
+   * (`routineRunsGoal`: the goal a routine records, or for an older routine its id or whole quoted
+   * title).
+   */
+  async function repeatsOf(
+    connection: Connection,
+    goal: Pick<
+      Responsibility,
+      "id" | "ownerUserId" | "agentId" | "title" | "recurring" | "subscriptions"
+    >,
+  ): Promise<GoalRepeats | null> {
+    if (goal.recurring) return "recurring";
+    // A person keeps at most 20 routines switched on (`MAX_ENABLED_ROUTINES`), so this read is small.
+    const enabled = await connection
+      .select({
+        goalId: routines.goalId,
+        goalByTitle: routines.goalByTitle,
+        instruction: routines.instruction,
+      })
+      .from(routines)
+      .where(
+        and(
+          eq(routines.ownerUserId, goal.ownerUserId),
+          eq(routines.agentId, goal.agentId),
+          eq(routines.enabled, true),
+        ),
+      );
+    if (enabled.some((routine) => routineRunsGoal(routine, goal)))
+      return "routine";
+    if (goal.subscriptions.length > 0) return "event";
+    const [trigger] = await connection
+      .select({ id: responsibilityTriggers.id })
+      .from(responsibilityTriggers)
+      .where(
+        and(
+          eq(responsibilityTriggers.responsibilityId, goal.id),
+          eq(responsibilityTriggers.enabled, true),
+        ),
+      )
+      .limit(1);
+    return trigger ? "event" : null;
   }
   const store: ResponsibilityStore = {
     async create(ownerUserId, input) {
@@ -114,7 +162,7 @@ export function createResponsibilityStore(
         const existing = await owned(transaction, ownerUserId, id, true);
         if (existing.status === "completed" && status !== "completed")
           throw new ResponsibilityRefusedError(
-            "A completed responsibility cannot be resumed. Create a new responsibility.",
+            "A completed goal can't be resumed. Create a new goal.",
           );
         const [row] = await transaction
           .update(responsibilities)
@@ -144,7 +192,7 @@ export function createResponsibilityStore(
           throw new ResponsibilityNotFoundError();
         if (existing.status !== "active")
           throw new ResponsibilityRefusedError(
-            "Only an active responsibility can make progress.",
+            "Only an active goal can make progress.",
           );
         if (input.sourceRunId) {
           const [run] = await transaction
@@ -159,7 +207,15 @@ export function createResponsibilityStore(
             );
           if (!run)
             throw new ResponsibilityRefusedError(
-              "Progress must come from the responsibility's current run.",
+              "Progress must come from the goal's current run.",
+            );
+          // A run of a goal that repeats is one of many: it records its result, and the person ends it.
+          const repeats = input.complete
+            ? await repeatsOf(transaction, existing)
+            : null;
+          if (repeats)
+            throw new ResponsibilityRefusedError(
+              `This goal repeats because ${whyItRepeats(repeats)}, so a run can't complete it. Record this run's progress without complete, and the goal stays active. Only the person ends it.`,
             );
         }
         const [row] = await transaction
@@ -177,6 +233,8 @@ export function createResponsibilityStore(
         return row;
       });
     },
+    repeats: async (ownerUserId, id) =>
+      repeatsOf(database, await owned(database, ownerUserId, id)),
     async listRuns(ownerUserId, id) {
       await owned(database, ownerUserId, id);
       return database
@@ -312,6 +370,10 @@ export function createResponsibilityStore(
               targetGoal.channelId,
             )
           : null;
+      const repeats =
+        targetGoal.status === "active"
+          ? await repeatsOf(database, targetGoal)
+          : null;
       return database.transaction(async (transaction) => {
         const [reference] = await transaction
           .select({ responsibilityId: responsibilityRuns.responsibilityId })
@@ -354,7 +416,7 @@ export function createResponsibilityStore(
               status: "skipped",
               error:
                 goal.status !== "active"
-                  ? `Responsibility is ${goal.status}.`
+                  ? `The goal is ${goal.status}.`
                   : "Bot or conversation access changed.",
               finishedAt: new Date(),
             })
@@ -387,6 +449,7 @@ export function createResponsibilityStore(
             payload: event.payload,
           },
           continuation: run.continuation,
+          repeats,
         };
       });
     },
@@ -409,7 +472,7 @@ export function createResponsibilityStore(
           .for("update");
         if (run?.status !== "running")
           throw new ResponsibilityRefusedError(
-            "This responsibility run is no longer running.",
+            "This goal's run is no longer running.",
           );
         const replyText =
           outcome.status === "succeeded"
@@ -432,6 +495,19 @@ export function createResponsibilityStore(
             .set({ lastResult: replyText, updatedAt: new Date() })
             .where(eq(responsibilities.id, run.responsibilityId));
       });
+    },
+    async requeueRun(runId) {
+      const [requeued] = await database
+        .update(responsibilityRuns)
+        .set({ status: "queued", startedAt: null, finishedAt: null })
+        .where(
+          and(
+            eq(responsibilityRuns.id, runId),
+            eq(responsibilityRuns.status, "running"),
+          ),
+        )
+        .returning({ id: responsibilityRuns.id });
+      return Boolean(requeued);
     },
     async resumeWaiting(ownerUserId, runId, response) {
       if (JSON.stringify(response)?.length > 32_768)
@@ -458,7 +534,7 @@ export function createResponsibilityStore(
         if (!run) throw new ResponsibilityNotFoundError();
         if (goal.status !== "active")
           throw new ResponsibilityRefusedError(
-            "Resume the responsibility before answering its waiting run.",
+            "Resume the goal before answering its waiting run.",
           );
         if (run.status !== "waiting" || !run.waiting) return false;
         await transaction

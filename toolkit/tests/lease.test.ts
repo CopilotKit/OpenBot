@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { isLockConflict, keepLease, LockLapsedError } from "../src/lease";
+import {
+  isLockConflict,
+  isThreadBusy,
+  keepLease,
+  LockLapsedError,
+} from "../src/lease";
 
 function platformError(status: number): Error {
   const error = new Error(`Intelligence platform error ${status}`);
@@ -21,6 +26,39 @@ describe("isLockConflict", () => {
       false,
     );
     expect(isLockConflict(undefined)).toBe(false);
+  });
+});
+
+describe("isThreadBusy", () => {
+  /** What the runtime's client raises for Intelligence's answer, body and all. */
+  const refused = (code: string, retryable: boolean) =>
+    Object.assign(
+      platformError(409),
+      {
+        message: `Intelligence platform error 409: ${JSON.stringify({
+          error: {
+            code,
+            message: "Thread is already locked by another runner.",
+            category: "conflict",
+            retryable,
+          },
+          requestId: "9f62408a-71cc-49fb-9f43-0160cc8394db",
+        })}`,
+      },
+      { retryable },
+    );
+
+  test("a lock refused because another run holds it, marked retryable, is busy", () => {
+    expect(isThreadBusy(refused("THREAD_LOCK_FAILED", true))).toBe(true);
+  });
+
+  test("anything else is not: not retryable, a lost renewal, another status", () => {
+    expect(isThreadBusy(refused("THREAD_LOCK_FAILED", false))).toBe(false);
+    expect(isThreadBusy(refused("THREAD_LOCK_RENEWAL_FAILED", true))).toBe(
+      false,
+    );
+    expect(isThreadBusy(platformError(409))).toBe(false);
+    expect(isThreadBusy(new TypeError("fetch failed"))).toBe(false);
   });
 });
 

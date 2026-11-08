@@ -12,7 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { BotResponsibilities } from "@/components/responsibilities/responsibilities";
 import { settleReactWork } from "./settle-react-work";
 
-/** A Bot's Responsibilities page: its own goals, and a new one that needs no Bot picked. */
+/** A Bot's Goals page: its own goals, and a new one that needs no Bot picked. */
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -55,7 +55,11 @@ const channel = (id: string, name: string, agentIds: string[]) => ({
 });
 
 const writes: { request: string; body: unknown }[] = [];
-function serving() {
+const twoGoals = () => [
+  goal("g1", "expenses", "Reconcile receipts"),
+  goal("g2", "knowledge", "Keep the wiki fresh"),
+];
+function serving(goals: ReturnType<typeof goal>[] = twoGoals()) {
   writes.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -68,12 +72,7 @@ function serving() {
       return Response.json({ ok: true });
     }
     if (url === "/api/responsibilities") {
-      return Response.json({
-        responsibilities: [
-          goal("g1", "expenses", "Reconcile receipts"),
-          goal("g2", "knowledge", "Keep the wiki fresh"),
-        ],
-      });
+      return Response.json({ responsibilities: goals });
     }
     if (url.startsWith("/api/channels")) {
       return Response.json({
@@ -113,19 +112,19 @@ function draw() {
   );
 }
 
-test("only this Bot's responsibilities are listed", async () => {
+test("only this Bot's goals are listed", async () => {
   serving();
   const view = draw();
   expect(await view.findByText("Reconcile receipts")).toBeTruthy();
   expect(view.queryByText("Keep the wiki fresh")).toBeNull();
 });
 
-test("a new responsibility needs no Bot picked, and offers only this Bot's conversations", async () => {
+test("a new goal needs no Bot picked, and offers only this Bot's conversations", async () => {
   serving();
   const view = draw();
   await view.findByText("Reconcile receipts");
   const user = userEvent.setup({ document });
-  await user.click(view.getByRole("button", { name: /New responsibility/ }));
+  await user.click(view.getByRole("button", { name: /New goal/ }));
   expect(view.queryByRole("combobox", { name: /^Bot/ })).toBeNull();
   await user.click(view.getByRole("combobox", { name: /^Conversation/ }));
   const options = (await view.findAllByRole("option")).map(
@@ -151,4 +150,20 @@ test("a new responsibility needs no Bot picked, and offers only this Bot's conve
       }),
     ),
   );
+});
+
+test("the section, its buttons, its empty state and its dialog all call it a goal", async () => {
+  serving([]);
+  const view = draw();
+  expect(await view.findByText("No goals yet")).toBeTruthy();
+  expect(view.getByText("Goals")).toBeTruthy();
+  const buttons = view.getAllByRole("button", { name: "New goal" });
+  expect(buttons).toHaveLength(2);
+  const user = userEvent.setup({ document });
+  await user.click(buttons[0] as HTMLElement);
+  const dialog = await view.findByRole("dialog");
+  expect(dialog.textContent).toContain("New goal");
+  expect(view.getByRole("button", { name: "Create goal" })).toBeTruthy();
+  // One word for one thing: the route and the API say responsibilities, the person never does.
+  expect(document.body.textContent).not.toMatch(/responsibilit/i);
 });

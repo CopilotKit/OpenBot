@@ -168,3 +168,75 @@ test("the waiting card offers the private sign-in once the request exists", asyn
   stop.abort();
   await answered;
 });
+
+/**
+ * The dialog's own spacing, not a page's. The form's sections are page sections, and a page puts
+ * 48px above each one to keep unrelated decisions apart. In the dialog that left a large empty gap
+ * above "Use a saved login" and another above "Enter your login".
+ */
+test("the private sign-in dialog spaces its sections as a dialog does", async () => {
+  const offered = {
+    ...signInRequest,
+    passwordManager: true,
+    savedLogins: [{ id: "login-1", username: "tomsmith" }],
+  };
+  global.fetch = Object.assign(
+    async (input: RequestInfo | URL) => {
+      const path = new URL(String(input), "http://127.0.0.1").pathname;
+      if (path === "/api/sign-in-requests")
+        return Response.json({ requests: [offered] });
+      if (path === `/api/sign-in-requests/${offered.id}`)
+        return Response.json(offered);
+      return Response.json({ error: "Not found" }, { status: 404 });
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  const queries = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const kept = new Registry();
+  const tree = render(
+    <Providers queries={queries}>
+      <SignInTool />
+      <Capture kept={kept} />
+    </Providers>,
+  );
+  await waitFor(() => expect(kept.renderer).toBeDefined());
+  const Kept = kept.renderer as Renderer;
+  tree.rerender(
+    <Providers queries={queries}>
+      <SignInTool />
+      <Capture kept={kept} />
+      <Kept
+        name="computer_request_sign_in"
+        args={{ site: SITE }}
+        status="executing"
+        toolCallId={TOOL_CALL_ID}
+      />
+    </Providers>,
+  );
+  fireEvent.click(
+    await tree.findByRole(
+      "button",
+      { name: /Open private sign-in/ },
+      { timeout: 4000 },
+    ),
+  );
+
+  const body = (await tree.findByText("Use a saved login")).closest(
+    "[data-slot=dialog-body]",
+  ) as HTMLElement;
+  expect(body).not.toBeNull();
+  const sections = [...body.querySelectorAll(":scope > section")];
+  expect(
+    sections.map((section) => section.querySelector("h2")?.textContent),
+  ).toEqual(["Use a saved login", "Enter your login"]);
+  for (const section of sections) {
+    // Spaced by the dialog body's own gap, with no page margin of its own above it.
+    expect(section.className.split(/\s+/)).toContain("mt-0");
+    expect(section.className.split(/\s+/)).not.toContain("mt-12");
+  }
+  // And the fields sit a step below the words that introduce them, not hard against them.
+  const form = body.querySelector("form") as HTMLFormElement;
+  expect(form.className.split(/\s+/)).toContain("mt-4");
+});

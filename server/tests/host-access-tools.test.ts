@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import type { AuditEventInput } from "../src/audit";
 import { createHostAccessBroker } from "../src/host-access/broker";
-import { hostAccessTools } from "../src/host-access/tools";
+import { DENIED_ON_DESKTOP, hostAccessTools } from "../src/host-access/tools";
 
 function auditRecorder() {
   const events: AuditEventInput[] = [];
@@ -143,7 +144,7 @@ describe("host access tools", () => {
     expect(await answer).toContain("ok");
   });
 
-  test("host operations audit request and outcome without content command or raw path", async () => {
+  test("host operations are recorded as a computer's actions, naming the file and never its content", async () => {
     const broker = createHostAccessBroker();
     broker.rememberGrant({
       id: "grant-1",
@@ -179,24 +180,22 @@ describe("host access tools", () => {
     });
     await answer;
 
-    expect(events.map((event) => event.payload.outcome)).toEqual([
-      "requested",
-      "succeeded",
+    // One row, written as it went to the desktop; a success adds nothing to it.
+    expect(events.map((event) => event.eventType)).toEqual([
+      "computer.action_allowed",
     ]);
     expect(JSON.stringify(events)).not.toContain("do not log");
-    expect(JSON.stringify(events)).not.toContain("secret.txt");
     expect(events[0]).toMatchObject({
-      eventType: "configuration.changed",
+      eventType: "computer.action_allowed",
       targetType: "host_access",
       targetId: "grant-1",
       actorUserId: "user-a",
       initiator: { kind: "handoff", id: "run-1" },
       payload: {
-        change: "host_access_tool_call",
-        operation: "write_file",
+        action: "host/write_file",
         bot: "bot-a",
         grant: "grant-1",
-        outcome: "requested",
+        file: "secret.txt",
       },
     });
   });
@@ -228,9 +227,72 @@ describe("host access tools", () => {
     })[0]!;
     const text = await list.execute({});
     expect(text).toContain("No host folders");
-    expect(events.at(-1)?.payload).toMatchObject({
-      operation: "list_folders",
-      outcome: "refused",
+    expect(events.at(-1)).toMatchObject({
+      eventType: "computer.action_refused",
+      payload: {
+        action: "host/list_folders",
+        reason: "No host folders are granted to this Bot.",
+      },
+    });
+  });
+  /*
+   * The desktop's Deny now says "Declined in OpenBot Desktop." where it said "The local owner denied
+   * this operation.", which the person read about themselves. The server reads that sentence to
+   * record the refusal as the person's own, so Activity says they declined it; a sentence it did
+   * not know would have recorded an ordinary refusal.
+   */
+  test("a Deny on the desktop is recorded as the person declining, in the desktop's words", async () => {
+    const source = readFileSync(
+      new URL(
+        "../../desktop/src-tauri/src/desktop_host_access.rs",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const declined = source.match(/const DECLINED: &str = "([^"]+)";/)?.[1];
+    expect(declined).toBe("Declined in OpenBot Desktop.");
+    expect(DENIED_ON_DESKTOP.has(declined as string)).toBe(true);
+
+    const broker = createHostAccessBroker();
+    broker.rememberGrant({
+      id: "grant-1",
+      botId: "bot-a",
+      actorId: "user-a",
+      displayName: "Project",
+      revoked: false,
+    });
+    broker.nextDesktopOperation();
+    const { auditStore, events } = auditRecorder();
+    const writeTool = hostAccessTools({
+      broker,
+      botId: "bot-a",
+      actorId: "user-a",
+      auditStore,
+    }).find((tool) => tool.name === "host_write_file")!;
+    const answer = writeTool.execute({
+      grantId: "grant-1",
+      path: "todo.txt",
+      content: "pick up dry cleaning",
+    });
+    let lease = broker.nextDesktopOperation();
+    for (let index = 0; index < 5 && !lease; index++) {
+      await Promise.resolve();
+      lease = broker.nextDesktopOperation();
+    }
+    broker.resolveDesktopOperation({
+      operationId: lease!.operations[0]!.operationId,
+      ok: false,
+      error: declined as string,
+    });
+
+    expect(await answer).toBe(`Refused. ${declined}`);
+    expect(events.at(-1)).toMatchObject({
+      eventType: "computer.action_refused",
+      payload: {
+        action: "host/write_file",
+        file: "todo.txt",
+        refusal: "person_declined",
+      },
     });
   });
 });

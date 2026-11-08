@@ -1,12 +1,17 @@
+import { isOpenBotActor } from "@openbot/shared/openbot-actor";
 import { and, eq, sql } from "drizzle-orm";
 import type { ApprovalGate } from "../../approvals/types";
-import type { AuditStore } from "../../audit";
+import {
+  type AuditInitiator,
+  type AuditStore,
+  DEPLOYMENT_INITIATOR,
+} from "../../audit";
+import type { EntraTokens } from "../../auth/entra-refusal";
 import type { ActionPolicy } from "../../computer/policy";
 import type {
   CredentialSecretReader,
   CredentialStore,
 } from "../../credentials";
-import type { EntraTokens } from "../../auth/entra-refusal";
 import type { Database } from "../../db/client";
 import { isQueryFailure, withoutStatement } from "../../db/query-failure";
 import { pendingAuthorizations } from "../../db/schema";
@@ -286,6 +291,8 @@ export type GrantedPlugins = {
     toolName: string;
     description: string;
     inputSchema: Record<string, unknown>;
+    /** The app marks it destructive (`mcpTools.destructive`): OpenBot always asks before it runs. */
+    destructive: boolean;
   }[];
   skills: {
     slug: string;
@@ -662,6 +669,16 @@ export function storableSchema(
  * reason comes back in `skipped`, once, spelled as the vendor listed it — so the caller can say
  * which actions were not recorded rather than leave their absence for somebody to notice.
  */
+/**
+ * The current reading of a vendor's listing, recorded on an app's row by every refresh that stores
+ * its tools (`mcpServers.listingRevision`). Raise it when what is recorded from the same listing
+ * changes, and every app of the active broker is listed again once at the next start.
+ *
+ * 1: a broker's silence is `unclassified` and not `destructive` (Arcade had recorded it as
+ * destructive), and a Composio action with no label is `unclassified` too.
+ */
+export const LISTING_REVISION = 1;
+
 export function storableTools(
   serverId: string,
   listed: ListedTool[],
@@ -727,6 +744,8 @@ export function storableTools(
        */
       effect: tool.effect ?? null,
       destructive: tool.destructive ?? false,
+      // A broker said nothing about it; see `mcpTools.unclassified`.
+      unclassified: tool.unclassified ?? false,
       // The server's own read-only label, kept apart from `effect`; see `mcpTools.declaredRead`.
       declaredRead: tool.declaredRead ?? false,
       version: tool.version?.replaceAll(NUL, "") ?? null,
@@ -745,6 +764,7 @@ export type StorableTool = {
   inputSchema: Record<string, unknown>;
   effect: "read" | "write" | null;
   destructive: boolean;
+  unclassified: boolean;
   declaredRead: boolean;
   version: string | null;
 };
@@ -922,6 +942,18 @@ export const iso = (value: Date | string | null): string | null =>
  */
 export const DEPLOYMENT_ACTOR = "deployment";
 export const UNATTRIBUTED_ACTOR = "unattributed";
+
+/**
+ * What started a configuration row, read from the actor it names, to spread into the row.
+ *
+ * A row OpenBot writes for a change nobody made names OpenBot as its actor ({@link DEPLOYMENT_ACTOR},
+ * or `openbot:always-on` and the personal edition's `openbot:personal-defaults`), and is started by
+ * OpenBot. Any other actor is a person, which is what a row with no initiator says. Without this an
+ * upgrade that gave every Bot the goal tools put a row per tool on Activity saying a person did it.
+ */
+export function initiatedBy(actor: string): { initiator?: AuditInitiator } {
+  return isOpenBotActor(actor) ? { initiator: DEPLOYMENT_INITIATOR } : {};
+}
 
 /**
  * Whose account this call went out as, for the trail.

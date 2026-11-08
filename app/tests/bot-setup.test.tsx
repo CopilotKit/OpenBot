@@ -20,6 +20,7 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { KEY_FROM_OPENBOT } from "@/components/agents/callback-token-panel";
 import { SetupSections } from "@/components/bot-profile/setup";
 import {
   ISOLATED_EXPLAINED,
@@ -67,6 +68,8 @@ afterEach(() => {
 
 /** What `scripts/start.sh` sets `MANAGED_AGENT_AG_UI_URL` to. */
 const MANAGED = "http://localhost:4201/ag-ui";
+/** The harness OpenBot Desktop runs for the personal starter, as `PICKED_HARNESS_URL` names it. */
+const PICKED = "http://agent-harness:4212";
 
 const actor = {
   id: "owner",
@@ -99,6 +102,7 @@ function serve(
     isolated?: boolean;
     isolationAvailable?: boolean;
     visibility?: AgentProfile["visibility"];
+    instructions?: string;
   } = {},
 ) {
   let profile: AgentProfile = {
@@ -118,6 +122,9 @@ function serve(
     hasAuth: false,
     hasCallbackToken: false,
     isolated: options.isolated ?? false,
+    ...(options.instructions === undefined
+      ? {}
+      : { instructions: options.instructions }),
   };
   const store = {
     get: async () => profile,
@@ -146,7 +153,8 @@ function serve(
     true,
     MANAGED,
     undefined,
-    undefined,
+    // The addresses this deployment runs, as app.ts names them from its configuration.
+    { token: "deployment-token", endpoints: [MANAGED, PICKED] },
     { available: options.isolationAvailable ?? true },
   );
   globalThis.fetch = Object.assign(
@@ -221,6 +229,48 @@ test("the personal edition's Setup has no Visibility or Isolated: one person, on
   expect(view.queryByText("Isolated")).toBeNull();
 });
 
+/*
+ * The starter Bot's header shows what it does, so what it does is a sentence for the person and
+ * its instructions are their own row, labelled as instructions and saved on their own.
+ */
+test("the starter Bot's Setup edits its instructions apart from what it does", async () => {
+  const instructions =
+    "You are a personal assistant for one person. Be clear and brief.";
+  serve(PICKED, actor.id, { instructions });
+  const view = draw("personal");
+  const user = userEvent.setup({ document: view.baseElement.ownerDocument });
+
+  const described = await view.findByRole("button", { name: /^What it does/ });
+  expect(described.textContent).toContain("Review receipts.");
+  expect(described.textContent).not.toContain("You are");
+  const instructed = view.getByRole("button", { name: /^Instructions/ });
+  expect(instructed.textContent).toContain(instructions);
+
+  await user.click(instructed);
+  const field = await view.findByDisplayValue(instructions);
+  await user.type(field, " I live in Berlin.");
+  await user.click(view.getByRole("button", { name: "Save" }));
+
+  await waitFor(() => expect(updates).toHaveLength(1));
+  expect(updates[0]).toMatchObject({
+    roleDescription: "Review receipts.",
+    instructions: `${instructions} I live in Berlin.`,
+  });
+});
+
+test("a Bot whose instructions are what it does has no separate Instructions row", async () => {
+  serve(MANAGED);
+  const view = draw("personal");
+  expect(
+    await view.findByRole("button", { name: /^What it does/ }),
+  ).toBeTruthy();
+  expect(view.queryByRole("button", { name: /^Instructions/ })).toBeNull();
+
+  await rename(view, "Receipts");
+  await waitFor(() => expect(updates).toHaveLength(1));
+  expect(updates[0]).not.toHaveProperty("instructions");
+});
+
 test("a built-in coworker can be renamed on a deployment whose own Bot lives on localhost", async () => {
   serve(MANAGED);
   const view = draw();
@@ -248,6 +298,27 @@ test("a coworker somebody hosts keeps its own endpoint when it is renamed", asyn
     name: "Receipts",
     endpoint: "https://agents.example.test/ag-ui",
   });
+});
+
+test("a Bot on the harness OpenBot runs says it can use its tools, and offers no key to make", async () => {
+  serve(PICKED);
+  const view = draw("personal");
+
+  expect(await view.findByText(KEY_FROM_OPENBOT)).toBeTruthy();
+  expect(view.queryByText(/can't use tools/)).toBeNull();
+  expect(view.queryByRole("button", { name: "Generate key" })).toBeNull();
+});
+
+test("a Bot somebody hosts is still offered a key for its tools", async () => {
+  serve("https://agents.example.test/ag-ui");
+  const view = draw("personal");
+
+  expect(
+    await view.findByText(
+      "This Bot has no key yet. It can talk but can't use tools. Generate a key and add it to your agent's configuration.",
+    ),
+  ).toBeTruthy();
+  expect(view.getByRole("button", { name: "Generate key" })).toBeTruthy();
 });
 
 test("someone who cannot manage the Bot reads its setup but cannot open an editor", async () => {

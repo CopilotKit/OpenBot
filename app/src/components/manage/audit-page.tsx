@@ -7,6 +7,7 @@ import {
   IconList,
   IconRefresh,
   IconSearch,
+  IconX,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
@@ -17,12 +18,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useBotNames } from "@/lib/agents/bot-names";
 import {
+  COMPUTER_ACTION_EVENT_TYPES,
   DID_NOT_HAPPEN_EVENT_TYPES,
   eventTypeFilter,
+  OPENBOT_WORKING_EVENT_TYPES,
+  oneRowPerAction,
   REFUSED_EVENT_TYPES,
 } from "@/lib/audit/outcome";
 import { auditEventsQueryOptions, auditExportUrl } from "@/lib/audit/queries";
 import { client } from "@/lib/client";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { useManagePaths } from "@/lib/manage-paths";
 import { cn } from "@/lib/utils";
 
 /**
@@ -42,7 +48,7 @@ const FILTERS = [
   {
     label: "Computer actions",
     icon: IconDeviceDesktop,
-    search: "?eventType=computer.action_allowed",
+    search: eventTypeFilter(COMPUTER_ACTION_EVENT_TYPES),
   },
   {
     label: "Blocked",
@@ -61,15 +67,63 @@ const FILTERS = [
   },
 ] as const;
 
+/** A saved view's query with one Bot's rows asked for too, for the table and the export alike. */
+export function withBot(search: string, bot: string | undefined): string {
+  if (!bot) return search;
+  const params = new URLSearchParams(
+    search.startsWith("?") ? search.slice(1) : search,
+  );
+  params.set("bot", bot);
+  return `?${params.toString()}`;
+}
+
+/**
+ * A view's query as the personal edition's Activity asks it: without OpenBot's own working, asked of
+ * the server so the page still holds a full page of rows. The export asks the same, so the file is
+ * the table.
+ */
+export function withoutOpenBotWorking(search: string): string {
+  const params = new URLSearchParams(
+    search.startsWith("?") ? search.slice(1) : search,
+  );
+  params.set("excludeEventType", OPENBOT_WORKING_EVENT_TYPES.join(","));
+  return `?${params.toString()}`;
+}
+
+/** What the page says under its title in Admin, where an admin reviews every Bot against policy. */
+const ADMIN_DESCRIPTION =
+  "Review Bot actions and actions blocked by this deployment’s policy.";
+
 /**
  * `children` are sections only the team edition's Admin adds below the page's own (the admin's
- * controls for these). The personal edition's Settings renders this page with none.
+ * controls for these). The personal edition's Settings renders this page with none, and with its
+ * own `description`, because a page anybody can open does not talk about a deployment.
+ *
+ * `bot` narrows every view to one Bot's rows, asked of the server; `onClearBot` takes it off.
  */
-export function AuditPage({ children }: { children?: ReactNode } = {}) {
-  const [search, setSearch] = useState<string>(FILTERS[0].search);
+export function AuditPage({
+  bot,
+  children,
+  description = ADMIN_DESCRIPTION,
+  onClearBot,
+}: {
+  bot?: string;
+  children?: ReactNode;
+  description?: string;
+  onClearBot?: () => void;
+} = {}) {
+  const paths = useManagePaths();
+  const [view, setView] = useState<string>(FILTERS[0].search);
+  // The stored event names and OpenBot's own working are Admin's to read; the personal edition's
+  // Activity is anybody's page. Its route has the edition loaded before this draws.
+  const edition = useQuery(deploymentCapabilitiesQueryOptions()).data?.edition;
+  const search =
+    edition === "personal"
+      ? withoutOpenBotWorking(withBot(view, bot))
+      : withBot(view, bot);
   const [query, setQuery] = useState("");
   const events = useQuery(auditEventsQueryOptions(search));
-  const rows = (events.data?.events ?? []) as AuditEvent[];
+  const rows = oneRowPerAction((events.data?.events ?? []) as AuditEvent[]);
   const nameFor = useBotNames();
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -87,7 +141,7 @@ export function AuditPage({ children }: { children?: ReactNode } = {}) {
     setExportCapped(null);
     try {
       const response = await client(auditExportUrl(search), {
-        fallback: "Couldn't export audit events. Try again.",
+        fallback: "Couldn't export these events. Try again.",
       });
       // A file that stopped early must say so, or it reads as the whole trail.
       const capped = Number(response.headers.get("x-audit-export-truncated"));
@@ -105,7 +159,7 @@ export function AuditPage({ children }: { children?: ReactNode } = {}) {
       setExportError(
         error instanceof Error
           ? error.message
-          : "Couldn't export audit events. Try again.",
+          : "Couldn't export these events. Try again.",
       );
     } finally {
       setExporting(false);
@@ -118,11 +172,7 @@ export function AuditPage({ children }: { children?: ReactNode } = {}) {
      * height; the title stays put and the rows scroll inside the log. With recording controls
      * below it, the log is bounded so the page can scroll down to those controls too.
      */
-    <PageShell
-      description="Review Bot actions and actions blocked by this deployment’s policy."
-      title="Audit"
-      width="full"
-    >
+    <PageShell description={description} title={paths.auditLabel} width="full">
       {/* With admin settings below the log, the page scrolls and the log keeps its own bounded
           viewport. Without settings, the table fills the panel as before. */}
       <div className={children ? "min-h-0 flex-1 overflow-y-auto" : "contents"}>
@@ -131,13 +181,15 @@ export function AuditPage({ children }: { children?: ReactNode } = {}) {
         >
           {events.isPending ? null : events.isError ? (
             <p className="px-4 text-destructive text-sm" role="alert">
-              Couldn't load the audit log. Reload the page.
+              Couldn't load these events. Reload the page.
             </p>
           ) : (
             <AuditTable
+              deploymentName={paths.deploymentName}
               events={rows}
               nameFor={nameFor}
               query={query}
+              storedNames={edition !== "personal"}
               toolbar={({ count, filters }) => (
                 <div className="flex shrink-0 flex-col gap-3 border-border border-b px-4 pb-3">
                   {/*
@@ -151,7 +203,7 @@ export function AuditPage({ children }: { children?: ReactNode } = {}) {
                       className="inline-flex items-center gap-0.5 rounded-lg border border-border p-0.5"
                     >
                       {FILTERS.map((filter) => {
-                        const active = search === filter.search;
+                        const active = view === filter.search;
                         return (
                           <Button
                             aria-pressed={active}
@@ -162,7 +214,7 @@ export function AuditPage({ children }: { children?: ReactNode } = {}) {
                                 : "text-muted-foreground",
                             )}
                             key={filter.label}
-                            onClick={() => setSearch(filter.search)}
+                            onClick={() => setView(filter.search)}
                             size="xs"
                             type="button"
                             variant="ghost"
@@ -186,6 +238,18 @@ export function AuditPage({ children }: { children?: ReactNode } = {}) {
                         value={query}
                       />
                     </div>
+                    {/* Beside the other filters, on the row that wraps: it narrows what is asked for. */}
+                    {bot ? (
+                      <Button
+                        aria-label={`Show every Bot, not only ${nameFor(bot)}`}
+                        onClick={onClearBot}
+                        size="sm"
+                        variant="outline"
+                      >
+                        Only {nameFor(bot)}
+                        <IconX />
+                      </Button>
+                    ) : null}
                     {filters}
                     <span className="ml-1 text-muted-foreground text-xs tabular-nums">
                       {count}

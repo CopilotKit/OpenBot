@@ -12,8 +12,12 @@ import { SEARCH_TOOLS } from "./tool-search";
  * the reader's problem, and putting it on screen tells them how the thing is built rather than what
  * their Bot just did.
  *
- * Anything that is not a prefixed MCP name is left exactly as it is: a component the app registered
- * already has a name somebody chose.
+ * ANY OTHER NAME IS PUT IN WORDS TOO, never drawn as it came. A line is drawn the moment a call
+ * starts, before its arguments and before the app's own renderer for it may have loaded, so its name
+ * is all there is to say. FOUND LIVE: a Bot first called `web_search`, a name it was never offered,
+ * and its line read "web_search" until the real search joined it. A component the app draws
+ * (`showBarChart`) reads "Show bar chart" while its renderer is not there yet, and a name with no
+ * words in it reads as a tool being used.
  */
 export type ToolName = {
   /** What was done, for the line itself. */
@@ -26,11 +30,31 @@ export function readToolName(name: string, running = false): ToolName {
   const own = ownToolLabel(name, running);
   if (own) return { label: own };
   const parts = name.split("__");
-  if (parts.length < 3 || parts[0] !== "mcp") return { label: name };
+  if (parts.length < 3 || parts[0] !== "mcp")
+    return {
+      label:
+        wordsOf(name).length > 0
+          ? humanise(name)
+          : running
+            ? "Using a tool"
+            : "Used a tool",
+    };
 
   const [, rawServer, ...rest] = parts;
+  /*
+   * OpenBot's own Routines app also carries a goal's tools for a conversation. They are the tools a
+   * goal's run holds, so they read in its words, "Created a goal", and not "Create goal" beside
+   * "routines".
+   */
+  if (rawServer === ROUTINES_APP) {
+    const goal = ownToolLabel(rest.join("__"), running);
+    if (goal) return { label: goal };
+  }
   return appToolName(rawServer ?? "", rest.join("__"));
 }
+
+/** The key of OpenBot's own Routines app (`ALWAYS_ON_APP` on the server). */
+const ROUTINES_APP = "routines";
 
 /**
  * One app's tool, from its server key and the tool's own name: what `readToolName` reads out of an
@@ -152,11 +176,47 @@ type OwnTool = {
   running: string;
   done: string;
   /**
+   * What was asked for, for a step that was blocked: "Save a file", not "Saved a file". A blocked
+   * step did not happen, so its line says what was tried. Without it the line keeps `done`.
+   */
+  attempted?: string;
+  /** The argument naming what the step acted on, said beside its words: a file's path. */
+  subject?: "path";
+  /**
    * What it was given and what it answered were both written for the model (a tool search's query
    * and limit), so its step in a folded group says what it did and does not open.
    */
   answersTheModel?: true;
 };
+
+/** A goal's tools, under the names they are offered as. */
+function goalTools(names: {
+  create: string;
+  list: string;
+  update: string;
+  report: string;
+  run: string;
+  pause: string;
+  resume: string;
+  complete: string;
+}): Record<string, OwnTool> {
+  return {
+    [names.create]: { running: "Creating a goal", done: "Created a goal" },
+    [names.list]: { running: "Checking goals", done: "Checked goals" },
+    [names.update]: { running: "Updating a goal", done: "Updated a goal" },
+    [names.report]: {
+      running: "Recording progress",
+      done: "Recorded progress",
+    },
+    [names.run]: { running: "Starting a goal", done: "Started a goal" },
+    [names.pause]: { running: "Pausing a goal", done: "Paused a goal" },
+    [names.resume]: { running: "Resuming a goal", done: "Resumed a goal" },
+    [names.complete]: {
+      running: "Marking a goal complete",
+      done: "Marked a goal complete",
+    },
+  };
+}
 
 /**
  * The tools OpenBot itself offers a Bot, named in words somebody chose.
@@ -206,6 +266,12 @@ const OWN_TOOLS: Record<string, OwnTool> = {
     done: "Checked available tools",
   },
   save_skill: { running: "Proposing a skill", done: "Proposed a skill" },
+
+  /*
+   * Drawing a generated interface in the conversation. The runtime offers it, not an OpenBot
+   * registration, so `built-in-tool-labels.test.ts` cannot find it; its words go here by hand.
+   */
+  render_ui: { running: "Drawing an interface", done: "Drew an interface" },
 
   // Making a Bot from a conversation.
   list_bots: {
@@ -270,39 +336,28 @@ const OWN_TOOLS: Record<string, OwnTool> = {
     done: "Cleared a next step",
   },
 
-  // Responsibilities.
-  create_responsibility: {
-    running: "Creating a responsibility",
-    done: "Created a responsibility",
-  },
-  list_responsibilities: {
-    running: "Checking responsibilities",
-    done: "Checked responsibilities",
-  },
-  update_responsibility: {
-    running: "Updating a responsibility",
-    done: "Updated a responsibility",
-  },
-  report_responsibility_progress: {
-    running: "Recording progress",
-    done: "Recorded progress",
-  },
-  run_responsibility: {
-    running: "Starting a responsibility",
-    done: "Started a responsibility",
-  },
-  pause_responsibility: {
-    running: "Pausing a responsibility",
-    done: "Paused a responsibility",
-  },
-  resume_responsibility: {
-    running: "Resuming a responsibility",
-    done: "Resumed a responsibility",
-  },
-  complete_responsibility: {
-    running: "Marking a responsibility complete",
-    done: "Marked a responsibility complete",
-  },
+  // Goals. The `*_responsibility` names are what a goal's tools were called before they said goal,
+  // kept so the steps in a conversation recorded then still read as words.
+  ...goalTools({
+    create: "create_goal",
+    list: "list_goals",
+    update: "update_goal",
+    report: "report_goal_progress",
+    run: "run_goal",
+    pause: "pause_goal",
+    resume: "resume_goal",
+    complete: "complete_goal",
+  }),
+  ...goalTools({
+    create: "create_responsibility",
+    list: "list_responsibilities",
+    update: "update_responsibility",
+    report: "report_responsibility_progress",
+    run: "run_responsibility",
+    pause: "pause_responsibility",
+    resume: "resume_responsibility",
+    complete: "complete_responsibility",
+  }),
 
   // The browser. A folded group names these steps in the same words (`browser-activity.ts`).
   computer_navigate: { running: "Opening page", done: "Opened page" },
@@ -318,18 +373,55 @@ const OWN_TOOLS: Record<string, OwnTool> = {
   },
 
   // The Bot's computer, and folders on yours. The same action reads the same on either.
-  computer_list_files: { running: "Listing files", done: "Listed files" },
-  computer_read_file: { running: "Reading a file", done: "Read a file" },
-  computer_write_file: { running: "Saving a file", done: "Saved a file" },
-  computer_run_command: { running: "Running a command", done: "Ran a command" },
+  computer_list_files: {
+    running: "Listing files",
+    done: "Listed files",
+    attempted: "List files",
+  },
+  computer_read_file: {
+    running: "Reading a file",
+    done: "Read a file",
+    attempted: "Read a file",
+    subject: "path",
+  },
+  computer_write_file: {
+    running: "Saving a file",
+    done: "Saved a file",
+    attempted: "Save a file",
+    subject: "path",
+  },
+  computer_run_command: {
+    running: "Running a command",
+    done: "Ran a command",
+    attempted: "Run a command",
+  },
   host_list_folders: {
     running: "Checking your folders",
     done: "Checked your folders",
+    attempted: "Check your folders",
   },
-  host_list_files: { running: "Listing files", done: "Listed files" },
-  host_read_file: { running: "Reading a file", done: "Read a file" },
-  host_write_file: { running: "Saving a file", done: "Saved a file" },
-  host_run_command: { running: "Running a command", done: "Ran a command" },
+  host_list_files: {
+    running: "Listing files",
+    done: "Listed files",
+    attempted: "List files",
+  },
+  host_read_file: {
+    running: "Reading a file",
+    done: "Read a file",
+    attempted: "Read a file",
+    subject: "path",
+  },
+  host_write_file: {
+    running: "Saving a file",
+    done: "Saved a file",
+    attempted: "Save a file",
+    subject: "path",
+  },
+  host_run_command: {
+    running: "Running a command",
+    done: "Ran a command",
+    attempted: "Run a command",
+  },
 
   // Asking the person, from the computer.
   computer_request_help: {
@@ -355,6 +447,41 @@ export function ownToolLabel(name: string, running = false): string | null {
   const own = Object.hasOwn(OWN_TOOLS, name) ? OWN_TOOLS[name] : undefined;
   if (!own) return null;
   return running ? own.running : own.done;
+}
+
+/**
+ * What one of OpenBot's own steps asked for, for a step that was blocked and so did not happen, or
+ * null when it has no words of its own for that.
+ */
+export function ownToolAttempt(name: string): string | null {
+  const own = Object.hasOwn(OWN_TOOLS, name) ? OWN_TOOLS[name] : undefined;
+  return own?.attempted ?? null;
+}
+
+/**
+ * What one of OpenBot's own steps acted on, read from its arguments (a JSON string while it streams,
+ * or already parsed): the file a file step read or saved. Undefined for any other step, and for
+ * arguments not yet complete.
+ */
+export function ownToolSubject(
+  name: string,
+  args: unknown,
+): string | undefined {
+  const own = Object.hasOwn(OWN_TOOLS, name) ? OWN_TOOLS[name] : undefined;
+  if (!own?.subject) return undefined;
+  let value = args;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return undefined;
+    }
+  }
+  if (!value || typeof value !== "object") return undefined;
+  const subject = (value as Record<string, unknown>)[own.subject];
+  return typeof subject === "string" && subject.trim()
+    ? subject.trim()
+    : undefined;
 }
 
 /** Whether a step's arguments and answer were written for the model and are not shown to the person. */

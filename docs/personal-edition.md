@@ -22,14 +22,15 @@ bash scripts/start.sh
 because the Personal Assistant runs inside the server on the model in
 [`examples/personal/model.yaml`](../examples/personal/model.yaml).
 
-It also starts your own browser, as OpenBot Desktop does: your installed Google
-Chrome, or Microsoft Edge, as a window on your desktop with the OpenBot Recorder in it. It builds the
-Recorder (`extension/dist`) if it isn't built, runs `scripts/start-local-chrome-computer.ts` on port
-`BROWSER_PORT` (4101) with `COMPUTER_PEOPLE_ONLY=on`, and points the server at it with
-`OPENBOT_BROWSER_URL`. **Teach a Bot** in the sidebar takes you to a page whose Open opens or brings forward that window, and Record
-there goes to your own Learning space. Its profile is kept under
+It also starts your own browser: your installed Google Chrome, or Microsoft Edge, as a window on
+your desktop with the OpenBot Recorder in it. It builds the Recorder (`extension/dist`) if it isn't
+built, runs `scripts/start-local-chrome-computer.ts` on port `BROWSER_PORT` (4101) with
+`COMPUTER_PEOPLE_ONLY=on`, and points the server at it with `OPENBOT_BROWSER_URL`. **Teach a Bot**
+in the sidebar takes you to a page whose Open opens or brings forward that window, and Record there
+goes to your own Learning space. OpenBot Desktop does not do this: it shows your browser inside its
+window (see [OpenBot Desktop](#openbot-desktop)). Its profile is kept under
 `~/Library/Application Support/OpenBot/local-computer` on macOS (see
-[configuration](configuration.md#openbot-desktop-runs-it-for-the-person) for the other systems).
+[configuration](configuration.md#installed-chrome-for-a-local-api-deployment) for the other systems).
 Without Chrome or Edge, OpenBot starts without it and `start.sh` says why. `scripts/stop.sh` stops it
 with the rest.
 
@@ -38,19 +39,63 @@ with the rest.
 OpenBot Desktop installs the personal edition: it writes `OPENBOT_EDITION=personal` and the settings
 below into its deployment's `.env` on every Start (`desktop/src-tauri/src/env.rs`). It runs
 PostgreSQL, the one computer, the server and the worker, and no supervisor and no bundled Bot
-containers. The Bot picked during setup, if any, joins the Personal Assistant: the `picked-harness`
-row in [`examples/personal/agents.yaml`](../examples/personal/agents.yaml) is dropped while
-`PICKED_HARNESS_URL` is empty, which is how `start.sh` leaves it.
+containers.
 
 The server's container is given the supervisor by name in `docker-compose.yml` unless
 `COMPUTER_SUPERVISOR_CONTAINER_URL` is set, so the desktop sets it empty as well as
 `COMPUTER_SUPERVISOR_URL`.
 
+A new installation starts with one Bot, the Personal Assistant. When a Bot was picked during setup,
+the Personal Assistant runs on what was picked: it takes the `picked-harness` row's id and
+connection, and the Personal Assistant's instructions, skills and conversation, and its subtitle
+says what runs it ("Everyday life. Powered by LangChain (LangGraph)."). With nothing picked, as
+`start.sh` leaves it, `PICKED_HARNESS_URL` is empty, the `picked-harness` row in
+[`examples/personal/agents.yaml`](../examples/personal/agents.yaml) is dropped, and the Personal
+Assistant runs inside the server ("Everyday life. Powered by OpenBot."). Either way it is an
+ordinary Bot: its name, subtitle and instructions can be changed on its Setup page. On OpenBot
+Desktop, after a change of AI provider, Start moves it to the new framework, renamed or not, and
+rewrites the "Powered by" part of its subtitle, keeping any words around it. A connection the person
+set on the Setup page is left alone.
+
+The starter is seeded once, into a new installation only (`personalStarterSeed` in
+`server/src/tenant-package.ts`). An existing installation keeps the Bots it has: where the Personal
+Assistant and the picked Bot are two Bots, they stay two, and neither is rewritten from the package
+on Start. Only the picked Bot's connection still follows the installer.
+
+**Teach a Bot** shows your browser inside the OpenBot window, as hosted OpenBot does: its tabs, its
+address bar and the live page, with the Recorder already in it and Record and Stop in OpenBot. It
+runs on the one computer, beside your Bots (see [Teach a Bot](#teach-a-bot) below); no separate
+Chrome window opens. Narration comes from the OpenBot window, as on hosted OpenBot. The window's web
+view has no speech recognition that stays on your computer, so the desktop app does it instead: Apple's
+Speech framework with on-device recognition required on macOS, the in-process SAPI recognizer on
+Windows. Your voice never leaves the machine; where neither can recognise your language, narration is
+off. macOS asks once for speech recognition and the microphone. The desktop runs
+no browser of its own on your machine, and writes no `OPENBOT_BROWSER_URL`; Start takes out one an
+earlier version wrote.
+
+The Recorder reaches OpenBot only at an https address or at this machine's loopback, so the browser
+in the computer's container is handed `http://127.0.0.1:<port>`, which in there is the container.
+The desktop writes `COMPUTER_LOOPBACK_RELAYS` (`<port>=<host>:<port>`, comma-separated): the app's
+and the server's ports to the server's container, and a local Intelligence gateway's port to
+`host.docker.internal`. The computer listens on those ports at its own loopback and passes each
+connection on (`agent-computer/src/loopback-relay.ts`). Unset, it relays nothing.
+
 An installation from an earlier OpenBot Desktop, which ran the team edition, becomes the personal
 edition on its next Start. Its Bots and conversations stay in the database. The team edition's
 settings stored there are not read (see [What is fixed](#what-is-fixed)). The package keeps the
-`openbot` tenant id so the picked Bot retains its package ownership across that switch. Stop still stops each
+`openbot` tenant id so the picked Bot retains its package ownership across that switch. It was
+`personal` up to v0.3.1, and lists that as a former id, so a personal edition set up with
+`start.sh` then keeps its Bots, conversations and deployment name. Stop still stops each
 computer the supervisor made for a Bot.
+
+Its Bots' files and browser logins come along. The supervisor gave the person a computer of their
+own, whose volumes keep each Bot's files in `computers/<bot>` and its browser profile in `<bot>`; the
+one computer keeps them in `computers/<person>~<bot>` and `<person>~<bot>`. Start copies each Bot's
+files and profile from the old volumes into the new places, with their owners and modes, once
+(recorded in `.openbot-carried-over/` in each new volume), in a short-lived container from the
+computer's own image (`stack::carry_over_person_computers`). Nothing already there is replaced: a
+Bot's files are merged into its folder, and a profile the one computer already has for that Bot is
+kept whole, as the supervisor's own carry-over does. The old volumes are left as they were.
 
 ## What the server requires
 
@@ -71,9 +116,9 @@ settings and team rules, and a paused Automatic Learning.
 
 | | Personal edition |
 | --- | --- |
-| Use Bots, cloud browser, network and computer, custom rules, password manager, apps a Bot uses as you, check-ins | On |
-| Local computer access, Slack and Teams, Team Bots, Isolated Bots | Off |
-| Ask before making changes | Off for anybody who has not chosen otherwise. Paying, deleting, sending, sharing and posting ask anyway. See [Approvals](approvals.md) |
+| Use Bots, cloud browser, network and computer, local computer access (folders, in OpenBot Desktop), custom rules, password manager, apps a Bot uses as you, check-ins | On |
+| Slack and Teams, Team Bots, Isolated Bots | Off |
+| Ask before making changes | Off for anybody who has not chosen otherwise. Paying, and deleting, sending, sharing or posting in your apps and on websites, ask anyway, as does every edit or command in a folder on this computer. A Bot's own computer is its scratch space. See [Approvals](approvals.md) |
 | Stop idle computers | Never: there is one |
 | Check-ins per Bot per day | 24, as in the team edition |
 | SSO, action recording, model and MCP allowlists, skill sharing | Off |
@@ -81,11 +126,40 @@ settings and team rules, and a paused Automatic Learning.
 The password manager uses a saved login only after the person picks it in the private sign-in
 form, and taking over the browser is always offered.
 
+### Folders on this computer
+
+In OpenBot Desktop, Settings → Computer → **Folders on this computer** lets a Bot use folders on
+your own machine. Every safeguard the team edition has applies here too:
+
+- You pick each folder in the desktop's own folder picker (**Choose folder** on the Bot's row). A
+  Bot sees only the folders picked for it.
+- A folder is read-only. Before a Bot changes a file or runs a command in it, the desktop app asks
+  you in a dialog of its own. Set **Commands on your computer** in Settings → Approvals to Never to
+  refuse every command.
+- Every folder chosen, every file read or changed and every command is in Activity.
+- Access ends when OpenBot stops, when the desktop app goes offline, or when you press **Revoke** or
+  **Stop folder access**. Nothing is remembered across a restart.
+
+Only the desktop can open a folder. It hands the server a token minted on every Start
+(`OPENBOT_DESKTOP_HOST_TOKEN`), and its folder worker answers the server with it. A personal edition
+started with `scripts/start.sh` has no such token, so the section says it needs OpenBot Desktop and
+offers no picker, and the server refuses a folder request at once (`409`) rather than waiting for a
+desktop that will never answer. See `server/src/host-access/` and
+`desktop/src-tauri/src/desktop_host_access.rs`.
+
+### Teach a Bot
+
 You can also teach a Bot a task in its own browser: take control of it and press **Record**. The recording goes to your
 own Learning space. The team edition refuses Record on a computer its Bots share, because another
 Bot's shell could read the Recorder's connection there. Here every Bot on the one computer is yours,
-so `scripts/start.sh` starts it as yours (`COMPUTER_PERSON_ID`) and the server allows Record. Your
-own browser never runs on that computer: it is the window on your desktop above.
+so `scripts/start.sh` and the desktop start it as yours (`COMPUTER_PERSON_ID`) and the server allows
+Record.
+
+For the same reason your own browser (**Teach a Bot**) may run on that computer here, where the team
+edition refuses it: the one computer is told the edition (`OPENBOT_EDITION`, beside
+`COMPUTER_PERSON_ID`), and the server and the computer both allow it only in the personal edition. Its
+profile sits beside your Bots' profiles, which already hold the sites you signed in to for them.
+Where `OPENBOT_BROWSER_URL` is set, as `scripts/start.sh` sets it, your browser runs there instead.
 
 ## What the app shows
 
@@ -113,9 +187,12 @@ account are the same decision when one person makes both:
 - **Parallel Search is on from the start**, and can be turned off. See
   [Web search is on from the start](#web-search-is-on-from-the-start).
 
-**In a conversation**, when a Bot needs an app that isn't connected, it shows a card with
-**Connect**: one press turns the app on and opens its sign-in in a new tab, and the conversation
-carries on once it is connected.
+**In a conversation**, when a Bot needs an app that isn't connected, it shows a card. For an app
+you sign in to, **Connect** turns the app on and opens its sign-in in a new tab, and the
+conversation carries on once it is connected. An app with nothing to sign in to, or whose sign-in
+isn't known until it is on, shows **Turn on**, and one that takes a key shows **Set up**, which
+opens its page under Connections. The Bot is told which button the card shows, so it names that one
+(`server/src/plugins/app-access-tool.ts`).
 
 **Bots** lists your Bots and, under **What your Bots know**, Skills and Memory. A Bot's own page has
 four settings: Routines, Memory, **What it can do** (the apps and skills it has, what it asks before

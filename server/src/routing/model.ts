@@ -1,12 +1,20 @@
+import { PlanModel, type PlanModelConfig } from "../agents/plan-model";
 import type { RuntimeModel } from "../copilot";
 
 /**
- * The one model call the router makes, kept apart from the routing logic so that logic stays a pure
- * function the tests drive without a network. This reuses the deployment's own model and key — the
- * same ones the built-in coworkers answer on — so a router is never a second thing to configure.
+ * One model call on the deployment's own model, for the router, the approval reviewer and the tool
+ * chooser, kept apart from their logic so that logic stays a pure function the tests drive without a
+ * network. This reuses the model the built-in Bots answer on, with its key, or on a Claude or ChatGPT
+ * plan its plan (`model.plan`), so none of them is a second thing to configure.
  *
- * It throws on a missing key or a bad response on purpose: the router treats a throw as "not sure"
- * and lands on the default, so failure here is a soft landing, not an error a person sees.
+ * It throws on a missing key, a bad response or a timeout on purpose: the router treats a throw as
+ * "not sure" and lands on the default, the reviewer as "ask the person", and the chooser as "offer
+ * what fits". A failure here is a soft landing, not an error a person sees.
+ *
+ * ON A PLAN THERE IS NO KEY, so the call is asked of the plan's own harness, the way the built-in
+ * Bots and a conversation's title are. Asked for a key there, every call threw "no model key": the
+ * chooser offered every tool, the router sent every message to the default Bot, and Auto-review
+ * asked the person about everything it was meant to let through.
  */
 export function createModelCompleter(deps: {
   model: RuntimeModel;
@@ -23,6 +31,7 @@ export function createModelCompleter(deps: {
   fastModel?: string | (() => string | undefined);
 }): (prompt: string, signal?: AbortSignal) => Promise<string> {
   return async (prompt: string, signal?: AbortSignal) => {
+    if (deps.model.plan) return askPlan(deps.model.plan, prompt, signal);
     const fast =
       typeof deps.fastModel === "function" ? deps.fastModel() : deps.fastModel;
     const models =
@@ -98,6 +107,93 @@ export function createModelCompleter(deps: {
       );
     }
   };
+}
+
+/**
+ * Pass one of tool selection: which skills a message needs, on the model the built-in Bots run on.
+ *
+ * ON A CLAUDE OR CHATGPT PLAN THERE IS NO KEY, so it is asked of the plan's own harness, as the Bots
+ * are answered. Asked for a key there, it threw on every turn: Activity said "Couldn't choose, so all
+ * were offered" for each message, and a Bot with ninety tools was handed all of them every time.
+ */
+export function createSkillChooser(
+  model: RuntimeModel,
+  resolveApiKey: () => Promise<string | null>,
+): (prompt: string, signal?: AbortSignal) => Promise<string> {
+  const complete = createModelCompleter({ model, resolveApiKey });
+  /*
+   * Why it could not choose, in the log, once for each reason. The run carries on with every tool
+   * that fits (see `fitToolLimit`) and its Activity row says it could not choose, but not why, and
+   * a reason that holds for every turn is worth one line rather than one per turn.
+   */
+  const said = new Set<string>();
+  return async (prompt, signal) => {
+    try {
+      return await complete(prompt, signal);
+    } catch (error) {
+      if (!signal?.aborted) {
+        const reason = (error instanceof Error ? error.message : String(error))
+          .replace(/\s+/g, " ")
+          .slice(0, 300);
+        if (!said.has(reason)) {
+          said.add(reason);
+          console.warn(
+            JSON.stringify({
+              type: "tool-selection-unavailable",
+              reason,
+              ...(model.plan ? { plan: model.plan.provider } : {}),
+            }),
+          );
+        }
+      }
+      throw error;
+    }
+  };
+}
+
+/**
+ * How long one call to a plan's harness may take. Longer than a key's ten seconds, since a plan's
+ * harness starts a query of its own for each call; the same bound a voice summary on a plan has.
+ */
+const PLAN_CALL_TIMEOUT_MS = 20_000;
+
+/**
+ * One answer from the plan's own harness: model only, no tools, and a conversation of its own each
+ * time, so the call is never a turn in somebody's thread. Throws on no text, as the key path does.
+ */
+async function askPlan(
+  plan: PlanModelConfig,
+  prompt: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  signal?.throwIfAborted();
+  // Aborted by hand: `AbortSignal.timeout` makes HttpAgent's cleanup rethrow a TimeoutError that
+  // nothing catches. The same reason `channels/titler.ts` gives.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PLAN_CALL_TIMEOUT_MS);
+  const stop = () => controller.abort();
+  signal?.addEventListener("abort", stop, { once: true });
+  try {
+    const result = await new PlanModel(
+      plan,
+      "openbot-model-call",
+      { threadId: crypto.randomUUID() },
+      new Set(),
+      controller.signal,
+    ).doGenerate({
+      prompt: [{ role: "user", content: [{ type: "text", text: prompt }] }],
+      abortSignal: controller.signal,
+    });
+    const answer = result.content
+      .flatMap((part) => (part.type === "text" ? [part.text] : []))
+      .join("");
+    if (!answer.trim()) throw new Error("plan model returned no text");
+    return answer;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", stop);
+    controller.abort();
+  }
 }
 
 /** The small model each provider's router asks first when nothing names one. */

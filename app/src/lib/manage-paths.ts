@@ -39,7 +39,20 @@ export function managePaths(edition: "team" | "personal") {
       credentials: () => linkOptions({ to: "/settings/credentials" }),
       newCredential: () => linkOptions({ to: "/settings/credentials/new" }),
       computers: () => linkOptions({ to: "/settings/computer" }),
+      /*
+       * What the trail is called, on its page, in the sidebar and wherever another page sends a
+       * person to it. Activity here, where one person reads what their own Bots did; Audit under
+       * Admin, where an admin reviews everybody's Bots for policy. Two names, each kept the same
+       * everywhere in its edition, so a page never reads "Audit" under a sidebar entry "Activity".
+       */
+      auditLabel: "Activity",
       audit: () => linkOptions({ to: "/settings/activity" }),
+      /*
+       * What a sentence calls the product itself. The person running OpenBot alone reads its name;
+       * an admin reads "this deployment", the exact word Admin is allowed (see `openbot-copy`).
+       * Mid-sentence; `atStart` capitalises it where it opens one.
+       */
+      deploymentName: "OpenBot",
     };
   }
   return {
@@ -69,8 +82,15 @@ export function managePaths(edition: "team" | "personal") {
     credentials: () => linkOptions({ to: "/admin/credentials" }),
     newCredential: () => linkOptions({ to: "/admin/credentials/new" }),
     computers: () => linkOptions({ to: "/admin/computers" }),
+    auditLabel: "Audit",
     audit: () => linkOptions({ to: "/admin/audit" }),
+    deploymentName: "this deployment",
   };
+}
+
+/** A name from these paths at the start of a sentence: "This deployment", and "OpenBot" as it is. */
+export function atStart(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 export type ManagePaths = ReturnType<typeof managePaths>;

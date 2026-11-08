@@ -50,8 +50,7 @@ test("none of the fintech example's Bots come with it", async () => {
   for (const agent of agents) expect(theirs).not.toContain(agent.id);
 });
 
-/** OpenBot Desktop runs the personal edition, and the Bot picked in its setup is in it. */
-test("the Bot picked in OpenBot Desktop's setup joins it once there is an address", async () => {
+test("the loader reads a configured harness template alongside the fallback", async () => {
   process.env.PICKED_HARNESS_URL = "http://127.0.0.1:4206/ag-ui";
   process.env.PICKED_HARNESS_NAME = "LangGraph";
   const { agents } = await loadTenantPackage(personal);
@@ -61,8 +60,19 @@ test("the Bot picked in OpenBot Desktop's setup joins it once there is an addres
   ]);
   expect(agents[1]).toMatchObject({
     name: "LangGraph",
+    // What runs it under its name, not its name a second time.
+    title: "Powered by LangGraph",
     type: "remote_ag_ui",
     configuration: { endpoint: "http://127.0.0.1:4206/ag-ui" },
+  });
+});
+
+test("the Bot that ships says it runs on OpenBot itself", async () => {
+  const { agents } = await loadTenantPackage(personal);
+  expect(agents[0]).toMatchObject({
+    name: "Personal Assistant",
+    title: "Powered by OpenBot",
+    type: "built_in",
   });
 });
 

@@ -1492,6 +1492,7 @@ mod tests {
             "SERVER_PORT",
             "DATABASE_URL",
             "TRUSTED_ORIGINS",
+            "OPENBOT_PUBLIC_URL",
             "CHATGPT_AUTH_FILE",
         ] {
             assert!(

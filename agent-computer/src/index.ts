@@ -2,12 +2,13 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { setDefaultAutoSelectFamily } from "node:net";
 import { join } from "node:path";
 import { type ServerWebSocket, serve } from "bun";
-import type { Page } from "playwright";
+import type { ConsoleMessage, Page } from "playwright";
 import { downloadHeaders } from "../../shared/file-download";
 import {
   isPersonBrowserId,
   RECORDER_DIR_ENV,
 } from "../../shared/openbot-browser";
+import { unfinishedAction } from "./action-failure";
 import {
   cutAtCodeUnits,
   parseAriaSnapshot,
@@ -32,10 +33,16 @@ import {
   SnapshotRequiredError,
   TAKE_CONTROL_FIRST,
 } from "./control";
+import { keyForOpenList } from "./dropdown-list";
 import { handleEgressPolicyRequest, startEgressFilter } from "./egress";
 import { enterText, FieldValueError } from "./enter-text";
 import { identity } from "./identity";
 import { createInputQueue, type InputQueue } from "./input-queue";
+import {
+  LOOPBACK_RELAYS_ENV,
+  parseLoopbackRelays,
+  startLoopbackRelays,
+} from "./loopback-relay";
 import {
   assertPageAccess,
   navigateWebPage,
@@ -348,6 +355,12 @@ const terminalSockets = createTerminalSockets<StreamData & TerminalSocketData>({
 // Only the running computer points its shell at it: a test that imports this module shares its
 // process with every later test.
 await startEgressFilter({ forShell: import.meta.main });
+// The deployment's loopback addresses, where a browser here is handed one (OpenBot Desktop). Before any browser exists,
+// so a Recorder never connects to an address that is not there yet. See loopback-relay.ts.
+if (import.meta.main)
+  await startLoopbackRelays(
+    parseLoopbackRelays(process.env[LOOPBACK_RELAYS_ENV]),
+  );
 const profiles = createProfiles(
   process.env.PROFILES_DIR?.trim() || "/profiles",
   async (botId) => {
@@ -1601,7 +1614,9 @@ serve<StreamData & TerminalSocketData>({
         const startedAt = Date.now();
         try {
           const target = await currentPage(botId, "navigate");
-          session.control.assertBotMayAct(true);
+          // Opening an address needs no fresh look after a handback (`mutatesBrowser`). Following a
+          // link off the page does: it acts on that page, as a click on the link would.
+          session.control.assertBotMayAct(citation !== undefined);
           // A followed link is checked against the live page as a click on it would be: the snapshot
           // it came from must still be current, the ref must still name an element, and that element
           // must still go where the server was told it goes. Otherwise it is stale, and nothing opens.
@@ -1638,6 +1653,8 @@ serve<StreamData & TerminalSocketData>({
           // Bumping the generation makes an action carrying one fail with "take a new snapshot" rather
           // than fall through to a selector that matches nothing and read as a missing element.
           session.snapshotId += 1;
+          // And the page a person handed back is gone, so the Bot has nothing of theirs left to look at.
+          session.control.pageReplaced();
           const extract = await readablePageText(target);
           return json({
             url: target.url(),
@@ -1887,9 +1904,20 @@ serve<StreamData & TerminalSocketData>({
         }
 
         const startedAt = Date.now();
+        // What the page logs while the action runs: a form its own security policy refuses to send
+        // is reported only there (see action-failure.ts). Capped, so a page that logs errors in a
+        // loop cannot grow it for the length of the action.
+        const logged: string[] = [];
+        const listen = (message: ConsoleMessage) => {
+          if (message.type() === "error" && logged.length < 50)
+            logged.push(message.text());
+        };
+        let watched: Page | undefined;
         try {
           const target = await currentPage(botId);
           session.control.assertBotMayAct(true);
+          watched = target;
+          target.on("console", listen);
           const detail = await performAction(
             session,
             target,
@@ -1936,7 +1964,20 @@ serve<StreamData & TerminalSocketData>({
           if (error instanceof FieldValueError) {
             return json({ error: error.message }, 400);
           }
+          // The element is on the page and the action could not finish: the page refused to send its
+          // form, something covers the element, it is hidden or turned off, or the page is still
+          // loading what the action set off. Said as that, and marked so the server does not read the
+          // timeout as a ref that has gone (action-failure.ts).
+          const unfinished = unfinishedAction(error, logged);
+          if (unfinished) {
+            return json(
+              { error: unfinished.message, unfinished: unfinished.reason },
+              409,
+            );
+          }
           return json({ error: describe(error, "The action failed.") }, 502);
+        } finally {
+          watched?.off("console", listen);
         }
       }
 
@@ -2105,7 +2146,9 @@ async function performAction(
       .evaluate(unmarkPersonFilled, PERSON_FILLED_ATTRIBUTE)
       .catch(() => undefined);
     if (body.submit === true) {
-      await field.press("Enter", acting);
+      // Enter on a dropdown whose list is open would accept the list's stale highlight over the
+      // choice just typed, so it closes the list instead (dropdown-list.ts).
+      await field.press(await keyForOpenList(target, "Enter", field), acting);
     }
     // The text itself is deliberately NOT returned. It is echoed nowhere: this response is read by
     // the model and logged by the server, and a value typed into a form is exactly where a password
@@ -2123,13 +2166,15 @@ async function performAction(
     if (typeof body.key !== "string" || !body.key) {
       throw new Error("A key press needs a key name, such as Enter or Tab.");
     }
+    // An Enter meant for a dropdown's open list closes it, keeping the Bot's choice (dropdown-list.ts).
     if (ref) {
-      await (await resolveRef(session, target, ref, expected)).press(
-        body.key,
+      const element = await resolveRef(session, target, ref, expected);
+      await element.press(
+        await keyForOpenList(target, body.key, element),
         acting,
       );
     } else {
-      await target.keyboard.press(body.key);
+      await target.keyboard.press(await keyForOpenList(target, body.key));
     }
     return { action: "key", key: body.key, ref, url: target.url() };
   }

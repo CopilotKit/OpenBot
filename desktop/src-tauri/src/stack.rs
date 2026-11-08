@@ -1,16 +1,13 @@
-//! Raising the stack: the Compose services, and the one process that is not a container.
+//! Raising the stack: the Compose services.
 //!
 //! Compose runs all of OpenBot: postgres, the supervisor, `agent-computer`, the Bots, a one-shot
 //! `migrate`, and the published image's `server` and `worker` under the `openbot` profile. Docker's
-//! restart policy keeps them up.
+//! restart policy keeps them up. Nothing runs on the host: the person's own browser is on the one
+//! computer, shown in the OpenBot window.
 //!
-//! One host process runs where this machine can run it: the person's own browser, the local Chrome
-//! computer `scripts/start-local-chrome-computer.ts` starts for a developer. It opens a window on
-//! their desktop, so it cannot be a container; see `local_browser`. The shell is its restart
-//! policy.
-//!
-//! [`HOST_PROCESSES`] still names the server, the app and the worker, which earlier versions ran on
-//! the host, so a Start or a Stop can find and end what one of those left running.
+//! [`HOST_PROCESSES`] still names what earlier versions ran on the host, the server, the app, the
+//! worker and a browser of the person's own on their desktop, so a Start or a Stop can find and end
+//! what one of those left running.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -50,80 +47,12 @@ pub fn selected_services(harness: bool) -> Vec<&'static str> {
     services
 }
 
-/// The processes that are not containers, in the order they are started.
-///
-/// The server first, because the app serves a page that talks to it and the worker claims routines
-/// it owns. Nothing here waits on the others: each is supervised on its own and reports its own
-/// state, so a worker that dies does not take the window with it.
-///
-/// The person's browser last, and only where [`host_processes`] includes it. The server reaches it
-/// only when the person opens their browser, so it is not on the way to the window answering.
-pub const HOST_PROCESSES: [HostProcess; 4] = [
-    HostProcess {
-        name: "server",
-        cwd: "server",
-        script: "src/production-entry.ts",
-        package_script: "",
-    },
-    // `serve`, not `dev`. The dev server sets NODE_ENV to development, and the SDK reads that to
-    // decide whether to draw its developer inspector, so a desktop install opened its first window
-    // on CopilotKit's "What's New" panel covering OpenBot entirely. An installed application should
-    // not be running a development server at all: this builds once and serves the build.
-    HostProcess {
-        name: "app",
-        cwd: "app",
-        script: "",
-        package_script: APP_SCRIPT,
-    },
-    HostProcess {
-        name: "worker",
-        cwd: "worker",
-        script: "src/index.ts",
-        package_script: "",
-    },
-    HostProcess {
-        name: LOCAL_BROWSER,
-        cwd: "agent-computer",
-        script: "src/index.ts",
-        package_script: "",
-    },
-];
-
-/// The host process that runs the person's own browser.
-pub const LOCAL_BROWSER: &str = "browser";
-
-/// The person's browser, the one host process a Start still runs.
-pub fn local_browser_process() -> &'static HostProcess {
-    HOST_PROCESSES
-        .iter()
-        .find(|process| process.name == LOCAL_BROWSER)
-        .expect("HOST_PROCESSES names the person's browser")
-}
-
-/// The host processes one start runs, in order: the server, the app and the worker always, and the
-/// person's browser where this machine runs one.
-pub fn host_processes(local_browser: bool) -> impl Iterator<Item = &'static HostProcess> {
-    HOST_PROCESSES
-        .iter()
-        .filter(move |process| local_browser || process.name != LOCAL_BROWSER)
-}
-
-#[derive(Clone, Copy, Debug)]
-/// One of the processes Compose does not run.
-///
-/// The app is started through the package's own `dev` script, which runs Vite through bun rather
-/// than through its shebang. `node_modules/.bin/vite` begins `#!/usr/bin/env node`, so a machine
-/// with bun and no Node starts the app, fails with `node: command not found`, and is restarted
-/// five more times before this gives up on it. Which is what happened on the Linux machine this
-/// was tested on, and would happen to anybody who installed OpenBot without also having Node.
-pub struct HostProcess {
-    pub name: &'static str,
-    pub cwd: &'static str,
-    /// Empty means a package script rather than a file, which is how the app is run.
-    pub script: &'static str,
-    /// The package script to run when `script` is empty.
-    pub package_script: &'static str,
-}
+/// What earlier versions ran on the host rather than in a container, by the name each was recorded
+/// under (`host-pids.json`): the server, the app and the worker, which run from the server image
+/// now, and the person's own browser, which runs on the one computer now. Nothing is started under
+/// these names any more. They are kept so a Start or a Stop recognises a record one of those left,
+/// and ends what it still runs.
+pub const HOST_PROCESSES: [&str; 4] = ["server", "app", "worker", "browser"];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -975,8 +904,8 @@ pub fn installation_images(
     installation_images_in(engine, root, root, harness, settings)
 }
 
-/// [`installation_images`] for a release laid out in `release`, a staged update beside the
-/// installation, resolved as `root`'s own project with `root`'s settings.
+/// [`installation_images`] for a release laid out in `release`, resolved as `root`'s own project
+/// with `root`'s settings.
 pub fn installation_images_in(
     engine: &Address,
     root: &Path,
@@ -1068,6 +997,15 @@ pub fn up(
     harness: bool,
     secrets: &Secrets,
 ) -> Result<Vec<&'static str>, crate::problem::Problem> {
+    crate::logging::timed("compose up", || up_now(engine, root, harness, secrets))
+}
+
+fn up_now(
+    engine: &Address,
+    root: &Path,
+    harness: bool,
+    secrets: &Secrets,
+) -> Result<Vec<&'static str>, crate::problem::Problem> {
     /*
      * The picked harness rides in on its profile.
      *
@@ -1089,35 +1027,6 @@ pub fn up(
 
     if output.status.success() {
         return Ok(requested);
-    }
-    // Both registers: the sentence is chosen from what the engine said, and what it said is kept
-    // beside it rather than shown as the headline. See `problem.rs`.
-    let raw = command_said(&output.stderr);
-    Err(crate::problem::Problem::with(
-        crate::problem::said_about(&raw),
-        raw,
-    ))
-}
-
-/// Apply migrations, once, to completion.
-///
-/// A release step rather than a start step, for the reason `server/Dockerfile` gives: two replicas
-/// starting together would race, and a failed migration should stop the start rather than leave a
-/// half-migrated database serving.
-pub fn migrate(
-    engine: &Address,
-    root: &Path,
-    secrets: &Secrets,
-) -> Result<(), crate::problem::Problem> {
-    // The installation step supplies this image. `run` does not accept `--no-build`, and its
-    // explicit no-pull policy must report a missing image without starting another download.
-    let output = compose_start_command(engine, root, secrets, std::env::consts::OS)?
-        .args(["run", "--rm", "--pull", "never", "migrate"])
-        .output()
-        .map_err(|error| format!("could not run migrations: {error}"))?;
-
-    if output.status.success() {
-        return Ok(());
     }
     // Both registers: the sentence is chosen from what the engine said, and what it said is kept
     // beside it rather than shown as the headline. See `problem.rs`.
@@ -1190,6 +1099,10 @@ fn computer_namespace(engine: &Address, root: &Path) -> Result<Option<String>, S
 /// Quiesce the supervisor before listing so in-flight creates and restarts are included.
 /// Returns false only when the selected root has no installed deployment to take down.
 pub fn stop_computers(engine: &Address, root: &Path) -> Result<bool, String> {
+    crate::logging::timed("stop Bots' computers", || stop_computers_now(engine, root))
+}
+
+fn stop_computers_now(engine: &Address, root: &Path) -> Result<bool, String> {
     let Some(namespace) = computer_namespace(engine, root)? else {
         return Ok(false);
     };
@@ -1245,93 +1158,46 @@ pub fn stop_computers(engine: &Address, root: &Path) -> Result<bool, String> {
 }
 
 pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
-    // Stop the supervisor and its runtime-created computers before removing the Compose stack.
-    if !stop_computers(engine, root)? {
-        return Ok(());
-    }
-
-    /*
-     * WITH THE PROFILE, OR THE PICKED BOT KEEPS RUNNING.
-     *
-     * Measured: after pressing Stop, `compose ps` still listed `agent-harness`. Compose only acts
-     * on a profiled service when the profile is named, so Stop was leaving the one container the
-     * person actually chose running on their laptop, still holding its port. The next Start then
-     * refused because something was listening on it.
-     *
-     * Named unconditionally rather than only when a harness was picked: this has to stop what an
-     * earlier run started, and whether that run picked one is not something a Stop can know.
-     *
-     * `openbot` for the same reason: `server` and `worker` sit behind it, and a Stop that left them
-     * running would leave the app answering a window that says OpenBot is stopped.
-     */
-    let output = compose_command(engine, root, &Secrets::new())
-        .args([
-            "-f",
-            "docker-compose.yml",
-            "--profile",
-            "harness",
-            "--profile",
-            OPENBOT_PROFILE,
-            "down",
-        ])
-        .output()
-        .map_err(|error| format!("could not stop the stack: {error}"))?;
-
-    if output.status.success() {
-        return Ok(());
-    }
-    Err(command_said(&output.stderr))
-}
-
-/// Install the deployment's dependencies.
-///
-/// The three host processes are `bun` processes run from the source, so the source alone is not
-/// enough: without this the server stops at `ENOENT while resolving package 'zod'` and the app at
-/// `vite: command not found`, and neither says the word `node_modules`. Always let Bun verify
-/// the frozen install: a failed download can leave the directory behind, while a complete
-/// installation can reuse Bun's cache without changing the lockfile.
-pub fn install_dependencies(root: &Path, bun: &Path) -> Result<(), String> {
-    // `--ignore-scripts`, for two reasons that point the same way.
-    //
-    // A postinstall script is arbitrary code from somebody else's package, and an installer that
-    // runs it on a person's machine while they watch a progress bar is doing something they did not
-    // ask for. And they are not all portable: `@scarf/scarf` shells out to `node`, which a machine
-    // that has bun need not have, so the install fails at "node: command not found" after the
-    // containers are already up. Found on a Linux machine with bun and no node.
-    for directory in dependency_directories(root) {
-        let output = command(bun)
-            .current_dir(root.join(directory))
-            .args(["install", "--frozen-lockfile", "--ignore-scripts"])
-            .output()
-            .map_err(|error| format!("could not run bun install: {error}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "installing the deployment's dependencies failed: {}",
-                command_said(&output.stderr)
-            ));
+    crate::logging::timed("compose down", || {
+        // Stop the supervisor and its runtime-created computers before removing the Compose stack.
+        if !stop_computers(engine, root)? {
+            return Ok(());
         }
-    }
-    Ok(())
+
+        /*
+         * WITH THE PROFILE, OR THE PICKED BOT KEEPS RUNNING.
+         *
+         * Measured: after pressing Stop, `compose ps` still listed `agent-harness`. Compose only acts
+         * on a profiled service when the profile is named, so Stop was leaving the one container the
+         * person actually chose running on their laptop, still holding its port. The next Start then
+         * refused because something was listening on it.
+         *
+         * Named unconditionally rather than only when a harness was picked: this has to stop what an
+         * earlier run started, and whether that run picked one is not something a Stop can know.
+         *
+         * `openbot` for the same reason: `server` and `worker` sit behind it, and a Stop that left them
+         * running would leave the app answering a window that says OpenBot is stopped.
+         */
+        let output = compose_command(engine, root, &Secrets::new())
+            .args([
+                "-f",
+                "docker-compose.yml",
+                "--profile",
+                "harness",
+                "--profile",
+                OPENBOT_PROFILE,
+                "down",
+            ])
+            .output()
+            .map_err(|error| format!("could not stop the stack: {error}"))?;
+
+        if output.status.success() {
+            return Ok(());
+        }
+        Err(command_said(&output.stderr))
+    })
 }
 
-/// Where the deployment's packages are installed: the root workspace, and `agent-computer` where the
-/// release runs the person's browser from it.
-///
-/// `agent-computer` is not a workspace. It has its own lockfile, as its image installs it, so the
-/// root install leaves it without Playwright and the browser process stops at its first import.
-/// Older releases have no browser to run, so they are not made to download one's dependencies.
-pub fn dependency_directories(root: &Path) -> Vec<&'static str> {
-    let mut directories = vec![""];
-    if crate::local_browser::in_release(root) {
-        directories.push("agent-computer");
-    }
-    directories
-}
-
-/// Start one host process, with its output on disk rather than nowhere.
-///
-/// A window has no console to inherit, so a process whose output is dropped fails invisibly: the
-/// symptom is a port that never answers and a log directory that explains why.
 /// Where the pids of the host processes are written, so a later window can stop them.
 ///
 /// The handles a window holds die with the window. Everything else about a running stack survives
@@ -1420,7 +1286,7 @@ fn record_windows_host_processes_with(
     let mut seen_names = std::collections::HashSet::new();
     let mut seen_pids = std::collections::HashSet::new();
     for (name, pid) in processes {
-        if !HOST_PROCESSES.iter().any(|process| process.name == *name) {
+        if !HOST_PROCESSES.contains(name) {
             return Err(problem(format!("unknown host launch {name}, pid {pid}")));
         }
         if !seen_names.insert(*name) || !seen_pids.insert(*pid) {
@@ -1578,173 +1444,6 @@ fn write_host_pid_file<T: Serialize>(root: &Path, value: &T) -> Result<(), Probl
     Ok(())
 }
 
-/// The desktop approval transport belongs only to the API server. In particular it must never
-/// reach the worker running model tools or the frontend development server.
-fn configure_host_process_env(command: &mut Command, name: &str, secrets: &Secrets) {
-    command.envs(secrets);
-    if name != "server" {
-        command.env_remove("OPENBOT_DESKTOP_HOST_TOKEN");
-        for key in crate::composio::BROKER_KEYS {
-            command.env_remove(key);
-        }
-    }
-}
-
-pub fn spawn_host_process(
-    process: &HostProcess,
-    root: &Path,
-    logs: &Path,
-    bun: &Path,
-    secrets: &Secrets,
-    // What this start decided about the person's browser. Required to start that process, and
-    // ignored by the others.
-    local_browser: Option<&crate::local_browser::LocalBrowser>,
-) -> std::io::Result<std::process::Child> {
-    std::fs::create_dir_all(logs)?;
-    let out = std::fs::File::create(logs.join(format!("{}.log", process.name)))?;
-    let err = out.try_clone()?;
-
-    let mut command = bun_command(bun);
-    command.current_dir(root.join(process.cwd));
-    let ports = crate::env::Ports::read(root)?;
-    if process.name == LOCAL_BROWSER {
-        configure_local_browser(&mut command, process, root, &ports, secrets, local_browser)?;
-        command
-            .stdout(Stdio::from(out))
-            .stderr(Stdio::from(err))
-            .stdin(Stdio::null());
-        return command.spawn();
-    }
-    /*
-     * The credentials, alongside the `--env-file` that carries the settings.
-     *
-     * They are not in that file any more, and this is where they rejoin. The environment wins over
-     * the file either way, so a machine still holding an older run's copy is overridden rather than
-     * fought with.
-     */
-    configure_host_process_env(&mut command, process.name, secrets);
-    command.envs(ports.settings());
-    if process.name == "server" {
-        command.env("PORT", ports.server.to_string());
-    }
-    if process.script.is_empty() {
-        command.args(["run", process.package_script]);
-    } else {
-        command.args(["--env-file=../.env", process.script]);
-    }
-    command
-        .stdout(Stdio::from(out))
-        .stderr(Stdio::from(err))
-        .stdin(Stdio::null());
-    command.spawn()
-}
-
-/// The installation's Bun, with its own directory first on `PATH`.
-///
-/// The app runs as a package script (`serve`), and that script runs `bun` again by name. A desktop
-/// app opened from Finder has the system's minimal `PATH`, where there is no `bun`, so the app
-/// exited with status 127 the moment it started. First, so the Bun this installation downloaded is
-/// the one found, not an older one somebody has on `PATH`.
-fn bun_command(bun: &Path) -> Command {
-    let mut command = command(bun);
-    if let Some(directory) = bun
-        .parent()
-        .filter(|directory| !directory.as_os_str().is_empty())
-    {
-        command.env("PATH", crate::engine::path_with(directory));
-    }
-    command
-}
-
-/// The person's browser is started the way `scripts/start-local-chrome-computer.ts` starts it, and
-/// is handed only what it needs (see `local_browser::environment`).
-///
-/// `--no-env-file` because nothing in a settings file is the computer's: Bun would otherwise read
-/// a `.env` beside it, and the deployment's own `.env` is the server's.
-fn configure_local_browser(
-    command: &mut Command,
-    process: &HostProcess,
-    root: &Path,
-    ports: &crate::env::Ports,
-    secrets: &Secrets,
-    local_browser: Option<&crate::local_browser::LocalBrowser>,
-) -> std::io::Result<()> {
-    let missing = |what: &str| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("the person's browser cannot start without {what}"),
-        )
-    };
-    let browser = local_browser.ok_or_else(|| missing("a browser to open"))?;
-    let port = ports.browser.ok_or_else(|| missing("BROWSER_PORT"))?;
-    let token = secrets
-        .get("COMPUTER_TOKEN")
-        .filter(|token| !token.trim().is_empty())
-        .ok_or_else(|| missing("COMPUTER_TOKEN"))?;
-    // The contract says absolute. A deployment folder typed as a relative path is relative to
-    // wherever this window runs from, which the computer does not share.
-    let root = if root.is_absolute() {
-        root.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(root)
-    };
-    crate::local_browser::prepare_data(browser)?;
-    // Taken out as well as not given: a Desktop started from a developer's shell inherits whatever
-    // that shell exported, and none of the deployment's other credentials are this process's.
-    for key in secrets
-        .keys()
-        .filter(|key| key.as_str() != "COMPUTER_TOKEN")
-    {
-        command.env_remove(key);
-    }
-    command
-        .envs(crate::local_browser::environment(
-            &root, browser, port, token,
-        ))
-        .args(["--no-env-file", process.script]);
-    Ok(())
-}
-
-/// The last build error can precede Bun's wrapper stack, version, and exit message.
-/// Bound both the file read and displayed lines while preserving that useful context.
-pub fn tail_of(logs: &Path, name: &str) -> String {
-    use std::io::{Read, Seek, SeekFrom};
-    const MAX_BYTES: u64 = 8 * 1024;
-    let read = || -> std::io::Result<Vec<u8>> {
-        let mut file = std::fs::File::open(logs.join(format!("{name}.log")))?;
-        let offset = file.metadata()?.len().saturating_sub(MAX_BYTES);
-        file.seek(SeekFrom::Start(offset))?;
-        let mut bytes = Vec::new();
-        file.take(MAX_BYTES).read_to_end(&mut bytes)?;
-        // Do not show a truncated first line, which may include part of a credential.
-        if offset > 0 {
-            let first_line = bytes.iter().position(|byte| *byte == b'\n');
-            bytes.drain(..first_line.map_or(bytes.len(), |index| index + 1));
-        }
-        Ok(bytes)
-    };
-    let bytes = match read() {
-        Ok(bytes) => bytes,
-        Err(error) => return format!("Could not read {name}.log: {error}"),
-    };
-    let text = String::from_utf8_lossy(&bytes);
-    let tail: Vec<&str> = text
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .rev()
-        .take(40)
-        .collect();
-    if tail.is_empty() {
-        return format!("No complete lines were available in the tail of {name}.log.");
-    }
-    let mut lines = tail;
-    lines.reverse();
-    format!(
-        "Last from {name}.log (up to 40 lines, 8 KiB):\n{}",
-        lines.join("\n")
-    )
-}
-
 /// Keep a replacement handle even if refreshing durable ownership fails. The caller must
 /// report success only after this Result succeeds; Stop still has the handle on failure.
 #[cfg(unix)]
@@ -1799,7 +1498,7 @@ pub fn replace_windows_host_process_with(
         Err(error) => Err(problem(format!("could not inspect replacement: {error}"))),
     };
     require_live(child)?;
-    if !HOST_PROCESSES.iter().any(|host| host.name == name) {
+    if !HOST_PROCESSES.contains(&name) {
         return Err(problem("unknown host role".to_string()));
     }
     let snapshot = windows_processes_with(powershell)?;
@@ -1857,7 +1556,7 @@ fn unix_host_records(
     processes
         .iter()
         .map(|(name, pid)| {
-            if !safe_unix_pid(*pid) || !HOST_PROCESSES.iter().any(|host| host.name == *name) {
+            if !safe_unix_pid(*pid) || !HOST_PROCESSES.contains(name) {
                 return Err(unix_ownership_problem(format!(
                     "invalid host launch {name}, pid {pid}"
                 )));
@@ -2039,218 +1738,6 @@ pub fn stop_processes_under(root: &Path) -> Result<usize, Problem> {
     stop_unix_records(root, &records)
 }
 
-/// Held children also provide ownership when durable recording failed. Call before killing
-/// their parents so descendants remain verifiable. Exited Child handles never authorize a PID.
-#[cfg(unix)]
-pub fn stop_host_children(
-    root: &Path,
-    children: &mut [(&str, std::process::Child)],
-) -> Result<usize, Problem> {
-    close_local_browser_first(children, BROWSER_CLOSE_PATIENCE);
-    let mut live = Vec::new();
-    for (name, child) in children {
-        if child
-            .try_wait()
-            .map_err(|error| {
-                unix_ownership_problem(format!("could not inspect held {name}: {error}"))
-            })?
-            .is_none()
-        {
-            live.push((*name, child.id()));
-        }
-    }
-    if live.is_empty() {
-        return Ok(0);
-    }
-    stop_unix_records(root, &unix_host_records(root, &live)?)
-}
-
-/// How long the person's browser is given to close before the rest of the stack is taken down.
-/// Playwright closes it over its own pipe in about a second; the rest is for a busy machine, kept
-/// short because the person is waiting on Stop or Quit.
-#[cfg(unix)]
-const BROWSER_CLOSE_PATIENCE: std::time::Duration = std::time::Duration::from_secs(10);
-
-/// Ask the person's browser to close before anything is killed.
-///
-/// Every other host process is stopped by freezing its process tree and killing it, which is right
-/// for a server and wrong for a browser holding somebody's logins: Chrome killed mid-write says it
-/// did not shut down correctly the next time it opens, and offers back pages the person had closed.
-/// The computer closes its browsers and exits on SIGTERM (`agent-computer/src/index.ts`, the path
-/// `docker stop` takes), so it is sent that first. Whatever still runs after `patience` is stopped
-/// the ordinary way, so this never weakens the guarantee below it.
-///
-/// Only a held child is signalled. Its pid cannot belong to anybody else while this process has
-/// not reaped it, which is not true of a pid read back from the pidfile.
-#[cfg(unix)]
-fn close_local_browser_first(
-    children: &mut [(&str, std::process::Child)],
-    patience: std::time::Duration,
-) {
-    let deadline = std::time::Instant::now() + patience;
-    for (name, child) in children.iter_mut() {
-        if *name != LOCAL_BROWSER || !matches!(child.try_wait(), Ok(None)) {
-            continue;
-        }
-        let Ok(pid) = i32::try_from(child.id()) else {
-            continue;
-        };
-        // SAFETY: kill(2) on a child this process spawned and still holds unreaped.
-        if unsafe { libc::kill(pid, libc::SIGTERM) } != 0 {
-            continue;
-        }
-        while matches!(child.try_wait(), Ok(None)) && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-    }
-}
-
-/// Windows replacements may not be in the initial pidfile. A live Child plus its current direct
-/// parent and complete instance identity authorizes adding it to the existing verified inventory.
-#[cfg(not(unix))]
-pub fn stop_host_children(
-    root: &Path,
-    children: &mut [(&str, std::process::Child)],
-) -> Result<usize, Problem> {
-    stop_windows_host_children_with(
-        root,
-        children,
-        Path::new("powershell"),
-        Path::new("taskkill"),
-        WINDOWS_BROWSER_CLOSE_PATIENCE,
-    )
-}
-
-/// How long the person's browser is given to close on Windows before its tree is ended, as on Unix
-/// ([`BROWSER_CLOSE_PATIENCE`]): Chrome closes its windows in about a second, and the person is
-/// waiting on Stop or Quit.
-#[cfg(any(not(unix), test))]
-const WINDOWS_BROWSER_CLOSE_PATIENCE: std::time::Duration = std::time::Duration::from_secs(10);
-
-/// The browsers the person's browser computer started, by the name Windows runs each from.
-#[cfg(any(not(unix), test))]
-const WINDOWS_BROWSERS: [&str; 2] = ["chrome.exe", "msedge.exe"];
-
-/// Ask the person's browser to close on Windows before anything is ended, as Unix does with
-/// SIGTERM ([`close_local_browser_first`]).
-///
-/// Every host process on Windows is ended with `taskkill /T /F`, which is `TerminateProcess` on the
-/// whole tree: right for a server and wrong for a browser holding somebody's logins, which killed
-/// mid-write says it did not shut down correctly the next time it opens and offers back pages the
-/// person had closed. Windows has no SIGTERM to send the computer instead, so the browser itself is
-/// asked, the way Windows asks any program to close: `taskkill` without `/F` posts `WM_CLOSE` to
-/// its windows, as their close button does, and Chrome and Edge then shut down cleanly. Chromium's
-/// own tooling quits Chrome on Windows exactly so, posting `WM_CLOSE` to each window and ending it
-/// by force only if it is still there after a wait.
-/// <https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/taskkill>
-/// <https://chromium.googlesource.com/chromium/src.git/+/74.0.3702.1/chrome/test/mini_installer/quit_chrome.py>
-///
-/// Only a browser the held computer started (its direct child, found in a fresh inventory) is
-/// asked, never one found by name: the person's everyday Chrome is nobody's child here and stays
-/// open. Never the computer itself or its console, which have no window to close. Whatever still
-/// runs after `patience` is ended the ordinary way, so this never weakens the guarantee below it,
-/// and an inventory or a `taskkill` that fails only means it goes straight to that.
-#[cfg(any(not(unix), test))]
-fn close_local_browser_windows_first(
-    children: &mut [(&str, std::process::Child)],
-    powershell: &Path,
-    taskkill: &Path,
-    patience: std::time::Duration,
-) {
-    let deadline = std::time::Instant::now() + patience;
-    let Some(computer) = children.iter_mut().find_map(|(name, child)| {
-        (*name == LOCAL_BROWSER && matches!(child.try_wait(), Ok(None))).then(|| child.id())
-    }) else {
-        return;
-    };
-    let browsers_of = |processes: &[WindowsProcess]| -> Vec<u32> {
-        processes
-            .iter()
-            .filter(|process| {
-                process.parent_process_id == computer
-                    && process.executable_path.as_deref().is_some_and(|path| {
-                        let file = path.rsplit(['\\', '/']).next().unwrap_or(path);
-                        WINDOWS_BROWSERS
-                            .iter()
-                            .any(|browser| file.eq_ignore_ascii_case(browser))
-                    })
-            })
-            .map(|process| process.process_id)
-            .collect()
-    };
-    let Ok(snapshot) = windows_processes_with(powershell) else {
-        return;
-    };
-    let browsers = browsers_of(&snapshot);
-    if browsers.is_empty() {
-        return;
-    }
-    for pid in &browsers {
-        // Not `/F` and not `/T`: the windows are asked to close, and the browser ends its own children.
-        let _ = command(taskkill).args(["/PID", &pid.to_string()]).output();
-    }
-    while std::time::Instant::now() < deadline {
-        let Ok(now) = windows_processes_with(powershell) else {
-            return;
-        };
-        let left = browsers_of(&now);
-        if !browsers.iter().any(|pid| left.contains(pid)) {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-}
-
-#[cfg(any(not(unix), test))]
-fn stop_windows_host_children_with(
-    root: &Path,
-    children: &mut [(&str, std::process::Child)],
-    powershell: &Path,
-    taskkill: &Path,
-    browser_patience: std::time::Duration,
-) -> Result<usize, Problem> {
-    close_local_browser_windows_first(children, powershell, taskkill, browser_patience);
-    let mut held = Vec::new();
-    for (name, child) in children.iter_mut() {
-        if child
-            .try_wait()
-            .map_err(|error| {
-                Problem::with(
-                    "OpenBot could not inspect a held host process.",
-                    format!("{name}: {error}"),
-                )
-            })?
-            .is_none()
-        {
-            held.push((*name, child.id()));
-        }
-    }
-    if held.is_empty() {
-        return Ok(0);
-    }
-    let snapshot = windows_processes_with(powershell)?;
-    let mut records = recorded_host_processes(root)?;
-    for (name, pid) in held {
-        let live = snapshot.iter().find(|live| {
-            live.process_id == pid
-                && live.parent_process_id == std::process::id()
-                && HOST_PROCESSES.iter().any(|process| process.name == name)
-        });
-        let record = live.and_then(|live| RecordedHostProcess::from_live(name, live))
-            .filter(|record| !record.executable_path.is_empty() && !record.command_line.is_empty() && !record.creation_date.is_empty())
-            .ok_or_else(|| Problem::with(
-                "OpenBot could not verify a held host process.",
-                format!("{name}, pid {pid}: current direct-child identity is unavailable; ownership retained"),
-            ))?;
-        // Preserve any earlier instance too. Each is independently verified before termination.
-        if !records.contains(&record) {
-            records.push(record);
-        }
-    }
-    write_host_pid_file(root, &serde_json::json!({"version":1,"processes":records}))?;
-    stop_windows_processes_under_with(root, &records, &snapshot, taskkill)
-}
-
 #[cfg(unix)]
 fn stop_unix_records(root: &Path, records: &[UnixHostProcess]) -> Result<usize, Problem> {
     if records.is_empty() {
@@ -2297,7 +1784,7 @@ where
             if record.deployment != deployment
                 || record.start.is_empty()
                 || !safe_unix_pid(record.pid)
-                || !HOST_PROCESSES.iter().any(|host| host.name == record.name)
+                || !HOST_PROCESSES.contains(&record.name.as_str())
             {
                 return Err(unix_ownership_problem(format!(
                     "invalid Unix ownership record for pid {}",
@@ -3050,7 +2537,7 @@ pub fn recorded_server_owns_port(root: &Path, port: u16) -> Result<bool, Problem
 /// Every listener on the port must belong to the requested recorded host role. This also rejects
 /// ambiguous IPv4/IPv6 ownership rather than showing whichever unrelated address answers first.
 pub fn recorded_process_owns_port(root: &Path, name: &str, port: u16) -> Result<bool, Problem> {
-    if !HOST_PROCESSES.iter().any(|host| host.name == name) {
+    if !HOST_PROCESSES.contains(&name) {
         return Ok(false);
     }
     #[cfg(unix)]
@@ -3401,6 +2888,64 @@ pub fn server_publishes_in(listing: &str, ports: &[u16]) -> bool {
 }
 
 /**
+The per-run host token the installation's running `server` container was given, if it has one.
+
+Start mints it, hands it to Compose for `server` alone and keeps it only in memory, so a session
+that shows a deployment an earlier session raised (after a crash, a force quit, or an installer
+that closed the app without its Quit) never had it. The container's own environment is the one
+place it is still kept, and it is exactly the token the server checks. Only reads, and the token is
+never logged.
+
+Every service's row rather than `server` named, for the reason `server_publishes` gives.
+*/
+pub fn server_host_token(engine: &Address, root: &Path) -> Result<Option<String>, String> {
+    let listed = compose_command(engine, root, &Secrets::new())
+        .args(["ps", "--format", "{{.Service}}\t{{.ID}}"])
+        .output()
+        .map_err(|error| format!("could not list the Compose services: {error}"))?;
+    if !listed.status.success() {
+        return Err(command_said(&listed.stderr));
+    }
+    let listing = String::from_utf8_lossy(&listed.stdout);
+    let Some(id) = listing
+        .lines()
+        .filter_map(|row| row.split_once('\t'))
+        .find(|(service, id)| service.trim() == "server" && !id.trim().is_empty())
+        .map(|(_, id)| id.trim().to_owned())
+    else {
+        return Ok(None);
+    };
+    let inspected = engine
+        .command()
+        .current_dir(root)
+        .args([
+            "container",
+            "inspect",
+            "--format",
+            "{{json .Config.Env}}",
+            &id,
+        ])
+        .output()
+        .map_err(|error| format!("could not read the server container's settings: {error}"))?;
+    if !inspected.status.success() {
+        return Err(command_said(&inspected.stderr));
+    }
+    host_token_in(&inspected.stdout)
+}
+
+/// `server_host_token` over a container's `{{json .Config.Env}}`. Pure, for the reason
+/// `published_in` is. An empty value is no token, as the server reads it.
+pub fn host_token_in(environment: &[u8]) -> Result<Option<String>, String> {
+    let environment: Vec<String> = serde_json::from_slice(environment)
+        .map_err(|_| "the server container's settings could not be read".to_string())?;
+    Ok(environment
+        .iter()
+        .find_map(|entry| entry.strip_prefix("OPENBOT_DESKTOP_HOST_TOKEN="))
+        .filter(|token| !token.trim().is_empty())
+        .map(str::to_owned))
+}
+
+/**
 Restart OpenBot itself, the server and the worker, and leave everything else running.
 
 What the Status window's Restart did to the host processes, now done by the engine that runs them:
@@ -3408,6 +2953,10 @@ the database and the Bots stay up, so nothing is lost and it takes seconds. The 
 because both services sit behind it, and Compose refuses to restart a service it cannot see.
 */
 pub fn restart_openbot(engine: &Address, root: &Path) -> Result<(), String> {
+    crate::logging::timed("compose restart", || restart_openbot_now(engine, root))
+}
+
+fn restart_openbot_now(engine: &Address, root: &Path) -> Result<(), String> {
     let output = compose_command(engine, root, &Secrets::new())
         .args(["--profile", OPENBOT_PROFILE, "restart", "server", "worker"])
         .output()
@@ -3670,9 +3219,12 @@ fn legacy_containers(
 }
 
 /// The folder as the file system resolves it, so `/var` and `/private/var`, or `..` in a label,
-/// compare equal. A folder that no longer exists compares as written.
+/// compare equal. A folder that no longer exists compares as written. Plain, because the folder of
+/// another copy goes into the message that says where it runs from.
 fn canonical(folder: &Path) -> PathBuf {
-    std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf())
+    std::fs::canonicalize(folder)
+        .map(crate::paths::plain)
+        .unwrap_or_else(|_| folder.to_path_buf())
 }
 
 /// The namespace the supervisor gives this installation's Bots' computers and volumes, when the
@@ -3939,7 +3491,9 @@ pub fn startup_problem(problem: Problem, secrets: &Secrets) -> Problem {
 ///
 /// Checked and named rather than discovered by failing: without this the first symptom is
 /// `os error 2` from writing `.env`, which says nothing about a missing deployment, and the second
-/// is Compose reporting no configuration file. Both are the same fact and neither says it.
+/// is Compose reporting no configuration file. Both are the same fact and neither says it. The
+/// containers run from their images, so the Compose file is the one part of the release on disk
+/// they need.
 pub fn deployment_problem(root: &Path) -> Option<String> {
     if !root.exists() {
         return Some(format!(
@@ -3954,64 +3508,8 @@ pub fn deployment_problem(root: &Path) -> Option<String> {
             root.display()
         ));
     }
-    for directory in ["server", "app", "worker"] {
-        if !root.join(directory).exists() {
-            return Some(format!(
-                "{} is missing its {directory} directory, so that process cannot be started.",
-                root.display()
-            ));
-        }
-    }
-    missing_script(root)
+    None
 }
-
-/// Whether the deployment on disk is one this app knows how to start.
-///
-/// The shell and the deployment are versioned apart: the app is installed once and the deployment
-/// is fetched at a tag. So an app can meet a deployment older than the scripts it calls, and the
-/// symptom is the worst kind: every step passes, the app process exits 1 on "Script not found",
-/// the supervisor restarts it five times, and the sentence a person is finally shown names a
-/// process rather than the mismatch.
-fn missing_script(root: &Path) -> Option<String> {
-    let manifest = root.join("app").join("package.json");
-    let Ok(text) = std::fs::read_to_string(&manifest) else {
-        return Some(format!("{} cannot be read.", manifest.display()));
-    };
-    /*
-     * An unreadable manifest and one without the script are different things.
-     *
-     * Read as one, a `package.json` that will not parse was reported as a deployment "older than
-     * this version of OpenBot", which sent somebody looking for a newer installer over a file with
-     * a byte-order mark in front of it. `serde_json` refuses a document that begins with one, and
-     * plenty of Windows tooling writes one: `Set-Content -Encoding UTF8` does.
-     */
-    let manifest_json =
-        match serde_json::from_str::<serde_json::Value>(text.trim_start_matches('\u{feff}')) {
-            Ok(json) => json,
-            Err(error) => {
-                return Some(format!(
-                    "{} cannot be read as JSON: {error}. Something has rewritten it.",
-                    manifest.display()
-                ))
-            }
-        };
-    if manifest_json
-        .get("scripts")
-        .and_then(|scripts| scripts.get(APP_SCRIPT))
-        .is_some()
-    {
-        return None;
-    }
-    Some(format!(
-        "The deployment in {} is older than this version of OpenBot: its app has no \"{APP_SCRIPT}\" \
-         script, so there is no way to serve it. Install a newer OpenBot, or delete that directory \
-         and start again to fetch a deployment that matches.",
-        root.display()
-    ))
-}
-
-/// The package script that serves the app. Named once, because two places must agree on it.
-const APP_SCRIPT: &str = "serve";
 
 /// Where the shell keeps the deployment it manages.
 pub fn default_root() -> PathBuf {
@@ -4043,142 +3541,16 @@ fn dirs_home() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("."))
 }
 
-/// Project only persistent identity from the selected Compose configuration. Never retain its
-/// secret-bearing environment wholesale in an update journal or log.
-pub fn runtime_update_identity(
-    engine: &Address,
-    root: &Path,
-    secrets: &Secrets,
-) -> Result<serde_json::Value, String> {
-    let bytes = postgres_configuration(engine, root, secrets).map_err(|p| p.said)?;
-    let config: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-    runtime_update_identity_config(&config)
-}
-
-fn runtime_update_identity_config(config: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let volumes = config["volumes"]
-        .as_object()
-        .ok_or("Compose configuration has no persistent volume identity")?;
-    let mut names = std::collections::BTreeMap::new();
-    for (key, value) in volumes {
-        names.insert(key, value["name"].clone());
-    }
-    let project = config["name"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .ok_or("Compose project identity is missing")?;
-    let services = config["services"]
-        .as_object()
-        .ok_or("Compose service configuration is missing")?;
-    let mut mounts = std::collections::BTreeMap::new();
-    for (service, value) in services {
-        let Some(volumes) = value.get("volumes") else {
-            continue;
-        };
-        let volumes = volumes
-            .as_array()
-            .ok_or("Compose service mounts are unreadable")?;
-        let mut destinations = std::collections::BTreeMap::new();
-        for mount in volumes {
-            let kind = mount["type"]
-                .as_str()
-                .ok_or("Compose mount type is missing")?;
-            if !matches!(kind, "volume" | "bind") {
-                continue;
-            }
-            let source = mount["source"]
-                .as_str()
-                .filter(|v| !v.is_empty())
-                .ok_or("Persistent mount source cannot be verified")?;
-            let target = mount["target"]
-                .as_str()
-                .filter(|v| !v.is_empty())
-                .ok_or("Persistent mount target cannot be verified")?;
-            if destinations
-                .insert(
-                    target,
-                    serde_json::json!({"type":kind,"source":source,"target":target}),
-                )
-                .is_some()
-            {
-                return Err("Compose service has duplicate persistent mount targets".into());
-            }
-        }
-        if !destinations.is_empty() {
-            mounts.insert(service, destinations);
-        }
-    }
-    Ok(
-        serde_json::json!({"project":project,"volumes":names,"namespace":config["services"]["supervisor"]["environment"]["COMPUTER_NAMESPACE"],"mounts":mounts}),
-    )
-}
-
-/// Resolve candidate Compose against the active project directory and customer-selected override
-/// files. Only the vendor base file comes from staging; config is read-only and no Stop/up occurs.
-///
-/// The project directory is `.`, which Compose resolves from the same working directory as the
-/// active configuration, by the same code. Every relative bind source in both configurations
-/// therefore starts from one spelling of the root. A canonicalized root does not: on Windows it
-/// carries the `\\?\` prefix the active configuration never sees, and on any platform it resolves
-/// links Compose keeps, so every relative mount compared unequal and every apply refused.
-pub fn verify_staged_runtime_identity(
-    engine: &Address,
-    root: &Path,
-    staged: &Path,
-    secrets: &Secrets,
-    expected: &serde_json::Value,
-) -> Result<(), String> {
-    let environment = compose_command(engine, root, secrets)
-        .args(["config", "--environment"])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !environment.status.success() {
-        return Err("could not resolve active Compose file selection before update".into());
-    }
-    let environment = String::from_utf8(environment.stdout).map_err(|e| e.to_string())?;
-    let files = compose_files(root, &environment).map_err(|p| p.said)?;
-    // Canonical forms only identify which selected file is the vendor base file. What Compose is
-    // given keeps the active configuration's own spelling.
-    let active = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
-    let mut command = compose_command(engine, root, secrets);
-    command.arg("--project-directory").arg(".");
-    for file in files {
-        let original = std::fs::canonicalize(root.join(&file)).map_err(|e| e.to_string())?;
-        if original.strip_prefix(&active).ok() == Some(Path::new("docker-compose.yml")) {
-            command.arg("-f").arg(staged.join("docker-compose.yml"));
-        } else {
-            command.arg("-f").arg(&file);
-        }
-    }
-    let output = command
-        .args(["config", "--format", "json"])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !output.status.success() {
-        return Err(
-            "candidate Compose configuration could not be verified; no runtime was stopped".into(),
-        );
-    }
-    let config: serde_json::Value =
-        serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
-    if &runtime_update_identity_config(&config)? != expected {
-        return Err("The candidate changes a persistent service mount, Compose project, volume or namespace. No runtime was stopped or modified.".into());
-    }
-    Ok(())
-}
-
 /// Called after all owned application writers stop. Bring up only the existing project's
 /// Postgres service, create a custom-format dump, and validate its table of contents. The caller
-/// retains Compose ownership and stops this service before preparation/startup continues.
+/// retains Compose ownership and stops this service before the upgrade continues.
 pub fn backup_runtime_database(
     engine: &Address,
     root: &Path,
     secrets: &Secrets,
     destination: &Path,
-    expected_database: &str,
 ) -> Result<(), String> {
     start_runtime_database(engine, root, secrets)?;
-    verify_runtime_database_identity(engine, root, secrets, expected_database)?;
     let file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -4259,10 +3631,20 @@ pub fn start_runtime_database(
     Ok(())
 }
 
-/// Return the database to the dump taken before an update. `--clean --create` drops and recreates
-/// the database named in the archive, connecting to the `postgres` maintenance database to do it,
-/// so tables a candidate migration added do not survive. A connection still open to the database
-/// makes the `DROP DATABASE` fail before anything is removed, and that failure is reported.
+/// Return the database to the dump taken before an update, whoever else is connected to it.
+///
+/// The database is published on the host's loopback, so anything on this computer can hold
+/// sessions open to it and reconnect the moment they are cut: a developer's OpenBot server left
+/// running on the host was found holding twelve. `pg_restore --clean --create` issues a plain
+/// `DROP DATABASE`, which any one of those sessions refuses. So, the standard way, and with no
+/// moment where a client could connect to half a database:
+///
+/// 1. Stop every container of this installation's Compose project but Postgres, whether or not
+///    this session started it (`stop_all_but_the_database`).
+/// 2. Restore the dump into a scratch database nobody connects to, in one transaction. A dump that
+///    does not restore leaves the database as it was.
+/// 3. Refuse new connections to the database, end the ones it has, drop it (`WITH (FORCE)`), and
+///    rename the scratch database into its place.
 pub fn restore_runtime_database(
     engine: &Address,
     root: &Path,
@@ -4271,15 +3653,9 @@ pub fn restore_runtime_database(
 ) -> Result<(), String> {
     let file = std::fs::File::open(dump)
         .map_err(|e| format!("the database backup {} cannot be read: {e}", dump.display()))?;
+    stop_all_but_the_database(engine, root)?;
     let restored = compose_command(engine, root, secrets)
-        .args([
-            "exec",
-            "-T",
-            "postgres",
-            "sh",
-            "-c",
-            "exec pg_restore --clean --if-exists --create --exit-on-error --username=\"$POSTGRES_USER\" --dbname=postgres",
-        ])
+        .args(["exec", "-T", "postgres", "sh", "-c", RESTORE_SCRIPT])
         .stdin(Stdio::from(file))
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -4294,170 +3670,359 @@ pub fn restore_runtime_database(
     Ok(())
 }
 
-/// Check the running selected project's release-owned containers, using their actual image
-/// references rather than Compose's desired configuration. PostgreSQL is separately preserved.
-pub fn verify_runtime_update_images(
+/// Run inside the Postgres container, with the dump on its standard input. See
+/// `restore_runtime_database`. `ALLOW_CONNECTIONS false` keeps a client that reconnects at once
+/// from getting back in between the sessions ending and the drop.
+const RESTORE_SCRIPT: &str = r#"set -e
+db="$POSTGRES_DB"
+scratch="${POSTGRES_DB}_restore"
+sql() { psql --no-psqlrc --quiet -v ON_ERROR_STOP=1 --username="$POSTGRES_USER" --dbname=postgres -c "$1"; }
+sql "DROP DATABASE IF EXISTS \"$scratch\" WITH (FORCE)"
+sql "CREATE DATABASE \"$scratch\" TEMPLATE template0 OWNER \"$POSTGRES_USER\""
+pg_restore --exit-on-error --single-transaction --username="$POSTGRES_USER" --dbname="$scratch"
+if [ "$(psql --no-psqlrc -tA --username="$POSTGRES_USER" --dbname=postgres -c "SELECT 1 FROM pg_database WHERE datname = '$db'")" = 1 ]; then
+  sql "ALTER DATABASE \"$db\" ALLOW_CONNECTIONS false"
+  sql "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$db' AND pid <> pg_backend_pid()"
+  sql "DROP DATABASE \"$db\" WITH (FORCE)"
+fi
+sql "ALTER DATABASE \"$scratch\" RENAME TO \"$db\""
+"#;
+
+/// Stop every running container of this installation's Compose project except Postgres: by the
+/// project's label, so a container this session did not start, or one a service of another version
+/// of the Compose file made, is stopped too. Stopped, not removed.
+pub fn stop_all_but_the_database(engine: &Address, root: &Path) -> Result<(), String> {
+    let project = project(engine, root).map_err(|problem| problem.said)?;
+    let listed = |filters: &[String]| -> Result<Vec<String>, String> {
+        let mut command = engine.command();
+        command.args(["ps", "--quiet"]);
+        for filter in filters {
+            command.args(["--filter", filter]);
+        }
+        let output = command
+            .output()
+            .map_err(|error| format!("could not list this installation's containers: {error}"))?;
+        if !output.status.success() {
+            return Err(command_said(&output.stderr));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .split_whitespace()
+            .map(str::to_string)
+            .collect())
+    };
+    let in_project = format!("label=com.docker.compose.project={project}");
+    let database = listed(&[
+        in_project.clone(),
+        "label=com.docker.compose.service=postgres".into(),
+    ])?;
+    let others: Vec<String> = listed(&[in_project])?
+        .into_iter()
+        .filter(|id| !database.contains(id))
+        .collect();
+    if others.is_empty() {
+        return Ok(());
+    }
+    let stopped = engine
+        .command()
+        .arg("stop")
+        .args(&others)
+        .output()
+        .map_err(|error| format!("could not stop this installation's containers: {error}"))?;
+    if !stopped.status.success() {
+        return Err(format!(
+            "could not stop this installation's containers: {}",
+            command_said(&stopped.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// One person's computer from before the personal edition, carried into the shared computer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CarriedOver {
+    pub person: String,
+    pub workspace: Option<String>,
+    pub profile: Option<String>,
+}
+
+/**
+Bring each person's Bots' files and browser logins from the computer the supervisor made for them
+into the one computer the personal edition shares, once.
+
+WHY. Before the personal edition, OpenBot Desktop ran a supervisor that gave each person a computer of
+their own, with two volumes: `<namespace>-workspace-person-<person>`, where each Bot's files are in
+`computers/<bot>`, and `<namespace>-profile-person-<person>`, where each Bot's browser profile, its
+logins, is `<bot>`. The personal edition runs no supervisor: every Bot is on the Compose
+`agent-computer` service, whose volumes keep a Bot's files in `computers/<person>~<bot>` and its
+profile in `<person>~<bot>` (agent-computer's `seatIdFor`). An installation that moved to it found
+its Bots with no files and signed out of everything. Nothing was lost; it was in the old volumes.
+
+WHAT. The supervisor's own carry-over (`supervisor/src/docker.ts`, `carryOverProfile`) is the rule:
+copied, never moved, and the old volumes are left exactly as they are; a profile the shared computer
+already has for that Bot wins, whole, because two Chromium profiles cannot be merged; and the copy is
+done by a short-lived container that mounts the volumes, Docker's own way to copy between volumes,
+from an image already on the machine (`image`, the computer's), with no network and only the
+capabilities that keep owners and modes. Files are merged into a Bot's folder rather than refused
+when it exists, because a Bot that already ran on the shared computer has a folder there, and its
+old files are no less its own: nothing that is there is replaced.
+
+ONCE. Recorded in each destination volume (`.openbot-carried-over/<old volume>`), which outlives
+this app and any reinstall, as the supervisor records its own. A run that fails records nothing, so
+the next Start tries again.
+
+Only volumes the supervisor made for a person, in this installation's namespace, by their labels:
+nothing is read out of a volume this installation does not own. Run after the Compose `up`, so the
+shared computer's volumes are the ones Compose made.
+*/
+pub fn carry_over_person_computers(
     engine: &Address,
     root: &Path,
-    candidate: &serde_json::Value,
-) -> Result<(), String> {
-    let listing = compose_command(engine, root, &Secrets::new())
-        .args(["ps", "-q"])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !listing.status.success() {
-        return Err("could not inspect candidate Compose containers".into());
-    }
-    let ids = String::from_utf8(listing.stdout).map_err(|e| e.to_string())?;
-    let ids: Vec<_> = ids.split_whitespace().collect();
-    if ids.is_empty() {
-        return Err("no candidate containers are running".into());
-    }
-    let inspected = engine
+    image: &str,
+) -> Result<Vec<CarriedOver>, String> {
+    let Some(namespace) = computer_namespace(engine, root)? else {
+        return Ok(Vec::new());
+    };
+    let listed = engine
         .command()
-        .current_dir(root)
-        .arg("inspect")
-        .args(ids)
+        .args([
+            "volume",
+            "ls",
+            "--quiet",
+            "--filter",
+            SUPERVISOR_FILTER,
+            "--filter",
+            &format!("label=openbot.namespace={namespace}"),
+            "--filter",
+            "label=openbot.computer-kind=person",
+        ])
         .output()
-        .map_err(|e| e.to_string())?;
-    if !inspected.status.success() {
-        return Err("candidate container inspection failed".into());
+        .map_err(|error| format!("could not list the computers from before: {error}"))?;
+    if !listed.status.success() {
+        return Err(command_said(&listed.stderr));
     }
-    let containers: Vec<serde_json::Value> =
-        serde_json::from_slice(&inspected.stdout).map_err(|e| e.to_string())?;
-    let references = crate::updates::candidate_images(candidate)?;
-    let mut verified = std::collections::BTreeSet::new();
-    for container in containers {
-        let service = container["Config"]["Labels"]["com.docker.compose.service"]
-            .as_str()
-            .ok_or("container has no Compose service identity")?;
-        if service == "postgres" {
-            continue;
+    let volumes: Vec<String> = String::from_utf8_lossy(&listed.stdout)
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    let mut people = std::collections::BTreeMap::<String, (Option<String>, Option<String>)>::new();
+    for volume in volumes {
+        for (prefix, profile) in [
+            (format!("{namespace}-workspace-person-"), false),
+            (format!("{namespace}-profile-person-"), true),
+        ] {
+            let Some(person) = volume.strip_prefix(&prefix) else {
+                continue;
+            };
+            // A plain id only, as the supervisor made it: it becomes a path.
+            if !plain_id(person) {
+                continue;
+            }
+            let entry = people.entry(person.to_string()).or_default();
+            if profile {
+                entry.1 = Some(volume.clone());
+            } else {
+                entry.0 = Some(volume.clone());
+            }
         }
-        let image = container["Config"]["Image"]
-            .as_str()
-            .ok_or("container has no actual image identity")?;
-        if !references.iter().any(|reference| reference == image) {
+    }
+    if people.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (workspace, profiles) = shared_computer_volumes(engine, root)?;
+    // A person's computer from before still running is stopped first, as the supervisor does, so
+    // Chromium has flushed its profile and nothing writes to the volumes while they are read. The
+    // personal edition never starts one again.
+    let running = engine
+        .command()
+        .args([
+            "ps",
+            "--quiet",
+            "--filter",
+            SUPERVISOR_FILTER,
+            "--filter",
+            &format!("label=openbot.namespace={namespace}"),
+            "--filter",
+            "label=openbot.computer-kind=person",
+        ])
+        .output()
+        .map_err(|error| format!("could not list the computers from before: {error}"))?;
+    let running: Vec<String> = String::from_utf8_lossy(&running.stdout)
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    if !running.is_empty() {
+        let stopped = engine
+            .command()
+            .args(["stop", "--time", "30"])
+            .args(&running)
+            .output()
+            .map_err(|error| format!("could not stop the computers from before: {error}"))?;
+        if !stopped.status.success() {
             return Err(format!(
-                "running service {service} is not a pinned candidate image"
+                "could not stop the computers from before: {}",
+                command_said(&stopped.stderr)
             ));
         }
-        if container["State"]["Running"] != true {
-            return Err(format!("candidate service {service} is not running"));
+    }
+    let mut carried = Vec::new();
+    for (person, (old_workspace, old_profile)) in people {
+        let mut command = engine.command();
+        command.args([
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--security-opt",
+            "no-new-privileges:true",
+            "--cap-drop",
+            "ALL",
+            "--cap-add",
+            "CHOWN",
+            "--cap-add",
+            "DAC_OVERRIDE",
+            "--cap-add",
+            "FOWNER",
+            "--label",
+            "openbot.carry-over=person",
+            "--entrypoint",
+            "sh",
+            "--env",
+            &format!("PERSON={person}"),
+            "--volume",
+            &format!("{workspace}:/workspace"),
+            "--volume",
+            &format!("{profiles}:/profiles"),
+        ]);
+        if let Some(volume) = &old_workspace {
+            command
+                .args(["--volume", &format!("{volume}:/from-workspace:ro")])
+                .args(["--env", &format!("FROM_WORKSPACE={volume}")]);
         }
-        verified.insert(service.to_string());
+        if let Some(volume) = &old_profile {
+            command
+                .args(["--volume", &format!("{volume}:/from-profiles:ro")])
+                .args(["--env", &format!("FROM_PROFILES={volume}")]);
+        }
+        let output = command
+            .args([image, "-c", CARRY_OVER_SCRIPT])
+            .output()
+            .map_err(|error| format!("could not run the copy for {person}: {error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "copying {person}'s computer from before failed: {}",
+                command_said(&output.stderr)
+            ));
+        }
+        let said = String::from_utf8_lossy(&output.stdout);
+        let outcome = |what: &str| {
+            said.lines()
+                .find_map(|line| line.strip_prefix(&format!("{what}=")))
+                .map(str::to_string)
+        };
+        carried.push(CarriedOver {
+            person,
+            workspace: outcome("workspace"),
+            profile: outcome("profiles"),
+        });
     }
-    // Not the supervisor: the personal edition runs none. One still running from before is checked
-    // above like any other container.
-    if !verified.contains("agent-computer") {
-        return Err("candidate agent-computer was not verified".into());
-    }
-    Ok(())
+    Ok(carried)
 }
 
-/// Compare the database's actual migration hashes and timestamps with the accepted release's
-/// journal. A package version or an HTTP health response cannot establish database identity.
-pub fn verify_runtime_database_identity(
-    engine: &Address,
-    root: &Path,
-    secrets: &Secrets,
-    expected_database: &str,
-) -> Result<(), String> {
-    if !runtime_database_matches(engine, root, secrets, expected_database)? {
-        return Err("actual database migration hashes/timestamps differ from the accepted release; integrate or repair the database explicitly before updating".into());
+/// The volumes the shared computer (the Compose `agent-computer` service) keeps `/workspace` and
+/// `/profiles` on, read from its container, so whatever named them (an override file, a project
+/// name) is answered for.
+fn shared_computer_volumes(engine: &Address, root: &Path) -> Result<(String, String), String> {
+    let listed = compose_command(engine, root, &Secrets::new())
+        .args(["ps", "--all", "--quiet", "agent-computer"])
+        .output()
+        .map_err(|error| format!("could not find the shared computer: {error}"))?;
+    if !listed.status.success() {
+        return Err(command_said(&listed.stderr));
     }
-    Ok(())
+    let id = String::from_utf8_lossy(&listed.stdout)
+        .split_whitespace()
+        .next()
+        .map(str::to_string)
+        .ok_or("the shared computer has not been created")?;
+    let inspected = engine
+        .command()
+        .args(["inspect", "--format", "{{json .Mounts}}", &id])
+        .output()
+        .map_err(|error| format!("could not read the shared computer's volumes: {error}"))?;
+    if !inspected.status.success() {
+        return Err(command_said(&inspected.stderr));
+    }
+    let mounts: Vec<serde_json::Value> =
+        serde_json::from_slice(&inspected.stdout).map_err(|error| error.to_string())?;
+    let volume = |destination: &str| {
+        mounts
+            .iter()
+            .find(|mount| mount["Destination"] == destination && mount["Type"] == "volume")
+            .and_then(|mount| mount["Name"].as_str())
+            .map(str::to_string)
+            .ok_or_else(|| format!("the shared computer keeps {destination} on no volume"))
+    };
+    Ok((volume("/workspace")?, volume("/profiles")?))
 }
 
-/// Whether the running database holds exactly the migrations of the source in `root`. An error
-/// means the comparison could not be made, which is not the same answer as "it differs".
-pub fn runtime_database_matches(
-    engine: &Address,
-    root: &Path,
-    secrets: &Secrets,
-    expected_database: &str,
-) -> Result<bool, String> {
-    let journal: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(root.join("server/drizzle/meta/_journal.json"))
-            .map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-    let entries = journal["entries"]
-        .as_array()
-        .ok_or("migration journal entries are missing")?;
-    if entries.last().and_then(|entry| entry["tag"].as_str()) != Some(expected_database) {
-        return Err("release database tag differs from local migration journal".into());
-    }
-    let mut expected = std::collections::BTreeMap::new();
-    use sha2::{Digest, Sha256};
-    for entry in entries {
-        let tag = entry["tag"].as_str().ok_or("invalid migration tag")?;
-        if tag.is_empty()
-            || !tag
-                .bytes()
-                .all(|c| c.is_ascii_alphanumeric() || b"_-".contains(&c))
-        {
-            return Err("unsafe migration tag".into());
-        }
-        let bytes = std::fs::read(root.join("server/drizzle").join(format!("{tag}.sql")))
-            .map_err(|e| e.to_string())?;
-        let when = entry["when"]
-            .as_u64()
-            .ok_or("invalid migration timestamp")?;
-        expected.insert(format!("{:x}", Sha256::digest(bytes)), when);
-    }
-    let output=compose_command(engine,root,secrets).args(["exec","-T","postgres","sh","-c","exec psql --no-psqlrc --tuples-only --no-align --set=ON_ERROR_STOP=1 --username=\"$POSTGRES_USER\" \"$POSTGRES_DB\" --command=\"select coalesce(json_agg(json_build_object('hash',hash,'createdAt',created_at)), '[]'::json)::text from drizzle.__drizzle_migrations\""])
-        .output().map_err(|e|e.to_string())?;
-    if !output.status.success() {
-        return Err(
-            "could not read the actual database migration journal; no release was accepted".into(),
-        );
-    }
-    let rows: Vec<serde_json::Value> =
-        serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
-    let mut actual = std::collections::BTreeMap::new();
-    for row in &rows {
-        let hash = row["hash"].as_str().ok_or("invalid migration hash")?;
-        let when = row["createdAt"]
-            .as_u64()
-            .ok_or("database migration has a missing timestamp")?;
-        if actual.insert(hash.to_string(), when).is_some() {
-            return Err("database migration journal has duplicate hashes".into());
-        }
-    }
-    Ok(actual == expected)
+/// What the supervisor allowed a person or Bot id to be, which is what keeps it one path segment.
+fn plain_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
+
+/// Run by `carry_over_person_computers` in its helper container. `tar` carries owners, modes and
+/// times (`-p`, and as root, owners), and `--skip-old-files` never replaces a file that is there.
+/// A profile is staged under a dot-name, which is not a seat, and moved into place whole. Prints
+/// `workspace=` and `profiles=` with what it did: `copied`, `done` (an earlier run did it) or nothing
+/// for a volume the person did not have.
+const CARRY_OVER_SCRIPT: &str = r#"set -eu
+plain() { case "$1" in ""|.*|*[!A-Za-z0-9_-]*) return 1 ;; *) return 0 ;; esac; }
+copy() {
+  if [ -e "$2" ]; then tar -C "$1" -cf - . | tar -C "$2" -xpf - --skip-old-files
+  else mkdir -p "$2" && tar -C "$1" -cf - . | tar -C "$2" -xpf -; fi
+}
+if [ -n "${FROM_WORKSPACE:-}" ]; then
+  mark="/workspace/.openbot-carried-over/$FROM_WORKSPACE"
+  if [ -e "$mark" ]; then echo workspace=done; else
+    if [ -d /from-workspace/computers ]; then
+      for dir in /from-workspace/computers/*; do
+        bot=$(basename "$dir")
+        [ -d "$dir" ] && plain "$bot" || continue
+        copy "$dir" "/workspace/computers/$PERSON~$bot"
+      done
+    fi
+    mkdir -p /workspace/.openbot-carried-over && touch "$mark"
+    echo workspace=copied
+  fi
+fi
+if [ -n "${FROM_PROFILES:-}" ]; then
+  mark="/profiles/.openbot-carried-over/$FROM_PROFILES"
+  if [ -e "$mark" ]; then echo profiles=done; else
+    for dir in /from-profiles/*; do
+      bot=$(basename "$dir")
+      [ -d "$dir" ] && plain "$bot" || continue
+      dest="/profiles/$PERSON~$bot"
+      [ -e "$dest" ] && continue
+      staging="/profiles/.openbot-carrying-$PERSON~$bot"
+      rm -rf "$staging"
+      copy "$dir" "$staging"
+      mv "$staging" "$dest"
+    done
+    mkdir -p /profiles/.openbot-carried-over && touch "$mark"
+    echo profiles=copied
+  fi
+fi
+"#;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The app's `serve` script runs `bun` by name. Opened from Finder, the desktop has no `bun` on
-    /// `PATH`, so a host process has to be handed the directory of the Bun that started it.
-    #[test]
-    fn a_host_process_finds_the_installations_own_bun_by_name() {
-        let bun = Path::new("/installation/openbot-engine/bun-1.4.3/bun");
-        let command = bun_command(bun);
-        let path = command
-            .get_envs()
-            .find(|(name, _)| *name == "PATH")
-            .and_then(|(_, value)| value)
-            .expect("a host process is given a PATH");
-        let mut entries = std::env::split_paths(path);
-        assert_eq!(
-            entries.next().as_deref(),
-            Some(Path::new("/installation/openbot-engine/bun-1.4.3")),
-            "the installation's Bun comes first"
-        );
-        let inherited: Vec<_> = std::env::var_os("PATH")
-            .map(|path| std::env::split_paths(&path).collect())
-            .unwrap_or_default();
-        assert_eq!(
-            entries.collect::<Vec<_>>(),
-            inherited,
-            "and the rest of PATH is kept"
-        );
-    }
     use crate::test_support::temp_root;
 
     #[test]
@@ -5252,87 +4817,6 @@ mod tests {
         std::fs::write(root.join(".fixture-ps-failure"), "").unwrap();
         let error = leftover_volumes(&address, &root, &Secrets::new()).unwrap_err();
         assert!(!format!("{error:?}").contains("synthetic-secret"));
-    }
-
-    #[test]
-    fn desktop_approval_transport_credential_reaches_only_the_server() {
-        let secrets = Secrets::from([
-            ("OPENBOT_DESKTOP_HOST_TOKEN".into(), "fixture-only".into()),
-            ("INTELLIGENCE_API_KEY".into(), "other-fixture".into()),
-        ]);
-        for name in ["server", "worker", "app"] {
-            let mut command = Command::new("unused");
-            configure_host_process_env(&mut command, name, &secrets);
-            let vars: std::collections::BTreeMap<_, _> = command.get_envs().collect();
-            assert_eq!(
-                vars[std::ffi::OsStr::new("OPENBOT_DESKTOP_HOST_TOKEN")],
-                (name == "server").then_some(std::ffi::OsStr::new("fixture-only")),
-                "approval credential exposure to {name}"
-            );
-            assert_eq!(
-                vars[std::ffi::OsStr::new("INTELLIGENCE_API_KEY")],
-                Some(std::ffi::OsStr::new("other-fixture"))
-            );
-        }
-    }
-
-    #[test]
-    fn host_processes_receive_persisted_ports_on_start_and_restart() {
-        let root = temp_root("host-selected-ports");
-        std::fs::create_dir_all(&root).unwrap();
-        let source = root.join("ports.rs");
-        let bun = root.join(format!("ports{}", std::env::consts::EXE_SUFFIX));
-        std::fs::write(
-            &source,
-            r#"
-fn main() {
-    let role = std::env::current_dir().unwrap().file_name().unwrap().to_string_lossy().into_owned();
-    assert_eq!(std::env::var("APP_PORT").unwrap(), "52110");
-    assert_eq!(std::env::var("SERVER_PORT").unwrap(), "52101");
-    if role == "server" {
-        assert_eq!(std::env::var("COMPOSIO_API_KEY").unwrap(), "fresh-project-key");
-    } else {
-        assert!(std::env::var("COMPOSIO_API_KEY").is_err());
-    }
-    if role == "server" { assert_eq!(std::env::var("PORT").unwrap(), "52101"); }
-}
-"#,
-        )
-        .unwrap();
-        crate::test_support::compile_fixture(&source, &bun);
-        let ports = crate::env::Ports {
-            app: 52110,
-            server: 52101,
-            ..Default::default()
-        };
-        crate::env::write(
-            &root.join(".env"),
-            &ports.settings(),
-            &std::collections::BTreeMap::new(),
-        )
-        .unwrap();
-        let stale = Secrets::from([
-            ("COMPOSIO_API_KEY".into(), "fresh-project-key".into()),
-            ("SERVER_PORT".into(), "3001".into()),
-            ("APP_PORT".into(), "3010".into()),
-            ("PORT".into(), "3001".into()),
-        ]);
-        for _ in 0..2 {
-            for process in host_processes(false) {
-                std::fs::create_dir_all(root.join(process.cwd)).unwrap();
-                let status =
-                    spawn_host_process(process, &root, &root.join(".logs"), &bun, &stale, None)
-                        .unwrap()
-                        .wait()
-                        .unwrap();
-                assert!(
-                    status.success(),
-                    "{} did not receive selected ports",
-                    process.name
-                );
-            }
-        }
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]
@@ -6347,240 +5831,6 @@ fn main() {
         }
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn windows_held_replacement_cleanup_keeps_evidence_on_refusal() {
-        if crate::test_support::isolated_process(
-            "stack::tests::windows_held_replacement_cleanup_keeps_evidence_on_refusal",
-        ) {
-            return;
-        }
-        let root = temp_root("windows-held-replacement-refusal");
-        std::fs::create_dir_all(&root).unwrap();
-        let fixture = CleanupCommandFixture::new(&root);
-        fixture.scenario("held-refusal");
-        let replacement = Command::new("/bin/sleep").arg("60").spawn().unwrap();
-        let pid = replacement.id();
-        let mut children = vec![("server", replacement)];
-        let old = recorded_process("server", 9000, "/Date(1000)/");
-        write_host_pid_file(
-            &root,
-            &serde_json::json!({"version":1,"processes":[old.clone()]}),
-        )
-        .unwrap();
-        let row = live_process(pid, std::process::id(), "/Date(2000)/");
-        std::fs::write(root.join("synthetic-inventory.json"), serde_json::to_vec(&serde_json::json!([{
-            "ProcessId":pid,"ParentProcessId":row.parent_process_id,"ExecutablePath":row.executable_path,"CommandLine":row.command_line,"CreationDate":row.creation_date
-        }])).unwrap()).unwrap();
-        let result = stop_windows_host_children_with(
-            &root,
-            &mut children,
-            &fixture.command("powershell"),
-            &fixture.command("taskkill"),
-            WINDOWS_BROWSER_CLOSE_PATIENCE,
-        );
-        let alive = children[0].1.try_wait().unwrap().is_none();
-        children[0].1.kill().unwrap();
-        children[0].1.wait().unwrap();
-        let problem = result.unwrap_err();
-        assert!(
-            problem
-                .detail
-                .as_deref()
-                .unwrap()
-                .contains("synthetic held cleanup refused"),
-            "{problem:?}"
-        );
-        assert!(alive);
-        assert_eq!(
-            recorded_host_processes(&root).unwrap(),
-            [old, recorded_process("server", pid, "/Date(2000)/")]
-        );
-        assert!(fixture
-            .log()
-            .contains(&format!("taskkill\t/PID {pid} /T /F")));
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn windows_held_cleanup_refuses_missing_or_wrong_parent_identity_without_killing() {
-        if crate::test_support::isolated_process("stack::tests::windows_held_cleanup_refuses_missing_or_wrong_parent_identity_without_killing") { return; }
-        for parent in [0, std::process::id()] {
-            let root = temp_root("windows-held-identity-refusal");
-            std::fs::create_dir_all(&root).unwrap();
-            let fixture = CleanupCommandFixture::new(&root);
-            fixture.scenario("held-refusal");
-            let replacement = Command::new("/bin/sleep").arg("60").spawn().unwrap();
-            let pid = replacement.id();
-            let mut children = vec![("server", replacement)];
-            let original = serde_json::to_vec(&serde_json::json!({"version":1,"processes":[recorded_process("server",9000,"original")]})).unwrap();
-            std::fs::create_dir_all(root.join(".logs")).unwrap();
-            std::fs::write(host_pids_path(&root), &original).unwrap();
-            std::fs::write(root.join("synthetic-inventory.json"),serde_json::to_vec(&serde_json::json!([{"ProcessId":pid,"ParentProcessId":parent,"ExecutablePath":"synthetic","CommandLine":"synthetic","CreationDate":if parent==0 {"instance"} else {""}}])).unwrap()).unwrap();
-            let result = stop_windows_host_children_with(
-                &root,
-                &mut children,
-                &fixture.command("powershell"),
-                &fixture.command("taskkill"),
-                WINDOWS_BROWSER_CLOSE_PATIENCE,
-            );
-            let alive = children[0].1.try_wait().unwrap().is_none();
-            children[0].1.kill().unwrap();
-            children[0].1.wait().unwrap();
-            assert!(result.unwrap_err().said.contains("verify"));
-            assert!(alive);
-            assert_eq!(std::fs::read(host_pids_path(&root)).unwrap(), original);
-            assert!(!fixture.log().contains("taskkill\t"));
-            std::fs::remove_dir_all(root).unwrap();
-        }
-    }
-
-    /// The inventory a Windows machine gives while the person's browser runs: the held computer,
-    /// its console, and the browser it started, as Win32_Process lists them.
-    fn windows_browser_inventory(computer: u32, with_browser: bool) -> String {
-        let mut rows = vec![
-            serde_json::json!({
-                "ProcessId": computer, "ParentProcessId": std::process::id(),
-                "ExecutablePath": r"C:\Users\person\.bun\bin\bun.exe",
-                "CommandLine": "bun --no-env-file src/index.ts", "CreationDate": "/Date(2000)/"
-            }),
-            serde_json::json!({
-                "ProcessId": 9200, "ParentProcessId": computer,
-                "ExecutablePath": r"C:\Windows\System32\conhost.exe",
-                "CommandLine": "conhost.exe 0xffffffff -ForceV1", "CreationDate": "/Date(2001)/"
-            }),
-            // The person's everyday Chrome, which is nobody's child here.
-            serde_json::json!({
-                "ProcessId": 9300, "ParentProcessId": 4,
-                "ExecutablePath": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                "CommandLine": "chrome.exe", "CreationDate": "/Date(1500)/"
-            }),
-        ];
-        if with_browser {
-            rows.push(serde_json::json!({
-                "ProcessId": 9100, "ParentProcessId": computer,
-                "ExecutablePath": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                "CommandLine": "chrome.exe --remote-debugging-pipe", "CreationDate": "/Date(2002)/"
-            }));
-        }
-        serde_json::to_string(&rows).unwrap()
-    }
-
-    /// Windows used to end the person's browser with `taskkill /T /F` while Unix asks it to close
-    /// and waits, which risks the profile damage a graceful close avoids. Now its windows are asked to close first (no `/F`), and the tree
-    /// is ended only once it has gone. Never the person's everyday Chrome, nor the console.
-    #[cfg(unix)]
-    #[test]
-    fn windows_asks_the_persons_browser_to_close_before_its_tree_is_ended() {
-        if crate::test_support::isolated_process(
-            "stack::tests::windows_asks_the_persons_browser_to_close_before_its_tree_is_ended",
-        ) {
-            return;
-        }
-        let root = temp_root("windows-browser-close");
-        std::fs::create_dir_all(root.join(".logs")).unwrap();
-        let fixture = CleanupCommandFixture::new(&root);
-        // Each stand-in run once first: macOS checks a freshly built executable on its first run.
-        fixture.scenario("warm-up");
-        for name in ["powershell", "taskkill"] {
-            let _ = Command::new(fixture.command(name)).output();
-        }
-        fixture.scenario("browser-close");
-        let computer = Command::new("/bin/sleep").arg("60").spawn().unwrap();
-        let pid = computer.id();
-        std::fs::write(
-            root.join("synthetic-inventory.json"),
-            windows_browser_inventory(pid, true),
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("synthetic-inventory-closed.json"),
-            windows_browser_inventory(pid, false),
-        )
-        .unwrap();
-        let mut children = vec![(LOCAL_BROWSER, computer)];
-        let started = std::time::Instant::now();
-        let result = stop_windows_host_children_with(
-            &root,
-            &mut children,
-            &fixture.command("powershell"),
-            &fixture.command("taskkill"),
-            WINDOWS_BROWSER_CLOSE_PATIENCE,
-        );
-        let waited = started.elapsed();
-        children[0].1.kill().unwrap();
-        children[0].1.wait().unwrap();
-        assert_eq!(result.unwrap(), 1);
-        assert!(waited < WINDOWS_BROWSER_CLOSE_PATIENCE, "{waited:?}");
-        let taskkills: Vec<String> = fixture
-            .log()
-            .lines()
-            .filter(|line| line.starts_with("taskkill\t"))
-            .map(str::to_string)
-            .collect();
-        assert_eq!(
-            taskkills,
-            [
-                "taskkill\t/PID 9100".to_string(),
-                format!("taskkill\t/PID {pid} /T /F")
-            ]
-        );
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    /// A browser that does not close in time is ended with its tree, so Stop waits on it for no
-    /// longer than its patience and never leaves it running.
-    #[cfg(unix)]
-    #[test]
-    fn windows_waits_for_a_browser_that_will_not_close_only_so_long() {
-        if crate::test_support::isolated_process(
-            "stack::tests::windows_waits_for_a_browser_that_will_not_close_only_so_long",
-        ) {
-            return;
-        }
-        let root = temp_root("windows-browser-stubborn");
-        std::fs::create_dir_all(root.join(".logs")).unwrap();
-        let fixture = CleanupCommandFixture::new(&root);
-        // Run each stand-in once first: macOS checks a freshly built executable on its first run,
-        // which takes seconds, and the wait measured below is the browser's alone.
-        fixture.scenario("warm-up");
-        for name in ["powershell", "taskkill"] {
-            let _ = Command::new(fixture.command(name)).output();
-        }
-        fixture.scenario("browser-stubborn");
-        let computer = Command::new("/bin/sleep").arg("60").spawn().unwrap();
-        let pid = computer.id();
-        std::fs::write(
-            root.join("synthetic-inventory.json"),
-            windows_browser_inventory(pid, true),
-        )
-        .unwrap();
-        let mut children = vec![(LOCAL_BROWSER, computer)];
-        let patience = std::time::Duration::from_millis(300);
-        let started = std::time::Instant::now();
-        let result = stop_windows_host_children_with(
-            &root,
-            &mut children,
-            &fixture.command("powershell"),
-            &fixture.command("taskkill"),
-            patience,
-        );
-        let waited = started.elapsed();
-        children[0].1.kill().unwrap();
-        children[0].1.wait().unwrap();
-        assert_eq!(result.unwrap(), 1);
-        assert!(waited >= patience, "{waited:?}");
-        assert!(waited < std::time::Duration::from_secs(5), "{waited:?}");
-        let log = fixture.log();
-        assert!(log.contains("taskkill\t/PID 9100\n"), "{log}");
-        assert!(
-            log.contains(&format!("taskkill\t/PID {pid} /T /F")),
-            "{log}"
-        );
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
     fn ipv6_loopback_listener() -> Option<std::net::TcpListener> {
         match std::net::TcpListener::bind("[::1]:0") {
             Ok(listener) => Some(listener),
@@ -6595,64 +5845,6 @@ fn main() {
             }
             Err(error) => panic!("could not bind the IPv6 regression listener: {error}"),
         }
-    }
-
-    #[test]
-    fn dependency_install_retries_partial_directory_and_rechecks_cached_success() {
-        let root = temp_root("dependency-install-retry");
-        std::fs::create_dir_all(&root).unwrap();
-        let source = root.join("fake_bun.rs");
-        std::fs::write(&source, r#"
-use std::io::Write;
-fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    assert_eq!(args, ["install", "--frozen-lockfile", "--ignore-scripts"]);
-    let previous = std::fs::read_to_string("attempts.log").unwrap_or_default();
-    let mut log = std::fs::OpenOptions::new().create(true).append(true).open("attempts.log").unwrap();
-    writeln!(log, "{}", args.join(" ")).unwrap();
-    std::fs::create_dir_all("node_modules").unwrap();
-    if previous.is_empty() {
-        eprintln!("synthetic interrupted dependency download");
-        std::process::exit(9);
-    }
-    std::fs::write("node_modules/installed-package", "cached package contents").unwrap();
-}
-"#).unwrap();
-        let bun = root.join(if cfg!(windows) {
-            "fake-bun.exe"
-        } else {
-            "fake-bun"
-        });
-        crate::test_support::compile_fixture(&source, &bun);
-        let first = install_dependencies(&root, &bun);
-        assert!(
-            root.join("node_modules").is_dir(),
-            "failure must leave a partial directory"
-        );
-        let second = install_dependencies(&root, &bun);
-        let third = install_dependencies(&root, &bun);
-        let attempts = std::fs::read_to_string(root.join("attempts.log")).unwrap();
-        let installed = std::fs::read_to_string(root.join("node_modules/installed-package"));
-        eprintln!(
-            "{}",
-            serde_json::json!({
-                "firstError": first.as_ref().err(), "retrySucceeded": second.is_ok(),
-                "cachedSucceeded": third.is_ok(), "invocations": attempts.lines().count(),
-                "installed": installed.as_ref().ok(),
-            })
-        );
-        std::fs::remove_dir_all(root).unwrap();
-        assert!(first
-            .unwrap_err()
-            .contains("synthetic interrupted dependency download"));
-        assert!(second.is_ok(), "{second:?}");
-        assert!(third.is_ok(), "{third:?}");
-        assert_eq!(
-            attempts.lines().count(),
-            3,
-            "retry and cached checks must invoke Bun"
-        );
-        assert_eq!(installed.unwrap(), "cached package contents");
     }
 
     fn host_command_line(name: &str) -> &'static str {
@@ -7181,19 +6373,6 @@ fn main() {
             println!("  TCP    127.0.0.1:45124        0.0.0.0:0              LISTENING       9002");
         },
         ("taskkill", "held-refusal") => { eprintln!("synthetic held cleanup refused"); std::process::exit(5); },
-        // The person's browser: its windows asked to close (`taskkill` without `/F`), after which an inventory no
-        // longer lists it. A stubborn one ignores the request and is still listed.
-        ("powershell", "browser-close" | "browser-stubborn") => {
-            let closed = std::path::Path::new(&root).join("browser-closed").exists();
-            let file = if closed { "synthetic-inventory-closed.json" } else { "synthetic-inventory.json" };
-            print!("{}", std::fs::read_to_string(std::path::Path::new(&root).join(file)).unwrap());
-        }
-        ("taskkill", "browser-close") => {
-            if !args.iter().any(|arg| arg == "/F") {
-                std::fs::write(std::path::Path::new(&root).join("browser-closed"), "").unwrap();
-            }
-        }
-        ("taskkill", "browser-stubborn") => {},
         ("powershell", "inventory-fail") => {
             print!("synthetic partial inventory that must not be trusted");
             std::process::exit(17);
@@ -8693,38 +7872,6 @@ fn main() {
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    /// A manifest with a byte-order mark in front of it is still a manifest.
-    ///
-    /// Windows tooling writes one freely (`Set-Content -Encoding UTF8` does), `serde_json` refuses
-    /// a document that begins with one, and the refusal was reported as a deployment older than
-    /// this version of OpenBot. That sent somebody looking for a newer installer over three bytes.
-    #[test]
-    fn a_byte_order_mark_does_not_make_a_deployment_look_old() {
-        let dir = temp_root("bom");
-        let app = dir.join("app");
-        std::fs::create_dir_all(&app).unwrap();
-        std::fs::write(
-            app.join("package.json"),
-            "\u{feff}{\"scripts\":{\"serve\":\"bun serve.ts\"}}",
-        )
-        .unwrap();
-        assert_eq!(missing_script(&dir), None);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// And a manifest that is genuinely broken says so, rather than blaming the version.
-    #[test]
-    fn an_unreadable_manifest_is_not_reported_as_an_old_deployment() {
-        let dir = temp_root("broken");
-        let app = dir.join("app");
-        std::fs::create_dir_all(&app).unwrap();
-        std::fs::write(app.join("package.json"), "{ this is not json").unwrap();
-        let problem = missing_script(&dir).expect("a broken manifest is a problem");
-        assert!(problem.contains("cannot be read as JSON"), "{problem}");
-        assert!(!problem.contains("older than"), "{problem}");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
     #[test]
     fn a_missing_root_is_named_rather_than_left_to_errno() {
         let missing = std::env::temp_dir().join("openbot-not-here-at-all");
@@ -8742,46 +7889,12 @@ fn main() {
         assert!(problem.contains("docker-compose.yml"), "{problem}");
 
         std::fs::write(dir.join("docker-compose.yml"), "services: {}\n").unwrap();
-        let problem = deployment_problem(&dir).expect("still missing the three processes");
-        assert!(problem.contains("server"), "{problem}");
+        assert_eq!(
+            deployment_problem(&dir),
+            None,
+            "the containers run from their images: no server, app or worker folder is needed"
+        );
 
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn a_deployment_older_than_this_app_is_named_as_that_rather_than_left_to_fail() {
-        let dir = temp_root("old");
-        for part in ["server", "app", "worker"] {
-            std::fs::create_dir_all(dir.join(part)).unwrap();
-        }
-        std::fs::write(dir.join("docker-compose.yml"), "services: {}\n").unwrap();
-        // What v0.0.7 shipped: a dev script and nothing to serve a build with.
-        std::fs::write(
-            dir.join("app").join("package.json"),
-            r#"{"scripts":{"dev":"vite","build":"vite build"}}"#,
-        )
-        .unwrap();
-
-        let problem = deployment_problem(&dir).expect("an older deployment is a problem");
-        assert!(problem.contains(APP_SCRIPT), "{problem}");
-        assert!(problem.to_lowercase().contains("older"), "{problem}");
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn a_complete_deployment_has_no_problem() {
-        let dir = temp_root("complete");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("docker-compose.yml"), "services: {}\n").unwrap();
-        for directory in ["server", "app", "worker"] {
-            std::fs::create_dir_all(dir.join(directory)).unwrap();
-        }
-        std::fs::write(
-            dir.join("app").join("package.json"),
-            r#"{"scripts":{"serve":"vite preview"}}"#,
-        )
-        .unwrap();
-        assert!(deployment_problem(&dir).is_none());
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -8831,6 +7944,7 @@ fn main() {
 
     #[test]
     fn a_port_nobody_holds_is_not_reported_as_taken() {
+        let _ports = crate::test_support::hold_ports();
         // 0 is never listening; this asserts the check does not invent a problem.
         assert!(port_already_taken(&[("nothing", 1)]).is_none());
     }
@@ -8905,6 +8019,7 @@ fn main() {
 
     #[test]
     fn multiline_published_ports_exempt_owned_listeners_but_reject_foreign_listener() {
+        let _ports = crate::test_support::hold_ports();
         let listeners = [(); 4].map(|()| std::net::TcpListener::bind("127.0.0.1:0").unwrap());
         let [first, second, third, foreign] = listeners
             .each_ref()
@@ -8944,6 +8059,7 @@ fn main() {
     */
     #[test]
     fn our_own_published_port_is_not_a_conflict() {
+        let _ports = crate::test_support::hold_ports();
         let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = held.local_addr().unwrap().port();
         assert!(port_already_taken(&[("Bot you picked", port)]).is_some());
@@ -8957,6 +8073,7 @@ fn main() {
 
     #[test]
     fn a_held_port_is_named_along_with_what_uses_it() {
+        let _ports = crate::test_support::hold_ports();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
 
@@ -8971,6 +8088,7 @@ fn main() {
 
     #[test]
     fn an_ipv6_only_port_is_named_unless_this_deployment_already_publishes_it() {
+        let _ports = crate::test_support::hold_ports();
         let Some(listener) = ipv6_loopback_listener() else {
             return;
         };
@@ -8992,6 +8110,7 @@ fn main() {
 
     #[test]
     fn an_ipv6_only_port_is_not_clear_while_its_listener_is_held() {
+        let _ports = crate::test_support::hold_ports();
         let Some(listener) = ipv6_loopback_listener() else {
             return;
         };
@@ -9217,8 +8336,12 @@ fn main() {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn macos_podman_up_and_migrate_keep_deployment_overrides_without_duplicate_ports() {
-        if crate::test_support::isolated_process("stack::tests::macos_podman_up_and_migrate_keep_deployment_overrides_without_duplicate_ports") { return; }
+    fn macos_podman_up_keeps_deployment_overrides_without_duplicate_ports() {
+        if crate::test_support::isolated_process(
+            "stack::tests::macos_podman_up_keeps_deployment_overrides_without_duplicate_ports",
+        ) {
+            return;
+        }
         let path = PathFixture::with_fake_engine("macos-podman-start");
         let [_, podman] = computer_stop_addresses(&path);
         let (root, record) = computer_stop_root(&path, "podman-start", "{}");
@@ -9237,18 +8360,15 @@ fn main() {
                 "agent-harness"
             ]
         );
-        migrate(&podman, &root, &Secrets::new()).unwrap();
         let log = std::fs::read_to_string(&record).unwrap();
-        for action in [
-            "--profile harness up -d --no-build --pull never",
-            "run --rm --pull never migrate",
-        ] {
-            let line = log.lines().find(|line| line.contains(action)).unwrap();
-            let base = line.find("-f docker-compose.yml").unwrap();
-            let existing = line.find("-f docker-compose.override.yml").unwrap();
-            let desktop = line.find(".openbot-macos-podman.yml").unwrap();
-            assert!(base < existing && existing < desktop, "{line}");
-        }
+        let line = log
+            .lines()
+            .find(|line| line.contains("--profile harness up -d --no-build --pull never"))
+            .unwrap();
+        let base = line.find("-f docker-compose.yml").unwrap();
+        let existing = line.find("-f docker-compose.override.yml").unwrap();
+        let desktop = line.find(".openbot-macos-podman.yml").unwrap();
+        assert!(base < existing && existing < desktop, "{line}");
         assert_eq!(
             std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(),
             original
@@ -9265,7 +8385,7 @@ fn main() {
         )
         .unwrap();
         std::fs::remove_file(&record).unwrap();
-        migrate(&podman, &root, &Secrets::new()).unwrap();
+        up(&podman, &root, true, &Secrets::new()).unwrap();
         let log = std::fs::read_to_string(&record).unwrap();
         assert!(
             log.contains("-f docker-compose.yml -f custom override.yml"),
@@ -10028,6 +9148,16 @@ fn main() {
             "{}",
             problem.said
         );
+        // The other copy's folder as a person reads it, never Windows' `\\?\C:\...` form.
+        let checkout = crate::paths::plain(std::fs::canonicalize(&checkout).unwrap());
+        assert!(
+            problem
+                .said
+                .contains(&format!("from {}.", checkout.display()))
+                && !problem.said.contains(r"\\?\"),
+            "{}",
+            problem.said
+        );
         assert_eq!(
             saved_project(&root),
             None,
@@ -10148,6 +9278,22 @@ fn main() {
         );
     }
 
+    /// What `docker container inspect --format '{{json .Config.Env}}'` printed for a Compose
+    /// `server` service given the token, and given none (`${OPENBOT_DESKTOP_HOST_TOKEN:-}`).
+    #[test]
+    fn the_host_token_is_read_from_the_server_containers_environment() {
+        let given = br#"["OTHER=value","OPENBOT_DESKTOP_HOST_TOKEN=probe-token-abc","PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]
+"#;
+        assert_eq!(host_token_in(given), Ok(Some("probe-token-abc".into())));
+        let empty = br#"["OPENBOT_DESKTOP_HOST_TOKEN=","PATH=/usr/bin"]"#;
+        assert_eq!(host_token_in(empty), Ok(None));
+        assert_eq!(host_token_in(br#"["PATH=/usr/bin"]"#), Ok(None));
+        // A value that merely contains the name is not it.
+        let other = br#"["NOT_OPENBOT_DESKTOP_HOST_TOKEN=x"]"#;
+        assert_eq!(host_token_in(other), Ok(None));
+        assert!(host_token_in(b"no such container").is_err());
+    }
+
     #[test]
     fn readiness_asks_both_loopbacks_because_a_runtime_picks_one() {
         assert!(LOOPBACKS.contains(&"127.0.0.1"));
@@ -10165,385 +9311,10 @@ fn main() {
     }
 
     #[test]
-    fn the_app_is_served_as_a_build_rather_than_by_a_development_server() {
-        let app = HOST_PROCESSES
-            .iter()
-            .find(|process| process.name == "app")
-            .expect("the app is one of the three");
-        assert_eq!(
-            app.package_script, "serve",
-            "`dev` sets NODE_ENV=development, and the SDK draws its developer inspector over the \
-             application when it reads that"
-        );
+    fn the_host_processes_are_the_ones_earlier_versions_ran() {
+        assert_eq!(HOST_PROCESSES, ["server", "app", "worker", "browser"]);
     }
 
-    #[test]
-    fn the_host_processes_are_the_ones_that_are_not_containers() {
-        let names: Vec<_> = HOST_PROCESSES.iter().map(|p| p.name).collect();
-        assert_eq!(names, vec!["server", "app", "worker", "browser"]);
-    }
-
-    /// The person's browser starts last, after everything the window waits on, and not at all on a
-    /// machine that cannot run one.
-    #[test]
-    fn the_persons_browser_starts_last_and_only_where_it_runs() {
-        let without: Vec<_> = host_processes(false).map(|p| p.name).collect();
-        assert_eq!(without, ["server", "app", "worker"]);
-        let with: Vec<_> = host_processes(true).map(|p| p.name).collect();
-        assert_eq!(with, ["server", "app", "worker", "browser"]);
-        let browser = HOST_PROCESSES
-            .iter()
-            .find(|process| process.name == LOCAL_BROWSER)
-            .unwrap();
-        assert_eq!(
-            (browser.cwd, browser.script),
-            ("agent-computer", "src/index.ts")
-        );
-    }
-
-    /// The browser process through the real spawn path, with a stand-in for Bun that writes down
-    /// what it was given: the arguments and environment `scripts/start-local-chrome-computer.ts`
-    /// gives the computer, this start's port, the computer token, and the built Recorder, and none
-    /// of the credentials the server and the worker hold.
-    #[test]
-    fn the_persons_browser_is_started_with_its_own_environment_and_no_other_credentials() {
-        let root = temp_root("local-browser-spawn");
-        std::fs::create_dir_all(root.join("agent-computer")).unwrap();
-        let root = std::fs::canonicalize(&root).unwrap();
-        let source = root.join("said.rs");
-        let bun = root.join(format!("said{}", std::env::consts::EXE_SUFFIX));
-        std::fs::write(
-            &source,
-            r#"
-fn main() {
-    let mut said: Vec<String> = std::env::args().skip(1).collect();
-    for name in ["COMPUTER_TOKEN", "COMPUTER_BROWSER_BACKEND", "COMPUTER_BROWSER_MODE", "PORT",
-        "PROFILES_DIR", "WORKSPACE_DIR", "OPENBOT_RECORDER_DIR", "COMPUTER_BROWSER_IDLE_MS",
-        "COMPUTER_PEOPLE_ONLY", "INTELLIGENCE_API_KEY", "OPENBOT_DESKTOP_HOST_TOKEN",
-        "KEY_ENCRYPTION_KEY"] {
-        said.push(format!("{name}={}", std::env::var(name).unwrap_or_else(|_| "<unset>".into())));
-    }
-    std::fs::write("said.txt", said.join("\n")).unwrap();
-}
-"#,
-        )
-        .unwrap();
-        crate::test_support::compile_fixture(&source, &bun);
-        crate::env::write(
-            &root.join(".env"),
-            &crate::env::Ports {
-                browser: Some(52131),
-                ..Default::default()
-            }
-            .settings(),
-            &std::collections::BTreeMap::new(),
-        )
-        .unwrap();
-        let secrets = Secrets::from([
-            ("COMPUTER_TOKEN".into(), "synthetic-computer-token".into()),
-            (
-                "INTELLIGENCE_API_KEY".into(),
-                "synthetic-intelligence".into(),
-            ),
-            ("KEY_ENCRYPTION_KEY".into(), "synthetic-key".into()),
-            ("OPENBOT_DESKTOP_HOST_TOKEN".into(), "synthetic-host".into()),
-        ]);
-        let browser = crate::local_browser::LocalBrowser {
-            product: crate::local_browser::Product::Chrome,
-            executable: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".into(),
-            data: root.join("data").join("local-computer"),
-        };
-        let process = host_processes(true)
-            .find(|process| process.name == LOCAL_BROWSER)
-            .unwrap();
-
-        let refused = spawn_host_process(process, &root, &root.join(".logs"), &bun, &secrets, None)
-            .expect_err("the browser cannot start without this start's decision about it");
-        assert_eq!(refused.kind(), std::io::ErrorKind::InvalidInput);
-
-        let status = spawn_host_process(
-            process,
-            &root,
-            &root.join(".logs"),
-            &bun,
-            &secrets,
-            Some(&browser),
-        )
-        .unwrap()
-        .wait()
-        .unwrap();
-        assert!(status.success());
-        let said = std::fs::read_to_string(root.join("agent-computer/said.txt")).unwrap();
-        let data = root.join("data").join("local-computer");
-        assert_eq!(
-            said.lines().collect::<Vec<_>>(),
-            [
-                "--no-env-file".to_string(),
-                "src/index.ts".into(),
-                "COMPUTER_TOKEN=synthetic-computer-token".into(),
-                "COMPUTER_BROWSER_BACKEND=local-chrome".into(),
-                "COMPUTER_BROWSER_MODE=headed".into(),
-                "PORT=52131".into(),
-                format!("PROFILES_DIR={}", data.join("profiles").display()),
-                format!("WORKSPACE_DIR={}", data.join("workspace").display()),
-                format!(
-                    "OPENBOT_RECORDER_DIR={}",
-                    root.join("extension").join("dist").display()
-                ),
-                "COMPUTER_BROWSER_IDLE_MS=0".into(),
-                // Desktop's computer runs people's browsers and no Bot, and says so, or the computer
-                // refuses to run a person's browser at all.
-                "COMPUTER_PEOPLE_ONLY=on".into(),
-                "INTELLIGENCE_API_KEY=<unset>".into(),
-                "OPENBOT_DESKTOP_HOST_TOKEN=<unset>".into(),
-                "KEY_ENCRYPTION_KEY=<unset>".into(),
-            ]
-        );
-        assert!(data.join("profiles").is_dir() && data.join("workspace").is_dir());
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    /// Stop asks the person's browser to close and waits for it, and only then freezes and kills
-    /// the rest. The stand-in does what `agent-computer` does on SIGTERM: closes, and exits 0.
-    #[cfg(unix)]
-    #[test]
-    fn stop_lets_the_persons_browser_close_before_the_rest_is_killed() {
-        use std::os::unix::process::ExitStatusExt;
-        let root = temp_root("local-browser-stop");
-        std::fs::create_dir_all(&root).unwrap();
-        let mut children = vec![
-            ("server", stand_in(&root, ":")),
-            (LOCAL_BROWSER, stand_in(&root, "trap 'exit 0' TERM")),
-        ];
-        let started = std::time::Instant::now();
-        stop_host_children(&root, &mut children).unwrap();
-        assert!(started.elapsed() < BROWSER_CLOSE_PATIENCE);
-        let browser = children[1].1.wait().unwrap();
-        assert_eq!(
-            browser.code(),
-            Some(0),
-            "the browser closed itself: {browser:?}"
-        );
-        let server = children[0].1.wait().unwrap();
-        assert_eq!(server.signal(), Some(libc::SIGKILL), "{server:?}");
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    /// A browser that does not close in time is stopped the ordinary way, so Stop never waits on it
-    /// for longer than its patience and never leaves it running.
-    #[cfg(unix)]
-    #[test]
-    fn a_browser_that_will_not_close_is_waited_for_only_so_long() {
-        let root = temp_root("local-browser-stubborn");
-        std::fs::create_dir_all(&root).unwrap();
-        let mut children = vec![(LOCAL_BROWSER, stand_in(&root, "trap '' TERM"))];
-        let started = std::time::Instant::now();
-        close_local_browser_first(&mut children, std::time::Duration::from_millis(300));
-        let waited = started.elapsed();
-        assert!(
-            waited >= std::time::Duration::from_millis(300),
-            "{waited:?}"
-        );
-        assert!(waited < std::time::Duration::from_secs(3), "{waited:?}");
-        assert!(children[0].1.try_wait().unwrap().is_none());
-        children[0].1.kill().unwrap();
-        children[0].1.wait().unwrap();
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    /// The person's browser exactly as Desktop gets it there: this commit's tree as GitHub's tag
-    /// tarball carries it, laid out by `deployment::unpack`, installed by `install_dependencies`,
-    /// its Recorder built here (installation copies the release's prebuilt one out of its computer
-    /// image, `preparation::place_recorder`, and this commit has no published image), the browser decided by
-    /// `local_browser::find` against this machine's real Chrome and Edge, spawned by
-    /// `spawn_host_process`, asked for `/health` with the computer token, and stopped by
-    /// `stop_host_children`. No browser is opened. Only the home folder is a scratch one, so the
-    /// profile folders it makes are not the person's.
-    ///
-    /// ```sh
-    /// OPENBOT_LIVE_BROWSER_BUN=<bun> OPENBOT_LIVE_BROWSER_PORT=<port> \
-    /// cargo test --lib live_the_persons_browser -- --ignored --nocapture
-    /// ```
-    #[cfg(unix)]
-    #[test]
-    #[ignore = "starts agent-computer from a prepared deployment on this machine"]
-    fn live_the_persons_browser_answers_health_with_the_computer_token() {
-        let setting = |name: &str| {
-            std::env::var(name).unwrap_or_else(|_| panic!("{name} names the live run's input"))
-        };
-        let bun = PathBuf::from(setting("OPENBOT_LIVE_BROWSER_BUN"));
-        let port: u16 = setting("OPENBOT_LIVE_BROWSER_PORT").parse().unwrap();
-        let scratch = temp_root("live-browser");
-        let root = scratch.join("deployment");
-        let home = scratch.join("home");
-        std::fs::create_dir_all(&home).unwrap();
-        // From the repository root: run in a subdirectory, `git archive` packs only that directory.
-        let tarball = Command::new("git")
-            .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
-            .args([
-                "archive",
-                "--format=tar.gz",
-                "--prefix=OpenBot-live/",
-                "HEAD",
-            ])
-            .output()
-            .unwrap();
-        assert!(tarball.status.success());
-        crate::deployment::unpack(&root, &tarball.stdout).unwrap();
-        install_dependencies(&root, &bun).unwrap();
-        let built = Command::new(&bun)
-            .current_dir(root.join("extension"))
-            .args(["run", "build"])
-            .status()
-            .unwrap();
-        assert!(built.success());
-        crate::env::write(
-            &root.join(".env"),
-            &crate::env::Ports {
-                browser: Some(port),
-                ..Default::default()
-            }
-            .settings(),
-            &std::collections::BTreeMap::new(),
-        )
-        .unwrap();
-        let var = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
-        let browser = crate::local_browser::find(
-            &root,
-            crate::recorder_install::Os::current(),
-            Some(&home),
-            &var,
-            &|path: &Path| path.is_file(),
-        )
-        .expect("this machine runs the person's browser");
-        let token = format!("{:032x}", rand::random::<u128>());
-        let secrets = Secrets::from([
-            ("COMPUTER_TOKEN".into(), token.clone()),
-            (
-                "INTELLIGENCE_API_KEY".into(),
-                "synthetic-not-for-the-browser".into(),
-            ),
-        ]);
-        let process = host_processes(true)
-            .find(|process| process.name == LOCAL_BROWSER)
-            .unwrap();
-        let child = spawn_host_process(
-            process,
-            &root,
-            &root.join(".logs"),
-            &bun,
-            &secrets,
-            Some(&browser),
-        )
-        .unwrap();
-        let mut children = vec![(LOCAL_BROWSER, child)];
-
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
-            .build()
-            .unwrap();
-        let at = |path: &str| format!("http://127.0.0.1:{port}{path}");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-        let health: serde_json::Value = loop {
-            if let Ok(response) = client.get(at("/health")).bearer_auth(&token).send() {
-                if response.status().is_success() {
-                    break response.json().unwrap();
-                }
-            }
-            assert!(
-                children[0].1.try_wait().unwrap().is_none(),
-                "the browser process exited: {}",
-                tail_of(&root.join(".logs"), LOCAL_BROWSER)
-            );
-            assert!(std::time::Instant::now() < deadline, "no /health answer");
-            std::thread::sleep(std::time::Duration::from_millis(250));
-        };
-        let without_token = client.get(at("/computers")).send().unwrap().status();
-        let with_token = client
-            .get(at("/computers"))
-            .bearer_auth(&token)
-            .send()
-            .unwrap()
-            .status();
-        let on_ipv6 = std::net::TcpStream::connect(("::1", port)).is_ok();
-
-        stop_host_children(&root, &mut children).unwrap();
-        let exit = children[0].1.wait().unwrap();
-        eprintln!(
-            "{}",
-            serde_json::json!({
-                "browser": browser.product.name(),
-                "executable": browser.executable,
-                "health": health,
-                "computersWithoutToken": without_token.as_u16(),
-                "computersWithToken": with_token.as_u16(),
-                "listeningOnIpv6Loopback": on_ipv6,
-                "exitAfterStop": exit.code(),
-            })
-        );
-        std::fs::remove_dir_all(scratch).unwrap();
-
-        assert_eq!(health["status"], "ok");
-        assert_eq!(health["browserBackend"], "local-chrome");
-        assert_eq!(health["browserMode"], "headed");
-        assert_eq!(health["browser"], false, "nothing opened a browser");
-        assert_eq!(without_token, reqwest::StatusCode::UNAUTHORIZED);
-        assert_eq!(with_token, reqwest::StatusCode::OK);
-        assert!(!on_ipv6, "the computer listens on 127.0.0.1 alone");
-        assert_eq!(exit.code(), Some(0), "Stop let it close on its own");
-    }
-
-    /// A shell that runs `setup`, says it is ready, and idles. Waited on until ready, because a
-    /// signal that lands before its `trap` is set kills it the default way.
-    #[cfg(unix)]
-    fn stand_in(dir: &Path, setup: &str) -> std::process::Child {
-        let ready = dir.join(format!("ready-{}", rand::random::<u64>()));
-        let child = Command::new("/bin/sh")
-            .arg("-c")
-            .arg(format!(
-                "{setup}; : > '{}'; while :; do sleep 0.05; done",
-                ready.display()
-            ))
-            .spawn()
-            .unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while !ready.exists() {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "the stand-in never started"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        child
-    }
-
-    #[test]
-    fn the_server_uses_the_production_loader_entry() {
-        let server = HOST_PROCESSES
-            .iter()
-            .find(|process| process.name == "server")
-            .expect("the server is one of the three");
-        assert_eq!(server.script, "src/production-entry.ts");
-    }
-
-    #[test]
-    fn the_worker_keeps_its_own_index_entry() {
-        let worker = HOST_PROCESSES
-            .iter()
-            .find(|process| process.name == "worker")
-            .expect("the worker is one of the three");
-        assert_eq!(worker.script, "src/index.ts");
-    }
-
-    #[test]
-    fn the_server_starts_before_the_app_that_talks_to_it() {
-        let server = HOST_PROCESSES
-            .iter()
-            .position(|p| p.name == "server")
-            .unwrap();
-        let app = HOST_PROCESSES.iter().position(|p| p.name == "app").unwrap();
-        assert!(server < app);
-    }
     #[cfg(unix)]
     #[test]
     fn unix_app_listener_requires_stable_recorded_ancestry() {
@@ -10750,5 +9521,261 @@ fn main() {
         let log = fixture.log();
         assert!(!log.contains("taskkill"), "{log}");
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An installation that ran the team edition, with a computer the supervisor made for its person,
+    /// moves to the personal edition's one shared computer. Its Bot's files and its browser profile
+    /// were in the person's old volumes and nowhere the shared computer looks; Start brings them in,
+    /// under the names the shared computer uses, once, without replacing anything already there.
+    /// Against a real engine, with its own Compose project, namespace and volumes.
+    ///
+    /// ```sh
+    /// OPENBOT_TEST_COMPUTER_IMAGE=<agent-computer image> \
+    /// cargo test --locked --lib carried_into_the_shared -- --ignored
+    /// ```
+    #[test]
+    #[ignore = "creates an isolated Compose project and volumes on the selected engine"]
+    fn the_computers_from_before_the_personal_edition_are_carried_into_the_shared_one_once() {
+        const IMAGE: &str = "pgvector/pgvector:pg17";
+        // The image the copy runs in: the computer's own where one is named, as Start uses it.
+        let computer =
+            std::env::var("OPENBOT_TEST_COMPUTER_IMAGE").unwrap_or_else(|_| IMAGE.into());
+        let unique = format!(
+            "{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let project = format!("openbot-carry-fixture-{unique}");
+        let namespace = format!("carry{unique}");
+        let person = "dev-local-user";
+        let root = temp_root("carry-over");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(PROJECT_FILE),
+            serde_json::json!({ "project": project }).to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            format!(
+                "services:\n  agent-computer:\n    image: {IMAGE}\n    command: [\"sleep\", \"infinity\"]\n    volumes:\n      - agent-workspace:/workspace\n      - agent-profiles:/profiles\n  supervisor:\n    image: {IMAGE}\n    command: [\"sleep\", \"infinity\"]\n    environment:\n      COMPUTER_NAMESPACE: ${{COMPUTER_NAMESPACE:-{namespace}}}\nvolumes:\n  agent-workspace: {{}}\n  agent-profiles: {{}}\n"
+            ),
+        )
+        .unwrap();
+        let address = Address::new(crate::engine::Engine::Docker, None)
+            .pin()
+            .expect("the test engine answers");
+        let old_workspace = format!("{namespace}-workspace-person-{person}");
+        let old_profiles = format!("{namespace}-profile-person-{person}");
+        // Another installation's person computer: never read.
+        let elsewhere = format!("other{unique}-workspace-person-{person}");
+        let new_workspace = format!("{project}_agent-workspace");
+        let new_profiles = format!("{project}_agent-profiles");
+
+        let engine = |args: &[&str]| -> String {
+            let output = address.command().args(args).output().unwrap();
+            assert!(
+                output.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        };
+        // A shell in a throwaway container with these volumes, as root.
+        let shell = |volumes: &[(&str, &str)], script: &str| -> String {
+            let mut args = vec!["run".to_string(), "--rm".to_string()];
+            for (volume, at) in volumes {
+                args.push("--volume".into());
+                args.push(format!("{volume}:{at}"));
+            }
+            args.extend([
+                "--entrypoint".into(),
+                "sh".into(),
+                IMAGE.into(),
+                "-c".into(),
+                script.into(),
+            ]);
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            engine(&args)
+        };
+
+        let workflow = std::panic::catch_unwind(|| {
+            let up = compose_command(&address, &root, &Secrets::new())
+                .args(["up", "-d", "agent-computer"])
+                .output()
+                .unwrap();
+            assert!(
+                up.status.success(),
+                "{}",
+                String::from_utf8_lossy(&up.stderr)
+            );
+            for (volume, space) in [
+                (&old_workspace, namespace.as_str()),
+                (&old_profiles, namespace.as_str()),
+                (&elsewhere, &format!("other{unique}")[..]),
+            ] {
+                engine(&[
+                    "volume",
+                    "create",
+                    "--label",
+                    "openbot.supervisor=true",
+                    "--label",
+                    &format!("openbot.namespace={space}"),
+                    "--label",
+                    "openbot.computer-kind=person",
+                    "--label",
+                    &format!("openbot.person-id={person}"),
+                    volume,
+                ]);
+            }
+            // The person's computer from before: a Bot's files under `computers/<bot>`, its profile
+            // under `<bot>`, owned by somebody other than root, and the computer's own `.control`.
+            shell(
+                &[(&old_workspace, "/w"), (&old_profiles, "/p"), (&elsewhere, "/e")],
+                "set -e
+                 mkdir -p /w/computers/picked-harness /w/computers/other-bot /p/picked-harness/Default /p/other-bot /p/.control
+                 echo old-marker > /w/computers/picked-harness/final-marker.txt
+                 chown 1234:1234 /w/computers/picked-harness/final-marker.txt
+                 chmod 640 /w/computers/picked-harness/final-marker.txt
+                 echo older-note > /w/computers/picked-harness/note.txt
+                 echo b > /w/computers/other-bot/b.txt
+                 echo cookies > /p/picked-harness/Default/Cookies
+                 chown -R 1234:1234 /p/picked-harness
+                 echo old-profile > /p/other-bot/Preferences
+                 echo control > /p/.control/state
+                 mkdir -p /e/computers/stranger && echo not-ours > /e/computers/stranger/x",
+            );
+            // The person's computer from before, still running on those volumes.
+            engine(&[
+                "run",
+                "--detach",
+                "--name",
+                &format!("{project}-old-person"),
+                "--label",
+                "openbot.supervisor=true",
+                "--label",
+                &format!("openbot.namespace={namespace}"),
+                "--label",
+                "openbot.computer-kind=person",
+                "--volume",
+                &format!("{old_workspace}:/workspace"),
+                "--volume",
+                &format!("{old_profiles}:/profiles"),
+                IMAGE,
+                "sleep",
+                "infinity",
+            ]);
+            // What the shared computer already has: a newer note for that Bot, and a profile of its
+            // own for the other one.
+            shell(
+                &[(&new_workspace, "/workspace"), (&new_profiles, "/profiles")],
+                &format!(
+                    "set -e
+                     mkdir -p '/workspace/computers/{person}~picked-harness' '/profiles/{person}~other-bot'
+                     echo newer-note > '/workspace/computers/{person}~picked-harness/note.txt'
+                     echo new-profile > '/profiles/{person}~other-bot/Preferences'"
+                ),
+            );
+
+            let carried = carry_over_person_computers(&address, &root, &computer).unwrap();
+            assert_eq!(
+                carried,
+                vec![CarriedOver {
+                    person: person.into(),
+                    workspace: Some("copied".into()),
+                    profile: Some("copied".into()),
+                }]
+            );
+            let seen = shell(
+                &[(&new_workspace, "/workspace"), (&new_profiles, "/profiles")],
+                &format!(
+                    "cd '/workspace/computers/{person}~picked-harness'
+                     echo marker=$(cat final-marker.txt) $(stat -c '%u:%g:%a' final-marker.txt)
+                     echo note=$(cat note.txt)
+                     echo other=$(cat '/workspace/computers/{person}~other-bot/b.txt')
+                     echo cookies=$(cat '/profiles/{person}~picked-harness/Default/Cookies') $(stat -c '%u:%g' '/profiles/{person}~picked-harness/Default/Cookies')
+                     echo kept=$(cat '/profiles/{person}~other-bot/Preferences')
+                     echo control=$(ls -A /profiles | grep -c '^\\.control$' || true)
+                     echo stranger=$(ls /workspace/computers | grep -c stranger || true)
+                     echo staging=$(ls -A /profiles | grep -c '^\\.openbot-carrying' || true)"
+                ),
+            );
+            assert_eq!(
+                seen.lines().collect::<Vec<_>>(),
+                [
+                    "marker=old-marker 1234:1234:640",
+                    "note=newer-note",
+                    "other=b",
+                    "cookies=cookies 1234:1234",
+                    "kept=new-profile",
+                    "control=0",
+                    "stranger=0",
+                    "staging=0",
+                ],
+                "the files come with their owners and modes, and nothing there is replaced"
+            );
+            // Stopped before its volumes were read, and kept.
+            assert_eq!(
+                engine(&[
+                    "inspect",
+                    "--format",
+                    "{{.State.Running}}",
+                    &format!("{project}-old-person"),
+                ]),
+                "false"
+            );
+            // The old volumes are as they were.
+            assert_eq!(
+                shell(
+                    &[(&old_workspace, "/w")],
+                    "cat /w/computers/picked-harness/final-marker.txt"
+                ),
+                "old-marker"
+            );
+
+            // Once: a file the old computer gains later is not brought in by the next Start.
+            shell(
+                &[(&old_workspace, "/w")],
+                "echo later > /w/computers/picked-harness/later.txt",
+            );
+            assert_eq!(
+                carry_over_person_computers(&address, &root, &computer).unwrap(),
+                vec![CarriedOver {
+                    person: person.into(),
+                    workspace: Some("done".into()),
+                    profile: Some("done".into()),
+                }]
+            );
+            assert_eq!(
+                shell(
+                    &[(&new_workspace, "/workspace")],
+                    &format!(
+                        "ls '/workspace/computers/{person}~picked-harness' | grep -c later || true"
+                    ),
+                ),
+                "0"
+            );
+        });
+
+        let _ = address
+            .command()
+            .args(["rm", "--force", &format!("{project}-old-person")])
+            .output();
+        let _ = compose_command(&address, &root, &Secrets::new())
+            .args(["down", "--volumes", "--remove-orphans"])
+            .output();
+        for volume in [&old_workspace, &old_profiles, &elsewhere] {
+            let _ = address
+                .command()
+                .args(["volume", "rm", "--force", volume])
+                .output();
+        }
+        let _ = std::fs::remove_dir_all(&root);
+        if let Err(panic) = workflow {
+            std::panic::resume_unwind(panic);
+        }
     }
 }

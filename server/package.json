@@ -22,7 +22,7 @@
     "@better-auth/scim": "1.7.1",
     "@better-auth/sso": "^1.7.1",
     "@composio/core": "^0.18.1",
-    "@copilotkit/runtime": "1.84.2-canary.openbot-intel-fixes",
+    "@copilotkit/runtime": "1.85.0",
     "@mastra/client-js": "^1.43.0",
     "@mastra/core": "^1.64.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
@@ -47,7 +47,7 @@
     "web-bot-auth": "0.2.0",
     "yaml": "^2.9.0",
     "zod": "^4.4.3",
-    "@copilotkit/shared": "1.84.2-canary.openbot-intel-fixes"
+    "@copilotkit/shared": "1.85.0"
   },
   "devDependencies": {
     "@copilotkit/aimock": "1.43.0",

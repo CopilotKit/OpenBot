@@ -15,7 +15,6 @@ import {
   type BrokerConnection,
   BrokerRefusalError,
   type ConnectedAppBroker,
-  flagOf,
   type GrantState,
 } from "./broker";
 
@@ -533,46 +532,27 @@ async function* pagedItems(listing: Listing): AsyncGenerator<unknown> {
   }
 }
 
-/** The verdict `classify` falls back to when it could not read a behaviour. See {@link isClassified}. */
-const CLOSED_VERDICT = { effect: "write", destructive: true } as const;
-
 /**
  * Whether ARCADE classified this action, as against this deployment falling back for it.
  *
  * `classify` from `./arcade` is the one reading of `metadata.behavior` anywhere here, and it is
- * deliberately TOTAL: anything it cannot read answers the closed `{ write, destructive }` verdict,
- * so an unannotated action is approved like a deletion. That fallback is exactly what must not be
- * counted — counted, `AirtableApi`'s `metadata: null` actions would report as classified, and the
- * coverage warning that exists to name them would never fire.
+ * deliberately TOTAL: anything it cannot read answers `unclassified`, a write that every background
+ * reader treats as cautiously as a destructive one. That fallback is exactly what must not be
+ * counted: counted, `AirtableApi`'s `metadata: null` actions would report as classified, and the
+ * coverage warning that exists to name them would never fire. An empty `behavior`, stating neither
+ * flag, is unclassified too, for the same reason.
  *
- * AN EMPTY `behavior` IS NOT A CLASSIFICATION EITHER, and `classify` is where that is decided: a
- * block stating neither flag answers the closed verdict, so it arrives here as the fallback it is
- * and the `flagOf(behavior.destructive, false)` below — the collision-breaker, not a second reading
- * of the wire — answers `false` for it. Were `{}` read as a plain write, every such action would
- * report as classified and the coverage warning would miss exactly the actions it exists to name,
- * the same way `AirtableApi`'s `metadata: null` actions would.
- *
- * THE CLOSED VERDICT IS ALSO A REAL ANSWER, which is the only subtlety here: `Attio.RemoveFromList`
- * genuinely publishes `destructive: true` and lands on the same pair. So the verdict is read first,
- * and only that one collision is broken — by asking whether Arcade actually sent a `behavior` whose
- * `destructive` flag reads true, through `flagOf`, the same function `classify` reads it with and
- * never a second parse of the wire.
+ * It used to be told apart from `Attio.RemoveFromList`, which genuinely publishes `destructive:
+ * true`, by a second look at the wire, because both landed on the same `{ write, destructive }`
+ * pair. They no longer share a verdict, so the verdict alone answers.
  *
  * NEVER THE `Api` SUFFIX (spec D8). `AirtableApi` and `GithubApi` are unannotated today and
- * `Apollo` is annotated, so the suffix correlates beautifully — and it is Arcade's naming
+ * `Apollo` is annotated, so the suffix correlates beautifully, and it is Arcade's naming
  * convention rather than a contract. A rule reading it is a guess wearing a measurement's clothes,
  * right until Arcade curates `DatadogApi`.
  */
 function isClassified(metadata: unknown): boolean {
-  const verdict = classify(metadata);
-  if (
-    verdict.effect !== CLOSED_VERDICT.effect ||
-    verdict.destructive !== CLOSED_VERDICT.destructive
-  ) {
-    return true;
-  }
-  const behavior = record(record(metadata)?.behavior);
-  return behavior !== null && flagOf(behavior.destructive, false) === true;
+  return classify(metadata).unclassified !== true;
 }
 
 /**

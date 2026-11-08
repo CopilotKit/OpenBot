@@ -242,10 +242,6 @@ function label(step: string): string {
       return "Ports";
     case "dependencies":
       return "Dependencies";
-    case "recorder":
-      return "Recorder";
-    case "browser":
-      return "Your browser";
     case "images":
       return "Local software";
     case "installation":

@@ -4,6 +4,6 @@ dependencies:
   version: 16.7.27
 - name: intelligence
   repository: oci://ghcr.io/copilotkit/charts
-  version: 0.16.0-rc.7
-digest: sha256:2daac7e82241a905c2e91ca82d8cbc869a5a208d81d9e953aa2b07a6182c04ae
-generated: "2026-11-06T08:29:36.27589-08:00"
+  version: 0.16.0-rc.9
+digest: sha256:a52bacdf806b99c38cef7cf4ef5ae1cf4abce66975e2ba5103a4171b53e3aa37
+generated: "2026-11-06T16:27:32.094053-08:00"

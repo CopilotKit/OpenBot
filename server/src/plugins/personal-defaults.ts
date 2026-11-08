@@ -22,6 +22,12 @@ type Store = {
     by: string,
     as?: "admin" | "owner",
   ): Promise<void>;
+  grantTools(
+    app: string,
+    refs: string[],
+    agentId: string,
+    by: string,
+  ): Promise<void>;
   listForAgent(agentId: string): Promise<unknown>;
   installSkill(input: { slug: string; by: string }): Promise<void>;
 };
@@ -73,12 +79,23 @@ export const EVERY_BOT_REFUSAL =
   "In OpenBot Personal every Bot can use every app you connect. Turn the app off to take it from all of them.";
 
 /**
+ * What the personal edition's server answers when somebody tries to stop one Bot asking another.
+ * Every Bot there is the one person's, so each can ask the others (see `botsReachableFrom`).
+ */
+export const EVERY_BOT_ASKS_REFUSAL =
+  "In OpenBot Personal every Bot can ask your other Bots for help.";
+
+/**
  * Gives Bots every tool of these apps they don't hold yet. Writes nothing when they hold them all,
  * so asking on every run costs reads and no trail rows. The trail names why: Routines' grants as
  * always on, any other app's as `by`.
+ *
+ * One trail row per Bot and app, naming every tool it was given, and started by OpenBot when `by`
+ * is OpenBot's own (see `initiatedBy`). An upgrade that added seven goal tools to Routines wrote one
+ * row per tool for every Bot, each saying a person had changed a setting.
  */
 async function grantEveryTool(
-  store: Pick<Store, "grant">,
+  store: Pick<Store, "grantTools">,
   deps: PersonalDefaultsDeps,
   apps: string[],
   bots: string[],
@@ -90,9 +107,12 @@ async function grantEveryTool(
     const grantedBy = isAlwaysOn(app) ? ALWAYS_ON_BY : by;
     for (const bot of bots) {
       const held = await deps.granted(bot, app);
-      for (const tool of tools)
-        if (!held.has(tool.ref))
-          await store.grant("mcp", tool.ref, bot, grantedBy);
+      const missing = tools
+        .map((tool) => tool.ref)
+        .filter((ref) => !held.has(ref))
+        .sort();
+      if (missing.length > 0)
+        await store.grantTools(app, missing, bot, grantedBy);
     }
   }
 }
@@ -140,19 +160,25 @@ async function everyBotApps(deps: PersonalDefaultsDeps): Promise<string[]> {
 }
 
 /**
- * At startup, in every edition: add Routines if it isn't added, and give every Bot all of its tools.
- * The ones that change things too, because scheduling is the point; a Bot still asks before each one
- * runs while Ask before acting is on.
+ * At startup, in every edition: add Routines if it isn't added, bring the saved tools of every app
+ * whose tools are OpenBot's own code up to date with this build (see `refreshOwnListings`), and give
+ * every Bot all of Routines' tools. The ones that change things too, because scheduling is the point;
+ * a Bot still asks before each one runs while Ask before acting is on.
+ *
+ * Brought up to date before the grants, so a tool this build adds to Routines is given to every Bot
+ * at the same start rather than the one after.
  */
 export async function ensureAlwaysOnApp(
-  store: Pick<Store, "grant"> & {
+  store: Pick<Store, "grantTools"> & {
     serverAddress(serverId: string): Promise<unknown>;
     addServer(input: { key: string; by: string }): Promise<unknown>;
+    refreshOwnListings(): Promise<string[]>;
   },
   deps: PersonalDefaultsDeps,
 ): Promise<void> {
   if (!(await store.serverAddress(ALWAYS_ON_APP)))
     await store.addServer({ key: ALWAYS_ON_APP, by: ALWAYS_ON_BY });
+  await store.refreshOwnListings();
   await grantEveryTool(
     store,
     deps,

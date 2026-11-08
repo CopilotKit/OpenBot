@@ -160,12 +160,12 @@ test("the personal edition has four rows: Memory, Routines, What it can do and S
   await new Promise((resolve) => setTimeout(resolve, 50));
   // Nobody to share a Bot with.
   expect(view.queryByText("Sharing")).toBeNull();
-  // Approval rules and Responsibilities are sections of What it can do; no Slack, Teams or text.
+  // Approval rules and Goals are sections of What it can do; no Slack, Teams or text.
   expect(view.getByText("What it can do")).toBeTruthy();
   for (const gone of [
     "Skills and access",
     "Approval rules",
-    "Responsibilities",
+    "Goals",
     "Reaching you",
   ])
     expect(view.queryByText(gone)).toBeNull();
@@ -186,7 +186,7 @@ test("someone a Bot was published to sees Sharing, where its link is", async () 
   expect(await view.findByText("Whole team")).toBeTruthy();
 });
 
-test("the rows for responsibilities, reach, memory and rules say what this Bot has and open their pages", async () => {
+test("the rows for goals, reach, memory and rules say what this Bot has and open their pages", async () => {
   serving("user");
   const view = draw(BOT);
   const row = async (title: string, summary: string, path: string) => {
@@ -195,7 +195,7 @@ test("the rows for responsibilities, reach, memory and rules say what this Bot h
       `/bots/expenses/${path}`,
     );
   };
-  await row("Responsibilities", "1 active", "responsibilities");
+  await row("Goals", "1 active", "responsibilities");
   await row("Reaching you", "Slack", "reach");
   await row("Memory", "1 source", "memory");
   await row("Approval rules", "1 rule", "approvals");

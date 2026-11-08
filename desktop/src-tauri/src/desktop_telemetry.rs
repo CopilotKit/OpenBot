@@ -46,7 +46,7 @@ pub fn initialize<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         Some(())
     })();
     if initialized.is_none() {
-        eprintln!("[telemetry] local setup telemetry could not initialize");
+        log::warn!("[telemetry] local setup telemetry could not initialize");
         return;
     }
     record(
@@ -115,7 +115,7 @@ pub fn record<R: tauri::Runtime>(app: &tauri::AppHandle<R>, event: telemetry::Ev
         return;
     };
     if state.emitter.record(event).is_err() {
-        eprintln!("[telemetry] setup event could not be saved");
+        log::warn!("[telemetry] setup event could not be saved");
         return;
     }
     let emitter = Arc::clone(&state.emitter);
@@ -123,12 +123,12 @@ pub fn record<R: tauri::Runtime>(app: &tauri::AppHandle<R>, event: telemetry::Ev
         .name("openbot-telemetry".into())
         .spawn(move || {
             if emitter.flush().is_err() {
-                eprintln!("[telemetry] delivery deferred until the next flush");
+                log::warn!("[telemetry] delivery deferred until the next flush");
             }
         })
         .is_err()
     {
-        eprintln!("[telemetry] delivery deferred until the next flush");
+        log::warn!("[telemetry] delivery deferred until the next flush");
     }
 }
 
@@ -196,7 +196,7 @@ pub fn pull_completed<R: tauri::Runtime>(
 pub fn shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(state) = app.try_state::<DesktopTelemetry>() {
         if state.emitter.shutdown().is_err() {
-            eprintln!("[telemetry] pending setup events retained for next launch");
+            log::warn!("[telemetry] pending setup events retained for next launch");
         }
     }
 }

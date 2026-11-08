@@ -321,7 +321,12 @@ export class PlanModel implements PlanLanguageModel {
               openbotModelOnly: true,
               openbotBotId: this.botId,
               ...(this.choice ? { openbotModel: this.choice } : {}),
-              // Claude must replace its still-running SDK query to change the tools it holds.
+              /*
+               * Claude must replace its still-running SDK query to change the tools it holds. The
+               * harness does so whenever a step's `tools` differ from what that query started
+               * with (a tool `search_tools` found, or none on the last step); see
+               * agent-claude-sdk/src/adapter.py `run`.
+               */
               ...(answerOnly ? { openbotAnswerOnly: true } : {}),
             },
           })
@@ -412,6 +417,9 @@ export class PlanModel implements PlanLanguageModel {
                   }
                   case "RUN_ERROR": {
                     const error = new Error(event.message);
+                    // The harness's code, so the run can say a provider's refusal in words. See
+                    // `provider-refusal.ts`.
+                    if (event.code) Object.assign(error, { code: event.code });
                     if (event.code === "OPENBOT_MODEL_AUTH_REQUIRED") {
                       error.name = "OpenBotModelAuthenticationError";
                       recordDesktopConnectionFailure({

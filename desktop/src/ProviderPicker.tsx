@@ -2,8 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
+import { EndpointMark } from "./EndpointMark";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
-import { Mark } from "./Mark";
+import { ButtonMark, Mark } from "./Mark";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
 import { Sections } from "./Sections";
 import { StatusLine } from "./SetupProgress";
@@ -73,20 +74,41 @@ export type HeldConfiguration = {
 
 const endpointPresets: Record<
   string,
-  { baseUrl: string; model: string; keyUrl: string }
+  // `keyLink` is written out whole: the article goes by how the name sounds ("an xAI"), not by
+  // its first letter.
+  { baseUrl: string; model: string; keyUrl: string; keyLink: string }
 > = {
   // https://ai.google.dev/gemini-api/docs/openai
   google: {
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
     model: "gemini-3.8-flash",
     keyUrl: "https://aistudio.google.com/apikey",
+    keyLink: "Get a Google Gemini API key",
   },
   // https://docs.x.ai/developers/model-capabilities/legacy/chat-completions
   xai: {
     baseUrl: "https://api.x.ai/v1",
     model: "grok-4.7",
     keyUrl: "https://console.x.ai/",
+    keyLink: "Get an xAI API key",
   },
+  // Unbiased AI's gateway speaks the OpenAI API under the `pareto` model. The sign-in on this row
+  // mints the key; the dashboard is where somebody makes one by hand.
+  unbiased: {
+    baseUrl: "https://api.unbiased.ai/v1",
+    model: "pareto",
+    keyUrl: "https://platform.unbiased.ai/dashboard/keys",
+    keyLink: "Get an Unbiased AI API key",
+  },
+};
+
+/** What approving in the browser does, for each provider that signs in that way. */
+const oauthExplanation: Record<string, string> = {
+  google:
+    "Authorize Gemini API access using the configured Google Cloud project and its API quota.",
+  xai: "Authorize OpenBot to use models available to your xAI account.",
+  unbiased:
+    "Sign in or create an Unbiased AI account in your browser and approve the code shown here. OpenBot receives an API key for Pareto and keeps it on this computer.",
 };
 
 function endpointIdentity(baseUrl: string | undefined): string {
@@ -310,11 +332,15 @@ export function ProviderPicker({
       } catch (error) {
         if (current()) setFailure(asProblem(error));
       }
-      await invoke("finish_model_oauth", {
+      // Nothing for a session the native side keeps for itself; the minted API key for a sign-in
+      // that produces one (Unbiased AI), held here the way a plan's token is and never shown.
+      const minted = await invoke<string | null>("finish_model_oauth", {
         attemptId: authorization.attemptId,
       });
       if (current()) {
         continueAfterSignIn.current = true;
+        if (minted)
+          setTokens((previous) => ({ ...previous, [providerId]: minted }));
         setOauthSignedIn(providerId);
         setSignInUrl(null);
         setOauthCode(null);
@@ -509,6 +535,21 @@ export function ProviderPicker({
     const trimmedBaseUrl = baseUrl.trim();
     const trimmedModel = model.trim();
     const trimmedContainerBaseUrl = containerBaseUrl.trim();
+    /*
+     * A sign-in that minted an API key for a named endpoint (Unbiased AI) is that endpoint's key, and
+     * it goes on exactly as a typed one does: the same address, the same model, the same credential
+     * shape. Nothing after this screen has to know how the key was obtained.
+     */
+    if (login === "oauth" && trimmedToken && preset) {
+      onChoose({
+        provider: "openai-compatible",
+        login: "endpoint",
+        apiKey: trimmedToken,
+        baseUrl: preset.baseUrl,
+        ...(trimmedModel ? { model: trimmedModel } : {}),
+      });
+      return;
+    }
     onChoose({
       provider: login === "endpoint" ? "openai-compatible" : row.id,
       login,
@@ -662,7 +703,11 @@ export function ProviderPicker({
                 }
               }}
             />
-            <Mark id={r.mark} name={r.name} />
+            {r.id === "openai-compatible" ? (
+              <EndpointMark />
+            ) : (
+              <Mark id={r.mark} name={r.name} />
+            )}
             <span className="tile-name">{r.name}</span>
             <span className="tile-summary">{r.summary}</span>
           </label>
@@ -710,11 +755,8 @@ export function ProviderPicker({
 
           {login === "oauth" && (
             <>
-              <p className="footnote">
-                {row.id === "google"
-                  ? "Authorize Gemini API access using the configured Google Cloud project and its API quota."
-                  : "Authorize OpenBot to use models available to your xAI account."}
-              </p>
+              {/* Set as the plan's description is, so its button has the same space above it. */}
+              <p className="lede">{oauthExplanation[row.id]}</p>
               {oauthSignedIn === row.id ? (
                 <p className="lede">
                   {confirmed === row.id && <SignedInMark />}
@@ -739,9 +781,16 @@ export function ProviderPicker({
                 </>
               ) : null}
               {!busy && (
-                <button type="button" onClick={beginOAuth}>
+                <button
+                  type="button"
+                  className="quiet sign-in-with"
+                  onClick={beginOAuth}
+                >
+                  <ButtonMark id={row.mark} />
+                  {/* Google's guidelines allow only "Sign in with Google" beside its G. The
+                      row above already says Gemini. */}
                   Sign in {oauthSignedIn === row.id ? "again " : ""}with{" "}
-                  {row.name}
+                  {row.id === "google" ? "Google" : row.name}
                 </button>
               )}
               {busy && !signInUrl && (
@@ -770,7 +819,13 @@ export function ProviderPicker({
                   Your plan will be used.
                 </p>
                 {!token && (
-                  <button type="button" disabled={busy} onClick={beginSignIn}>
+                  <button
+                    type="button"
+                    className="quiet sign-in-with"
+                    disabled={busy}
+                    onClick={beginSignIn}
+                  >
+                    <ButtonMark id={row.mark} />
                     Sign in again with {row.name}
                   </button>
                 )}
@@ -784,8 +839,10 @@ export function ProviderPicker({
                  */}
                 <p className="footnote">
                   Your Bot will use{" "}
-                  {row.id === "anthropic" ? "Claude Agent SDK" : "LangGraph"}.
-                  It’s the one that can use this plan.
+                  {row.id === "anthropic"
+                    ? "Claude Agent SDK"
+                    : "LangChain (LangGraph)"}
+                  . It’s the one that can use this plan.
                 </p>
               </>
             ) : signInUrl ? (
@@ -831,12 +888,21 @@ export function ProviderPicker({
               </>
             ) : (
               <>
+                {/* Says what the flow below asks for: Claude's sign-in hands back a
+                    code to paste here, ChatGPT's finishes in the browser. */}
                 <p className="lede">
-                  Opens {row.name} in your browser. Nothing is typed here and no
-                  key is stored.
+                  {row.id === "anthropic"
+                    ? `${row.name} opens in your browser. Approve the request there, then paste the code it shows you back here. You won't need an API key.`
+                    : `${row.name} opens in your browser. You won't type anything here or need an API key.`}
                 </p>
                 <div className="provider-sign-in-actions">
-                  <button type="button" disabled={busy} onClick={beginSignIn}>
+                  <button
+                    type="button"
+                    className="quiet sign-in-with"
+                    disabled={busy}
+                    onClick={beginSignIn}
+                  >
+                    <ButtonMark id={row.mark} />
                     {busy ? "Starting…" : `Sign in with ${row.name}`}
                   </button>
                   {!busy &&
@@ -980,7 +1046,7 @@ export function ProviderPicker({
               {preset && (
                 <p className="footnote">
                   <ExternalLink key={preset.keyUrl} href={preset.keyUrl}>
-                    Get a {row.name} API key
+                    {preset.keyLink}
                   </ExternalLink>
                 </p>
               )}

@@ -489,3 +489,31 @@ test("team approvals still show the shared Bot account controls", async () => {
   expect(await view.findByText("Shared Bots")).toBeTruthy();
   expect(view.getByRole("button", { name: "Reset" })).toBeTruthy();
 });
+
+/*
+ * What always asks, said where the switches are, and only what is true: a Bot deleting a file on
+ * its own computer is an ordinary change (server/src/approvals/policy.ts, NOT_ACCOUNT_ACTIONS), so
+ * the page must not promise that every delete asks.
+ */
+test.each(["team", "personal"] as const)(
+  "the %s edition says what always asks, and that a Bot's own computer is its scratch space",
+  async (edition) => {
+    inboxOverride = {
+      teamRules: [],
+      team: { enforceAutoReview: false, customRulesEnabled: true },
+    };
+    const view = draw(<ApprovalSettings />, edition);
+    await view.findByText("Rules for every Bot");
+    const said = view.container.textContent ?? "";
+    for (const sentence of [
+      "Payments, passwords and security settings are always handed to you.",
+      "Deleting, sending, sharing and posting in your apps and on websites always ask first.",
+      "So does every edit or command in a folder on your own computer.",
+      "A Bot's own computer is its scratch space, so what it does there asks only when your settings or rules say so.",
+    ])
+      expect(said.replace(/\s+/g, " ")).toContain(sentence);
+    expect(said).not.toContain(
+      "Deleting, sending, sharing and posting always ask first.",
+    );
+  },
+);

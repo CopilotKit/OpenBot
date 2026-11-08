@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createApp } from "../src/app";
 import { DEV_ACTOR } from "../src/auth/dev-actor";
 import { loadConfig } from "../src/config";
+import { setEdition } from "../src/edition";
 import { ServerRowAmbiguousError } from "../src/plugins/access";
 import {
   type BrokerApp,
@@ -10,6 +11,7 @@ import {
   BrokerRefusalError,
   schemeKind,
 } from "../src/plugins/broker";
+import { EVERY_BOT_ASKS_REFUSAL } from "../src/plugins/personal-defaults";
 import type { AccountRef } from "../src/plugins/shared-accounts";
 import {
   CatalogueEntryUnknownError,
@@ -512,6 +514,26 @@ describe("granting one Bot to another", () => {
         by: ADMIN.email,
       },
     ]);
+  });
+
+  /*
+   * In the personal edition every Bot can ask every other (see `botsReachableFrom`), so removing a
+   * row would answer ok and change nothing. Refused in a sentence instead, as an app is.
+   */
+  test("but not in the personal edition, where every Bot can ask every other", async () => {
+    const { calls, app } = grantsApp();
+    setEdition("personal");
+    try {
+      const response = await app.request(
+        "http://openbot.test/api/plugins/grants?kind=bot&ref=knowledge&agentId=assistant",
+        { method: "DELETE" },
+      );
+      expect(response.status).toBe(403);
+      expect((await response.json()).error).toBe(EVERY_BOT_ASKS_REFUSAL);
+      expect(calls).toEqual([]);
+    } finally {
+      setEdition("team");
+    }
   });
 
   /*

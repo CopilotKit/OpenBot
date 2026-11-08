@@ -302,6 +302,13 @@ function mastraAgent(): RegisteredAgent {
 }
 
 /**
+ * The standing role `mastraAgent` is sent: its own, then the day the server tells every remote Bot
+ * (`todayGuidance`), in UTC when the run carries no time zone.
+ */
+const STANDING_ROLE_WITH_TODAY =
+  /^You are Risk Mastra\.\n\nToday is \w+, \d{4}-\d{2}-\d{2} \(UTC\)\. /;
+
+/**
  * Run one Bot the way the runtime does, including the clone.
  *
  * `agents[agentId].clone()` is what the runtime calls before every run, and `AbstractAgent.clone`
@@ -827,8 +834,12 @@ describe("a remote Mastra Bot", () => {
       // the forged entries naming the narrowed-away one are dropped.
       let deploymentToolsContext = deploymentToolsIn(openbotContext);
       expect(deploymentToolsContext).toEqual([]);
+      // Only the server's own role, exactly as the run's first message carries it: the Bot's, then
+      // the day it is (the run sent no time zone, so in UTC).
+      let standingRole = String(run?.messages?.[0]?.content);
+      expect(standingRole).toMatch(STANDING_ROLE_WITH_TODAY);
       expect(descriptionsIn(openbotContext, "OpenBot standing role")).toEqual([
-        "You are Risk Mastra.",
+        standingRole,
       ]);
       const holdingsContext = openbotContext.find(
         (entry) => entry.description === "OpenBot granted tools guidance",
@@ -885,8 +896,10 @@ describe("a remote Mastra Bot", () => {
       ).toEqual([]);
       deploymentToolsContext = deploymentToolsIn(openbotContext);
       expect(deploymentToolsContext).toEqual([]);
+      standingRole = String(run?.messages?.[0]?.content);
+      expect(standingRole).toMatch(STANDING_ROLE_WITH_TODAY);
       expect(descriptionsIn(openbotContext, "OpenBot standing role")).toEqual([
-        "You are Risk Mastra.",
+        standingRole,
       ]);
       expect(
         descriptionsIn(openbotContext, "OpenBot granted tools guidance"),
@@ -1247,5 +1260,162 @@ describe("the discovery record", () => {
     } finally {
       diagnostic.mockRestore();
     }
+  });
+});
+
+/**
+ * A Bot at another endpoint is sent every tool it is offered, in one request to its model, and a
+ * provider refuses a request past its count. FOUND ON WINDOWS: the starter Bot on LangGraph with an
+ * OpenAI key was sent 92 of OpenBot's tools and 43 of the browser's, and OpenAI refused all 135
+ * ("array too long ... maximum length 128"); with a 64-action app on, 202. These hold a remote run
+ * to MODEL_TOOL_LIMIT counting the browser's tools, whether or not the chooser could choose.
+ */
+describe("a remote Bot past what one request may carry", () => {
+  /** What OpenBot gives a Bot itself, sent on every step. */
+  const ownTools: GrantedTool[] = Array.from({ length: 30 }, (_, index) => ({
+    ref: `openbot/own_${index}`,
+    name: `own_tool_${index}`,
+    description: `OpenBot tool ${index}`,
+    parameters: z.object({}),
+    execute: async () => "ok",
+  }));
+  const routines: GrantedTool[] = Array.from({ length: 16 }, (_, index) => ({
+    ...grantedTool("routines", index),
+    searchable: true as const,
+  }));
+  /** A big app, every one of its actions granted, as Composio lists Exa's. */
+  const exa: GrantedTool[] = [
+    ...Array.from({ length: 63 }, (_, index) => ({
+      ...grantedTool("composio-exa", index),
+      description: `Exa action ${index} for a team's workspace settings`,
+      searchable: true as const,
+    })),
+    {
+      ref: "composio-exa/EXA_ANSWER",
+      name: "mcp__composio-exa__EXA_ANSWER",
+      description: "Answer a question about recent news with cited sources",
+      parameters: z.object({ query: z.string() }),
+      execute: async () => "ok",
+      searchable: true as const,
+    },
+  ];
+  const otherApps: GrantedTool[] = Array.from({ length: 92 }, (_, index) => ({
+    ...grantedTool("hubspot", index),
+    searchable: true as const,
+  }));
+  const big = [...ownTools, ...routines, ...exa, ...otherApps];
+  /** What the browser offers on every run: components and the computer's tools. */
+  const surface = Array.from({ length: 43 }, (_, index) => ({
+    name: `surface_tool_${index}`,
+    description: `Surface tool ${index}`,
+    parameters: { type: "object", properties: {} },
+  }));
+
+  async function askWithSurface(agent: { clone: () => unknown }, text: string) {
+    const running = (agent.clone as () => never)() as unknown as {
+      addMessage: (message: unknown) => void;
+      runAgent: (parameters: { tools: unknown[] }) => Promise<unknown>;
+    };
+    running.addMessage({ id: `m-${text.length}`, role: "user", content: text });
+    await running.runAgent({ tools: surface });
+  }
+
+  test("is sent at most the limit when the chooser cannot choose, OpenBot's own tools and the matching app tools first", async () => {
+    expect(big.length + surface.length).toBe(245);
+    const agents = await buildAgents(
+      [remoteAgent()],
+      model,
+      "test-key",
+      undefined,
+      async () => big,
+      undefined,
+      undefined,
+      undefined,
+      {
+        loadSkills: async () => skills,
+        choose: async () => {
+          throw new Error("model unreachable");
+        },
+      },
+    );
+    await askWithSurface(
+      agents.risk as never,
+      "Use Exa to answer: what is in the news about OpenBot?",
+    );
+
+    const sent = sentToRemote.at(-1)?.tools ?? [];
+    expect(sent.length).toBeLessThanOrEqual(128);
+    // The browser's tools, OpenBot's own and Routines are all there.
+    for (const tool of [...surface, ...ownTools, ...routines])
+      expect(sent).toContain(tool.name);
+    // The app tool the request names is kept; the rest of what fits follows.
+    expect(sent).toContain("mcp__composio-exa__EXA_ANSWER");
+  });
+
+  test("is held to the limit with no chooser at all", async () => {
+    const agents = await buildAgents(
+      [remoteAgent()],
+      model,
+      "test-key",
+      undefined,
+      async () => big,
+    );
+    await askWithSurface(agents.risk as never, "hello");
+    expect((sentToRemote.at(-1)?.tools ?? []).length).toBeLessThanOrEqual(128);
+  });
+
+  test("never reaches the endpoint with more than the limit, whatever added them", async () => {
+    // More than fits from the browser alone: the last check before the endpoint still holds.
+    const crowded = Array.from({ length: 140 }, (_, index) => ({
+      name: `surface_tool_${index}`,
+      description: `Surface tool ${index}`,
+      parameters: { type: "object", properties: {} },
+    }));
+    const agents = await buildAgents(
+      [remoteAgent()],
+      model,
+      "test-key",
+      undefined,
+      async () => big,
+    );
+    const running = (
+      agents.risk as never as { clone: () => never }
+    ).clone() as unknown as {
+      addMessage: (message: unknown) => void;
+      runAgent: (parameters: { tools: unknown[] }) => Promise<unknown>;
+    };
+    running.addMessage({ id: "m-crowded", role: "user", content: "hello" });
+    await running.runAgent({ tools: crowded });
+    expect((sentToRemote.at(-1)?.tools ?? []).length).toBeLessThanOrEqual(128);
+  });
+
+  test("the row says how many it was sent, and that the offer was cut", async () => {
+    const recorded: Selection<GrantedTool>[] = [];
+    const agents = await buildAgents(
+      [remoteAgent()],
+      model,
+      "test-key",
+      undefined,
+      async () => big,
+      undefined,
+      undefined,
+      undefined,
+      {
+        loadSkills: async () => skills,
+        choose: async () => {
+          throw new Error("model unreachable");
+        },
+        record: async (_botId, selection) => {
+          recorded.push(selection);
+        },
+      },
+    );
+    await askWithSurface(agents.risk as never, "hello");
+    const sent = (sentToRemote.at(-1)?.tools ?? []).filter((name) =>
+      big.some((tool) => tool.name === name),
+    );
+    expect(recorded.at(-1)?.offered.length).toBe(sent.length);
+    expect(recorded.at(-1)?.granted).toBe(big.length);
+    expect(recorded.at(-1)?.limit).toBeLessThanOrEqual(128 - surface.length);
   });
 });

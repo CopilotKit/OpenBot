@@ -15,6 +15,7 @@ import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
+import { UpdateBanner } from "@/components/layout/update-banner";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { approvalInboxOptions } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
@@ -136,6 +137,7 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
         className="openmuse-frame flex h-svh flex-col overflow-hidden bg-background text-foreground"
         data-openmuse-tab={tab ?? "none"}
       >
+        <UpdateBanner />
         <SelfHostBanner />
         <div className="mx-auto w-full max-w-[760px] shrink-0">
           <header className="relative mx-5 h-[122px] shrink-0 pt-0.5 min-[900px]:h-[146px] min-[900px]:pt-3.5">

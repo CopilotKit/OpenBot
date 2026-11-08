@@ -12,9 +12,18 @@ on:
 permissions:
   contents: read
 
-# The newest push on a branch wins; main runs are retained for badge and release history.
+# The newest push on a pull request wins. Every commit on main keeps its own run, for the badge and
+# for the release: publishing a release relies on main's CI having passed on the commit the release
+# PR merged onto (scripts/release-ci-gate.ts). In one group, a push landing while another commit's
+# run was in progress replaced the pending run of the commit before it, and that commit never got a
+# result.
+#
+# `github.workflow` keeps the release's own call of these checks out of main's group. A called
+# workflow sees its caller's context, so without it Publish release's checks shared
+# `ci-refs/heads/main` with main's push runs: they queued behind whichever was in progress (the
+# five-minute wait before the checks of v0.3.1) and cancelled the one that was pending.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
@@ -140,13 +149,19 @@ jobs:
       - run: >-
           bun test tests/sign-in.test.ts tests/session-cookies.test.ts tests/follows-popup.test.ts
           tests/webrtc-proxy.test.ts tests/web-bot-auth-browser.test.ts
-          tests/handoff-page-restore.test.ts tests/enter-text.test.ts tests/person-browser.test.ts tests/person-browser-computer.test.ts
+          tests/handoff-page-restore.test.ts tests/handback-fresh-look.test.ts tests/enter-text.test.ts tests/person-browser.test.ts tests/person-browser-computer.test.ts
           tests/bot-browser.test.ts tests/bot-browser-computer.test.ts
           tests/screencast-keys-browser.test.ts tests/screencast-pacing-browser.test.ts tests/browser-memory.test.ts
         working-directory: agent-computer
         env:
           OPENBOT_COMPUTER_BROWSER: '1'
           COMPUTER_BROWSER_MODE: headless
+      # The app's real-browser test, here because this job has the browser: a running step's words
+      # under reduced motion, which only a browser's cascade resolves. The root playwright-core is the
+      # same version as agent-computer's playwright, so it finds the Chromium installed above.
+      - run: bun test app/tests/tool-line-reduced-motion.test.tsx
+        env:
+          OPENBOT_APP_BROWSER: '1'
       # Headed is the default for hosted computers, so it is tested as one: the computer starting its
       # own Xvfb, and the signing again with cross-site frames in processes of their own.
       - run: bun test tests/headed-browser.test.ts

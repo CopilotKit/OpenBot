@@ -5,7 +5,7 @@ import {
   currentApprovalContext,
   withApprovalContext,
 } from "@openbot/toolkit/continuation";
-import type { AuditInitiator } from "../audit";
+import type { AuditEventInput, AuditInitiator } from "../audit";
 import { cutAtCodeUnits } from "../channels/text";
 
 /** `handled` answers a hand-off: the person did it themselves, so it is never executed for them. */
@@ -79,6 +79,20 @@ export type ApprovalCandidate = {
    * Not part of what the person approves, so not in the action's digest.
    */
   ownConnectionRead?: true;
+  /**
+   * The app marks this tool as destroying something: MCP's `destructiveHint`, or a broker's
+   * destructive flag, as recorded when the app was listed (`mcpTools.destructive`). It asks as
+   * deleting does, whatever the tool is called (see `safetyRequirement` in ./policy). A fact about
+   * the tool, not about this call, so not in the action's digest.
+   */
+  destructive?: true;
+  /**
+   * The row the trail records for this action if the person denies it, built by the code that would
+   * have carried it out, so a denial reads like that surface's other refusals and lands in the
+   * Blocked view. Written once, with the decision, in the transaction that saves it. Not part of what
+   * the person approves, so not in the action's digest.
+   */
+  declined?: AuditEventInput;
 };
 export type ApprovalAction = ApprovalCandidate & {
   runId: string;
@@ -204,6 +218,8 @@ export type ApprovalPolicyStore = {
     scope: string;
     outcome: ApprovalPolicyOutcome;
     initiator?: AuditInitiator;
+    /** What the action was aimed at, so the row can name the file or page it was about. */
+    target?: unknown;
   }): Promise<void>;
 };
 export type ApprovalPermit = {
@@ -265,11 +281,39 @@ export class ApprovalNeedsConversationError extends ApprovalRefusedError {
     this.name = "ApprovalNeedsConversationError";
   }
 }
+/**
+ * This same call was answered already: it was denied, it failed, or its approval was used. What it
+ * got then is what it gets now. Nothing new was turned away, so the action's code records nothing new.
+ */
+export class ApprovalAlreadyAnsweredError extends ApprovalRefusedError {
+  constructor(message: string) {
+    super(message);
+    this.name = "ApprovalAlreadyAnsweredError";
+  }
+}
 export class ApprovalNotFoundError extends Error {
   constructor() {
     super("This approval could not be found.");
     this.name = "ApprovalNotFoundError";
   }
+}
+/**
+ * The file or page an action was aimed at, for its approval rows on the trail: without it a decision
+ * names a tool and a folder, and nobody can tell which of the actions beside it it was about.
+ */
+export function targetSubject(target: unknown): {
+  file?: string;
+  page?: string;
+} {
+  if (!target || typeof target !== "object") return {};
+  const { filePath, pageUrl } = target as {
+    filePath?: unknown;
+    pageUrl?: unknown;
+  };
+  return {
+    ...(typeof filePath === "string" && filePath ? { file: filePath } : {}),
+    ...(typeof pageUrl === "string" && pageUrl ? { page: pageUrl } : {}),
+  };
 }
 export function parseApprovalResult(value: unknown): {
   content: string;

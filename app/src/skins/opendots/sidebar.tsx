@@ -23,6 +23,7 @@ import {
 import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
 import { NavigationTarget } from "@/components/edition/team-features-dialog";
+import { OpenBotVersion } from "@/components/layout/openbot-version";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -34,6 +35,7 @@ import { Input } from "@/components/ui/input";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { groupRoster } from "@/lib/agents/roster";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
+import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { untitledLine } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
@@ -565,6 +567,7 @@ function UserRow() {
   const user = useQuery(currentUserQueryOptions());
   const navigate = useNavigate();
   const signOut = useMutation(signOutMutationOptions(queryClient));
+  const signOutOffered = useSignOutOffered();
   if (!user.data) return null;
   const name = user.data.name?.trim() || user.data.email;
   const initials = initialsOf(user.data);
@@ -576,19 +579,24 @@ function UserRow() {
       >
         {initials}
       </span>
-      <span className="min-w-0 flex-1 truncate text-[12px] text-(--opendots-muted)">
-        {name}
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-[12px] text-(--opendots-muted)">
+          {name}
+        </span>
+        <OpenBotVersion className="text-[10px] leading-3 text-(--opendots-icon)" />
       </span>
-      <IconAction
-        disabled={signOut.isPending}
-        label="Sign out"
-        onClick={async () => {
-          await signOut.mutateAsync();
-          await navigate({ to: "/sign" });
-        }}
-      >
-        <IconLogout />
-      </IconAction>
+      {signOutOffered ? (
+        <IconAction
+          disabled={signOut.isPending}
+          label="Sign out"
+          onClick={async () => {
+            await signOut.mutateAsync();
+            await navigate({ to: "/sign" });
+          }}
+        >
+          <IconLogout />
+        </IconAction>
+      ) : null}
     </div>
   );
 }

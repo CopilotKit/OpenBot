@@ -10,7 +10,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  BROWSER_ABSENCES,
   type BrowserApiState,
   type BrowserOpenResponse,
   type BrowserState,
@@ -484,7 +483,11 @@ function build(
     gatewayUrl: config.runtime.intelligence.gatewayWsUrl,
   });
   const provider = withPolicyPushOnWake(
-    withPersonBrowsers(options.provider ?? ownComputers(), config.browser?.url),
+    withPersonBrowsers(
+      options.provider ?? ownComputers(),
+      config.browser?.url,
+      config.edition,
+    ),
     {
       policyForBot: async (botId) =>
         isPersonBrowserId(botId) ? personPolicy : undefined,
@@ -516,7 +519,7 @@ function build(
   const place = personBrowserPlace({
     provider,
     browserUrl: config.browser?.url,
-    ...(config.browserAbsent ? { absent: config.browserAbsent } : {}),
+    edition: config.edition,
     computers: () => gatewayBrowserComputers(gateway, config.browser?.url),
   });
   args[34] = {
@@ -674,7 +677,7 @@ describe("opening a person's own browser", () => {
     expect(asked.slice(before)).toEqual([]);
   });
 
-  test("the state says where the browser shows before it is opened: a window on the desktop on OpenBot Desktop, a screen elsewhere", async () => {
+  test("the state says where the browser shows before it is opened: a window on the desktop with a host-side computer of people's browsers, a screen elsewhere", async () => {
     // The sidebar's Browser button reads this on every load to know what one click does, so it is said with no browser
     // open, from where people's browsers run here, and asking it starts nothing.
     const started: string[] = [];
@@ -693,7 +696,7 @@ describe("opening a person's own browser", () => {
       reset: async () => ({ cleared: false }),
       list: async () => [],
     } satisfies ComputerProvider;
-    // OpenBot Desktop: people's browsers run on its host-side local Chrome computer, here one that is not answering
+    // A host-side local Chrome computer of people's browsers (scripts/start.sh), here one that is not answering
     // (Chrome closed, the computer restarting), and Bots' computers stay where they are.
     const desktop = build(
       { OPENBOT_BROWSER_URL: `http://127.0.0.1:${NOTHING_PORT}` },
@@ -744,47 +747,7 @@ describe("opening a person's own browser", () => {
     }
   });
 
-  test("on OpenBot Desktop with no Chrome or Edge it can open, the state says why in a sentence for the person", async () => {
-    // With Chrome or Edge somewhere OpenBot Desktop did not look, or installed only as a Flatpak, the reason used to be
-    // only in Desktop's log. Desktop now names it to the server, which says it to the person.
-    const flatpak = build({ OPENBOT_BROWSER_ABSENT: "flatpak-chrome" });
-    expect(
-      await (await call(flatpak, "/api/browser", { as: "ben" })).json(),
-    ).toEqual({
-      available: true,
-      shows: "screen",
-      note: BROWSER_ABSENCES["flatpak-chrome"],
-      computerId: personBrowserId(ben.id),
-      open: false,
-      tabs: [],
-    } satisfies BrowserApiState);
-    expect(BROWSER_ABSENCES["flatpak-chrome"]).toBe(
-      "OpenBot can't open the Flatpak version of Google Chrome, so install Chrome from google.com/chrome to use your own browser.",
-    );
-    // With no computers for it at all, the same sentence is why it cannot open.
-    const nothing = build(
-      { OPENBOT_BROWSER_ABSENT: "no-chrome-or-edge" },
-      { computers: false },
-    );
-    expect(
-      await (await call(nothing, "/api/browser", { as: "ben" })).json(),
-    ).toMatchObject({ available: false });
-    // A name this server does not know, and a browser that does run, explain nothing.
-    for (const environment of [
-      { OPENBOT_BROWSER_ABSENT: "a-reason-from-a-newer-desktop" },
-      {
-        OPENBOT_BROWSER_ABSENT: "no-chrome-or-edge",
-        OPENBOT_BROWSER_URL: `http://127.0.0.1:${NOTHING_PORT}`,
-      },
-    ])
-      expect(
-        await (
-          await call(build(environment), "/api/browser", { as: "ben" })
-        ).json(),
-      ).not.toHaveProperty("note");
-  });
-
-  test("OpenBot Desktop's host-side computer carries people's browsers, while Bots' computers stay where they are", async () => {
+  test("a host-side computer of people's browsers carries them, while Bots' computers stay where they are", async () => {
     const bots = {
       name: "docker",
       isolation: "per-person",
@@ -2609,12 +2572,17 @@ describe("a person's browser where every Bot shares one computer", () => {
     );
   });
 
-  test("a computer of each one's own, and OpenBot Desktop's host-side computer, still run it", () => {
+  test("a computer of each one's own, a host-side computer of people's browsers, and the personal edition's one computer, still run it", () => {
     const shared = { isolation: "shared" } as const;
     const own = { isolation: "per-person" } as const;
     expect(personBrowserRefusal(shared, undefined)).toBe(SHARED_COMPUTER);
     expect(personBrowserRefusal(own, undefined)).toBeNull();
     expect(personBrowserRefusal(shared, "http://127.0.0.1:4101")).toBeNull();
+    // The personal edition's one computer, whose every Bot is the one person's, runs it too; a team's never does.
+    expect(personBrowserRefusal(shared, undefined, "personal")).toBeNull();
+    expect(personBrowserRefusal(shared, undefined, "team")).toBe(
+      SHARED_COMPUTER,
+    );
   });
 });
 
@@ -2766,23 +2734,75 @@ describe("where the browser reaches this OpenBot", () => {
 });
 
 describe("a single-user OpenBot, where the person is its admin", () => {
+  /** One person and no sign-in, and no address anybody else reaches. */
+  const SINGLE_USER = {
+    OPENBOT_SINGLE_USER: "true",
+    OPENBOT_PUBLIC_URL: undefined,
+    BETTER_AUTH_URL: undefined,
+    BETTER_AUTH_SECRET: undefined,
+    GOOGLE_OAUTH_CLIENT_ID: undefined,
+    GOOGLE_OAUTH_CLIENT_SECRET: undefined,
+    INITIAL_ADMIN_EMAILS: undefined,
+  };
   /**
-   * OpenBot Desktop's server: one person and no sign-in, no address anybody else reaches, and people's browsers on the
-   * host-side computer (here the stand-in), so they show as windows on the person's desktop.
+   * A single-user server with people's browsers on a host-side computer (here the stand-in), as `scripts/start.sh` runs
+   * the personal edition, so they show as windows on the person's desktop.
    */
   const desktop = () =>
     build({
-      OPENBOT_SINGLE_USER: "true",
-      OPENBOT_PUBLIC_URL: undefined,
-      BETTER_AUTH_URL: undefined,
-      BETTER_AUTH_SECRET: undefined,
-      GOOGLE_OAUTH_CLIENT_ID: undefined,
-      GOOGLE_OAUTH_CLIENT_SECRET: undefined,
-      INITIAL_ADMIN_EMAILS: undefined,
+      ...SINGLE_USER,
       OPENBOT_BROWSER_URL: `http://127.0.0.1:${COMPUTER_PORT}`,
     });
   /** The address OpenBot Desktop's window uses, which the Recorder is handed. */
   const WINDOW = { origin: "http://127.0.0.1:3010" };
+
+  test("OpenBot Desktop's personal edition shows the person's browser in the page, on its one computer", async () => {
+    // David, 2026-11-06: Teach a Bot on OpenBot Desktop opened a separate Chrome window, because Desktop pointed the
+    // server at a host-side Chrome (OPENBOT_BROWSER_URL). Desktop now runs the personal edition's one computer and no
+    // host-side browser, and the person's browser runs on that computer and shows in the page, as a hosted one does.
+    const personal = build(
+      { ...SINGLE_USER, OPENBOT_EDITION: "personal" },
+      {
+        provider: createSharedComputerProvider({
+          baseUrl: `http://127.0.0.1:${COMPUTER_PORT}`,
+          token: COMPUTER_TOKEN,
+        }),
+      },
+    );
+    expect(personal.config.edition).toBe("personal");
+    expect(personal.config.browser).toBeUndefined();
+    const computerId = personBrowserId(DEV_ACTOR.id);
+    expect(
+      await (await call(personal, "/api/browser", { headers: WINDOW })).json(),
+    ).toEqual({
+      available: true,
+      shows: "screen",
+      computerId,
+      open: false,
+      tabs: [],
+    } satisfies BrowserApiState);
+    const opening = await call(personal, "/api/browser/open", {
+      method: "POST",
+      headers: WINDOW,
+    });
+    expect(opening.status).toBe(200);
+    expect(await opening.json()).toMatchObject({
+      computerId,
+      window: "screen",
+    });
+    // On the one computer, reached through the gateway like a Bot's, and handed the window's own address.
+    expect(await personal.gateway.locate(botSeat(computerId))).toMatch(
+      `http://127.0.0.1:${COMPUTER_PORT}`,
+    );
+    const handed = browsers.get(computerId)?.connection as
+      | { openbotUrl: string }
+      | undefined;
+    expect(handed?.openbotUrl).toBe(WINDOW.origin);
+    await call(personal, "/api/browser/close", {
+      method: "POST",
+      headers: WINDOW,
+    });
+  });
 
   beforeAll(async () => {
     await initializeDevActorUser(database, true);

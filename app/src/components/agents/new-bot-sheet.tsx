@@ -1,4 +1,8 @@
-import { summaryFor, WEB_HARNESSES } from "@openbot/shared/harnesses";
+import {
+  OPENBOT_HARNESS_NAME,
+  summaryFor,
+  WEB_HARNESSES,
+} from "@openbot/shared/harnesses";
 import {
   IconCheck,
   IconInfoCircle,
@@ -124,10 +128,24 @@ type Runtime = { kind: "builtin" } | { kind: "managed"; harness: string };
 function frameworkName(runtime: Runtime): string {
   if (runtime.kind === "builtin") return "Assistant";
   if (runtime.harness === "byo-url") return "AG-UI agent";
-  return (
-    WEB_HARNESSES.find((harness) => harness.id === runtime.harness)?.name ??
-    "AG-UI agent"
+  const harness = WEB_HARNESSES.find(
+    (harness) => harness.id === runtime.harness,
   );
+  return harness ? harness.name : "AG-UI agent";
+}
+
+/**
+ * The subtitle under a new Bot's name: what runs it. OpenBot itself for a Bot that runs here, the
+ * framework for one picked from the list. Nothing for an agent somebody already runs, since OpenBot
+ * cannot know what is behind its address.
+ */
+function poweredBy(runtime: Runtime): string {
+  if (runtime.kind === "builtin") return `Powered by ${OPENBOT_HARNESS_NAME}`;
+  if (runtime.harness === "byo-url") return "";
+  const framework = WEB_HARNESSES.find(
+    (harness) => harness.id === runtime.harness,
+  );
+  return framework ? `Powered by ${framework.name}` : "";
 }
 
 /**
@@ -252,10 +270,10 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 
   const create = async (chosen: Runtime) => {
     const managed = chosen.kind === "managed";
-    const agent = await createAgent.mutateAsync(
-      agentInputFrom({
+    const agent = await createAgent.mutateAsync({
+      ...agentInputFrom({
         name: name.trim(),
-        title: "",
+        title: poweredBy(chosen),
         roleDescription:
           instructions.trim() || defaultInstructions(name.trim(), chosen),
         visibility: personal ? "private" : visibility,
@@ -266,7 +284,12 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         isolated:
           !personal && isolated && isolationAvailable && isolationAllowed,
       }),
-    );
+      // The framework picked from the list, so the Bot is told what runs it. None for an agent
+      // somebody already runs, since nobody said what is behind its address.
+      ...(managed && chosen.harness !== "byo-url"
+        ? { harness: chosen.harness }
+        : {}),
+    });
     /*
      * The ticked apps, given once the Bot exists. A refusal is not a failed create: the Bot is made,
      * and its page lists every app it could be given with a switch each. So each is tried, none

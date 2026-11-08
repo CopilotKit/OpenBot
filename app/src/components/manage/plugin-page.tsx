@@ -6,7 +6,7 @@ import {
   IconTool,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
 import { useState } from "react";
 import {
@@ -50,7 +50,7 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { storeMcpToken } from "@/lib/credentials/mutations";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { useManagePaths } from "@/lib/manage-paths";
+import { atStart, useManagePaths } from "@/lib/manage-paths";
 import {
   addCuratedServerMutationOptions,
   connectAccountMutationOptions,
@@ -188,13 +188,14 @@ export function connectionKindFor(
  * not left to notice their absence.
  */
 function ConnectionStateUnreadable() {
+  const paths = useManagePaths();
   return (
     <Item size="sm">
       <ItemContent>
         <ItemTitle>Your account</ItemTitle>
         <ItemDescription role="alert">
           Couldn't load whether you've connected an account here. Reload the
-          page, or check this deployment's logs if it keeps happening.
+          page, or check {paths.deploymentName}'s logs if it keeps happening.
         </ItemDescription>
       </ItemContent>
     </Item>
@@ -303,9 +304,27 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
     ...setOwnerGrantsMutationOptions(queryClient),
     ...report,
   });
+  const navigate = useNavigate();
   const remove = useMutation({
     ...removePluginServerMutationOptions(queryClient),
     ...report,
+    /*
+     * BACK TO THE LIST FOR AN APP THIS PAGE CAN'T TURN BACK ON, the way Connections itself treats
+     * one. A catalogue app is listed there on or off, and its page, off, offers Connect. An app
+     * added from a broker's directory, or by its address, is listed only while it is on, and is
+     * added from the directory, which says what adding it means first. With its row gone this page
+     * had nothing left to draw and said "Not an app" about the app just turned off.
+     *
+     * Asked of the catalogue as it stood when the switch was pressed. Awaited, because the
+     * mutation runs its own `onSettled` refetch only after this returns: started any sooner, the
+     * refetch landed before the navigation and the page drew "Not an app" on its way out.
+     */
+    onSuccess: async (_data, serverId) => {
+      const listed = queryClient
+        .getQueryData(pluginsPageQueryOptions().queryKey)
+        ?.catalogue.some((item) => item.key === serverId);
+      if (!listed) await navigate(paths.plugins());
+    },
   });
   const connectSelf = useMutation({
     // Back to this page afterwards, not to the personal settings screen.
@@ -780,15 +799,15 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
         <PageSection
           description={
             auth === "user-oauth"
-              ? "This vendor answers as whoever is asking. The deployment registers an OAuth client, and each person connects their own account. A Bot only sees what that person can see."
+              ? `This vendor answers as whoever is asking. ${personal ? "OpenBot" : "The deployment"} registers an OAuth client, and each person connects their own account. A Bot only sees what that person can see.`
               : auth === "builtin"
-                ? "Built into this deployment. There is no vendor to reach and no credential to keep. A call runs as whoever asked."
+                ? `Built into ${paths.deploymentName}. There is no vendor to reach and no credential to keep. A call runs as whoever asked.`
                 : auth === "brokered"
                   ? /* The row below says how, at length. This says whose account it is, which is the part that decides what an admin has to do here — which is nothing. */
                     brokeredConnectionDescription(provider)
                   : auth === "person-entra"
                     ? "This server answers as whoever is asking. Each call carries a token Microsoft Entra issues for that person, so a Bot only sees what they can see."
-                    : "What this deployment sends to the vendor. One credential for everybody."
+                    : `What ${paths.deploymentName} sends to the vendor. One credential for everybody.`
           }
           title="Connection"
         >
@@ -825,8 +844,8 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                 <ItemContent>
                   <ItemTitle>Connection</ItemTitle>
                   <ItemDescription>
-                    Nothing to set up. These tools run inside this deployment,
-                    on its own data.
+                    Nothing to set up. These tools run inside{" "}
+                    {paths.deploymentName}, on its own data.
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
@@ -847,12 +866,12 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                 <ItemContent>
                   <ItemTitle>How this is reached</ItemTitle>
                   <ItemDescription>
-                    {brokeredReach(provider).description}
+                    {brokeredReach(provider, paths.deploymentName).description}
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
                   <span className="text-muted-foreground text-xs">
-                    {brokeredReach(provider).badge}
+                    {brokeredReach(provider, paths.deploymentName).badge}
                   </span>
                 </ItemActions>
               </Item>
@@ -916,8 +935,8 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                 <ItemContent>
                   <ItemTitle>OAuth client</ItemTitle>
                   <ItemDescription>
-                    This deployment registers itself with the vendor on first
-                    connect. There is nothing to paste.
+                    {atStart(paths.deploymentName)} registers itself with the
+                    vendor on first connect. There is nothing to paste.
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
@@ -938,8 +957,8 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                 <ItemContent>
                   <ItemTitle>OAuth client</ItemTitle>
                   <ItemDescription>
-                    Identifies this deployment to the vendor. On its own, it
-                    can't reach anyone's documents.
+                    Identifies {paths.deploymentName} to the vendor. On its own,
+                    it can't reach anyone's documents.
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
@@ -1002,6 +1021,7 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                 ) : shared ? (
                   <BrokeredAccountRow
                     account={brokeredAccount}
+                    deployment={paths.deploymentName}
                     connectedDescription={`Connected${sharedConnection?.displayName ? ` as ${sharedConnection.displayName}` : ""}${sharedConnection?.connectedBy ? ` by ${sharedConnection.connectedBy}` : ""}. Every Bot with these tools acts as this account.`}
                     disconnectedDescription="No team account is connected. Bots with these tools are refused."
                     heading="Team account"
@@ -1012,6 +1032,7 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                 ) : (
                   <BrokeredAccountRow
                     account={brokeredAccount}
+                    deployment={paths.deploymentName}
                     /* Said beside the button rather than after it: disconnecting ends the account
                        at Composio, so what it undoes is not the row here but the grant on this
                        person's mailbox, and connecting again is a fresh consent. */
@@ -1146,8 +1167,8 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
             <div className="mt-3 p-3">
               {server?.dynamicClient ? (
                 <p className="text-muted-foreground text-sm">
-                  The deployment registers its redirect URI itself. There is
-                  nothing to add at the vendor.
+                  {personal ? "OpenBot" : "The deployment"} registers its
+                  redirect URI itself. There is nothing to add at the vendor.
                 </p>
               ) : (
                 <p className="text-muted-foreground text-sm">
@@ -1158,8 +1179,8 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
               )}
               {!plugins.data?.redirectUri ? (
                 <p className="mt-3 text-destructive text-sm" role="alert">
-                  This deployment has no public URL, so nobody can finish
-                  connecting. Set OPENBOT_PUBLIC_URL.
+                  {atStart(paths.deploymentName)} has no public URL, so nobody
+                  can finish connecting. Set OPENBOT_PUBLIC_URL.
                 </p>
               ) : server?.dynamicClient ? null : (
                 /* Selectable and monospaced: it is copied by hand into somebody else's console. */
@@ -1393,10 +1414,10 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
             </DialogTitle>
             <DialogDescription>
               {dialog === "client"
-                ? "From the vendor's console. The secret is saved in this deployment's vault and never shown again."
+                ? `From the vendor's console. The secret is saved in ${paths.deploymentName}'s vault and never shown again.`
                 : dialog === "instance"
                   ? "Your own hostname with this vendor. It is checked against the vendor's pattern before it is saved."
-                  : "Saved in this deployment's vault and never shown again."}
+                  : `Saved in ${paths.deploymentName}'s vault and never shown again.`}
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">
@@ -1493,8 +1514,9 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
             <DialogHeader>
               <DialogTitle>Grant tools</DialogTitle>
               <DialogDescription>
-                Each grant is its own row in Audit. Tools that change things are
-                still checked against the boundaries on every call.
+                Each grant is its own row in {paths.auditLabel}. Tools that
+                change things are still checked against the boundaries on every
+                call.
               </DialogDescription>
             </DialogHeader>
             <DialogBody className="mt-4 space-y-5">

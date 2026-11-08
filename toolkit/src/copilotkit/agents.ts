@@ -529,7 +529,8 @@ export class UnavailableAgent extends AbstractAgent {
  * public URL to write before it: the page resolves a path against itself. The runtime also hands the
  * same address to the Recorder in its capture pass, which is not on the page and which the runtime
  * refuses a path for, so a path is made whole on `ownOrigin`, the server's own origin as that caller
- * reached it, whenever the server has one it may name.
+ * reached it, whenever the server has one it may name. Either way a `localhost` address is handed out as
+ * 127.0.0.1, the only loopback the Recorder opens a ws:// gateway at.
  */
 export class IntelligenceKnowingANewThread extends CopilotKitIntelligence {
   readonly #browserClientWsUrl: string | undefined;
@@ -555,9 +556,11 @@ export class IntelligenceKnowingANewThread extends CopilotKitIntelligence {
 
   override ɵgetClientWsUrl(): string {
     const address = this.#browserClientWsUrl ?? super.ɵgetClientWsUrl();
-    if (!address.startsWith("/")) return address;
+    if (!address.startsWith("/")) return atLoopbackAddress(address);
     const origin = this.#ownOrigin?.();
-    return origin ? `${origin.replace(/^http/, "ws")}${address}` : address;
+    return origin
+      ? atLoopbackAddress(`${origin.replace(/^http/, "ws")}${address}`)
+      : address;
   }
 
   /** A thread, or the client's 404 for one nobody has run yet, unprinted. */
@@ -683,6 +686,26 @@ export class IntelligenceKnowingANewThread extends CopilotKitIntelligence {
 const LOCK_CONFLICT_WAIT_MS = 5_000;
 const LOCK_CONFLICT_RETRY_FIRST_MS = 100;
 const LOCK_CONFLICT_RETRY_MAX_MS = 1_000;
+
+/**
+ * A gateway address on `localhost` as 127.0.0.1, and any other as it is.
+ *
+ * The Recorder opens a plain ws:// gateway only at 127.0.0.1 or [::1], never at the name (Decision 21,
+ * `isAllowedGatewayUrl` in shared/recorder-api.ts), and refused OpenBot Desktop's `ws://localhost:<port>` after
+ * Intelligence had already minted the recording's join token. A local gateway answers on 127.0.0.1 wherever it answers
+ * on localhost (Docker publishes its ports there), and the page opens it there as well as it did at the name.
+ */
+function atLoopbackAddress(wsUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(wsUrl);
+  } catch {
+    return wsUrl;
+  }
+  if (url.hostname !== "localhost") return wsUrl;
+  url.hostname = "127.0.0.1";
+  return url.toString();
+}
 
 /**
  * The gateway's client socket, from any of the three addresses the platform names it by.

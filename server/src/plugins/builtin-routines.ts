@@ -1,4 +1,11 @@
+import { runTimeZone } from "@openbot/shared/person-time-zone";
+import { currentApprovalContext } from "@openbot/toolkit/continuation";
 import { cutAtCodeUnits } from "../channels/text";
+import {
+  callGoalTool,
+  GOAL_TOOLS,
+  isGoalTool,
+} from "../responsibilities/chat-tools";
 import {
   callTriggerTool,
   isTriggerTool,
@@ -97,14 +104,26 @@ const TOOLS: readonly McpTool[] = Object.freeze([
       "anything more frequent is refused.",
       "",
       "Pass the person's IANA timezone (`America/New_York`, `Europe/Madrid`) whenever they speak in local",
-      "time — the default is UTC and there is no deployment timezone to inherit, so a schedule set without",
-      "one fires at a UTC hour rather than at theirs.",
+      "time, and `UTC` when they mean UTC. Left out, it is the person's own time zone when their browser",
+      "said it for this conversation and UTC otherwise, so a schedule set without one may fire at a UTC hour",
+      "rather than at theirs.",
       "",
       "The routine posts its reply into a conversation. Leave `channelId` out and it posts into this",
       "conversation, the one you are being asked in. Pass a `channelId` only when the person asks for a",
       "different conversation. Where there is no conversation here and you share more than one with this",
       "person, you are given them by title and id: ask the person which one, offering each by its title,",
       "and pass the id they choose.",
+      "",
+      'When the person gives the routine a name ("call it Morning briefing", "a daily routine called Inbox',
+      'sweep"), pass that name as `title`, in their words. The Routines page and your own page in OpenBot',
+      "show the routine by it. Pass a title only when the person named the routine, and never make one up.",
+      "Without one, a routine that runs one of your goals carries that goal's title, and any other is",
+      "named by its instruction.",
+      "",
+      "To run one of your goals on a schedule, pass the goal's id, from `create_goal` or `list_goals`, as",
+      '`goalId`, and write the `instruction` as running it (`Run the goal "Track OpenBot releases"`). The',
+      "routine is then the goal's: the goal repeats, so none of its runs completes it, and the Bot's page lists",
+      "the two together. Leave `title` out unless the person named the routine.",
       "",
       "It takes no owner and no Bot. The routine belongs to the person you are talking to and runs as you;",
       "both are taken from the run itself, and there is no field for either.",
@@ -117,6 +136,16 @@ const TOOLS: readonly McpTool[] = Object.freeze([
           description:
             'The work of one firing, imperative, with no schedule restated in it: `Append the current UTC time to the page "Log"`.',
         },
+        title: {
+          type: "string",
+          description:
+            "The name the person gave the routine, in their words, such as `Morning briefing`. At most 100 characters. Omit it unless they named it; never make one up. Omitted, a routine that runs one of your goals carries the goal's title.",
+        },
+        goalId: {
+          type: "string",
+          description:
+            "The id of the goal this routine runs, from `create_goal` or `list_goals`. Pass it whenever the routine is there to run one of your goals.",
+        },
         cron: {
           type: "string",
           description:
@@ -125,7 +154,7 @@ const TOOLS: readonly McpTool[] = Object.freeze([
         timezone: {
           type: "string",
           description:
-            "The person's IANA timezone, such as `Europe/Madrid`. Omit only when they meant UTC; the default is UTC.",
+            "The person's IANA timezone, such as `Europe/Madrid`, or `UTC`. Omitted: the person's own time zone when known, UTC otherwise.",
         },
         channelId: {
           type: "string",
@@ -139,18 +168,20 @@ const TOOLS: readonly McpTool[] = Object.freeze([
   {
     name: "list_routines",
     description: [
-      "List the standing instructions this person has: each one's id, its schedule in words, its timezone,",
-      "the channel it posts into, when it next runs and how the last run went.",
+      "List the standing instructions this person has: each one's title when it has one, its schedule in",
+      "words, its timezone, the channel it posts into, when it next runs, how the last run went, and its id.",
       "",
-      "Take the id from here before changing or deleting one. It lists only this person's own routines.",
+      "Take the id from here before changing or deleting one. The id is for your routine tools only: never",
+      "show it to the person, who knows a routine by its title or its instruction. It lists only this",
+      "person's own routines.",
     ].join("\n"),
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "update_routine",
     description: [
-      "Change one of this person's routines: its instruction, its schedule, its timezone, the channel it",
-      "posts into, or whether it is switched on.",
+      "Change one of this person's routines: its title, its instruction, its schedule, its timezone, the",
+      "channel it posts into, or whether it is switched on.",
       "",
       "Give the id from `list_routines` and only the fields that change; anything left out stays as it is. A",
       "new `cron` follows exactly the same five-field rules as `create_routine`, and a routine switched back",
@@ -167,6 +198,11 @@ const TOOLS: readonly McpTool[] = Object.freeze([
           type: "string",
           description: "The routine's id, from `list_routines`.",
         },
+        title: {
+          type: "string",
+          description:
+            "A new name for the routine, in the person's words, such as `Morning briefing`. At most 100 characters.",
+        },
         instruction: {
           type: "string",
           description:
@@ -180,6 +216,11 @@ const TOOLS: readonly McpTool[] = Object.freeze([
         timezone: {
           type: "string",
           description: "A new IANA timezone, such as `America/New_York`.",
+        },
+        goalId: {
+          type: "string",
+          description:
+            "The id of the goal this routine runs from now on, from `list_goals`.",
         },
         channelId: {
           type: "string",
@@ -242,11 +283,16 @@ type Connection = {
  * belongs to the actor is {@link callTool}'s, where the actor is what authorizes the change.
  */
 export async function listTools(): Promise<McpTool[]> {
-  // The trigger tools ride this transport so the same catalogue grant governs them.
-  return [...TOOLS, ...TRIGGER_TOOLS].map((tool) => ({ ...tool }));
+  // The trigger and goal tools ride this transport so the same catalogue grant governs them.
+  return [...TOOLS, ...TRIGGER_TOOLS, ...GOAL_TOOLS].map((tool) => ({
+    ...tool,
+  }));
 }
 
 export const listNeedsCredential = false;
+
+/** This list is this file, so every start brings the saved copy up to date with it. */
+export const listIsThisCode = true;
 
 const failure = (message: string): McpCallResult => ({
   text: message,
@@ -298,6 +344,86 @@ function lastRunOf(summary: RoutineSummary): string {
   return `last ran ${run.finishedAt.toISOString()}${run.status ? ` (${run.status})` : ""}`;
 }
 
+/** The moment a result is written, and the person's own time zone when the run asking says it. */
+type Clock = { now: Date; timeZone: string | undefined };
+
+/** Now, and the time zone the person's browser said for the run making this call (`person-time-zone.ts`). */
+function clockOfRun(): Clock {
+  return {
+    now: new Date(),
+    timeZone: runTimeZone(currentApprovalContext()?.forwardedProps),
+  };
+}
+
+/**
+ * `at` on the person's clock: "Saturday, November 7, 2026 at 9:00 AM UTC", or "... at 9:00 AM PST
+ * (America/Los_Angeles)" for a zone whose short name is not its name, which is every zone but UTC.
+ *
+ * Built from parts, because the engine's own formatting joins the time and "AM" with a narrow
+ * no-break space on newer ICU versions, and the wording would then change under the model with the
+ * runtime. The ISO instant when Intl cannot say.
+ */
+function onClock(at: Date, timeZone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZoneName: "short",
+    }).formatToParts(at);
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((entry) => entry.type === type)?.value ?? "";
+    const zone = part("timeZoneName");
+    return `${part("weekday")}, ${part("month")} ${part("day")}, ${part("year")} at ${part("hour")}:${part("minute")} ${part("dayPeriod")} ${zone === timeZone ? zone : `${zone} (${timeZone})`}`;
+  } catch {
+    return at.toISOString();
+  }
+}
+
+const plural = (count: number, unit: string) =>
+  `${count} ${unit}${count === 1 ? "" : "s"}`;
+
+/** How far `at` is from `now`, in the two largest units: "6 minutes", "1 hour and 6 minutes". */
+function fromNow(at: Date, now: Date): string {
+  const minutes = Math.round((at.getTime() - now.getTime()) / 60_000);
+  if (minutes <= 0) return "due now";
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const rest = minutes % 60;
+  const [larger, smaller] =
+    days > 0
+      ? [plural(days, "day"), hours > 0 ? plural(hours, "hour") : null]
+      : hours > 0
+        ? [plural(hours, "hour"), rest > 0 ? plural(rest, "minute") : null]
+        : [plural(rest, "minute"), null];
+  return `${smaller ? `${larger} and ${smaller}` : larger} from now`;
+}
+
+/**
+ * When it next fires, on the person's clock, and how long that is from now.
+ *
+ * A Bot is told only today's date (`todayGuidance`), never the time. Given "next
+ * 2026-11-07T09:00:00.000Z" at 08:54 UTC, a Bot told the person the first run was tomorrow, "since
+ * it's already past that time", six minutes before it ran. So the answer says the time in the
+ * person's own zone (the routine's when the run does not carry one) and how far away it is, and
+ * leaves the Bot nothing to work out.
+ */
+function nextRunOf(summary: RoutineSummary, clock: Clock): string {
+  const at = summary.nextRunAt;
+  return `next run ${onClock(at, clock.timeZone ?? summary.timezone)}, ${fromNow(at, clock.now)}`;
+}
+
+/**
+ * How a result labels a routine's id: for the tools that take it, and never for the person, who
+ * knows a routine by its title or its instruction.
+ */
+const ID_LABEL = "id for your routine tools only, never shown to the person";
+
 /**
  * One routine in words.
  *
@@ -307,22 +433,24 @@ function lastRunOf(summary: RoutineSummary): string {
  * answering in words is that the model confirms a schedule in language a person can check, rather
  * than reading five fields back to somebody who did not write them.
  */
-function inWords(summary: RoutineSummary): string {
+function inWords(summary: RoutineSummary, clock: Clock): string {
   const parts = [
     `${summary.schedule} (${summary.timezone})`,
     `in ${channelOf(summary)}`,
     // The store does not recompute `nextRunAt` on disable, so a switched-off routine's stored
     // value is a stale firing time, not a fact — stating it as "next" would let a model repeat a
     // time that will never come until somebody switches it back on.
-    summary.enabled
-      ? `next ${summary.nextRunAt.toISOString()}`
-      : "next when switched back on",
+    summary.enabled ? nextRunOf(summary, clock) : "next when switched back on",
     lastRunOf(summary),
-    // The model needs this to change or delete the routine later, and it cannot derive it.
-    `id: ${summary.id}`,
+    // The model needs this to change or delete the routine later, and it cannot derive it. A Bot
+    // given a bare "id: routine_…" read it out to the person, so the label says who it is for.
+    `${ID_LABEL}: ${summary.id}`,
   ];
   if (!summary.enabled) parts.push("switched off");
-  return `"${summary.instruction}" — ${parts.join(" · ")}`;
+  const named = summary.title
+    ? `"${summary.title}", instruction "${summary.instruction}"`
+    : `"${summary.instruction}"`;
+  return `${named} — ${parts.join(" · ")}`;
 }
 
 /**
@@ -357,8 +485,8 @@ async function describeWritten(
   }
   return asResult(
     summary
-      ? `${opening} ${inWords(summary)}`
-      : `${fallbackOpening} Its id is ${routine.id}.`,
+      ? `${opening} ${inWords(summary, clockOfRun())}`
+      : `${fallbackOpening} Its id, for your routine tools only and never shown to the person, is ${routine.id}.`,
   );
 }
 
@@ -403,8 +531,36 @@ export async function callTool(
         return failure(error.message);
       if (error instanceof ResponsibilityNotFoundError)
         return failure(
-          "There is no trigger or responsibility of yours with that id for me.",
+          "There is no trigger or goal of yours with that id for me.",
         );
+      const message = error instanceof Error ? error.message : String(error);
+      return failure(Array.from(message).slice(0, MAX_RUN_ERROR).join(""));
+    }
+  }
+  if (isGoalTool(toolName)) {
+    try {
+      const answer = await callGoalTool(
+        {
+          ownerUserId,
+          agentId,
+          threadId: connection.threadId?.trim() || undefined,
+        },
+        toolName,
+        args,
+      );
+      return answer.startsWith("Refused.")
+        ? failure(answer.slice("Refused.".length).trim())
+        : asResult(answer);
+    } catch (error) {
+      // The conversation a new goal reports into is chosen by the routine store's rule, and so is
+      // its refusal: which conversations there are to choose from.
+      if (
+        error instanceof RoutineRefusedError ||
+        error instanceof ResponsibilityRefusedError
+      )
+        return failure(error.message);
+      if (error instanceof ResponsibilityNotFoundError)
+        return failure("There is no goal of yours with that id for me.");
       const message = error instanceof Error ? error.message : String(error);
       return failure(Array.from(message).slice(0, MAX_RUN_ERROR).join(""));
     }
@@ -430,10 +586,18 @@ export async function callTool(
         ownerUserId,
         agentId,
         instruction,
+        title: stringArg(args, "title"),
+        goalId: stringArg(args, "goalId")?.trim(),
         cron,
-        // Absent means absent. The store owns the UTC default, so guessing a zone here would put a
-        // zone nobody chose on a routine that then fires at the wrong hour for ever.
-        timezone: stringArg(args, "timezone"),
+        /*
+         * The Bot's zone, else the person's own: the one their browser said for the run making this
+         * call (`person-time-zone.ts`), which a run's tool calls carry in their continuation. With
+         * neither, absent means absent: the store owns the UTC default, and guessing a zone here
+         * would put a zone nobody chose on a routine that then fires at the wrong hour for ever.
+         */
+        timezone:
+          stringArg(args, "timezone") ??
+          runTimeZone(currentApprovalContext()?.forwardedProps),
         channelId: stringArg(args, "channelId"),
         // From the run, like the owner and the Bot: the conversation it was asked in.
         threadId: connection.threadId?.trim() || undefined,
@@ -454,7 +618,10 @@ export async function callTool(
         // tool had nothing to say" and gets filled in from memory.
         return asResult("You have no routines set up.");
       }
-      return asResult(summaries.map((one) => `- ${inWords(one)}`).join("\n"));
+      const clock = clockOfRun();
+      return asResult(
+        summaries.map((one) => `- ${inWords(one, clock)}`).join("\n"),
+      );
     }
 
     if (toolName === "update_routine") {
@@ -465,6 +632,8 @@ export async function callTool(
         );
       }
       const patch: RoutinePatch = {};
+      const title = stringArg(args, "title");
+      if (title !== undefined) patch.title = title;
       const instruction = stringArg(args, "instruction");
       if (instruction !== undefined) patch.instruction = instruction;
       const cron = stringArg(args, "cron");
@@ -473,6 +642,8 @@ export async function callTool(
       if (timezone !== undefined) patch.timezone = timezone;
       const channelId = stringArg(args, "channelId");
       if (channelId !== undefined) patch.channelId = channelId;
+      const goalId = stringArg(args, "goalId")?.trim();
+      if (goalId !== undefined) patch.goalId = goalId;
       if (typeof args.enabled === "boolean") patch.enabled = args.enabled;
 
       // An empty patch is not a change, and sending it would answer "changed" having changed

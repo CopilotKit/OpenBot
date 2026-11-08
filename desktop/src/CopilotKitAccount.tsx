@@ -5,6 +5,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { CopilotKitLogo } from "./CopilotKitLogo";
+import { CopilotKitSignInWait } from "./CopilotKitSignInWait";
 import { ExternalLink } from "./ExternalLink";
 import {
   cancelLocalEval,
@@ -20,13 +22,21 @@ import { StatusLine } from "./SetupProgress";
 type Seen =
   | { at: "checking" }
   | { at: "signed-out" }
-  | { at: "signing-in" }
+  | { at: "signing-in"; attempt: string }
   | { at: "agreement"; terms: Extract<LocalTerms, { status: "required" }> }
   | { at: "apps"; version: string | null }
   | { at: "apps-failed"; version: string | null; problem: Problem }
   | { at: "failed"; said: string };
 
 const COULD_NOT_CHECK = "Couldn’t check your CopilotKit account. Try again.";
+
+/**
+ * How long the account check waits for a container engine, and how often it asks again. A new
+ * Windows computer installs Podman and its machine while the person signs in, a few minutes at
+ * most; an engine that never comes is Install's failure to show, not this step's.
+ */
+const ENGINE_WAIT_MS = 2000;
+const ENGINE_WAIT_LIMIT_MS = 15 * 60 * 1000;
 
 /**
  * The CopilotKit account step of a local first run: sign in, then read and accept the evaluation
@@ -93,6 +103,9 @@ export function CopilotKitAccount({
     [finish],
   );
 
+  /** When the account check first found no engine answering, while it waits for one. */
+  const waitingSince = useRef<number | null>(null);
+  const askAgain = useRef<ReturnType<typeof setTimeout> | null>(null);
   const check = useCallback(() => {
     setSeen({ at: "checking" });
     const started = localEvalTerms();
@@ -101,6 +114,19 @@ export function CopilotKitAccount({
       (terms) => {
         if (attempt.current !== started.attempt) return;
         attempt.current = null;
+        if (terms.status === "engine-not-ready") {
+          // Install is still bringing the engine up: keep checking rather than fail.
+          const since = waitingSince.current ?? Date.now();
+          waitingSince.current = since;
+          if (Date.now() - since < ENGINE_WAIT_LIMIT_MS) {
+            askAgain.current = setTimeout(
+              () => checkAgain.current(),
+              ENGINE_WAIT_MS,
+            );
+            return;
+          }
+        }
+        waitingSince.current = null;
         if (terms.status === "signed-out") setSeen({ at: "signed-out" });
         else if (terms.status === "required" && !terms.accepted)
           setSeen({ at: "agreement", terms });
@@ -122,21 +148,24 @@ export function CopilotKitAccount({
       },
     );
   }, [connectApps]);
+  const checkAgain = useRef(check);
+  checkAgain.current = check;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: once, on arrival.
   useEffect(() => {
     check();
     return () => {
       // Leaving stops whatever is still waiting, the browser sign-in included.
+      if (askAgain.current) clearTimeout(askAgain.current);
       if (attempt.current) cancelLocalEval(attempt.current).catch(() => {});
       attempt.current = null;
     };
   }, []);
 
   async function signIn() {
-    setSeen({ at: "signing-in" });
     const started = signInToCopilotKit();
     attempt.current = started.attempt;
+    setSeen({ at: "signing-in", attempt: started.attempt });
     try {
       const signedIn = await started.signedIn;
       if (attempt.current !== started.attempt) return;
@@ -150,14 +179,23 @@ export function CopilotKitAccount({
     }
   }
 
+  /** Stop the CLI's sign-in and go back to the start of this step. */
+  function cancelSignIn() {
+    const running = attempt.current;
+    attempt.current = null;
+    if (running) cancelLocalEval(running).catch(() => {});
+    setSeen({ at: "signed-out" });
+  }
+
   const agreement = seen.at === "agreement" ? seen.terms : null;
   // Signed in already: what is left to say is about the apps.
   const appsFailed = seen.at === "apps-failed";
   return (
     <div className="sheet">
       {/* OpenBot is what is being set up, so its mark heads this step as it heads every other.
-          CopilotKit is named where that is true: the account and the agreement's own title. */}
+          The account is CopilotKit's, so its logotype leads the step itself. */}
       <Sections at="Account" />
+      <CopilotKitLogo />
       <h1>
         {agreement
           ? "Accept the license agreement"
@@ -183,9 +221,11 @@ export function CopilotKitAccount({
         <StatusLine>Checking your CopilotKit account…</StatusLine>
       )}
       {seen.at === "signing-in" && (
-        <StatusLine>
-          Finish signing in to CopilotKit in your browser…
-        </StatusLine>
+        <CopilotKitSignInWait
+          attempt={seen.attempt}
+          waiting="Finish signing in to CopilotKit in your browser…"
+          onCancel={cancelSignIn}
+        />
       )}
       {seen.at === "apps" && <StatusLine>Connecting your apps…</StatusLine>}
       {seen.at === "apps-failed" && (

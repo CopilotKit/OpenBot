@@ -7,7 +7,7 @@ import type { EgressPolicy, EgressRule } from "../computer/policy-network";
  * A PERSON'S BROWSER IS NOT A BOT'S. The organization's network policy says where Bots may go, and a person's own browser
  * is for whatever they browse, so it is not held to it. It reaches what the person's browser on their own laptop would:
  *
- * - On their own desktop (OpenBot Desktop's host-side computer), everything: it is their machine and their network.
+ * - On their own desktop (a host-side computer of people's browsers), everything: it is their machine and their network.
  * - On a computer in the cloud, the open internet and nothing inside the deployment, which a laptop could never reach
  *   either: the database, another pod, a node or a cloud metadata endpoint. The same line the chart's NetworkPolicy
  *   draws for computers (charts/openbot/templates/networkpolicy.yaml), and the one OWASP's SSRF guidance draws for a

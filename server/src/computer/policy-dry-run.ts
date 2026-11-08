@@ -101,6 +101,9 @@ export function contextFromAuditPayload(
   const action = payload.action;
   const bot = payload.bot;
   if (typeof action !== "string" || typeof bot !== "string") return null;
+  // A folder action on the person's own computer (`host/read_file`) is decided by its folder grant
+  // and the desktop's own asking, never by this policy, so replaying it here would invent a change.
+  if (action.startsWith("host/")) return null;
 
   const text = (value: unknown): string =>
     typeof value === "string" ? value : "";
@@ -147,10 +150,10 @@ export function contextFromAuditPayload(
 /**
  * Replay judged actions under a candidate policy and report what changes.
  *
- * "Was" comes from the row's event type, which records what the policy in force decided — including
+ * "Was" comes from the decision the row records, which is what the policy in force decided, including
  * a dry-run policy's refusals, which were recorded and then carried out. That is the honest
  * baseline: the question this answers is "what would decide differently than was decided", not
- * "what would run differently than ran".
+ * "what would run differently than ran". A row without one falls back to its event type.
  *
  * A `computer.action_failed` row is skipped rather than scored. It is the outcome of an action whose
  * decision row is already in this history, so counting it would score that action twice — and worse,
@@ -184,8 +187,22 @@ export function dryRunAgainstHistory(
     if (!context) continue;
     report.scanned += 1;
 
+    /*
+     * The policy's own verdict where the row records one. A refused row is not always the policy's
+     * refusal: the person can deny an action the policy allowed, and that row keeps the policy's
+     * `allowed: true`. Scored by its event type it would read as a refusal no rule made.
+     */
+    const recorded = (
+      event.payload.decision as { allowed?: unknown } | undefined
+    )?.allowed;
     const was =
-      event.eventType === "computer.action_refused" ? "refused" : "allowed";
+      typeof recorded === "boolean"
+        ? recorded
+          ? "allowed"
+          : "refused"
+        : event.eventType === "computer.action_refused"
+          ? "refused"
+          : "allowed";
     const decision = evaluateActionPolicy(policy, context);
     const would = decision.allowed ? "allowed" : "refused";
 

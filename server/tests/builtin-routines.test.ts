@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
+import { withApprovalContext } from "@openbot/toolkit/continuation";
 import {
   callTool,
   listTools,
@@ -39,6 +40,8 @@ const ROUTINE: Routine = {
   agentId: "bot_helper",
   channelId: "channel_1",
   instruction: "Post the standup summary.",
+  title: null,
+  goalId: null,
   cron: "0 9 * * 1-5",
   timezone: "Europe/Madrid",
   enabled: true,
@@ -51,6 +54,7 @@ const SUMMARY: RoutineSummary = {
   id: "routine_1",
   agentId: "bot_helper",
   instruction: "Post the standup summary.",
+  title: null,
   schedule: "Weekdays at 09:00",
   timezone: "Europe/Madrid",
   enabled: true,
@@ -134,7 +138,7 @@ describe("a list too long for one result", () => {
 });
 
 describe("the tool list", () => {
-  test("is the four routine tools and the five trigger tools, named exactly", async () => {
+  test("is the four routine tools, the five trigger tools and the seven goal tools, named exactly", async () => {
     const tools = await listTools();
     expect(tools.map((tool) => tool.name)).toEqual([
       "create_routine",
@@ -146,6 +150,13 @@ describe("the tool list", () => {
       "pause_trigger",
       "resume_trigger",
       "delete_trigger",
+      "create_goal",
+      "list_goals",
+      "update_goal",
+      "run_goal",
+      "pause_goal",
+      "resume_goal",
+      "complete_goal",
     ]);
     for (const tool of tools) {
       expect(tool.description.length).toBeGreaterThan(0);
@@ -184,7 +195,7 @@ describe("the tool list", () => {
     // that refused without one would store zero tools and Routines would advertise nothing.
     useRoutineTools(null);
     const tools = await listTools();
-    expect(tools).toHaveLength(9);
+    expect(tools).toHaveLength(16);
   });
 });
 
@@ -241,6 +252,66 @@ describe("dispatch", () => {
     expect(created?.method === "create" && created.input.timezone).toBe(
       undefined,
     );
+  });
+
+  test("create_routine without a timezone takes the person's own from the run asking", async () => {
+    // "Every weekday at 9am", asked from a browser in California: the run carries the person's zone
+    // (`openbotTimeZone`), and a tool call is made inside that run's continuation.
+    const inRun = (forwardedProps: unknown) =>
+      withApprovalContext(
+        {
+          runId: "run_1",
+          threadId: "thread_1",
+          toolCallId: "call_1",
+          toolName: "create_routine",
+          args: {},
+          messages: [],
+          state: {},
+          context: [],
+          forwardedProps,
+        },
+        () =>
+          callTool(CONNECTION, "create_routine", {
+            instruction: "Post the standup summary.",
+            cron: "0 9 * * 1-5",
+          }),
+      );
+    const zoneOf = (calls: Recorded[]) => {
+      const created = calls.find((call) => call.method === "create");
+      return created?.method === "create" ? created.input.timezone : null;
+    };
+
+    const local = recordingTools();
+    await inRun({ openbotTimeZone: "America/Los_Angeles" });
+    expect(zoneOf(local)).toBe("America/Los_Angeles");
+
+    // A zone the run carries that is not one stays absent: the store's UTC default applies.
+    const bogus = recordingTools();
+    await inRun({ openbotTimeZone: "Mars/Olympus_Mons" });
+    expect(zoneOf(bogus)).toBe(undefined);
+
+    // And the Bot's own zone always wins over the person's.
+    const named = recordingTools();
+    await withApprovalContext(
+      {
+        runId: "run_1",
+        threadId: "thread_1",
+        toolCallId: "call_1",
+        toolName: "create_routine",
+        args: {},
+        messages: [],
+        state: {},
+        context: [],
+        forwardedProps: { openbotTimeZone: "America/Los_Angeles" },
+      },
+      () =>
+        callTool(CONNECTION, "create_routine", {
+          instruction: "Post the standup summary.",
+          cron: "0 9 * * 1-5",
+          timezone: "UTC",
+        }),
+    );
+    expect(zoneOf(named)).toBe("UTC");
   });
 
   test("list_routines reaches listFor, and renders id, words, channel and last run", async () => {
@@ -407,7 +478,9 @@ describe("a write that landed but could not be read back", () => {
     });
 
     expect(result.isError).toBe(false);
-    expect(result.text).toBe("That routine is set. Its id is routine_1.");
+    expect(result.text).toBe(
+      "That routine is set. Its id, for your routine tools only and never shown to the person, is routine_1.",
+    );
   });
 
   test("update: a listFor that throws after a successful write is not reported as a failure", async () => {
@@ -423,7 +496,9 @@ describe("a write that landed but could not be read back", () => {
     });
 
     expect(result.isError).toBe(false);
-    expect(result.text).toBe("That routine is updated. Its id is routine_1.");
+    expect(result.text).toBe(
+      "That routine is updated. Its id, for your routine tools only and never shown to the person, is routine_1.",
+    );
   });
 
   test("create: the vanished-routine fallback reads as a sentence and names the id", async () => {
@@ -439,7 +514,9 @@ describe("a write that landed but could not be read back", () => {
     });
 
     expect(result.isError).toBe(false);
-    expect(result.text).toBe("That routine is set. Its id is routine_1.");
+    expect(result.text).toBe(
+      "That routine is set. Its id, for your routine tools only and never shown to the person, is routine_1.",
+    );
   });
 
   test("update: the vanished-routine fallback reads as a sentence and names the id", async () => {
@@ -455,7 +532,9 @@ describe("a write that landed but could not be read back", () => {
     });
 
     expect(result.isError).toBe(false);
-    expect(result.text).toBe("That routine is updated. Its id is routine_1.");
+    expect(result.text).toBe(
+      "That routine is updated. Its id, for your routine tools only and never shown to the person, is routine_1.",
+    );
   });
 
   test("the confirmation read is attributed to the connection's actor, not the routine's owner", async () => {
@@ -487,6 +566,45 @@ describe("a disabled routine's rendered next-run", () => {
     expect(result.text).not.toContain(SUMMARY.nextRunAt.toISOString());
     expect(result.text).toContain("switched off");
     expect(result.text).toMatch(/next when switched back on/);
+  });
+});
+
+describe("a routine's next run, as the model is told it", () => {
+  afterEach(() => setSystemTime());
+
+  test("is on the routine's clock when the run names no zone, and says how far away it is", async () => {
+    setSystemTime(new Date("2026-01-05T06:54:00.000Z"));
+    recordingTools({
+      async listFor() {
+        return [
+          SUMMARY,
+          {
+            ...SUMMARY,
+            id: "routine_2",
+            timezone: "UTC",
+            nextRunAt: new Date("2026-01-07T09:30:00.000Z"),
+          },
+          {
+            ...SUMMARY,
+            id: "routine_3",
+            timezone: "UTC",
+            nextRunAt: new Date("2026-01-05T06:50:00.000Z"),
+          },
+        ];
+      },
+    });
+    const result = await callTool(CONNECTION, "list_routines", {});
+
+    expect(result.text).toContain(
+      "next run Monday, January 5, 2026 at 9:00 AM GMT+1 (Europe/Madrid), 1 hour and 6 minutes from now",
+    );
+    expect(result.text).toContain(
+      "next run Wednesday, January 7, 2026 at 9:30 AM UTC, 2 days and 2 hours from now",
+    );
+    // Overdue until the next sweep picks it up: it is about to run, not in the past.
+    expect(result.text).toContain(
+      "next run Monday, January 5, 2026 at 6:50 AM UTC, due now",
+    );
   });
 });
 

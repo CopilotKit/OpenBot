@@ -29,6 +29,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { managePaths } from "@/lib/manage-paths";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
 const adminLinkOptions = { to: "/admin" } satisfies LinkOptions;
@@ -137,7 +138,7 @@ const GROUPS: {
     label: "What happened",
     items: [
       {
-        title: "Audit",
+        title: managePaths("team").auditLabel,
         icon: IconListDetails,
         linkOptions: { to: "/admin/audit" },
       },

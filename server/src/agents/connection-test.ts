@@ -142,6 +142,8 @@ export async function testAgentConnection(
     allowedHosts?: ReadonlySet<string>;
     /** The deployment's own agent addresses, reachable at exactly those URLs; see checkAgentEndpoint. */
     managedEndpoints?: readonly (string | URL)[];
+    /** Where a loopback address is dialled from a server in a container; see onThisMachine. */
+    thisMachineHost?: string;
     fetchImpl?: typeof fetch;
     timeoutMs?: number;
   } = {},
@@ -166,6 +168,9 @@ export async function testAgentConnection(
       : {}),
     ...(options.allowPrivateHosts !== undefined
       ? { allowPrivateHosts: options.allowPrivateHosts }
+      : {}),
+    ...(options.thisMachineHost
+      ? { thisMachineHost: options.thisMachineHost }
       : {}),
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
   });

@@ -7,20 +7,27 @@ alone. The worker also builds its options once, so context and grants changed af
 never reached it. Here each query gets a fresh worker, built from this run's input, and the
 conversation as its prompt: all of it, or its newest messages up to `REPLAY_BUDGET_TOKENS`.
 
-Client-tool continuations never take this path: the adapter resolves their PostToolUse hook in the
-same SDK query that emitted the tool use.
+Client-tool continuations do not take this path: the adapter resolves their PostToolUse hook in the
+same SDK query that emitted the tool use. The exceptions are answered by a fresh query from here: a
+model-endpoint step sent other tools than that query holds, and a result whose query is no longer
+running (it outlived the query's bound, or the process restarted); see `OpenBotClaudeAgentAdapter.run`.
 """
 
 import asyncio
 import json
 import math
+import os
+import tempfile
+from contextlib import suppress
 from datetime import datetime
 
 from ag_ui.core import EventType, RunErrorEvent, RunFinishedEvent, StateSnapshotEvent
 from ag_ui_claude_sdk.session import SessionWorker
 
-# The model endpoint has always bounded a query; the full harness runs agentic work that can take
-# longer, and upstream only bounds it when a timeout is configured.
+# How long a query may go without an event: the model endpoint's own, and the full harness's through
+# upstream's `query_timeout_seconds`, which defaults to 300 seconds. A client tool or the person can
+# take longer than that; a result that arrives after its query ended is answered by a replay (see
+# `adapter.run`).
 MODEL_QUERY_TIMEOUT_SECONDS = 300
 
 # The ids the server gives the system messages it writes for a remote Bot: `standingRoleMessage`
@@ -200,6 +207,28 @@ def system_instructions(messages):
     )
 
 
+def system_prompt_in_file(options):
+    """Hand Claude Code its system prompt in a file, and return the file's path to remove later.
+
+    The SDK otherwise passes it as one `--system-prompt` argument, and Linux refuses to start a
+    process with any argument over 128 KiB (`MAX_ARG_STRLEN`): `[Errno 7] Argument list too long`.
+    A full Bot's prompt is its standing role, a line naming every tool it is offered, and every
+    context entry the run carries (the browser's generative UI schema and guidelines, personal
+    memory, learned skills), so a Bot holding a few large apps crossed it and never started.
+    `--system-prompt-file` replaces Claude Code's prompt exactly as `--system-prompt` does.
+
+    A preset's `append` is left alone: this harness never sets one.
+    """
+    prompt = options.system_prompt
+    if not isinstance(prompt, str) or not prompt:
+        return None
+    handle, path = tempfile.mkstemp(prefix="openbot-system-prompt-", suffix=".md")
+    with os.fdopen(handle, "w", encoding="utf-8") as file:
+        file.write(prompt)
+    options.system_prompt = {"type": "file", "path": path}
+    return path
+
+
 async def run_replayed_query(adapter, input_data):
     thread, run = input_data.thread_id, input_data.run_id
     model_only = adapter._model_only
@@ -210,8 +239,11 @@ async def run_replayed_query(adapter, input_data):
     )
     # A fresh worker receives the current Bot instructions and granted schemas.
     # Tool-boundary HTTP continuations consume this still-running query instead
-    # of creating a second worker or changing its identity.
-    worker = SessionWorker(thread, adapter.build_options(input_data, thread))
+    # of creating a second worker or changing its identity, unless the model
+    # endpoint sends them other tools than this query holds (see `adapter.run`).
+    options = adapter.build_options(input_data, thread)
+    prompt_file = system_prompt_in_file(options)
+    worker = SessionWorker(thread, options)
     adapter._workers[thread] = {
         "worker": worker,
         "last_used": datetime.now(),
@@ -238,9 +270,21 @@ async def run_replayed_query(adapter, input_data):
         await worker.start()
         if state is not None:
             yield StateSnapshotEvent(type=EventType.STATE_SNAPSHOT, snapshot=state)
-        async with asyncio.timeout(timeout):
+        # A bound on a query that has stopped moving, not on how long it works: each message from
+        # Claude Code pushes the deadline back. Counted from the start, it cut off a Bot that was
+        # still working (nine browser steps took it past five minutes) with an error the person
+        # never saw. Waiting on a client tool or the person brings no messages, so that wait still
+        # ends here, before the PostToolUse hook's own timeout could hand Claude a placeholder.
+        async with asyncio.timeout(timeout) as deadline:
+
+            async def moving(messages):
+                async for message in messages:
+                    if timeout is not None:
+                        deadline.reschedule(asyncio.get_running_loop().time() + timeout)
+                    yield message
+
             async for event in adapter._stream_claude_sdk(
-                worker.query(prompt(), session_id=thread),
+                moving(worker.query(prompt(), session_id=thread)),
                 thread,
                 run,
                 input_data,
@@ -270,4 +314,9 @@ async def run_replayed_query(adapter, input_data):
         adapter._workers.pop(thread, None)
         adapter._per_thread_state.pop(thread, None)
         adapter._per_run_result.pop((thread, run), None)
-        await worker.stop()
+        try:
+            await worker.stop()
+        finally:
+            if prompt_file:
+                with suppress(FileNotFoundError):
+                    os.unlink(prompt_file)

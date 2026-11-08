@@ -36,7 +36,12 @@ import {
   proactiveSettings,
   proactiveSuggestions,
 } from "../src/db/schema/proactive";
-import { responsibilities } from "../src/db/schema/responsibilities";
+import {
+  responsibilities,
+  responsibilityEvents,
+  responsibilityRuns,
+  responsibilityTriggers,
+} from "../src/db/schema/responsibilities";
 import { workItems } from "../src/db/schema/work";
 import { createRoutineRunner } from "../src/routines/runner";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
@@ -294,11 +299,138 @@ describe("pause", () => {
 describe("Activity and attention", () => {
   const activity = createActivityStore(database);
 
+  /*
+   * FOUND ON WINDOWS: a goal that only runs when asked was listed under Scheduled, and the Bot page
+   * said "2 scheduled" for one routine and that goal. Nothing starts it on its own, so it is on
+   * demand; a trigger on it wakes it, and puts it back with what is lined up.
+   */
+  test("a goal that runs only when asked is on demand, not scheduled", async () => {
+    const goal = `responsibility:${prefix}-goal-${owner}`;
+    const asked = await activity.forBot(owner, bot);
+    expect(asked.onDemand).toEqual([
+      expect.objectContaining({ id: goal, detail: "Runs when asked" }),
+    ]);
+    expect(asked.scheduled.some((item) => item.id === goal)).toBe(false);
+
+    const trigger = `${prefix}-trigger`;
+    await database.insert(responsibilityTriggers).values({
+      id: trigger,
+      ownerUserId: owner,
+      responsibilityId: `${prefix}-goal-${owner}`,
+      kind: "webhook",
+      config: { kind: "webhook", filter: { eventTypes: [] } },
+    });
+    try {
+      const woken = await activity.forBot(owner, bot);
+      expect(woken.onDemand).toEqual([]);
+      expect(woken.scheduled).toContainEqual(
+        expect.objectContaining({ id: goal, detail: "Wakes on webhook" }),
+      );
+      await database
+        .update(responsibilityTriggers)
+        .set({ enabled: false })
+        .where(eq(responsibilityTriggers.id, trigger));
+      const paused = await activity.forBot(owner, bot);
+      expect(paused.onDemand.map((item) => item.id)).toEqual([goal]);
+    } finally {
+      await database
+        .delete(responsibilityTriggers)
+        .where(eq(responsibilityTriggers.id, trigger));
+    }
+  });
+
+  /*
+   * FOUND LIVE: a goal a daily routine runs was listed under On demand as "Runs when asked", below
+   * the routine that runs it every morning, and its run under Completed as "Goal · succeeded" under
+   * the goal's own title, which read as a second goal that had finished.
+   */
+  test("a goal a routine runs says when, from its routine, and is lined up with it", async () => {
+    const goal = `responsibility:${prefix}-goal-${owner}`;
+    const routine = `${prefix}-routine-runs-goal`;
+    const nextRunAt = new Date(Date.now() + 7_200_000);
+    await database.insert(routines).values({
+      id: routine,
+      ownerUserId: owner,
+      agentId: bot,
+      channelId: direct,
+      // Made for the goal, which it records, with the instruction a Bot wrote live.
+      goalId: `${prefix}-goal-${owner}`,
+      instruction:
+        "Find and run the active goal \u201cKeep the build green\u201d and report what changed.",
+      cron: "0 8 * * *",
+      timezone: "America/Los_Angeles",
+      nextRunAt,
+    });
+    try {
+      const lined = await activity.forBot(owner, bot);
+      expect(lined.onDemand.some((item) => item.id === goal)).toBe(false);
+      const item = lined.scheduled.find((candidate) => candidate.id === goal);
+      expect(item).toMatchObject({
+        title: "Keep the build green",
+        detail: "Every day at 08:00 (America/Los_Angeles), from its routine",
+        status: "active",
+      });
+      expect(item?.at).toBe(nextRunAt.toISOString());
+
+      // Switched off, the routine runs nothing, and the goal waits to be asked again.
+      await database
+        .update(routines)
+        .set({ enabled: false })
+        .where(eq(routines.id, routine));
+      const asked = await activity.forBot(owner, bot);
+      expect(asked.onDemand).toContainEqual(
+        expect.objectContaining({ id: goal, detail: "Runs when asked" }),
+      );
+      expect(asked.scheduled.some((candidate) => candidate.id === goal)).toBe(
+        false,
+      );
+    } finally {
+      await database.delete(routines).where(eq(routines.id, routine));
+    }
+  });
+
+  test("a goal's run is named as a run of that goal", async () => {
+    await database.insert(responsibilityEvents).values({
+      id: `${prefix}-named-run-event`,
+      ownerUserId: owner,
+      source: "manual",
+      externalId: `${prefix}-named-run-event`,
+      type: "requested",
+      payload: {},
+    });
+    await database.insert(responsibilityRuns).values({
+      id: `${prefix}-named-run`,
+      responsibilityId: `${prefix}-goal-${owner}`,
+      eventId: `${prefix}-named-run-event`,
+      status: "succeeded",
+      replyText: "The build is green.",
+      startedAt: new Date(),
+      finishedAt: new Date(),
+    });
+    const result = await activity.forBot(owner, bot);
+    expect(
+      result.completed.find(
+        (item) => item.id === `responsibility-run:${prefix}-named-run`,
+      ),
+    ).toMatchObject({
+      title: "Run of Keep the build green",
+      status: "succeeded",
+      detail: "The build is green.",
+    });
+    // The goal itself keeps its own name.
+    expect(
+      result.onDemand.find(
+        (item) => item.id === `responsibility:${prefix}-goal-${owner}`,
+      )?.title,
+    ).toBe("Keep the build green");
+  });
+
   test("sections hold the owner's work and nobody else's", async () => {
     const result = await activity.forBot(owner, bot);
     const all = [
       ...result.inProgress,
       ...result.scheduled,
+      ...result.onDemand,
       ...result.completed,
     ];
     expect(all.some((item) => item.title === "Not yours")).toBe(false);
@@ -329,6 +461,40 @@ describe("Activity and attention", () => {
     ).toBe(true);
   });
 
+  test("a routine's schedule reads in words, as the Routines page says it", async () => {
+    // Seen on the Bot page: "Repeats on 0 9 * * * (UTC)", five cron fields shown to a person.
+    const result = await activity.forBot(owner, bot);
+    const routine = result.scheduled.find(
+      (item) => item.id === `routine:${prefix}-routine-${owner}`,
+    );
+    expect(routine?.detail).toBe("Every day at 09:00 (UTC)");
+  });
+
+  test("a routine's title is its whole instruction, never cut mid-word", async () => {
+    // Seen on the Bot page: "...releases) and post one l", the instruction cut at 120 characters.
+    const instruction =
+      "Check the latest release of CopilotKit/OpenBot on GitHub (https://github.com/CopilotKit/OpenBot/releases) and post one line in this conversation with its version number (tag) and release date.";
+    const id = `${prefix}-routine-long`;
+    await database.insert(routines).values({
+      id,
+      ownerUserId: owner,
+      agentId: bot,
+      channelId: direct,
+      instruction,
+      cron: "0 9 * * *",
+      nextRunAt: new Date(Date.now() + 3_600_000),
+    });
+    try {
+      const result = await activity.forBot(owner, bot);
+      const item = result.scheduled.find(
+        (candidate) => candidate.id === `routine:${id}`,
+      );
+      expect(item?.title).toBe(instruction);
+    } finally {
+      await database.delete(routines).where(eq(routines.id, id));
+    }
+  });
+
   test("attention counts what waits on this person", async () => {
     const [row] = (await activity.attention(owner)).filter(
       (entry) => entry.agentId === bot,
@@ -343,6 +509,36 @@ describe("Activity and attention", () => {
       (entry) => entry.agentId === bot,
     );
     expect(others).toMatchObject({ questions: 0, approvals: 0, unread: 2 });
+  });
+
+  test("a goal run's summary is the Bot's reply as plain text, the way the sidebar draws a reply", async () => {
+    // The reply a goal run gave on OpenBot Desktop, which the row drew with its backticks and asterisks.
+    await database.insert(responsibilityEvents).values({
+      id: `${prefix}-goal-event`,
+      ownerUserId: owner,
+      source: "manual",
+      externalId: `${prefix}-goal-event`,
+      type: "requested",
+      payload: {},
+    });
+    await database.insert(responsibilityRuns).values({
+      id: `${prefix}-goal-run`,
+      responsibilityId: `${prefix}-goal-${owner}`,
+      eventId: `${prefix}-goal-event`,
+      status: "succeeded",
+      replyText:
+        'Done. I opened example.com, saved its heading to `heading.txt`, and it reads **"Example Domain"**.\n\n- Checked: the file exists\n- [Source](https://example.com)',
+      startedAt: new Date(),
+      finishedAt: new Date(),
+    });
+    const result = await activity.forBot(owner, bot);
+    expect(
+      result.completed.find(
+        (item) => item.id === `responsibility-run:${prefix}-goal-run`,
+      )?.detail,
+    ).toBe(
+      'Done. I opened example.com, saved its heading to heading.txt, and it reads "Example Domain". Checked: the file exists Source',
+    );
   });
 
   test("stopping a delegated task finishes only that person's hop", async () => {

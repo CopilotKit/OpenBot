@@ -85,11 +85,12 @@ export function plainFailure(error: string | null | undefined): string {
     [/lock/i, "the conversation was busy with another reply"],
     [/cancel|abort/i, "the run was stopped"],
     [
-      /\b40[13]\b|authentication|api.?key/i,
+      // The raw refusals, and the sentences a run now ends with for them (provider-refusal.ts).
+      /\b40[13]\b|authentication|api.?key|turned down the request|is limiting how many requests|doesn't offer the model/i,
       "the model provider turned the request away",
     ],
     [
-      /fetch failed|ECONN|ETIMEDOUT|ENOTFOUND|socket hang up|unavailable|overloaded|\b50[234]\b/i,
+      /fetch failed|ECONN|ETIMEDOUT|ENOTFOUND|socket hang up|unavailable|overloaded|\b50[234]\b|is having problems right now/i,
       "a service didn't answer",
     ],
   ];

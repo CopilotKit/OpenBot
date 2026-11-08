@@ -1,9 +1,12 @@
 import { useContext, useState } from "react";
 import { z } from "zod";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
+import { FailedCard, UNREADABLE } from "./failed";
 import { Badge, GalleryFrame } from "./frame";
 import { byPosition } from "./positions";
 import { GalleryStreamingContext } from "./streaming";
+
+const TITLE = "Data table";
 
 export const DataTableProps = z
   .object({
@@ -70,6 +73,9 @@ export function DataTable(props: Record<string, unknown>) {
     : { table: props, arriving: false };
   const parsed = DataTableProps.safeParse(table);
   if (!parsed.success) {
+    // Only a table still being written is waited for. Once its arguments are final, nothing more
+    // is coming, and waiting would last for good.
+    if (!streaming) return <FailedCard reason={UNREADABLE} title={TITLE} />;
     return (
       <GalleryFrame title="Table">
         <p className="text-sm text-muted-foreground">
@@ -221,8 +227,10 @@ export function DataTable(props: Record<string, unknown>) {
 export const GALLERY: GalleryComponent[] = [
   {
     name: "showTable",
-    title: "Data table",
+    title: TITLE,
     kind: "card",
+    summary:
+      "Shows a table you can sort by any column, for comparing records side by side.",
     description:
       "Show a sortable table to compare records, plans, or other structured facts. Supply up to eight columns and 100 rows, with exactly one cell per column. Use numbers for quantities so sorting is numeric. Show only data you have; do not invent rows.",
     parameters: DataTableProps,

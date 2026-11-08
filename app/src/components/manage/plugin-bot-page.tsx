@@ -38,7 +38,6 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { useBotNames } from "@/lib/agents/bot-names";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { useManagePaths } from "@/lib/manage-paths";
@@ -112,7 +111,6 @@ export function PluginBotPage({
    * say there is no such Bot.
    */
   const hiddenAgents = useQuery(agentListQueryOptions(true));
-  const nameFor = useBotNames();
   const [error, setError] = useState<string | null>(null);
   /** What the list is narrowed to, over action names. Never over what is switched on. */
   const [search, setSearch] = useState("");
@@ -269,8 +267,12 @@ export function PluginBotPage({
     );
   }
 
-  // From the row itself where there is one: the id-to-name lookup is built from the visible roster.
-  const botName = bot?.name ?? nameFor(agentId);
+  /*
+   * From the row itself, found in either roster. Without one a roster is loading or failed (a Bot
+   * missing from both is answered above), and on this Admin page the id is then the only name there
+   * is, so it stands in. Screens a person reads go through `useBotNames`, which never shows an id.
+   */
+  const botName = bot?.name ?? agentId;
   const held = (tool: PluginTool) => tool.grantedTo.includes(agentId);
 
   /*

@@ -34,3 +34,20 @@ export function Mark({ id, name }: { id: string | null; name: string }) {
     </div>
   );
 }
+
+/**
+ * A provider's mark at the start of its "Sign in with" button, as the web app's sign-in page sets
+ * Google's, Microsoft's and Okta's on theirs.
+ *
+ * Decorative, like the tile's: the button's label already names the provider. A provider with no
+ * vendored mark gets none, and the label stands alone rather than beside something invented.
+ */
+export function ButtonMark({ id }: { id: string | null }) {
+  const uri = markFor(id);
+  if (!uri) return null;
+  return (
+    <span className="button-mark">
+      <img src={uri} alt="" aria-hidden="true" data-mark={id} />
+    </span>
+  );
+}

@@ -36,6 +36,11 @@ export type HostAccessPendingOperation = {
 
 export type HostAccessStatus = {
   connected: boolean;
+  /**
+   * Whether this OpenBot runs in OpenBot Desktop, the only thing that can open folders on this
+   * computer. Absent from a server that predates it, which is read as yes.
+   */
+  desktop?: boolean;
   grants: HostFolderGrant[];
   pending: HostAccessPendingOperation[];
 };
@@ -82,7 +87,7 @@ export function revokeHostFolderGrantMutationOptions(queryClient: QueryClient) {
         `/api/host-access/grants/${encodeURIComponent(variables.grantId)}`,
         {
           method: "DELETE",
-          fallback: "The host folder grant could not be revoked.",
+          fallback: "Access to that folder could not be revoked.",
         },
       );
     },
@@ -95,7 +100,7 @@ export function stopHostAccessMutationOptions(queryClient: QueryClient) {
     mutationFn: async () => {
       await client("/api/host-access/stop", {
         method: "POST",
-        fallback: "Host folder access could not be stopped.",
+        fallback: "Folder access could not be stopped.",
       });
     },
     onSuccess: () => invalidateHostAccess(queryClient),

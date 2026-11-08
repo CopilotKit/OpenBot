@@ -16,6 +16,7 @@ import {
   PINNED_OVERLAY,
   planSignedBuild,
   type Runner,
+  rustTarget,
 } from "./signed-build";
 
 const temps: string[] = [];
@@ -232,6 +233,30 @@ test("an internal signed build is never pinned, even from a candidate's branch",
   expect(calls).toEqual([]);
 });
 
+// Before, the Windows overlay had no updater, so a signed Windows app never read the feed, was
+// never offered a release and could not install one.
+test("a Windows stable release is signed unpinned, with the updater the Mac carries", () => {
+  const dir = desktop(stable);
+  const { run, calls } = fakeRun();
+  const result = plan(dir, run, "win32");
+  expect(result.pinned).toBeNull();
+  expect(result.updater).toBe(true);
+  expect(result.configs).toEqual([
+    "src-tauri/tauri.windows-signing.conf.json",
+    "src-tauri/tauri.build-version.conf.json",
+  ]);
+  expect(calls).toEqual([]);
+  const windows = JSON.parse(real("src-tauri/tauri.windows-signing.conf.json"));
+  const mac = JSON.parse(real("src-tauri/tauri.macos-signing.conf.json"));
+  const { windows: install, ...updater } = windows.plugins.updater;
+  // The same key and the same feed: one latest.json serves both, and one key signs both.
+  expect(updater).toEqual(mac.plugins.updater);
+  // A small progress window and no questions: the update was already asked for in the app.
+  expect(install).toEqual({ installMode: "passive" });
+  // No updater artifacts from the build, which would need the updater key in this environment.
+  expect(windows.bundle.createUpdaterArtifacts).toBeUndefined();
+});
+
 test("a Windows candidate is pinned, and its overlay keeps the signing command", () => {
   const dir = desktop(candidate);
   const { run } = fakeRun({ version: "v0.3.0-rc.1", commit: SHA, images: {} });
@@ -242,6 +267,8 @@ test("a Windows candidate is pinned, and its overlay keeps the signing command",
   expect(overlay.bundle.windows.signCommand.args).toContain(
     "../scripts/sign-windows.ps1",
   );
+  // Never offered anything: the updater is taken out with the rest of `plugins`.
+  expect(overlay.plugins).toBeUndefined();
 });
 
 test("the CLI is bundled whenever the tree has the overlay for it, pinned or not", () => {
@@ -273,7 +300,9 @@ test("the CLI is bundled whenever the tree has the overlay for it, pinned or not
   }
 });
 
-test("the build command passes every overlay in order, then the caller's arguments", () => {
+// Cargo.lock as committed: an unlocked cargo rewrote it before build.rs read the tree, and every
+// release said it was built from a `-dirty` commit.
+test("the build command passes every overlay in order, the caller's arguments, then --locked to cargo", () => {
   const dir = desktop(candidate, true);
   const { run } = fakeRun({ version: "v0.3.0-rc.1", commit: SHA, images: {} });
   const result = plan(dir, run, "win32");
@@ -290,6 +319,8 @@ test("the build command passes every overlay in order, then the caller's argumen
     CLI_OVERLAY,
     "--bundles",
     "nsis",
+    "--",
+    "--locked",
   ]);
 });
 
@@ -308,7 +339,8 @@ test("Desktop macOS signing builds through signed-build.ts", () => {
   const build = workflow.jobs.sign.steps.find(
     (step) => step.name === "Build, sign and notarize",
   );
-  expect(build?.run?.trim()).toBe(
+  // Beside the xcrun that staples Tauri's .app through the retry (staple-with-retry.test.ts).
+  expect(build?.run?.split("\n").map((line) => line.trim())).toContain(
     'bun desktop/scripts/signed-build.ts darwin "$ARCH" src-tauri/tauri.macos-signing.conf.json',
   );
   const others = workflow.jobs.sign.steps.filter((step) => step !== build);
@@ -338,3 +370,111 @@ test("desktop-build.yml restores no cache for a release", () => {
   );
   expect(rust?.if).toBe("inputs.channel != 'release'");
 });
+
+// The Intel signing job ran on macos-15-intel and took 22 minutes for a build macos-15 makes in 12.
+// Both Mac builds now name their Rust target, the Intel one x86_64-apple-darwin, as Tauri documents
+// for building it on Apple silicon, and the CLI bundle is assembled for the same architecture.
+test("every Mac build names its Rust target, and the Intel one is x86_64", () => {
+  for (const [arch, target] of [
+    ["x64", "x86_64-apple-darwin"],
+    ["arm64", "aarch64-apple-darwin"],
+  ] as const) {
+    expect(rustTarget("darwin", arch)).toBe(target);
+    const dir = desktop(stable, true);
+    const { run, calls } = fakeRun();
+    const result = planSignedBuild({
+      desktop: dir,
+      platform: "darwin",
+      arch,
+      overlay: "src-tauri/tauri.macos-signing.conf.json",
+      repository: "CopilotKit/OpenBot",
+      workDir: join(dir, "work"),
+      bun: "bun",
+      run,
+    });
+    expect(result.target).toBe(target);
+    const command = buildCommand("bun", result, []);
+    expect(command.slice(command.indexOf("--target"), -2)).toEqual([
+      "--target",
+      target,
+    ]);
+    // The CLI and its Node runtime for the same architecture.
+    expect(calls.at(-1)?.slice(-2)).toEqual(["darwin", arch]);
+  }
+  expect(rustTarget("win32", "x64")).toBeNull();
+});
+
+test("Desktop macOS signing builds both Macs on the Apple silicon runner and checks each is its own architecture", () => {
+  const text = readFileSync(
+    join(import.meta.dir, "../../.github/workflows/desktop-macos-signing.yml"),
+    "utf8",
+  );
+  const workflow = Bun.YAML.parse(text) as {
+    jobs: {
+      sign: {
+        env: Record<string, string>;
+        strategy: {
+          matrix: {
+            platform: {
+              runner: string;
+              target: string;
+              arch: "arm64" | "x64";
+              "rust-target": string;
+              "lipo-arch": string;
+            }[];
+          };
+        };
+        steps: {
+          name?: string;
+          uses?: string;
+          run?: string;
+          env?: Record<string, string>;
+          with?: Record<string, string>;
+        }[];
+      };
+    };
+  };
+  const sign = workflow.jobs.sign;
+  const platforms = sign.strategy.matrix.platform;
+  expect(platforms.map((platform) => platform.target).sort()).toEqual([
+    "darwin-aarch64",
+    "darwin-x86_64",
+  ]);
+  for (const platform of platforms) {
+    expect(platform.runner).toBe("macos-15");
+    expect(platform["rust-target"]).toBe(
+      rustTarget("darwin", platform.arch) as string,
+    );
+    expect(platform["lipo-arch"]).toBe(
+      platform.arch === "x64" ? "x86_64" : "arm64",
+    );
+  }
+  expect(text).not.toContain("macos-15-intel");
+  const rustTargetExpression = expression("matrix.platform.rust-target");
+  expect(sign.env.BUNDLE).toBe(
+    `desktop/src-tauri/target/${rustTargetExpression}/release/bundle`,
+  );
+  const toolchain = sign.steps.find((step) =>
+    step.uses?.startsWith("dtolnay/rust-toolchain@"),
+  );
+  expect(toolchain?.with?.targets).toBe(rustTargetExpression);
+  // Every path into the bundle goes through BUNDLE; the untargeted one is empty now.
+  for (const step of sign.steps) {
+    expect(step.run ?? "").not.toContain("target/release/bundle");
+  }
+  const check = sign.steps.find(
+    (step) => step.name === "Verify the app is built for its architecture",
+  );
+  expect(check?.env?.LIPO_ARCH).toBe(expression("matrix.platform.lipo-arch"));
+  expect(check?.run).toContain(
+    'desktop/scripts/verify-mac-arch.sh "$BUNDLE/macos/OpenBot.app" "$LIPO_ARCH"',
+  );
+  expect(check?.run).toContain(
+    'desktop/scripts/verify-mac-arch.sh "$mount/OpenBot.app" "$LIPO_ARCH"',
+  );
+});
+
+/** A workflow expression, as the YAML holds it. */
+function expression(body: string) {
+  return `\${{ ${body} }}`;
+}

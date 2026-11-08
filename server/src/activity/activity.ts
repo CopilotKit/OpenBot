@@ -22,6 +22,7 @@ import {
 } from "drizzle-orm";
 import { HANDOFF_KIND } from "../agents/handoff";
 import { WAKE_UP_KIND, type WakeUpPayload } from "../agents/wake-up";
+import { plainLine } from "../channels/text";
 import type { Database } from "../db/client";
 import {
   approvalRequests,
@@ -35,10 +36,13 @@ import {
   responsibilities,
   responsibilityEvents,
   responsibilityRuns,
+  responsibilityTriggers,
   routineRuns,
   routines,
   workItems,
 } from "../db/schema";
+import { routineRunsGoal } from "../responsibilities/types";
+import { describeCron } from "../routines/schedule";
 import { listedTask } from "../tasks/store";
 import { DEFAULT_MAX_ATTEMPTS } from "../work/queue";
 
@@ -73,6 +77,12 @@ export type ActivityItem = {
 export type BotActivity = {
   inProgress: ActivityItem[];
   scheduled: ActivityItem[];
+  /**
+   * Active goals with nothing to start them on their own: no schedule and no event. They run when
+   * somebody asks, with Run now on the goal. Not `scheduled`, which is work lined up for a time or an
+   * event: a goal that only runs when asked was counted there, and a Bot page said "2 scheduled".
+   */
+  onDemand: ActivityItem[];
   completed: ActivityItem[];
 };
 
@@ -106,8 +116,14 @@ const inListedTask = (ownerUserId: string, channelId: SQL, threadId: SQL) =>
       and ${listedTask}
       and (${botTasks.channelId} = ${channelId} or ${intelligenceChannelMappings.threadId} = ${threadId})
   )`;
+/**
+ * One line of a row, as plain text. A run's reply and a follow-up's note are written by the Bot, in
+ * Markdown, and a row draws text, so `heading.txt` in backticks and **bold** showed their marks.
+ * Flattened the way the sidebar flattens a conversation's last message (`previewOf` in
+ * `channels/routes.ts`), at the same 200 characters.
+ */
 const clip = (text: string | null | undefined, max = 200) =>
-  text ? Array.from(text).slice(0, max).join("") : null;
+  (text && plainLine(text, max)) || null;
 const iso = (value: Date | string | null | undefined) =>
   value ? new Date(value).toISOString() : new Date(0).toISOString();
 
@@ -164,6 +180,7 @@ export function createActivityStore(database: Database) {
       const activity: BotActivity = {
         inProgress: [],
         scheduled: [],
+        onDemand: [],
         completed: [],
       };
       const now = Date.now();
@@ -183,8 +200,11 @@ export function createActivityStore(database: Database) {
           activity.scheduled.push({
             id: `routine:${routine.id}`,
             kind: "routine",
-            title: clip(routine.instruction, 120) ?? "Routine",
-            detail: `Repeats on ${routine.cron} (${routine.timezone})`,
+            // What the person called it, else its instruction, whole: the page shortens it to fit
+            // and shows it all on hover. The store caps an instruction at 2,000 characters.
+            title: routine.title || routine.instruction || "Routine",
+            // In words, by the helper the Routines page uses, so the two screens say it the same way.
+            detail: `${describeCron(routine.cron)} (${routine.timezone})`,
             status: "scheduled",
             at: iso(routine.nextRunAt),
             channelId: routine.channelId,
@@ -208,7 +228,7 @@ export function createActivityStore(database: Database) {
           const item: ActivityItem = {
             id: `routine-run:${run.id}`,
             kind: "routine",
-            title: clip(routine.instruction, 120) ?? "Routine",
+            title: routine.title || routine.instruction || "Routine",
             detail: clip(run.error),
             status: run.status ?? "running",
             at: iso(run.finishedAt ?? run.startedAt),
@@ -223,7 +243,8 @@ export function createActivityStore(database: Database) {
         }
       }
 
-      // Responsibilities: an active one is standing work; each run is a piece of it.
+      // Responsibilities: an active one is standing work; each run is a piece of it. One a routine
+      // runs or an event wakes is lined up for it; one nothing starts runs only when somebody asks.
       const goals = await database
         .select()
         .from(responsibilities)
@@ -233,22 +254,74 @@ export function createActivityStore(database: Database) {
             eq(responsibilities.agentId, agentId),
           ),
         );
-      for (const goal of goals)
-        if (goal.status === "active")
-          activity.scheduled.push({
-            id: `responsibility:${goal.id}`,
-            kind: "responsibility",
-            title: goal.title,
-            detail: goal.subscriptions.length
-              ? `Wakes on ${goal.subscriptions.map((s) => `${s.source}/${s.eventType}`).join(", ")}`
-              : "Runs when asked",
-            status: "active",
-            at: iso(goal.updatedAt),
-            channelId: goal.channelId,
-            needsYou: false,
-            stoppable: false,
-            cancellable: false,
-          });
+      // A goal's triggers wake it as its subscriptions do; a paused one starts nothing.
+      const triggers = goals.length
+        ? await database
+            .select({
+              goalId: responsibilityTriggers.responsibilityId,
+              kind: responsibilityTriggers.kind,
+            })
+            .from(responsibilityTriggers)
+            .where(
+              and(
+                eq(responsibilityTriggers.ownerUserId, ownerUserId),
+                eq(responsibilityTriggers.enabled, true),
+                inArray(
+                  responsibilityTriggers.responsibilityId,
+                  goals.map((goal) => goal.id),
+                ),
+              ),
+            )
+        : [];
+      for (const goal of goals) {
+        if (goal.status !== "active") continue;
+        /*
+         * The routines that run it, by the rule its run is told it repeats by. FOUND LIVE: a goal a
+         * daily routine runs was listed under On demand as "Runs when asked", below the routine that
+         * runs it every morning. It says when it runs, from the soonest routine, and sits with them.
+         */
+        const runBy = ownedRoutines
+          .filter(
+            (routine) => routine.enabled && routineRunsGoal(routine, goal),
+          )
+          .sort(
+            (first, second) =>
+              first.nextRunAt.getTime() - second.nextRunAt.getTime(),
+          );
+        const wakesOn = [
+          ...goal.subscriptions.map((s) => `${s.source}/${s.eventType}`),
+          ...triggers
+            .filter((trigger) => trigger.goalId === goal.id)
+            .map((trigger) => trigger.kind),
+        ];
+        const starts = [
+          ...(runBy.length
+            ? [
+                `${runBy
+                  .map(
+                    (routine) =>
+                      `${describeCron(routine.cron)} (${routine.timezone})`,
+                  )
+                  .join(
+                    "; ",
+                  )}, from its ${runBy.length === 1 ? "routine" : "routines"}`,
+              ]
+            : []),
+          ...(wakesOn.length ? [`Wakes on ${wakesOn.join(", ")}`] : []),
+        ];
+        (starts.length ? activity.scheduled : activity.onDemand).push({
+          id: `responsibility:${goal.id}`,
+          kind: "responsibility",
+          title: goal.title,
+          detail: starts.length ? starts.join(" · ") : "Runs when asked",
+          status: "active",
+          at: iso(runBy[0]?.nextRunAt ?? goal.updatedAt),
+          channelId: goal.channelId,
+          needsYou: false,
+          stoppable: false,
+          cancellable: false,
+        });
+      }
       if (goals.length > 0) {
         const byId = new Map(goals.map((goal) => [goal.id, goal]));
         const runs = await database
@@ -271,7 +344,9 @@ export function createActivityStore(database: Database) {
           const item: ActivityItem = {
             id: `responsibility-run:${run.id}`,
             kind: "responsibility",
-            title: goal.title,
+            // A run, not the goal: "Goal · succeeded" under the goal's own title read as a second
+            // goal that had finished, beside the one still active.
+            title: `Run of ${goal.title}`,
             detail:
               clip(run.error ?? run.replyText) ?? `${source}/${eventType}`,
             status: run.status,

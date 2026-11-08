@@ -206,11 +206,85 @@ jobs:
           echo "becomes_latest=$becomes_latest" >> "$GITHUB_OUTPUT"
           echo "$VERSION becomes the latest release: $becomes_latest."
 
-  # The same checks CI runs, against the commit being published. This is the gate: nothing is built
-  # or tagged unless they pass here, on this exact tree.
-  checks:
+  # Whether the full CI suite runs again on the release commit (scripts/release-ci-gate.ts). A release
+  # PR that changes only the release files (the versions, CHANGELOG.md and release-policy.json),
+  # merged onto a commit main's CI passed, has a tree that has already been through every check, so
+  # `checks` below is skipped and that run stands in for it. Anything else in the diff, or a parent
+  # whose CI did not pass, runs the full suite as before. When the suite is skipped, the checks CI
+  # makes that read the release files run here instead, so a changelog or policy edited in the
+  # release PR is still held to them.
+  gate:
+    name: checks needed
     needs: [metadata, verify]
     if: needs.metadata.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    # The decision waits up to 40 minutes for main's CI on the parent while it is still running.
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      # To read main's CI runs.
+      actions: read
+    outputs:
+      full_checks: ${{ steps.decide.outputs.full_checks }}
+    steps:
+      # The release commit and its parent, which the decision compares.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+          no-cache: true
+      - id: decide
+        name: Decide whether the full checks run again
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun scripts/release-ci-gate.ts "$GITHUB_SHA"
+      - if: steps.decide.outputs.full_checks == 'false'
+        run: bun install --frozen-lockfile
+      # CI's `format, lint, types` job formats and lints package.json and the policy, and checks the
+      # versions the release moved still agree with each other.
+      - name: Format and lint
+        if: steps.decide.outputs.full_checks == 'false'
+        run: |
+          set -euo pipefail
+          bun run format:check
+          bun run lint
+      - name: Desktop version tracks the release version
+        if: steps.decide.outputs.full_checks == 'false'
+        run: bun desktop/scripts/desktop-version.ts check
+      - name: Chart appVersion tracks the release version
+        if: steps.decide.outputs.full_checks == 'false'
+        run: |
+          set -euo pipefail
+          pkg=$(bun -e 'console.log(require("./package.json").version)')
+          chart=$(bun -e 'console.log(require("yaml").parse(require("fs").readFileSync("charts/openbot/Chart.yaml","utf8")).appVersion)')
+          if [ "$pkg" != "$chart" ]; then
+            echo "::error::package.json is $pkg but charts/openbot/Chart.yaml appVersion is $chart."
+            exit 1
+          fi
+      # Every test that reads the changelog or the policy, found by name so a new one is included
+      # without anybody adding it here.
+      - name: The tests that read CHANGELOG.md and release-policy.json
+        if: steps.decide.outputs.full_checks == 'false'
+        run: |
+          set -euo pipefail
+          tests=()
+          while IFS= read -r file; do
+            tests+=("$file")
+          done < <(git grep -l -e CHANGELOG.md -e release-policy.json -- '*.test.ts' '*.test.tsx')
+          test "${#tests[@]}" -gt 0
+          printf '%s\n' "${tests[@]}"
+          bun test "${tests[@]}"
+
+  # The same checks CI runs, against the commit being published, unless `gate` found the release
+  # commit is the release files on a commit main's CI passed. This or that run is the gate: nothing is
+  # built or tagged unless one of them passed on this tree.
+  checks:
+    needs: [metadata, verify, gate]
+    if: needs.metadata.outputs.is_release == 'true' && needs.gate.outputs.full_checks == 'true'
     uses: $/.github/workflows/ci.yml
     permissions:
       contents: read
@@ -220,9 +294,16 @@ jobs:
   # publishes images builds them the same way and only the tags differ. `latest` follows the one
   # decision made in `verify`, the same one that marks the GitHub release Latest: whoever pulls
   # `latest` gets the newest stable release, never a candidate, a beta or an older patch.
+  #
+  # After `checks` passed, or after `gate` passed having decided `checks` need not run. Nothing else:
+  # a `checks` skipped for any other reason, or a `gate` that failed, publishes nothing.
   images:
-    needs: [metadata, verify, checks]
-    if: needs.metadata.outputs.is_release == 'true'
+    needs: [metadata, verify, gate, checks]
+    if: >-
+      !cancelled() && needs.metadata.outputs.is_release == 'true' &&
+      needs.verify.result == 'success' && needs.gate.result == 'success' &&
+      (needs.checks.result == 'success' ||
+       (needs.checks.result == 'skipped' && needs.gate.outputs.full_checks == 'false'))
     uses: $/.github/workflows/images.yml
     with:
       ref: ${{ github.sha }}
@@ -237,22 +318,31 @@ jobs:
       id-token: write
       attestations: write
 
-  # The macOS and Windows installers, built from the commit that passed the checks, with the CLI
-  # bundled. A candidate or beta pins the images built above, so whoever tests it runs exactly what
-  # the final will ship. A stable release is what customers install, and it is not pinned. These are
-  # ad-hoc signed or unsigned, because this workflow holds no signing certificate. Desktop macOS
-  # signing and Desktop Windows signing, dispatched at the end of `github-release`, replace them
-  # with signed ones built the same way, pinned or not (desktop/scripts/signed-build.ts).
+  # A candidate or beta's ad-hoc and unsigned installers, built from the commit that passed the
+  # checks, with the CLI bundled and pinned to the images built above, so whoever tests it runs
+  # exactly what the final will ship. They give testers a link before signing is approved; Desktop
+  # macOS signing and Desktop Windows signing replace them with signed ones built the same way
+  # (desktop/scripts/signed-build.ts). They are built beside `github-release`, not before it, so
+  # signing starts as soon as the release and its container-images.json exist, and `installers`
+  # attaches them when they are ready.
+  #
+  # A stable release builds none here. Its installers are the signing runs' own builds, the only ones
+  # a stable release ever carries, so building another pair first only delayed them. The Desktop
+  # workflow still builds and tests the app on a stable release commit's push to main, as on every
+  # change to package.json, and a final ships its candidate's tree, which this job built and tested
+  # when the candidate was published.
   desktop:
     name: desktop
-    needs: [metadata, verify, checks, images]
-    if: needs.metadata.outputs.is_release == 'true'
+    needs: [metadata, verify, images]
+    if: >-
+      !cancelled() && needs.metadata.outputs.prerelease == 'true' &&
+      needs.images.result == 'success'
     uses: $/.github/workflows/desktop-build.yml
     with:
       ref: ${{ github.sha }}
       channel: release
       bundle_cli: true
-      manifest_artifact: ${{ needs.metadata.outputs.prerelease == 'true' && needs.images.outputs.manifest-artifact || '' }}
+      manifest_artifact: ${{ needs.images.outputs.manifest-artifact }}
       retention_days: 30
       platforms: '["macos","windows"]'
     secrets:
@@ -260,13 +350,19 @@ jobs:
     permissions:
       contents: read
 
-  # The tag and the release, last, so nothing is announced that was not built. The manifest is the
-  # useful artefact: it pins the digest, so a deploy or a rollback names an exact image rather than a
-  # tag somebody could move.
+  # The tag and the release, once the images it describes are pushed, so nothing is announced that
+  # was not built. The manifest is the useful artefact: it pins the digest, so a deploy or a rollback
+  # names an exact image rather than a tag somebody could move. The installers come after: the
+  # signing runs it starts build, sign and attach them, and for a candidate or beta `installers`
+  # attaches the ad-hoc and unsigned ones first if they are ready first. A stable release is
+  # published not Latest, so `releases/latest` keeps serving the previous release's signed
+  # installers until this one has all of its own (scripts/release-make-latest.sh).
   github-release:
     name: tag and release
-    needs: [metadata, verify, checks, images, desktop]
-    if: needs.metadata.outputs.is_release == 'true'
+    needs: [metadata, verify, images]
+    if: >-
+      !cancelled() && needs.metadata.outputs.is_release == 'true' &&
+      needs.verify.result == 'success' && needs.images.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -291,13 +387,6 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ needs.images.outputs.manifest-artifact }}
-      # The installers the desktop job built, one folder per platform under `installers/`, where the
-      # step below attaches them to the release. They are ad-hoc and unsigned, like every CI build,
-      # until the signing runs replace them.
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: openbot-desktop-*
-          path: installers
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.19.0
@@ -368,11 +457,11 @@ jobs:
             edit_flags=(--prerelease --latest=false)
           else
             section="## ${VERSION#v}"
-            # Never Latest here. The installers attached below are ad-hoc, and macOS refuses
-            # them, so `releases/latest` keeps serving the previous release's signed installers
-            # until Desktop macOS signing attaches this one's and marks it Latest, following
-            # `verify`'s decision (BECOMES_LATEST). A re-run leaves Latest as it is: the signing
-            # run may already have moved it here.
+            # Never Latest here. The release has no installers yet, so `releases/latest` keeps
+            # serving the previous release's signed installers until both signing runs have
+            # attached this one's and the second marks it Latest, following `verify`'s decision
+            # (BECOMES_LATEST). A re-run leaves Latest as it is: a signing run may already have
+            # moved it here.
             create_flags=(--latest=false)
             edit_flags=()
           fi
@@ -414,57 +503,32 @@ jobs:
               --title "$VERSION" --notes-file notes.md "${create_flags[@]}"
           fi
 
-          # The installers are rebuilt on every run, so a rerun produces new bytes. They are kept
-          # out of the check above, which holds the release's source, chart and manifest to what
-          # was first published. An installer already on the release, such as a signed one a
-          # signing run attached, is kept, so a re-run never puts the unsigned build back. A
-          # candidate's installers are also attached under their fixed download names. A stable
-          # release's fixed names are left to the signing runs, so `releases/latest/download` never
-          # serves an unsigned installer (scripts/release-attach-installers.sh).
-          attached_list="$RUNNER_TEMP/attached-installers.txt"
-          ATTACHED_LIST="$attached_list" scripts/release-attach-installers.sh "$VERSION" installers
-
-          # Say which CLI the installers carry. Every platform bundles the same one, so the first
-          # build-version.json that names a CLI is the answer.
-          cli="no CLI bundled"
-          node=""
-          while IFS= read -r build; do
-            if jq -e '.cli' "$build" >/dev/null; then
-              cli="$(jq -r '.cli.name + "@" + .cli.version' "$build")"
-              node="$(jq -r '.node.version // empty' "$build")"
-              break
-            fi
-          done < <(find installers -type f -name build-version.json | sort)
+          # Where the installers come from. A stable release carries only the signing runs' builds;
+          # a candidate or beta also gets its ad-hoc and unsigned ones from `installers`, until the
+          # signed ones replace them. A final is checked against its candidate, CLI pin included.
           {
             echo "### Installers for $VERSION"
             echo ""
-            while read -r name fixed; do
-              if [ "$PRERELEASE" = true ]; then
-                echo "- \`$name\`, also as \`$fixed\`"
-              else
-                echo "- \`$name\`, and as \`$fixed\` once it is signed"
-              fi
-            done < "$attached_list"
-            echo ""
-            echo "- CLI: $cli"
-            if [ -n "$node" ]; then
-              echo "- Node: $node"
+            echo "Desktop macOS signing and Desktop Windows signing build, sign and attach them, under"
+            echo "their own names and their fixed download names, once each is approved."
+            if [ "$PRERELEASE" = true ]; then
+              echo "The ad-hoc and unsigned installers are attached by the \`installers\` job when they are built, unless a signed one is already there."
             fi
-            # A final cut from a candidate is checked against that candidate, which includes the
-            # CLI pin, so the CLI here is the one the candidate was tested with.
             if [ "$FINAL_FROM_CANDIDATE" = true ]; then
-              echo "- This is the CLI the candidate pinned."
+              echo "They carry the CLI the candidate pinned."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
       # The tag above was created with GITHUB_TOKEN, and GitHub starts no workflow from that push, so
       # Mac signing is dispatched explicitly; a dispatch is the one event GITHUB_TOKEN may start. On
       # the tag, so the signed build is this commit and carries the release version. The
       # `macos-signing` environment's required reviewers still approve the signing itself. A
-      # candidate's signed build is pinned to this release's images, like its ad-hoc one. Each
-      # signing run attaches its signed installers under both their names, replacing the unsigned
-      # ones attached above. A stable release becomes Latest in whichever signing run, Mac or
-      # Windows, finishes second, once every signed installer is on it, when `verify` said it
-      # should (scripts/release-make-latest.sh).
+      # candidate's signed build is pinned to this release's images, read from the
+      # container-images.json just attached. Both are started here, as soon as the release they
+      # attach to exists, so they build while the rest of this run finishes. Each signing run
+      # attaches its signed installers under both their names, replacing any unsigned ones. A
+      # stable release becomes Latest in whichever signing run, Mac or Windows, finishes second,
+      # once every signed installer is on it, when `verify` said it should
+      # (scripts/release-make-latest.sh).
       - name: Start signing the Mac build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -487,6 +551,65 @@ jobs:
           gh workflow run desktop-signing.yml -R "$GITHUB_REPOSITORY" --ref "$VERSION" \
             -f signing-mode=keyvault -f release-tag="$VERSION" -f make-latest="$BECOMES_LATEST"
 
+  # A candidate or beta's ad-hoc and unsigned installers, onto the release once `desktop` has built
+  # them, so testers have a link before signing is approved. Signing is already running by now, and
+  # may attach first. So nothing here replaces anything: each installer, and its fixed-name copy, is
+  # added only if the release does not have that name yet, and a name a signing run attached
+  # meanwhile wins (scripts/release-attach-installers.sh). A signing run always replaces both names
+  # with its signed build, whichever comes first.
+  installers:
+    name: attach unsigned installers
+    needs: [metadata, github-release, desktop]
+    if: >-
+      !cancelled() && needs.metadata.outputs.prerelease == 'true' &&
+      needs.github-release.result == 'success' && needs.desktop.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      # One folder per platform under `installers/`.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: openbot-desktop-*
+          path: installers
+      - name: Attach what the release does not have yet
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          attached_list="$RUNNER_TEMP/attached-installers.txt"
+          ATTACHED_LIST="$attached_list" scripts/release-attach-installers.sh "$VERSION" installers
+
+          # Say which CLI the installers carry. Every platform bundles the same one, so the first
+          # build-version.json that names a CLI is the answer.
+          cli="no CLI bundled"
+          node=""
+          while IFS= read -r build; do
+            if jq -e '.cli' "$build" >/dev/null; then
+              cli="$(jq -r '.cli.name + "@" + .cli.version' "$build")"
+              node="$(jq -r '.node.version // empty' "$build")"
+              break
+            fi
+          done < <(find installers -type f -name build-version.json | sort)
+          {
+            echo "### Unsigned installers for $VERSION"
+            echo ""
+            while read -r name fixed; do
+              echo "- \`$name\`, also as \`$fixed\`"
+            done < "$attached_list"
+            echo ""
+            echo "- CLI: $cli"
+            if [ -n "$node" ]; then
+              echo "- Node: $node"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # A final cut from a candidate is published from `release/X.Y`, so main has not seen it: the
   # version bump, the changelog section and any fix made while the candidates were tested are all
   # on the release branch only. This opens the PR that brings them home. It is a PR and not a push,
@@ -503,7 +626,10 @@ jobs:
   merge-back:
     name: merge back
     needs: [metadata, github-release]
-    if: needs.metadata.outputs.final_from_candidate == 'true'
+    # Spelled out, because `checks` before it may have been skipped on purpose.
+    if: >-
+      !cancelled() && needs.metadata.outputs.final_from_candidate == 'true' &&
+      needs.github-release.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write

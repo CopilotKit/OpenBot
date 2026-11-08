@@ -104,7 +104,8 @@ export function AccessSections({ agent }: { agent: AgentProfile }) {
       {agent.mine && !personal ? <YourApps agent={agent} /> : null}
       {agent.mine ? <YourSkills agentId={agent.id} /> : null}
       <Granted agentId={agent.id} mine={agent.mine} />
-      <HandoffPanel agentId={agent.id} />
+      {/* Every Bot can ask every other in the personal edition, so there is no switch per Bot. */}
+      {personal ? null : <HandoffPanel agentId={agent.id} />}
     </>
   );
 }

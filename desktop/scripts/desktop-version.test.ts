@@ -59,6 +59,31 @@ function fixture() {
   return { root, write, read, run };
 }
 
+/** Runs git in `root`, and fails the test on any error. */
+function git(root: string, ...args: string[]) {
+  const result = Bun.spawnSync([
+    "git",
+    "-C",
+    root,
+    "-c",
+    "user.name=Version test",
+    "-c",
+    "user.email=version@example.invalid",
+    "-c",
+    "commit.gpgsign=false",
+    ...args,
+  ]);
+  expect(result.exitCode).toBe(0);
+  return result.stdout.toString().trim();
+}
+
+/** A fixture repository with one empty commit. Returns the commit. */
+function firstCommit(root: string) {
+  git(root, "init", "--quiet");
+  git(root, "commit", "--allow-empty", "--quiet", "-m", "fixture");
+  return git(root, "rev-parse", "HEAD");
+}
+
 afterEach(() => {
   for (const directory of directories.splice(0))
     rmSync(directory, { recursive: true, force: true });
@@ -82,6 +107,17 @@ test("macOS microphone capture has a nonempty system permission description", ()
   );
   expect(plist).toMatch(
     /<key>NSMicrophoneUsageDescription<\/key>\s*<string>\s*[^<\s][^<]*<\/string>/,
+  );
+});
+
+test("macOS speech recognition for narration has a nonempty system permission description", () => {
+  // Without it, asking for speech recognition ends the app (SFSpeechRecognizer.requestAuthorization).
+  const plist = readFileSync(
+    resolve(import.meta.dir, "../src-tauri/Info.plist"),
+    "utf8",
+  );
+  expect(plist).toMatch(
+    /<key>NSSpeechRecognitionUsageDescription<\/key>\s*<string>\s*[^<\s][^<]*<\/string>/,
   );
 });
 
@@ -173,29 +209,10 @@ test.each(["internal", "release"])(
   "%s emits actual commit identity and compatible macOS metadata",
   (channel) => {
     const f = fixture();
-    const git = (...args: string[]) => {
-      const result = Bun.spawnSync(["git", "-C", f.root, ...args]);
-      expect(result.exitCode).toBe(0);
-      return result.stdout.toString().trim();
-    };
-    git("init", "--quiet");
-    git(
-      "-c",
-      "user.name=Version test",
-      "-c",
-      "user.email=version@example.invalid",
-      "-c",
-      "commit.gpgsign=false",
-      "commit",
-      "--allow-empty",
-      "--quiet",
-      "-m",
-      "fixture",
-    );
-    const sourceSha = git("rev-parse", "HEAD");
+    const sourceSha = firstCommit(f.root);
     const version =
       channel === "internal"
-        ? `0.0.10-internal.g${sourceSha.slice(0, 12)}`
+        ? `0.0.10-internal.1.g${sourceSha.slice(0, 12)}`
         : "0.0.10";
     expect(f.run(channel).code).toBe(0);
     expect(JSON.parse(f.read("desktop/build-version.json"))).toEqual({
@@ -234,29 +251,10 @@ test("a release candidate syncs whole and keeps macOS metadata numeric", () => {
   expect(f.read("desktop/src-tauri/Cargo.lock")).toContain(
     'name = "openbot-desktop"\nversion = "0.3.0-rc.1"',
   );
-  const git = (...args: string[]) => {
-    const result = Bun.spawnSync(["git", "-C", f.root, ...args]);
-    expect(result.exitCode).toBe(0);
-    return result.stdout.toString().trim();
-  };
-  git("init", "--quiet");
-  git(
-    "-c",
-    "user.name=Version test",
-    "-c",
-    "user.email=version@example.invalid",
-    "-c",
-    "commit.gpgsign=false",
-    "commit",
-    "--allow-empty",
-    "--quiet",
-    "-m",
-    "fixture",
-  );
-  const sourceSha = git("rev-parse", "HEAD");
+  const sourceSha = firstCommit(f.root);
   expect(f.run("internal").code).toBe(0);
   expect(JSON.parse(f.read("desktop/build-version.json"))).toEqual({
-    version: `0.3.0-rc.1-internal.g${sourceSha.slice(0, 12)}`,
+    version: `0.3.0-rc.1-internal.1.g${sourceSha.slice(0, 12)}`,
     releaseVersion: "0.3.0-rc.1",
     sourceSha,
     channel: "internal",
@@ -265,4 +263,83 @@ test("a release candidate syncs whole and keeps macOS metadata numeric", () => {
   for (const key of ["CFBundleShortVersionString", "CFBundleVersion"]) {
     expect(plist).toContain(`<key>${key}</key><string>0.3.0</string>`);
   }
+});
+
+/*
+ * The Windows installer compares the version it installs with the one installed, by semver, and
+ * semver compares a prerelease identifier that is not a number as text. Named after the commit
+ * alone, 0.3.1-internal.g4400ba023e0c (the later build) sorted before 0.3.1-internal.gd298debe26f2,
+ * and the installer said a newer version was already installed. `Bun.semver.order` follows the
+ * same semver precedence as the `semver` crate the installer's SemverCompare and the app use.
+ */
+test("a later internal build orders after an earlier one whatever their hashes", () => {
+  const f = fixture();
+  const earlier = firstCommit(f.root);
+  expect(f.run("internal").code).toBe(0);
+  const first = JSON.parse(f.read("desktop/build-version.json")).version;
+  // The next commit, chosen so its hash sorts before the earlier one's, as 4400ba02 did d298debe.
+  const tree = git(f.root, "rev-parse", "HEAD^{tree}");
+  let later = "";
+  for (let attempt = 0; !later; attempt += 1) {
+    const sha = git(
+      f.root,
+      "commit-tree",
+      tree,
+      "-p",
+      earlier,
+      "-m",
+      `next ${attempt}`,
+    );
+    if (sha.slice(0, 12) < earlier.slice(0, 12)) later = sha;
+  }
+  git(f.root, "update-ref", "HEAD", later);
+  expect(f.run("internal").code).toBe(0);
+  const second = JSON.parse(f.read("desktop/build-version.json")).version;
+  expect(Bun.semver.order(first, second)).toBe(-1);
+  expect(Bun.semver.order(second, first)).toBe(1);
+  expect(first).toBe(`0.0.10-internal.1.g${earlier.slice(0, 12)}`);
+  expect(second).toBe(`0.0.10-internal.2.g${later.slice(0, 12)}`);
+  // The release itself still orders after every internal build of it.
+  expect(Bun.semver.order(second, "0.0.10")).toBe(-1);
+});
+
+test("an internal build refuses a shallow checkout, whose commit count is wrong", () => {
+  const f = fixture();
+  git(f.root, "init", "--quiet");
+  git(f.root, "add", "-A");
+  git(f.root, "commit", "--quiet", "-m", "fixture");
+  git(f.root, "commit", "--allow-empty", "--quiet", "-m", "next");
+  const shallow = mkdtempSync(join(tmpdir(), "openbot-desktop-version-"));
+  directories.push(shallow);
+  rmSync(shallow, { recursive: true });
+  const clone = Bun.spawnSync([
+    "git",
+    "clone",
+    "--quiet",
+    "--depth",
+    "1",
+    `file://${f.root}`,
+    shallow,
+  ]);
+  expect(clone.exitCode).toBe(0);
+  const result = Bun.spawnSync(
+    [
+      process.execPath,
+      join(shallow, "desktop/scripts/desktop-version.ts"),
+      "internal",
+    ],
+    { cwd: tmpdir() },
+  );
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr.toString()).toContain("shallow");
+  // A release build needs no count, so a shallow checkout still builds one.
+  const release = Bun.spawnSync(
+    [
+      process.execPath,
+      join(shallow, "desktop/scripts/desktop-version.ts"),
+      "release",
+    ],
+    { cwd: tmpdir() },
+  );
+  expect(release.exitCode).toBe(0);
 });

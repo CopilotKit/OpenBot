@@ -38,7 +38,7 @@ function rememberIntroduced() {
 }
 
 /**
- * Teach a Bot on OpenBot Desktop, where the person's browser is a window on their desktop, as three steps on one stage:
+ * Teach a Bot where the person's browser is a window on their desktop (a host-side computer of people's browsers), as three steps on one stage:
  * what it does, naming the task (with narration), and opening the browser already recording. While a recording runs the
  * third step is the recording itself, with Show browser and Stop; once it stops it says what became of it, with Record
  * another. The introduction shows until the person has saved a recording, and Back always reaches it.
@@ -55,7 +55,8 @@ export function TeachSteps({ state }: { state: BrowserApiState }) {
   const saved =
     recording.stopped &&
     !recording.stopped.discarded &&
-    !recording.stopped.empty;
+    !recording.stopped.empty &&
+    !recording.stopped.kept;
   useEffect(() => {
     if (saved) rememberIntroduced();
   }, [saved]);

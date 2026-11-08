@@ -17,9 +17,10 @@ import type { ComposioApp } from "./queries";
  *
  * The classification is measured server-side from the fetched listing and never re-derived here:
  * never inferred from the `Api` suffix (Arcade's naming convention, not a contract — a guess wearing
- * a measurement's clothes), and never from `classify()`'s verdict, which is TOTAL: its closed
- * destructive-write verdict for absent metadata is byte-identical to its verdict for a genuinely
- * destructive action, so counting "did classify return something" counts nothing.
+ * a measurement's clothes), and never from `classify()`'s verdict here, which is TOTAL: it answers
+ * every action, so counting "did classify return something" counts nothing. An action it could not
+ * classify is an unclassified write: not destructive, so it doesn't always ask, and kept away from
+ * every background read (`mightDestroy` in server/src/plugins/catalogue.ts).
  *
  * Phrased as what it will feel like, not as a percentage.
  */
@@ -28,7 +29,7 @@ export function coverageWarning(
 ): string | null {
   if (app.classifiedCount === null) return null;
   if (app.actionCount > 0 && app.classifiedCount === 0) {
-    return "This provider has not said which of its actions only read, so every action is treated as a destructive write and every call will ask for approval.";
+    return "This provider hasn't said which of its actions only read, so each one is treated as a change. Bots ask before using it wherever changes need approval, and check-ins can't use it.";
   }
   return null;
 }

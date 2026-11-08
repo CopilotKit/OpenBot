@@ -90,15 +90,66 @@ export const DID_NOT_HAPPEN_EVENT_TYPES = [
   "component.function_failed",
 ] as const;
 
+/**
+ * Every row about one action a Bot took on its computer, whatever became of it.
+ *
+ * The Computer actions view used to ask for `computer.action_allowed` alone, so a refused, failed or
+ * stopped action was missing from the one view named for them, and the actions that remained all
+ * read as allowed.
+ */
+export const COMPUTER_ACTION_EVENT_TYPES = [
+  "computer.action_allowed",
+  "computer.action_refused",
+  "computer.action_failed",
+  "computer.action_stopped",
+] as const;
+
+/**
+ * OpenBot's own working, which the personal edition's Activity leaves out, and the rule that draws an
+ * action once. Shared with the server, whose Activity report counts what this page shows.
+ */
+export {
+  OPENBOT_WORKING_EVENT_TYPES,
+  oneRowPerAction,
+} from "@openbot/shared/activity-rows";
+
 export type AuditOutcome = "refused" | "did-not-happen" | "allowed";
 
 const REFUSED = new Set<string>(REFUSED_EVENT_TYPES);
 const DID_NOT_HAPPEN = new Set<string>(DID_NOT_HAPPEN_EVENT_TYPES);
 
-/** What kind of thing this row is, for the label and the colour it is drawn in. */
-export function outcomeOf(eventType: string): AuditOutcome {
+type Row = { eventType: string; payload?: Record<string, unknown> };
+
+/**
+ * What kind of thing this row is, for the label and the colour it is drawn in.
+ *
+ * Mostly its type. The two approval rows are the exception, because one type covers every answer:
+ * `approval.person_decided` is a person allowing or denying, and `approval.evaluated` is the gate
+ * allowing, asking or refusing. Read by type alone, a denial was drawn as "Allowed". They stay out of
+ * the Blocked view, whose list is by type; the action a denial stopped is there as its own row.
+ */
+export function outcomeOf(row: string | Row): AuditOutcome {
+  const { eventType, payload } =
+    typeof row === "string" ? { eventType: row, payload: undefined } : row;
   if (REFUSED.has(eventType)) return "refused";
   if (DID_NOT_HAPPEN.has(eventType)) return "did-not-happen";
+  // A folder action recorded before it was a computer's says how it went in its payload.
+  if (
+    eventType === "configuration.changed" &&
+    payload?.change === "host_access_tool_call"
+  ) {
+    if (payload.outcome === "refused") return "refused";
+    if (payload.outcome === "failed" || payload.outcome === "stopped")
+      return "did-not-happen";
+  }
+  if (eventType === "approval.person_decided" && payload?.decision === "deny")
+    return "refused";
+  if (
+    eventType === "approval.evaluated" &&
+    (payload?.outcome as { behaviour?: unknown } | undefined)?.behaviour ===
+      "deny"
+  )
+    return "refused";
   return "allowed";
 }
 

@@ -1,4 +1,8 @@
-import { checkNavigationTarget } from "../computer/target";
+import { isLoopbackHost } from "@openbot/shared/this-machine";
+import {
+  checkNavigationTarget,
+  isNeverAllowedHostname,
+} from "../computer/target";
 import { isManagedEndpoint } from "./managed-endpoint";
 
 /**
@@ -249,6 +253,36 @@ function strippedBody(body: BodyInit | null | undefined): { body?: BodyInit } {
 }
 
 /**
+ * Where to dial an address a person gave on their own machine, from a server in a container there.
+ *
+ * OpenBot Desktop runs this server in a container, where `127.0.0.1` is the container and never the
+ * person's machine, so an agent they run on their Mac at `http://127.0.0.1:8765/ag-ui` was
+ * unreachable while the same agent at `http://host.docker.internal:8765/ag-ui` worked. The Desktop
+ * says which name its container reaches the machine by (`OPENBOT_THIS_MACHINE_HOST`), and a loopback
+ * host (`localhost`, `*.localhost`, `127.x.y.z`, `[::1]`) is dialled through that name instead, the
+ * same rewrite the Desktop makes for its own addresses (`container_address` in env.rs).
+ *
+ * The address as written is what is checked and stored, so this only ever changes where an allowed
+ * address is dialled. Unset, as on a host server or a hosted deployment, nothing changes.
+ */
+export function onThisMachine(
+  address: string,
+  thisMachineHost: string | undefined,
+): string {
+  if (!thisMachineHost) return address;
+  let url: URL;
+  try {
+    url = new URL(address);
+  } catch {
+    return address;
+  }
+  const host = url.hostname.toLowerCase().replace(/\.+$/, "");
+  if (!isLoopbackHost(host) && !host.endsWith(".localhost")) return address;
+  url.hostname = thisMachineHost;
+  return url.toString();
+}
+
+/**
  * `fetch`, with the endpoint check applied to every hop rather than only the address a person typed.
  *
  * Checking the URL once and then handing it to a fetch that follows redirects is a check with a hole
@@ -293,6 +327,12 @@ export function createAgentFetch(
      * address the deployment did not name.
      */
     managedEndpoints?: readonly (string | URL)[];
+    /**
+     * The name this server's container reaches the person's machine by, when it runs in one there.
+     * A loopback address is dialled through it; see {@link onThisMachine}. The deployment's own
+     * agents are dialled exactly as configured.
+     */
+    thisMachineHost?: string;
     fetchImpl?: typeof fetch;
     /**
      * Told about every address this refused to dial, and why.
@@ -347,9 +387,22 @@ export function createAgentFetch(
     let carried = init;
 
     for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+      // Checked as written, dialled from where this server runs. The translated address is held to
+      // the same floor, so no setting can turn an allowed address into the metadata endpoint.
+      const dialled =
+        options.managedEndpoints &&
+        isManagedEndpoint(target, options.managedEndpoints)
+          ? target
+          : onThisMachine(target, options.thisMachineHost);
+      if (isNeverAllowedHostname(new URL(dialled).hostname)) {
+        throw refuse(
+          dialled,
+          `${NOT_DIALLED}${dialled}: an agent may not live there.`,
+        );
+      }
       // `manual` is what makes this a check rather than a comment: the caller sees the redirect, and
       // the underlying fetch cannot quietly follow one on its own.
-      const response = await doFetch(target, {
+      const response = await doFetch(dialled, {
         ...carried,
         redirect: "manual",
       });

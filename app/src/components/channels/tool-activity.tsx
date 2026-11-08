@@ -12,8 +12,7 @@ import {
 import {
   answersTheModel,
   connectorName,
-  humanise,
-  ownToolLabel,
+  ownToolAttempt,
   readToolName,
 } from "@openbot/shared/tool-name";
 import {
@@ -37,15 +36,27 @@ import { PendingApprovals } from "@/components/approvals/inline-approval";
 import { codingLook, foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { markdownComponents, markdownPlugins } from "@/lib/markdown";
 import {
+  RESEARCH_RESULTS_LABELS,
+  type ResearchSource,
+  readResearchSources,
+} from "@/lib/plugins/research-results";
+import {
   asText,
   forDisplay,
   REFUSAL_MARKER,
   toolResultFailed,
+  UNOFFERED_TOOL_SENTENCE,
+  unofferedTool,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
-import { browserStepDetails, isBrowserStep } from "./browser-activity";
+import {
+  awaitingFreshLook,
+  browserStepDetails,
+  isBrowserStep,
+} from "./browser-activity";
 import type { VisibleChatItem } from "./chat-messages";
 import { codingOutcome, lookStep } from "./coding-tool-cards";
+import { ResearchResults } from "./research-results";
 import { SubtaskStep } from "./subtask-step";
 import { ToolLine } from "./tool-line";
 
@@ -98,6 +109,8 @@ export function groupToolSteps(
     run = [];
   };
   for (const item of items) {
+    // Nothing happened, and the Bot looks and goes again: not a step to show (`awaitingFreshLook`).
+    if (item.kind === "tool" && awaitingFreshLook(item)) continue;
     if (item.kind === "tool" && foldable(item, isDrawn)) {
       run.push(item);
       continue;
@@ -281,6 +294,12 @@ export type StepDetails = {
   output?: string;
   /** The output is a file, a command's output or a search's matches: drawn as it came, not as markdown. */
   verbatim?: boolean;
+  /**
+   * The pages a web search found or a page read returned, read out of the provider's answer. When
+   * set, the step opens to these and nothing else: its inputs were the model's (an objective, a
+   * session id) and its output was the provider's JSON.
+   */
+  sources?: ResearchSource[];
   /** A subtask's own facts, which its row reads to find and draw the steps it took. */
   subtask?: {
     toolCallId: string;
@@ -383,15 +402,19 @@ export function stepDetails(step: ToolItem): StepDetails {
   const body = refused ? answer?.slice(REFUSAL_MARKER.length).trim() : answer;
   // A tool whose answer is for the model, not the person; see `ServerToolLine`.
   const own = answersTheModel(name);
+  // A tool the Bot was never offered: the runtime's answer lists every tool it has, for the model.
+  const unoffered = unofferedTool(step.result);
   const outcome = {
     id: step.id,
     pending: step.result === undefined,
-    failed: !refused && toolResultFailed(step.result),
+    failed: !refused && (unoffered || toolResultFailed(step.result)),
     refused,
     // Neither what it was given nor what it said: both were for the model (a tool search's query
     // and limit), so the line says what it did and does not open.
     inputs: own ? [] : inputs,
-    ...(body && !own ? { output: body } : {}),
+    ...(body && !own
+      ? { output: unoffered ? UNOFFERED_TOOL_SENTENCE : body }
+      : {}),
   };
   // Not a connector: one of this deployment's own tools, or one an external agent runs itself.
   // Named in words, never as an identifier.
@@ -399,7 +422,10 @@ export function stepDetails(step: ToolItem): StepDetails {
     return {
       ...outcome,
       kind: "tool",
-      label: ownToolLabel(name, outcome.pending) ?? humanise(name),
+      // Beside "Blocked", what was tried: "Save a file", not "Saved a file", which did not happen.
+      label:
+        (refused ? ownToolAttempt(name) : null) ??
+        readToolName(name, outcome.pending).label,
       pages: 0,
     };
 
@@ -407,7 +433,11 @@ export function stepDetails(step: ToolItem): StepDetails {
   const role = researchRoleOfTool(server, rest.join("__"));
   const { label, detail } = readToolName(name);
   const urls = role === "fetch" ? urlsOf(args) : [];
-  const base = { ...outcome, label };
+  const sources =
+    role && !outcome.failed && !refused && body
+      ? readResearchSources(body)
+      : null;
+  const base = { ...outcome, label, ...(sources ? { sources } : {}) };
   if (role === "search") {
     const query = firstString(
       args.query,
@@ -677,7 +707,17 @@ export function StepRow({
           {line}
         </summary>
         <div className="mt-1.5 space-y-2 pl-5">
-          {step.inputs.length ? (
+          {step.sources ? (
+            <ResearchResults
+              label={
+                RESEARCH_RESULTS_LABELS[
+                  step.kind === "search" ? "search" : "fetch"
+                ]
+              }
+              sources={step.sources}
+            />
+          ) : null}
+          {step.inputs.length && !step.sources ? (
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-muted-foreground">
               {step.inputs.map(([key, value]) => (
                 <div className="contents" key={key}>
@@ -689,7 +729,7 @@ export function StepRow({
               ))}
             </dl>
           ) : null}
-          {step.output ? (
+          {step.output && !step.sources ? (
             <StepOutput output={step.output} verbatim={step.verbatim} />
           ) : null}
         </div>

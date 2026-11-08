@@ -337,6 +337,11 @@ pub fn tool(engine: Engine) -> Command {
 }
 
 fn command_at(engine: Engine, binary: &Path) -> Command {
+    command_configured(engine, binary, crate::docker_config::owned())
+}
+
+/// `command_at`, with OpenBot's Docker configuration kept in `docker_config`.
+fn command_configured(engine: Engine, binary: &Path, docker_config: Option<&Path>) -> Command {
     let mut built = command(binary);
     let mut path = tools_dir()
         .map(|dir| path_with(dir))
@@ -372,6 +377,13 @@ fn command_at(engine: Engine, binary: &Path) -> Command {
     }
     if let Some(path) = path {
         built.env("PATH", path);
+    }
+    // A pull through the person's own configuration runs Docker Desktop's credential helper,
+    // which macOS stops to ask about when OpenBot runs it. See `docker_config`.
+    if let Some(dir) = docker_config.and_then(|owned| {
+        crate::docker_config::for_commands_in(owned, |name| std::env::var_os(name))
+    }) {
+        built.env("DOCKER_CONFIG", dir);
     }
     built
 }
@@ -703,6 +715,47 @@ fn main() {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// Install's `docker compose pull` and a `docker run` of an image not here yet read Docker's
+    /// configuration, and Docker Desktop's names `docker-credential-desktop`, which macOS stops to
+    /// ask about when OpenBot runs it. OpenBot's commands get its own configuration instead: no
+    /// credential store, the person's context.
+    #[cfg(unix)]
+    #[test]
+    fn engine_commands_run_without_the_persons_docker_credential_helper() {
+        if crate::test_support::isolated_process(
+            "engine::tests::engine_commands_run_without_the_persons_docker_credential_helper",
+        ) {
+            return;
+        }
+        let root = crate::test_support::temp_root("engine docker config");
+        let home = root.join("home");
+        std::fs::create_dir_all(home.join(".docker/contexts/meta")).unwrap();
+        std::fs::write(
+            home.join(".docker/config.json"),
+            r#"{"auths":{"ghcr.io":{}},"credsStore":"desktop","currentContext":"desktop-linux"}"#,
+        )
+        .unwrap();
+        std::env::set_var("HOME", &home);
+        std::env::remove_var("DOCKER_CONFIG");
+        let owned = root.join("docker-config");
+
+        let command = command_configured(Engine::Docker, Path::new("docker"), Some(&owned));
+
+        let config = command
+            .get_envs()
+            .find(|(key, _)| *key == "DOCKER_CONFIG")
+            .and_then(|(_, value)| value);
+        assert_eq!(config, Some(owned.as_os_str()));
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(owned.join("config.json")).unwrap()).unwrap();
+        assert_eq!(
+            written,
+            serde_json::json!({"currentContext": "desktop-linux"})
+        );
+        assert!(owned.join("contexts/meta").is_dir());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn docker_symlink_adds_target_helpers_after_inherited_paths_and_managed_compose() {
@@ -904,7 +957,7 @@ Where a container under rootless Podman reaches this machine's loopback.
 Rootless Podman puts its containers in a network namespace of the person's own, and by default
 nothing in it leads back to the host's `127.0.0.1`: slirp4netns runs with host loopback disabled
 and pasta with `--no-map-gw`. The server is a container now, and what it calls on this machine
-listens only on loopback: the person's browser, deliberately, and a local Intelligence. Measured
+listens only on loopback: a local Intelligence. Measured
 on Ubuntu 24.04 (Podman 4.9.3, slirp4netns) and Fedora 44 (Podman 5.8.9, pasta): a container on a
 Compose network reached neither, at any address, until [`local_api::HOST_LOOPBACK_CONFIG`] was in
 place, and then reached both at this address, which is slirp4netns's fixed one and which pasta is
@@ -968,7 +1021,7 @@ pub mod local_api {
         let address = super::ROOTLESS_HOST_LOOPBACK;
         format!(
             "# Written by OpenBot Desktop: lets its containers reach services this machine runs on\n\
-             # 127.0.0.1, such as the person's browser and OpenBot's back end, at {address}.\n\
+             # 127.0.0.1, such as OpenBot's back end, at {address}.\n\
              [engine]\n\
              network_cmd_options = [\"allow_host_loopback=true\", {{append=true}}]\n\
              \n\

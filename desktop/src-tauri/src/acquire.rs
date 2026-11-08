@@ -151,7 +151,7 @@ fn holds_openbot(connection: &str) -> bool {
 }
 
 /// The machine a connection belongs to, by the naming `connection_for` describes.
-fn machine_of(connection: &str) -> &str {
+pub(crate) fn machine_of(connection: &str) -> &str {
     connection.strip_suffix("-root").unwrap_or(connection)
 }
 

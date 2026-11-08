@@ -198,7 +198,8 @@ pub struct CommandPrompt {
     pub bot_id: String,
     pub bot_name: Option<String>,
     pub root: PathBuf,
-    pub working_directory: Option<String>,
+    /// The folder on this computer the command runs in, when it is not the approved folder itself.
+    pub working_directory: Option<PathBuf>,
     pub command: String,
     pub writable: bool,
     /// The member's OpenBot setting after the team cap, as the server sent it.
@@ -524,7 +525,7 @@ fn broker_loop(inner: Arc<Inner>) {
     let client = match Client::builder().timeout(Duration::from_secs(15)).build() {
         Ok(client) => client,
         Err(error) => {
-            eprintln!("host access broker could not create HTTP client: {error}");
+            log::error!("[host access] could not create its HTTP client: {error}");
             return;
         }
     };
@@ -533,9 +534,9 @@ fn broker_loop(inner: Arc<Inner>) {
             Ok(Some(operation)) => inner.spawn_operation(client.clone(), operation),
             Ok(None) => thread::sleep(inner.config.poll_interval),
             Err(error) => {
-                eprintln!("host access broker poll failed and revoked local leases: {error}");
+                log::warn!("[host access] poll failed and revoked local leases: {error}");
                 if let Err(cleanup) = inner.revoke_all_and_stop() {
-                    eprintln!("host access broker cleanup after poll failure failed: {cleanup}");
+                    log::error!("[host access] cleanup after a failed poll failed: {cleanup}");
                 }
                 thread::sleep(inner.config.poll_interval);
             }
@@ -676,7 +677,7 @@ impl Inner {
             .json(&body)
             .send()
         {
-            eprintln!("host access broker could not post refusal: {error}");
+            log::warn!("[host access] could not post a refusal: {error}");
         }
     }
 
@@ -695,9 +696,12 @@ impl Inner {
                 error: None,
             },
             Err(error) => {
-                eprintln!(
-                    "host access operation {} failed: {error}",
-                    operation.operation_id
+                // What the server is told, not the error itself: that can carry a path or the
+                // output of a command a Bot ran.
+                log::warn!(
+                    "[host access] operation {} failed: {}",
+                    operation.operation_id,
+                    public_error_message(&error)
                 );
                 DesktopResult {
                     operation_id: operation.operation_id.clone(),
@@ -715,7 +719,7 @@ impl Inner {
             .json(&body)
             .send()
         {
-            eprintln!("host access broker could not post result: {error}");
+            log::warn!("[host access] could not post a result: {error}");
         }
     }
 
@@ -924,7 +928,7 @@ impl Inner {
             bot_id: operation.bot_id.clone(),
             bot_name: grant.bot_name.clone(),
             root: grant.root.clone(),
-            working_directory: operation.relative_path.clone(),
+            working_directory: working_directory.clone(),
             command: command.into(),
             writable,
             command_policy,

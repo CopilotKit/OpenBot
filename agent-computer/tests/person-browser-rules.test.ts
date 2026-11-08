@@ -485,7 +485,21 @@ describe("which computer a person's browser may run on", () => {
       kind: "person",
       id: "u-ada",
     });
-    // OpenBot Desktop's host-side computer.
+    // The personal edition's one computer, started as its one person's (scripts/start.sh, OpenBot Desktop).
+    expect(
+      computerOwner({
+        COMPUTER_PERSON_ID: "personal",
+        OPENBOT_EDITION: "personal",
+      }),
+    ).toEqual({ kind: "personal", id: "personal" });
+    // The edition alone says nothing about whose a computer is: it stays the one every Bot shares.
+    expect(computerOwner({ OPENBOT_EDITION: "personal" })).toEqual({
+      kind: "shared",
+    });
+    expect(
+      computerOwner({ COMPUTER_PERSON_ID: "u-ada", OPENBOT_EDITION: "team" }),
+    ).toEqual({ kind: "person", id: "u-ada" });
+    // A host-side computer for people's browsers alone.
     expect(computerOwner({ COMPUTER_PEOPLE_ONLY: "on" })).toEqual({
       kind: "people",
     });
@@ -508,6 +522,15 @@ describe("which computer a person's browser may run on", () => {
       expect(refusedHere(owner, "invoice-collector")).toBeNull();
       expect(refusedHere(owner, "shared")).toBeNull();
     }
+  });
+
+  test("on the personal edition's one computer, beside the one person's own Bots", () => {
+    const personal = computerOwner({
+      COMPUTER_PERSON_ID: "personal",
+      OPENBOT_EDITION: "personal",
+    });
+    for (const id of [PERSON, "invoice-collector", "shared"])
+      expect(refusedHere(personal, id)).toBeNull();
   });
 
   test("on a computer of its own, and nothing else there", () => {

@@ -3,6 +3,7 @@ import type { HeadlessTool } from "@openbot/toolkit/headless-tools";
 import type { ComponentCatalog } from "@openbot/toolkit/ports";
 import { z } from "zod";
 import type { AuditInitiator, AuditSink } from "../audit";
+import { functionRefusal } from "./functions";
 import type { ComponentStore } from "./store";
 
 /**
@@ -161,14 +162,14 @@ const ChecklistCardProps = z.object({
     .array(
       z.object({
         text: z.string(),
-        done: z.boolean().describe("Whether this one is already finished"),
+        done: z.boolean().describe("Whether this task is already finished"),
         note: z
           .string()
           .optional()
           .describe("A short aside, e.g. who it is waiting on"),
       }),
     )
-    .describe("The items, in the order they should be done"),
+    .describe("The tasks, in the order they should be done"),
 });
 
 const NoticeCardProps = z.object({
@@ -255,6 +256,13 @@ const ACTIVITY_FUNCTION_FOR: ReadonlyMap<string, string> = new Map([
   ["activity", "botActivity"],
   ["refusals", "recentRefusals"],
 ]);
+
+/**
+ * Every data function each of this build's components can read, whatever it is called with. What
+ * the personal edition gives a component when it arrives, since nobody there can.
+ */
+export const COMPONENT_DATA_FUNCTIONS: ReadonlyMap<string, readonly string[]> =
+  new Map([["showActivityReport", [...ACTIVITY_FUNCTION_FOR.values()]]]);
 
 export type HeadlessComponentSpec = {
   /** The tool name, the catalogue key, and the renderer's key in the app. */
@@ -454,11 +462,9 @@ export async function createHeadlessComponentTools(options: {
         if (!decision.allowed) return refuse(spec, decision.reason);
         for (const functionName of spec.reads?.(parsed.data) ?? []) {
           if (await store.mayCall(spec.name, functionName)) continue;
-          return refuse(
-            spec,
-            `${spec.name} can't use the function ${functionName}. An admin has to give it to this component.`,
-            { function: functionName },
-          );
+          return refuse(spec, functionRefusal(spec.name, functionName), {
+            function: functionName,
+          });
         }
         return spec.confirmation;
       },

@@ -1,6 +1,6 @@
 # Windows desktop signing
 
-Builds use the root OpenBot release number plus `-internal.g<commit>`, or the plain release
+Builds use the root OpenBot release number plus `-internal.<commits>.g<commit>`, or the plain release
 number when the run is on a release tag. The workflow verifies
 that both the packaged app and installer embed that version, and includes `build-version.json`
 with the binaries. See [desktop build versions](releasing.md#desktop-build-versions).
@@ -43,21 +43,22 @@ These checks do not test SmartScreen reputation or exercise the app UI.
 
 ## Sign a release
 
-Every release starts this workflow. After `publish-release.yml` creates the tag and the
-release, it dispatches this workflow on the tag with `signing-mode: keyvault` and
-`release-tag` set to that version. The tag alone would not start it: GitHub starts no
+Every release starts this workflow. As soon as `publish-release.yml` has created the tag and
+the release, right after the images, it dispatches this workflow on the tag with
+`signing-mode: keyvault` and `release-tag` set to that version. The tag alone would not start it: GitHub starts no
 workflow from a push made with `GITHUB_TOKEN`, and this workflow has no tag trigger anyway.
 The run still waits for a `windows-signing` reviewer to approve it.
 
-On a tag, the build carries the plain release version, the same as the unsigned installer
-the release was published with, and is built by
+On a tag, the build carries the plain release version, the same as a candidate's unsigned
+installer, and is built by
 [`desktop/scripts/signed-build.ts`](../desktop/scripts/signed-build.ts), as the signed Mac
 build is. A candidate or beta is pinned to its release's own `container-images.json`, like
 its unsigned installer, and the Intelligence CLI is bundled whenever the tree has
 `tauri.bundled-cli.conf.json`. After the signing job verifies the installer, a separate
 job with permission to write to the repository attaches it to the release with `--clobber`,
-twice: as `OpenBot_<version>_x64-setup.exe`, which replaces the unsigned installer of the
-same name, and as `OpenBot-windows-x64-setup.exe`, the fixed name a web page links to. See
+twice: as `OpenBot_<version>_x64-setup.exe`, replacing a candidate's unsigned installer of
+the same name, and as `OpenBot-windows-x64-setup.exe`, the fixed name a web page links to. A
+stable release has no other Windows installer: this is the only one it carries. See
 [Download links](releasing.md#download-links). The signing job itself never holds that
 permission. A stable release becomes Latest once both this and Mac signing have attached their
 signed installers, in whichever of the two finishes second, so the Windows address never gives the
@@ -72,6 +73,33 @@ also refuses a `container-images.json` from another commit. To attach again afte
 signing job succeeded, re-run only the failed attach job: it uses the installer that attempt
 signed. [`desktop/scripts/publish-signed-windows.sh`](../desktop/scripts/publish-signed-windows.sh)
 is the attach step.
+
+## Updates
+
+A signed Windows app updates itself the way a signed Mac app does: it reads the same `latest.json`
+at launch and every six hours, shows **OpenBot X is available** with **Update and restart** in
+OpenBot's window and the setup window, and installs only on that click. See
+[The updater](releasing.md#the-updater). `tauri.windows-signing.conf.json` carries the same
+`plugins.updater` block as the Mac overlay (public key and endpoints), plus
+`windows.installMode: passive`.
+
+The Windows updater installs the NSIS installer itself, so the release's signed `-setup.exe` is
+the update. For a run that attaches to a release, the **Sign the installer for the updater** job
+downloads the installer the signing job verified, signs exactly those bytes with
+`tauri signer sign` and the updater key, and checks the signature against `plugins.updater.pubkey`
+with minisign
+([`desktop/scripts/sign-windows-update.sh`](../desktop/scripts/sign-windows-update.sh)). The key is
+the Mac's, and it is kept only in the `macos-signing` environment, so that job runs there and waits
+for a `macos-signing` reviewer. The attach job then uploads `OpenBot_<version>_x64-setup.exe.sig`
+and lists the installer in `latest.json` as `windows-x86_64`, beside the Mac archives. A candidate
+or beta is pinned, has no updater, and skips that job.
+
+**Update and restart** downloads and verifies the installer while OpenBot keeps running, then stops
+OpenBot (the local Intelligence keeps running). The updater starts the installer in update mode and
+the app exits at once; the installer stops anything still running from the bundled CLI, replaces the
+app, and starts the new version, whose Start moves the installation to its release. The installer
+is per user, so no administrator prompt appears, and update mode never runs the uninstaller, so the
+installation and the app's data stay where they are.
 
 ## One-time infrastructure setup
 
@@ -106,7 +134,8 @@ The existing signing identity needs certificate read and key sign permissions.
 With Key Vault RBAC, **Key Vault Certificate User** plus **Key Vault Crypto User**
 cover these operations; Crypto User alone does not grant certificate read access.
 Reuse the existing certificate and permissions where already provisioned. No
-client secret, exported private key, PFX, or Tauri updater signing key is needed.
+client secret, exported private key, PFX, or Tauri updater signing key is needed in
+this environment: the updater key stays in `macos-signing` (see [Updates](#updates)).
 
 The workflow pins Azure Login and AzureSignTool 7.0.1, checks the downloaded
 tool's SHA-256, and obtains Key Vault access tokens through GitHub OIDC. The

@@ -15,16 +15,22 @@ export type Edition = "team" | "personal";
  * What the personal edition allows. Fixed: there is no screen to change it, and a row left in the
  * database by a team deployment is not read.
  *
- * Off is what needs a team or a fleet (Slack and Teams, Team Bots, a computer per Bot) and reaching
- * into the person's own machine. Everything else stays on, including the password manager, whose
- * saved logins are only ever used after the person picks one in the private sign-in form.
+ * Off is what needs a team or a fleet (Slack and Teams, Team Bots, a computer per Bot). Everything
+ * else stays on, including the password manager, whose saved logins are only ever used after the
+ * person picks one in the private sign-in form.
+ *
+ * Local computer access is on: folders on the person's own machine, through OpenBot Desktop. The
+ * person picks each folder in the desktop's native picker, a folder is read-only, the desktop asks
+ * before each write or command, every call leaves an audit row, and access ends when OpenBot stops
+ * (`host-access/`, `desktop/src-tauri/src/desktop_host_access.rs`). Without the desktop there is no
+ * host to reach: the folder routes refuse and Settings → Computer says it needs the desktop.
  */
 export const PERSONAL_CAPABILITIES: Record<Capability, boolean> = {
   useBots: true,
   cloudBrowser: true,
   cloudNetwork: true,
   cloudComputer: true,
-  localComputer: false,
+  localComputer: true,
   customRules: true,
   passwordManager: true,
   slackTeams: false,

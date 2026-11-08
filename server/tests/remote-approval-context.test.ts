@@ -6,7 +6,11 @@ import { z } from "zod";
 import { currentApprovalContext } from "../src/approvals/types";
 import { buildAgents } from "../src/copilot";
 
-async function fixture(answered = false) {
+async function fixture(
+  answered = false,
+  toolName = "mcp__vendor__write",
+  suspend = true,
+) {
   const requests: RunAgentInput[] = [];
   const run = spyOn(HttpAgent.prototype, "run").mockImplementation((input) => {
     requests.push(input);
@@ -16,7 +20,7 @@ async function fixture(answered = false) {
       {
         type: "TOOL_CALL_START",
         toolCallId: "provider-call",
-        toolCallName: "mcp__vendor__write",
+        toolCallName: toolName,
         parentMessageId: "provider-message",
       },
       {
@@ -58,15 +62,16 @@ async function fixture(answered = false) {
     { provider: "openai", defaultModel: "test" },
     null,
   ];
-  args[4] = async () => [
+  args[toolName === "ask_person" ? 10 : 4] = async () => [
     {
-      name: "mcp__vendor__write",
+      name: toolName,
       ref: "vendor/write",
       description: "Write with approval",
       parameters: z.object({ value: z.string() }),
       execute: async () => {
         calls += 1;
         context = currentApprovalContext();
+        if (!suspend) return "question saved";
         throw new HeadlessToolSuspension("Approve write", {
           kind: "approval",
           requestId: "request",
@@ -74,7 +79,9 @@ async function fixture(answered = false) {
       },
     },
   ];
-  args[5] = () => "signed-original-run";
+  let signatures = 0;
+  args[5] = () =>
+    ++signatures === 1 ? "signed-original-run" : `signed-segment-${signatures}`;
   const agent = (await buildAgents(...args)).remote;
   if (!agent) throw new Error("Missing fixture agent");
   agent.threadId = "canonical-thread";
@@ -124,6 +131,42 @@ test("backend answered remote tool calls are forwarded without duplicate executi
   try {
     await f.agent.runAgent({ runId: "canonical-run" });
     expect(f.calls()).toBe(0);
+  } finally {
+    f.run.mockRestore();
+  }
+});
+
+for (const answered of [false, true]) {
+  test(`remote question ${answered ? "already answered is not repeated" : "executes as a client tool with provider context"}`, async () => {
+    const f = await fixture(answered, "ask_person");
+    try {
+      await f.agent.runAgent({ runId: "canonical-run" });
+      expect(f.calls()).toBe(answered ? 0 : 1);
+      expect(f.requests[0]?.forwardedProps.openbotDeploymentTools).toEqual([
+        "ask_person",
+      ]);
+      if (!answered) expect(f.context()?.toolName).toBe("ask_person");
+    } finally {
+      f.run.mockRestore();
+    }
+  });
+}
+
+test("remote question result continues the same run without executing the call twice", async () => {
+  const f = await fixture(false, "ask_person", false);
+  try {
+    await f.agent.runAgent({ runId: "canonical-run" });
+    expect(f.calls()).toBe(1);
+    expect(f.requests).toHaveLength(2);
+    expect(f.requests[1]?.runId).toBe("canonical-run");
+    expect(f.requests[1]?.forwardedProps.openbotRun).toBe(
+      "signed-original-run",
+    );
+    expect(f.requests[1]?.messages.at(-1)).toMatchObject({
+      role: "tool",
+      toolCallId: "provider-call",
+      content: "question saved",
+    });
   } finally {
     f.run.mockRestore();
   }

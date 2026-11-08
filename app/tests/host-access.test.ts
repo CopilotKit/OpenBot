@@ -99,3 +99,27 @@ test("revoking and stopping host access use their dedicated endpoints", async ()
     ["/api/host-access/stop", "POST"],
   ]);
 });
+
+// Shown on the Computer page when the server sends no words of its own. They said "host folder
+// grant" and "Host folder access", which is how the server names it, not the person.
+test("a failed revoke or stop says so in the person's words", async () => {
+  globalThis.fetch = (async () =>
+    new Response("", { status: 502 })) as unknown as typeof fetch;
+  const { queryClient } = invalidationRecorder();
+
+  const revoke = revokeHostFolderGrantMutationOptions(queryClient);
+  const stop = stopHostAccessMutationOptions(queryClient);
+  const messages = [
+    await revoke
+      .mutationFn?.({ grantId: "host-grant-1" }, mutationContext(queryClient))
+      .catch((error: Error) => error.message),
+    await stop
+      .mutationFn?.(undefined, mutationContext(queryClient))
+      .catch((error: Error) => error.message),
+  ];
+
+  expect(messages).toEqual([
+    "Access to that folder could not be revoked.",
+    "Folder access could not be stopped.",
+  ]);
+});

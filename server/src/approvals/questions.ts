@@ -36,6 +36,20 @@ export const personQuestionSchema = questionSchema;
 export type PersonQuestion = z.infer<typeof questionSchema>;
 export const questionConversationBot = (question: PersonQuestion) =>
   question.sourceBotId ?? question.botId;
+/**
+ * Whether an answer given in the open conversation goes on there, as that conversation's next turn.
+ *
+ * A question a person's own turn asked is answered by the person's next turn, and the screen they
+ * typed it on is where that turn belongs: run there, it streams its steps as they happen, has a Stop,
+ * and has every tool the conversation's turns have. Resumed here instead, it ran headless and the
+ * screen showed only "reading your answer" until the whole turn was over.
+ *
+ * A question asked under anything else (a routine, a responsibility, a hand-off) still comes back
+ * here: its answer resumes that run's work with that run's own tools and initiator, which the
+ * conversation's turn does not have.
+ */
+export const questionContinuesInConversation = (question: PersonQuestion) =>
+  question.initiator === undefined || question.initiator.kind === "person";
 export const questionResponseMessage = (
   question: PersonQuestion,
   response: string,
@@ -94,7 +108,20 @@ export function createApprovalQuestions(
         .limit(100);
       return rows.map(listedQuestion).filter((row) => row !== null);
     },
-    async respond(owner: string, id: string, response: string) {
+    /**
+     * Answer a question. Resumed here, as a queued turn, unless the answer was given in the open
+     * conversation (`inConversation`) and that conversation's next turn is where it belongs
+     * (`questionContinuesInConversation`): then the question is closed and the conversation runs
+     * the answer as its own turn, which `continueHere` in the result tells it to.
+     */
+    async respond(
+      owner: string,
+      id: string,
+      response: string,
+      { inConversation = false }: { inConversation?: boolean } = {},
+    ): Promise<
+      { id: string; queued: true } | { id: string; continueHere: true }
+    > {
       const answer = z.string().trim().min(1).max(6000).parse(response);
       const [current] = await database
         .select()
@@ -118,6 +145,13 @@ export function createApprovalQuestions(
         if (!row) throw new ApprovalNotFoundError();
         if (row.finishedAt)
           throw new ApprovalRefusedError("You already answered this question.");
+        if (inConversation && questionContinuesInConversation(parsed.data)) {
+          await tx
+            .update(workItems)
+            .set({ finishedAt: sql`now()`, updatedAt: sql`now()` })
+            .where(owned(owner, id));
+          return { id, continueHere: true as const };
+        }
         await tx
           .insert(workItems)
           .values({
@@ -137,7 +171,7 @@ export function createApprovalQuestions(
         await tx.execute(
           sql`select pg_notify('openbot_work_offered', 'person.response')`,
         );
-        return { id, queued: true };
+        return { id, queued: true as const };
       });
     },
     /**

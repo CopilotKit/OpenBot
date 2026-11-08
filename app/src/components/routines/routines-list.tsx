@@ -294,12 +294,25 @@ export function RoutinesList({
                   </ItemMedia>
                   {/* Paused reads at a glance: the content dims, and a chip below says the word. */}
                   <ItemContent className={routine.enabled ? "" : "opacity-60"}>
-                    <ItemTitle>
-                      {routine.schedule}
-                      <span className="font-normal text-muted-foreground text-xs">
-                        {routine.timezone}
-                      </span>
-                    </ItemTitle>
+                    {/*
+                     * Named by the person, the name heads the row and the schedule takes a line of
+                     * its own under it, so a narrow window never squeezes the name to fit it.
+                     */}
+                    {routine.title ? (
+                      <>
+                        <ItemTitle>{routine.title}</ItemTitle>
+                        <p className="text-muted-foreground text-xs">
+                          {routine.schedule} · {routine.timezone}
+                        </p>
+                      </>
+                    ) : (
+                      <ItemTitle>
+                        {routine.schedule}
+                        <span className="font-normal text-muted-foreground text-xs">
+                          {routine.timezone}
+                        </span>
+                      </ItemTitle>
+                    )}
                     <ItemDescription>{routine.instruction}</ItemDescription>
                   </ItemContent>
                   <ItemActions>

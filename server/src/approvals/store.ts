@@ -22,6 +22,7 @@ import {
   type ApprovalStore,
   type ApprovalTeamSettings,
   offersStandingRule,
+  targetSubject,
 } from "./types";
 
 const TEAM = "team";
@@ -184,7 +185,8 @@ export function createApprovalStore(database: Database): ApprovalStore {
           .where(owned(owner, id))
           .returning();
         if (!updated) throw new ApprovalNotFoundError();
-        await recordAuditEvent(createAuditStore(tx as unknown as Database), {
+        const trail = createAuditStore(tx as unknown as Database);
+        await recordAuditEvent(trail, {
           eventType: "approval.person_decided",
           targetType: "approval",
           targetId: id,
@@ -195,8 +197,16 @@ export function createApprovalStore(database: Database): ApprovalStore {
             bot: request.action.botId,
             tool: request.action.toolRef,
             scope: request.action.scope,
+            ...targetSubject(request.action.target),
           },
         });
+        /*
+         * The action's own row for a denial, beside the decision and in the same transaction, so it
+         * is written once. Without it the trail held only the decision: the action itself read as
+         * nothing, or, from the code that asked, as allowed, and the Blocked view never showed it.
+         */
+        if (decision === "deny" && request.action.declined)
+          await recordAuditEvent(trail, request.action.declined);
         await tx
           .insert(workItems)
           .values({
@@ -579,6 +589,7 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
           tool: input.toolRef,
           effect: input.effect,
           scope: input.scope,
+          ...targetSubject(input.target),
           outcome: input.outcome,
         },
       });

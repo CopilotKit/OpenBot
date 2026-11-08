@@ -7,8 +7,10 @@ import {
 import type { LearningSettings } from "@openbot/shared/learning";
 import {
   type ExchangeResponse,
+  isAllowedGatewayUrl,
   RECORDER_SIGNED_OUT,
   recorderPaths,
+  type TrajectoryGrant,
 } from "@openbot/shared/recorder-api";
 import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
 import { eq, inArray } from "drizzle-orm";
@@ -54,6 +56,9 @@ const config = loadConfig(
   testEnvironment({
     INTELLIGENCE_API_URL: "http://127.0.0.1:7100",
     INTELLIGENCE_GATEWAY_WS_URL: "ws://127.0.0.1:7103",
+    // As OpenBot Desktop writes it: the browser's address for a local gateway names localhost, which the Recorder
+    // refuses to open (Decision 21), so the pass must name it at 127.0.0.1.
+    INTELLIGENCE_BROWSER_GATEWAY_WS_URL: "ws://localhost:7103",
   }),
 );
 const intelligenceApi = config.runtime.intelligence.apiUrl.replace(/\/$/, "");
@@ -272,13 +277,16 @@ describe("the capture pass", () => {
     const answer = await pass(mine, as(owner));
 
     expect(answer.status).toBe(200);
-    expect(await answer.json()).toEqual({
+    const grant = (await answer.json()) as TrajectoryGrant;
+    expect(grant).toEqual({
       joinToken: "join-1",
       realtime: {
-        clientUrl: expect.stringMatching(/^ws:\/\/127\.0\.0\.1:7103\//),
+        clientUrl: "ws://127.0.0.1:7103/client",
         topic: `trajectory:${mine}`,
       },
     });
+    // The Recorder's own rule: a gateway it would refuse is a recording kept in the browser and never saved.
+    expect(isAllowedGatewayUrl(grant.realtime.clientUrl, null)).toBe(true);
     expect(joins).toEqual([
       {
         trajectoryId: mine,

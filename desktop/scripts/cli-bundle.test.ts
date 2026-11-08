@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   bundleCli,
   downloadNode,
@@ -498,6 +498,58 @@ test("assembles Node and the CLI under the target and leaves no work folder", as
   expect(existsSync(join(target, "cli", "index.js"))).toBe(true);
   expect(existsSync(join(target, "stale.txt"))).toBe(false);
   expect(readdirSync(target).sort()).toEqual(["cli", "runtime"]);
+});
+
+// The Intel Mac installer is built on an Apple silicon runner. npm picks a dependency's
+// platform-specific packages for the machine it runs on unless told otherwise, which would put
+// Apple silicon binaries in the Intel app.
+test("installs the CLI's dependencies for the installer's platform, not the runner's", async () => {
+  for (const [platform, arch] of [
+    ["darwin", "x64"],
+    ["darwin", "arm64"],
+    ["win32", "x64"],
+  ] as const) {
+    const asset = nodeAsset(platform, arch, "26.13.0");
+    const bytes = new TextEncoder().encode(`fake node ${platform}-${arch}`);
+    const target = join(tempDir("bundle-"), "out");
+    const { run, calls } = fakePackRun({
+      name: "copilotkit",
+      version: "4.34.0",
+      bin: "index.js",
+    });
+    await bundleCli(target, platform, arch, {
+      fetch: fakeFetch({
+        [sumsUrl]: `${sha(bytes)}  ${asset.file}\n`,
+        [asset.url]: bytes,
+      }),
+      // tar unpacks the Node archive; the fake leaves the binary where tar would.
+      run: (cmd, cwd) => {
+        if (
+          cmd[0] === "tar" &&
+          asset.inArchive &&
+          cmd.includes(asset.inArchive)
+        ) {
+          const dest = join(cwd, asset.inArchive);
+          mkdirSync(dirname(dest), { recursive: true });
+          writeFileSync(dest, bytes);
+          return { code: 0, stdout: "", stderr: "" };
+        }
+        return run(cmd, cwd);
+      },
+      choice: { cli: "latest", node: pin(asset.key, sha(bytes)) },
+    });
+    const install = calls.find(
+      (call) => call.cmd[0] === "npm" && call.cmd[1] === "install",
+    );
+    expect(install?.cmd).toEqual([
+      "npm",
+      "install",
+      "--omit=dev",
+      "--ignore-scripts",
+      `--os=${platform}`,
+      `--cpu=${arch}`,
+    ]);
+  }
 });
 
 function runCommandLine(...args: string[]) {

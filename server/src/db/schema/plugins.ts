@@ -167,6 +167,19 @@ export const mcpServers = pgTable(
      * writes nothing here.
      */
     skippedTools: text("skipped_tools").array(),
+    /**
+     * Which reading of a vendor's listing recorded this app's tools: `LISTING_REVISION` in
+     * `plugins/plugin-store/model.ts` as of the refresh that stored them, 0 for rows stored before
+     * this column existed.
+     *
+     * What OpenBot records from a listing can change between releases while the vendor's answer
+     * does not: #1177 started recording a broker's silence as `unclassified`, where Arcade's had been
+     * recorded as `destructive`. Nothing stored tells those rows apart from an action the vendor did
+     * flag, so they are listed again instead. At each start, every app of the active broker whose
+     * revision is behind is refreshed once (`relistOutdatedBrokeredApps`), so an upgraded install
+     * records what a fresh one would, with nobody pressing Refresh tools.
+     */
+    listingRevision: integer("listing_revision").notNull().default(0),
     addedBy: text("added_by"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -271,6 +284,22 @@ export const mcpTools = pgTable(
      * an approver to click through the colour.
      */
     destructive: boolean("destructive").notNull().default(false),
+    /**
+     * A broker listed this action and said nothing about what it does: Composio gave it no
+     * read-only, destructive, create or update label, or Arcade no behaviour flag it could read.
+     *
+     * Kept apart from {@link mcpTools.destructive}, which stays the vendor's own word. That word
+     * makes a call always ask and draws "destroys things" on a Bot's page, and nobody said it here.
+     * {@link mcpTools.effect} is `write`, so chat treats it as any change. A check-in, a task's
+     * trusted read and a memory source treat it as cautiously as a destructive action (see
+     * `mightDestroy` in `plugins/catalogue.ts`). An MCP server's silence is a null `effect`
+     * instead, which its reviewed lists decide, so this stays `false` for MCP rows.
+     *
+     * `false` for rows listed before this column existed. Arcade recorded such an action as
+     * destructive then, which asks every time. Such an app is listed again at the next start, which
+     * records it here (see {@link mcpServers.listingRevision}).
+     */
+    unclassified: boolean("unclassified").notNull().default(false),
     /**
      * Whether the server marked this action read-only (MCP `readOnlyHint`), as it said it.
      *

@@ -16,6 +16,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { NoticeCard } from "@/components/gallery/cards";
 import {
   GALLERY as FORMS,
   FormCard,
@@ -283,4 +284,43 @@ test("invalid form arguments release the suspended run once so the Bot can repai
   expect(view.queryByRole("form")).toBeNull();
   view.rerender(card);
   expect(answers).toHaveLength(1);
+});
+
+/*
+ * FOUND ON WINDOWS: a notice a Bot drew with `tone: "positive"` showed a badge reading "positive".
+ * The tone picks the badge's colour; the words on it are for the person.
+ */
+test("a notice's badge says what its tone means, never the tone's own name", () => {
+  const said = {
+    positive: "Good news",
+    caution: "Heads up",
+    negative: "Problem",
+  } as const;
+  for (const [tone, words] of Object.entries(said)) {
+    const view = render(
+      <NoticeCard
+        body="It runs every morning."
+        title="Standing check created"
+        tone={tone as keyof typeof said}
+      />,
+    );
+    expect(view.getByText(words)).toBeTruthy();
+    expect(view.queryByText(tone)).toBeNull();
+    view.unmount();
+  }
+  const plain = render(
+    <NoticeCard body="Nothing to flag." title="Noted" tone="neutral" />,
+  );
+  expect(plain.queryByText("neutral")).toBeNull();
+  expect(plain.container.querySelectorAll("figcaption span")).toHaveLength(0);
+  plain.unmount();
+  // A tone still arriving while the card draws is no badge yet, never its first letters.
+  const arriving = render(
+    <NoticeCard
+      body="It runs every morning."
+      title="Standing check created"
+      tone={"posi" as "positive"}
+    />,
+  );
+  expect(arriving.queryByText("posi")).toBeNull();
 });

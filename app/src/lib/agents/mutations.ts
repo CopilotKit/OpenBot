@@ -1,4 +1,5 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import { channelKeys } from "@/lib/channels/queries";
 import { client } from "@/lib/client";
 import {
   type AgentProfile,
@@ -21,6 +22,11 @@ export type AgentInput = {
    * Bot between computers; only the Isolated control sends it.
    */
   isolated?: boolean;
+  /**
+   * The framework picked for an agent somebody runs themselves, by its id in the harness list, so
+   * the Bot is told what runs it whatever its subtitle says. Only New Bot sends it.
+   */
+  harness?: string;
 };
 
 /** The sentence for every write here, since they all fail the same way to a reader. */
@@ -54,7 +60,12 @@ export function updateAgentMutationOptions(queryClient: QueryClient) {
         body: variables.input,
         fallback: FALLBACK,
       }),
-    onSuccess: () => invalidateAgents(queryClient),
+    // A conversation is called by its Bot's name, so a rename shows in the sidebar and the header.
+    onSuccess: () =>
+      Promise.all([
+        invalidateAgents(queryClient),
+        queryClient.invalidateQueries({ queryKey: channelKeys.all }),
+      ]),
   });
 }
 

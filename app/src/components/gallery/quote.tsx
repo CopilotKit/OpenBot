@@ -51,6 +51,7 @@ export const GALLERY: GalleryComponent[] = [
     name: "showQuote",
     title: "Quotation",
     kind: "card",
+    summary: "Shows a quotation and who said or wrote it.",
     description:
       "Show a quotation with its attribution. Use when the exact words matter, something a person said, or a line from a document you were given.",
     parameters: QuoteCardProps,

@@ -6,7 +6,7 @@ type: application
 version: 0.2.0
 # The OpenBot release this chart's default image tag points at. Kept equal to package.json's version
 # (the last version published) by the release workflow, and CI refuses a tree where they have drifted.
-appVersion: "0.3.1"
+appVersion: "0.3.3"
 home: https://github.com/CopilotKit/OpenBot
 sources:
   - https://github.com/CopilotKit/OpenBot
@@ -39,6 +39,6 @@ dependencies:
     # EXACT, NOT A RANGE, for the reason the pin above gives: a new release of this chart carries new
     # images and new required values, and arriving on its own it would be an install nobody tested.
     # Bump it deliberately, with the values under `intelligence` in values.yaml.
-    version: "0.16.0-rc.7"
+    version: "0.16.0-rc.9"
     repository: "oci://ghcr.io/copilotkit/charts"
     condition: intelligence.enabled

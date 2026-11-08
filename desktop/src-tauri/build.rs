@@ -42,7 +42,8 @@ fn main() {
                 "openbot-intelligence",
                 tauri_build::InlinedPlugin::new().commands(&["watch", "open"]),
             )
-            // Settings → This computer: the Status window's facts and actions, from the app.
+            // Settings → This computer: the Status window's facts and actions, from the app. And
+            // the update banner, which reads what the shell found in its update feed.
             .plugin(
                 "openbot-desktop",
                 tauri_build::InlinedPlugin::new().commands(&[
@@ -51,6 +52,17 @@ fn main() {
                     "restart",
                     "stop",
                     "intelligence",
+                    "update_offer",
+                    "check_update",
+                    "dismiss_update",
+                    "install_update",
+                    // Narration's speech recognition, on this computer. See `src/speech.rs`.
+                    "speech_available",
+                    "speech_start",
+                    "speech_stop",
+                    "speech_abort",
+                    // Open log folder: the shell's own log folder. See `src/logging.rs`.
+                    "open_logs",
                 ]),
             ),
     )
@@ -106,6 +118,9 @@ fn build_identity() {
     println!("cargo:rerun-if-changed=../src");
 }
 
+// `cli_release::pinned_release_in`, the one reading of which Intelligence a CLI build installs.
+include!("src/cli_release.rs");
+
 /**
 The Intelligence CLI a build carries inside the app, pinned to the bytes it was built with.
 
@@ -142,6 +157,18 @@ fn bundled_cli() {
         std::io::copy(&mut file, &mut hasher).expect("the bundled CLI could not be read");
         println!("cargo:rustc-env={variable}={:x}", hasher.finalize());
         println!("cargo:rerun-if-changed={}", path.display());
+    }
+    // The Intelligence release the bundled CLI installs, so the app can tell a local Intelligence
+    // that an older app installed is behind it (`local_eval::update_due`). A CLI built without a
+    // pin names none, and then nothing is updated.
+    let entry = std::fs::read(root.join("cli").join("index.js"))
+        .expect("the bundled CLI could not be read");
+    match pinned_release_in(&String::from_utf8_lossy(&entry)) {
+        Some(release) => println!("cargo:rustc-env=OPENBOT_BUNDLED_CLI_INTELLIGENCE={release}"),
+        None => println!(
+            "cargo:warning=the bundled CLI is not pinned to an Intelligence release, so a local \
+             Intelligence an older app installed is not updated"
+        ),
     }
 }
 

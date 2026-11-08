@@ -4,6 +4,7 @@ import { SEARCH_TOOLS } from "@openbot/shared/tool-search";
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { z } from "zod";
 import { researchRoleFor } from "../plugins/catalogue";
+import { isAlwaysOn } from "../plugins/personal-defaults";
 import { markUntrusted } from "../untrusted-content";
 
 export { SEARCH_TOOLS };
@@ -102,9 +103,11 @@ type PromptPart = { type: string; toolName?: string; output?: unknown };
  *
  * Only an app's tools wait, and not every one of those: a tool that finds or reads sources on the
  * web stays, because the computer's instructions route searching to it and a Bot told to use a tool
- * it cannot see reaches for the browser instead. A tool the run's chosen skills asked for stays too,
- * unless even those leave the run over the floor, where a skill has asked for more than a model
- * chooses well among and they wait like the rest.
+ * it cannot see reaches for the browser instead. Routines stay, because they are the app every Bot
+ * holds to schedule its own work (`isAlwaysOn`): FOUND LIVE, a Bot past the floor spent three
+ * searches finding `create_routine` before it could set up a routine. A tool the run's chosen skills
+ * asked for stays too, unless even those leave the run over the floor, where a skill has asked for
+ * more than a model chooses well among and they wait like the rest.
  */
 export function planToolSearch(
   tools: readonly GrantedTool[],
@@ -117,9 +120,7 @@ export function planToolSearch(
 ): ReadonlySet<string> {
   const total = tools.length + (options.alsoSent ?? 0);
   if (total <= TOOL_SEARCH_FLOOR) return new Set();
-  const searchable = tools.filter(
-    (tool) => tool.searchable && researchRoleFor(tool.ref) === null,
-  );
+  const searchable = tools.filter((tool) => !staysInFront(tool));
   /*
    * Fewer app tools than one search returns are not worth a search. A Bot with a computer can be over
    * the floor on the browser's own tools alone, and hiding its three app tools behind a search would
@@ -131,6 +132,66 @@ export function planToolSearch(
   const waiting =
     total - unpinned.length > TOOL_SEARCH_FLOOR ? searchable : unpinned;
   return new Set(waiting.map((tool) => tool.name));
+}
+
+/**
+ * Whether a tool is one a Bot needs on every step: anything OpenBot gives it itself, Routines, and
+ * the tools that search and read the web. Only an app's other tools can wait, or be left out.
+ */
+function staysInFront(tool: GrantedTool): boolean {
+  return (
+    !tool.searchable ||
+    researchRoleFor(tool.ref) !== null ||
+    isAlwaysOn(tool.ref)
+  );
+}
+
+/**
+ * At most `limit` of a run's tools, for an endpoint that is sent every tool it is offered.
+ *
+ * A Bot at another endpoint (the harness OpenBot Desktop installs, or one somebody runs) cannot wait
+ * behind a search the way a built-in one does: whatever it is sent reaches its model in one request,
+ * and a provider refuses a request past its count. FOUND ON WINDOWS: the starter Bot on LangGraph,
+ * with an OpenAI key and no app turned on, was sent 92 tools of OpenBot's and 43 of the browser's,
+ * and OpenAI refused all 135 ("array too long ... maximum length 128"), so it could not answer
+ * anything. With a 64-action app on, it was 202.
+ *
+ * What a Bot needs on every step comes first, then what the run's chosen skills asked for, then an
+ * app's tools ranked by the words of the person's request (`rankTools`), then the rest in the order
+ * they were held. The same tools in the same order always give the same answer. Returned in the
+ * order they were given.
+ */
+export function fitToolLimit(
+  tools: readonly GrantedTool[],
+  options: {
+    limit: number;
+    /** The person's latest message, whose words rank an app's tools. */
+    text: string;
+    /** Names `selectTools` chose for this run. */
+    pinned?: ReadonlySet<string>;
+  },
+): GrantedTool[] {
+  const limit = Math.max(0, options.limit);
+  if (tools.length <= limit) return [...tools];
+  const pinned = options.pinned ?? new Set<string>();
+  const kept = new Set<GrantedTool>();
+  const keep = (candidates: readonly GrantedTool[]) => {
+    for (const tool of candidates) {
+      if (kept.size >= limit) return;
+      kept.add(tool);
+    }
+  };
+  /** Best match to the request first, then in the order given. */
+  const ranked = (candidates: readonly GrantedTool[]) => {
+    const matched = rankTools(options.text, candidates, candidates.length);
+    const matchedSet = new Set(matched);
+    return [...matched, ...candidates.filter((tool) => !matchedSet.has(tool))];
+  };
+  const core = tools.filter(staysInFront);
+  keep(core.length > limit ? ranked(core) : core);
+  keep(tools.filter((tool) => !kept.has(tool) && pinned.has(tool.name)));
+  keep(ranked(tools.filter((tool) => !kept.has(tool))));
+  return tools.filter((tool) => kept.has(tool));
 }
 
 /** Words a query carries that say nothing about which tool. */

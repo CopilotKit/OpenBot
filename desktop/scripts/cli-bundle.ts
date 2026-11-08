@@ -211,12 +211,20 @@ export type CliRecord = {
  * of packages it installed are returned, so two builds of the same choice
  * can be compared. npm writes npm-shrinkwrap.json instead when the package
  * ships one.
+ *
+ * `installFor` is the platform the installer is for. npm otherwise picks a
+ * dependency's platform-specific optional packages for the machine it runs
+ * on, so the Intel Mac installer, built on an Apple silicon runner, would
+ * carry Apple silicon binaries. `--os` and `--cpu` make npm pick them for
+ * the installer's platform instead; for a build on its own platform they
+ * change nothing.
  */
 export function packCli(
   source: CliSource,
   workDir: string,
   cliDir: string,
   run: Runner,
+  installFor?: { platform: Platform; arch: Arch },
 ): CliRecord {
   const target = source.kind === "npm" ? source.spec : source.url;
   const packed = JSON.parse(
@@ -254,7 +262,19 @@ export function packCli(
 
   mkdirSync(dirname(cliDir), { recursive: true });
   renameSync(pkgDir, cliDir);
-  runChecked(run, ["npm", "install", "--omit=dev", "--ignore-scripts"], cliDir);
+  runChecked(
+    run,
+    [
+      "npm",
+      "install",
+      "--omit=dev",
+      "--ignore-scripts",
+      ...(installFor
+        ? [`--os=${installFor.platform}`, `--cpu=${installFor.arch}`]
+        : []),
+    ],
+    cliDir,
+  );
   const lockfile = ["npm-shrinkwrap.json", "package-lock.json"]
     .map((file) => join(cliDir, file))
     .find((file) => existsSync(file));
@@ -334,7 +354,10 @@ export async function bundleCli(
   const workDir = join(target, ".work");
   mkdirSync(workDir, { recursive: true });
   try {
-    const cli = packCli(source, workDir, join(target, "cli"), deps.run);
+    const cli = packCli(source, workDir, join(target, "cli"), deps.run, {
+      platform,
+      arch,
+    });
     return { cli, node };
   } finally {
     rmSync(workDir, { recursive: true, force: true });

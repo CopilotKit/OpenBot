@@ -129,6 +129,61 @@ describe("show_app_access", () => {
     },
   );
 
+  /*
+   * The button the personal edition's card draws for each, as `PersonalConnectAction` and
+   * `AdminAction` label it. Gmail on a fresh install is the first row: a broker app nobody added has
+   * no auth scheme yet, so the card reads Turn on, and Connect only comes after it.
+   */
+  test.each([
+    {
+      card: "Turn on, then Connect (fresh Gmail)",
+      access: { state: "disabled", connect: null, authScheme: null },
+      says: /offers Turn on\. If the card then offers Connect, they press that next/,
+    },
+    {
+      card: "Connect (an app that signs in)",
+      access: { state: "disabled", connect: "consent" },
+      says: /offers Connect, which turns it on and connects it in one press/,
+    },
+    {
+      card: "Set up (an app that takes a key)",
+      access: { state: "not_granted", connect: "key" },
+      says: /offers Set up, which opens the page where they add its key/,
+    },
+    {
+      card: "Set it up (no broker key yet)",
+      access: {
+        state: "disabled",
+        connect: null,
+        unavailable: "composio_unconfigured",
+      },
+      says: /isn't set up yet\. The card in front of the person offers Set it up/,
+    },
+    {
+      card: "Connect (on, not connected)",
+      access: { state: "not_connected" },
+      says: /offers Connect; ask them/,
+    },
+  ] as const)(
+    "in the personal edition, the model is told the card's own button: $card",
+    async ({ access: overrides, says }) => {
+      setEdition("personal");
+      try {
+        const { tool } = toolOver({
+          ...access(overrides.state),
+          ...overrides,
+        } as AppAccess);
+        const message =
+          readConnectPrompt(await tool.execute({ app: "gmail" }))?.message ??
+          "";
+        expect(message).toMatch(says);
+        expect(message).not.toMatch(/administrator/);
+      } finally {
+        setEdition("team");
+      }
+    },
+  );
+
   test("an app nobody can name gets a plain sentence and no card", async () => {
     const { tool } = toolOver(null);
     const answer = await tool.execute({ app: "Frobnicator" });

@@ -17,8 +17,8 @@ A task started from a check-in asks before every change, whatever the above says
 | What the Bot is about to do | What you see | How it is recognised |
 | --- | --- | --- |
 | Pay, buy or move money: a payment, a checkout, a refund, a transfer or payout, placing an order, paying an invoice, running payroll, a paid plan | **This needs you.** You do it yourself and mark it done, or tell the Bot not to. | Payment words anywhere in the action and its page. A transfer, payout, withdrawal, charge, order, purchase, paid invoice or order, payroll run, plan upgrade or change, or app subscription in an app's tool name. A button labelled Transfer, Withdraw, Pay, Buy, Place your order, Complete purchase, Upgrade, Downgrade, Change plan, or Send with an amount, and Subscribe when its label or page is about a paid plan. |
-| Change a password, two-factor setting or other credential, or security and sharing settings | **This needs you.** | Credential and security-setting words anywhere in the action and its page. |
-| Delete something | **Allow once** or **Deny** | Delete, trash, destroy, erase, purge, wipe or discard in an app's tool name, or remove as its action (removing a collaborator asks as sharing). A button labelled Delete, Move to trash, Empty trash, Discard, Erase or Destroy, or exactly Remove, Yes, remove or Remove permanently. |
+| Change a password, two-factor setting or other credential, or security and sharing settings | **This needs you.** | Credential and security-setting words anywhere in the action and its page. For credentials the page is read by its address up to the path: a query string or fragment that carries a signature or a token (`X-Amz-Credential=`, `access_token=`) doesn't make an ordinary form a credentials page, while a password field, a Change password button or a `/security/2fa` page still does. |
+| Delete something | **Allow once** or **Deny** | Delete, trash, destroy, erase, purge, wipe or discard in an app's tool name, or remove or archive as its action (removing a collaborator asks as sharing). Any app tool its app marks destructive, whatever it is called. A button labelled Delete, Move to trash, Empty trash, Discard, Erase or Destroy, or exactly Remove, Yes, remove or Remove permanently. |
 | Send something to other people | **Allow once** or **Deny** | Send, reply, forward, respond, notify, broadcast, invite, comment, a new message or a scheduled send in an app's tool name, or an app call addressed to someone's email address (a calendar event with attendees, for example). A button labelled Send, or exactly Comment or Reply. Cmd+Enter or Ctrl+Enter in the browser, and Enter in a box for writing a message, a reply or a comment. |
 | Share something with other people | **Allow once** or **Deny** | Share, sharing, a shared link, permissions, collaborators or granting access in an app's tool name. A button labelled Share, Invite or Add people. |
 | Post or publish something | **Allow once** or **Deny** | Publish, tweet, repost or a release in an app's tool name, posting something (a comment, a photo, a thread) or creating a post. A button labelled Post, Publish, Tweet, Repost or Go live. |
@@ -27,16 +27,29 @@ None of these offers **Always allow here**: each one asks every time. A saved al
 reach them, because they are decided before any rule is read.
 
 You are asked once. A Bot OpenBot runs is told that OpenBot asks before these, so it doesn't put
-its own approval card in front of OpenBot's (`APPROVAL_GUIDANCE` in `shared/bot-prompt.ts`). A remote
-Bot is not told so, because its own tools don't go through this policy.
+its own approval card in front of OpenBot's (`APPROVAL_GUIDANCE` in `shared/bot-prompt.ts`). A tool
+its app marks destructive can be called anything, so its description, as the Bot is offered it, also
+says that OpenBot asks before it runs (`DESTRUCTIVE_TOOL_NOTE`). A remote Bot is not told so, because
+its own tools don't go through this policy.
 
 They are recognised by what the action is called, never by what it carries. A document that says
 "delete the old draft", a note about a purchase, or an email draft addressed to someone is an
 ordinary change. In an app's tool name the action is its first verb, so a word that only names what
 it acts on doesn't count: marking a comment as spam, bookmarking or liking a post, editing a
-comment, cancelling a scheduled send, or a request sent with the web's POST method
-(`STRIPE_POST_V1_PLANS_OVERVIEW`). A button counts when its label starts with the action ("Delete", "Yes, delete"),
-so opening a folder called Sent, a tab called Posts or a list called Shared with me is browsing.
+comment, cancelling a scheduled send, listing archived mail or reading archive settings, or a
+request sent with the web's POST method (`STRIPE_POST_V1_PLANS_OVERVIEW`). A button counts when its
+label starts with the action ("Delete", "Yes, delete"), so opening a folder called Sent, a tab called
+Posts or a list called Shared with me is browsing.
+
+Archive asks as deleting because some apps call their delete that: HubSpot deletes a contact with
+`HUBSPOT_ARCHIVE_CONTACT`, and Gmail's archive takes mail out of the inbox. Unarchive is not archiving.
+
+An app can also say a tool destroys something, whatever it is named: an MCP server with the tool's
+`destructiveHint` annotation, Composio with the same tag, and Arcade with its `destructive` flag.
+OpenBot records that when it lists the app's tools (`destructive` on `mcp_tools`), and such a tool
+asks as deleting does. Composio tags `HUBSPOT_ARCHIVE_CONTACT` this way. An action a broker says
+nothing about (no flag from Arcade, no label from Composio) is not destructive: it is an ordinary
+change, which asks only when Ask before making changes or a rule says so.
 
 ## What doesn't ask
 
@@ -44,9 +57,11 @@ With Ask before making changes off, a Bot reads and makes ordinary changes witho
 an email, editing your documents, creating a calendar event for yourself, labelling mail, saving a
 page, writing a file on its own computer.
 
-A Bot's own computer is its workspace. Writing, reading and deleting files there, and the commands
-it runs there, are not account actions and don't ask. Commands on your own computer follow
-**Commands on your computer** in Settings → Approvals.
+A Bot's own computer is its scratch space. Writing, reading and deleting files there, and the
+commands it runs there, are not account actions and don't ask unless Ask before making changes,
+Auto-review or a rule says so. A folder on your own computer is different: the OpenBot desktop app
+asks before every edit or command in it, and **Commands on your computer** in Settings → Approvals
+can refuse commands there altogether. Settings → Approvals says this above its switches.
 
 ## What isn't recognised
 
@@ -55,6 +70,6 @@ it runs there, are not account actions and don't ask. Commands on your own compu
   or a mail app's own shortcut like Alt+S. Ctrl+Enter that only inserts a page break asks too.
 - **A button labelled with another word**, such as Confirm or Done on its own, or Remove with more
   after it. Editors and filters use that for ordinary changes ("Remove filter", "Remove formatting").
-- **An app tool that names none of the words above**, such as one that trashes mail by changing its
-  labels (`GMAIL_BATCH_MODIFY_MESSAGES` with the `TRASH` label). Turn on Auto-review or Ask before
-  making changes, or add a rule, to cover it.
+- **An app tool that names none of the words above and that its app doesn't mark destructive**, such
+  as one that trashes mail by changing its labels (`GMAIL_BATCH_MODIFY_MESSAGES` with the `TRASH`
+  label). Turn on Auto-review or Ask before making changes, or add a rule, to cover it.

@@ -1,5 +1,9 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { desktopKeys, invokeDesktop } from "./queries";
+import {
+  type DesktopAppUpdateCheck,
+  desktopKeys,
+  invokeDesktop,
+} from "./queries";
 
 function invalidateDesktop(queryClient: QueryClient) {
   return queryClient.invalidateQueries({ queryKey: desktopKeys.all });
@@ -24,6 +28,52 @@ export function restartOpenBotMutationOptions(queryClient: QueryClient) {
 export function stopOpenBotMutationOptions() {
   return mutationOptions({
     mutationFn: (): Promise<void> => invokeDesktop("stop"),
+  });
+}
+
+/**
+ * Check for updates now. The desktop app reads its update feed and keeps the answer, so the banner
+ * reads it too. Rejects with the app's own sentence when the feed couldn't be read.
+ */
+export function checkAppUpdateMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (): Promise<DesktopAppUpdateCheck> =>
+      invokeDesktop("check_update"),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: desktopKeys.appUpdate }),
+  });
+}
+
+/** Close the update banner on `version`, until a newer version comes out. */
+export function dismissAppUpdateMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (version: string): Promise<void> =>
+      invokeDesktop("dismiss_update", { version }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: desktopKeys.appUpdate }),
+  });
+}
+
+/**
+ * Update and restart. The desktop app downloads the update and checks its signature while OpenBot
+ * keeps running, installs it, stops OpenBot and restarts. It answers only when that failed: on
+ * success this page goes away with the app, and the next Start moves OpenBot to the new release.
+ */
+export function installAppUpdateMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (): Promise<void> => invokeDesktop("install_update"),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: desktopKeys.appUpdate }),
+  });
+}
+
+/**
+ * Open the desktop app's log folder in the system's file manager. The desktop app opens its own
+ * folder; the page never names a path. Rejects with the app's reason as a plain string.
+ */
+export function openLogFolderMutationOptions() {
+  return mutationOptions({
+    mutationFn: (): Promise<void> => invokeDesktop("open_logs"),
   });
 }
 

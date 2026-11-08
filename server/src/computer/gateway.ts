@@ -11,7 +11,9 @@
  *  1. Resolve the ref the caller sent into the element it actually points at, from the snapshot this
  *     server fetched. Never from what the caller said it was clicking.
  *  2. Ask the policy. Deny beats allow, an absent policy denies, and a broken rule denies.
- *  3. Write the row, whichever way the decision went, and only then act.
+ *  3. Write the row, whichever way the decision went, and only then act. An action the person is
+ *     asked about first is written when they answer: refused if they deny it, attempted if they
+ *     allow it.
  *
  * Step 1 is the one that is easy to skip and fatal to skip. A gateway that decides on a label supplied
  * by the model is theatre: "never click Submit" is evaded by sending `{ref: "e13", name: "Continue"}`.
@@ -23,9 +25,17 @@ import type {
   RequestHelpInput,
   RequestHelpSource,
 } from "@openbot/shared/computer-control";
+import { DECLINED_BY_PERSON } from "@openbot/shared/approval-outcomes";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
-import { type ApprovalGate, currentApprovalContext } from "../approvals/types";
 import {
+  ApprovalAlreadyAnsweredError,
+  type ApprovalGate,
+  ApprovalNeedsConversationError,
+  ApprovalRefusedError,
+  currentApprovalContext,
+} from "../approvals/types";
+import {
+  type AuditEventInput,
   type AuditInitiator,
   type AuditStore,
   recordAuditEvent,
@@ -50,6 +60,7 @@ import { computerTokenOf } from "./computer-token";
 import { checkComputerAddress } from "./target";
 
 export {
+  ActionUnfinishedError,
   ComputerStillStartingError,
   ComputerUnavailableError,
   ElementNotFoundError,
@@ -663,11 +674,12 @@ export function createComputerGateway(
   }
 
   /**
-   * Decide, record, then act.
+   * Decide, ask, record, then act.
    *
    * The audit row is written before the action runs, not after it succeeds. An allowed action that
    * later fails is still part of the audit sequence, and a trail that only contains successes cannot
-   * show that sequence.
+   * show that sequence. It is written after the person is asked, where they are: until they answer,
+   * the action has not been attempted.
    */
   async function govern<T>(
     toolName: string,
@@ -765,7 +777,8 @@ export function createComputerGateway(
     };
 
     const decision = evaluateActionPolicy(options.policy(), context);
-    await write(auditStore, {
+    /** What every row about this action carries: its subject, and the policy's decision on it. */
+    const subjectOf = {
       toolName,
       seat,
       actor,
@@ -776,41 +789,54 @@ export function createComputerGateway(
       filePath,
       pageUrl,
       decision,
-    });
+    };
     if (!decision.forward) {
+      await write(auditStore, subjectOf);
       throw new ActionRefusedError(decision.reason, decision.matched);
     }
 
-    let result: T;
+    /*
+     * ASK BEFORE RECORDING THE ATTEMPT. The row below says the action was sent to the computer, so it
+     * is written only once nothing stands between the action and the computer. It used to be written
+     * before the approval gate, and an action the person then denied stayed on the trail as allowed
+     * and carried out. Now an action that waits for the person has no row of its own until it is
+     * answered: the gate's `approval.evaluated` row says it was asked, a denial writes the refusal
+     * the gate was handed below (`declined`), and an approval writes this row when the action runs.
+     *
+     * A citation that was made and could not be honoured is refused, not carried out.
+     *
+     * `resolve` answering undefined leaves the element half of the context all-empty, and empty is
+     * the honest neutral value for an action that names no element: it is what stops a rule about
+     * one action surface throwing on another. It is the wrong answer for an action that named a ref
+     * and did not get one. Every element-keyed rule then evaluates against empty strings, so a deny
+     * that exists to stop this exact click does not match, the shipped default permits, and the
+     * click lands on whatever that ref is now. The rule did not decline to match. It was never
+     * shown the element.
+     *
+     * The computer's own staleness check does not make this safe. It compares the citation against
+     * its own counter, so it catches the cases where the two disagree; the case that matters is the
+     * one where the computer is content and only this server is out of step, which is what a
+     * computer restarting its generation counter under a stored row leaves behind.
+     *
+     * Only a cited ref, and only against a snapshot this server actually holds. Scroll, a
+     * page-level keypress, a shell call and a file read name no element, so they have nothing to
+     * have failed to resolve. A computer this server has no snapshot for at all is a different
+     * situation: there is no page here to judge the citation against, the computer is the only
+     * party that can, and refusing locally would take its answer away, including the one that says
+     * a person has taken the wheel. What is refused here is a citation this server can see is stale.
+     *
+     * Either refusal still leaves a row: an action whose ref resolves to nothing is still an action
+     * somebody tried to take, and it is on the trail as one that did not happen.
+     */
+    // The element's label, attached on the way out, so the transcript can say what was acted on
+    // instead of quoting a ref. The computer cannot supply this: it knows the ref, and the resolved
+    // snapshot lives here. File calls carry their own path already, so there is nothing to add.
+    const withElement = (output: T): T =>
+      element && output && typeof output === "object"
+        ? { ...output, element: { role: element.role, name: element.name } }
+        : output;
+    let approval: Awaited<ReturnType<ApprovalGate>>;
     try {
-      /*
-       * A citation that was made and could not be honoured is refused, not carried out.
-       *
-       * `resolve` answering undefined leaves the element half of the context all-empty, and empty is
-       * the honest neutral value for an action that names no element: it is what stops a rule about
-       * one action surface throwing on another. It is the wrong answer for an action that named a ref
-       * and did not get one. Every element-keyed rule then evaluates against empty strings, so a deny
-       * that exists to stop this exact click does not match, the shipped default permits, and the
-       * click lands on whatever that ref is now. The rule did not decline to match. It was never
-       * shown the element.
-       *
-       * The computer's own staleness check does not make this safe. It compares the citation against
-       * its own counter, so it catches the cases where the two disagree; the case that matters is the
-       * one where the computer is content and only this server is out of step, which is what a
-       * computer restarting its generation counter under a stored row leaves behind.
-       *
-       * Only a cited ref, and only against a snapshot this server actually holds. Scroll, a
-       * page-level keypress, a shell call and a file read name no element, so they have nothing to
-       * have failed to resolve. A computer this server has no snapshot for at all is a different
-       * situation: there is no page here to judge the citation against, the computer is the only
-       * party that can, and refusing locally would take its answer away, including the one that says
-       * a person has taken the wheel. What is refused here is a citation this server can see is stale.
-       *
-       * Thrown from inside the attempt, after the decision row, on purpose: an action whose ref
-       * resolves to nothing is still an action somebody tried to take, and refusing it before the row
-       * was written would be a way to act without appearing on the trail. The failure row beside it is
-       * what stops the trail claiming a permitted action was carried out when nothing was sent.
-       */
       if (located?.starting) throw located.starting;
       if (ref && stored && !element) {
         throw new StaleSnapshotError(
@@ -818,7 +844,7 @@ export function createComputerGateway(
         );
       }
       const continuation = currentApprovalContext();
-      const approval = await options.approvalGate?.({
+      approval = await options.approvalGate?.({
         actorId: actor.id,
         botId: seat.botId,
         toolRef: toolName,
@@ -839,11 +865,54 @@ export function createComputerGateway(
           ...(filePath ? { filePath } : {}),
         },
         continuation,
+        declined: auditRow({
+          ...subjectOf,
+          refusal: { kind: "person_declined", reason: DECLINED_BY_PERSON },
+        }),
       });
-      result =
-        approval && "replay" in approval
-          ? (approval.replay as T)
-          : await run(address);
+    } catch (error) {
+      // Waiting for the person, or the re-check before an approved action runs: nothing was attempted
+      // and nothing was refused, so there is nothing to record yet.
+      if (error instanceof HeadlessToolSuspension) throw error;
+      if (error instanceof ApprovalRefusedError) {
+        /*
+         * Turned away at the gate: the person already denied an equivalent action in this
+         * conversation, or one is already waiting for them. A refusal like a boundary's, though the
+         * policy allowed it. Two answers are not refusals of anything new and leave no row: a call
+         * that has to come again through the conversation that can ask, and the same call answered
+         * already, whose answer was recorded when it was given.
+         */
+        if (
+          !(error instanceof ApprovalNeedsConversationError) &&
+          !(error instanceof ApprovalAlreadyAnsweredError)
+        )
+          await write(auditStore, {
+            ...subjectOf,
+            refusal: { kind: "approval", reason: error.message },
+          });
+        throw error;
+      }
+      await write(auditStore, {
+        ...subjectOf,
+        failure: error instanceof Error ? error.message : "The action failed.",
+      });
+      throw error;
+    }
+    // Carried out (or done by the person) when it was first answered, and recorded then.
+    if (approval && "replay" in approval)
+      return withElement(approval.replay as T);
+
+    /*
+     * The attempt, written before acting: there is no path that acts without this row. An allowed
+     * action that then fails gets a second row saying so, carrying the same `attempt` id, because an
+     * allowed action may have partial effects before failing and the trail has to say both that it
+     * was sent and that it did not succeed. The audit page shows the pair as the one action it is.
+     */
+    const attempt = crypto.randomUUID();
+    await write(auditStore, { ...subjectOf, attempt });
+    let result: T;
+    try {
+      result = await run(address);
       await approval?.complete(result);
     } catch (error) {
       if (error instanceof HeadlessToolSuspension) throw error;
@@ -853,10 +922,6 @@ export function createComputerGateway(
        * Without this the trail lies by omission. The row above says the policy allowed the call, and
        * a reader takes "allowed" to mean "it happened".
        *
-       * Writing the decision before acting is still right, because an allowed action may have partial
-       * effects before failing. The failure row records the outcome separately from the policy
-       * decision.
-       *
        * It carries the same subject the decision row did, and for the same reasons: a shell call
        * that failed part-way is the row somebody most needs to name the command from, and a keypress
        * that failed is still the difference between a submitted form and a typed letter. Leaving
@@ -865,16 +930,8 @@ export function createComputerGateway(
        * snapshot lookup that never happened.
        */
       await write(auditStore, {
-        toolName,
-        seat,
-        actor,
-        element,
-        ref,
-        ...(subject.key ? { key: subject.key } : {}),
-        ...(subject.command ? { command: subject.command } : {}),
-        filePath,
-        pageUrl,
-        decision,
+        ...subjectOf,
+        attempt,
         failure: error instanceof Error ? error.message : "The action failed.",
         // A person pressing Stop mid-action is not the computer failing. The message still says so;
         // this keeps the row's type a stop, so a count of failed actions does not read every Stop as
@@ -883,12 +940,7 @@ export function createComputerGateway(
       });
       throw error;
     }
-    // The element's label, attached on the way out, so the transcript can say what was acted on
-    // instead of quoting a ref. The computer cannot supply this: it knows the ref, and the resolved
-    // snapshot lives here. File calls carry their own path already, so there is nothing to add.
-    return element && result && typeof result === "object"
-      ? { ...result, element: { role: element.role, name: element.name } }
-      : result;
+    return withElement(result);
   }
 
   /** A stop of one seat. See `seatIsComputer`. */
@@ -1717,28 +1769,39 @@ export function intentOf(
   }
 }
 
-async function write(
-  auditStore: AuditStore,
-  entry: {
-    toolName: string;
-    seat: ComputerSeat;
-    actor: ActionActor;
-    element: SnapshotElement | undefined;
-    ref: string | undefined;
-    /** Which key, for a keypress. Recorded because a keypress can act without naming a button. */
-    key?: string | undefined;
-    filePath: string | undefined;
-    pageUrl: string;
-    decision: PolicyDecision;
-    /** The command a shell call ran, so the trail says what was run and not merely that something was. */
-    command?: string;
-    /** Set only when a permitted action was attempted and did not succeed. */
-    failure?: string;
-    /** Set when that non-success was a person pressing Stop, so the row is typed a stop, not a failure. */
-    stopped?: boolean;
-  },
-) {
-  await recordAuditEvent(auditStore, {
+type ActionRow = {
+  toolName: string;
+  seat: ComputerSeat;
+  actor: ActionActor;
+  element: SnapshotElement | undefined;
+  ref: string | undefined;
+  /** Which key, for a keypress. Recorded because a keypress can act without naming a button. */
+  key?: string | undefined;
+  filePath: string | undefined;
+  pageUrl: string;
+  decision: PolicyDecision;
+  /** The command a shell call ran, so the trail says what was run and not merely that something was. */
+  command?: string;
+  /** Set only when a permitted action was attempted and did not succeed. */
+  failure?: string;
+  /** Set when that non-success was a person pressing Stop, so the row is typed a stop, not a failure. */
+  stopped?: boolean;
+  /**
+   * Set when the policy allowed the action and it was refused anyway: by the person, who denied it
+   * when asked, or by the approval gate (an equivalent action denied earlier, or one already
+   * waiting). `reason` is the sentence the Bot was told.
+   */
+  refusal?: { kind: "person_declined" | "approval"; reason: string };
+  /** One id for the attempt row and the failure or stop row that follows it, so the two read as one action. */
+  attempt?: string;
+};
+
+async function write(auditStore: AuditStore, entry: ActionRow) {
+  await recordAuditEvent(auditStore, auditRow(entry));
+}
+
+function auditRow(entry: ActionRow): AuditEventInput {
+  return {
     // A failure is its own kind of event, not a variant of "allowed": the whole point of the extra row
     // is that a reader can tell an action that happened from one that was permitted and then did not.
     // A stop is a third kind again: the action did not happen, but nothing broke, so it is neither a
@@ -1747,9 +1810,9 @@ async function write(
       ? "computer.action_stopped"
       : entry.failure
         ? "computer.action_failed"
-        : entry.decision.allowed
-          ? "computer.action_allowed"
-          : "computer.action_refused",
+        : entry.refusal || !entry.decision.allowed
+          ? "computer.action_refused"
+          : "computer.action_allowed",
     targetType: "computer",
     targetId: entry.seat.botId,
     initiator: entry.actor.initiator,
@@ -1806,16 +1869,25 @@ async function write(
           ? "not in the current snapshot"
           : undefined,
       ...(entry.failure ? { failure: entry.failure } : {}),
+      ...(entry.attempt ? { attempt: entry.attempt } : {}),
+      ...(entry.refusal
+        ? { refusal: entry.refusal.kind, reason: entry.refusal.reason }
+        : {}),
+      /*
+       * The policy's decision, as it was made. A refusal by the person or the gate leaves `allowed`
+       * as the policy said, which is what a replay of the policy over this row compares against, and
+       * `carriedOut` false: it was not.
+       */
       decision: {
         allowed: entry.decision.allowed,
         mode: entry.decision.mode,
         source: entry.decision.source,
         rule: entry.decision.matched,
         /** Present so the trail explains a dry-run row that was recorded as refused but still ran. */
-        carriedOut: entry.decision.forward,
+        carriedOut: entry.refusal ? false : entry.decision.forward,
       },
     },
-  });
+  };
 }
 
 /**

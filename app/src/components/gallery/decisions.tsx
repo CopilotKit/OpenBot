@@ -254,6 +254,8 @@ export const GALLERY: GalleryComponent[] = [
     name: "askApproval",
     title: "Approval",
     kind: "decision",
+    summary:
+      "Asks you to approve or decline something. The Bot waits for your answer.",
     description:
       "Ask the person to approve or decline something, and WAIT for their answer. You are given their decision: `approved`, `declined`, or `other` with `note`, what they wrote instead. Use it for a decision that is theirs to make, or before something you cannot undo, unless your instructions say the person is already asked before that kind of action.",
     parameters: ApprovalCardProps,
@@ -280,6 +282,8 @@ export const GALLERY: GalleryComponent[] = [
     name: "askChoice",
     title: "Choice",
     kind: "decision",
+    summary:
+      "Asks you to pick one of several options. The Bot waits for your answer.",
     description:
       "Ask the person to pick one of several options, and WAIT for their answer. Use when you cannot sensibly guess which one they meant. You are given the id of the option they chose as `choice`, or `answer`, what they wrote instead.",
     parameters: ChoiceCardProps,

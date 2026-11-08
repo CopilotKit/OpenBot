@@ -1,6 +1,6 @@
 {
   "name": "openbot",
-  "version": "0.3.1",
+  "version": "0.3.3",
   "license": "MIT",
   "private": true,
   "packageManager": "bun@1.4.3",

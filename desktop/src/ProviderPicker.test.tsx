@@ -50,22 +50,38 @@ const cloudProviders = [
   {
     id: "google",
     name: "Google Gemini",
+    // Google's guidelines allow only "Sign in with Google" beside its G.
+    signsInWith: "Google",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
     model: "gemini-3.8-flash",
     keyUrl: "https://aistudio.google.com/apikey",
+    keyLink: "Get a Google Gemini API key",
   },
   {
     id: "xai",
     name: "xAI",
+    signsInWith: "xAI",
     baseUrl: "https://api.x.ai/v1",
     model: "grok-4.7",
     keyUrl: "https://console.x.ai/",
+    // "an", by the sound of the name: the link read "Get a xAI API key".
+    keyLink: "Get an xAI API key",
   },
 ];
 
+/** Signs in through a device authorization that mints an API key, then uses it like a typed one. */
+const unbiased = {
+  id: "unbiased",
+  name: "Unbiased AI",
+  baseUrl: "https://api.unbiased.ai/v1",
+  model: "pareto",
+  keyUrl: "https://platform.unbiased.ai/dashboard/keys",
+  keyLink: "Get an Unbiased AI API key",
+};
+
 const allProviders: Provider[] = [
   ...providers,
-  ...cloudProviders.map(
+  ...[...cloudProviders, unbiased].map(
     (provider): Provider => ({
       id: provider.id,
       name: provider.name,
@@ -98,6 +114,10 @@ mock.module("@tauri-apps/api/event", () => ({
 
 mock.module("./Mark", () => ({
   Mark: ({ name }: { name: string }) => <span>{name}</span>,
+  // The mark a "Sign in with" button carries, by the id it was given. The real one draws that
+  // vendored file, which needs Vite's glob.
+  ButtonMark: ({ id }: { id: string | null }) =>
+    id ? <img alt="" data-mark={id} /> : null,
 }));
 
 const { ProviderPicker } = await import("./ProviderPicker");
@@ -168,6 +188,78 @@ async function pick(view: ReturnType<typeof render>, name: RegExp) {
   if (change) await userEvent.click(change);
   await userEvent.click(await view.findByRole("radio", { name }));
 }
+
+/*
+ * Every "Sign in with" button carries the mark of the provider it signs in to, as the web app's
+ * sign-in buttons do. They carried none, and Google's and xAI's rows had no mark to carry.
+ */
+test("every Sign in with button carries its provider's mark", async () => {
+  const marked: Provider[] = [
+    { ...providers[0], mark: "openai" },
+    { ...providers[1], mark: "anthropic" },
+    {
+      id: "google",
+      name: "Google Gemini",
+      summary: "Use an API key or sign in.",
+      logins: ["endpoint", "oauth"],
+      mark: "google-color",
+      caution: null,
+    },
+    {
+      id: "xai",
+      name: "xAI",
+      summary: "Use an API key or sign in.",
+      logins: ["endpoint", "oauth"],
+      mark: "xai",
+      caution: null,
+    },
+  ];
+  invokeHandler = async (command) => {
+    if (command === "providers") return marked;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPickerWithHeld({
+    saved: { modelSessions: { anthropic: true } },
+  });
+
+  for (const provider of marked) {
+    await pick(view, new RegExp(`^${provider.name}`));
+    if (provider.logins.includes("oauth"))
+      await userEvent.click(view.getByRole("tab", { name: "Sign in" }));
+    const name =
+      provider.id === "anthropic"
+        ? "Sign in again with Anthropic"
+        : provider.id === "google"
+          ? "Sign in with Google"
+          : `Sign in with ${provider.name}`;
+    const button = view.getByRole("button", { name });
+    expect(button.querySelector("img")?.getAttribute("data-mark")).toBe(
+      provider.mark,
+    );
+  }
+});
+
+/*
+ * "Any OpenAI-compatible endpoint" was the one row with nothing beside its name. It stands for no one
+ * vendor, so it carries no vendor's mark, and gets a plain icon in the marks' tile instead.
+ */
+test("the OpenAI-compatible endpoint row shows a plain icon in a mark tile", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return allProviders;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPicker();
+
+  const row = (
+    await view.findByRole("radio", { name: /^OpenAI-compatible/ })
+  ).closest("label");
+  const tile = row?.querySelector(".mark-tile");
+  expect(tile?.getAttribute("data-icon")).toBe("cloud");
+  expect(tile?.getAttribute("aria-hidden")).toBe("true");
+  expect(tile?.querySelector("svg")).toBeTruthy();
+  // The other rows keep their own marks; only the endpoint row gets the plain icon.
+  expect(view.container.querySelectorAll("[data-icon]").length).toBe(1);
+});
 
 test("a completed plan sign-in enables and submits only its issuing provider", async () => {
   const choices: unknown[] = [];
@@ -343,6 +435,47 @@ test("a ChatGPT sign-in that finished is not cancelled when the screen moves on"
   ).toBe(false);
 });
 
+test.each([
+  {
+    name: "Anthropic",
+    signIn: "claude",
+    says: "Anthropic opens in your browser. Approve the request there, then paste the code it shows you back here. You won't need an API key.",
+    asksForCode: true,
+  },
+  {
+    name: "OpenAI",
+    signIn: "chatgpt",
+    says: "OpenAI opens in your browser. You won't type anything here or need an API key.",
+    asksForCode: false,
+  },
+])(
+  "$name's plan sign-in says beforehand whether it will ask for a code",
+  async ({ name, signIn, says, asksForCode }) => {
+    const finished = deferred<string>();
+    invokeHandler = async (command) => {
+      if (command === "providers") return providers;
+      if (command === `begin_${signIn}_sign_in`)
+        return "https://sign-in.example";
+      if (command === `finish_${signIn}_sign_in`) return finished.promise;
+      if (command === `cancel_${signIn}_sign_in`) return null;
+      throw new Error(`unexpected command ${command}`);
+    };
+    const view = await renderPicker();
+    await pick(view, new RegExp(name));
+
+    const promise = view.getByText(/in your browser\./);
+    expect(promise.textContent).toBe(says);
+
+    await userEvent.click(
+      view.getByRole("button", { name: `Sign in with ${name}` }),
+    );
+    await view.findByText("Open the sign-in page");
+    expect(Boolean(view.queryByLabelText("Code from your browser"))).toBe(
+      asksForCode,
+    );
+  },
+);
+
 test("a saved provider-scoped plan session enables continue without exposing a token", async () => {
   const choices: unknown[] = [];
   invokeHandler = async (command) => {
@@ -364,6 +497,7 @@ test("a saved provider-scoped plan session enables continue without exposing a t
 
   await pick(view, /OpenAI/);
   expect(view.getByText(/A saved OpenAI sign-in will be checked/)).toBeTruthy();
+  expect(view.getByText(/Your Bot will use LangChain/)).toBeTruthy();
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
 
   expect(choices).toEqual([
@@ -984,7 +1118,9 @@ for (const provider of cloudProviders) {
     );
     await user.click(view.getByRole("tab", { name: "Sign in" }));
     await user.click(
-      view.getByRole("button", { name: `Sign in with ${provider.name}` }),
+      view.getByRole("button", {
+        name: `Sign in with ${provider.signsInWith}`,
+      }),
     );
     await view.findByText(`Signed in to ${provider.name}.`);
     // Signed in with a model already named: on by itself, no Continue.
@@ -1006,7 +1142,9 @@ for (const provider of cloudProviders) {
       args: { attemptId: "synthetic-attempt" },
     });
   });
+}
 
+for (const provider of [...cloudProviders, unbiased]) {
   test(`${provider.name} opens its API key page externally without sending entered credentials`, async () => {
     invokeHandler = async (command) => {
       if (command === "providers") return allProviders;
@@ -1023,9 +1161,7 @@ for (const provider of cloudProviders) {
       "synthetic-private-api-key",
     );
     expect(invokeCalls.map((call) => call.command)).toEqual(["providers"]);
-    await user.click(
-      view.getByRole("link", { name: `Get a ${provider.name} API key` }),
-    );
+    await user.click(view.getByRole("link", { name: provider.keyLink }));
     expect(invokeCalls).toEqual([
       { command: "providers", args: undefined },
       { command: "plugin:opener|open_url", args: { url: provider.keyUrl } },
@@ -1192,6 +1328,100 @@ for (const provider of cloudProviders) {
     });
   });
 }
+
+test("an Unbiased AI sign-in mints an API key that goes on as its endpoint credential", async () => {
+  const finish = deferred<string>();
+  invokeHandler = async (command) => {
+    if (command === "providers")
+      return allProviders.map((row) =>
+        row.id === "unbiased" ? { ...row, logins: ["oauth", "endpoint"] } : row,
+      );
+    if (command === "begin_model_oauth")
+      return {
+        attemptId: "unbiased-attempt",
+        url: "https://platform.unbiased.ai/activate?user_code=BCDF-GHJK",
+        userCode: "BCDF-GHJK",
+      };
+    if (command === "plugin:opener|open_url") return null;
+    if (command === "finish_model_oauth") return finish.promise;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const choices: unknown[] = [];
+  const view = await renderPicker((choice) => choices.push(choice));
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.click(await view.findByRole("radio", { name: /Unbiased AI/ }));
+  // Sign-in is the way in by default, with the gateway's model already named.
+  expect(
+    view.getByRole("tab", { name: "Sign in" }).getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(view.getByLabelText("Model name")).toHaveProperty("value", "pareto");
+  await user.click(
+    view.getByRole("button", { name: "Sign in with Unbiased AI" }),
+  );
+  // The code is on screen for matching against the approval page, beside the link to it.
+  await view.findByText("BCDF-GHJK");
+  expect(invokeCalls).toContainEqual({
+    command: "plugin:opener|open_url",
+    args: { url: "https://platform.unbiased.ai/activate?user_code=BCDF-GHJK" },
+  });
+  await act(async () => {
+    finish.resolve("sk_pareto_synthetic");
+  });
+  await view.findByText("Signed in to Unbiased AI.");
+  await waitFor(() => expect(choices).toHaveLength(1), { timeout: 4000 });
+  expect(choices).toEqual([
+    {
+      provider: "openai-compatible",
+      login: "endpoint",
+      apiKey: "sk_pareto_synthetic",
+      baseUrl: "https://api.unbiased.ai/v1",
+      model: "pareto",
+    },
+  ]);
+  // Held, never shown.
+  expect(view.container.textContent).not.toContain("sk_pareto_synthetic");
+});
+
+test("a refused Unbiased AI sign-in shows why, submits nothing and keeps no key", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers")
+      return allProviders.map((row) =>
+        row.id === "unbiased" ? { ...row, logins: ["oauth", "endpoint"] } : row,
+      );
+    if (command === "begin_model_oauth")
+      return {
+        attemptId: "unbiased-attempt",
+        url: "https://platform.unbiased.ai/activate?user_code=BCDF-GHJK",
+        userCode: "BCDF-GHJK",
+      };
+    if (command === "plugin:opener|open_url") return null;
+    if (command === "finish_model_oauth")
+      throw new Error(
+        "Unbiased AI sign-in was not approved: the user denied this authorization.",
+      );
+    throw new Error(`unexpected command ${command}`);
+  };
+  const choices: unknown[] = [];
+  const view = await renderPicker((choice) => choices.push(choice));
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.click(await view.findByRole("radio", { name: /Unbiased AI/ }));
+  await user.click(
+    view.getByRole("button", { name: "Sign in with Unbiased AI" }),
+  );
+  await view.findByText(/not approved: the user denied this authorization/);
+  // The wait is over: no code, no link, and the button offers a fresh start, not "again".
+  expect(view.queryByText("BCDF-GHJK")).toBeNull();
+  expect(view.queryByText("Signed in to Unbiased AI.")).toBeNull();
+  expect(
+    view.getByRole("button", { name: "Sign in with Unbiased AI" }),
+  ).toBeTruthy();
+  expect(view.getByRole("button", { name: "Continue" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  await new Promise((settle) => setTimeout(settle, 1200));
+  expect(choices).toEqual([]);
+});
 
 test("a chosen provider stands alone, and Change or Escape shows them all again", async () => {
   invokeHandler = async (command) => {

@@ -1,5 +1,5 @@
 {
-  "id": "8747f779-9207-4165-9c7a-2fda2e55306a",
+  "id": "ec90177b-6cc5-4858-8a27-76976f2e9495",
   "prevId": "44b6c1d5-d495-4a86-be24-090358d84d82",
   "version": "7",
   "dialect": "postgresql",
@@ -2188,6 +2188,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "cron": {
           "name": "cron",
           "type": "text",
@@ -4343,82 +4349,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.learning_skill_approvals": {
-      "name": "learning_skill_approvals",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "skill_name": {
-          "name": "skill_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "approved_by": {
-          "name": "approved_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sharing": {
-          "name": "sharing",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'none'"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "learning_skill_approvals_user_id_users_id_fk": {
-          "name": "learning_skill_approvals_user_id_users_id_fk",
-          "tableFrom": "learning_skill_approvals",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "learning_skill_approvals_user_id_skill_name_pk": {
-          "name": "learning_skill_approvals_user_id_skill_name_pk",
-          "columns": [
-            "user_id",
-            "skill_name"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "learning_skill_approvals_approved_by_check": {
-          "name": "learning_skill_approvals_approved_by_check",
-          "value": "\"learning_skill_approvals\".\"approved_by\" IN ('person', 'admin')"
-        },
-        "learning_skill_approvals_sharing_check": {
-          "name": "learning_skill_approvals_sharing_check",
-          "value": "\"learning_skill_approvals\".\"sharing\" IN ('none', 'requested', 'approved', 'declined')"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.learning_skill_sharing": {

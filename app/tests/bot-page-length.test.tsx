@@ -12,6 +12,7 @@ import {
   activitySummary,
   BotActivityGlance,
   BotActivityRow,
+  BotActivitySections,
 } from "@/components/bot-profile/activity";
 import { SuggestionsInbox } from "@/components/suggestions/proactive-panel";
 import type { ActivityItem, BotActivity } from "@/lib/bot-lifecycle/queries";
@@ -67,7 +68,50 @@ test("the activity row counts what is running and what is lined up", () => {
   expect(activitySummary(activity(0, 0, 4))).toBe(
     "Nothing running or scheduled",
   );
-  expect(activitySummary(activity(0, 0, 0))).toBe("Nothing yet");
+  expect(activitySummary(activity(0, 0, 0))).toBe(
+    "No tasks, routines or goals yet",
+  );
+});
+
+/*
+ * FOUND ON WINDOWS: a goal that only runs when asked sat under Scheduled, and a Bot with one routine
+ * and that goal read "2 scheduled".
+ */
+test("a goal that runs only when asked is counted and listed as on demand, never as scheduled", async () => {
+  const [routine] = items(1, "Check releases");
+  const goal = {
+    ...(routine as ActivityItem),
+    id: "responsibility:watch",
+    kind: "responsibility",
+    title: "Watch OpenBot releases",
+    detail: "Runs when asked",
+    status: "active",
+  } as ActivityItem;
+  const data = {
+    inProgress: [],
+    scheduled: [{ ...(routine as ActivityItem), status: "scheduled" }],
+    onDemand: [goal],
+    completed: [],
+  };
+  expect(activitySummary(data)).toBe("1 scheduled · 1 on demand");
+  expect(activitySummary({ ...data, scheduled: [] })).toBe("1 on demand");
+
+  const page = glance(data);
+  expect(await page.findByText("1 scheduled · 1 on demand")).toBeTruthy();
+  expect(page.getByText("Watch OpenBot releases")).toBeTruthy();
+  cleanup();
+
+  const sections = glance(data, BotActivitySections);
+  const scheduled = await sections.findByRole("heading", { name: "Scheduled" });
+  const onDemand = sections.getByRole("heading", { name: "On demand" });
+  const listedUnder = (heading: HTMLElement) =>
+    [
+      ...(heading
+        .closest("section")
+        ?.querySelectorAll("[data-slot=item-title]") ?? []),
+    ].map((title) => title.textContent);
+  expect(listedUnder(scheduled)).toEqual(["Check releases 1"]);
+  expect(listedUnder(onDemand)).toEqual(["Watch OpenBot releases"]);
 });
 
 test("the newest three suggestions show, and the rest open in place", async () => {
@@ -168,4 +212,37 @@ test("with nothing running or scheduled, there is no Activity section, and For y
   expect(titles).toEqual(["Activity"]);
   expect(section.container.querySelector("[data-slot=item]")).toBeNull();
   expect(section.queryByRole("heading", { name: "Activity" })).toBeNull();
+});
+
+test("a long title is cut to one line with an ellipsis, and the whole of it shows on hover", async () => {
+  // Seen on the Bot page: "...releases) and post one l", cut mid-word with nothing to say so.
+  const long =
+    "Check the latest release of CopilotKit/OpenBot on GitHub (https://github.com/CopilotKit/OpenBot/releases) and post one line in this conversation with its version number (tag) and release date.";
+  const [scheduled] = items(1, "Scheduled");
+  const view = glance({
+    inProgress: [],
+    scheduled: [{ ...(scheduled as ActivityItem), title: long }],
+    completed: [],
+  });
+
+  const title = await view.findByText(long);
+  expect(title.getAttribute("data-slot")).toBe("item-title");
+  expect(title.getAttribute("title")).toBe(long);
+  expect(title.className).toContain("truncate");
+  // The row's content may shrink below its text, or the ellipsis never shows.
+  expect(title.parentElement?.className).toContain("min-w-0");
+});
+
+test("a goal's activity row says Goal and opens the Bot's goals", async () => {
+  const [running] = items(1, "Close the month");
+  const view = glance({
+    inProgress: [{ ...(running as ActivityItem), kind: "responsibility" }],
+    scheduled: [],
+    completed: [],
+  });
+  const title = await view.findByText("Close the month 1");
+  const row = title.closest("a");
+  expect(row?.getAttribute("href")).toBe("/bots/scout/responsibilities");
+  expect(row?.textContent).toContain("Goal · running");
+  expect(row?.textContent).not.toMatch(/responsibilit/i);
 });

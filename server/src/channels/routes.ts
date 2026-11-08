@@ -1,3 +1,5 @@
+import { readFiring } from "@openbot/shared/routine-firing";
+import { isStarterTourAgent } from "@openbot/shared/starter-tour";
 import {
   and,
   asc,
@@ -11,7 +13,6 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { readFiring } from "@openbot/shared/routine-firing";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import {
@@ -24,13 +25,16 @@ import type { AppVariables } from "../auth/guards";
 import type { Database } from "../db/client";
 import {
   agentProfiles,
+  agents,
   botTasks,
   channelAgents,
   channelMemberships,
   channels,
   intelligenceChannelMappings,
+  users,
 } from "../db/schema";
 import { parsePageLimit } from "../paging";
+import type { UserPreferencesStore } from "../user-preferences";
 import {
   CHANNEL_ACTIVITY_TOPIC,
   type ChannelActivityEvent,
@@ -223,7 +227,11 @@ export type ChannelStore = {
    * True when this call deleted the channel; false when it was already deleted. A repeat is a
    * no-op, so it announces nothing and its route records nothing.
    */
-  softDelete(actor: AgentActor, channelId: string): Promise<boolean>;
+  softDelete(
+    actor: AgentActor,
+    channelId: string,
+    discardFailedStart?: boolean,
+  ): Promise<boolean>;
   recordActivity(
     actor: AgentActor,
     channelId: string,
@@ -300,6 +308,29 @@ function channelName(names: string[]) {
   if (codePoints.length <= MAX_CHANNEL_NAME_CODE_POINTS) return joined;
   return `${codePoints.slice(0, MAX_CHANNEL_NAME_CODE_POINTS - 1).join("")}…`;
 }
+
+/**
+ * What a conversation is called: what its Bots are called now.
+ *
+ * A conversation's stored name is its Bots' names when it was made, and nothing wrote it again, so
+ * a Bot renamed on its Setup page went on under its old name in the conversation header, the sidebar
+ * and every list of conversations. Read here from the Bots instead, cut the way {@link channelName}
+ * cuts. A group's Bots keep the order its stored name gives them, and one renamed since goes last.
+ * A package's conversations are named by the package and keep that name.
+ */
+export const conversationName = sql<string>`case when ${channels.packageId} is null then coalesce((
+  select case when char_length(named.joined) <= ${MAX_CHANNEL_NAME_CODE_POINTS}::int then named.joined
+    else left(named.joined, ${MAX_CHANNEL_NAME_CODE_POINTS - 1}::int) || '…' end
+  from (
+    select string_agg(${agents.name}, ', ' order by
+      nullif(strpos(', ' || ${channels.name} || ', ', ', ' || ${agents.name} || ', '), 0) nulls last,
+      ${channelAgents.agentId}) as joined
+    from ${channelAgents}
+    inner join ${agents} on ${agents.id} = ${channelAgents.agentId}
+    where ${channelAgents.channelId} = ${channels.id}
+  ) named
+  where named.joined is not null
+), ${channels.name}) else ${channels.name} end`;
 
 export function createChannelStore(
   database: Database,
@@ -518,7 +549,7 @@ export function createChannelStore(
       const rows = await database
         .select({
           id: channels.id,
-          name: channels.name,
+          name: conversationName,
           agentId: channelAgents.agentId,
           threadId: intelligenceChannelMappings.threadId,
           lastMessageAt: channels.lastMessageAt,
@@ -624,7 +655,7 @@ export function createChannelStore(
       const rows = await database
         .select({
           id: channels.id,
-          name: channels.name,
+          name: conversationName,
           agentId: channelAgents.agentId,
           threadId: intelligenceChannelMappings.threadId,
           deletedAt: agentProfiles.deletedAt,
@@ -790,7 +821,7 @@ export function createChannelStore(
       if (updated.length === 0) throw new ChannelNotFoundError(channelId);
     },
 
-    async softDelete(actor, channelId) {
+    async softDelete(actor, channelId, discardFailedStart = false) {
       return await database.transaction(
         async (transaction) => {
           const [row] = await transaction
@@ -815,13 +846,33 @@ export function createChannelStore(
             .update(channels)
             .set({ deletedAt: new Date(), updatedAt: new Date() })
             .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)))
-            .returning({ id: channels.id });
+            .returning({
+              id: channels.id,
+              lastMessageAt: channels.lastMessageAt,
+            });
           /*
            * And the rest of the no-op: a repeat changed nothing, so nothing is announced. Without
            * this, every repeat told every member again, and the route wrote another
            * `channel.deleted` row to an append-only trail for a deletion that had not happened.
            */
           if (stamped.length === 0) return false;
+
+          // A failed start can delete its newly created, still-empty conversation.
+          // Release only that account's matching claim, never a used tour.
+          if (discardFailedStart && stamped[0]?.lastMessageAt === null) {
+            await transaction
+              .update(users)
+              .set({
+                preferences: sql`${users.preferences} - 'starterTourChannelId'`,
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(users.id, actor.id),
+                  sql`${users.preferences}->>'starterTourChannelId' = ${channelId}`,
+                ),
+              );
+          }
 
           // Read on this transaction, so the members told are the ones the channel had when it was
           // hidden. Soft leaves the membership rows in place, so this reads the same list a repeat
@@ -1197,6 +1248,7 @@ export function createChannelRoutes(
   events?: ChannelEventHub,
   /** Where a channel's removal is written. Absent in tests that do not care about the trail. */
   auditStore?: AuditStore,
+  preferences?: Pick<UserPreferencesStore, "claimStarterTour">,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -1280,6 +1332,24 @@ export function createChannelRoutes(
         context.var.actor,
         parsed.value.agentIds,
       );
+      if (
+        preferences &&
+        channel.agentIds.length === 1 &&
+        isStarterTourAgent(channel.agentIds[0] ?? "")
+      ) {
+        try {
+          await preferences.claimStarterTour(context.var.actor.id, channel.id);
+        } catch (error) {
+          // Creation already succeeded. A preference failure must not invite a duplicate retry.
+          console.error(
+            JSON.stringify({
+              type: "starter-tour-claim-failed",
+              channelId: channel.id,
+              error: String(error),
+            }),
+          );
+        }
+      }
       return context.json({ channel: channelDto(channel) }, 201);
     } catch (error) {
       return mapStoreError(context, error);
@@ -1400,7 +1470,11 @@ export function createChannelRoutes(
   routes.delete("/:channelId", requireUser, async (context) => {
     const channelId = context.req.param("channelId");
     try {
-      const deleted = await store.softDelete(context.var.actor, channelId);
+      const deleted = await store.softDelete(
+        context.var.actor,
+        channelId,
+        context.req.query("discardFailedStart") === "true",
+      );
       // A repeat is still 204, but it deleted nothing, and the trail records acts, not attempts.
       if (deleted !== false) await recordDeleted(context, channelId);
       return context.body(null, 204);

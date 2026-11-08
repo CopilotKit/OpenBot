@@ -378,8 +378,10 @@ export async function installEnterpriseControls(
 
   /*
    * Action Recording: every shell command a Bot ran (or was refused), scrubbed, into its own table.
-   * Read from the audit rows the computer gateway and the host broker already write, so the recorded
-   * outcome is the one the trail holds.
+   * Read from the audit rows the computer gateway writes, so the recorded outcome is the one the
+   * trail holds. A command on the person's own computer (`host/run_command`) is on the trail too,
+   * and is recorded by `guardHostAccess` below with the outcome the desktop gave, so it is skipped
+   * here and recorded once.
    */
   removeTaps.push(
     addAuditTap((event) => {
@@ -387,11 +389,12 @@ export async function installEnterpriseControls(
       if (!event.eventType.startsWith("computer.action_")) return;
       const command = commandOf(event.payload);
       if (!command) return;
+      // The gateway names the tool `action`; `tool` is accepted for any other writer.
+      const named = event.payload.action ?? event.payload.tool;
+      if (typeof named === "string" && named.startsWith("host/")) return;
       const scrubbed = scrubCommand(command);
       const botId =
         typeof event.payload.bot === "string" ? event.payload.bot : null;
-      // The gateway names the tool `action`; `tool` is accepted for any other writer.
-      const named = event.payload.action ?? event.payload.tool;
       const toolName =
         typeof named === "string" ? named : "computer_run_command";
       const actor =
@@ -400,7 +403,7 @@ export async function installEnterpriseControls(
       const outcome = event.eventType.replace("computer.action_", "");
       void store
         .recordAction({
-          surface: toolName.startsWith("host/") ? "local" : "cloud",
+          surface: "cloud",
           botId,
           actorUserId: actor,
           toolName,
@@ -804,12 +807,15 @@ type HostAccessLike = {
     botName: string;
     writable?: boolean;
   }): Promise<unknown>;
-  callHost(input: {
-    actorId: string;
-    botId: string;
-    kind: string;
-    command?: string;
-  }): Promise<unknown>;
+  callHost(
+    input: {
+      actorId: string;
+      botId: string;
+      kind: string;
+      command?: string;
+    },
+    hooks?: { onDispatch?: () => Promise<void> },
+  ): Promise<unknown>;
 };
 
 /** Refuse the member's own machine to somebody without "Local computer access", and record commands. */
@@ -838,7 +844,10 @@ export function guardHostAccess<T extends HostAccessLike>(
       throw refuse(capabilityRefusal("localComputer"));
     return requestFolderGrant(input);
   }) as T["requestFolderGrant"];
-  broker.callHost = (async (input: Parameters<T["callHost"]>[0]) => {
+  broker.callHost = (async (
+    input: Parameters<T["callHost"]>[0],
+    hooks?: Parameters<T["callHost"]>[1],
+  ) => {
     if (!(await allowed(input.actorId)))
       throw refuse(capabilityRefusal("localComputer"));
     const controls = enterpriseControls();
@@ -857,7 +866,7 @@ export function guardHostAccess<T extends HostAccessLike>(
         .catch(() => undefined);
     };
     try {
-      const result = await callHost(input);
+      const result = await callHost(input, hooks);
       record("allowed");
       return result;
     } catch (error) {

@@ -119,6 +119,18 @@ describe("contextFromAuditPayload", () => {
     expect(contextFromAuditPayload({ bot: "b" })).toBeNull();
     expect(contextFromAuditPayload({ action: 7, bot: "b" })).toBeNull();
   });
+
+  test("a folder action on the person's own computer is not this policy's to replay", () => {
+    // Recorded as a computer action so Activity reads it as one; its folder grant and the desktop's
+    // own asking decide it, so a policy for the cloud computer must not count it.
+    expect(
+      contextFromAuditPayload({
+        action: "host/run_command",
+        bot: "b",
+        command: "dir",
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("dryRunAgainstHistory", () => {

@@ -93,15 +93,18 @@ function orbFace(id: string, size: number) {
   return <OrbFace id={id} size={size} />;
 }
 
-/** A participant that is not a listed Bot, such as a computer, is seeded by its id. */
+/**
+ * A participant that is not a listed Bot, such as a computer, is seeded by its id. Its label is the
+ * Bot's name and never the id, hidden or not: whatever reads the orb's label should hear a Bot.
+ */
 function OrbFace({ id, size }: { id: string; size: number }) {
-  const { data: seed } = useQuery({
+  const { data: bot } = useQuery({
     ...agentListQueryOptions(),
-    select: (agents) => agents.find((agent) => agent.id === id)?.avatarSeed,
+    select: (agents) => agents.find((agent) => agent.id === id),
   });
   return (
     <span aria-hidden="true" className="contents">
-      <BotOrb name={id} seed={seed ?? id} size={size} />
+      <BotOrb name={bot?.name ?? ""} seed={bot?.avatarSeed ?? id} size={size} />
     </span>
   );
 }

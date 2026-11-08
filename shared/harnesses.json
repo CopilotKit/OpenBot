@@ -45,7 +45,7 @@
     },
     {
       "id": "langgraph",
-      "name": "LangGraph",
+      "name": "LangChain (LangGraph)",
       "summary": "Graphs you can change, from LangChain.",
       "webSummary": null,
       "image": "agent-langgraph-agui",

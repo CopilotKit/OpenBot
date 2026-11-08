@@ -227,6 +227,75 @@ describe("built-in safety requirements", () => {
     ).toBeUndefined();
   });
 
+  test("archive as an app tool's action deletes, and so does a tool its app marks destructive", async () => {
+    const asked = (toolRef: string, over: Partial<ApprovalCandidate> = {}) =>
+      safetyRequirement(candidate({ toolRef, args: { id: "51" }, ...over }));
+    for (const toolRef of [
+      // HubSpot's delete is called archive. Seen on a Mac: "delete that HubSpot contact" ran unasked.
+      "composio-hubspot/HUBSPOT_ARCHIVE_CONTACT",
+      "composio-hubspot/HUBSPOT_ARCHIVE_BATCH_OF_FEEDBACK_SUBMISSIONS",
+      "composio-hubspot/HUBSPOT_BATCH_ARCHIVE_ASSOCIATION_LABELS",
+      "composio-slack/SLACK_ARCHIVE_CONVERSATION",
+      // Gmail's archive, as Gmail MCP servers name it, and in a broker's CamelCase.
+      "mcp/gmail/gmail_archive",
+      "mcp/gmail/archive-email",
+      "mcp/gmail/archive",
+      "arcade-Gmail/ArchiveEmail",
+      // The delete words, as before.
+      "composio-googledrive/GOOGLEDRIVE_DELETE_FILE",
+      "composio-gmail/GMAIL_MOVE_TO_TRASH",
+      "arcade-Linear/RemoveAttachment",
+    ])
+      expect({ toolRef, asked: asked(toolRef) }).toEqual({
+        toolRef,
+        asked: {
+          id: "deleting",
+          reason: "Deleting something always asks you first.",
+          behaviour: "ask",
+        },
+      });
+    // Archive counts only as the action, the name's first verb.
+    for (const toolRef of [
+      "mcp/gmail/list_archived_emails",
+      "mcp/gmail/get_archive_settings",
+      "composio-slack/SLACK_UNARCHIVE_CHANNEL",
+      "composio-github/GITHUB_DOWNLOAD_A_REPOSITORY_ARCHIVE_ZIP",
+      "composio-hubspot/HUBSPOT_SEARCH_ARCHIVED_CONTACTS",
+    ])
+      expect({ toolRef, asked: asked(toolRef) ?? "nothing" }).toEqual({
+        toolRef,
+        asked: "nothing",
+      });
+
+    // A name that says nothing, from an app that marks the tool destructive.
+    const destructive = candidate({
+      toolRef: "mcp/acme/reset_workspace",
+      args: { workspace: "w1" },
+      destructive: true,
+    });
+    expect(safetyRequirement(destructive)).toEqual({
+      id: "deleting",
+      reason:
+        "The app marks this as deleting or overwriting something, so it always asks you first.",
+      behaviour: "ask",
+    });
+    // Before any rule: an allow rule, the person's or the team's, doesn't answer it.
+    expect(
+      await decideAction({
+        ...base,
+        candidate: destructive,
+        team: [team("allow", { toolRef: "*" })],
+        personal: [rule("allow", { toolRef: "*" })],
+      }),
+    ).toMatchObject({ behaviour: "ask", source: "safety" });
+    // The same tool unmarked is an ordinary change; a read is never asked about here.
+    const { destructive: _marked, ...unmarked } = destructive;
+    expect(safetyRequirement(unmarked)).toBeUndefined();
+    expect(
+      safetyRequirement({ ...destructive, effect: "read" }),
+    ).toBeUndefined();
+  });
+
   test("what a Bot types into a field is content: the field and the page say what the action is", () => {
     // As the computer describes a typing action: the field it types into and the page it is on.
     const typing = (text: string, field: string, pageUrl: string) =>
@@ -270,6 +339,116 @@ describe("built-in safety requirements", () => {
     expect(
       typing("hunter2", "New password", "https://mail.example/settings"),
     ).toBe("credentials");
+  });
+
+  test("an address that carries credential words in its query string is not a credentials page", () => {
+    // As the computer describes an action on a page: the element acted on and the page it is on.
+    const acting = (
+      toolRef: "computer_type" | "computer_click",
+      element: { name: string; role: string; type?: string },
+      pageUrl: string,
+    ) =>
+      safetyRequirement(
+        candidate({
+          toolRef,
+          scope: new URL(pageUrl).host,
+          args:
+            toolRef === "computer_type"
+              ? { ref: "e5", text: "Test Robot", snapshotId: 4 }
+              : { ref: "e5", snapshotId: 4 },
+          target: {
+            element: { ref: "e5", ...element },
+            pageUrl,
+            snapshotId: 4,
+          },
+        }),
+      )?.id;
+    // A page served from a link signed for one download, as S3 signs it: the signature's
+    // credential and session token ride in the query string of an ordinary sign-up form.
+    const presigned =
+      "https://garden-club-example.s3.us-east-2.amazonaws.com/f4/garden-signup.html?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=EXAMPLEKEYID%2F20261107%2Fus-east-2%2Fs3%2Faws4_request&X-Amz-Date=20261107T043445Z&X-Amz-Expires=21600&X-Amz-SignedHeaders=host&X-Amz-Security-Token=EXAMPLE-SESSION-TOKEN&X-Amz-Signature=0123456789abcdef";
+    for (const field of ["Full name", "Email", "Note"])
+      expect(
+        acting("computer_type", { name: field, role: "textbox" }, presigned),
+      ).toBeUndefined();
+    expect(
+      acting(
+        "computer_type",
+        { name: "Favourite plant", role: "combobox" },
+        presigned,
+      ),
+    ).toBeUndefined();
+    expect(
+      acting("computer_click", { name: "Sign up", role: "button" }, presigned),
+    ).toBeUndefined();
+    // A sign-in's return address, with its token in the query string or the fragment.
+    expect(
+      acting(
+        "computer_type",
+        { name: "Display name", role: "textbox" },
+        "https://app.example/welcome?code=4%2F0AY&state=xyz&access_token=ya29.a0Af#access_token=ya29.a0Af&token_type=Bearer",
+      ),
+    ).toBeUndefined();
+    expect(
+      acting(
+        "computer_type",
+        { name: "Company", role: "textbox" },
+        "https://crm.example/accounts/new?api_key=sk_live_123&credential=abc",
+      ),
+    ).toBeUndefined();
+
+    // A credential field, button or page still goes to the person, on any address.
+    expect(
+      acting(
+        "computer_type",
+        { name: "New password", role: "textbox" },
+        presigned,
+      ),
+    ).toBe("credentials");
+    expect(
+      acting(
+        "computer_type",
+        { name: "PIN", role: "textbox", type: "password" },
+        presigned,
+      ),
+    ).toBe("credentials");
+    expect(
+      acting(
+        "computer_click",
+        { name: "Change password", role: "button" },
+        "https://mail.example/settings?tab=general",
+      ),
+    ).toBe("credentials");
+    expect(
+      acting(
+        "computer_type",
+        { name: "Phone number", role: "textbox" },
+        "https://accounts.example/security/2fa?step=1",
+      ),
+    ).toBe("credentials");
+    expect(
+      acting(
+        "computer_type",
+        { name: "Name", role: "textbox" },
+        "https://platform.example/settings/api-keys",
+      ),
+    ).toBe("credentials");
+    expect(
+      acting(
+        "computer_click",
+        { name: "Create", role: "button" },
+        "https://console.cloud.example/apis/credentials?project=demo",
+      ),
+    ).toBe("credentials");
+    // Only the credentials rule reads the page without its query string: a checkout reached by
+    // its query string is still paying.
+    expect(
+      acting(
+        "computer_type",
+        { name: "Quantity", role: "textbox" },
+        "https://shop.example/cart?step=checkout",
+      ),
+    ).toBe("payments");
   });
 
   test("a news wire is not a wire of money", () => {

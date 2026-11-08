@@ -28,6 +28,14 @@ export type GalleryComponent = {
    * edits and publishes its own, and that is what a running Bot is given.
    */
   description: string;
+  /**
+   * What a person reads about this in the Components gallery: one sentence on what it shows them.
+   *
+   * Never the description. That is written for a model deciding whether to call this, so it names
+   * other tools, says what the model will and won't be given, and can say "deployment", none of
+   * which means anything to the person browsing. Never sent to the model.
+   */
+  summary: string;
   parameters: ToolParameters;
   /**
    * The props that show this component at its best, for anywhere it is displayed rather than called.

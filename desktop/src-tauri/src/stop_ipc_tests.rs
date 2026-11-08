@@ -167,6 +167,162 @@ mod stop_ipc {
         );
     }
 
+    /// The app's own logger, writing into a folder of its own for the rest of this process, and
+    /// the file it writes. Only in an isolated process: a process has one logger.
+    fn log_to_a_file() -> PathBuf {
+        let folder = temp_root("stop-log");
+        let app = tauri::test::mock_app();
+        let (_, level, logger) = logging::builder(
+            tauri_plugin_log::TargetKind::Folder {
+                path: folder.clone(),
+                file_name: Some(logging::FILE_NAME.into()),
+            },
+            logging::MAX_FILE_BYTES,
+            logging::KEPT_FILES,
+        )
+        .split(app.handle())
+        .expect("the logger builds");
+        log::set_boxed_logger(logger).expect("nothing else logs in this process");
+        log::set_max_level(level);
+        folder.join(format!("{}.log", logging::FILE_NAME))
+    }
+
+    /// The log's entries without their timestamps: `INFO  [stop] finished in 3.1s`.
+    fn entries(file: &Path) -> Vec<String> {
+        std::fs::read_to_string(file)
+            .unwrap()
+            .lines()
+            .filter_map(|line| line.split_once(' ').map(|(_, entry)| entry.to_owned()))
+            .collect()
+    }
+
+    /// Where `wanted` first is in `entries`, or a failure that shows the whole log.
+    fn position(entries: &[String], wanted: impl Fn(&str) -> bool, what: &str) -> usize {
+        entries
+            .iter()
+            .position(|entry| wanted(entry))
+            .unwrap_or_else(|| panic!("no {what} in the log:\n{}", entries.join("\n")))
+    }
+
+    /// Stop's own two entries bracket the work: who asked and where, the engine's commands, then
+    /// how Stop ended and how long it took. The same as Start, whichever way Stop was asked.
+    fn assert_stop_logged(file: &Path, root: &Path, from: &str) {
+        let entries = entries(file);
+        let folder = root.file_name().unwrap().to_string_lossy().into_owned();
+        let asked = position(
+            &entries,
+            |entry| {
+                entry.starts_with("INFO  [stop] asked in ")
+                    && entry.ends_with(&format!("{folder} {from}"))
+            },
+            &format!("[stop] asked line ending \"{folder} {from}\""),
+        );
+        let down = position(
+            &entries,
+            |entry| entry.starts_with("INFO  [compose down] finished in "),
+            "[compose down] line",
+        );
+        let took = regex::Regex::new(r"^INFO  \[stop\] finished in \d+\.\ds$").unwrap();
+        let finished = position(
+            &entries,
+            |entry| took.is_match(entry),
+            "[stop] finished line",
+        );
+        assert!(
+            asked < down && down < finished,
+            "out of order:\n{}",
+            entries.join("\n")
+        );
+    }
+
+    /// Settings > This computer's Stop on Windows logged only the menu's own lines and the engine's
+    /// commands: no `[stop]` entry, so no outcome or duration for the Stop somebody pressed.
+    #[test]
+    fn stop_from_settings_logs_who_asked_how_it_ended_and_how_long_it_took() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::stop_from_settings_logs_who_asked_how_it_ended_and_how_long_it_took",
+        ) {
+            return;
+        }
+        let log = log_to_a_file();
+        let fixture = Fixture::new();
+        let setup = "tauri://localhost/settings-stop";
+        *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
+        let compose = fixture.compose_barrier();
+
+        // The command Settings > This computer invokes.
+        tauri::async_runtime::block_on(desktop_page::stop(fixture.app.handle().clone()));
+        await_compose(&compose).write_all(&[0]).unwrap();
+        wait_until(|| fixture.window.url().unwrap().as_str() == setup);
+
+        assert_stop_logged(&log, &fixture.root, "from Settings");
+        let _ = std::fs::remove_dir_all(log.parent().unwrap());
+    }
+
+    /// Quit stops everything too, and logged only its screen's rows.
+    #[test]
+    fn stop_by_quit_logs_who_asked_how_it_ended_and_how_long_it_took() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::stop_by_quit_logs_who_asked_how_it_ended_and_how_long_it_took",
+        ) {
+            return;
+        }
+        let log = log_to_a_file();
+        let fixture = Fixture::new();
+        let compose = fixture.compose_barrier();
+
+        let app = fixture.app.handle().clone();
+        let quitting = std::thread::spawn(move || quit_cleanup_shown(&app));
+        await_compose(&compose).write_all(&[0]).unwrap();
+        assert_eq!(quitting.join().unwrap(), Vec::<String>::new());
+
+        assert_stop_logged(&log, &fixture.root, "by Quit");
+        let _ = std::fs::remove_dir_all(log.parent().unwrap());
+    }
+
+    /// Restart is asked from Settings and from the Status window, and its entry says which. Show
+    /// says it was asked, as every other action does, before how it ended.
+    #[test]
+    fn restart_and_show_log_who_asked_and_how_they_ended() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::restart_and_show_log_who_asked_and_how_they_ended",
+        ) {
+            return;
+        }
+        let log = log_to_a_file();
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        // Nothing running, so both end at once, and say why.
+        tauri::async_runtime::block_on(desktop_page::restart(app.handle().clone()))
+            .expect_err("nothing to restart");
+        tauri::async_runtime::block_on(show_openbot(app.handle().clone()))
+            .expect_err("nothing to show");
+
+        let entries = entries(&log);
+        let failed = |tag: &str| {
+            let failed = regex::Regex::new(&format!(r"^ERROR \[{tag}\] failed after \d+\.\ds: "))
+                .unwrap();
+            move |entry: &str| failed.is_match(entry)
+        };
+        let asked = position(
+            &entries,
+            |entry| entry == "INFO  [restart] asked from Settings",
+            "[restart] asked from Settings",
+        );
+        let ended = position(&entries, failed("restart"), "[restart] failed line");
+        assert!(asked < ended, "{}", entries.join("\n"));
+        let asked = position(
+            &entries,
+            |entry| entry == "INFO  [show] asked",
+            "[show] asked",
+        );
+        let ended = position(&entries, failed("show"), "[show] failed line");
+        assert!(asked < ended, "{}", entries.join("\n"));
+        let _ = std::fs::remove_dir_all(log.parent().unwrap());
+    }
+
     fn async_runtime_progresses() -> bool {
         let (sent, received) = mpsc::channel();
         tauri::async_runtime::spawn(async move {
@@ -298,7 +454,7 @@ mod stop_ipc {
         *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
         let compose = fixture.compose_barrier();
 
-        stop_from_menu(fixture.app.handle().clone());
+        stop_from_menu(fixture.app.handle().clone(), AskedFrom::Menu);
         await_compose(&compose).write_all(&[71]).unwrap();
 
         let shell = fixture.app.state::<Shell>();
@@ -357,7 +513,7 @@ mod stop_ipc {
         let setup = "tauri://localhost/menu-stop-success";
         *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
         let compose = fixture.compose_barrier();
-        stop_from_menu(fixture.app.handle().clone());
+        stop_from_menu(fixture.app.handle().clone(), AskedFrom::Menu);
         await_compose(&compose).write_all(&[0]).unwrap();
 
         wait_until(|| fixture.window.url().unwrap().as_str() == setup);

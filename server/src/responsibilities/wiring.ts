@@ -25,11 +25,12 @@ import type { DeliveryScope } from "../delivery/types";
 import { markUntrusted } from "../untrusted-content";
 import { createWorkQueue } from "../work/queue";
 import {
+  type BusyRetry,
   createResponsibilityEngine,
   type ResponsibilityEngine,
 } from "./engine";
 import { responsibilityTools } from "./tools";
-import type { ResponsibilityStore } from "./types";
+import { type ResponsibilityStore, whyItRepeats } from "./types";
 
 /**
  * The deployment's responsibility engine: a responsibility's turn, with the computer when the Bot
@@ -57,6 +58,8 @@ export function createServerResponsibilityEngine(deps: {
     scope: DeliveryScope,
     input: { id: string; kind: "reply"; text: string },
   ) => Promise<void>;
+  /** How long a run waits for a busy conversation. `BUSY_RETRY` unless a test says otherwise. */
+  busyRetry?: BusyRetry;
 }): ResponsibilityEngine {
   const {
     database,
@@ -78,6 +81,7 @@ export function createServerResponsibilityEngine(deps: {
     {
       store: responsibilityStore,
       queue: responsibilityQueue,
+      ...(deps.busyRetry ? { busyRetry: deps.busyRetry } : {}),
       runTurn: async (context) => {
         const initiator: AuditInitiator = {
           kind: "responsibility",
@@ -174,6 +178,9 @@ export function createServerResponsibilityEngine(deps: {
               `${context.event.source} event`,
             ),
             responsibilityId: context.responsibilityId,
+            ...(context.repeats
+              ? { repeats: whyItRepeats(context.repeats) }
+              : {}),
           }),
         });
       },

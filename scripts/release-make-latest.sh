@@ -13,10 +13,13 @@
 #   GITHUB_REPOSITORY  and GH_TOKEN, for `gh`
 #   FEED_RETRY_DELAY   seconds between reads of the update feed (default 15)
 #
-# A stable release is signed when it carries every fixed download name and latest.json. On a
-# stable release only the signing runs attach those: publish-release.yml attaches the unsigned
-# installers under their versioned names alone (scripts/release-attach-installers.sh). Mac signing
-# attaches latest.json and both Mac names, and Windows signing the Windows one.
+# A stable release is signed when it carries every fixed download name and a latest.json that lists
+# every platform (scripts/release-update-feed.sh --platforms). On a stable release only the signing
+# runs attach those: publish-release.yml attaches the unsigned installers under their versioned
+# names alone (scripts/release-attach-installers.sh). Mac signing attaches both Mac names and lists
+# both Mac archives in latest.json, and Windows signing attaches the Windows name and lists the
+# Windows installer there. So a release never becomes Latest with a feed that leaves a platform
+# behind: an app on it would never be offered the release, or any after it.
 #
 # Only when publish-release.yml said the release becomes Latest, and only when no newer release has
 # become Latest since (scripts/release-becomes-latest.sh). Making it Latest also starts Downloads
@@ -28,6 +31,15 @@ set -euo pipefail
 make_latest="${MAKE_LATEST:-false}"
 delay="${FEED_RETRY_DELAY:-15}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Whether a feed is for `version` and lists `platform` with a URL and a signature.
+lists() {
+  jq -e --arg version "$2" --arg platform "$3" '
+    .version == $version and
+    ((.platforms // {})[$platform] | (.url | type) == "string" and (.url | length) > 0
+      and (.signature | type) == "string" and (.signature | length) > 0)
+  ' "$1" > /dev/null 2>&1
+}
 
 latest_tag() {
   local out
@@ -51,6 +63,15 @@ if [ "$make_latest" = true ]; then
       missing+=("$name")
     fi
   done < <(printf '%s\n%s\n' latest.json "$required")
+  if [ "${#missing[@]}" -eq 0 ]; then
+    feed="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/release-feed.XXXXXX")"
+    gh release download "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --pattern latest.json --dir "$feed" --clobber
+    while IFS= read -r platform; do
+      if ! lists "$feed/latest.json" "${RELEASE_TAG#v}" "$platform"; then
+        missing+=("$platform in latest.json")
+      fi
+    done < <("$root/scripts/release-update-feed.sh" --platforms)
+  fi
   if [ "${#missing[@]}" -gt 0 ]; then
     echo "$RELEASE_TAG is not Latest yet: it still needs the signed ${missing[*]}. The signing run that attaches the last of them makes it Latest."
   else
@@ -78,26 +99,30 @@ if [ "$current" != "$RELEASE_TAG" ]; then
   exit 0
 fi
 
-# Read back what installed apps will read: the endpoint compiled into them, fetched the way they
-# fetch it, redirects and all. An endpoint that answers with a web page, or a Latest release that is
-# not this one, fails here instead of failing silently in every app.
-endpoint="$(jq -r '.plugins.updater.endpoints[0]' "$root/desktop/src-tauri/tauri.macos-signing.conf.json")"
+# Read back what installed apps will read: the release's own feed, compiled into them, fetched the
+# way they fetch it, redirects and all. An endpoint that answers with a web page, or a Latest release
+# that is not this one, fails here instead of failing silently in every app. The apps ask
+# downloads.copilotkit.ai first, which Downloads sync (started above) fills with a checked copy of
+# this same file a few minutes later, and fall back to this one when it does not answer.
+endpoint="$(jq -r '[.plugins.updater.endpoints[] | select(startswith("https://github.com/"))][0]' \
+  "$root/desktop/src-tauri/tauri.macos-signing.conf.json")"
 expected="${RELEASE_TAG#v}"
 for attempt in 1 2 3 4 5; do
   # The asset may have been uploaded seconds ago; give the download redirect a moment to catch up.
-  if curl -fsSL --retry 3 "$endpoint" -o feed.json &&
-    jq -e --arg version "$expected" '
-      .version == $version and
-      ([.platforms // {} | to_entries[]
-        | select(.key | startswith("darwin-"))
-        | select((.value.url | type) == "string" and (.value.signature | type) == "string")]
-        | length > 0)
-    ' feed.json > /dev/null 2>&1; then
-    echo "$endpoint serves latest.json for $expected."
-    exit 0
+  if curl -fsSL --retry 3 "$endpoint" -o feed.json; then
+    unlisted=()
+    while IFS= read -r platform; do
+      if ! lists feed.json "$expected" "$platform"; then
+        unlisted+=("$platform")
+      fi
+    done < <("$root/scripts/release-update-feed.sh" --platforms)
+    if [ "${#unlisted[@]}" -eq 0 ]; then
+      echo "$endpoint serves latest.json for $expected, for every platform."
+      exit 0
+    fi
   fi
   if [ "$attempt" -lt 5 ]; then sleep "$delay"; fi
 done
-echo "::error::$endpoint does not serve a latest.json with version $expected and a darwin-* platform."
+echo "::error::$endpoint does not serve a latest.json with version $expected and a signed file for every platform ($("$root/scripts/release-update-feed.sh" --platforms | paste -sd ' ' -))."
 head -c 500 feed.json 2>/dev/null || true
 exit 1

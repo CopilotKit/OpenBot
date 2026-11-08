@@ -291,14 +291,16 @@ test("a start that fails after the person went back home shows its words and rea
     ),
   );
 
-  await waitFor(() =>
+  // Both, in one wait. The reason shows in the render that restores the start, and the words reach
+  // the box after it, in PromptArea's own effect, which under load runs a task later.
+  await waitFor(() => {
     expect(view.getByRole("alert").textContent).toContain(
       "Data Analyst, Risk Analyst",
-    ),
-  );
-  expect(view.getByRole("textbox", { name: "Message" }).textContent).toBe(
-    "ask analyst",
-  );
+    );
+    expect(view.getByRole("textbox", { name: "Message" }).textContent).toBe(
+      "ask analyst",
+    );
+  });
 });
 
 test("a start that fails while the person is writing something else on home leaves the box alone", async () => {
