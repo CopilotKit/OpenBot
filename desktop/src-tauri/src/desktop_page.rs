@@ -172,8 +172,15 @@ async fn notify(
     title: String,
     body: Option<String>,
     path: Option<String>,
+    tag: Option<String>,
 ) -> Result<(), String> {
-    crate::show_notice(&app, &title, body.as_deref().unwrap_or(""), path.as_deref())
+    crate::show_notice(
+        &app,
+        &title,
+        body.as_deref().unwrap_or(""),
+        path.as_deref(),
+        tag.as_deref(),
+    )
 }
 
 pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {

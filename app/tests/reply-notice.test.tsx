@@ -15,6 +15,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { agentKeys } from "@/lib/agents/queries";
 import {
   type BotAttention,
@@ -23,6 +24,7 @@ import {
 } from "@/lib/bot-lifecycle/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { refreshNotificationPermission } from "@/lib/notifications/permission";
+import { forgetReplies, replyTiming } from "@/lib/notifications/reply-notice";
 import { closeDesktop, launchDesktop } from "./desktop-notifications.fixture";
 import { settleReactWork } from "./settle-react-work";
 
@@ -102,6 +104,47 @@ const globals = globalThis as unknown as Globals;
 const originalNotification = globals.Notification;
 let originalWebSocket: typeof WebSocket;
 let originalFocus: typeof window.focus;
+const originalFetch = globalThis.fetch;
+/**
+ * What `GET /api/bots/attention` answers now, read fresh when a reply is about to be announced.
+ * Null: what the page was opened with.
+ */
+let served: { bots: BotAttention[]; lastPingId: null } | null = null;
+let openedWith: { bots: BotAttention[]; lastPingId: null } = {
+  bots: [],
+  lastPingId: null,
+};
+/**
+ * Each Bot's own notification setting, as `GET /api/bots/:id/lifecycle` answers it: what the person
+ * saved, or "all" for a Bot they never set, as the server does. The attention list carries the same
+ * setting for the Bots it names, and names only Bots with something waiting.
+ */
+let settings: Record<string, BotNotify> = {};
+const serveAttention = (async (input: RequestInfo | URL) => {
+  const url = String(input);
+  if (url.endsWith("/api/bots/attention"))
+    return Response.json(served ?? openedWith);
+  const lifecycle = url.match(/\/api\/bots\/([^/]+)\/lifecycle$/);
+  if (lifecycle?.[1]) {
+    const agentId = decodeURIComponent(lifecycle[1]);
+    const listed = (served ?? openedWith).bots.find(
+      (bot) => bot.agentId === agentId,
+    );
+    return Response.json({
+      lifecycle: {
+        agentId,
+        paused: false,
+        pausedAt: null,
+        notify: listed?.notify ?? settings[agentId] ?? "all",
+      },
+    });
+  }
+  if (url.endsWith("/api/proactive/suggestions"))
+    return Response.json({ suggestions: [] });
+  return Response.json({ error: "not served" }, { status: 404 });
+}) as unknown as typeof fetch;
+// A turn's replies settle quickly here; the rule is the same.
+replyTiming.settleMs = 10;
 let visibility: DocumentVisibilityState = "hidden";
 let focused = false;
 let windowFocused = 0;
@@ -121,6 +164,10 @@ beforeAll(() => {
   };
 });
 beforeEach(() => {
+  forgetReplies();
+  served = null;
+  settings = {};
+  globalThis.fetch = serveAttention;
   shown.length = 0;
   ServerSocket.opened.length = 0;
   windowFocused = 0;
@@ -133,6 +180,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  globalThis.fetch = originalFetch;
   closeDesktop();
   globals.Notification = originalNotification;
   refreshNotificationPermission();
@@ -163,19 +211,22 @@ function attention(notify: BotNotify): BotAttention {
 async function openPage(options: {
   bots?: BotAttention[];
   agents?: { id: string; name: string }[];
+  badge?: boolean;
 }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
-  queryClient.setQueryData(botLifecycleKeys.attention, {
+  openedWith = {
     bots: options.bots ?? [attention("all")],
     lastPingId: null,
-  });
+  };
+  queryClient.setQueryData(botLifecycleKeys.attention, openedWith);
   if (options.agents)
     queryClient.setQueryData(agentKeys.list(false), options.agents);
   function Page() {
     useChannelEvents();
-    return null;
+    // The sidebar's badge, which raises "needs you" off the same attention list.
+    return options.badge ? <BotsNavBadge /> : null;
   }
   const router = createRouter({
     routeTree: createRootRoute({ component: Page }),
@@ -225,7 +276,8 @@ test("a Bot's reply while OpenBot is out of sight shows one notice, naming the B
     {
       title: "Expenses replied",
       body: "Categorized three expenses.",
-      tag: `openbot-reply-march-receipts-${event.lastMessageAt}`,
+      // The conversation's tag, which its "needs you" notice shares: one notice per conversation.
+      tag: "openbot-march-receipts",
       extra: { path: "/channel/march-receipts" },
     },
   ]);
@@ -337,6 +389,8 @@ const DESKTOP_REPLY = {
   body: "Categorized three expenses.",
   // The page a click opens, from the notification centre too.
   path: "/channel/march-receipts",
+  // The conversation's: Windows replaces a toast of the same tag rather than stacking another.
+  tag: "openbot-march-receipts",
 };
 
 test("in OpenBot Desktop the desktop app shows it, naming the conversation a click opens", async () => {
@@ -374,4 +428,115 @@ test("in OpenBot Desktop no notice while the person is looking at it", async () 
   await settle();
 
   expect(desktop.shown()).toEqual([]);
+});
+
+/*
+ * ONE MOMENT, ONE NOTICE. Measured on Windows (#1265): one turn that ended asking the person which
+ * colour of apple they prefer raised four toasts, "needs you", "replied" twice with the same words,
+ * and "replied" again with the server's "A question needs your answer" line.
+ */
+
+/** A Bot's turn as the socket carries it: busy on, what it said, busy off. */
+function aTurn(socket: ServerSocket, ...said: Record<string, unknown>[]) {
+  act(() => socket.say({ ...reply(), busy: true }));
+  for (const each of said) act(() => socket.say(reply(each)));
+  act(() => socket.say({ ...reply(), busy: false }));
+}
+
+const ASKED = {
+  lastMessage:
+    "I've asked: which colour of apple do you prefer, red or green? I'll wait for your answer.",
+  firstLine:
+    "I've asked: which colour of apple do you prefer, red or green? I'll wait for your answer.",
+};
+
+test("a turn that ends in a question gives exactly one notice, and it is the question's", async () => {
+  const { socket } = await openPage({ badge: true });
+  await settle();
+  // What the server says once the turn ends: the Bot waits on the person, in this conversation.
+  served = {
+    bots: [{ ...attention("all"), questions: 1, waitingIn: "march-receipts" }],
+    lastPingId: null,
+  };
+
+  aTurn(
+    socket,
+    ASKED,
+    // The same words again, at another moment: one turn reports what it said more than once.
+    ASKED,
+    // The server's own line for the question, which is a Bot's message too.
+    {
+      lastMessage:
+        "A question needs your answer: Which colour of apple do you prefer?",
+      firstLine:
+        "A question needs your answer: Which colour of apple do you prefer?",
+    },
+  );
+
+  await waitFor(() =>
+    expect(shown.map(({ title, options }) => [title, options.tag])).toEqual([
+      ["Expenses needs you", "openbot-march-receipts"],
+    ]),
+  );
+  await settle();
+  expect(shown).toHaveLength(1);
+});
+
+test("a reply already announced, reported again in a later moment, gives no second notice", async () => {
+  const { socket } = await openPage({});
+
+  aTurn(socket, ASKED);
+  await waitFor(() => expect(shown).toHaveLength(1));
+  aTurn(socket, ASKED);
+  await settle();
+
+  expect(shown.map((notice) => notice.title)).toEqual(["Expenses replied"]);
+});
+
+test("a turn's replies give one notice, the last thing it said, once the turn has ended", async () => {
+  const { socket } = await openPage({});
+
+  act(() => socket.say({ ...reply(), busy: true }));
+  act(() => socket.say(reply({ firstLine: "Looking at your receipts." })));
+  await settle();
+  // Still working: nothing yet.
+  expect(shown).toEqual([]);
+  act(() => socket.say(reply({ firstLine: "Categorized three expenses." })));
+  act(() => socket.say({ ...reply(), busy: false }));
+
+  await waitFor(() =>
+    expect(shown.map(({ options }) => options.body)).toEqual([
+      "Categorized three expenses.",
+    ]),
+  );
+});
+
+test("a Bot set to only when it needs the person raises no reply notice, though nothing of it waits", async () => {
+  // Measured on Windows: with nothing waiting, the Bot was missing from the attention list, and the
+  // missing entry was read as "Everything".
+  settings = { expenses: "needs_input" };
+  const { socket } = await openPage({ bots: [] });
+
+  aTurn(socket, { firstLine: "Categorized three expenses." });
+  await settle();
+  await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+
+  expect(shown).toEqual([]);
+});
+
+test("no notice of either kind while the person is looking at OpenBot", async () => {
+  visibility = "visible";
+  focused = true;
+  const { socket } = await openPage({ badge: true });
+  await settle();
+  served = {
+    bots: [{ ...attention("all"), questions: 1, waitingIn: "march-receipts" }],
+    lastPingId: null,
+  };
+
+  aTurn(socket, ASKED);
+  await settle();
+  await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+
+  expect(shown).toEqual([]);
 });

@@ -13,6 +13,20 @@ export type Notice = {
 };
 
 /**
+ * The tag of every notice about one conversation, whether it replied or needs the person: a browser
+ * and Windows replace a notice with the next of the same tag, so one conversation's moment is one
+ * notice however it was raised.
+ */
+export function conversationTag(channelId: string): string {
+  return `openbot-${channelId}`;
+}
+
+/** Whether the person can see OpenBot now, in which case what is on screen says it all. */
+export function inSight(): boolean {
+  return document.visibilityState === "visible" && document.hasFocus();
+}
+
+/**
  * Raises `notice`, if notifications may be shown (the caller asks `notificationsAllowed` first).
  *
  * IN OPENBOT DESKTOP the desktop app shows it (`notify`, desktop/src-tauri/src/notice.rs). On
@@ -32,6 +46,7 @@ export function showNotice(notice: Notice): void {
       title: notice.title,
       body: notice.body,
       path: notice.path,
+      tag: notice.tag,
     })
     .catch(() => browserNotice(notice));
 }

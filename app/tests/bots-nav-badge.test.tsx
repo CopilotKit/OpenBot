@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
+import { awayFromOpenBot } from "./desktop-notifications.fixture";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -12,7 +13,10 @@ import { settleReactWork } from "./settle-react-work";
  * browser notifications those rows used to send, and the one each check-in ping sends.
  */
 
-beforeAll(() => GlobalRegistrator.register());
+beforeAll(() => {
+  GlobalRegistrator.register();
+  awayFromOpenBot();
+});
 afterEach(cleanup);
 afterAll(async () => {
   await settleReactWork();
@@ -215,7 +219,8 @@ test("a Bot that starts waiting in a conversation sends a notice that opens that
       {
         title: "Expenses needs you",
         body: "1 question",
-        tag: "openbot-attention-expenses",
+        // The conversation's tag: its reply notice, if any, is replaced by this one.
+        tag: "openbot-channel-plan",
         path: "/channel/channel-plan",
       },
     ]),

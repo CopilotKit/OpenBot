@@ -65,9 +65,28 @@ pub fn toast_xml(title: &str, body: &str, link: &str) -> String {
     )
 }
 
-/// Shows the toast as `app_id`, the AppUserModelID the Start menu shortcut carries.
+/// The longest tag Windows takes on a toast (`ToastNotification.Tag`: 64 characters).
+const TAG_MAX: usize = 64;
+
+/**
+The page's tag for a notice, as a toast can carry it. A toast with the tag of one already in the
+notification centre replaces it, so one conversation's moment is one toast however the page raised
+it. A longer tag is shortened to its SHA-256, which keeps two different tags apart.
+*/
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn toast_tag(tag: &str) -> String {
+    if tag.chars().count() <= TAG_MAX {
+        return tag.to_owned();
+    }
+    use sha2::Digest;
+    let digest = sha2::Sha256::digest(tag.as_bytes());
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// Shows the toast as `app_id`, the AppUserModelID the Start menu shortcut carries, replacing any
+/// toast of the same `tag`.
 #[cfg(windows)]
-pub fn show_toast(app_id: &str, xml: &str) -> Result<(), String> {
+pub fn show_toast(app_id: &str, xml: &str, tag: Option<&str>) -> Result<(), String> {
     use windows::core::HSTRING;
     use windows::Data::Xml::Dom::XmlDocument;
     use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
@@ -75,6 +94,10 @@ pub fn show_toast(app_id: &str, xml: &str) -> Result<(), String> {
         let document = XmlDocument::new()?;
         document.LoadXml(&HSTRING::from(xml))?;
         let toast = ToastNotification::CreateToastNotification(&document)?;
+        if let Some(tag) = tag {
+            toast.SetTag(&HSTRING::from(tag))?;
+            toast.SetGroup(&HSTRING::from("openbot"))?;
+        }
         ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id))?.Show(&toast)
     };
     show().map_err(|error| error.to_string())
@@ -123,5 +146,16 @@ mod tests {
         assert!(xml.contains("<text>R&amp;D &lt;Bot&gt; needs you</text>"));
         assert!(xml.contains("<text>Approve &quot;Q3&quot; &amp; &apos;Q4&apos;?</text>"));
         assert!(!toast_xml("a\u{0}b", "", "").contains('\u{0}'));
+    }
+
+    /// A conversation's tag reaches the toast as it is, so its next notice replaces it; a tag too
+    /// long for Windows becomes one that fits and still tells two tags apart.
+    #[test]
+    fn a_notices_tag_fits_a_toast_and_keeps_two_tags_apart() {
+        let conversation = "openbot-0b6a5d4e-6f53-4c9c-9a3c-6c1f0d6d8b2e";
+        assert_eq!(toast_tag(conversation), conversation);
+        let long = |end: &str| format!("openbot-attention-{}{end}", "x".repeat(60));
+        assert_eq!(toast_tag(&long("a")).chars().count(), TAG_MAX);
+        assert_ne!(toast_tag(&long("a")), toast_tag(&long("b")));
     }
 }

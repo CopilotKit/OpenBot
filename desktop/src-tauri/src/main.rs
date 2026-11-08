@@ -6909,6 +6909,7 @@ fn show_notice<R: tauri::Runtime>(
     title: &str,
     body: &str,
     path: Option<&str>,
+    tag: Option<&str>,
 ) -> Result<(), String> {
     #[cfg(windows)]
     {
@@ -6916,10 +6917,13 @@ fn show_notice<R: tauri::Runtime>(
         notice::show_toast(
             &app.config().identifier,
             &notice::toast_xml(title, body, &link),
+            tag.map(notice::toast_tag).as_deref(),
         )
     }
     #[cfg(not(windows))]
     {
+        // The plugin has no tag to replace a notice by: the page sends one notice per moment.
+        let _ = tag;
         use tauri_plugin_notification::NotificationExt;
         let mut builder = app.notification().builder().title(title).body(body);
         if let Some(path) = path {

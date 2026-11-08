@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { announceReply } from "@/lib/notifications/reply-notice";
+import { noticeChannelEvent } from "@/lib/notifications/reply-notice";
 import { socketUrl as buildSocketUrl } from "@/lib/socket-url";
 import {
   type AgentChannel,
@@ -374,7 +374,7 @@ export function useChannelEvents() {
         );
 
         // A Bot's reply, while OpenBot is out of sight: the notice, when the person allowed them.
-        void announceReply(activity, queryClient, (channelId) => {
+        noticeChannelEvent(activity, queryClient, (channelId) => {
           void router.navigate({
             to: "/channel/$channelId",
             params: { channelId },

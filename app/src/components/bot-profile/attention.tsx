@@ -8,7 +8,7 @@ import {
 // Whether this browser, or OpenBot Desktop, lets OpenBot interrupt: the same answer the offer to
 // turn notifications on reads, so the two cannot disagree.
 import { notificationsAllowed } from "@/lib/notifications/permission";
-import { showNotice } from "@/lib/notifications/show";
+import { conversationTag, inSight, showNotice } from "@/lib/notifications/show";
 import {
   type ProactiveSuggestion,
   proactiveSuggestionsQueryOptions,
@@ -155,7 +155,8 @@ function useAttentionNotifications(bots: BotAttention[] | undefined) {
     seen.current = new Map(bots.map((bot) => [bot.agentId, asksOf(bot)]));
     // The first answer is the state on arrival, not news.
     if (!previous) return;
-    if (!notificationsAllowed()) return;
+    // Someone looking at OpenBot sees the badge and the conversation; a notice is for when they are not.
+    if (!notificationsAllowed() || inSight()) return;
     for (const bot of bots) {
       const now = asksOf(bot);
       if (bot.notify === "none" || now <= (previous.get(bot.agentId) ?? 0))
@@ -163,7 +164,10 @@ function useAttentionNotifications(bots: BotAttention[] | undefined) {
       showNotice({
         title: `${bot.name} needs you`,
         body: attentionSummary(bot),
-        tag: `openbot-attention-${bot.agentId}`,
+        // The conversation's tag when it waits in one: its reply notice, if any, is replaced by this.
+        tag: bot.waitingIn
+          ? conversationTag(bot.waitingIn)
+          : `openbot-attention-${bot.agentId}`,
         path: noticePath(bot),
       });
     }

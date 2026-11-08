@@ -139,19 +139,50 @@ export function launchDesktop(options: {
           return [call.args];
         if (call.command !== "plugin:notification|notify") return [];
         const plugin = call.args?.options as
-          | { title?: string; body?: string; extra?: { path?: string } }
+          | {
+              title?: string;
+              body?: string;
+              tag?: string;
+              extra?: { path?: string };
+            }
           | undefined;
         return [
           {
             title: plugin?.title,
             body: plugin?.body,
             path: plugin?.extra?.path,
+            tag: plugin?.tag,
           },
         ];
       }),
     /** The calls that reached the desktop app's own `notify`. */
     toDesktopNotify: () =>
       calls.filter((call) => call.command === "plugin:openbot-desktop|notify"),
+  };
+}
+
+/**
+ * The person is not looking at OpenBot: its tab is hidden, or another app is in front. Notices are
+ * for then; a person looking at OpenBot sees the badge and the conversation instead. `look()` puts
+ * OpenBot back in sight.
+ */
+export function awayFromOpenBot() {
+  let visibility: DocumentVisibilityState = "hidden";
+  let focused = false;
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    get: () => visibility,
+  });
+  document.hasFocus = () => focused;
+  return {
+    look() {
+      visibility = "visible";
+      focused = true;
+    },
+    away() {
+      visibility = "hidden";
+      focused = false;
+    },
   };
 }
 

@@ -13,7 +13,11 @@ import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { NotifyPrompt } from "@/components/notifications/notify-prompt";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { refreshNotificationPermission } from "@/lib/notifications/permission";
-import { closeDesktop, launchDesktop } from "./desktop-notifications.fixture";
+import {
+  awayFromOpenBot,
+  closeDesktop,
+  launchDesktop,
+} from "./desktop-notifications.fixture";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -27,7 +31,10 @@ const originalNotification = (globalThis as { Notification?: unknown })
   .Notification;
 const originalFetch = globalThis.fetch;
 
-beforeAll(() => GlobalRegistrator.register({ url: "http://127.0.0.1:3010" }));
+beforeAll(() => {
+  GlobalRegistrator.register({ url: "http://127.0.0.1:3010" });
+  awayFromOpenBot();
+});
 beforeEach(() => window.localStorage.clear());
 afterEach(() => {
   cleanup();
@@ -126,6 +133,7 @@ const EXPENSES_NEEDS_YOU = {
   body: "1 question",
   // The page a click opens (`open_notice_page` in the shell).
   path: "/bots/expenses",
+  tag: "openbot-attention-expenses",
 };
 
 test("in OpenBot Desktop a Bot that starts needing the person is shown by the desktop app, naming the page a click opens", async () => {
@@ -154,7 +162,11 @@ test("in OpenBot Desktop a notice about a Bot waiting in a conversation opens th
 
   await waitFor(() =>
     expect(desktop.shown()).toEqual([
-      { ...EXPENSES_NEEDS_YOU, path: "/channel/channel-plan" },
+      {
+        ...EXPENSES_NEEDS_YOU,
+        path: "/channel/channel-plan",
+        tag: "openbot-channel-plan",
+      },
     ]),
   );
 });
@@ -167,7 +179,11 @@ test("a desktop app without its own notify opens the waiting conversation too", 
 
   await waitFor(() =>
     expect(desktop.shown()).toEqual([
-      { ...EXPENSES_NEEDS_YOU, path: "/channel/channel-plan" },
+      {
+        ...EXPENSES_NEEDS_YOU,
+        path: "/channel/channel-plan",
+        tag: "openbot-channel-plan",
+      },
     ]),
   );
 });
