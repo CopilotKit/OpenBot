@@ -19,7 +19,8 @@
         "minHeight": 560,
         "resizable": true,
         "titleBarStyle": "Transparent",
-        "backgroundThrottling": "disabled"
+        "backgroundThrottling": "disabled",
+        "create": false
       }
     ],
     "security": { "csp": null }
