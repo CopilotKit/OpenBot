@@ -9,6 +9,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 ## Unreleased
 
 - Onboarding's Welcome says what always asks (deleting, sending, sharing, posting) above the approvals switch, which is now "Always ask before making changes" there and in Settings, Approvals, with the same words in both.
+- A conversation shows the Bot is still working through a run of tool calls: the step still running
+  shimmers like the line above it, and once every step has its answer "Thinking" shows under them
+  until the reply starts. Before, a run of finished steps sat still and read as a Bot that had died.
 - OpenBot Desktop updates and sets up its local back end on a slow connection. Before the back
   end's update (a new one, or the next Start's retry of one that did not finish) or a setup that
   resumes, it downloads the back end's images itself, one at a time and with no fixed time limit,
