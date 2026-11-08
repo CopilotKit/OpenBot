@@ -8,6 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- In the personal edition, the sentence under each tool on an app's page reads as a person would say it: no leading "Tool to", no words in capitals ("Permanently deletes", not "Permanently DELETES"), and no "by its ID" where the tool finds a thing by an ID nobody has to hand.
 - In the personal edition, an app's page names each tool in words, as Activity does ("Add label to email", not GMAIL_ADD_LABEL_TO_EMAIL), with the first sentence of what it does, and says "Connect your Gmail account so your Bots can use it" instead of a sentence about your documents; team Admin names the app's own account there too.
 - In a new conversation with two or more Bots in To:, typing @ before the first message lists those Bots, and a first message addressed to one goes to that Bot only. Before, @ said "No Bots in this conversation" until something had been sent.
 - In OpenBot Personal, a Bot's "What it can do" lists every skill you wrote on Settings, Skills under Your skills, with its switch. They were stored as nobody's, so the section read "No skills yet"; skills written before this become yours the next time OpenBot starts.
