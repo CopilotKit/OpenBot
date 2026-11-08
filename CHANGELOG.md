@@ -35,6 +35,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   microphone found. Narration is off." on a computer with none, keeping your choice for when there
   is one.
 
+### Personal edition
+
+- In Activity, a Bot's call to an app you haven't connected reads "Not connected" and "Gmail isn't
+  connected. Connect it in Connections.", rows already recorded included. It read "The server
+  didn't answer" and printed raw `[connect-app]` text, which Admin → Audit no longer shows either.
+
 ## 0.3.4
 
 **Before upgrading.** One migration: `0083_learning_skill_approvals` creates the table
