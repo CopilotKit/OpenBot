@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Settings, Computer lists the Teach a Bot browser as your OpenBot browser, with Clear browser data, not as "A Bot no longer here"; Admin, Computers names whose OpenBot browser each one is.
+- Onboarding's Welcome says what always asks (deleting, sending, sharing, posting) above the approvals switch, which is now "Always ask before making changes" there and in Settings, Approvals, with the same words in both.
 - A conversation shows the Bot is still working through a run of tool calls: the step still running
   shimmers like the line above it, and once every step has its answer "Thinking" shows under them
   until the reply starts. Before, a run of finished steps sat still and read as a Bot that had died.

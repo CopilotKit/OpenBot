@@ -10,6 +10,7 @@ import {
 } from "@openbot/shared/openbot-browser";
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { client, tryClient } from "@/lib/client";
+import { computerKeys } from "@/lib/computers/queries";
 import { browserKeys } from "./queries";
 
 function invalidateBrowser(queryClient: QueryClient) {
@@ -182,7 +183,12 @@ export function clearBrowserMutationOptions(queryClient: QueryClient) {
           fallback: "Couldn't clear your browser. Try again.",
         })
       ).json(),
-    onSettled: () => invalidateBrowser(queryClient),
+    // Settings > Computer lists the browser too, with whether it runs.
+    onSettled: () =>
+      Promise.all([
+        invalidateBrowser(queryClient),
+        queryClient.invalidateQueries({ queryKey: computerKeys.fleet() }),
+      ]),
   });
 }
 
