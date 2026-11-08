@@ -44,7 +44,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-use crate::engine::{self, Engine};
+use crate::engine::{self, Engine, StepLine};
 use crate::problem::Problem;
 
 /// The releases this was tested against.
@@ -218,7 +218,7 @@ fn digest_of(bytes: &[u8]) -> String {
 /// somebody presses Start. Answers with the sentence for the step row, or a failure in both
 /// registers. `saved` is the engine the installation was set up on, if it saved one.
 pub fn install_engine(cache: &Path, saved: Option<Engine>) -> Result<String, Problem> {
-    install_engine_observed(cache, saved, |_, _| {}, &mut |_| {}).map(|chosen| chosen.said)
+    install_engine_observed(cache, saved, |_, _| {}, &mut |_| {}, &|| {}).map(|chosen| chosen.said)
 }
 
 /// The engine the install step settled on, and the sentence for its step row.
@@ -230,11 +230,15 @@ pub struct EngineChosen {
 
 /// Observe an actual engine install, excluding engines that were already here, starting Docker
 /// Desktop and Compose repair; `progress` is each line for the step row.
+///
+/// `back` brings OpenBot's window to the front again after another app's window took it: Docker
+/// Desktop once it answers, or the system's password prompt once Podman's installer is done.
 pub fn install_engine_observed(
     cache: &Path,
     saved: Option<Engine>,
     installed: impl FnMut(Engine, bool),
-    progress: &mut dyn FnMut(String),
+    progress: &mut dyn FnMut(StepLine),
+    back: &dyn Fn(),
 ) -> Result<EngineChosen, Problem> {
     // Only one of the two runs, so they share the step row's lines one at a time.
     let progress = std::cell::RefCell::new(progress);
@@ -243,10 +247,16 @@ pub fn install_engine_observed(
         Found::here(saved),
         saved,
         installed,
-        || crate::docker_desktop::start(&mut **progress.borrow_mut()),
+        || crate::docker_desktop::start(&mut **progress.borrow_mut(), back),
         |into| {
-            (progress.borrow_mut())(podman_install_said(std::env::consts::OS).into());
-            install_podman(into)
+            let line = podman_install_said(std::env::consts::OS);
+            let prompted = line.elsewhere;
+            (progress.borrow_mut())(line);
+            let result = install_podman(into);
+            if prompted {
+                back();
+            }
+            result
         },
         place_compose,
     )
@@ -256,11 +266,16 @@ pub fn install_engine_observed(
 ///
 /// macOS asks for the person's password, because the package writes to `/opt/podman`. Windows
 /// asks for nothing here: the MSI installs for this account alone. Linux asks through `pkexec`.
-fn podman_install_said(os: &str) -> &'static str {
+/// A prompt is a window of the system's own, in front of OpenBot's, so its line is `elsewhere`.
+fn podman_install_said(os: &str) -> StepLine {
     match os {
-        "macos" => "Installing Podman. Enter your Mac password when macOS asks for it.",
-        "linux" => "Installing Podman. Enter your password when your system asks for it.",
-        _ => "Installing Podman.",
+        "macos" => StepLine::elsewhere(
+            "Installing Podman. Enter your Mac password when macOS asks for it.",
+        ),
+        "linux" => StepLine::elsewhere(
+            "Installing Podman. Enter your password when your system asks for it.",
+        ),
+        _ => StepLine::here("Installing Podman."),
     }
 }
 
@@ -1266,8 +1281,16 @@ esac
     /// The prompt is named where there is one, and none is promised where there is not.
     #[test]
     fn the_podman_install_line_names_the_prompt_each_platform_raises() {
-        assert!(podman_install_said("macos").contains("password"));
-        assert!(podman_install_said("linux").contains("password"));
-        assert_eq!(podman_install_said("windows"), "Installing Podman.");
+        // A prompt is the system's own window in front of OpenBot's: the line says so wherever
+        // the person is, and OpenBot comes back once the installer is done.
+        for os in ["macos", "linux"] {
+            let line = podman_install_said(os);
+            assert!(line.said.contains("password"), "{os}");
+            assert!(line.elsewhere, "{os}");
+        }
+        assert_eq!(
+            podman_install_said("windows"),
+            StepLine::here("Installing Podman.")
+        );
     }
 }

@@ -1037,6 +1037,8 @@ function agentDto(actor: AgentActor, agent: AgentProfile) {
     isolated: agent.isolated,
     // The personal starter's, for its Setup page. No other Bot's DTO carries any.
     ...(agent.instructions ? { instructions: agent.instructions } : {}),
+    // What runs it, by name, so a page can say that where it would otherwise show an address.
+    ...(agent.framework ? { framework: agent.framework } : {}),
     canManage: canManageAgent(actor, agent),
     // Ownership, kept separate from permission. `canManage` is also true for an administrator on
     // another user's coworker, so a roster that split "mine" on it would file other people's work

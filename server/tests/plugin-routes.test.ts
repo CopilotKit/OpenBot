@@ -11,6 +11,7 @@ import {
   BrokerRefusalError,
   schemeKind,
 } from "../src/plugins/broker";
+import { catalogueEntry, summaryFor } from "../src/plugins/catalogue";
 import { EVERY_BOT_ASKS_REFUSAL } from "../src/plugins/personal-defaults";
 import type { AccountRef } from "../src/plugins/shared-accounts";
 import {
@@ -457,6 +458,71 @@ function grantsApp(
 
   return { calls, app };
 }
+
+/*
+ * The catalogue's summaries are a page's header and a Connections row's line. Written for a team
+ * ("Pages and databases of whoever is asking", "this deployment's Exa API key"), they read wrong to
+ * the personal edition's one person, so that edition is served its own.
+ */
+describe("what the Plugins page says each app is", () => {
+  async function summaries(): Promise<Record<string, string>> {
+    const app = createApp(
+      loadConfig(testEnvironment()),
+      {
+        handler: () => new Response(null, { status: 204 }),
+        api: { getSession: async () => ({ user: ADMIN }) },
+      } as never,
+      { rolesForUser: async () => ["admin"] },
+      ...UP_TO_PLUGIN_STORE,
+      pluginStore({ listServers: async () => [], listSkills: async () => [] }),
+    );
+    const response = await app.request("http://openbot.test/api/plugins");
+    const body = (await response.json()) as {
+      catalogue: { key: string; summary: string }[];
+    };
+    return Object.fromEntries(
+      body.catalogue.map((entry) => [entry.key, entry.summary]),
+    );
+  }
+
+  /** What an added Notion's row says it is, as `listServers` serves it. */
+  function notionRowSummary(): string {
+    const entry = catalogueEntry("notion");
+    if (!entry) throw new Error("Notion is not in the catalogue.");
+    return summaryFor(entry);
+  }
+
+  test("the personal edition is spoken to as you, and names no deployment", async () => {
+    setEdition("personal");
+    try {
+      const said = await summaries();
+      expect(said.notion).toBe("Your pages and databases.");
+      expect(said["google-drive"]).toBe("Files in your Drive.");
+      expect(said["exa-authenticated"]).toBe(
+        "Public-web search and page reading using your Exa API key.",
+      );
+      expect(said.routines).toBe(
+        "Standing instructions your Bots run on a schedule.",
+      );
+      expect(JSON.stringify(said)).not.toMatch(/whoever|deployment|admin/i);
+      // An app page's header reads the same words off the added server's row.
+      expect(notionRowSummary()).toBe("Your pages and databases.");
+    } finally {
+      setEdition("team");
+    }
+  });
+
+  test("the team edition keeps its words", async () => {
+    const said = await summaries();
+    expect(said.notion).toBe("Pages and databases of whoever is asking.");
+    expect(said["firecrawl-authenticated"]).toBe(
+      "Public-web search and page scraping using this deployment's Firecrawl API key.",
+    );
+    expect(notionRowSummary()).toBe(
+      "Pages and databases of whoever is asking.",
+    );
+  });
+});
 
 describe("granting one Bot to another", () => {
   test("an administrator can grant it", async () => {

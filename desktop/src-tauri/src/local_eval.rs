@@ -12,7 +12,8 @@
 //! - **Arguments are fixed.** Only `status`, `start`, `stop` and `login`, a validated stack id and
 //!   `--json`, plus the constant `list`, `setup`, `connect` and `login --help` lists and the sign-in's
 //!   `--mode openbot`, and `integrations composio provision` with a validated installation id and
-//!   a file OpenBot made, as separate arguments with no shell. The CLI's `resumeCommand` strings
+//!   a file OpenBot made, and `local setup --model-config` with a model file OpenBot made, as
+//!   separate arguments with no shell. The CLI's `resumeCommand` strings
 //!   are text for a terminal user; they are dropped here and never executed.
 //! - **Only allowlisted facts leave.** Raw stdout, stderr, error messages and recovery text never
 //!   cross IPC or reach a log. Failures are static categories with no payload. The account
@@ -359,6 +360,24 @@ pub fn setup_arguments(accepted: Option<&EulaVersion>) -> Vec<&str> {
             version.as_str(),
             "--json",
         ],
+    }
+}
+
+/**
+`local setup` again on the stack OpenBot already made, to give its Learning agent the model the
+person signed in to (`learning_model`): `--model-config` with a file OpenBot wrote, or
+`--defer-model` to take a model an earlier sign-in gave it away.
+
+On a stack that is running and ready, the CLI changes the Learning agent alone, and a choice it
+already has changes nothing (Intelligence `apps/cli/src/services/local-setup.ts`, in the CLI pinned
+since `desktop/intelligence-cli.json` named 48a3863). It asks for no licence or agreement there:
+those belong to a stack's first setup. The file is an absolute path OpenBot made, never anything
+that reads as a flag.
+*/
+pub fn learning_model_arguments(file: Option<&str>) -> Vec<&str> {
+    match file {
+        None => SETUP_ARGUMENTS.to_vec(),
+        Some(file) => vec!["local", "setup", "--model-config", file, "--json"],
     }
 }
 
@@ -1325,6 +1344,12 @@ impl Limits {
         }
     }
 
+    /// The Learning agent's model on a running stack: the Learning agent restarts with it, and
+    /// nothing else does. As long as a start allows.
+    pub fn for_learning_model() -> Self {
+        Self::for_action(Action::Start)
+    }
+
     /// The CopilotKit account sign-in waits on a person approving it in their browser.
     pub fn for_account_sign_in() -> Self {
         Self {
@@ -1832,6 +1857,37 @@ pub fn setup(
     normalize_setup(code, &bytes)
 }
 
+/// `local setup` in `installation` with the Learning agent's model (`learning_model_arguments`).
+pub fn configure_learning_model(
+    cli: &PinnedCli,
+    installation: &std::path::Path,
+    file: Option<&std::path::Path>,
+    limits: Limits,
+    cancel: &Cancel,
+) -> Result<Report, Failure> {
+    let file = match file {
+        None => None,
+        Some(file) => Some(model_file(file)?),
+    };
+    let (code, bytes) = execute(
+        cli,
+        &learning_model_arguments(file),
+        Some(installation),
+        limits,
+        cancel,
+    )?;
+    normalize_setup(code, &bytes)
+}
+
+/// The model file as an argument: absolute, and nothing that reads as a flag.
+pub fn model_file(file: &std::path::Path) -> Result<&str, Failure> {
+    file.is_absolute()
+        .then(|| file.to_str())
+        .flatten()
+        .filter(|file| !file.starts_with('-'))
+        .ok_or(Failure::Spawn)
+}
+
 /// `login --json`: the CopilotKit account sign-in. `shown` hears each new approval page the CLI
 /// prints while it waits, so the window can show it (`sign_in_page`).
 pub fn account_sign_in(
@@ -1947,7 +2003,8 @@ pub fn provision_apps(
 }
 
 /// The exit code and stdout of one bounded CLI process. Arguments come only from `arguments`,
-/// `login_arguments`, `LIST_ARGUMENTS`, `setup_arguments`, `CONNECT_ARGUMENTS`,
+/// `login_arguments`, `LIST_ARGUMENTS`, `setup_arguments`, `learning_model_arguments`,
+/// `CONNECT_ARGUMENTS`,
 /// `ACCOUNT_SIGN_IN_ARGUMENTS`, `TERMS_ARGUMENTS` and `apps_arguments`; only setup and connect
 /// run somewhere other than inherited.
 fn execute(
@@ -2587,6 +2644,19 @@ pub fn setup_installed(
     })
 }
 
+/// `configure_learning_model` against the installed CLI, in its turn like every other call.
+pub fn configure_learning_model_installed(
+    attempt: &str,
+    installation: &std::path::Path,
+    file: Option<&std::path::Path>,
+) -> Result<Report, Failure> {
+    let attempt = Attempt::register(attempt);
+    one_at_a_time(&attempt.0, Limits::for_learning_model(), |limits| {
+        let cli = installed()?;
+        configure_learning_model(&cli, installation, file, limits, &attempt.0)
+    })
+}
+
 /// `setup`, after downloading the images a resumed setup is about to pull. Limits as `run_with`.
 pub(crate) fn setup_with(
     cli: &PinnedCli,
@@ -2608,12 +2678,70 @@ pub(crate) fn setup_with(
                 cancel,
                 images_limits,
             )?,
-            None => false,
+            // A first setup: its node does not exist until the CLI makes it, so its download is
+            // followed while the CLI pulls (`local_images::follow_new_stack`).
+            None => {
+                return setup_followed(
+                    cli,
+                    installation,
+                    accepted,
+                    limits.1,
+                    cancel,
+                    &images,
+                    attempt,
+                    images_limits,
+                )
+            }
         },
         None => false,
     };
     let limits = if downloaded { limits.0 } else { limits.1 };
     setup(cli, installation, accepted, limits, cancel)
+}
+
+/**
+A first `local setup`, with how far its image download has got shown for `attempt` while it runs.
+
+The CLI creates the stack's node and pulls into it itself, so nothing can be downloaded for it first.
+Its pulls are followed instead, from the node's containerd, so the row shows the download a first
+install waits on. An engine that does not say which nodes it has leaves the setup to run as before.
+*/
+#[allow(clippy::too_many_arguments)]
+fn setup_followed(
+    cli: &PinnedCli,
+    installation: &std::path::Path,
+    accepted: Option<&EulaVersion>,
+    limits: Limits,
+    cancel: &Cancel,
+    images: &crate::local_images::CliImages,
+    attempt: &str,
+    images_limits: crate::local_images::Limits,
+) -> Result<Report, Failure> {
+    let engine = recorded_engine();
+    if refuse_rootless(&setup_arguments(accepted), engine.as_ref()).is_err() {
+        return setup(cli, installation, accepted, limits, cancel);
+    }
+    let command = || engine_command(engine.as_ref());
+    let Some(before) = crate::local_images::stack_nodes(&command, images_limits) else {
+        return setup(cli, installation, accepted, limits, cancel);
+    };
+    let finished = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let showing = crate::local_images::Showing::new(attempt);
+            crate::local_images::follow_new_stack(
+                &command,
+                images,
+                &before,
+                images_limits,
+                &|| finished.load(Ordering::SeqCst) || cancel.requested(),
+                &mut |progress| showing.show(progress),
+            );
+        });
+        let report = setup(cli, installation, accepted, limits, cancel);
+        finished.store(true, Ordering::SeqCst);
+        report
+    })
 }
 
 /// The CopilotKit account sign-in against the installed CLI. While it waits, `shown_sign_in_page`
@@ -3359,6 +3487,58 @@ mod tests {
             "local\nsetup\n--defer-model\n--json"
         );
         assert_eq!(fixture.cwd(), installation.canonicalize().unwrap());
+    }
+
+    /// The Learning agent's model goes to `local setup` on the stack the installation already has:
+    /// the file OpenBot wrote, or `--defer-model` to take a model away. Nothing else is passed.
+    #[test]
+    fn the_learning_model_is_given_by_running_setup_again_with_its_file() {
+        let mut done = envelope();
+        done["command"] = json!("local setup");
+        let fixture = Fixture::new("local-eval-learning-model", &format!("0\n{done}"));
+        let installation = fixture.root.join("installation");
+        std::fs::create_dir_all(&installation).unwrap();
+        let file = installation.join(".openbot-learning").join("model.json");
+        let report = configure_learning_model(
+            &fixture.cli(),
+            &installation,
+            Some(&file),
+            Limits::for_learning_model(),
+            &Cancel::default(),
+        )
+        .unwrap();
+        assert_eq!(report.outcome, Outcome::Completed);
+        assert_eq!(
+            fixture.argv().unwrap(),
+            format!("local\nsetup\n--model-config\n{}\n--json", file.display())
+        );
+        assert_eq!(fixture.cwd(), installation.canonicalize().unwrap());
+
+        configure_learning_model(
+            &fixture.cli(),
+            &installation,
+            None,
+            Limits::for_learning_model(),
+            &Cancel::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            fixture.argv().unwrap(),
+            "local\nsetup\n--defer-model\n--json"
+        );
+
+        for refused in [Path::new("model.json"), Path::new("-x/model.json")] {
+            assert_eq!(
+                configure_learning_model(
+                    &fixture.cli(),
+                    &installation,
+                    Some(refused),
+                    Limits::for_learning_model(),
+                    &Cancel::default(),
+                ),
+                Err(Failure::Spawn)
+            );
+        }
     }
 
     // As `local connect` prints it at Intelligence 780313e4: no key, only the stack it connected.
@@ -4742,6 +4922,58 @@ fn main() {
             .collect()
     }
 
+    /**
+    Run a program this test has just copied, once, the first time it is run.
+
+    On Linux, running a file that was just written can fail with ETXTBSY ("Text file busy"). Another
+    test thread may fork a child while this one has the copy open for writing. The child holds that
+    write handle until it calls exec, and the kernel refuses to run a file someone has open for
+    writing. Seen on CI as `too_much_output_stops_the_call` failing with `ExecutableFileBusy`. The
+    handle goes as soon as the child execs, so a short retry is enough. The first run is the only
+    one at risk: once it ran, the copy is no longer open anywhere for writing.
+    */
+    fn warm_copied_program(program: &Path) -> std::process::ExitStatus {
+        let mut tries = 0;
+        loop {
+            match std::process::Command::new(program).arg("--warm").status() {
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 50 =>
+                {
+                    tries += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                result => return result.unwrap(),
+            }
+        }
+    }
+
+    /// The CI flake made certain: the copy is held open for writing, as a forked child would hold
+    /// it, while it is first run. Linux refuses to run it until the handle goes.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_copied_program_still_open_for_writing_runs_once_the_handle_goes() {
+        let root = temp_root("local-eval-busy-copy");
+        std::fs::create_dir_all(&root).unwrap();
+        let program = root.join("cli");
+        std::fs::copy(compiled(), &program).unwrap();
+        let held = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&program)
+            .unwrap();
+        // Busy while held: the failure CI saw.
+        let busy = std::process::Command::new(&program).arg("--warm").status();
+        assert_eq!(
+            busy.unwrap_err().kind(),
+            std::io::ErrorKind::ExecutableFileBusy
+        );
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            drop(held);
+        });
+        assert!(warm_copied_program(&program).success());
+        release.join().unwrap();
+    }
+
     struct Fixture {
         root: PathBuf,
         program: PathBuf,
@@ -4754,8 +4986,7 @@ fn main() {
             let program = root.join(format!("cli{}", std::env::consts::EXE_SUFFIX));
             std::fs::copy(compiled(), &program).unwrap();
             std::fs::write(root.join("scenario"), scenario).unwrap();
-            let warm = std::process::Command::new(&program).arg("--warm").status();
-            assert!(warm.unwrap().success());
+            assert!(warm_copied_program(&program).success());
             Self { root, program }
         }
 

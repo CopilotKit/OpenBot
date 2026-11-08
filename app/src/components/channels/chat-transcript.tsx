@@ -76,6 +76,13 @@ import { foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { ToolPlaceContext } from "@/lib/copilot/tool-place";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
+  type FolderNames,
+  FolderNamesContext,
+  folderNamesIn,
+  folderStepBody,
+  folderStepSubject,
+} from "@/lib/folders/folder-steps";
+import {
   markdownComponents,
   markdownPlugins,
   replyRemarkPlugins,
@@ -1693,8 +1700,13 @@ export function ServerToolLine({
   const running = result === undefined;
   const named = readToolName(name, running);
   const { label } = named;
-  // The file a file step read or saved, as a computer's own file steps name it.
-  const detail = named.detail ?? ownToolSubject(name, args);
+  const folders = useContext(FolderNamesContext);
+  // The file a file step read or saved, as a computer's own file steps name it; a step on a folder
+  // on the person's computer names the folder too ("todo.txt in share").
+  const detail =
+    named.detail ??
+    folderStepSubject(name, args, folders) ??
+    ownToolSubject(name, args);
   /*
    * A refusal is not a result, and must not read like one.
    *
@@ -1753,7 +1765,8 @@ export function ServerToolLine({
         ? UNOFFERED_TOOL_SENTENCE
         : refused && body
           ? outcomeForPerson(body)
-          : body;
+          : // A folder step's answer for the model (JSON, grant ids) is said in words or left out.
+            folderStepBody(name, body);
   /*
    * A web search or a page read opens to the pages it found, not to the provider's JSON. The list
    * bounds itself (a few results, each cut to a few lines), so the line does not scroll around it.
@@ -2025,11 +2038,27 @@ export function ChatTranscript({
    */
   /* Which row each tool step was drawn in, so a row keeps its key; see `groupToolSteps`. */
   const rowIdsRef = useRef(new Map<string, string>());
-  const items = groupToolSteps(
-    dropRepeatedAppCards(toVisibleChatItems(messages)),
-    isDrawn,
-    rowIdsRef.current,
+  const visible = dropRepeatedAppCards(toVisibleChatItems(messages));
+  const items = groupToolSteps(visible, isDrawn, rowIdsRef.current);
+  /*
+   * The folders this conversation's "Check your folders" steps named, for its other folder steps.
+   * The same map while the names are the same: a new one on every render is a new context value,
+   * and every finished tool row under it drew again while a reply streamed.
+   */
+  const foldersRef = useRef<{ key: string; names: FolderNames }>({
+    key: "",
+    names: new Map(),
+  });
+  const named = folderNamesIn(
+    visible.filter(
+      (item): item is Extract<typeof item, { kind: "tool" }> =>
+        item.kind === "tool",
+    ),
   );
+  const namedKey = JSON.stringify([...named]);
+  if (namedKey !== foldersRef.current.key)
+    foldersRef.current = { key: namedKey, names: named };
+  const folders = foldersRef.current.names;
 
   /*
    * ONLY WHILE THERE IS NOTHING ELSE TO LOOK AT. Once a reply starts streaming, or a tool line
@@ -2403,147 +2432,151 @@ export function ChatTranscript({
       {hasActivities ? (
         <TranscriptRenderersWatch onVersion={setRenderersVersion} />
       ) : null}
-      <LateRenderersContext.Provider value={renderersVersion}>
-        <MessageScrollerProvider
-          autoScroll={follow.following}
-          scrollPreviousItemPeek={48}
-        >
-          <MessageScroller className="@container">
-            <MessageScrollerViewport
-              {...follow.viewportHandlers}
-              data-following={follow.following}
-              onScroll={(event) => {
-                follow.viewportHandlers.onScroll?.(event);
-                drawEarlierNearTop(pagesFrom);
-                readActiveTurn();
-              }}
-              ref={viewportRef}
-            >
-              <MessageScrollerContent
-                aria-busy={busy}
-                className={cn("py-6", column)}
-                data-transcript-column
-                spacerClassName="order-2"
+      <FolderNamesContext.Provider value={folders}>
+        <LateRenderersContext.Provider value={renderersVersion}>
+          <MessageScrollerProvider
+            autoScroll={follow.following}
+            scrollPreviousItemPeek={48}
+          >
+            <MessageScroller className="@container">
+              <MessageScrollerViewport
+                {...follow.viewportHandlers}
+                data-following={follow.following}
+                onScroll={(event) => {
+                  follow.viewportHandlers.onScroll?.(event);
+                  drawEarlierNearTop(pagesFrom);
+                  readActiveTurn();
+                }}
+                ref={viewportRef}
               >
-                {/*
-                 * THE INTRO IS THE FIRST CHILD, AND ONLY ONCE THE EARLIEST PAGE IS DRAWN. The scroller
-                 * reads "the first child moved" as rows prepended and holds the reader's place (see the
-                 * block below). Drawn while older pages are still to come, the intro would stay the
-                 * first child and every page drawn under it would be read as appended rows instead.
-                 * Drawn in the same commit as the earliest page, it is the prepend.
-                 */}
-                {pages.from === 0 ? intro : null}
-                {/*
-                 * DRAWN LAST, WRITTEN FIRST, AND THE SCROLLER IS WHY. Three reviewers have now arrived
-                 * at this block, worked the mechanism out from the library's bundle, and reached the
-                 * same place; it had no comment for any of them to read. This is that comment.
-                 *
-                 * `MessageScrollerContent` is `flex flex-col`, so `order` is live: the spacer takes
-                 * `order-2`, these children take `order-1`, and the transcript rows below keep the
-                 * default `0`. Visual order is therefore items, then anything parked or in flight, then
-                 * the spacer — while DOM order puts this block first.
-                 *
-                 * IT CANNOT SIMPLY BE MOVED DOWN. The scroller finds a newly appended row POSITIONALLY.
-                 * On every content change it takes `Array.from(content.children)` minus the spacer,
-                 * compares the length against the previous length, and when it grew scans FROM THE OLD
-                 * LENGTH FORWARD for the next `data-scroll-anchor="true"` (`je(a, T)` in
-                 * `@shadcn/react/dist/message-scroller`). A new row is only found when it lands at the
-                 * very end of that list. Put this block after `items.map` and every appended row lands
-                 * one slot short of the end, the scan finds this div instead, returns null, and the
-                 * caller falls through to its follow-the-bottom branch — so a new turn stops aligning
-                 * to the top of the viewport with a peek of the previous one, silently, with no test
-                 * failing.
-                 *
-                 * OLDER PAGES GO BEFORE THIS BLOCK, AND THAT IS THE SAME MECHANISM USED ON PURPOSE.
-                 * When the reader nears the top, the page before is drawn (`useTranscriptPages`). Drawn
-                 * here, ahead of this block, it moves whatever was the first child, and a first child
-                 * that moved is the scroller's own "rows were prepended" case: it puts the row the
-                 * reader was looking at back where it was (`de()`), and never runs the scan above, which
-                 * would read the shifted rows as new ones and jump to an old turn. Rows that arrive
-                 * live still go after this block, at the end, where that scan looks for them.
-                 *
-                 * ONE CASE IT DOES NOT COVER. The scroller takes one path per batch of changes, so a page
-                 * drawn above and a sent message landing in the SAME commit would be held in place and
-                 * the new turn not aligned to the top. They come from different updates (a scroll near
-                 * the top, a send at the bottom) and in practice never commit together; if they ever
-                 * do, the turn is not aligned when it arrives, and a later change that keeps the row
-                 * count can align to it then instead (the scroller's `Ge`), a beat late.
-                 *
-                 * `display: contents` IS LOAD-BEARING FOR THE SAME REASON, and not a layout trick. It
-                 * promotes these children to flex items of the column so they can carry `order`, while
-                 * the div itself stays a single, always-present entry in `content.children` — one
-                 * stable slot the row count can be offset by. Wrapping `items.map` the same way would
-                 * be the natural symmetry and is fatal: the rows would leave `content.children`
-                 * entirely and the scroller would see a transcript of two elements, neither carrying a
-                 * `data-message-id`, so nothing would register, be tracked as visible, or anchor.
-                 *
-                 * WHAT THIS COSTS, STATED RATHER THAN LEFT TO BE REDISCOVERED. `order` moves paint and
-                 * not the DOM, so it moves neither focus order nor the reading order of the enclosing
-                 * `role="log"`. A keyboard user tabbing in reaches the "Remove queued message: …"
-                 * button of every parked message before any control in the conversation, though those
-                 * lines are drawn at the very bottom (WCAG 2.4.3); a screen reader reading the log
-                 * linearly hears the parked messages, and `Stopped`, ahead of the conversation they
-                 * follow on screen (WCAG 1.3.2).
-                 *
-                 * THAT IS A KNOWN, UNPAID DEBT AND NOT AN OVERSIGHT. The fixes available from inside
-                 * this file were each tried on paper and each breaks something worse: `aria-owns` needs
-                 * a generated id per row and re-sequences only the accessibility tree, leaving tab
-                 * order inverted; positive `tabIndex` hijacks the tab sequence of the whole page;
-                 * hoisting the queue out of `MessageScrollerContent` into a sibling region — the
-                 * cleanest END STATE, since a parked message is genuinely not a log entry — puts it
-                 * outside a column that is `min-h-full`, so it lands below the fold on a short
-                 * transcript, outside the `gap-6` rhythm, and outside the spacer's height arithmetic.
-                 * Paying it properly means the scroller identifying new rows by identity rather than by
-                 * position, which is the library's to change and is worth asking for.
-                 */}
-                <ArrivalsLiveContext.Provider value={AT_REST}>
+                <MessageScrollerContent
+                  aria-busy={busy}
+                  className={cn("py-6", column)}
+                  data-transcript-column
+                  spacerClassName="order-2"
+                >
+                  {/*
+                   * THE INTRO IS THE FIRST CHILD, AND ONLY ONCE THE EARLIEST PAGE IS DRAWN. The scroller
+                   * reads "the first child moved" as rows prepended and holds the reader's place (see the
+                   * block below). Drawn while older pages are still to come, the intro would stay the
+                   * first child and every page drawn under it would be read as appended rows instead.
+                   * Drawn in the same commit as the earliest page, it is the prepend.
+                   */}
+                  {pages.from === 0 ? intro : null}
+                  {/*
+                   * DRAWN LAST, WRITTEN FIRST, AND THE SCROLLER IS WHY. Three reviewers have now arrived
+                   * at this block, worked the mechanism out from the library's bundle, and reached the
+                   * same place; it had no comment for any of them to read. This is that comment.
+                   *
+                   * `MessageScrollerContent` is `flex flex-col`, so `order` is live: the spacer takes
+                   * `order-2`, these children take `order-1`, and the transcript rows below keep the
+                   * default `0`. Visual order is therefore items, then anything parked or in flight, then
+                   * the spacer — while DOM order puts this block first.
+                   *
+                   * IT CANNOT SIMPLY BE MOVED DOWN. The scroller finds a newly appended row POSITIONALLY.
+                   * On every content change it takes `Array.from(content.children)` minus the spacer,
+                   * compares the length against the previous length, and when it grew scans FROM THE OLD
+                   * LENGTH FORWARD for the next `data-scroll-anchor="true"` (`je(a, T)` in
+                   * `@shadcn/react/dist/message-scroller`). A new row is only found when it lands at the
+                   * very end of that list. Put this block after `items.map` and every appended row lands
+                   * one slot short of the end, the scan finds this div instead, returns null, and the
+                   * caller falls through to its follow-the-bottom branch — so a new turn stops aligning
+                   * to the top of the viewport with a peek of the previous one, silently, with no test
+                   * failing.
+                   *
+                   * OLDER PAGES GO BEFORE THIS BLOCK, AND THAT IS THE SAME MECHANISM USED ON PURPOSE.
+                   * When the reader nears the top, the page before is drawn (`useTranscriptPages`). Drawn
+                   * here, ahead of this block, it moves whatever was the first child, and a first child
+                   * that moved is the scroller's own "rows were prepended" case: it puts the row the
+                   * reader was looking at back where it was (`de()`), and never runs the scan above, which
+                   * would read the shifted rows as new ones and jump to an old turn. Rows that arrive
+                   * live still go after this block, at the end, where that scan looks for them.
+                   *
+                   * ONE CASE IT DOES NOT COVER. The scroller takes one path per batch of changes, so a page
+                   * drawn above and a sent message landing in the SAME commit would be held in place and
+                   * the new turn not aligned to the top. They come from different updates (a scroll near
+                   * the top, a send at the bottom) and in practice never commit together; if they ever
+                   * do, the turn is not aligned when it arrives, and a later change that keeps the row
+                   * count can align to it then instead (the scroller's `Ge`), a beat late.
+                   *
+                   * `display: contents` IS LOAD-BEARING FOR THE SAME REASON, and not a layout trick. It
+                   * promotes these children to flex items of the column so they can carry `order`, while
+                   * the div itself stays a single, always-present entry in `content.children` — one
+                   * stable slot the row count can be offset by. Wrapping `items.map` the same way would
+                   * be the natural symmetry and is fatal: the rows would leave `content.children`
+                   * entirely and the scroller would see a transcript of two elements, neither carrying a
+                   * `data-message-id`, so nothing would register, be tracked as visible, or anchor.
+                   *
+                   * WHAT THIS COSTS, STATED RATHER THAN LEFT TO BE REDISCOVERED. `order` moves paint and
+                   * not the DOM, so it moves neither focus order nor the reading order of the enclosing
+                   * `role="log"`. A keyboard user tabbing in reaches the "Remove queued message: …"
+                   * button of every parked message before any control in the conversation, though those
+                   * lines are drawn at the very bottom (WCAG 2.4.3); a screen reader reading the log
+                   * linearly hears the parked messages, and `Stopped`, ahead of the conversation they
+                   * follow on screen (WCAG 1.3.2).
+                   *
+                   * THAT IS A KNOWN, UNPAID DEBT AND NOT AN OVERSIGHT. The fixes available from inside
+                   * this file were each tried on paper and each breaks something worse: `aria-owns` needs
+                   * a generated id per row and re-sequences only the accessibility tree, leaving tab
+                   * order inverted; positive `tabIndex` hijacks the tab sequence of the whole page;
+                   * hoisting the queue out of `MessageScrollerContent` into a sibling region — the
+                   * cleanest END STATE, since a parked message is genuinely not a log entry — puts it
+                   * outside a column that is `min-h-full`, so it lands below the fold on a short
+                   * transcript, outside the `gap-6` rhythm, and outside the spacer's height arithmetic.
+                   * Paying it properly means the scroller identifying new rows by identity rather than by
+                   * position, which is the library's to change and is worth asking for.
+                   */}
+                  <ArrivalsLiveContext.Provider value={AT_REST}>
+                    {items
+                      .slice(pages.from, pages.split)
+                      .map((item, offset) =>
+                        renderRow(item, pages.from + offset),
+                      )}
+                  </ArrivalsLiveContext.Provider>
+                  <div className="contents [&>*]:order-1">
+                    {stopped ? (
+                      <Stopped reason={stopped} />
+                    ) : waitingOnTheModel ? (
+                      <Thinking />
+                    ) : null}
+                    {working}
+                    {queued.map((message) => (
+                      <Queued
+                        attachments={message.attachments}
+                        key={message.id}
+                        onRemove={
+                          onRemoveQueued
+                            ? () => onRemoveQueued(message.id)
+                            : undefined
+                        }
+                        text={message.text}
+                      />
+                    ))}
+                  </div>
                   {items
-                    .slice(pages.from, pages.split)
+                    .slice(pages.split)
                     .map((item, offset) =>
-                      renderRow(item, pages.from + offset),
+                      renderRow(item, pages.split + offset),
                     )}
-                </ArrivalsLiveContext.Provider>
-                <div className="contents [&>*]:order-1">
-                  {stopped ? (
-                    <Stopped reason={stopped} />
-                  ) : waitingOnTheModel ? (
-                    <Thinking />
-                  ) : null}
-                  {working}
-                  {queued.map((message) => (
-                    <Queued
-                      attachments={message.attachments}
-                      key={message.id}
-                      onRemove={
-                        onRemoveQueued
-                          ? () => onRemoveQueued(message.id)
-                          : undefined
-                      }
-                      text={message.text}
-                    />
-                  ))}
-                </div>
-                {items
-                  .slice(pages.split)
-                  .map((item, offset) => renderRow(item, pages.split + offset))}
-              </MessageScrollerContent>
-            </MessageScrollerViewport>
-            <MessageScrollerButton
-              onClick={(event) => {
-                // Ours, not the scroller's: it would scroll before it had been told to follow again.
-                event.preventDefault();
-                dispatchFollow({ type: "button" });
-              }}
-            />
-            <ScrollNewestQueuedIntoView
-              newest={queued.at(-1)?.id ?? null}
-              onQueued={followOnQueued}
-            />
-            <FollowScroll request={follow.request} />
-            <TranscriptRail active={activeTurn} onJump={jump} turns={turns} />
-          </MessageScroller>
-        </MessageScrollerProvider>
-      </LateRenderersContext.Provider>
+                </MessageScrollerContent>
+              </MessageScrollerViewport>
+              <MessageScrollerButton
+                onClick={(event) => {
+                  // Ours, not the scroller's: it would scroll before it had been told to follow again.
+                  event.preventDefault();
+                  dispatchFollow({ type: "button" });
+                }}
+              />
+              <ScrollNewestQueuedIntoView
+                newest={queued.at(-1)?.id ?? null}
+                onQueued={followOnQueued}
+              />
+              <FollowScroll request={follow.request} />
+              <TranscriptRail active={activeTurn} onJump={jump} turns={turns} />
+            </MessageScroller>
+          </MessageScrollerProvider>
+        </LateRenderersContext.Provider>
+      </FolderNamesContext.Provider>
     </ArrivalsLive>
   );
 }

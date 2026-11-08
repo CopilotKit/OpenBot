@@ -81,6 +81,10 @@ import {
   withToolSearch,
 } from "./agents/tool-search";
 import { sayingWhenUnreachable } from "./agents/unreachable";
+import {
+  type DecisionWaits,
+  watchDecisionWaits,
+} from "./approvals/decision-waits";
 import type { AuditInitiator } from "./audit";
 import {
   attachmentIdsIn,
@@ -2853,6 +2857,11 @@ export function mountCopilotRuntime(
   identifyActor: IdentifyActor,
   options: {
     productTelemetry?: ProductTelemetry;
+    /**
+     * Where the cards a Bot asks with in the conversation are saved while they wait on the person,
+     * so the Bot is under Needs you for them. See approvals/decision-waits.ts.
+     */
+    decisionWaits?: DecisionWaits;
     basePath?: string;
     onRunBusy?: (input: { threadId: string; busy: boolean }) => void;
     learningSettings?: LearningSettingsStore;
@@ -3049,6 +3058,9 @@ export function mountCopilotRuntime(
         return startup(request);
       };
   }
+
+  if (options.decisionWaits)
+    watchDecisionWaits(runtime.runner, options.decisionWaits);
 
   return {
     handler: createCopilotHonoHandler({

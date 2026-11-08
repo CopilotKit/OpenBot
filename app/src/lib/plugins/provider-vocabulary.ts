@@ -14,6 +14,26 @@ import { type PluginsPage, pluginsProvider } from "./queries";
  */
 export type PluginsProvider = NonNullable<PluginsPage["provider"]>;
 
+/**
+ * Which edition reads the sentence. The team edition's words are for an admin and for each person
+ * in a team; the personal edition has one person, on their own computer, and is spoken to as "you".
+ * `managePaths(...).edition` carries it, read from the deployment's capabilities.
+ */
+export type Edition = "team" | "personal";
+
+/**
+ * What this person actually does to connect: click through a consent screen, type a secret, or
+ * nothing at all. See `kindOf` in `brokered-account-row.tsx`, which reads it off the app's scheme.
+ */
+export type BrokeredAccountKind = "consent" | "fields" | "no-auth";
+
+/** The app a personal sentence names, and how it is connected. */
+export type BrokeredApp = { title: string; kind: BrokeredAccountKind };
+
+function capitalised(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 /** Whether a row came through a broker, whichever one. Filters; never names. */
 export function brokeredProvenance(provenance: string): boolean {
   return provenance === "composio" || provenance === "arcade";
@@ -75,7 +95,31 @@ export function directoryReadFailure(_provider: PluginsProvider): string {
   return "Couldn't load the apps you can connect. Reload the page.";
 }
 
-/** The "More apps" section's own sentence. */
+/**
+ * The directory screen's own two sentences: its description and its search section's.
+ *
+ * Adding an app there connects nobody, in either edition. In the team edition each person connects
+ * their own account afterwards; in the personal one, the one person does, on the app's page.
+ */
+export function directoryDescriptions(edition: Edition = "team"): {
+  page: string;
+  search: string;
+} {
+  return edition === "personal"
+    ? {
+        page: "Add an app to give your Bots its tools. Then connect your account on its page so they can use it.",
+        search: "Search by name. OpenBot hasn't reviewed these apps.",
+      }
+    : {
+        page: "Add an app to make its tools available to Bots. Each person still connects their own account before a Bot reads anything.",
+        search: "Search by name. Nobody here has reviewed these apps.",
+      };
+}
+
+/**
+ * The "More apps" section's own sentence. Admin's Plugins list only: the personal edition lists its
+ * apps under Connections, with the directory as one more tile ({@link moreAppsRow}).
+ */
 export function moreAppsSectionDescription(_provider: PluginsProvider): string {
   return "More apps people can connect through OpenBot. Nobody here has reviewed them.";
 }
@@ -94,47 +138,95 @@ export type MoreAppsRow = {
   linked: boolean;
 };
 
+/**
+ * The "More apps" row's sentence in the personal edition, where the one person reading it is the
+ * only one who connects anything. The same split as {@link ProviderVocabulary.directoryDescription}:
+ * Composio's counts its directory and Arcade's claims no size.
+ */
+const PERSONAL_DIRECTORY_DESCRIPTION: Record<PluginsProvider, string> = {
+  composio: "A few hundred more apps you can connect.",
+  arcade: "More apps you can connect.",
+};
+
+/** Where the personal edition's one person turns connecting apps on: Settings, Setup. */
+const PERSONAL_SET_UP = "Set it up in Settings under Setup.";
+
 export function moreAppsRow(
   provider: PluginsProvider,
   configured: boolean,
+  edition: Edition = "team",
 ): MoreAppsRow {
   const { directoryLabel, envVar, directoryDescription } = VOCABULARY[provider];
   if (!configured) {
     return {
       title: directoryLabel,
-      description: `Not set up. Set ${envVar} on this deployment to browse its apps.`,
+      description:
+        edition === "personal"
+          ? `Not set up yet. ${PERSONAL_SET_UP}`
+          : `Not set up. Set ${envVar} on this deployment to browse its apps.`,
       linked: false,
     };
   }
   return {
     title: directoryLabel,
-    description: directoryDescription,
+    description:
+      edition === "personal"
+        ? PERSONAL_DIRECTORY_DESCRIPTION[provider]
+        : directoryDescription,
     linked: true,
   };
 }
 
-/** The Connection card's sentence for a brokered app. */
+/**
+ * The Connection card's sentence for a brokered app.
+ *
+ * `personal` is the app, given only by the personal edition's page: there is one person there, so
+ * the sentence names their own account in the app, and an app with no account says so.
+ */
 export function brokeredConnectionDescription(
   _provider: PluginsProvider,
+  personal?: BrokeredApp,
 ): string {
-  return "Each person connects their own account through OpenBot.";
+  if (!personal)
+    return "Each person connects their own account through OpenBot.";
+  if (personal.kind === "no-auth")
+    return `${capitalised(personal.title)} works through OpenBot without an account.`;
+  return `Connect your ${personal.title} account through OpenBot.`;
 }
 
 /**
- * The "How this is reached" row for a brokered app: its sentence and its badge. `deployment` is
- * what OpenBot itself is called on the page (`managePaths().deploymentName`).
+ * The "How this is reached" row for a brokered app: its sentence and its badge.
+ *
+ * `personal` as above. What it says is what happens at sign-in: a consent app sends you to the
+ * app's own sign-in page in your browser (`useBrokeredAccount` leaves for the broker's
+ * authorization URL), so OpenBot never holds the password; a key app takes a key you paste, so
+ * that sentence promises nothing about passwords; and an app with no account has nothing to sign
+ * in to.
  */
 export function brokeredReach(
   _provider: PluginsProvider,
-  deployment = "this deployment",
+  personal?: BrokeredApp,
 ): {
   description: string;
   badge: string;
 } {
-  const holds = deployment.charAt(0).toUpperCase() + deployment.slice(1);
+  const badge = "Through OpenBot";
+  if (!personal) {
+    return {
+      description:
+        "This deployment holds one key for every app like this. Each person connects their own account, and a Bot sees only what that person can see. There is no token to paste.",
+      badge,
+    };
+  }
+  const { title, kind } = personal;
   return {
-    description: `${holds} holds one key for every app like this. Each person connects their own account, and a Bot sees only what that person can see. There is no token to paste.`,
-    badge: "Through OpenBot",
+    description:
+      kind === "consent"
+        ? `You sign in to ${title} in your browser. OpenBot never sees your password.`
+        : kind === "fields"
+          ? `You connect with a key from your ${title} account. Your Bots use it as you.`
+          : "There's nothing to sign in to.",
+    badge,
   };
 }
 
@@ -144,21 +236,25 @@ export function brokeredDisconnectNote(_provider: PluginsProvider): string {
 }
 
 /**
- * What is said where the deployment has no key for the active broker. `deployment` is what OpenBot
- * itself is called on the page (`managePaths().deploymentName`).
+ * What is said where the deployment has no key for the active broker.
  *
- * `reader` is who can act on it. An admin's page names the variable they set; a person's own
- * Connections page names neither the variable nor the vendor in it, and says who to ask, in the
- * server's words for the same state (`BrokerUnconfiguredError`'s person sentence).
+ * `reader` is who can act on it, in the team edition. An admin's page names the variable they set; a
+ * person's own Connections page names neither the variable nor the vendor in it, and says who to
+ * ask, in the server's words for the same state (`BrokerUnconfiguredError`'s person sentence).
+ *
+ * The personal edition has no admin to ask and no grants to keep, whichever page it is: the one
+ * person sets it up themselves, on Settings' Setup page, whose "More apps" row names what to set.
  */
 export function brokeredKeyMissing(
   provider: PluginsProvider,
-  deployment = "this deployment",
+  edition: Edition = "team",
   reader: "admin" | "person" = "admin",
 ): string {
+  if (edition === "personal")
+    return `Connecting apps isn't set up yet, so you can't connect or disconnect this account here. ${PERSONAL_SET_UP}`;
   if (reader === "person")
     return "Connecting apps isn't set up yet, so this account can't be connected or disconnected here. Ask an admin to set it up.";
-  return `Set ${VOCABULARY[provider].envVar} on ${deployment}. Until then, this account can't be connected or disconnected here. The app stays turned on, and its tool grants still stand.`;
+  return `Set ${VOCABULARY[provider].envVar} on this deployment. Until then, this account can't be connected or disconnected here. The app stays turned on, and its tool grants still stand.`;
 }
 
 /**

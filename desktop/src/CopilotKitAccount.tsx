@@ -59,9 +59,15 @@ export function CopilotKitAccount({
   root,
   onDone,
   failure,
+  handOff = null,
 }: {
   /** The installation folder the apps are connected for. */
   root: string;
+  /**
+   * What another app's window wants while Install, behind this step, waits on it: Docker Desktop
+   * starting, or a password prompt. See `handOffNow`.
+   */
+  handOff?: string | null;
   /** Signed in and agreed: the version accepted here, or null when nothing needed accepting. */
   onDone: (acceptedVersion: string | null) => void;
   /** A failure from setup itself, shown inside this card rather than under it. */
@@ -217,7 +223,10 @@ export function CopilotKitAccount({
         </p>
       )}
 
-      {seen.at === "checking" && (
+      {/* The account check waits on the engine too. While Docker Desktop starts, this says what
+          it waits on and what the person may have to do in Docker's window. */}
+      {handOff && <StatusLine>{handOff}</StatusLine>}
+      {seen.at === "checking" && !handOff && (
         <StatusLine>Checking your CopilotKit account…</StatusLine>
       )}
       {seen.at === "signing-in" && (

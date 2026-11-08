@@ -11,14 +11,20 @@
 //!
 //! And Open log folder (`open_logs`): the folder of this app's log file, in the system's file
 //! manager. The page never names a path; the shell opens its own log folder and nothing else.
+//!
+//! And Quit (`quit`), for Ctrl+Q in the window on Windows (`QUIT_SHORTCUT_PAGE`). The setup and
+//! Status pages are granted it too (`capabilities/default.json`).
 
 use openbot_desktop_lib::{app_update, local_eval, local_eval_state, speech, stack};
 use tauri::Manager;
 
 pub const PLUGIN: &str = "openbot-desktop";
 
+/// Injected into the window's pages on Windows: Ctrl+Q asks `quit`. See the script.
+pub const QUIT_SHORTCUT_PAGE: &str = include_str!("quit-shortcut.js");
+
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 14] = [
+pub const PERMISSIONS: [&str; 16] = [
     "openbot-desktop:allow-appearance",
     "openbot-desktop:allow-status",
     "openbot-desktop:allow-restart",
@@ -33,6 +39,8 @@ pub const PERMISSIONS: [&str; 14] = [
     "openbot-desktop:allow-speech-stop",
     "openbot-desktop:allow-speech-abort",
     "openbot-desktop:allow-open-logs",
+    "openbot-desktop:allow-notify",
+    "openbot-desktop:allow-quit",
 ];
 
 /**
@@ -163,6 +171,32 @@ async fn open_logs(app: tauri::AppHandle) -> Result<(), String> {
     crate::open_log_folder_now(&app)
 }
 
+/// A Bot's notification: shown by the system, and opening OpenBot at `path` when it is clicked,
+/// from the notification centre too. See `notice.rs`.
+#[tauri::command]
+async fn notify(
+    app: tauri::AppHandle,
+    title: String,
+    body: Option<String>,
+    path: Option<String>,
+    tag: Option<String>,
+) -> Result<(), String> {
+    crate::show_notice(
+        &app,
+        &title,
+        body.as_deref().unwrap_or(""),
+        path.as_deref(),
+        tag.as_deref(),
+    )
+}
+
+/// Quit, by the same path as the tray's Quit: Ctrl+Q in the window on Windows, where no menu
+/// carries the shortcut.
+#[tauri::command]
+async fn quit(app: tauri::AppHandle) {
+    crate::chose(&app, "quit");
+}
+
 pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new(PLUGIN)
         .invoke_handler(tauri::generate_handler![
@@ -179,7 +213,9 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             speech_start,
             speech_stop,
             speech_abort,
-            open_logs
+            open_logs,
+            notify,
+            quit
         ])
         .build()
 }

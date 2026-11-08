@@ -38,6 +38,36 @@ use crate::quiet::command;
 
 use serde::{Deserialize, Serialize};
 
+/// One line for a setup step's row while the engine comes up.
+///
+/// `elsewhere` when the line sends the person to another app's window: Docker Desktop starting, or
+/// the system's password prompt for Podman's installer. Those windows come to the front over
+/// OpenBot's. The setup window then says the line on whichever screen the person is on, and OpenBot
+/// comes back to the front once that window is done with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StepLine {
+    pub said: String,
+    pub elsewhere: bool,
+}
+
+impl StepLine {
+    /// A line about work OpenBot does by itself.
+    pub fn here(said: impl Into<String>) -> Self {
+        Self {
+            said: said.into(),
+            elsewhere: false,
+        }
+    }
+
+    /// A line about a window of another app that may need the person.
+    pub fn elsewhere(said: impl Into<String>) -> Self {
+        Self {
+            said: said.into(),
+            elsewhere: true,
+        }
+    }
+}
+
 /// Which engine is in use, because the answer changes what is mounted and what is reported.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

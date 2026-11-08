@@ -10,6 +10,7 @@ mod desktop_page;
 mod desktop_status;
 mod desktop_telemetry;
 mod intelligence_bridge;
+mod notice;
 mod outside_links;
 
 #[cfg(test)]
@@ -106,6 +107,12 @@ struct Shell {
     owned_app_origins: Mutex<Vec<String>>,
     /// The origins already given the window's controls (`allow_app_page`).
     app_page_grants: Mutex<Vec<String>>,
+    /// Whether the app was built with the permissions `allow_app_page` grants (`generate_context!`),
+    /// so `trust_owned_app` can grant them ahead of the page. Tauri panics on a grant of a
+    /// permission it does not know, as in a test app built from a mock context.
+    app_page_grants_known: std::sync::atomic::AtomicBool,
+    /// The page a click on a notification asked for while OpenBot's page was not there yet.
+    waiting_notice_page: Mutex<Option<String>>,
     /// A newer OpenBot Desktop, as the feed last said, and an install of it under way.
     app_update: app_update::Known,
 }
@@ -236,6 +243,9 @@ struct Progress {
     /// Install's image downloads, while they run: see `pull_metrics::Downloads`.
     #[serde(skip_serializing_if = "Option::is_none")]
     downloads: Option<pull_metrics::Downloads>,
+    /// The detail sends the person to another app's window: see `engine::StepLine`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    elsewhere: bool,
 }
 
 #[derive(Serialize)]
@@ -344,6 +354,94 @@ fn wake_saved_engine(
     }
 }
 
+/// `wake_saved_engine` on this machine, each line said on the setup window's rows. Opening Docker
+/// Desktop says the hand-off and brings OpenBot back once Docker answers: see
+/// `docker_desktop::start`.
+async fn wake_installation_engine<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    saved: Option<engine::Engine>,
+) -> Result<(), Problem> {
+    let progress_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        wake_saved_engine(
+            saved,
+            cfg!(any(target_os = "macos", target_os = "windows")),
+            || engine::detect_saved(saved).responding,
+            || {
+                let mut said = false;
+                let started = openbot_desktop_lib::docker_desktop::start_saved(
+                    &mut |line| {
+                        said = true;
+                        report_running_line(&progress_app, "engine", line, None)
+                    },
+                    &|| bring_to_front(&progress_app, "Docker Desktop answers"),
+                );
+                // The row that said the hand-off ends, so the window stops saying it.
+                if said {
+                    match &started {
+                        Ok(()) => {
+                            report(&progress_app, "engine", true, "Docker Desktop is running.")
+                        }
+                        Err(problem) => {
+                            report(&progress_app, "engine", false, problem.said.clone())
+                        }
+                    }
+                }
+                started
+            },
+            || acquire::machine_exists().unwrap_or(false),
+            || {
+                report_running(
+                    &progress_app,
+                    "start-machine",
+                    "Starting the engine machine.",
+                    None,
+                );
+                let started = acquire::start_machine();
+                report(
+                    &progress_app,
+                    "start-machine",
+                    started.ok,
+                    started.said.clone(),
+                );
+                if started.ok {
+                    Ok(())
+                } else {
+                    Err(started.problem())
+                }
+            },
+        )
+    })
+    .await
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot could not start the software it runs on. Try again.",
+            error.to_string(),
+        )
+    })?
+}
+
+/**
+The installation's engine, brought up before the back end is set up, connected or waited on.
+
+A relaunch after a restart finds Docker Desktop quit, or OpenBot's Podman machine stopped, and every
+Intelligence CLI call needs the engine. The window's relaunch sequence starts with the CLI, so
+before this, the CLI answered "docker-unavailable" and setup stopped at "Waiting for the back end",
+never reaching Start, which is where the engine used to be woken. Nothing is done while OpenBot's
+own containers are up, or when the engine already answers.
+*/
+#[tauri::command]
+async fn wake_engine(app: tauri::AppHandle, root: String) -> Result<(), Problem> {
+    let root = stack::root_from(&root);
+    if app.state::<Shell>().containers.lock().unwrap().is_some() {
+        return Ok(());
+    }
+    let asked = std::time::Instant::now();
+    let woken = wake_installation_engine(&app, preparation::saved_engine(&root)).await;
+    logging::outcome("wake engine", asked, &woken);
+    woken
+}
+
 /// Return a responding engine only after Compose is present too.
 fn ready_responding_engine_after_compose_repair(
     found: engine::EngineStatus,
@@ -422,6 +520,7 @@ fn report<R: tauri::Runtime>(
             running: false,
             download_bytes: None,
             downloads: None,
+            elsewhere: false,
         },
     );
 }
@@ -442,7 +541,20 @@ fn report_running<R: tauri::Runtime>(
     detail: impl Into<String>,
     download_bytes: Option<u64>,
 ) {
-    let detail = detail.into();
+    report_running_line(app, step, engine::StepLine::here(detail), download_bytes);
+}
+
+/// A running step's line, marked when it sends the person to another app's window.
+fn report_running_line<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    step: &str,
+    line: engine::StepLine,
+    download_bytes: Option<u64>,
+) {
+    let engine::StepLine {
+        said: detail,
+        elsewhere,
+    } = line;
     {
         let mut logged = RUNNING_LOGGED
             .lock()
@@ -462,8 +574,43 @@ fn report_running<R: tauri::Runtime>(
             running: true,
             download_bytes,
             downloads: None,
+            elsewhere,
         },
     );
+}
+
+/// OpenBot's window in front of whatever is there, at a moment setup needs the person: Docker
+/// Desktop has answered, the system's password prompt has closed, the installation failed or is
+/// done, OpenBot has started. `why` goes in the log.
+///
+/// On macOS that means activating the app, not only ordering its window to the front. A window an
+/// inactive app orders front stays behind the active app's. Tauri's `set_focus` does both: tao
+/// sends `makeKeyAndOrderFront:` and then `activateIgnoringOtherApps:YES`. macOS 14 deprecated that
+/// call for `activate`, which is cooperative: it works only if the app in front yields, and Docker
+/// Desktop does not. Measured on macOS 26.6 with Finder in front: `activateIgnoringOtherApps:YES`
+/// brought a regular app forward, while `activate` and `NSRunningApplication`'s `activate` left it
+/// behind. So the deprecated call, through `set_focus`, is the one used. `AppHandle::show` first
+/// unhides an app hidden with Command-H, which `set_focus` does not.
+///
+/// On Windows `set_focus` gets past the foreground lock (tao's `force_window_active`).
+/// `set_focus` does nothing to a hidden or minimised window, hence `show` and `unminimize` first.
+fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
+    log::info!("[front] {why}");
+    #[cfg(target_os = "macos")]
+    let _ = app.show();
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+}
+
+/// The setup window asks to come to the front: its installation finished or failed, and the next
+/// step is the person's. See `bring_to_front`.
+#[tauri::command]
+fn bring_setup_to_front(app: tauri::AppHandle, why: String) {
+    bring_to_front(&app, &why);
 }
 
 /// Install's running image downloads: the step's sentence, the overall bytes as `downloadBytes`
@@ -481,6 +628,7 @@ fn report_downloads<R: tauri::Runtime>(
             running: true,
             download_bytes: (downloads.bytes > 0).then_some(downloads.bytes),
             downloads: Some(downloads),
+            elsewhere: false,
         },
     );
 }
@@ -1510,18 +1658,26 @@ async fn prepare_installation_inner(
         let images = preparation::installation_pull_set(&address, &root, &root, harness.as_ref())?;
         // Several pulls run at once. Stop is checked before each pull starts; running pulls finish.
         let pacer = Mutex::new(pull_metrics::Pacer::default());
+        // How big the download is, from each image's registry, while the pulls start.
+        let sizes = {
+            let address = address.clone();
+            pull_metrics::size_images(&images, move |image| {
+                preparation::image_present(&address, image).unwrap_or(false)
+            })
+        };
         pull_metrics::pull_images_limited(
             &images,
             pull_metrics::IMAGE_PULLS_AT_ONCE,
-            |_, image, on_bytes| {
-                pull_metrics::pull_image(&address, image, on_bytes, |metrics| {
+            sizes,
+            |_, image, on_layer| {
+                pull_metrics::pull_image(&address, image, on_layer, |metrics| {
                     desktop_telemetry::pull_completed(&handle, metrics)
                 })
             },
             || attempt.require_current(),
             |downloads| {
-                // `done` counts FINISHED pulls; the bytes are the sum over every pull, running and
-                // finished. Paced to a few reports a second, which also measures the speed.
+                // `done` counts FINISHED pulls; the bytes and the size are over every image.
+                // Paced to a few reports a second, which also measures the speed.
                 let paced = pacer
                     .lock()
                     .unwrap()
@@ -1647,6 +1803,7 @@ async fn engine_ready(
     );
     let telemetry_app = app.clone();
     let progress_app = app.clone();
+    let back_app = app.clone();
     let installed = tauri::async_runtime::spawn_blocking(move || {
         install::install_engine_observed(
             &stack::default_root(),
@@ -1668,7 +1825,9 @@ async fn engine_ready(
                 );
             },
             // Installing Podman or starting Docker Desktop can take minutes; each line says where it is.
-            &mut |said| report_running(&progress_app, "install-engine", said, None),
+            &mut |line| report_running_line(&progress_app, "install-engine", line, None),
+            // Docker Desktop's window, or the password prompt, came to the front over OpenBot's.
+            &|| bring_to_front(&back_app, "the engine no longer needs another app's window"),
         )
     })
     .await
@@ -1702,20 +1861,26 @@ async fn engine_ready(
     // One at a time, and each only if the last one worked. Written as a loop over an array once,
     // which ran all three before the first was checked: a failed `machine init` was still followed
     // by `machine start`.
-    report_running(
+    report_running_line(
         app,
         "create-machine",
         if cfg!(target_os = "windows") {
             // Podman's own installer for WSL, when WSL is missing: its dialog, then Windows' own
-            // administrator prompt, then a restart. Said before it happens rather than after.
-            "Preparing the engine machine. If Windows Subsystem for Linux is missing, Podman \
-             offers to install it. Windows then asks for administrator approval and a restart."
+            // administrator prompt, then a restart. Said before it happens rather than after, and
+            // on whichever screen the person is on: those windows come to the front over OpenBot's.
+            engine::StepLine::elsewhere(
+                "Preparing the engine machine. If Windows Subsystem for Linux is missing, Podman \
+                 offers to install it. Windows then asks for administrator approval and a restart.",
+            )
         } else {
-            "Preparing the engine machine."
+            engine::StepLine::here("Preparing the engine machine.")
         },
         None,
     );
     let created = acquire::create_machine(4, 6144, 60);
+    if cfg!(target_os = "windows") {
+        bring_to_front(app, "the engine machine is prepared");
+    }
     report(app, "create-machine", created.ok, created.said.clone());
     if !created.ok {
         return Err(created.problem());
@@ -2499,47 +2664,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
     let saved = preparation::saved_engine(&root);
     let owned = shell.containers.lock().unwrap().is_some();
     if !owned {
-        let progress_app = app.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            wake_saved_engine(
-                saved,
-                cfg!(any(target_os = "macos", target_os = "windows")),
-                || engine::detect_saved(saved).responding,
-                || {
-                    openbot_desktop_lib::docker_desktop::start_saved(&mut |said| {
-                        report_running(&progress_app, "engine", said, None)
-                    })
-                },
-                || acquire::machine_exists().unwrap_or(false),
-                || {
-                    report_running(
-                        &progress_app,
-                        "start-machine",
-                        "Starting the engine machine.",
-                        None,
-                    );
-                    let started = acquire::start_machine();
-                    report(
-                        &progress_app,
-                        "start-machine",
-                        started.ok,
-                        started.said.clone(),
-                    );
-                    if started.ok {
-                        Ok(())
-                    } else {
-                        Err(started.problem())
-                    }
-                },
-            )
-        })
-        .await
-        .map_err(|error| {
-            Problem::with(
-                "OpenBot could not start the software it runs on. Try again.",
-                error.to_string(),
-            )
-        })??;
+        wake_installation_engine(&app, saved).await?;
         attempt.require_current()?;
     }
 
@@ -2909,10 +3034,57 @@ async fn start_stack_inner<R: tauri::Runtime>(
         )
     })?;
     preparation::save_selected_root(&config, &root)?;
+    give_learning_its_model(
+        root.clone(),
+        found.clone(),
+        credential,
+        ports.server,
+        secrets
+            .get(openbot_desktop_lib::learning_model::TOKEN)
+            .cloned()
+            .unwrap_or_default(),
+    );
     watch_connections(app.clone(), root, host_token, generation, ports.server);
 
     report(&app, "answering", true, "OpenBot is ready.");
     Ok(())
+}
+
+/**
+Give local Intelligence's Learning agent the model the person signed in to, once OpenBot answers.
+See `learning_model`.
+
+In the background, on its own thread. Learning is not what Start waits on, and a CLI call that
+fails here leaves OpenBot running, Settings saying why Learning can't run, and the next Start trying
+again. The CLI takes its turn with the window's own calls (`local_eval::one_at_a_time`).
+*/
+fn give_learning_its_model(
+    root: PathBuf,
+    engine: engine::Address,
+    credential: openbot_env::ModelCredential,
+    server_port: u16,
+    token: String,
+) {
+    use openbot_desktop_lib::learning_model;
+    std::thread::spawn(move || {
+        let attempt = format!("learning-model-{:016x}", rand::random::<u64>());
+        let given = learning_model::apply(
+            &root,
+            &credential,
+            server_port,
+            &token,
+            || stack::host_gateway_ipv4(&engine, &root),
+            |stack| local_eval::run_installed(&attempt, local_eval::Action::Status, stack),
+            |file| local_eval::configure_learning_model_installed(&attempt, &root, file),
+        );
+        match given {
+            learning_model::Given::Nothing => {}
+            learning_model::Given::Given => {
+                log::info!("[learning] the Learning agent has the model this sign-in gives it")
+            }
+            other => log::warn!("[learning] the Learning agent's model was not changed: {other:?}"),
+        }
+    });
 }
 
 /// Local folder access for the deployment at `root`, answering to its server with the per-run
@@ -3163,6 +3335,7 @@ impl QuitStatus {
             running: state == QuitStepState::Running,
             download_bytes: None,
             downloads: None,
+            elsewhere: false,
         };
         match self.steps.iter_mut().find(|known| known.step == row.step) {
             Some(known) => *known = row,
@@ -4080,6 +4253,11 @@ fn show_openbot_on<R: tauri::Runtime>(
         )
         .map_err(|_| Problem::plain("OpenBot could not navigate to its app."));
     log::info!("[show] navigate returned {outcome:?}");
+    // Setup is over and OpenBot is what the person uses now: in front, wherever they had gone
+    // while it started.
+    if outcome.is_ok() {
+        bring_to_front(&app, "OpenBot is showing");
+    }
     outcome
 }
 
@@ -4443,8 +4621,9 @@ fn show_window_title<R: tauri::Runtime>(window: &tauri::Window<R>, shown: bool) 
 /**
 Marks OpenBot's page for the overlay title bar: its styles pad the sidebar's header for the window
 buttons, and the header becomes the drag handle, as does the strip the main column keeps above
-itself while the sidebar is hidden. The sidebar renders after the page loads and again
-on navigation, so new headers are marked as they appear, at most once a frame.
+itself while the sidebar is hidden, and onboarding's header, which has no sidebar beside it. The
+sidebar renders after the page loads and again on navigation, so new headers are marked as they
+appear, at most once a frame. Run on macOS only: Windows has its own title bar to drag.
 */
 const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
   document.documentElement.dataset.desktopTitlebar = "overlay";
@@ -4452,6 +4631,11 @@ const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
   const mark = () => {
     // Bare attributes: only a press on the element itself drags, never on its contents.
     for (const header of document.querySelectorAll(`[data-slot="sidebar-header"]:not([${DRAG}])`)) {
+      header.setAttribute(DRAG, "");
+    }
+    // Onboarding has no sidebar. Its header starts below the window's buttons, and that strip is
+    // the header's own, so it drags while Back and the steps inside it stay buttons.
+    for (const header of document.querySelectorAll(`[data-onboarding-frame] > header:not([${DRAG}])`)) {
       header.setAttribute(DRAG, "");
     }
     // The main column only while the sidebar is hidden, when its top strip is the one handle left.
@@ -4511,6 +4695,12 @@ Record `address` as the OpenBot app this shell verified it owns, and let it use 
 Called with an address `owned_app_url` verified, before the window navigates there. Its origin is
 then the only loopback origin the window treats as OpenBot (`window_page`) and gives the window's
 controls to (`allow_app_page`).
+
+They are granted here, before the page exists, and not only once it has loaded: the notification
+plugin's script asks `is_permission_granted` as the page starts, and a page whose origin was not yet
+granted was refused, kept "default" as its answer for as long as it stayed open, and never showed a
+notification. MEASURED on a Mac: no Bot's notice reached the system (usernoted never heard from the
+app) while the offer to turn them on, asked later, was rightly hidden.
 */
 fn trust_owned_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>, address: &str) {
     if let Some(origin) = intelligence_bridge::app_origin(address) {
@@ -4520,7 +4710,22 @@ fn trust_owned_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>, address: &str) 
             trusted.push(origin);
         }
     }
+    let known = app
+        .state::<Shell>()
+        .app_page_grants_known
+        .load(std::sync::atomic::Ordering::SeqCst);
+    if let (true, Ok(url)) = (known, address.parse::<tauri::Url>()) {
+        allow_app_page(app, &url);
+    }
     intelligence_bridge::allow(app, address);
+}
+
+/// Lets `trust_owned_app` grant OpenBot's page its permissions before the page loads. Only for an
+/// app built by `generate_context!`, which compiles them in.
+fn know_app_page_grants<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    app.state::<Shell>()
+        .app_page_grants_known
+        .store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
 /// Whether `url` is on the origin of the OpenBot app this shell verified it owns.
@@ -4534,8 +4739,25 @@ fn is_owned_app_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri
 }
 
 /**
+The page's Notification API, which the notification plugin's script stands in for in this window:
+whether notifications are on, turning them on, and showing one. Nothing else of the plugin's.
+
+MEASURED: the window's own Notification API cannot be granted. In a WKWebView set up as wry sets it
+up, `Notification.requestPermission()` answers "denied" at once with no prompt, and the next launch
+reads "default" again, so the page's offer to turn them on came back after every yes. The plugin
+shows them through the system instead, and answers that they are allowed: a desktop app needs no
+permission of its own to post one (tauri-plugin-notification, `desktop.rs`).
+*/
+const APP_PAGE_NOTIFICATIONS: [&str; 3] = [
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "notification:allow-notify",
+];
+
+/**
 Lets OpenBot's own page move and zoom the window from its drag handle, set the window's appearance
-to its own theme, and use Settings → This computer (`desktop_page`), and nothing more.
+to its own theme, use Settings → This computer (`desktop_page`), and show a Bot's notifications
+(`APP_PAGE_NOTIFICATIONS`), and nothing more.
 
 Only the origin this shell verified as its own OpenBot (`trust_owned_app`). A page on any other
 loopback port, which a link in a reply can open in this window, gets none of it: Settings → This
@@ -4558,8 +4780,11 @@ fn allow_app_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url
             .window("main")
             .permission("core:window:allow-start-dragging")
             .permission("core:window:allow-internal-toggle-maximize");
-    for permission in desktop_page::PERMISSIONS {
-        capability = capability.permission(permission);
+    for permission in desktop_page::PERMISSIONS
+        .iter()
+        .chain(&APP_PAGE_NOTIFICATIONS)
+    {
+        capability = capability.permission(*permission);
     }
     match app.add_capability(capability) {
         Ok(()) => granted.push(origin),
@@ -4586,10 +4811,13 @@ mod app_page_tests {
                 .build();
         let app = tauri::test::mock_builder()
             .plugin(stand_in)
+            .plugin(tauri_plugin_notification::init())
             .plugin(intelligence_bridge::plugin())
             .manage(Shell::default())
             .build(tauri::generate_context!(test = true))
             .unwrap();
+        // As the app's setup does: this context compiles the page's permissions in.
+        know_app_page_grants(app.handle());
         let window = app.get_webview_window("main").unwrap_or_else(|| {
             tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
                 .build()
@@ -4664,6 +4892,37 @@ mod app_page_tests {
         }
     }
 
+    /// On Windows the tray said "Quit  Ctrl+Q" and Ctrl+Q in the window did nothing: a tray menu's
+    /// shortcut is only a label there, and the window has no menu bar. The window's pages now ask
+    /// to quit themselves (`quit-shortcut.js`), so the setup screens and OpenBot's own page must be
+    /// able to, and a page on another loopback port must not.
+    #[test]
+    fn ctrl_q_on_windows_can_quit_from_setup_and_openbot_but_not_another_page() {
+        const QUIT: &str = "plugin:openbot-desktop|quit";
+        let (app, window) = app();
+        // The setup screens, served by the app itself, at the address each platform gives them.
+        let setup = if cfg!(windows) {
+            "http://tauri.localhost/"
+        } else {
+            "tauri://localhost/"
+        };
+        assert_eq!(ask(&window, setup, QUIT), Ok(serde_json::Value::Null));
+        let foreign = "http://127.0.0.1:3011/";
+        allow_app_page(app.handle(), &foreign.parse().unwrap());
+        assert!(ask(&window, foreign, QUIT).is_err());
+        trust_owned_app(app.handle(), "http://127.0.0.1:3010");
+        let owned = "http://127.0.0.1:3010/";
+        allow_app_page(app.handle(), &owned.parse().unwrap());
+        assert_eq!(ask(&window, owned, QUIT), Ok(serde_json::Value::Null));
+
+        // Read as text, as the outside-links test does: the real webview cannot be built here.
+        let main = include_str!("main.rs");
+        assert!(main.contains(
+            "if cfg!(target_os = \"windows\") && page != WindowPage::Other {\n                let _ = window.eval(desktop_page::QUIT_SHORTCUT_PAGE);"
+        ));
+        assert!(desktop_page::QUIT_SHORTCUT_PAGE.contains("\"plugin:openbot-desktop|quit\""));
+    }
+
     /// Every command OpenBot's page may ask, the update banner's among them (installing an update
     /// stops OpenBot and restarts the app), answers only the OpenBot this shell owns.
     #[test]
@@ -4729,6 +4988,163 @@ mod app_page_tests {
                 .unwrap_or_else(|| home.join(".local").join("share"));
             assert_eq!(folder, data.join(&identifier).join("logs"));
         }
+    }
+
+    /// OpenBot's own page turns notifications on and shows them through the notification plugin,
+    /// whose script stands in for the page's Notification API. It answers that they are on, as the
+    /// plugin does on every desktop, so the page's offer to turn them on does not come back. A page
+    /// on another port gets none of it: it could post notices in OpenBot's name.
+    #[test]
+    fn only_the_owned_app_origin_can_turn_on_and_show_notifications() {
+        let (app, window) = app();
+        let foreign: tauri::Url = "http://127.0.0.1:3011/".parse().unwrap();
+        let owned: tauri::Url = "http://127.0.0.1:3010/channel/c-1".parse().unwrap();
+        allow_app_page(app.handle(), &foreign);
+        trust_owned_app(app.handle(), "http://127.0.0.1:3010");
+        allow_app_page(app.handle(), &owned);
+        for command in ["is_permission_granted", "request_permission", "notify"] {
+            let command = format!("plugin:notification|{command}");
+            let refused = ask(&window, foreign.as_str(), &command).unwrap_err();
+            assert!(
+                refused.to_string().contains("not allowed"),
+                "{command} from another page: {refused}"
+            );
+        }
+        assert_eq!(
+            ask(
+                &window,
+                owned.as_str(),
+                "plugin:notification|is_permission_granted"
+            ),
+            Ok(serde_json::json!(true))
+        );
+        assert_eq!(
+            ask(
+                &window,
+                owned.as_str(),
+                "plugin:notification|request_permission"
+            ),
+            Ok(serde_json::json!("granted"))
+        );
+        // Showing one is the page's to ask. Asked with no notice, so the command is reached (it
+        // refuses the arguments, not the page) and a test run posts nothing to the system.
+        let reached = ask(&window, owned.as_str(), "plugin:notification|notify").unwrap_err();
+        assert!(
+            !reached.to_string().contains("not allowed") && reached.to_string().contains("options"),
+            "{reached}"
+        );
+    }
+
+    /// The notification plugin's script asks whether notifications are on as OpenBot's page
+    /// starts, before it has loaded. Its origin is granted when the shell trusts it, ahead of the
+    /// window going there, so that first question is answered. It used to be granted only once the
+    /// page had loaded: the question was refused, and the page never showed a notification.
+    #[test]
+    fn the_owned_app_page_is_answered_from_its_first_moment() {
+        let (app, window) = app();
+        let starting = "http://127.0.0.1:3010/";
+        trust_owned_app(app.handle(), "http://127.0.0.1:3010");
+        // No page load has finished: nothing but the trust has happened.
+        assert_eq!(
+            ask(
+                &window,
+                starting,
+                "plugin:notification|is_permission_granted"
+            ),
+            Ok(serde_json::json!(true))
+        );
+        assert!(ask(
+            &window,
+            "http://127.0.0.1:3011/",
+            "plugin:notification|is_permission_granted"
+        )
+        .is_err());
+    }
+
+    /// A click on a Bot's notification opens the page it names, on the OpenBot the window shows,
+    /// and nowhere else: not another site, not another port, and not while the window shows setup.
+    #[test]
+    fn a_click_on_a_notification_opens_only_a_page_of_the_shown_openbot() {
+        let current: tauri::Url = "http://127.0.0.1:3010/channel/c-1".parse().unwrap();
+        let open = |owned, path| {
+            notification_destination(&current, owned, path).map(|url| url.to_string())
+        };
+        assert_eq!(
+            open(true, Some("/bots/expenses")).as_deref(),
+            Some("http://127.0.0.1:3010/bots/expenses")
+        );
+        assert_eq!(
+            open(true, Some("/bots")).as_deref(),
+            Some("http://127.0.0.1:3010/bots")
+        );
+        for path in [
+            "//example.com/bots",
+            "https://example.com/",
+            "http://127.0.0.1:3011/bots",
+            "bots",
+            "/\\example.com",
+            "javascript:alert(1)",
+        ] {
+            assert_eq!(open(true, Some(path)), None, "{path}");
+        }
+        assert_eq!(open(true, None), None);
+        assert_eq!(open(false, Some("/bots")), None);
+    }
+
+    /// A toast from an app Windows did not install from a package is shown under the app whose
+    /// AppUserModelID it names, and only when a Start menu shortcut carries that ID. The
+    /// notification plugin names the bundle identifier in an installed app (`desktop.rs`,
+    /// `notification.app_id(&self.identifier)`), and Tauri's own NSIS template stamps the same
+    /// `${BUNDLEID}` on the Start menu shortcut it names after the product (`installer.nsi`,
+    /// `SetLnkAppUserModelId`). So a toast reads "OpenBot" as long as the installer is that template
+    /// and the identifier and product name stay what they are.
+    #[test]
+    fn windows_toasts_name_the_app_the_start_menu_shortcut_carries() {
+        let (app, _) = app();
+        let config = app.config();
+        assert_eq!(config.identifier, "ai.copilotkit.openbot.desktop");
+        assert_eq!(config.product_name.as_deref(), Some("OpenBot"));
+        // Read from the files the installer is built from, the base and every overlay a build
+        // passes with --config: the app's runtime config leaves the bundle settings out.
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut checked = 0;
+        for entry in std::fs::read_dir(folder).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if !(name.starts_with("tauri.") && name.ends_with(".json")) {
+                continue;
+            }
+            let file: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let nsis = &file["bundle"]["windows"]["nsis"];
+            assert!(
+                nsis.get("template").is_none(),
+                "{name}: a custom NSIS template has to stamp the Start menu shortcut's \
+                 AppUserModelID itself"
+            );
+            if let Some(identifier) = file.get("identifier") {
+                assert_eq!(identifier, "ai.copilotkit.openbot.desktop", "{name}");
+            }
+            if let Some(product) = file.get("productName") {
+                assert_eq!(product, "OpenBot", "{name}");
+            }
+            checked += 1;
+        }
+        assert!(checked >= 2, "found {checked} Tauri config files");
+        // The installer registers the scheme a toast's link opens by: a click in the notification
+        // centre can only bring an unpackaged app back by protocol (`notice.rs`).
+        let base: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(folder.join("tauri.conf.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            base["plugins"]["deep-link"]["desktop"]["schemes"],
+            serde_json::json!([notice::SCHEME])
+        );
+        let hooks = std::fs::read_to_string(folder.join("windows/hooks.nsh")).unwrap();
+        assert!(
+            !hooks.contains("CreateShortcut"),
+            "a shortcut the hooks make carries no AppUserModelID"
+        );
     }
 
     /// Narration listens through the shell's speech recognition from OpenBot's own page, and from
@@ -6670,6 +7086,171 @@ where
         .spawn(move || restore(context))
 }
 
+/**
+Where a click on one of a Bot's notifications takes the window: the page the notice names
+(`extra.path`, which OpenBot's page sets as it posts it), on the OpenBot the window shows. Nothing
+when the window shows anything else, or for a path that is not one of that OpenBot's own pages.
+*/
+fn notification_destination(
+    current: &tauri::Url,
+    owned: bool,
+    path: Option<&str>,
+) -> Option<tauri::Url> {
+    let path = path.filter(|path| owned && path.starts_with('/') && !path.starts_with("//"))?;
+    if path.contains('\\') {
+        return None;
+    }
+    let target = current.join(path).ok()?;
+    (target.origin() == current.origin()).then_some(target)
+}
+
+/**
+A Bot's notification, shown by the system: OpenBot's page asks for it (`desktop_page::notify`) with
+the page a click opens.
+
+On Windows a toast of our own, which opens an `openbot://` link by protocol: the only way an app
+installed without a package is brought back from the notification centre (see `notice.rs`). On
+macOS and Linux the notification plugin's, carrying the page in `extra.path` for its click report.
+*/
+fn show_notice<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    title: &str,
+    body: &str,
+    path: Option<&str>,
+    tag: Option<&str>,
+) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let link = path.map_or_else(|| format!("{}://open", notice::SCHEME), notice::open_link);
+        notice::show_toast(
+            &app.config().identifier,
+            &notice::toast_xml(title, body, &link),
+            tag.map(notice::toast_tag).as_deref(),
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        // The plugin has no tag to replace a notice by: the page sends one notice per moment.
+        let _ = tag;
+        use tauri_plugin_notification::NotificationExt;
+        let mut builder = app.notification().builder().title(title).body(body);
+        if let Some(path) = path {
+            builder = builder.extra("path", path);
+        }
+        builder.show().map_err(|error| error.to_string())
+    }
+}
+
+/**
+A click on one of a Bot's notifications, as the notification plugin reports it (`tap`): opens the
+page it names. The plugin reports one only for notices it showed; on macOS, with notify-rust 4.18
+and mac-notification-sys 0.6.15, not even then (a notice without buttons is sent without waiting
+for a response).
+*/
+fn open_from_notification(
+    app: &tauri::AppHandle,
+    performed: &tauri_plugin_notification::ActionPerformed,
+) {
+    if performed.action_id() != "tap" {
+        return;
+    }
+    let path = performed
+        .notification()
+        .and_then(|notification| notification.extra().get("path"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    open_notice_page(app, path);
+}
+
+/// An `openbot://open?path=…` link, which a click on a Windows toast opens, from the notification
+/// centre too: Windows starts OpenBot.exe with it and the single-instance plugin hands it here.
+fn open_from_link(app: &tauri::AppHandle, link: &tauri::Url) {
+    if link.scheme() != notice::SCHEME {
+        return;
+    }
+    open_notice_page(app, notice::path_of(link));
+}
+
+/**
+OpenBot comes forward, as it does for a second launch, at the page a notice is about. While the
+window does not show this OpenBot yet (it is still starting, from a click that launched it), the
+page waits for it: `open_waiting_notice_page` opens it once OpenBot's page has loaded.
+*/
+fn open_notice_page(app: &tauri::AppHandle, path: Option<String>) {
+    show_whichever_applies(app);
+    // On the window's own thread, which is the thread `AttachThreadInput` lends the foreground's
+    // input to. Logged with how the click's launch fared passing the foreground on.
+    #[cfg(windows)]
+    if let Some(hwnd) = app
+        .get_webview_window("main")
+        .and_then(|window| window.hwnd().ok())
+    {
+        let hwnd = hwnd.0 as isize;
+        let _ = app.run_on_main_thread(move || {
+            let handoff = notice::take_handoff();
+            let forward = notice::bring_to_front(hwnd as *mut core::ffi::c_void);
+            log::info!(
+                "[notification] to the front: {forward:?} (the click's launch: {})",
+                handoff.as_deref().unwrap_or("no record")
+            );
+        });
+    }
+    let Some(path) = path else {
+        return;
+    };
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let Ok(current) = window.url() else {
+        return;
+    };
+    let owned = matches!(
+        window_page(app, &current),
+        WindowPage::OwnedApp | WindowPage::LocalApp
+    );
+    if !owned {
+        *app.state::<Shell>().waiting_notice_page.lock().unwrap() = Some(path);
+        return;
+    }
+    navigate_to_notice_page(&current, &path, |script| window.eval(script));
+}
+
+/// The page a click asked for before OpenBot's page was there, now that it is.
+fn open_waiting_notice_page<R: tauri::Runtime>(window: &tauri::Webview<R>, loaded: &tauri::Url) {
+    let waiting = window
+        .app_handle()
+        .state::<Shell>()
+        .waiting_notice_page
+        .lock()
+        .unwrap()
+        .take();
+    if let Some(path) = waiting {
+        navigate_to_notice_page(loaded, &path, |script| window.eval(script));
+    }
+}
+
+/**
+Goes to `path` on the OpenBot at `current`, unless it is there already or `path` is not one of its
+pages (`notification_destination`).
+
+As a route change in the page (`notice::open_script`), never by loading the page again: a click on a
+notice used to reload OpenBot and lose what the person was in the middle of. A page from before the
+page handled it is loaded at the target instead.
+*/
+fn navigate_to_notice_page(
+    current: &tauri::Url,
+    path: &str,
+    eval: impl FnOnce(String) -> tauri::Result<()>,
+) {
+    if let Some(target) = notification_destination(current, true, Some(path)) {
+        if &target != current {
+            if let Err(error) = eval(notice::open_script(path, target.as_str())) {
+                log::warn!("[notification] could not open the page it named: {error}");
+            }
+        }
+    }
+}
+
 fn restore_after_second_instance(app: &tauri::AppHandle) {
     let app = app.clone();
     let reporting_app = app.clone();
@@ -7453,6 +8034,12 @@ fn install_recorder_host_at_start() -> Option<std::thread::JoinHandle<()>> {
 
 fn main() {
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    // Windows opening a notification's link: pass the foreground on, before the single-instance plugin
+    // hands the link to the OpenBot already running and this launch exits. See `notice.rs`.
+    #[cfg(windows)]
+    if notice::launched_by_link(args.iter().map(|arg| arg.to_string_lossy().into_owned())) {
+        notice::let_running_openbot_come_forward();
+    }
     // Chrome, Edge or Chromium starting the Recorder's native messaging host: answer it and exit, before
     // anything of the app (the single-instance plugin would forward this launch to a running app).
     if let Some(origin) = recorder_host::caller_origin(&args) {
@@ -7499,18 +8086,24 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             restore_after_second_instance(app);
         }))
+        // The `openbot://` links a click on a Windows notification opens. Right after the
+        // single-instance plugin, whose `deep-link` feature hands it a second launch's link.
+        .plugin(tauri_plugin_deep_link::init())
         // The log file, before anything that logs. After the single-instance plugin, so a second
         // launch, which that plugin ends, never opens (or rotates) the file the first one writes.
         .plugin(logging::plugin())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(intelligence_bridge::plugin())
         .plugin(desktop_page::plugin())
         .plugin(outside_links_guard())
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
             record_setup_event,
+            bring_setup_to_front,
+            wake_engine,
             fit_setup_window,
             detect_engine,
             windows_blocker,
@@ -7577,10 +8170,15 @@ fn main() {
             if matches!(page, WindowPage::OwnedApp | WindowPage::LocalApp) {
                 let _ = window.eval(outside_links::PAGE);
             }
+            // Ctrl+Q quits, as the tray says. Windows only: no menu there carries the shortcut.
+            if cfg!(target_os = "windows") && page != WindowPage::Other {
+                let _ = window.eval(desktop_page::QUIT_SHORTCUT_PAGE);
+            }
             if matches!(page, WindowPage::OwnedApp | WindowPage::LocalApp)
                 && payload.event() == tauri::webview::PageLoadEvent::Finished
             {
                 allow_app_page(window.app_handle(), payload.url());
+                open_waiting_notice_page(window, payload.url());
                 // macOS draws the window's outline from it; Windows tints the title bar with it.
                 if cfg!(any(target_os = "macos", target_os = "windows")) {
                     let _ = window.eval(APP_THEME_PAGE);
@@ -7617,6 +8215,32 @@ fn main() {
         })
         .setup(move |app| {
             log_launch(app.handle(), local_offset);
+            // Built by `generate_context!`, so the permissions OpenBot's page is granted are
+            // compiled in. First, before anything that could trust an app and open it.
+            know_app_page_grants(app.handle());
+            {
+                use tauri_plugin_notification::NotificationExt;
+                let handle = app.handle().clone();
+                app.notification()
+                    .on_action(move |performed| open_from_notification(&handle, performed))?;
+            }
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    for link in event.urls() {
+                        open_from_link(&handle, &link);
+                    }
+                });
+                // OpenBot started by a click on a notification: its page, once OpenBot shows.
+                if let Ok(Some(links)) = app.deep_link().get_current() {
+                    for link in links {
+                        if let Some(path) = notice::path_of(&link) {
+                            *app.state::<Shell>().waiting_notice_page.lock().unwrap() = Some(path);
+                        }
+                    }
+                }
+            }
             // A signed Mac or Windows build updates itself. The window asks once at launch and
             // installs only if the person says yes; the plugin refuses anything whose minisign
             // signature does not match the public key compiled in from the signing overlay

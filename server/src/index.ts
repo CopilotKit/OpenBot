@@ -55,12 +55,14 @@ import {
   wakeUpTools,
 } from "./agents/wake-up";
 import { createApp } from "./app";
+import { createDecisionWaits } from "./approvals/decision-waits";
 import { createApprovedActionExecutor } from "./approvals/execute";
 import { createPersonResponseTick } from "./approvals/person-response-sweep";
 import {
   type PersonQuestion,
   questionConversationBot,
 } from "./approvals/questions";
+import { waitForReplyInTranscript } from "./approvals/reply-in-transcript";
 import { createApprovalResumeTick } from "./approvals/resume-sweep";
 import { createApprovalStore } from "./approvals/store";
 import { ApprovalRefusedError } from "./approvals/types";
@@ -204,6 +206,11 @@ import {
   learningSetupInstructions,
 } from "./learning/ensure-container";
 import { createInspectorLearningReader } from "./learning/inspector";
+import {
+  createLearningModelCalls,
+  learningModelEndpointFor,
+} from "./learning/model-endpoint";
+import { learningModelUnavailable } from "./learning/routes";
 import { createLearningPeople } from "./learning/people";
 import {
   createPersonalLearningSpaces,
@@ -218,8 +225,8 @@ import {
 } from "./learning/sharing";
 import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
-import { createMemoryRuntime } from "./memory/runtime";
 import { createIntelligenceMemory } from "./memory/intelligence";
+import { createMemoryRuntime } from "./memory/runtime";
 import { createMemoryStore } from "./memory/store";
 import { offeredMemoryTools } from "./memory/tools";
 import { reportModelAvailability } from "./model-availability-check";
@@ -781,6 +788,15 @@ const storedApprovals = createApprovalStore(database);
 // Before anything reads the model environment: blank base URLs removed, Anthropic given its `/v1`.
 normalizeModelBaseUrls();
 const runtimeModel = runtimeModelForEnvironment(tenantPackage.model);
+/**
+ * Where local Intelligence's Learning thinks on the person's plan, with a record of what became of
+ * each call so Settings can say why a run failed. Absent off a plan or without Desktop's secret.
+ */
+const learningModelEndpoint = learningModelEndpointFor(
+  runtimeModel.plan,
+  process.env.OPENBOT_LEARNING_MODEL_TOKEN,
+  createLearningModelCalls(),
+);
 // And before any Bot's model is resolved: behind a gateway, the API that model takes tools on (chooseOpenAIApi).
 if (chooseOpenAIApi(runtimeModel) === "responses")
   console.info(
@@ -2203,6 +2219,7 @@ const copilotRuntime = mountCopilotRuntime(
   identifyActor,
   {
     productTelemetry,
+    decisionWaits: createDecisionWaits(database),
     onRunBusy: (input) => {
       void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
     },
@@ -2451,6 +2468,15 @@ const approvalSweep = repeatAfterEach(
     actorFor,
     // Assigned further down, once delivery is wired.
     notify: (scope, input) => deliveryNotifications(scope, input),
+    transcriptHolds: waitForReplyInTranscript({
+      read: async ({ ownerUserId, threadId }) =>
+        (
+          await routineIntelligence.getThreadMessages({
+            threadId,
+            userId: ownerUserId,
+          })
+        ).messages,
+    }),
   }),
   2_000,
 );
@@ -3051,6 +3077,7 @@ const app = createApp(
       ? createInspectorLearningReader(config.runtime.intelligence)
       : undefined,
     manage: learningProbeIntelligence.experimental.learning,
+    modelUnavailable: learningModelUnavailable(process.env),
     skills: copilotRuntime.learning?.containerSkills,
     approvals: skillApprovalStore,
     people: createLearningPeople(database),
@@ -3128,8 +3155,12 @@ const app = createApp(
           },
         }
       : {}),
+    learningModel: learningModelEndpoint,
     personalLearning: {
       store: learningSharingStore,
+      ...(learningModelEndpoint?.calls
+        ? { modelCalls: learningModelEndpoint.calls }
+        : {}),
       approvals: skillApprovalStore,
       autoApprover,
       skillsOf: (userId) =>

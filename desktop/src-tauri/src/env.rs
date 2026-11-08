@@ -873,6 +873,15 @@ pub fn compose(
         }
     }
 
+    /*
+     * Why Learning has no model, for Settings to say, or empty when it has one. Written with the
+     * model's own keys, and left alone when nothing was chosen, for the same reasons. See
+     * `learning_model`.
+     */
+    if let Some(why) = crate::learning_model::unavailable_setting(&model.credential) {
+        env.insert(crate::learning_model::UNAVAILABLE.into(), why.into());
+    }
+
     // Trimmed, the way the model key beside it already is. All four values come from the same
     // setup screen, which enables its button on `value.trim() !== ""` and then sends the untrimmed
     // string, so a key copied from a provider's dashboard with the trailing space the selection
@@ -1313,10 +1322,13 @@ pub const NO_KEY_NEEDED: &str = "no-key-needed";
 const BANNER: &str = "# Written by OpenBot Desktop. Anything else in this file is left alone.";
 
 /// The secrets this deployment mints for itself, once.
-pub const MINTED: [&str; 6] = [
+pub const MINTED: [&str; 7] = [
     "AGENT_TOOL_TOKEN",
     "COMPUTER_TOKEN",
     "KEY_ENCRYPTION_KEY",
+    // What local Intelligence's Learning agent proves itself to the server with when it thinks on
+    // the person's plan. See `learning_model`.
+    crate::learning_model::TOKEN,
     "MANAGED_AGENT_TOKEN",
     "SUPERVISOR_TOKEN",
     "WORKER_SHARED_SECRET",
@@ -3177,6 +3189,46 @@ mod model_tests {
         );
         assert_eq!(env.get("OPENAI_API_KEY"), Some(&String::new()));
         assert_eq!(env.get("OPENAI_BASE_URL"), Some(&String::new()));
+    }
+
+    /// The server is told why Learning has no model, empty when it has one, and a Start that chose
+    /// nothing leaves the setting as it was. Learning's secret is minted like the other tokens.
+    #[test]
+    fn the_server_hears_whether_learning_has_a_model_and_gets_its_secret() {
+        let written = |credential: ModelCredential| {
+            compose(
+                &intelligence(),
+                &Model { credential },
+                &engine(),
+                &Ports::default(),
+                &pinned(),
+                None,
+                &BTreeMap::new(),
+            )
+        };
+        let plan = written(ModelCredential::ClaudePlan { token: "t".into() });
+        assert_eq!(
+            plan.get(crate::learning_model::UNAVAILABLE),
+            Some(&String::new())
+        );
+        assert!(plan
+            .get(crate::learning_model::TOKEN)
+            .is_some_and(|secret| secret.len() >= 32));
+        assert_eq!(
+            written(ModelCredential::ProviderOAuth {
+                provider: "google".into(),
+                path: "/x".into(),
+                proxy_token: "p".into(),
+                model: "m".into(),
+            })
+            .get(crate::learning_model::UNAVAILABLE),
+            Some(&"unsupported".to_string())
+        );
+        assert_eq!(
+            written(ModelCredential::None).get(crate::learning_model::UNAVAILABLE),
+            None
+        );
+        assert!(crate::vault::is_secret(crate::learning_model::TOKEN));
     }
 
     #[test]

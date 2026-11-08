@@ -1,3 +1,5 @@
+import { askAdminTo, itsAppPage } from "../edition";
+
 /**
  * The OAuth clients this deployment registered itself, for the brokered apps that need one.
  *
@@ -52,5 +54,5 @@ export function sharedAccountOnly(authScheme: string | null): boolean {
 
 /** The refusal a personal connect to such an app meets, in one place for both readers of it. */
 export function sharedAccountOnlySentence(title: string): string {
-  return `${title} connects only as one shared account, because it signs in with this deployment's own client rather than anything of yours, so no account was made. Ask an admin to make it shared on its Plugins page and connect it there.`;
+  return `${title} connects only as one shared account, because it signs in with this deployment's own client rather than anything of yours, so no account was made. ${askAdminTo(`make it shared on ${itsAppPage()} and connect it there`)}.`;
 }

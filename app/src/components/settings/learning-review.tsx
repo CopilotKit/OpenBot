@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { skillTitle } from "@/lib/learning/display";
 import {
   reviewPersonalProposalMutationOptions,
   saveAutoApproveMutationOptions,
@@ -40,9 +41,9 @@ function operationLabel(proposal: LearningProposal): string {
     case "add":
       return "New skill";
     case "update":
-      return `Update to ${proposal.title}`;
+      return `Update to ${skillTitle(proposal.title, proposal.description)}`;
     case "remove":
-      return `Remove ${proposal.title}`;
+      return `Remove ${skillTitle(proposal.title, proposal.description)}`;
   }
 }
 
@@ -282,7 +283,12 @@ export function LearningReview() {
                   {canReview && (
                     <ItemDescription>
                       {group.latestRun
-                        ? `Latest run ${RUN_STATUS[group.latestRun.status]}.`
+                        ? [
+                            `Latest run ${RUN_STATUS[group.latestRun.status]}.`,
+                            group.latestRun.failure,
+                          ]
+                            .filter(Boolean)
+                            .join(" ")
                         : "No run yet."}
                     </ItemDescription>
                   )}
@@ -322,7 +328,9 @@ export function LearningReview() {
                       <IconSparkles />
                     </ItemMedia>
                     <ItemContent>
-                      <ItemTitle>{proposal.title}</ItemTitle>
+                      <ItemTitle>
+                        {skillTitle(proposal.title, proposal.description)}
+                      </ItemTitle>
                       <ItemDescription>{proposal.description}</ItemDescription>
                     </ItemContent>
                     <ItemActions>

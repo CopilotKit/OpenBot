@@ -196,11 +196,22 @@ let microphone = fakeMicrophone();
  */
 let documentGeneration = 0;
 let documentPorts: chrome.runtime.Port[] = [];
+/** How long the document's outbox takes to store an event: a loaded machine's IndexedDB, when a test sets it. */
+let storeDelayMs = 0;
 function runDocument(): void {
   const generation = documentGeneration;
   fake.runAs("offscreen-document", () =>
     createOffscreenController({
-      openOutbox: () => openOutbox(databaseName),
+      openOutbox: async () => {
+        const outbox = await openOutbox(databaseName);
+        return {
+          ...outbox,
+          put: async (item, stepKey) => {
+            if (storeDelayMs > 0) await sleep(storeDelayMs);
+            return outbox.put(item, stepKey);
+          },
+        };
+      },
       connectPort: () => {
         if (generation !== documentGeneration)
           throw new Error("This document was closed.");
@@ -332,6 +343,7 @@ beforeEach(async () => {
   databaseName = `launcher-${Date.now()}-${databaseCounter++}`;
   due = [];
   documentTimers = [];
+  storeDelayMs = 0;
   // The last test's document is gone with its browser.
   documentGeneration += 1;
   documentPorts = [];
@@ -569,71 +581,89 @@ test("disconnect forgets the connection OpenBot revoked at once and reports sign
   expect(openbotAsked.slice(asked)).toEqual([]);
 });
 
-test("a recording disconnect finds running stops as a sign-out stops one, kept for its person, and goes to OpenBot's back end once the browser is connected again", async () => {
-  await launcher().connect({ connection: connection(), narration: "external" });
-  const click = rows.archiveClick;
-  const trajectoryId = await record(
-    click.timestamp - 7_000,
-    "Archive order 1043",
-  );
-  const port = contentPort();
-  clock = click.timestamp;
-  port.postMessage({ type: "content.event", event: click });
-  await settle();
-  expect((await launcher().state()).actions).toBe(1);
-
-  liveTokens.delete(TOKEN);
-  clock = click.timestamp + 1_000;
-  expect(await launcher().disconnect()).toEqual({ ok: true });
-  expect(await launcher().state()).toMatchObject({
-    connected: false,
-    phase: "idle",
-    actions: 0,
-  });
-  expect(fake.badge.text).toBe("");
-  // Kept, waiting for its person to connect this browser again, as a recording a sign-out stopped is.
-  expect(fake.storage.local.get("drains")).toMatchObject([
-    {
-      trajectoryIds: [trajectoryId],
-      userId: ada.id,
-      kept: { waitingForReconnect: true },
-    },
-  ]);
-  expect(names(trajectoryId)).not.toContain("click");
-
-  // Record after Disconnect: OpenBot connects the browser again first, and the kept recording goes, its outcome saying
-  // the browser was signed out.
-  const NEXT = "obr_openbot-browser-token-next";
-  liveTokens.add(NEXT);
-  expect(
+/*
+ * With a slow store as well: on a loaded runner the document took longer to store the signed-out outcome than the
+ * service worker took to mark the drain waiting and close the document. Closed mid-store, the outcome was lost, and the
+ * reconnect's recover ended the recording as interrupted, or, with the closed document still writing beside the new
+ * one, never sent it at all. The service worker now waits for the document to say it stored the outcome.
+ */
+test.each([
+  ["", 0],
+  [", even when the document is slow to store the outcome", 30],
+])(
+  "a recording disconnect finds running stops as a sign-out stops one, kept for its person, and goes to OpenBot's back end once the browser is connected again%s",
+  async (_, delayMs) => {
     await launcher().connect({
-      connection: connection({ token: NEXT, connectionId: `c-${NEXT}` }),
+      connection: connection(),
       narration: "external",
-    }),
-  ).toEqual({ ok: true });
-  await until(
-    () => names(trajectoryId).filter((name) => name === "outcome").length === 2,
-    "the kept recording in Intelligence",
-  );
-  expect(names(trajectoryId)).toEqual([
-    "recording.started",
-    "outcome",
-    "navigation",
-    "click",
-    "outcome",
-  ]);
-  expect(sent(trajectoryId).at(-1)?.value).toMatchObject({
-    workflow: "Archive order 1043",
-    phase: "failed",
-    reason: "signed-out",
-  });
-  await until(
-    () =>
-      ((fake.storage.local.get("drains") as unknown[] | undefined) ?? [])
-        .length === 0,
-    "the kept recording sent",
-  );
-}, 15_000);
+    });
+    const click = rows.archiveClick;
+    const trajectoryId = await record(
+      click.timestamp - 7_000,
+      "Archive order 1043",
+    );
+    const port = contentPort();
+    clock = click.timestamp;
+    port.postMessage({ type: "content.event", event: click });
+    await settle();
+    expect((await launcher().state()).actions).toBe(1);
+
+    liveTokens.delete(TOKEN);
+    clock = click.timestamp + 1_000;
+    storeDelayMs = delayMs;
+    expect(await launcher().disconnect()).toEqual({ ok: true });
+    expect(await launcher().state()).toMatchObject({
+      connected: false,
+      phase: "idle",
+      actions: 0,
+    });
+    expect(fake.badge.text).toBe("");
+    // Kept, waiting for its person to connect this browser again, as a recording a sign-out stopped is.
+    expect(fake.storage.local.get("drains")).toMatchObject([
+      {
+        trajectoryIds: [trajectoryId],
+        userId: ada.id,
+        kept: { waitingForReconnect: true },
+      },
+    ]);
+    expect(names(trajectoryId)).not.toContain("click");
+
+    // Record after Disconnect: OpenBot connects the browser again first, and the kept recording goes, its outcome saying
+    // the browser was signed out.
+    const NEXT = "obr_openbot-browser-token-next";
+    liveTokens.add(NEXT);
+    expect(
+      await launcher().connect({
+        connection: connection({ token: NEXT, connectionId: `c-${NEXT}` }),
+        narration: "external",
+      }),
+    ).toEqual({ ok: true });
+    await until(
+      () =>
+        names(trajectoryId).filter((name) => name === "outcome").length === 2,
+      "the kept recording in Intelligence",
+    );
+    expect(names(trajectoryId)).toEqual([
+      "recording.started",
+      "outcome",
+      "navigation",
+      "click",
+      "outcome",
+    ]);
+    expect(sent(trajectoryId).at(-1)?.value).toMatchObject({
+      workflow: "Archive order 1043",
+      phase: "failed",
+      reason: "signed-out",
+    });
+    await until(
+      () =>
+        ((fake.storage.local.get("drains") as unknown[] | undefined) ?? [])
+          .length === 0,
+      "the kept recording sent",
+    );
+  },
+  15_000,
+);
 
 test("an OpenBot browser shows no setup tab and no Connect page: none on a later launch, and the first launch's are closed", async () => {
   // OpenBot Desktop's native host answers in this profile too, and hands over a code its OpenBot takes.

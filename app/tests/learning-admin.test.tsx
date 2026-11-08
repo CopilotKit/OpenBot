@@ -566,7 +566,7 @@ describe("reviewing proposed skills", () => {
   test("an admin approves a sharing request", async () => {
     const posts = intelligence();
     const view = shared();
-    const row = await view.findByRole("button", { name: /quote-follow-up/ });
+    const row = await view.findByRole("button", { name: /Quote follow up/ });
     expect(row.textContent).toContain("Dana Reyes");
     fireEvent.click(row);
     await view.findByText("Ask whether the quote still fits.");
@@ -581,7 +581,7 @@ describe("reviewing proposed skills", () => {
     });
     await waitFor(() =>
       expect(
-        view.queryByRole("button", { name: /quote-follow-up/ }),
+        view.queryByRole("button", { name: /Quote follow up/ }),
       ).toBeNull(),
     );
   });
@@ -599,7 +599,7 @@ describe("reviewing proposed skills", () => {
     );
     const view = shared();
     fireEvent.click(
-      await view.findByRole("button", { name: /quote-follow-up/ }),
+      await view.findByRole("button", { name: /Quote follow up/ }),
     );
     await view.findByText("Ask whether the quote still fits.");
     fireEvent.click(view.getByRole("button", { name: "Decline" }));
@@ -642,7 +642,7 @@ describe("reviewing proposed skills", () => {
     });
     const view = shared();
     fireEvent.click(
-      await view.findByRole("button", { name: /quote-follow-up/ }),
+      await view.findByRole("button", { name: /Quote follow up/ }),
     );
     await view.findByText("Ask whether the quote still fits.");
     fireEvent.click(view.getByRole("button", { name: "Approve sharing" }));
@@ -670,7 +670,7 @@ describe("reviewing proposed skills", () => {
     expect(posts.length).toBe(2);
     await waitFor(() =>
       expect(
-        view.queryByRole("button", { name: /quote-follow-up/ }),
+        view.queryByRole("button", { name: /Quote follow up/ }),
       ).toBeNull(),
     );
   });
@@ -691,7 +691,7 @@ describe("reviewing proposed skills", () => {
     );
     const view = shared();
     fireEvent.click(
-      await view.findByRole("button", { name: /quote-follow-up/ }),
+      await view.findByRole("button", { name: /Quote follow up/ }),
     );
     const approve = await view.findByRole("button", {
       name: "Approve sharing",
@@ -726,7 +726,7 @@ describe("reviewing proposed skills", () => {
     );
     const view = shared();
     fireEvent.click(
-      await view.findByRole("button", { name: /quote-follow-up/ }),
+      await view.findByRole("button", { name: /Quote follow up/ }),
     );
     await view.findByText("Couldn't read this skill.");
     expect(
@@ -893,7 +893,7 @@ describe("reviewing proposed skills", () => {
   test("Refresh status also reads proposed skills, analysis runs and published skills again", async () => {
     const posts = intelligence();
     const view = shared();
-    await view.findByRole("button", { name: /invoice-lookup/ });
+    await view.findByRole("button", { name: /Invoice lookup/ });
     const count = (path: string) =>
       posts.gets.filter((get) => get === path).length;
     const before = [
@@ -1116,7 +1116,7 @@ describe("reviewing proposed skills", () => {
     const view = shared();
     await view.findByText("Published skills");
     fireEvent.click(
-      await view.findByRole("button", { name: /invoice-lookup/ }),
+      await view.findByRole("button", { name: /Invoice lookup/ }),
     );
     await view.findByText("Search billing for the invoice number.");
   });
@@ -1183,6 +1183,20 @@ describe("reviewing proposed skills", () => {
     expect(anchors.some((a) => a.getAttribute("href") === runsLink)).toBe(
       false,
     );
+  });
+
+  test("a sign-in Learning can't use is said on the page, before anyone presses Learn now", async () => {
+    const said =
+      "Learning can't run on the model you signed in with. To use it, sign OpenBot in with an OpenAI or Anthropic API key, or a Claude or ChatGPT plan.";
+    intelligence({ ...noDashboard, modelProblem: said });
+    const view = shared();
+    expect((await view.findByText(said)).getAttribute("role")).toBe("alert");
+    cleanup();
+    queryClient.clear();
+    intelligence();
+    const fine = shared();
+    await fine.findByText("OpenBot (openbot)");
+    expect(fine.queryByText(said)).toBeNull();
   });
 
   test("with no dashboard there is no link into one, and with one the links stay", async () => {

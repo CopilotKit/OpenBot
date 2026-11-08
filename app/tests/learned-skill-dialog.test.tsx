@@ -90,7 +90,7 @@ test("the personal source fetches the skill and renders its SKILL.md", async () 
   await view.findByText("Open the order, then refund it.");
   expect(asked).toEqual(["/api/settings/learning/skills/refund-order"]);
   expect(view.getByText("Refunds an order.")).toBeTruthy();
-  expect(view.getByText("refund-order")).toBeTruthy();
+  expect(view.getByText("Refund order")).toBeTruthy();
 });
 
 test("a 404 shows the server's message", async () => {
