@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.3.3
+
 **Before upgrading.** Five migrations add columns: `0078_routine_title` adds a nullable
 `routines.title`, `0079_tool_unclassified` adds `mcp_tools.unclassified`, false on every existing
 row, `0080_listing_revision` adds `mcp_servers.listing_revision`, 0 on every existing row,
