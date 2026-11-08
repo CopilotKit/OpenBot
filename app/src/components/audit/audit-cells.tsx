@@ -7,7 +7,7 @@ import {
   dataWords,
 } from "@openbot/shared/audit-words";
 import { isOpenBotActor } from "@openbot/shared/openbot-actor";
-import { connectorName, humanise } from "@openbot/shared/tool-name";
+import { connectorName, humanise, inFolder } from "@openbot/shared/tool-name";
 import { Fragment, type ReactNode } from "react";
 import { type AuditOutcome, outcomeOf } from "@/lib/audit/outcome";
 import { silenceOf } from "@/lib/audit/silence";
@@ -328,8 +328,19 @@ export function subjectText(event: AuditEvent, storedNames = true): string {
       ? `${event.targetId} · ${functions.join(", ")}`
       : event.targetId;
   }
-  if (typeof payload.file === "string") return payload.file;
-  if (typeof payload.command === "string") return payload.command;
+  /*
+   * A step on a folder on the person's computer names the file and the folder it is in, as its card
+   * and its line in the conversation do ("todo.txt in share"). Rows written before they named the
+   * folder name the file alone.
+   */
+  const folder =
+    typeof payload.folder === "string" && payload.folder
+      ? payload.folder
+      : undefined;
+  if (typeof payload.file === "string")
+    return inFolder(payload.file, folder) ?? payload.file;
+  if (typeof payload.command === "string")
+    return inFolder(payload.command, folder) ?? payload.command;
   const folders = foldersOf(payload);
   if (folders) return folders;
   if (typeof element === "object" && element?.name)
