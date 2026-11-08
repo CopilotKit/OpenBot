@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- In OpenBot Personal every Bot takes part in Automatic Learning, including Bots made later. A Bot
+  that settings carried over from a team deployment left out is taken back in at the next start (or
+  its first run), with one audit row naming the Bots. Every Bot still gets every skill once, and a
+  skill switched off for one Bot stays off. The team edition is unchanged.
+
 ## 0.3.3
 
 **Before upgrading.** Five migrations add columns: `0078_routine_title` adds a nullable
