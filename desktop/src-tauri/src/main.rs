@@ -4534,8 +4534,25 @@ fn is_owned_app_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri
 }
 
 /**
+The page's Notification API, which the notification plugin's script stands in for in this window:
+whether notifications are on, turning them on, and showing one. Nothing else of the plugin's.
+
+MEASURED: the window's own Notification API cannot be granted. In a WKWebView set up as wry sets it
+up, `Notification.requestPermission()` answers "denied" at once with no prompt, and the next launch
+reads "default" again, so the page's offer to turn them on came back after every yes. The plugin
+shows them through the system instead, and answers that they are allowed: a desktop app needs no
+permission of its own to post one (tauri-plugin-notification, `desktop.rs`).
+*/
+const APP_PAGE_NOTIFICATIONS: [&str; 3] = [
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "notification:allow-notify",
+];
+
+/**
 Lets OpenBot's own page move and zoom the window from its drag handle, set the window's appearance
-to its own theme, and use Settings → This computer (`desktop_page`), and nothing more.
+to its own theme, use Settings → This computer (`desktop_page`), and show a Bot's notifications
+(`APP_PAGE_NOTIFICATIONS`), and nothing more.
 
 Only the origin this shell verified as its own OpenBot (`trust_owned_app`). A page on any other
 loopback port, which a link in a reply can open in this window, gets none of it: Settings → This
@@ -4558,8 +4575,11 @@ fn allow_app_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url
             .window("main")
             .permission("core:window:allow-start-dragging")
             .permission("core:window:allow-internal-toggle-maximize");
-    for permission in desktop_page::PERMISSIONS {
-        capability = capability.permission(permission);
+    for permission in desktop_page::PERMISSIONS
+        .iter()
+        .chain(&APP_PAGE_NOTIFICATIONS)
+    {
+        capability = capability.permission(*permission);
     }
     match app.add_capability(capability) {
         Ok(()) => granted.push(origin),
@@ -4586,6 +4606,7 @@ mod app_page_tests {
                 .build();
         let app = tauri::test::mock_builder()
             .plugin(stand_in)
+            .plugin(tauri_plugin_notification::init())
             .plugin(intelligence_bridge::plugin())
             .manage(Shell::default())
             .build(tauri::generate_context!(test = true))
@@ -4729,6 +4750,51 @@ mod app_page_tests {
                 .unwrap_or_else(|| home.join(".local").join("share"));
             assert_eq!(folder, data.join(&identifier).join("logs"));
         }
+    }
+
+    /// OpenBot's own page turns notifications on and shows them through the notification plugin,
+    /// whose script stands in for the page's Notification API. It answers that they are on, as the
+    /// plugin does on every desktop, so the page's offer to turn them on does not come back. A page
+    /// on another port gets none of it: it could post notices in OpenBot's name.
+    #[test]
+    fn only_the_owned_app_origin_can_turn_on_and_show_notifications() {
+        let (app, window) = app();
+        let foreign: tauri::Url = "http://127.0.0.1:3011/".parse().unwrap();
+        let owned: tauri::Url = "http://127.0.0.1:3010/channel/c-1".parse().unwrap();
+        allow_app_page(app.handle(), &foreign);
+        trust_owned_app(app.handle(), "http://127.0.0.1:3010");
+        allow_app_page(app.handle(), &owned);
+        for command in ["is_permission_granted", "request_permission", "notify"] {
+            let command = format!("plugin:notification|{command}");
+            let refused = ask(&window, foreign.as_str(), &command).unwrap_err();
+            assert!(
+                refused.to_string().contains("not allowed"),
+                "{command} from another page: {refused}"
+            );
+        }
+        assert_eq!(
+            ask(
+                &window,
+                owned.as_str(),
+                "plugin:notification|is_permission_granted"
+            ),
+            Ok(serde_json::json!(true))
+        );
+        assert_eq!(
+            ask(
+                &window,
+                owned.as_str(),
+                "plugin:notification|request_permission"
+            ),
+            Ok(serde_json::json!("granted"))
+        );
+        // Showing one is the page's to ask. Asked with no notice, so the command is reached (it
+        // refuses the arguments, not the page) and a test run posts nothing to the system.
+        let reached = ask(&window, owned.as_str(), "plugin:notification|notify").unwrap_err();
+        assert!(
+            !reached.to_string().contains("not allowed") && reached.to_string().contains("options"),
+            "{reached}"
+        );
     }
 
     /// Narration listens through the shell's speech recognition from OpenBot's own page, and from
@@ -7505,6 +7571,7 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(intelligence_bridge::plugin())
         .plugin(desktop_page::plugin())
         .plugin(outside_links_guard())
