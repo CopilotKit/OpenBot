@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { currentUserQueryOptions, needsOnboarding } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
-import { BUSINESS_CALL_URL } from "@/lib/openbot-for-business";
+import { BUSINESS_URL } from "@/lib/openbot-for-business";
 import {
   advanceOnboardingMutationOptions,
   completeOnboardingMutationOptions,
@@ -156,7 +156,7 @@ const selfhost: OnboardingStep = {
   // A new tab, so booking doesn't cost the place in onboarding, and then on to the next step.
   primaryLabel: "Book a call",
   onPrimary: (next) => {
-    window.open(BUSINESS_CALL_URL, "_blank", "noopener,noreferrer");
+    window.open(BUSINESS_URL, "_blank", "noopener,noreferrer");
     next();
   },
   secondary: { label: "Not now" },

@@ -105,9 +105,7 @@ test("offers self-hosting with a link to book an OpenBot for Business call", () 
     view.getByText("Self-host OpenBot for your organization."),
   ).toBeTruthy();
   const link = view.getByRole("link", { name: "Book a call" });
-  expect(link.getAttribute("href")).toBe(
-    "https://calendly.com/d/dwfr-k64-8d2/openbot-for-business",
-  );
+  expect(link.getAttribute("href")).toBe("https://open.bot/business");
   expect(link.getAttribute("target")).toBe("_blank");
   expect(link.getAttribute("rel")).toBe("noopener noreferrer");
 });

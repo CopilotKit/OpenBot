@@ -6,7 +6,7 @@ import {
   dismissSelfHostBannerMutationOptions,
   useUserPreferences,
 } from "@/lib/settings/message-list";
-import { BUSINESS_CALL_URL } from "@/lib/openbot-for-business";
+import { BUSINESS_URL } from "@/lib/openbot-for-business";
 import { cn } from "@/lib/utils";
 
 /**
@@ -51,7 +51,7 @@ export function SelfHostBanner() {
             buttonVariants({ size: "sm", variant: "link" }),
             "px-0 text-foreground underline",
           )}
-          href={BUSINESS_CALL_URL}
+          href={BUSINESS_URL}
           rel="noopener noreferrer"
           target="_blank"
         >

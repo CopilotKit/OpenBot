@@ -479,7 +479,7 @@ test("personal Bot creation hides team visibility and isolation controls and lin
         name: "Give each Bot its own computer with OpenBot for Business.",
       })
       .getAttribute("href"),
-  ).toBe("https://calendly.com/d/dwfr-k64-8d2/openbot-for-business");
+  ).toBe("https://open.bot/business");
   const user = userEvent.setup({ document: view.baseElement.ownerDocument });
   const name = view.getByLabelText("Name");
   await user.type(name, "Personal Research");

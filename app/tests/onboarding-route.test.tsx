@@ -30,9 +30,8 @@ import type { RouterContext } from "@/router-context";
 import { Route as OnboardingRoute } from "@/routes/_authed/onboarding";
 import { settleReactWork } from "./settle-react-work";
 
-/** Book a call opens the OpenBot for Business booking page, never CopilotKit's generic one. */
-const OPENBOT_FOR_BUSINESS_CALL =
-  "https://calendly.com/d/dwfr-k64-8d2/openbot-for-business";
+/** Book a call opens the OpenBot for Business page, with its booking calendar, never CopilotKit's generic one. */
+const OPENBOT_FOR_BUSINESS = "https://open.bot/business";
 
 /**
  * Where somebody is in onboarding lives in the address: `?step=<id>`. A reload stays on the step,
@@ -612,7 +611,7 @@ test("somebody trying OpenBot alone gets Talk to us before the name, and Book a 
 
     fireEvent.click(view.getByRole("button", { name: "Book a call" }));
     expect(opened).toEqual([
-      [OPENBOT_FOR_BUSINESS_CALL, "_blank", "noopener,noreferrer"],
+      [OPENBOT_FOR_BUSINESS, "_blank", "noopener,noreferrer"],
     ]);
     expect(await heading(view, "What should we call you?")).toBeTruthy();
     expect(completed).toBe(false);
@@ -765,7 +764,7 @@ test("somebody trying OpenBot alone whose name is known books a call in a new ta
     fireEvent.click(await ready(view, "Book a call"));
 
     expect(opened).toEqual([
-      [OPENBOT_FOR_BUSINESS_CALL, "_blank", "noopener,noreferrer"],
+      [OPENBOT_FOR_BUSINESS, "_blank", "noopener,noreferrer"],
     ]);
     await waitFor(() => expect(completed).toBe(true));
     await waitFor(() => expect(view.getByText("Home")).toBeTruthy(), {

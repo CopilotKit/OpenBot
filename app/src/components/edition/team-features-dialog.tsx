@@ -26,7 +26,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { NavigationItem } from "@/lib/navigation";
-import { BUSINESS_CALL_URL } from "@/lib/openbot-for-business";
+import { BUSINESS_URL } from "@/lib/openbot-for-business";
 import { cn } from "@/lib/utils";
 
 /**
@@ -143,7 +143,7 @@ export function TeamFeaturesDialog() {
             {/* An anchor, not Button: Base UI gives a rendered anchor role="button", and this is a link. */}
             <a
               className={cn(buttonVariants(), "mt-2 w-full")}
-              href={BUSINESS_CALL_URL}
+              href={BUSINESS_URL}
               rel="noopener noreferrer"
               target="_blank"
             >
@@ -227,7 +227,7 @@ export function BusinessComputerLink() {
   return (
     <a
       className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
-      href={BUSINESS_CALL_URL}
+      href={BUSINESS_URL}
       rel="noopener noreferrer"
       target="_blank"
     >
