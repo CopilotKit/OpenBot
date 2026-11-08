@@ -245,6 +245,7 @@ import {
   ensureAlwaysOnApp,
   ensurePersonalLearning,
   ensurePersonalSkills,
+  ensurePersonalSkillsOwned,
   personalDefaultAppsMemory,
   personalDefaultsDeps,
   startPersonalDefaultApps,
@@ -1218,6 +1219,18 @@ await ensurePersonalSkills(pluginStore, personalDefaultsDeps(database)).catch(
   (error: unknown) => {
     console.warn(
       `Couldn't give every Bot its skills at startup; each Bot gets them the first time it runs. ${error instanceof Error ? error.message : String(error)}`,
+    );
+  },
+);
+/*
+ * The personal edition's skills the person wrote on Settings > Skills before the route gave them an
+ * owner become theirs, so a Bot's "Your skills" lists them. A failure is a warning, and the next
+ * start tries again. Does nothing in the team edition.
+ */
+await ensurePersonalSkillsOwned(database, DEV_ACTOR, bootAuditStore).catch(
+  (error: unknown) => {
+    console.warn(
+      `Couldn't mark the skills you wrote as yours at startup; the next start tries again. ${error instanceof Error ? error.message : String(error)}`,
     );
   },
 );

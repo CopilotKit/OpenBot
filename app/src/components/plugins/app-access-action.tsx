@@ -13,7 +13,11 @@ import {
   giveBotAppMutationOptions,
   requestAppAccessMutationOptions,
 } from "@/lib/app-access/mutations";
-import { type AppAccess, appAccessKeys } from "@/lib/app-access/queries";
+import {
+  type AppAccess,
+  appAccessKeys,
+  botAppQueryOptions,
+} from "@/lib/app-access/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
@@ -377,7 +381,7 @@ function OwnerGiveAction({
       ) : null}
       <Button
         aria-label={
-          give.isPending || waiting
+          give.isPending || waiting || tab.pending
             ? undefined
             : `Let ${bot} use ${name}${access.needsConnect ? " after you connect it" : ""}`
         }
@@ -398,9 +402,11 @@ function OwnerGiveAction({
           ? "Allowing…"
           : waiting
             ? `Waiting for ${name}…`
-            : access.needsConnect
-              ? "Connect and allow"
-              : "Allow"}
+            : tab.pending
+              ? "Opening sign-in…"
+              : access.needsConnect
+                ? "Connect and allow"
+                : "Allow"}
       </Button>
     </div>
   );
@@ -437,6 +443,30 @@ function PersonalConnectAction({
   }, [waiting]);
 
   const turnOn = () => approve.mutateAsync({ agentId, app: access.key });
+
+  /*
+   * TURNED ON IS NOT DONE WHEN IT TURNS OUT TO SIGN IN. An app nobody has turned on may not say how
+   * it connects yet (its directory listing was not available), so the press reads the app again
+   * once it is on, and starts the sign-in itself if one is what is left. This press used to stop at
+   * on, and the card swapped to a second Connect the person had to find and press.
+   */
+  const turnOnThenSignIn = async () => {
+    await turnOn();
+    const now = await queryClient.fetchQuery({
+      ...botAppQueryOptions(agentId, access.key),
+      staleTime: 0,
+    });
+    if (
+      now.state === "not_connected" &&
+      (now.connect === "oauth" || now.connect === "consent")
+    ) {
+      tab.stopWaiting();
+      tab.open(now.key);
+      return;
+    }
+    // Nothing to sign in to: on is ready, and every query is read again for the next turn.
+    await queryClient.invalidateQueries();
+  };
 
   if (access.connect === "key" || tab.needsKey)
     return (
@@ -477,7 +507,7 @@ function PersonalConnectAction({
       ) : null}
       <Button
         aria-label={
-          waiting || approve.isPending
+          waiting || approve.isPending || tab.pending
             ? undefined
             : `${signsIn ? "Connect" : "Turn on"} ${name}`
         }
@@ -489,8 +519,8 @@ function PersonalConnectAction({
             tab.open(access.key, turnOn);
             return;
           }
-          // Nothing to sign in to: on is ready, and every query is read again for the next turn.
-          void turnOn().then(() => queryClient.invalidateQueries());
+          // A refusal is drawn from `approve.error`; a failed read leaves the card's own state.
+          turnOnThenSignIn().catch(() => queryClient.invalidateQueries());
         }}
         size="sm"
       >
@@ -498,9 +528,11 @@ function PersonalConnectAction({
           ? `Waiting for ${name}…`
           : approve.isPending
             ? "Turning on…"
-            : signsIn
-              ? "Connect"
-              : "Turn on"}
+            : tab.pending
+              ? "Opening sign-in…"
+              : signsIn
+                ? "Connect"
+                : "Turn on"}
       </Button>
     </div>
   );
@@ -588,8 +620,10 @@ function ConnectAction({
         </p>
       ) : null}
       <Button
-        // Named for the app while it is idle; while waiting, the visible words already name it.
-        aria-label={waiting ? undefined : `${label} ${access.displayName}`}
+        // Named for the app while it is idle; otherwise the visible words say what is happening.
+        aria-label={
+          waiting || tab.pending ? undefined : `${label} ${access.displayName}`
+        }
         disabled={tab.pending}
         onClick={() => {
           stopWaiting();
@@ -598,7 +632,11 @@ function ConnectAction({
         size="sm"
         variant="outline"
       >
-        {waiting ? `Waiting for ${access.displayName}…` : label}
+        {waiting
+          ? `Waiting for ${access.displayName}…`
+          : tab.pending
+            ? "Opening sign-in…"
+            : label}
       </Button>
     </div>
   );

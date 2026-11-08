@@ -105,17 +105,36 @@ ARG S6_OVERLAY_VERSION=3.2.1.0
 # to be translated. Hardcoding one of them builds fine on the other and then fails at start with an
 # exec format error, which reads as a broken image rather than a wrong download.
 ARG TARGETARCH
-ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz /tmp/
-RUN case "${TARGETARCH}" in \
-      amd64) S6_ARCH=x86_64 ;; \
-      arm64) S6_ARCH=aarch64 ;; \
+# A GITHUB 504 MUST NOT FAIL THE BUILD. This was `ADD <url>`, and BuildKit works out an ADD's cache key
+# by requesting the URL on every build, cache or no cache, retrying only a 429 or a 503. When
+# github.com's release downloads answered 504 the build died with "failed to load cache key: invalid
+# response status 504" before any cache was read. A RUN's cache key is its own text, so once this
+# layer is in the cache the download is not attempted at all. When it does run, curl retries the
+# 5xx, and if github.com's download page stays down the same file comes through the REST API's
+# release-asset endpoint, which is served separately. Either way the bytes are checked against the
+# checksums s6 publishes with the release (`<name>.sha256`), so a bump changes the version, the
+# three checksums and the three asset ids together.
+ARG S6_OVERLAY_NOARCH_SHA256=42e038a9a00fc0fef70bf0bc42f625a9c14f8ecdfe77d4ad93281edf717e10c5
+ARG S6_OVERLAY_X86_64_SHA256=8bcbc2cada58426f976b159dcc4e06cbb1454d5f39252b3bb0c778ccf71c9435
+ARG S6_OVERLAY_AARCH64_SHA256=c8fd6b1f0380d399422fc986a1e6799f6a287e2cfa24813ad0b6a4fb4fa755cc
+RUN set -eu; \
+    case "${TARGETARCH}" in \
+      amd64) S6_ARCH=x86_64; S6_ARCH_SHA256="${S6_OVERLAY_X86_64_SHA256}"; S6_ARCH_ASSET=252547925 ;; \
+      arm64) S6_ARCH=aarch64; S6_ARCH_SHA256="${S6_OVERLAY_AARCH64_SHA256}"; S6_ARCH_ASSET=252547981 ;; \
       *) echo "unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac \
-  && curl -fsSL -o /tmp/s6-overlay-arch.tar.xz \
-    "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-${S6_ARCH}.tar.xz" \
-  && tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz \
-  && tar -C / -Jxpf /tmp/s6-overlay-arch.tar.xz \
-  && rm /tmp/s6-overlay-*.tar.xz
+    esac; \
+    fetch() { \
+      curl -fsSL --retry 5 --retry-all-errors -o "/tmp/$1" \
+        "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/$1" \
+      || curl -fsSL --retry 5 --retry-all-errors -H 'Accept: application/octet-stream' -o "/tmp/$1" \
+        "https://api.github.com/repos/just-containers/s6-overlay/releases/assets/$2"; \
+      echo "$3  /tmp/$1" | sha256sum -c -; \
+    }; \
+    fetch s6-overlay-noarch.tar.xz 252547954 "${S6_OVERLAY_NOARCH_SHA256}"; \
+    fetch "s6-overlay-${S6_ARCH}.tar.xz" "${S6_ARCH_ASSET}" "${S6_ARCH_SHA256}"; \
+    tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz; \
+    tar -C / -Jxpf "/tmp/s6-overlay-${S6_ARCH}.tar.xz"; \
+    rm /tmp/s6-overlay-*.tar.xz
 
 # WHAT THE X SERVER EXPECTS TO FIND, made by root. A Bot's computer starts Xvfb as `pwuser` (s6 drops
 # to it; a chart computer pod is 1001 from the start, `computers.podSecurityContext`). Xvfb wants

@@ -621,7 +621,7 @@ jobs:
           load: true
           tags: openbot:ci
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
       # Building it says the layers resolve. Running it says the supervision tree comes up and stays
       # up, which is a different claim and the one that has broken before.
       - name: The image boots and serves
