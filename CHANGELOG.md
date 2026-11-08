@@ -12,8 +12,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 `routines.title`, `0079_tool_unclassified` adds `mcp_tools.unclassified`, false on every existing
 row, `0080_listing_revision` adds `mcp_servers.listing_revision`, 0 on every existing row, and
 `0081_goal_recurring` adds `responsibilities.recurring`, false on every existing row. The database
-moves to `0081_goal_recurring`. Seven things change for an existing
-deployment:
+moves to `0081_goal_recurring`. Eight things change for an existing deployment:
 - A goal's tools are named for goals. `create_responsibility`, `list_responsibilities`,
   `update_responsibility`, `report_responsibility_progress`, `run_responsibility`,
   `pause_responsibility`, `resume_responsibility` and `complete_responsibility` are now
@@ -27,18 +26,27 @@ deployment:
 - An app tool whose action is archive, and any app tool its app marks destructive, asks with
   **Allow once** or **Deny** every time, whatever your settings (below). This starts at once, with
   nothing to refresh.
-- At the first start, every app of your broker (Arcade or Composio) is listed again once, so an
-  action its app says nothing about is recorded as a fresh install records it: an ordinary change
-  (below). Nobody has to press anything. Actions the broker flags destructive, and delete or archive
-  names, still ask every time. If the broker can't be reached, an app's actions ask as before until
-  it answers, and OpenBot keeps trying.
+- At the first start, every app of your broker (Arcade or Composio) is listed again once, as
+  **Refresh tools** does, so an action its app says nothing about is recorded as a fresh install
+  records it: an ordinary change (below). Nobody has to press anything, and the start doesn't wait
+  for it. Actions the broker flags destructive, and delete or archive names, still ask every time.
+  If the broker can't be reached, an app keeps its actions, which ask as before, and OpenBot keeps
+  trying every few minutes and at the next start.
+- Existing goals keep their state, but a goal that one of its Bot's routines runs, or that an event
+  wakes, now counts as repeating, so its runs no longer complete it (below). A goal a run already
+  completed stays completed, and its routine now says so each time it fires.
 - The audit trail records a person's denial as the action's own refusal (`computer.action_refused`
   or `mcp.call_rejected`), and an approved computer action as one `computer.action_allowed`, where
-  it wrote up to three. Counts taken from the export or a log collector change. Rows recorded before
-  the upgrade keep their old shape.
+  it wrote up to three. A Bot's actions in folders on OpenBot Desktop are `computer.action_*` events
+  (actions `host/read_file`, `host/write_file` and so on), where each was two
+  `configuration.changed` rows. OpenBot giving a Bot an app's tools is one `configuration.changed`
+  row per Bot and app, where each tool had one. Counts taken from the export or a log collector
+  change. Rows recorded before the upgrade keep their old shape.
 - A Bot you run at your own address that hands `ask_person` or `message_bot` back to OpenBot
   unanswered now has OpenBot carry it out: the person is asked, or the message is delivered. A Bot
-  that calls OpenBot's tools itself is unchanged.
+  that calls OpenBot's tools itself is unchanged. Any Bot at its own address is never sent more than
+  128 tools in one request, whatever its provider takes: the app tools least like the request are
+  left out.
 - An existing personal edition keeps its Bots. On OpenBot Desktop the Personal Assistant and the
   Bot picked in setup stay two Bots, and the Personal Assistant is no longer rewritten from the
   package at each Start. The picked Bot's subtitle says "Powered by" and its framework where it
@@ -63,11 +71,13 @@ deployment:
   tasks and memory still never call one on their own. On an app's page for a Bot, such an Arcade
   action no longer says "destroys things". An app listed before this release is listed again at the
   first start (above).
-- **Settings → Approvals says what always asks**, above its switches: deleting, sending, sharing and
-  posting in your apps and on websites, and every edit or command in a folder on your own computer.
-  A Bot's own computer is its scratch space, so what it does there asks only when your settings or
-  rules say so. The page said every delete asked first, though a Bot deleting a file in its own
-  workspace never did. Onboarding and what Bots are told say the same.
+- **Settings → Approvals says what always asks**, above its switches: payments, passwords and
+  security settings are handed to you, deleting, sending, sharing and posting in your apps and on
+  websites ask first, and so do edits and commands in a folder on your own computer. A Bot's own
+  computer is its scratch space, so what it does there asks only when your settings or rules say
+  so. The page said every delete asked first, though a Bot deleting a file on its own computer
+  asked only when your settings did. Onboarding says the same about your apps and a Bot's own
+  computer, and Bots are told it.
 
 ### Goals and routines
 
@@ -80,12 +90,12 @@ deployment:
   responsibility complete". The tools are renamed (above), `create_trigger` sends you to the goal's
   card on the Bot's Goals page, and a goal's steps in a conversation read "Created a goal",
   "Checked goals", "Marked a goal complete" and so on, also in conversations from before.
-- **A goal that repeats stays active after its runs.** A goal a routine runs, an event wakes, or a
-  Bot sets up as recurring ("every morning") is no longer completed by one of its runs: each run
-  records its result, and only you end the goal. Its first run could complete it, and the Bot then
-  made a second goal. A routine that runs a goal you ended now tells you it is complete, where
-  `run_goal` ran nothing and said nothing. A Bot changing one thing about a goal no longer clears
-  the events that wake it.
+- **A goal that repeats stays active after its runs.** A goal a Bot sets up to repeat ("every
+  morning"), one a routine runs and one an event wakes are no longer completed by one of their
+  runs. Each run records its result, and only you end the goal, in a conversation or on its card.
+  Its first run could complete it, which left the routine nothing to run. A routine that runs a goal
+  you completed or paused now says so, where it ran nothing and said nothing. Editing a goal, on its
+  card or by asking a Bot, no longer clears the events that wake it.
 - **A goal's run waits for a busy conversation.** A run that starts while its conversation is in
   use, such as **Run now** while the Bot is still answering there, waits and then runs. After about
   9 minutes it gives up with "This goal's conversation was busy for about 9 minutes, so the run
@@ -95,17 +105,14 @@ deployment:
   demand on its Activity page, where it was counted and listed as scheduled. A goal a trigger wakes
   says so ("Wakes on webhook"), where it said "Runs when asked".
 - **A goal a routine runs is listed with it.** On a Bot's Activity page it sits under Scheduled and
-  says when it runs ("Every day at 08:00 (UTC), from its routine"), where it was under On demand as
-  "Runs when asked". A goal's run is named "Run of" its goal, where it carried the goal's own name
-  and read as a second goal that had finished.
+  says when it runs ("Every day at 08:00 (UTC), from its routine"), where it read "Runs when asked".
+  Each of its runs is named "Run of" and the goal's title, where it carried the goal's own title.
 - **A routine can have a title.** A Bot asked to name a routine ("call it Morning briefing") gives
   it that title, up to 100 characters, where it said it couldn't. The title heads the routine's row
-  on the Routines page, with its schedule under it, and names it in a Bot's Activity. Bots are told
-  a routine's id is for their tools only, and not to read it out.
-- **A routine a Bot makes to run one of your goals carries the goal's title**, such as "Track
-  OpenBot releases", on the Routines page and in a Bot's Activity, where it was named by the
-  instruction the Bot wrote for it ("Run the existing goal ... and report its result in this
-  conversation."). A title you give it is kept.
+  on the Routines page, with its schedule under it, and names it in a Bot's Activity. A new routine
+  a Bot makes to run one of your goals carries the goal's title unless you named it, where it went
+  by the instruction the Bot wrote for it. Bots are told a routine's id is for their tools only, and
+  not to read it out.
 - **Bots tell you a routine's next run on your clock**: a Bot that creates, changes or lists a
   routine is told "Saturday, November 7, 2026 at 9:00 AM UTC, 6 minutes from now", where it was told
   "2026-11-07T09:00:00.000Z", so it no longer says a run due in minutes is tomorrow.
@@ -118,8 +125,8 @@ deployment:
   of Routines and Google Drive (where it is added) up to date with the release it runs, so a tool a
   release renames, rewords or adds reaches an existing installation without anybody pressing
   **Refresh tools**. A start where nothing changed writes nothing, and which Bots have an app, and
-  which apps are on, stay as they were. Apps from MCP servers, Composio and Arcade are not refreshed
-  at start.
+  which apps are on, stay as they were. Apps from MCP servers are not refreshed at start, and
+  Composio and Arcade apps only once, at the first start after this upgrade (above).
 
 ### Questions reach you, and answers show as they happen
 
@@ -154,9 +161,10 @@ deployment:
   and your message was missing when the conversation was opened again.
 - **A step Claude Code refuses before it runs**, such as a table sent with broken data, no longer
   ends the turn in silence. The Bot goes on to retry or answer in words.
-- **They answer once when the reply's connection to Claude breaks partway.** Claude Code recovers
-  by itself, and the Bot used to answer a second time under its first reply, or leave a cut-off
-  fragment above it, or lose the answer and keep only the fragment.
+- **They answer once when their stream from Claude breaks partway** and Claude Code recovers. The
+  Bot used to answer a second time under its first reply, show the same reply twice, leave a
+  cut-off fragment above the answer, or lose the answer and keep only the fragment. A fragment can
+  still show while the answer arrives, and is gone when the turn ends.
 
 ### Activity and Audit
 
@@ -167,23 +175,36 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
   Allowed. The person's answer reads "Denied by a person", "Allowed once by a person" and so on.
 - **One row per action.** A computer action that failed or was stopped shows once, as "Did not
   happen", and Computer actions lists blocked, failed and stopped actions as well as allowed ones.
-- **A Bot's actions in folders on your computer read as computer actions**: "Read a file todo.txt", "Run a command dir", and a write you denied as "Save a file todo.txt, Blocked", listed under Computer actions and Blocked. Each read "Change a setting", twice per action, and a denied write was missing from Blocked. Older rows read in the same words.
-- **Activity leaves out choosing tools for a run** ("Choose tools for a run, 96 of 96 tools"), which was written on every turn and is OpenBot's own working. Admin's Audit still lists it. **Giving a Bot a folder** on Settings → Computer reads "Give a Bot a folder" with the folder and the Bot, and taking it away or stopping folder access reads in words too, where each read "Change a setting" with no Bot. Older rows show the Bot when they recorded one.
-- **Activity leaves out more of OpenBot's own working**: which Bot a message went to ("Choose a Bot for a message, fallback: one-candidate"), the components a build publishes, and the computer's two start-up rows. Admin's Audit still lists them. What stays says things in words: a component by its gallery name ("Activity report") with why it was refused, a skill by its name, a saved key by its provider and key ID, and OpenBot setting up Learning, where they showed ids, a policy rule or "Change a setting".
-- **The Activity report works in the personal edition.** A Bot asked for one drew "Not shown: Activity report", saying an admin had to give it the data, and the personal edition has no admin. OpenBot now gives the report what it reads, on the first page load after an upgrade too, and the card names each Bot and says what was refused in words. One try writes one row: a refused report wrote three.
-- **The Activity report counts what Activity shows.** In the personal edition a Bot's figure is the number of rows Settings → Activity lists for it: no choosing tools, routing, component publishes or start-up rows, and each action once. It read "45" beside a page listing 23. The team edition counts as before.
-- **Rows say what they were about in words**, such as "Choose tools for a run" and "Save a file",
-  where they showed "mcp.tools_discovered" and "write_file". Admin shows the stored name on hover,
-  and the export keeps it.
+- **A Bot's folder actions on your computer are computer actions.** Reading, saving or running
+  something in a folder reads "Read a file", "Save a file" or "Run a command", with the file or
+  command under it, and is listed under Computer actions. One you denied reads Blocked and is
+  listed under Blocked. Giving a Bot a folder reads "Give a Bot a folder" with the folder and the
+  Bot, and taking it away or stopping folder access reads "Take a folder from a Bot" or "Stop folder
+  access".
+- **Activity leaves out OpenBot's own working**: choosing tools for a run ("Choose tools for a
+  run", "96 of 96 tools"), written on every turn; which Bot a message went to ("Choose a Bot for a
+  message"); the components a build publishes; and the two "Start the computer" rows at every
+  start. They are gone from every view of Activity and from its export. Admin's Audit still lists
+  them.
+- **Rows say what they were about in words**, such as "Save a file" and "Set up Learning", where
+  they showed "write_file" and "Change a setting". Admin shows the stored name on hover, and the
+  export keeps it. In Activity, what a row acted on is in words too: a tool call's app ("Gmail"), a
+  component by its gallery name ("Activity report") with why it was refused, a skill by its name,
+  and a saved key by its provider and key ID, where they showed stored names and ids.
 - **Bots are named, never shown by id**, here and on the Computers page. A Bot hidden from the
   sidebar is named, a deleted Bot reads "A Bot no longer here", and hovering a Bot no longer shows
   its id. The export keeps the ids.
 - **The table fits a 1000-pixel window**, OpenBot Desktop's default: what an action acted on sits
   under it, and who started it under the Bot, so Decision shows without scrolling sideways.
 - **The personal edition's page is titled Activity**, as its sidebar entry is, where it was titled
-  Audit and spoke of "this deployment's policy". A row OpenBot started reads "Started by OpenBot",
-  where it read "Started by this deployment". Admin keeps Audit.
-- **What OpenBot does by itself reads "Started by OpenBot"**, one row per Bot naming the tools and the app in words: every Bot given Routines' new goal tools at an upgrade's first start, and a build's new components. It read "Change a setting" over each tool's internal name, one row per tool, started by a person. A tool call shows the app's name under it, where it showed the tool's internal name.
+  Audit and spoke of "this deployment's policy". Admin keeps Audit.
+- **What OpenBot does by itself is started by OpenBot**: giving every Bot Routines' tools at a
+  start, such as the new goal tools at this upgrade's first start, giving every Bot an app's tools
+  in the personal edition, turning on Routines, and publishing a build's new components (Admin
+  only). These read as started by a person. Activity reads "Started by OpenBot" for them, and for
+  every other row OpenBot started, where it read "Started by this deployment", which Admin keeps.
+  Giving a Bot an app's tools is one row per Bot, "Give a Bot tools", with the tools and the app in
+  words, where each tool had its own "Change a setting" row.
 - **A Bot's Activity page links to "Every action this Bot took"**, which opens this page narrowed
   to that Bot until you clear the filter. The link shows in the personal edition, and for admins.
   The page also says it lists the Bot's tasks, routines and goals.
@@ -193,10 +214,12 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
 - **A new installation starts with one Bot**, the Personal Assistant, running on the framework
   picked in setup. It started with the Personal Assistant and a second Bot named after the
   framework. Its subtitle says what runs it ("Everyday life. Powered by LangChain (LangGraph)."),
-  and its name, subtitle and instructions can be changed on its Setup page. After a change of AI
-  provider it moves to the new framework, even after you rename it, and the "Powered by" part of its
-  subtitle names the new one, keeping any words you wrote around it. Its Setup page says "OpenBot
-  runs this Bot, so it can use its tools without a key." A personal edition started with
+  and under its name it says what it does ("Help with email, your calendar, research, planning and
+  everyday errands."). Its Setup page changes its name, its subtitle, what it does and its
+  Instructions, each on a row of its own. After a change of AI provider it moves to the new
+  framework, even after you rename it, and the "Powered by" part of its subtitle names the new one,
+  keeping any words you wrote around it. Its Setup page says "OpenBot runs this Bot, so it can use
+  its tools without a key." A personal edition started with
   `scripts/start.sh` starts with the Personal Assistant subtitled "Everyday life. Powered by
   OpenBot.", which can be changed the same way.
 - **Bots can read folders on your computer.** Press **Choose folder** on a Bot's row under Folders
@@ -245,9 +268,6 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
 
 ### Personal edition
 
-- **+ starts a new conversation with your Bot picked**: the default Bot in the personal edition,
-  and the only Bot wherever there is just one. Enter used to ask you to choose a Bot first, even when
-  there was only one. With several Bots in the team edition, To: still starts empty and asks.
 - **Sign out is gone where nobody signs in**: every personal edition, OpenBot Desktop included,
   and any deployment with `OPENBOT_SINGLE_USER`. Pressing it said "No identity provider is
   configured." and left you where you were.
@@ -260,15 +280,13 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
 - **A Bot names the app card's real button**: Turn on (then Connect, if the card offers it),
   Connect, Set up for an app that takes a key, or Set it up. It always said to press Connect, which
   the card doesn't show for an app that has to be turned on first.
-- **The Personal Assistant says what it does under its name**: "Help with email, your calendar,
-  research, planning and everyday errands." Its conversations and its page showed the instructions
-  written for the model ("You are a personal assistant for one person..."). Those are now their own
-  Instructions row on its Setup page. An existing one is put right at the next start and keeps the
-  instructions it runs on, edits included.
-- **Turning off an app you added from Composio's or Arcade's directory takes you back to
-  Connections**, where you can add it again from the directory. Its page said "Not an app. There is
-  no app with that name." An app Connections always lists, such as Notion, still stays on its page,
-  off, with Connect.
+- **The Activity report works.** A Bot asked for one drew "Not shown: Activity report", saying an
+  admin had to give it the data, and the personal edition has no admin. OpenBot now gives the report
+  what it reads when the app loads, including the first load after the upgrade, and a refusal says
+  "It can't read the data it needs." Its figure for each Bot is the number of rows Settings →
+  Activity lists for that Bot. In both editions the report names each Bot and says what was refused
+  in words, where it showed ids, and one request writes one row, where a refused one wrote up to
+  three.
 
 ### The Bot's browser
 
@@ -285,10 +303,23 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
 
 ### Smaller changes
 
-- Asked which AI model it runs on, a Bot names the one the composer's model picker shows, such as "GPT-6.1 Terra", and the new one after you pick another, where it said it couldn't see its model's name.
-- Asked which framework it runs on, a Bot names what actually runs it, whatever its subtitle says: OpenBot, the framework picked in OpenBot Desktop's setup, or the one you picked in **New Bot** for an agent you run. It said it didn't know.
-- On a Claude or ChatGPT plan, Auto-review and the choice of which Bot an untagged message goes to now run on the plan. Auto-review asked about every action instead, and every such message went to your default Bot. Auto-review still asks you when the plan errors or does not answer in time.
-- A Bot on a framework (the starter Bot in OpenBot Desktop) is never sent more than 128 tools in one request, counting the ones your browser adds, so with an OpenAI key it answers where every message failed with "array too long ... maximum length 128". OpenBot's own tools come first, then the app tools closest to what you asked. On a Claude or ChatGPT plan, OpenBot now chooses which tools a message needs on the plan itself; it could not choose before and offered every tool.
+- Asked which AI model it runs on, a Bot whose model you pick in the composer names the one the
+  model picker shows, such as "GPT-6.1 Terra", and the new one after you pick another, where it said
+  it couldn't see its model's name.
+- Asked which framework it runs on, a Bot names what runs it, whatever its subtitle says: OpenBot
+  for a Bot that runs in OpenBot, the framework picked in OpenBot Desktop's setup, or the framework
+  picked from **New Bot**'s list, where it said it didn't know. An agent you already run is told
+  none.
+- On a Claude or ChatGPT plan, Auto-review and the choice of which Bot an untagged message goes to
+  run on the plan. Auto-review asked you about every change it should have judged, and such a
+  message went to your default Bot unless it named an app only one Bot has. Auto-review still asks
+  you when the plan errors, gives no clear answer or does not answer in time.
+- A Bot that runs at another address, on a framework such as OpenBot Desktop's starter Bot or one
+  you run yourself, is never sent more than 128 tools in one request, counting the ones your browser
+  adds. With an OpenAI key the starter Bot now answers, where every message failed with "Error code:
+  400 - Invalid 'tools': array too long". OpenBot's own tools, Routines and web search come first,
+  then the app tools closest to what you asked. On a Claude or ChatGPT plan, choosing which tools a
+  message needs now runs on the plan, where it failed and every tool was offered.
 - The sidebar shows the OpenBot release the server runs, such as "v0.3.3", in small grey type under
   your name at the bottom left. In OpenDots it is under your name in the account menu and the phone
   drawer. Nothing shows when the server has no version, as in development.
@@ -311,8 +342,8 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
 - When the model provider refuses a turn, the conversation says so in words, names the provider and
   says what to do, such as "OpenAI didn't accept the API key. Check that it's set, correct and still
   active, then try again." It showed the provider's error, such as "Error code: 400 - Invalid
-  'tools': array too long", which now goes to the log. A Claude Agent SDK Bot's refusal no longer
-  reads as its answer.
+  'tools': array too long", which now goes to the server log. A Claude Agent SDK Bot's refusal no
+  longer reads as its answer.
 - A Bot's step that asked for a tool the Bot doesn't have reads "didn't work" and opens to "This Bot
   asked for a tool it doesn't have, so it carried on without it." It opened to the error written for
   the model, listing every tool the Bot has by its raw name.
@@ -327,23 +358,26 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
   tone's own name, such as "positive".
 - With reduced motion turned on in the operating system, a step a Bot is still running shows its
   words, in the same muted tone as a finished step. It showed only its ▸, or nothing.
-- Pressing + for a new conversation opens the To: picker with the caret in it every time, where a
-  second press left it closed. You can write the message before choosing a Bot. Enter or Send with
-  nobody in To: keeps the message, opens To: and says "Choose a Bot first."
+- Pressing + starts a new conversation with your Bot picked, the default Bot in the personal
+  edition and the only Bot wherever there is just one, where To: started empty and you had to pick
+  it. With several Bots in the team edition, + opens the To: picker with the caret in it every time,
+  where a second press left it closed. You can write the message before choosing a Bot, and Enter or
+  Send with nobody in To: keeps the message, opens To: and says "Choose a Bot first."
 - A renamed Bot's conversations go by its new name in the sidebar, the conversation header and the
   lists you pick a conversation from, including conversations started before the rename. They kept
   the name the Bot had when each began.
 - The sign-in dialog that **Open private sign-in** opens no longer leaves large empty gaps above
   "Use a saved login" and "Enter your login". Its fields sit just below the sentence that
   introduces them, in the dialog and on the sign-in page.
-- Settings → Components gallery says what each component shows, such as "Shows what your Bots
-  have been doing and what was refused, read from OpenBot's own records." It showed the text
-  written for the model ("Show what this deployment has actually been doing..."). In the personal
-  edition its intro says every Bot can use all of them, where it said an admin controls them.
-- Folder access on your computer speaks to you: "Allow folder access?" no longer shows "Requested
-  by: dev-local-user", "Allow this command?" no longer shows "Working folder: /workspace",
-  Settings → Computer says OpenBot Desktop is asking you in a window, and a file change you deny
-  reads "Blocked: Save a file todo.txt", where it read "Blocked: Saved a file".
+- Settings → Components gallery, and each component's page, say what it shows, such as "Shows what
+  your Bots have been doing and what was refused, read from OpenBot's own records." They showed the
+  text written for the model ("Show what this deployment has actually been doing..."). In the
+  personal edition the intro says every Bot can use all of them, where it said an admin controls
+  them.
+- Turning off an app you added from Composio's or Arcade's directory, or by its address, takes you
+  back to Connections (Admin → Plugins for an admin), where you can add it again. Its page said "Not
+  an app. There is no app with that name." An app always listed there, such as Notion, still stays
+  on its page, off.
 
 ## 0.3.2
 
