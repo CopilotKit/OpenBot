@@ -28,12 +28,14 @@ import {
 import { Sections } from "./Sections";
 import { StartFresh } from "./StartFresh";
 import {
+  engineNow,
   handOffNow,
   INSTALL_BLURB,
   type Progress,
   plainInstallSteps,
   SetupProgress,
   StatusLine,
+  trayPlace,
 } from "./SetupProgress";
 import { ShuttingDown, useQuitStatus } from "./ShuttingDown";
 import {
@@ -921,8 +923,9 @@ function Setup() {
         )
     : undefined;
   const updatingLine = updating && <StatusLine>{updating.detail}</StatusLine>;
-  // Docker Desktop opened before the back end starts, as after a restart: said under the rows.
-  const handOff = handOffNow(steps);
+  // Docker Desktop opened, or the engine machine started, before the back end starts, as after a
+  // restart: said under the rows.
+  const handOff = engineNow(steps);
 
   if (!running && returningToInstallation && !refreshIntelligence) {
     return (
@@ -1052,14 +1055,17 @@ function Setup() {
         {!displayedFailure && !releaseNotice && !backEndNotice && (
           <p className="lede">
             OpenBot is open in this window. You can also show it or stop it from
-            the menu bar.
+            its icon in {trayPlace()}.
           </p>
         )}
         {/* Start went back to the version this installation had. Said before handing over. */}
         {!displayedFailure && releaseNotice && (
           <InlineFailure problem={releaseNotice} />
         )}
-        <SetupProgress steps={steps} />
+        {/* The start's rows only when something failed, to show where. Once OpenBot runs they are
+          all done, and they flashed for the moment before it opened with the native side's own
+          words ("settings written, credentials stored"). */}
+        {displayedFailure && <SetupProgress steps={steps} />}
         {displayedFailure && <Failure problem={displayedFailure} />}
         {stopping && <StatusLine>Stopping OpenBot…</StatusLine>}
         {showing && <StatusLine>Loading OpenBot…</StatusLine>}
