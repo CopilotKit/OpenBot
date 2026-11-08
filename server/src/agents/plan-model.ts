@@ -77,12 +77,34 @@ const UNKNOWN_USAGE: GenerateResult["usage"] = {
   outputTokens: { total: undefined, text: undefined, reasoning: undefined },
 };
 
+/**
+ * The conversation as the plan's harness is sent it.
+ *
+ * A user message that is only words goes as one string, the shape a browser sends every Bot. Sent
+ * as parts, the Claude harness put each part in a block of its own, and Claude Code reads the last
+ * block it is sent as what was typed at its own prompt: a message that started with the command
+ * the `/` menu puts there ("/tide-report lighthouses") was taken for a slash command of Claude
+ * Code's, answered "Unknown command: /tide-report", and never reached the model. A message with an
+ * image still goes as parts, and the harness closes such a replay itself (`conversation_content`
+ * in agent-claude-sdk/src/replay.py).
+ */
 export function planMessages(prompt: Options["prompt"]): Message[] {
   const messages: Message[] = [];
   for (const [index, message] of prompt.entries()) {
     const id = `prompt-${index}`;
     if (message.role === "system") {
       messages.push({ id, role: "system", content: message.content });
+    } else if (
+      message.role === "user" &&
+      message.content.every((part) => part.type === "text")
+    ) {
+      messages.push({
+        id,
+        role: "user",
+        content: message.content
+          .map((part) => (part.type === "text" ? part.text : ""))
+          .join("\n\n"),
+      });
     } else if (message.role === "user") {
       messages.push({
         id,

@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A skill picked from the `/` menu works for a built-in Bot on a Claude plan. The Bot answered
+  "Unknown command: /tide-report" without asking the model, because Claude Code took the message,
+  which starts with the skill's command, for a slash command of its own.
 - Settings, Computer lists the Teach a Bot browser as your OpenBot browser, with Clear browser data, not as "A Bot no longer here"; Admin, Computers names whose OpenBot browser each one is.
 - Onboarding's Welcome says what always asks (deleting, sending, sharing, posting) above the approvals switch, which is now "Always ask before making changes" there and in Settings, Approvals, with the same words in both.
 - A conversation shows the Bot is still working through a run of tool calls: the step still running
