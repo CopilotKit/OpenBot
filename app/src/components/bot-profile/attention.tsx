@@ -82,6 +82,22 @@ function notificationsAllowed() {
   }
 }
 
+/**
+ * A notification's options, with the page it is about. OpenBot Desktop opens that page when the
+ * notification is clicked (`open_from_notification` in desktop/src-tauri): there `Notification` is
+ * the notification plugin's, which hands `extra` on to the shell. A browser ignores it.
+ */
+function noticeOptions(
+  options: NotificationOptions,
+  path: string,
+): NotificationOptions {
+  const withPath: NotificationOptions & { extra: { path: string } } = {
+    ...options,
+    extra: { path },
+  };
+  return withPath;
+}
+
 /** A push body is cut here too, so the browser says what the phone says. */
 const PING_BODY_LIMIT = 200;
 /** How many items a ping's notice lists before it says how many more there are, as the phone does. */
@@ -158,10 +174,16 @@ function useAttentionNotifications(bots: BotAttention[] | undefined) {
       if (bot.notify === "none" || now <= (previous.get(bot.agentId) ?? 0))
         continue;
       try {
-        new Notification(`${bot.name} needs you`, {
-          body: attentionSummary(bot),
-          tag: `openbot-attention-${bot.agentId}`,
-        });
+        new Notification(
+          `${bot.name} needs you`,
+          noticeOptions(
+            {
+              body: attentionSummary(bot),
+              tag: `openbot-attention-${bot.agentId}`,
+            },
+            `/bots/${encodeURIComponent(bot.agentId)}`,
+          ),
+        );
       } catch {
         // A browser that refuses the constructor still has the badge.
       }
@@ -204,10 +226,14 @@ function usePingNotifications(
           names.current?.find((bot) => bot.agentId === agentId)?.name,
       );
       try {
-        new Notification(notice.title, {
-          body: notice.body,
-          tag: `openbot-ping-${lastPingId}`,
-        });
+        // Bots lists what the ping carried first, under Needs you.
+        new Notification(
+          notice.title,
+          noticeOptions(
+            { body: notice.body, tag: `openbot-ping-${lastPingId}` },
+            "/bots",
+          ),
+        );
       } catch {
         // A browser that refuses the constructor still has the badge and the list.
       }
