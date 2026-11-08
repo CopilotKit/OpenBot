@@ -50,6 +50,7 @@ import {
   type PluginTool,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
+import { toolsListError } from "@/lib/plugins/tools-error";
 import {
   botSharedAppsQueryOptions,
   type SharedUseApproval,
@@ -439,7 +440,10 @@ export function PluginBotPage({
 
       {server.tools.length === 0 ? (
         <PageEmpty icon={IconTool} title="No actions listed">
-          {server.lastError ?? "Refresh its tools to check again."}
+          {toolsListError(server.lastError, {
+            title: server.title,
+            personal: false,
+          }) ?? "Refresh its tools to check again."}
         </PageEmpty>
       ) : (
         <>

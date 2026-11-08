@@ -33,6 +33,8 @@ import {
 // The one place browsing and this check agree on: the addresses that hold the deployment's own
 // cloud credentials. `target.ts` imports nothing itself, so asking it here adds no dependency.
 import { isNeverAllowedHostname } from "../computer/target";
+// `edition.ts` imports only types, so asking it which edition is running adds no cycle.
+import { currentEdition } from "../edition";
 // Type-only, so naming the transport here creates no import cycle with the registry that resolves it.
 import type { CuratedTransportKind } from "./transport";
 
@@ -93,6 +95,12 @@ export type CatalogueEntry = {
   title: string;
   vendor: string;
   summary: string;
+  /**
+   * The summary the personal edition shows, where the summary above is written for a team ("of
+   * whoever is asking", "this deployment's key"). The personal edition has one person, so it says
+   * "your". Absent where the summary already reads right for one person. See {@link summaryFor}.
+   */
+  personalSummary?: string;
   /**
    * The one host this server lives on. Null for a vendor that gives every customer their own
    * hostname, where {@link CatalogueEntry.hostPattern} decides instead.
@@ -231,6 +239,8 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     vendor: "Parallel",
     summary:
       "Public-web search and extraction using this deployment's Parallel API key.",
+    personalSummary:
+      "Public-web search and extraction using your Parallel API key.",
     host: "https://search.parallel.ai",
     path: "/mcp",
     auth: { kind: "deployment-bearer" },
@@ -256,6 +266,8 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     vendor: "Exa",
     summary:
       "Public-web search and page reading using this deployment's Exa API key.",
+    personalSummary:
+      "Public-web search and page reading using your Exa API key.",
     host: "https://mcp.exa.ai",
     path: "/mcp",
     // Exa reads its key from `x-api-key`, not from `Authorization`.
@@ -283,6 +295,8 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     vendor: "Firecrawl",
     summary:
       "Public-web search and page scraping using this deployment's Firecrawl API key.",
+    personalSummary:
+      "Public-web search and page scraping using your Firecrawl API key.",
     host: "https://mcp.firecrawl.dev",
     path: "/v2/mcp",
     auth: { kind: "deployment-bearer" },
@@ -296,6 +310,7 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     title: "Google Drive",
     vendor: "Google",
     summary: "Files in the Drive of whoever is asking.",
+    personalSummary: "Files in your Drive.",
     /*
      * Google publishes one MCP server per Workspace product, each on its own host: Gmail, Docs,
      * Sheets, Slides, Calendar, Chat and People have their own. Drive is here because it is the one
@@ -369,6 +384,7 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     title: "Notion",
     vendor: "Notion",
     summary: "Pages and databases of whoever is asking.",
+    personalSummary: "Your pages and databases.",
     /*
      * The hosted MCP server Notion runs, on the default MCP transport — the first entry to use
      * it. Drive's REST adapter is a workaround for a preview-gated vendor; Notion's server is
@@ -476,6 +492,7 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     vendor: "OpenBot",
     summary:
       "Standing instructions a Bot runs on a schedule, as whoever scheduled them.",
+    personalSummary: "Standing instructions your Bots run on a schedule.",
     // First-party and in-process: no host to dial, no credential to hold. Always on, for every Bot.
     host: "builtin://routines",
     path: "/",
@@ -536,6 +553,17 @@ export function tokenHeaderFor(
 
 export function catalogueEntry(key: string): CatalogueEntry | null {
   return BY_KEY.get(key) ?? null;
+}
+
+/**
+ * The summary a person reads in this edition: the personal one where the entry has one and the
+ * personal edition is running, the team one everywhere else. For the browser only; nothing a model
+ * reads goes through here.
+ */
+export function summaryFor(entry: CatalogueEntry): string {
+  return currentEdition() === "personal"
+    ? (entry.personalSummary ?? entry.summary)
+    : entry.summary;
 }
 
 /**

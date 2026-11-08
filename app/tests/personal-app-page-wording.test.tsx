@@ -1,5 +1,9 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import {
+  CONNECT_APP_MARKER,
+  connectAppRefusal,
+} from "@openbot/shared/connect-prompt";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -307,4 +311,59 @@ test("the same OAuth page in team keeps its words", async () => {
   expect(text).toContain(
     "This vendor answers as whoever is asking. The deployment registers an OAuth client, and each person connects their own account. A Bot only sees what that person can see.",
   );
+});
+
+/*
+ * A refresh made before the person connected leaves the refusal a Bot gets as the app's last
+ * error, and that refusal opens with the marker the chat draws as a card. The page has no card to
+ * draw, and showed `[connect-app]{"serverId":"notion",...}` as text under "No tools listed".
+ */
+const notConnectedYet = connectAppRefusal({
+  serverId: "notion",
+  title: "Notion",
+  message:
+    "You have not connected your Notion account. Connect it and ask again.",
+});
+
+test("an app's empty tools in personal point to Connect, and never show the marker", async () => {
+  const text = await pageText(
+    draw({
+      edition: "personal",
+      server: { ...notion, lastError: notConnectedYet },
+      catalogue: [notionEntry],
+    }),
+  );
+  expect(text).toContain("No tools listed");
+  expect(text).toContain(
+    "Connect your Notion account above to list its tools.",
+  );
+  expect(text).not.toContain(CONNECT_APP_MARKER);
+  expect(text).not.toContain("serverId");
+  expect(text).not.toMatch(TEAM_WORDS);
+});
+
+test("an app's empty tools in team keep the refusal's sentence, without the marker", async () => {
+  const text = await pageText(
+    draw({
+      edition: "team",
+      server: { ...notion, lastError: notConnectedYet },
+      catalogue: [notionEntry],
+    }),
+  );
+  expect(text).toContain(
+    "You have not connected your Notion account. Connect it and ask again.",
+  );
+  expect(text).not.toContain(CONNECT_APP_MARKER);
+  expect(text).not.toContain("serverId");
+});
+
+test("any other last error is shown as the server wrote it", async () => {
+  const text = await pageText(
+    draw({
+      edition: "personal",
+      server: { ...notion, lastError: "Notion took too long to answer." },
+      catalogue: [notionEntry],
+    }),
+  );
+  expect(text).toContain("Notion took too long to answer.");
 });

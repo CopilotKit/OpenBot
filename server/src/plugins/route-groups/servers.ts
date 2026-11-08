@@ -2,7 +2,7 @@ import { requireAdmin } from "../../auth/guards";
 import { reasonWithoutStatement } from "../../db/query-failure";
 import { BROKERED_PROFILE } from "../access";
 import { brokerSentence, schemeKind } from "../broker";
-import { CATALOGUE } from "../catalogue";
+import { CATALOGUE, summaryFor } from "../catalogue";
 import { vendorSentence } from "../composio";
 import { redirectUriFor } from "../oauth";
 import { ALWAYS_ON_REFUSAL, isAlwaysOn } from "../personal-defaults";
@@ -37,7 +37,7 @@ export function mountServerRoutes({
         key: entry.key,
         title: entry.title,
         vendor: entry.vendor,
-        summary: entry.summary,
+        summary: summaryFor(entry),
         docsUrl: entry.docsUrl,
         /*
          * The kind, not the whole thing. The page needs to know what to ask an administrator for;
