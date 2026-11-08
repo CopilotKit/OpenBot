@@ -559,22 +559,42 @@ async function holdsBrowserConnection(
 }
 
 /**
- * Whether the Recorder in this browser holds the connection `connectionId` for `userId`, with the narration its window
- * wants: then it is kept rather than made again (`connectNow`). A Recorder from before it named its connection never
- * matches, and is connected again as before.
+ * Whether the Recorder in this browser holds the connection `connectionId` for `userId`, at `openbotUrl`, with the
+ * narration its window wants: then it is kept rather than made again (`connectNow`). A Recorder from before it named
+ * its connection, or the address it reaches OpenBot at, never matches, and is connected again as before.
  */
 function keeps(
   state: BrowserState,
   connectionId: string,
   userId: string,
+  openbotUrl: string,
 ): boolean {
   const recorder = state.recorder;
   return (
     recorder?.connected === true &&
     recorder.userId === userId &&
     recorder.connectionId === connectionId &&
+    reachesAt(recorder, openbotUrl) &&
     recorder.narration === narrationOf(state)
   );
+}
+
+/**
+ * Whether the Recorder reaches OpenBot at `openbotUrl`, the address OpenBot hands a browser now.
+ *
+ * WHY. The Recorder keeps the address it was handed with its connection, in its profile, and every capture pass goes
+ * there. OpenBot's own address can move under it: OpenBot Desktop gives the app another port when the one it had is
+ * held at Start (desktop/src-tauri/src/env.rs, `Ports::available`), and the computer then relays only the new one. A
+ * Recorder kept on the old port reached nothing, and every recording made in that browser stayed in it. Compared as
+ * origins, the form the Recorder stores (`normaliseOpenBotOrigin`).
+ */
+function reachesAt(recorder: LauncherState, openbotUrl: string): boolean {
+  if (recorder.openbotUrl === undefined) return false;
+  try {
+    return new URL(recorder.openbotUrl).origin === new URL(openbotUrl).origin;
+  } catch {
+    return false;
+  }
 }
 
 /** A Recorder's own report as the red dot reads it: what it is recording, and nothing of how it hears the person. */
@@ -1238,7 +1258,8 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
     if (held) {
       const kept = await openOn(base, computerId, {});
       if (!kept.ok) return kept;
-      if (kept.state && keeps(kept.state, held.id, actor.id)) return kept;
+      if (kept.state && keeps(kept.state, held.id, actor.id, openbotUrl))
+        return kept;
     }
 
     const minted = await deps.recorder.connections.mintCode(
@@ -1329,11 +1350,15 @@ export function createBrowserRoutes(deps: BrowserRouteDeps) {
       deps.recorder.connections,
       asker.actor.id,
     );
-    // A Recorder that has not answered yet is taken at OpenBot's word.
+    // A Recorder that has not answered yet is taken at OpenBot's word. One that reaches OpenBot at an address it has
+    // left (`reachesAt`) is connected again too, so the recording goes where OpenBot is now.
     const recorder = state.recorder;
+    const openbotUrl = deps.openbotUrl(asker.origin);
     const holdsIt =
       recorder === undefined ||
-      (recorder.connected && recorder.userId === asker.actor.id);
+      (recorder.connected &&
+        recorder.userId === asker.actor.id &&
+        (openbotUrl === null || reachesAt(recorder, openbotUrl)));
     if (standing && holdsIt) return null;
     const again = await connect(asker);
     return again.ok ? null : again.response;

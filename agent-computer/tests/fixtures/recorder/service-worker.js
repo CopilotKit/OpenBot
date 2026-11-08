@@ -67,6 +67,7 @@ function stateOf(now) {
       ? {
           userId: now.connection.user.id,
           connectionId: now.connection.connectionId,
+          openbotUrl: new URL(now.connection.openbotUrl).origin,
         }
       : {}),
     phase: now.recording ? "recording" : "idle",
