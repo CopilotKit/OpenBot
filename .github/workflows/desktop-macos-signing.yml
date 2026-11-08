@@ -198,10 +198,12 @@ jobs:
           fi
           echo 'Updater wiring is consistent across Cargo.toml, main.rs, the capability and both signing overlays.'
 
-  # One native runner per architecture, for the same reason `publish-release.yml` builds its images
-  # that way: the machines installing this are laptops of both kinds, and a cross build is a thing
-  # nobody has run. Each produces its own signed, notarized, stapled .app and .dmg, and, for a build
-  # that is not pinned, the updater archive.
+  # Both architectures on the Apple silicon runner, the Intel one built for `x86_64-apple-darwin` as
+  # Tauri documents (signed-build.ts names the target, and assembles the CLI and its Node runtime for
+  # it). The Intel runner took twice as long for the same build. Each produces its own signed,
+  # notarized, stapled .app and .dmg, and, for a build that is not pinned, the updater archive, and
+  # each is checked to be its own architecture all the way down (verify-mac-arch.sh), so an Intel
+  # app with an Apple silicon binary in it never ships.
   sign:
     name: Sign and notarize (${{ matrix.platform.target }})
     needs: checks
@@ -218,11 +220,18 @@ jobs:
           - runner: macos-15
             target: darwin-aarch64
             arch: arm64
-          - runner: macos-15-intel
+            rust-target: aarch64-apple-darwin
+            lipo-arch: arm64
+          - runner: macos-15
             target: darwin-x86_64
             arch: x64
+            rust-target: x86_64-apple-darwin
+            lipo-arch: x86_64
     env:
       SIGNING_SOURCE_SHA: ${{ github.sha }}
+      # Where Tauri leaves a build that names its Rust target, as signed-build.ts makes every Mac
+      # build do.
+      BUNDLE: desktop/src-tauri/target/${{ matrix.platform.rust-target }}/release/bundle
     steps:
       # The whole history: an internal build is numbered by its commit count (desktop-version.ts).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -307,9 +316,12 @@ jobs:
           no-cache: true
       # No caches in this job, Rust or Bun: it runs on release tags, and a signed, notarized build
       # must come from the tree and the lockfiles, not from anything an earlier run left behind.
+      # The standard library for the architecture this job builds, which on the Apple silicon
+      # runner is a second target for the Intel build.
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
+          targets: ${{ matrix.platform.rust-target }}
       - run: bun install --frozen-lockfile
         working-directory: desktop
       - run: bun run typecheck
@@ -356,7 +368,7 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
         run: |
           set -euo pipefail
-          images=(desktop/src-tauri/target/release/bundle/dmg/*.dmg)
+          images=("$BUNDLE"/dmg/*.dmg)
           test "${#images[@]}" -eq 1
           xcrun notarytool submit "${images[0]}" \
             --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
@@ -367,8 +379,8 @@ jobs:
       - name: Verify the signature, Gatekeeper and the notarization ticket
         run: |
           set -euo pipefail
-          app=desktop/src-tauri/target/release/bundle/macos/OpenBot.app
-          images=(desktop/src-tauri/target/release/bundle/dmg/*.dmg)
+          app="$BUNDLE/macos/OpenBot.app"
+          images=("$BUNDLE"/dmg/*.dmg)
 
           # What the RED case fails. An ad-hoc build passes none of these three.
           codesign --verify --deep --strict --verbose=2 "$app"
@@ -390,6 +402,22 @@ jobs:
 
           # The CLI is in the app, and every Mach-O in it is ours, hardened and timestamped.
           desktop/scripts/verify-cli-bundle.sh "$app" developer-id
+      # Every Mach-O in the app, the bundled Node and the CLI's native modules included, is built for
+      # this job's architecture, and the image holds that same app. The Intel build is made on an
+      # Apple silicon runner, so this is what proves it is an Intel app.
+      - name: Verify the app is built for its architecture
+        env:
+          LIPO_ARCH: ${{ matrix.platform.lipo-arch }}
+        run: |
+          set -euo pipefail
+          ROSETTA_CHECK=1 desktop/scripts/verify-mac-arch.sh "$BUNDLE/macos/OpenBot.app" "$LIPO_ARCH"
+          images=("$BUNDLE"/dmg/*.dmg)
+          mount="$RUNNER_TEMP/openbot-arch-check"
+          mkdir -p "$mount"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount" "${images[0]}"
+          trap 'hdiutil detach "$mount"' EXIT
+          desktop/scripts/verify-mac-arch.sh "$mount/OpenBot.app" "$LIPO_ARCH"
+          codesign --verify --deep --strict --verbose=2 "$mount/OpenBot.app"
       # Named by architecture because both runners produce `OpenBot.app.tar.gz`, and latest.json
       # points at one URL per platform. A pinned build made no updater archive.
       - name: Collect the artifacts
@@ -399,13 +427,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p signed
-          cp desktop/src-tauri/target/release/bundle/dmg/*.dmg signed/
+          cp "$BUNDLE"/dmg/*.dmg signed/
           if [ "$UPDATER" = true ]; then
-            cp "desktop/src-tauri/target/release/bundle/macos/OpenBot.app.tar.gz" \
-              "signed/OpenBot-$TARGET.app.tar.gz"
-            cp "desktop/src-tauri/target/release/bundle/macos/OpenBot.app.tar.gz.sig" \
-              "signed/OpenBot-$TARGET.app.tar.gz.sig"
-          elif [ -e desktop/src-tauri/target/release/bundle/macos/OpenBot.app.tar.gz ]; then
+            cp "$BUNDLE/macos/OpenBot.app.tar.gz" "signed/OpenBot-$TARGET.app.tar.gz"
+            cp "$BUNDLE/macos/OpenBot.app.tar.gz.sig" "signed/OpenBot-$TARGET.app.tar.gz.sig"
+          elif [ -e "$BUNDLE/macos/OpenBot.app.tar.gz" ]; then
             echo '::error::A build with no updater made an updater archive.'
             exit 1
           fi

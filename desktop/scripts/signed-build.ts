@@ -12,6 +12,10 @@
  *   no updater archive, so the updater key never signs one. The signing overlay is copied without
  *   its updater for that build.
  * - The Intelligence CLI is bundled whenever the tree can bundle one, as desktop-build.yml does.
+ * - A Mac build names its Rust target, so both architectures build on one Apple silicon runner:
+ *   `x86_64-apple-darwin` for Intel, `aarch64-apple-darwin` for Apple silicon. The bundle is then
+ *   under `src-tauri/target/<target>/release/bundle`. The CLI bundle and its Node runtime are
+ *   assembled for the same architecture.
  *
  * Usage, from anywhere, after desktop-version.ts has written desktop/build-version.json:
  *
@@ -40,6 +44,8 @@ export type Runner = (
 ) => { code: number; stdout: string; stderr: string };
 
 export type Plan = {
+  /** The Rust target triple Tauri builds for, or null to build for the runner's own. */
+  target: string | null;
   /** The release this build is pinned to, or null for an ordinary build. */
   pinned: string | null;
   /** Whether the build carries the updater and makes updater archives. */
@@ -61,6 +67,17 @@ const UPDATER_KEYS = [
 ];
 
 type Json = Record<string, unknown>;
+
+/**
+ * The Rust target a signed build names. Every Mac build names one, so the Intel app is built on the
+ * Apple silicon runner as Tauri documents (`--target x86_64-apple-darwin`), and both architectures
+ * leave their bundle in the same place, `target/<triple>/release/bundle`. Windows builds for the
+ * runner it is on, as before.
+ */
+export function rustTarget(platform: Platform, arch: Arch): string | null {
+  if (platform !== "darwin") return null;
+  return arch === "x64" ? "x86_64-apple-darwin" : "aarch64-apple-darwin";
+}
 
 function object(value: unknown): value is Json {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -113,6 +130,7 @@ export function planSignedBuild(options: {
   const record = readJson(recordPath);
   const version = String(record.version ?? "");
   const plan: Plan = {
+    target: rustTarget(platform, arch),
     pinned: null,
     updater: false,
     configs: [],
@@ -229,6 +247,7 @@ export function buildCommand(
     "tauri",
     "build",
     ...plan.configs.flatMap((config) => ["--config", config]),
+    ...(plan.target ? ["--target", plan.target] : []),
     ...extra,
     "--",
     "--locked",
@@ -285,6 +304,7 @@ function main(argv: string[]) {
       ? `Pinned to ${plan.pinned}, with no updater.`
       : `Not pinned. Updater: ${plan.updater}.`,
   );
+  if (plan.target) console.log(`Rust target: ${plan.target}.`);
   if (process.env.GITHUB_OUTPUT) {
     appendFileSync(
       process.env.GITHUB_OUTPUT,
