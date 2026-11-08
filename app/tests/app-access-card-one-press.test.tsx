@@ -1,4 +1,11 @@
-import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+} from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
@@ -44,14 +51,18 @@ type DesktopPage = Window & {
 
 const CONSENT = "https://backend.composio.dev/api/v3/s/abc123";
 
-/** How long a wait may take on a loaded CI runner, where the first render of a file is slow. */
-const SLOW_RUNNER = 10_000;
-
 let originalOpen: typeof window.open;
 beforeAll(() => {
   GlobalRegistrator.register({ url: "http://127.0.0.1:3010/channel/one" });
   originalOpen = window.open;
 });
+/*
+ * EMPTIED BEFORE EACH CASE, NOT ONLY AFTER. The app's one query client is a module, and `bun test`
+ * runs every file in one process, so it reaches this file holding whatever an earlier file left on
+ * it. A cached `/api/capabilities` answer never goes stale, and a team one drew the card as the team
+ * edition: an admin's "Turn on and give it", never Connect.
+ */
+beforeEach(() => queryClient.clear());
 const originalFetch = global.fetch;
 afterEach(() => {
   cleanup();
@@ -202,40 +213,23 @@ test.each([
     );
     const view = drawCard();
 
-    /*
-     * Until `/api/capabilities` answers, the card reads as the team edition and offers an admin's
-     * "Turn on and give it". A cold CI runner took longer than `findBy`'s one second to get the
-     * answer, so the card is given the time a slow first load takes.
-     */
-    const button = await view.findByRole(
-      "button",
-      { name: `${label} Gmail` },
-      { timeout: SLOW_RUNNER },
-    );
+    const button = await view.findByRole("button", {
+      name: `${label} Gmail`,
+    });
     fireEvent.click(button);
 
     // While the sign-in is being asked for, the button says so.
-    await view.findByRole(
-      "button",
-      { name: "Opening sign-in…" },
-      { timeout: SLOW_RUNNER },
-    );
+    await view.findByRole("button", { name: "Opening sign-in…" });
     answer();
-    await waitFor(() => expect(browser).toEqual([CONSENT]), {
-      timeout: SLOW_RUNNER,
-    });
+    await waitFor(() => expect(browser).toEqual([CONSENT]), { timeout: 3_000 });
     expect(writes).toEqual([
       "POST /api/plugins/for/assistant/apps/composio-gmail/approve",
       "POST /api/plugins/servers/composio-gmail/connect?returnTo=settings",
     ]);
     // And it says what it is doing while the person signs in.
-    await view.findByText("Finish in the tab that opened.", undefined, {
-      timeout: SLOW_RUNNER,
-    });
+    await view.findByText("Finish in the tab that opened.");
     expect(
       view.getByRole("button", { name: "Waiting for Gmail…" }),
     ).toBeTruthy();
   },
-  // Room for every wait above at its longest, past bun's five-second default.
-  4 * SLOW_RUNNER,
 );
