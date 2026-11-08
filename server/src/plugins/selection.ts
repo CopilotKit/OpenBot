@@ -40,6 +40,11 @@ export type SelectableSkill = {
   summary: string;
   /** What the skill says it needs, as `<serverId>/<toolName>` refs. A declaration, not a grant. */
   tools: readonly string[];
+  /**
+   * What the skill tells the Bot, as stored. Not read by narrowing; a run whose message picks the
+   * skill is given it (`picked-skill.ts`).
+   */
+  instructions?: string;
 };
 
 /** A granted tool, as much of it as narrowing needs. */
