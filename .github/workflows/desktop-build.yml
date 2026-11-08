@@ -142,6 +142,13 @@ jobs:
           manifest="$RUNNER_TEMP/pinned/container-images.json"
           test -f "$manifest"
           echo "path=$manifest" >> "$GITHUB_OUTPUT"
+      # Tauri downloads NSIS from GitHub the first time it bundles the installer, once, with no
+      # retry, and a 504 there fails the build. This puts the same pinned, checksummed files where
+      # Tauri looks, retrying and falling back to the REST API, so `tauri build` downloads nothing.
+      - name: Fetch the NSIS toolset
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: desktop/scripts/prefetch-nsis.sh
       # `tauri build`, not `cargo build --release`. tauri-build emits `cargo:rustc-cfg=dev`
       # for anything the Tauri CLI did not build, so a plain cargo release binary still points
       # at the dev server and shows "Could not connect to localhost" when it is run. That
