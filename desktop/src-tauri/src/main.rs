@@ -17,7 +17,8 @@ mod test_support;
 
 use openbot_desktop_lib::{
     acquire, app_update, deployment, deployment_release, docker_config, engine, env as openbot_env,
-    harness, host_access, install, local_eval, local_eval_state, logging, preparation,
+    harness, host_access, install, intelligence_download, local_eval, local_eval_state, logging,
+    preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
     telemetry, tray, upgrade, windows as win,
@@ -1510,18 +1511,26 @@ async fn prepare_installation_inner(
         let images = preparation::installation_pull_set(&address, &root, &root, harness.as_ref())?;
         // Several pulls run at once. Stop is checked before each pull starts; running pulls finish.
         let pacer = Mutex::new(pull_metrics::Pacer::default());
+        // How big the download is, from each image's registry, while the pulls start.
+        let sizes = {
+            let address = address.clone();
+            pull_metrics::size_images(&images, move |image| {
+                preparation::image_present(&address, image).unwrap_or(false)
+            })
+        };
         pull_metrics::pull_images_limited(
             &images,
             pull_metrics::IMAGE_PULLS_AT_ONCE,
-            |_, image, on_bytes| {
-                pull_metrics::pull_image(&address, image, on_bytes, |metrics| {
+            sizes,
+            |_, image, on_layer| {
+                pull_metrics::pull_image(&address, image, on_layer, |metrics| {
                     desktop_telemetry::pull_completed(&handle, metrics)
                 })
             },
             || attempt.require_current(),
             |downloads| {
-                // `done` counts FINISHED pulls; the bytes are the sum over every pull, running and
-                // finished. Paced to a few reports a second, which also measures the speed.
+                // `done` counts FINISHED pulls; the bytes and the size are over every image.
+                // Paced to a few reports a second, which also measures the speed.
                 let paced = pacer
                     .lock()
                     .unwrap()
@@ -5718,6 +5727,14 @@ fn cancel_model_oauth(attempt_id: String) {
     openbot_desktop_lib::provider_oauth::cancel(&attempt_id);
 }
 
+/// What the back end's update has downloaded, for the window's `run_local_eval` call `attempt`.
+#[derive(Clone, Serialize)]
+struct UpdateDownload {
+    attempt: String,
+    #[serde(flatten)]
+    transferred: intelligence_download::Transferred,
+}
+
 /// One Intelligence CLI call for the local evaluation. Returns only the normalized report or a
 /// static failure category; the CLI's own output never reaches the window. `attempt` names the
 /// call so `cancel_local_eval` can stop it, including before it has started.
@@ -5734,9 +5751,37 @@ async fn run_local_eval(
         let selected = shell.selected_root.lock().unwrap().clone();
         selected.unwrap_or_else(stack::default_root)
     };
+    let handle = app.clone();
     let mut report = tauri::async_runtime::spawn_blocking(move || {
         know_cli_engine(&root);
-        local_eval::run_installed(&attempt, action, &stack)
+        if action != local_eval::Action::Update {
+            return local_eval::run_installed(&attempt, action, &stack);
+        }
+        // The CLI says nothing while it updates: what it downloads is read from its cluster, for
+        // the back end's row. See `intelligence_download`.
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                intelligence_download::watch(
+                    stack.as_str(),
+                    local_eval::bundled_release(),
+                    local_eval::engine_command,
+                    &stop,
+                    |transferred| {
+                        let _ = handle.emit(
+                            "local-eval:download",
+                            UpdateDownload {
+                                attempt: attempt.clone(),
+                                transferred,
+                            },
+                        );
+                    },
+                )
+            });
+            let report = local_eval::run_installed(&attempt, action, &stack);
+            stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            report
+        })
     })
     .await
     .map_err(|_| local_eval::Failure::Spawn)??;

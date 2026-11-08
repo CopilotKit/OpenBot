@@ -1,6 +1,6 @@
 //! Metrics for an explicit image pull, before containers or provider sign-in start.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Command, Output, Stdio};
 use std::sync::mpsc::{sync_channel, SyncSender};
@@ -69,7 +69,7 @@ fn option_advertises(help: &[u8], flag: &str, value: &str) -> bool {
         .any(|word| word == value)
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Progress {
     id: String,
     parent_id: Option<String>,
@@ -78,23 +78,10 @@ struct Progress {
     total: Option<u64>,
 }
 
-/// One pull's download so far: the bytes counted, and the image's size once every layer still to
-/// download has said how big it is.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ImageBytes {
-    pub bytes: u64,
-    pub size: Option<u64>,
-}
-
+/// Each layer's highest download counter in one pull, for its telemetry.
 #[derive(Default)]
 struct DownloadBytes {
-    /// Each layer's highest download counter.
     current: HashMap<String, u64>,
-    /// Each layer's advertised size, from its download lines.
-    sizes: HashMap<String, u64>,
-    /// Layers this pull downloads, and those that finished downloading.
-    layers: HashSet<String>,
-    finished: HashSet<String>,
 }
 
 impl DownloadBytes {
@@ -102,29 +89,14 @@ impl DownloadBytes {
         if progress.id.is_empty() || progress.parent_id.as_deref().unwrap_or_default().is_empty() {
             return;
         }
-        match progress.text.as_str() {
-            // Already on this computer: nothing to download.
-            "Already exists" => {
-                self.layers.remove(&progress.id);
-                return;
+        if progress.text == "Downloading" {
+            if let Some(current) = progress.current {
+                self.current
+                    .entry(progress.id)
+                    .and_modify(|maximum| *maximum = (*maximum).max(current))
+                    .or_insert(current);
             }
-            "Download complete" | "Verifying Checksum" | "Extracting" | "Pull complete" => {
-                self.finished.insert(progress.id.clone());
-            }
-            "Downloading" => {
-                if let Some(current) = progress.current {
-                    self.current
-                        .entry(progress.id.clone())
-                        .and_modify(|maximum| *maximum = (*maximum).max(current))
-                        .or_insert(current);
-                }
-                if let Some(total) = progress.total.filter(|total| *total > 0) {
-                    self.sizes.insert(progress.id.clone(), total);
-                }
-            }
-            _ => {}
         }
-        self.layers.insert(progress.id);
     }
 
     fn total(&self) -> Option<u64> {
@@ -135,44 +107,205 @@ impl DownloadBytes {
             .values()
             .try_fold(0_u64, |sum, current| sum.checked_add(*current))
     }
+}
 
-    /// The size is the sum of the layers' sizes, known only when every layer that is still
-    /// downloading has advertised one. A layer that finished without ever saying is counted at
-    /// what was seen of it, so a tiny layer does not leave the size unknown for good.
-    fn size(&self) -> Option<u64> {
-        if self.layers.is_empty() {
+/// What a pull said about one of its layers, by the short id it names the layer with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LayerProgress {
+    pub id: String,
+    pub event: LayerEvent,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LayerEvent {
+    /// Downloading: the bytes so far and the layer's size, when the line carries them.
+    Downloading {
+        current: Option<u64>,
+        total: Option<u64>,
+    },
+    /// Downloaded. Docker with the containerd image store says only this for a small layer, with
+    /// no counters ever: "Download complete", `"details":"0B"`.
+    Finished,
+    /// Already on this computer: nothing to download.
+    Cached,
+}
+
+impl LayerProgress {
+    /// A layer's line from Compose's JSON progress, or None for anything else: the image's own
+    /// line, and extraction, whose counters are not download bytes.
+    fn of(progress: &Progress) -> Option<Self> {
+        if progress.id.is_empty() || progress.parent_id.as_deref().unwrap_or_default().is_empty() {
             return None;
         }
-        self.layers.iter().try_fold(0_u64, |sum, layer| {
-            let size = match self.sizes.get(layer) {
-                Some(size) => *size,
-                None if self.finished.contains(layer) => {
-                    self.current.get(layer).copied().unwrap_or(0)
-                }
-                None => return None,
-            };
-            sum.checked_add(size)
+        let event = match progress.text.as_str() {
+            "Already exists" => LayerEvent::Cached,
+            "Download complete" | "Verifying Checksum" | "Extracting" | "Pull complete" => {
+                LayerEvent::Finished
+            }
+            "Downloading" => LayerEvent::Downloading {
+                current: progress.current,
+                total: progress.total.filter(|total| *total > 0),
+            },
+            _ => return None,
+        };
+        Some(Self {
+            id: progress.id.clone(),
+            event,
         })
     }
+}
 
-    fn image_bytes(&self) -> ImageBytes {
-        ImageBytes {
-            bytes: self.total().unwrap_or(0),
-            size: self.size(),
+/// The layers an image will download, from its registry (`registry::image_layers`), sent to
+/// `pull_images_limited` while it pulls. `layers` is `None` when the registry could not say, and
+/// empty for an image already on this computer.
+pub struct ImageSize {
+    pub index: usize,
+    pub layers: Option<Vec<crate::registry::Layer>>,
+}
+
+/// What Install has downloaded, over every image, and how much it downloads in all.
+///
+/// The total is the size of every layer the images name in their registries, less each layer the
+/// engine says it already has. It is known only once every image's registry has answered: until
+/// then, and for good when one cannot be read, it is None, and the window says the size is not
+/// known. Counted by layer, so a layer two images share counts once, as the engine downloads it
+/// once.
+#[derive(Default)]
+pub struct Transfer {
+    images: Vec<ImageState>,
+    layers: HashMap<String, LayerState>,
+}
+
+#[derive(Clone, Default)]
+struct ImageState {
+    /// The short ids of its layers, once its registry has said.
+    expected: Option<Vec<String>>,
+    /// Its pull said something about at least one layer.
+    streamed: bool,
+    finished: bool,
+}
+
+#[derive(Default)]
+struct LayerState {
+    /// The size its registry gave.
+    expected: Option<u64>,
+    /// The size its pull gave.
+    advertised: Option<u64>,
+    current: u64,
+    seen: bool,
+    finished: bool,
+    cached: bool,
+}
+
+impl LayerState {
+    fn size(&self) -> Option<u64> {
+        self.expected.or(self.advertised)
+    }
+
+    fn downloaded(&self) -> u64 {
+        if self.cached {
+            0
+        } else if self.finished {
+            self.size().unwrap_or(self.current).max(self.current)
+        } else {
+            self.current
         }
     }
 }
 
-/// A short name a person can read for an image reference: its repository's last part, without
-/// registry, tag, digest or the `openbot-` prefix. The server image is "OpenBot server".
-pub fn display_name(image: &str) -> String {
-    let without_digest = image.split('@').next().unwrap_or_default();
-    let last = without_digest.rsplit('/').next().unwrap_or_default();
-    let repository = last.split(':').next().unwrap_or_default();
-    let name = repository.strip_prefix("openbot-").unwrap_or(repository);
-    match name {
-        "openbot" | "server" => "OpenBot server".to_string(),
-        name => name.to_string(),
+impl Transfer {
+    pub fn new(images: usize) -> Self {
+        Self {
+            images: vec![ImageState::default(); images],
+            layers: HashMap::new(),
+        }
+    }
+
+    /// Image `index`'s layers, from its registry. See `ImageSize`.
+    pub fn expect(&mut self, index: usize, layers: &[crate::registry::Layer]) {
+        let mut ids = Vec::new();
+        for layer in layers {
+            let id = crate::registry::short_id(&layer.digest);
+            self.layers.entry(id.clone()).or_default().expected = Some(layer.size);
+            ids.push(id);
+        }
+        let Some(image) = self.images.get_mut(index) else {
+            return;
+        };
+        image.expected = Some(ids);
+        if image.finished {
+            self.settle(index);
+        }
+    }
+
+    /// One line from image `index`'s pull.
+    pub fn observe(&mut self, index: usize, progress: &LayerProgress) {
+        if let Some(image) = self.images.get_mut(index) {
+            image.streamed = true;
+        }
+        let layer = self.layers.entry(progress.id.clone()).or_default();
+        layer.seen = true;
+        match progress.event {
+            LayerEvent::Cached => layer.cached = true,
+            LayerEvent::Finished => layer.finished = true,
+            LayerEvent::Downloading { current, total } => {
+                if let Some(current) = current {
+                    layer.current = layer.current.max(current);
+                }
+                if total.is_some() {
+                    layer.advertised = total;
+                }
+            }
+        }
+    }
+
+    /// Image `index`'s pull succeeded: every layer it names is on this computer now.
+    pub fn finish(&mut self, index: usize) {
+        if let Some(image) = self.images.get_mut(index) {
+            image.finished = true;
+        }
+        self.settle(index);
+    }
+
+    /// A finished image's layers that its pull never mentioned. Docker with the containerd image
+    /// store says nothing at all about a layer it already has, so when the pull spoke of other
+    /// layers, these were already here. A pull that said nothing (an engine without JSON progress)
+    /// downloaded them all.
+    fn settle(&mut self, index: usize) {
+        let Some(image) = self.images.get(index) else {
+            return;
+        };
+        let streamed = image.streamed;
+        for id in image.expected.clone().unwrap_or_default() {
+            if let Some(layer) = self.layers.get_mut(&id) {
+                if !layer.seen {
+                    if streamed {
+                        layer.cached = true;
+                    } else {
+                        layer.finished = true;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Downloaded so far, over every image. It never goes down.
+    pub fn bytes(&self) -> u64 {
+        self.layers.values().map(LayerState::downloaded).sum()
+    }
+
+    /// The whole download, once every image's registry has said. Never less than `bytes`.
+    pub fn size(&self) -> Option<u64> {
+        if self.images.iter().any(|image| image.expected.is_none()) {
+            return None;
+        }
+        let size: u64 = self
+            .layers
+            .values()
+            .filter(|layer| !layer.cached)
+            .map(|layer| layer.size().unwrap_or(layer.current))
+            .sum();
+        Some(size.max(self.bytes()))
     }
 }
 
@@ -199,7 +332,7 @@ fn download_bytes(stdout: &[u8], stderr: &[u8]) -> Option<u64> {
 pub fn pull_image(
     engine: &Address,
     image: &str,
-    on_progress: impl FnMut(ImageBytes),
+    on_progress: impl FnMut(LayerProgress),
     on_complete: impl FnOnce(PullMetrics),
 ) -> Result<(), Problem> {
     crate::logging::timed(&format!("pull {image}"), || {
@@ -210,7 +343,7 @@ pub fn pull_image(
 fn pull_image_now(
     engine: &Address,
     image: &str,
-    on_progress: impl FnMut(ImageBytes),
+    on_progress: impl FnMut(LayerProgress),
     on_complete: impl FnOnce(PullMetrics),
 ) -> Result<(), Problem> {
     if crate::preparation::image_present(engine, image)? {
@@ -249,7 +382,7 @@ fn pull_image_now(
 pub const IMAGE_PULLS_AT_ONCE: usize = 4;
 
 /// How often Install's download report is refreshed while no pull says anything, so the speed
-/// falls when a download stalls.
+/// falls when a download stalls, and a size the registries sent in the meantime is shown.
 pub const PROGRESS_TICK: Duration = Duration::from_millis(500);
 
 /// Install's download, as the window shows it under "Installing OpenBot".
@@ -259,68 +392,52 @@ pub struct Downloads {
     /// Pulls FINISHED, of `total`.
     pub done: usize,
     pub total: usize,
-    /// Bytes downloaded by every pull so far, running and finished.
+    /// Downloaded so far, over every image: see `Transfer::bytes`.
     pub bytes: u64,
+    /// The whole download, once it is known: see `Transfer::size`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
     /// Recent download speed, once there is enough of a window to say. Filled in by `Pacer`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bytes_per_second: Option<u64>,
-    /// The pulls running now, in list order.
-    pub pulling: Vec<ImagePull>,
-}
-
-/// One running pull.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct ImagePull {
-    /// See `display_name`.
-    pub name: String,
-    pub bytes: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub size: Option<u64>,
 }
 
 /// Pull `images` with at most `limit` pulls in flight, starting them in list order.
 ///
-/// `pull(index, image, on_bytes)` is one blocking pull; it calls `on_bytes` with what that pull
-/// has downloaded so far. `keep_going` is asked before each pull starts; an `Err` (Stop) starts no
-/// further pull. On the first failure no further pull starts, the pulls already running finish,
-/// and that first error is returned.
+/// `pull(index, image, on_layer)` is one blocking pull; it calls `on_layer` with each thing that
+/// pull says about a layer. `keep_going` is asked before each pull starts; an `Err` (Stop) starts
+/// no further pull. On the first failure no further pull starts, the pulls already running finish,
+/// and that first error is returned. `sizes` brings each image's layers from its registry, whenever
+/// they arrive: see `ImageSize`.
 ///
 /// `on_progress` gets every change, and a repeat every `PROGRESS_TICK` while nothing changes.
-/// `done` counts FINISHED pulls (not started ones), and `bytes` is the sum over every pull so
-/// far, running and finished. Neither goes down, nor does a running pull's own `bytes`, and after
-/// the last pull succeeds it is called with `done == total`. Pace it with `Pacer`.
+/// `done` counts FINISHED pulls (not started ones), and `bytes` and `size` are over every image:
+/// see `Transfer`. Neither `done` nor `bytes` goes down, and after the last pull succeeds it is
+/// called with `done == total`. Pace it with `Pacer`.
 pub fn pull_images_limited<P, K, O>(
     images: &[String],
     limit: usize,
+    sizes: std::sync::mpsc::Receiver<ImageSize>,
     pull: P,
     keep_going: K,
     on_progress: O,
 ) -> Result<(), Problem>
 where
-    P: Fn(usize, &str, &dyn Fn(ImageBytes)) -> Result<(), Problem> + Sync,
+    P: Fn(usize, &str, &dyn Fn(LayerProgress)) -> Result<(), Problem> + Sync,
     K: Fn() -> Result<(), Problem> + Sync,
     O: Fn(&Downloads) + Sync,
 {
-    #[derive(Clone, Copy, PartialEq)]
-    enum Pull {
-        Queued,
-        Running,
-        Finished,
-    }
     struct Shared {
         next: usize,
         done: usize,
-        state: Vec<Pull>,
-        bytes: Vec<ImageBytes>,
+        transfer: Transfer,
         error: Option<Problem>,
     }
     let total = images.len();
-    let names: Vec<String> = images.iter().map(|image| display_name(image)).collect();
     let shared = std::sync::Mutex::new(Shared {
         next: 0,
         done: 0,
-        state: vec![Pull::Queued; total],
-        bytes: vec![ImageBytes::default(); total],
+        transfer: Transfer::new(total),
         error: None,
     });
     // Reported under the lock, so the person sees `done` and `bytes` only ever go up.
@@ -328,17 +445,18 @@ where
         on_progress(&Downloads {
             done: state.done,
             total,
-            bytes: state.bytes.iter().map(|bytes| bytes.bytes).sum(),
+            bytes: state.transfer.bytes(),
+            size: state.transfer.size(),
             bytes_per_second: None,
-            pulling: (0..total)
-                .filter(|index| state.state[*index] == Pull::Running)
-                .map(|index| ImagePull {
-                    name: names[index].clone(),
-                    bytes: state.bytes[index].bytes,
-                    size: state.bytes[index].size,
-                })
-                .collect(),
         })
+    };
+    let take_sizes = |state: &mut Shared, sizes: &std::sync::mpsc::Receiver<ImageSize>| {
+        while let Ok(size) = sizes.try_recv() {
+            // A size that is not known leaves the total unknown.
+            if let Some(layers) = size.layers {
+                state.transfer.expect(size.index, &layers);
+            }
+        }
     };
     report(&shared.lock().unwrap());
     let worker = || loop {
@@ -352,28 +470,21 @@ where
                 return;
             }
             state.next += 1;
-            let index = state.next - 1;
-            state.state[index] = Pull::Running;
-            index
+            state.next - 1
         };
-        let on_bytes = |bytes: ImageBytes| {
+        let on_layer = |progress: LayerProgress| {
             let mut state = shared.lock().unwrap();
-            let seen = state.bytes[index];
-            // One pull's own figure is cumulative; keep its highest so the sum never drops.
-            let next = ImageBytes {
-                bytes: seen.bytes.max(bytes.bytes),
-                size: bytes.size.or(seen.size),
-            };
-            if next != seen {
-                state.bytes[index] = next;
+            let seen = (state.transfer.bytes(), state.transfer.size());
+            state.transfer.observe(index, &progress);
+            if (state.transfer.bytes(), state.transfer.size()) != seen {
                 report(&state);
             }
         };
-        let outcome = pull(index, &images[index], &on_bytes);
+        let outcome = pull(index, &images[index], &on_layer);
         let mut state = shared.lock().unwrap();
-        state.state[index] = Pull::Finished;
         match outcome {
             Ok(()) => {
+                state.transfer.finish(index);
                 state.done += 1;
                 report(&state);
             }
@@ -385,13 +496,14 @@ where
     };
     std::thread::scope(|scope| {
         let (stop, stopped) = std::sync::mpsc::channel::<()>();
-        let (shared, report) = (&shared, &report);
+        let (shared, report, take_sizes) = (&shared, &report, &take_sizes);
         scope.spawn(move || {
             // Wakes every tick until every worker has returned and `stop` is dropped.
             while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
                 stopped.recv_timeout(PROGRESS_TICK)
             {
-                let state = shared.lock().unwrap();
+                let mut state = shared.lock().unwrap();
+                take_sizes(&mut state, &sizes);
                 if state.error.is_none() && state.done < total {
                     report(&state);
                 }
@@ -411,6 +523,37 @@ where
         Some(problem) => Err(problem),
         None => Ok(()),
     }
+}
+
+/// Each image's layers from its registry, one thread per image at most `IMAGE_PULLS_AT_ONCE` at a
+/// time, sent as they arrive. `present` says an image is on this computer already, so it downloads
+/// nothing. Detached: an install that finishes first never waits for a slow registry.
+pub fn size_images<F>(images: &[String], present: F) -> std::sync::mpsc::Receiver<ImageSize>
+where
+    F: Fn(&str) -> bool + Send + Sync + 'static,
+{
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let queue = std::sync::Arc::new(std::sync::Mutex::new(
+        images.iter().cloned().enumerate().collect::<VecDeque<_>>(),
+    ));
+    let present = std::sync::Arc::new(present);
+    for _ in 0..IMAGE_PULLS_AT_ONCE.min(images.len()) {
+        let (queue, present, sender) = (queue.clone(), present.clone(), sender.clone());
+        std::thread::spawn(move || loop {
+            let Some((index, image)) = queue.lock().unwrap().pop_front() else {
+                return;
+            };
+            let layers = if present(&image) {
+                Some(Vec::new())
+            } else {
+                crate::registry::image_layers(&image, crate::registry::host_architecture())
+            };
+            if sender.send(ImageSize { index, layers }).is_err() {
+                return;
+            }
+        });
+    }
+    receiver
 }
 
 /// Download speed over the last few seconds.
@@ -502,7 +645,7 @@ fn run_with_progress(
     mut command: Command,
     input: Option<&[u8]>,
     json_progress: bool,
-    mut on_progress: impl FnMut(ImageBytes),
+    mut on_progress: impl FnMut(LayerProgress),
     on_complete: impl FnOnce(PullMetrics),
 ) -> Result<(), Problem> {
     command
@@ -537,14 +680,9 @@ fn run_with_progress(
             let stdout_sender = sender.clone();
             let out = scope.spawn(move || read_output(stdout, json_progress, stdout_sender));
             let err = scope.spawn(move || read_output(stderr, json_progress, sender));
-            let mut layers = DownloadBytes::default();
-            let mut last = ImageBytes::default();
             for progress in receiver {
-                layers.observe(progress);
-                let now = layers.image_bytes();
-                if now != last {
-                    on_progress(now);
-                    last = now;
+                if let Some(layer) = LayerProgress::of(&progress) {
+                    on_progress(layer);
                 }
             }
             let stdout = out
@@ -693,6 +831,11 @@ mod tests {
         }
     }
 
+    /// No registry answers: every size stays unknown.
+    fn no_sizes() -> std::sync::mpsc::Receiver<ImageSize> {
+        std::sync::mpsc::channel().1
+    }
+
     fn names(count: usize) -> Vec<String> {
         (0..count).map(|index| format!("image-{index}")).collect()
     }
@@ -706,6 +849,7 @@ mod tests {
         pull_images_limited(
             &images,
             IMAGE_PULLS_AT_ONCE,
+            no_sizes(),
             |index, _, _| {
                 let now = running.fetch_add(1, SeqCst) + 1;
                 most.fetch_max(now, SeqCst);
@@ -736,6 +880,7 @@ mod tests {
         let error = pull_images_limited(
             &images,
             3,
+            no_sizes(),
             |index, _, _| {
                 if failed.load(SeqCst) {
                     started_after_failure.fetch_add(1, SeqCst);
@@ -778,6 +923,7 @@ mod tests {
         let error = pull_images_limited(
             &images,
             2,
+            no_sizes(),
             |_, _, _| {
                 if started.fetch_add(1, SeqCst) + 1 == 3 {
                     cancelled.store(true, SeqCst);
@@ -805,17 +951,19 @@ mod tests {
         pull_images_limited(
             &images,
             3,
-            |index, _, on_bytes| {
+            no_sizes(),
+            |index, _, on_layer| {
                 let base = (index as u64 + 1) * 100;
-                on_bytes(ImageBytes {
-                    bytes: base,
-                    size: None,
-                });
+                let downloading = |current| LayerProgress {
+                    id: format!("layer-{index}"),
+                    event: LayerEvent::Downloading {
+                        current: Some(current),
+                        total: None,
+                    },
+                };
+                on_layer(downloading(base));
                 std::thread::sleep(Duration::from_millis(2));
-                on_bytes(ImageBytes {
-                    bytes: base * 2,
-                    size: None,
-                });
+                on_layer(downloading(base * 2));
                 Ok(())
             },
             || Ok(()),
@@ -880,9 +1028,9 @@ fn main() {
             command,
             None,
             true,
-            |bytes: ImageBytes| {
-                updates.push(bytes.bytes);
-                if bytes.bytes == 12 {
+            |layer: LayerProgress| {
+                updates.push(layer.id.clone());
+                if updates.len() == 2 {
                     std::fs::write(&acknowledgement, "received").unwrap();
                 }
             },
@@ -890,7 +1038,8 @@ fn main() {
         );
         std::fs::remove_dir_all(root).unwrap();
         assert!(result.is_ok(), "{result:?}");
-        assert_eq!(updates.last(), Some(&12));
+        updates.sort();
+        assert_eq!(updates, ["a", "b"]);
         assert_eq!(metrics.len(), 1);
         assert_eq!(metrics[0].bytes, Some(12));
         assert_eq!(metrics[0].outcome, Outcome::Success);
@@ -1163,174 +1312,13 @@ Executing external compose provider
         assert_eq!(reports[0].bytes, None);
     }
     #[test]
-    fn names_an_image_by_its_repository_without_registry_tag_or_digest() {
-        assert_eq!(
-            display_name("ghcr.io/copilotkit/openbot-agent-bot@sha256:0123"),
-            "agent-bot"
-        );
-        assert_eq!(
-            display_name("ghcr.io/copilotkit/openbot-server@sha256:0123"),
-            "OpenBot server"
-        );
-        assert_eq!(display_name("openbot-server:latest"), "OpenBot server");
-        assert_eq!(display_name("openbot"), "OpenBot server");
-        assert_eq!(display_name("pgvector/pgvector:pg17"), "pgvector");
-        assert_eq!(display_name("busybox:1.37"), "busybox");
-        assert_eq!(
-            display_name("ghcr.io/spiffe/spire-agent:1.15.1"),
-            "spire-agent"
-        );
-        // A registry with a port is not a tag.
-        assert_eq!(
-            display_name("localhost:5000/openbot-supervisor"),
-            "supervisor"
-        );
-        assert_eq!(display_name(""), "");
-    }
-
-    #[test]
-    fn an_image_size_is_known_once_every_unfinished_layer_has_one() {
-        let mut layers = DownloadBytes::default();
-        let line = |text: &str| serde_json::from_str::<Progress>(text).unwrap();
-        layers.observe(line(
-            r#"{"id":"a","parent_id":"image","text":"Pulling fs layer"}"#,
-        ));
-        layers.observe(line(
-            r#"{"id":"b","parent_id":"image","text":"Pulling fs layer"}"#,
-        ));
-        layers.observe(line(
-            r#"{"id":"c","parent_id":"image","text":"Already exists"}"#,
-        ));
-        layers.observe(line(
-            r#"{"id":"a","parent_id":"image","text":"Downloading","current":10,"total":100}"#,
-        ));
-        // Layer b has not said how big it is yet.
-        assert_eq!(
-            layers.image_bytes(),
-            ImageBytes {
-                bytes: 10,
-                size: None
-            }
-        );
-        layers.observe(line(
-            r#"{"id":"b","parent_id":"image","text":"Downloading","current":5,"total":50}"#,
-        ));
-        assert_eq!(
-            layers.image_bytes(),
-            ImageBytes {
-                bytes: 15,
-                size: Some(150)
-            }
-        );
-        // A tiny layer that finishes without ever reporting a size counts as done, not unknown.
-        layers.observe(line(
-            r#"{"id":"d","parent_id":"image","text":"Pulling fs layer"}"#,
-        ));
-        layers.observe(line(
-            r#"{"id":"d","parent_id":"image","text":"Download complete"}"#,
-        ));
-        assert_eq!(layers.image_bytes().size, Some(150));
-        // The image's own line is not a layer.
-        layers.observe(line(r#"{"id":"image","text":"Pulling"}"#));
-        assert_eq!(layers.image_bytes().size, Some(150));
-    }
-
-    #[test]
-    fn streams_each_change_of_bytes_or_size_for_one_pull() {
-        let mut command = crate::quiet::command("sh");
-        command.args([
-            "-c",
-            r#"printf '%s\n' '{"id":"a","parent_id":"image","text":"Pulling fs layer"}' '{"id":"a","parent_id":"image","text":"Downloading","current":4,"total":40}' '{"id":"a","parent_id":"image","text":"Downloading","current":4,"total":40}' '{"id":"a","parent_id":"image","text":"Downloading","current":40,"total":40}'"#,
-        ]);
-        let mut updates = Vec::new();
-        run_with_progress(command, None, true, |bytes| updates.push(bytes), |_| {}).unwrap();
-        assert_eq!(
-            updates,
-            vec![
-                ImageBytes {
-                    bytes: 4,
-                    size: Some(40)
-                },
-                ImageBytes {
-                    bytes: 40,
-                    size: Some(40)
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn progress_lists_the_running_pulls_with_their_own_bytes() {
-        let images = vec![
-            "ghcr.io/copilotkit/openbot-server@sha256:1".to_string(),
-            "ghcr.io/copilotkit/openbot-agent-bot@sha256:2".to_string(),
-            "busybox:1.37".to_string(),
-        ];
-        let arrived = AtomicUsize::new(0);
-        let reported = AtomicUsize::new(0);
-        let calls = Mutex::new(Vec::<Downloads>::new());
-        pull_images_limited(
-            &images,
-            2,
-            |index, _, on_bytes| {
-                if index < 2 {
-                    on_bytes(ImageBytes {
-                        bytes: (index as u64 + 1) * 100,
-                        size: (index == 0).then_some(1000),
-                    });
-                    arrived.fetch_add(1, SeqCst);
-                    // Both running pulls have reported before either finishes.
-                    wait_for(&arrived, 2);
-                    reported.fetch_add(1, SeqCst);
-                    wait_for(&reported, 2);
-                }
-                Ok(())
-            },
-            || Ok(()),
-            |downloads| calls.lock().unwrap().push(downloads.clone()),
-        )
-        .unwrap();
-        let calls = calls.lock().unwrap();
-        let both = calls
-            .iter()
-            .find(|downloads| downloads.bytes == 300 && downloads.done == 0)
-            .expect("a report while both pulls ran");
-        assert_eq!(
-            both.pulling,
-            vec![
-                ImagePull {
-                    name: "OpenBot server".into(),
-                    bytes: 100,
-                    size: Some(1000)
-                },
-                ImagePull {
-                    name: "agent-bot".into(),
-                    bytes: 200,
-                    size: None
-                },
-            ]
-        );
-        assert_eq!(both.total, 3);
-        let last = calls.last().unwrap();
-        assert_eq!((last.done, last.total, last.bytes), (3, 3, 300));
-        assert!(last.pulling.is_empty());
-        // A running pull's own figure never goes down.
-        let server: Vec<u64> = calls
-            .iter()
-            .flat_map(|downloads| &downloads.pulling)
-            .filter(|pull| pull.name == "OpenBot server")
-            .map(|pull| pull.bytes)
-            .collect();
-        assert!(server.windows(2).all(|w| w[0] <= w[1]), "{server:?}");
-    }
-
-    #[test]
     fn keeps_reporting_while_a_pull_is_quiet() {
         let images = names(1);
         let calls = AtomicUsize::new(0);
         pull_images_limited(
             &images,
             1,
+            no_sizes(),
             |_, _, _| {
                 std::thread::sleep(PROGRESS_TICK * 3);
                 Ok(())
@@ -1365,8 +1353,8 @@ Executing external compose provider
             done,
             total: 3,
             bytes,
+            size: Some(10_000),
             bytes_per_second: None,
-            pulling: Vec::new(),
         }
     }
 
@@ -1380,6 +1368,7 @@ Executing external compose provider
         assert!(pacer.offer(at(200), &downloads(0, 20)).is_none());
         let paced = pacer.offer(at(260), &downloads(0, 30)).unwrap();
         assert_eq!(paced.bytes, 30);
+        assert_eq!(paced.size, Some(10_000));
         // A pull finishing is shown at once.
         assert_eq!(pacer.offer(at(300), &downloads(1, 40)).unwrap().done, 1);
         assert!(pacer.offer(at(400), &downloads(1, 50)).is_none());
@@ -1397,12 +1386,8 @@ Executing external compose provider
             done: 1,
             total: 9,
             bytes: 5,
+            size: Some(3_400_000_000),
             bytes_per_second: Some(2),
-            pulling: vec![ImagePull {
-                name: "agent-bot".into(),
-                bytes: 5,
-                size: None,
-            }],
         })
         .unwrap();
         assert_eq!(
@@ -1411,9 +1396,185 @@ Executing external compose provider
                 "done": 1,
                 "total": 9,
                 "bytes": 5,
+                "size": 3_400_000_000_u64,
                 "bytesPerSecond": 2,
-                "pulling": [{"name": "agent-bot", "bytes": 5}],
             })
         );
+        // A size not known yet is left out, and the window says so.
+        let value = serde_json::to_value(Downloads {
+            done: 0,
+            total: 9,
+            bytes: 0,
+            size: None,
+            bytes_per_second: None,
+        })
+        .unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({"done": 0, "total": 9, "bytes": 0})
+        );
+    }
+
+    /// A real pull, as `pull_image` runs it: `docker compose --progress json -f - pull --policy
+    /// missing` of `nginx:1.27-alpine`, captured with Docker 29.5.2 (containerd image store) and
+    /// Compose 5.1.4 on an arm64 Mac. And that image's linux/arm64 manifest, as Docker
+    /// Hub served them, for the layers and sizes the registry gives before the pull.
+    const NGINX_PULL: &str =
+        include_str!("../test-fixtures/image-pulls/docker-29-compose-5-nginx-1.27-alpine.jsonl");
+    const NGINX_MANIFEST: &str =
+        include_str!("../test-fixtures/image-pulls/nginx-1.27-alpine-linux-arm64.json");
+
+    fn nginx_layers() -> Vec<crate::registry::Layer> {
+        #[derive(Deserialize)]
+        struct Manifest {
+            layers: Vec<Descriptor>,
+        }
+        #[derive(Deserialize)]
+        struct Descriptor {
+            digest: String,
+            size: u64,
+        }
+        let manifest: Manifest = serde_json::from_str(NGINX_MANIFEST).unwrap();
+        manifest
+            .layers
+            .into_iter()
+            .map(|layer| crate::registry::Layer {
+                digest: layer.digest,
+                size: layer.size,
+            })
+            .collect()
+    }
+
+    fn sizes(sent: Vec<ImageSize>) -> std::sync::mpsc::Receiver<ImageSize> {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        for size in sent {
+            sender.send(size).unwrap();
+        }
+        receiver
+    }
+
+    /// The bytes and the total a person is shown for a real pull, from the real pull's lines and
+    /// the image's real manifest.
+    ///
+    /// The capture is the hard case. Docker with the containerd image store gives byte counters
+    /// for one layer only, once, at 7.3 MB of 16 MB; every other layer says only "Download complete"
+    /// with `"details":"0B"`. And it says nothing at all about `6e771e15690e`, the Alpine base layer
+    /// it already had. Counting counters alone said 7.3 MB had downloaded, with no total.
+    #[cfg(unix)]
+    #[test]
+    fn a_real_pull_reports_its_bytes_out_of_the_size_its_registry_gave() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/test-fixtures/image-pulls/docker-29-compose-5-nginx-1.27-alpine.jsonl"
+        );
+        let layers = nginx_layers();
+        let whole: u64 = layers.iter().map(|layer| layer.size).sum();
+        assert_eq!(whole, 21_808_610);
+        let base = 3_993_029; // 6e771e15690e, already on that computer.
+        let reports = Mutex::new(Vec::<Downloads>::new());
+        pull_images_limited(
+            &["nginx:1.27-alpine".to_string()],
+            1,
+            sizes(vec![ImageSize {
+                index: 0,
+                layers: Some(layers),
+            }]),
+            |_, _, on_layer| {
+                // Read the size first, as the registry answers before the first layer arrives.
+                std::thread::sleep(PROGRESS_TICK * 2);
+                let mut command = crate::quiet::command("sh");
+                command.args(["-c", "cat \"$1\" >&2", "sh", fixture]);
+                run_with_progress(command, None, true, on_layer, |_| {})
+            },
+            || Ok(()),
+            |downloads| reports.lock().unwrap().push(downloads.clone()),
+        )
+        .unwrap();
+        let reports = reports.lock().unwrap();
+        // Before the registry has answered, the size is not known, and nothing is guessed.
+        assert_eq!(reports[0].size, None);
+        assert_eq!(reports[0].bytes, 0);
+        // The one counted line: two small layers done (957 B and 1,210 B), and 7,340,032 B of the
+        // largest, out of the whole image.
+        assert!(
+            reports
+                .iter()
+                .any(|report| report.bytes == 957 + 1_210 + 7_340_032
+                    && report.size == Some(whole)),
+            "{reports:#?}"
+        );
+        // Finished: the base layer it already had is not counted as downloaded, nor as to come.
+        let last = reports.last().unwrap();
+        assert_eq!((last.done, last.total), (1, 1));
+        assert_eq!(last.bytes, whole - base);
+        assert_eq!(last.size, Some(whole - base));
+        // Never down, and never past the size.
+        assert!(reports.windows(2).all(|w| w[0].bytes <= w[1].bytes));
+        assert!(reports
+            .iter()
+            .all(|report| report.size.is_none_or(|size| report.bytes <= size)));
+        // What counters alone would have said: 7.3 MB.
+        assert_eq!(download_bytes(b"", NGINX_PULL.as_bytes()), Some(7_340_032));
+    }
+
+    #[test]
+    fn a_layer_two_images_share_counts_once() {
+        let layer = |digest: &str, size| crate::registry::Layer {
+            digest: format!("sha256:{digest}"),
+            size,
+        };
+        let mut transfer = Transfer::new(2);
+        transfer.expect(
+            0,
+            &[layer("aaaaaaaaaaaa00", 100), layer("bbbbbbbbbbbb00", 50)],
+        );
+        assert_eq!(transfer.size(), None, "the second image has not said");
+        transfer.expect(
+            1,
+            &[layer("aaaaaaaaaaaa00", 100), layer("cccccccccccc00", 30)],
+        );
+        assert_eq!(transfer.size(), Some(180));
+        let downloading = |id: &str, current| LayerProgress {
+            id: id.into(),
+            event: LayerEvent::Downloading {
+                current: Some(current),
+                total: Some(100),
+            },
+        };
+        // Both pulls show the shared layer's one download.
+        transfer.observe(0, &downloading("aaaaaaaaaaaa", 40));
+        transfer.observe(1, &downloading("aaaaaaaaaaaa", 40));
+        assert_eq!(transfer.bytes(), 40);
+        transfer.observe(
+            1,
+            &LayerProgress {
+                id: "cccccccccccc".into(),
+                event: LayerEvent::Cached,
+            },
+        );
+        assert_eq!(transfer.size(), Some(150));
+    }
+
+    #[test]
+    fn an_image_already_here_or_a_registry_that_cannot_say() {
+        let mut transfer = Transfer::new(2);
+        // Already on this computer: nothing to download.
+        transfer.expect(0, &[]);
+        assert_eq!(transfer.size(), None);
+        transfer.expect(
+            1,
+            &[crate::registry::Layer {
+                digest: "sha256:dddddddddddd".into(),
+                size: 70,
+            }],
+        );
+        assert_eq!(transfer.size(), Some(70));
+        // An engine without JSON progress says nothing about layers: a finished pull downloaded
+        // every layer its registry named.
+        transfer.finish(1);
+        assert_eq!((transfer.bytes(), transfer.size()), (70, Some(70)));
+        // A registry that never answers leaves the size unknown.
+        let unknown = Transfer::new(1);
+        assert_eq!(unknown.size(), None);
     }
 }

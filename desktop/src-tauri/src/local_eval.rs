@@ -1561,6 +1561,34 @@ impl CliEngine {
     }
 }
 
+/// The engine the CLI runs its cluster on, as a command with the same engine variables the CLI is
+/// given, so it reaches the same engine. Only for reading what the cluster holds while the CLI
+/// works (`intelligence_download`); None before the app has said which engine OpenBot runs on.
+pub fn engine_command() -> Option<std::process::Command> {
+    let engine = recorded_engine()?;
+    let mut command = crate::quiet::command(
+        crate::engine::program(engine.engine).unwrap_or_else(|| engine.engine.binary().into()),
+    );
+    let engines: &[crate::engine::Engine] = match engine.engine {
+        crate::engine::Engine::Podman => {
+            &[crate::engine::Engine::Docker, crate::engine::Engine::Podman]
+        }
+        _ => &[crate::engine::Engine::Docker],
+    };
+    if let Some(path) = crate::engine::path_with_engines(engines) {
+        command.env("PATH", path);
+    }
+    for (name, value) in engine_environment(Some(&engine)) {
+        match value {
+            Some(value) => command.env(name, value),
+            None => command.env_remove(name),
+        };
+    }
+    command.stdin(std::process::Stdio::null());
+    command.stderr(std::process::Stdio::null());
+    Some(command)
+}
+
 fn recorded_engine() -> Option<CliEngine> {
     let address = ENGINE
         .lock()

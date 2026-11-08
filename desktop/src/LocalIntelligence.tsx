@@ -12,6 +12,8 @@ import {
   type LocalReason,
   type LocalReport,
   type LocalTerms,
+  type UpdateDownload,
+  listenToUpdateDownload,
   localEvalTerms,
   runLocalEval,
   setUpLocalEval,
@@ -102,6 +104,8 @@ type State = {
   refused: string | null;
   /** What the running row is doing, when it says more than its label. */
   detail: string | null;
+  /** What the back end's update has downloaded, while it runs. */
+  download: UpdateDownload | null;
   /**
    * The back end could not be updated to the release this app installs. Said, and not a stop: the
    * release it had is still there and still runs.
@@ -117,6 +121,7 @@ const idle: State = {
   problem: null,
   refused: null,
   detail: null,
+  download: null,
   updateFailed: null,
 };
 
@@ -251,20 +256,28 @@ export function useLocalSequence({
     from: string,
     token: number,
   ): Promise<boolean> {
-    update({ detail: `Updating the back end to ${to}. Its data stays.` });
+    update({
+      detail: `Updating the back end to ${to}. Its data stays.`,
+      download: null,
+    });
     const started = runLocalEval("update", id);
     attempt.current = started.attempt;
+    const stopHearing = listenToUpdateDownload(started.attempt, (download) => {
+      if (generation.current === token) update({ download });
+    });
     let updated = false;
     try {
       updated = (await started.report).outcome === "completed";
     } catch {
       updated = false;
     } finally {
+      stopHearing();
       if (attempt.current === started.attempt) attempt.current = null;
     }
     if (generation.current !== token) return false;
     update({
       detail: null,
+      download: null,
       updateFailed: updated
         ? null
         : `The back end could not be updated to ${to}, so it stays on ${from}. OpenBot tries again the next time it starts.`,
@@ -364,7 +377,13 @@ export function useLocalSequence({
   async function run(from: Phase): Promise<void> {
     halt();
     const token = generation.current;
-    update({ blocked: null, problem: null, detail: null, updateFailed: null });
+    update({
+      blocked: null,
+      problem: null,
+      detail: null,
+      download: null,
+      updateFailed: null,
+    });
     const { root } = latest.current;
     let id = latest.current.stack;
     const stop = (reason?: { said: string; reason?: LocalReason | null }) => {
@@ -511,6 +530,7 @@ export function useLocalSequence({
                 ok: true,
                 running: true,
                 detail: state.detail ?? "",
+                downloads: state.download ?? undefined,
                 startedAt: state.since ?? undefined,
               }
             : stopped

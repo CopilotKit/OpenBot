@@ -6,6 +6,7 @@
  * decisions stay in the CLI: readiness and licence are its own states, read by exact value.
  */
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { Problem } from "./Problem";
 
 /** `update` installs the release this app's CLI installs over an older stack, keeping its data. */
@@ -150,6 +151,42 @@ export function runLocalEval(
     throw failure(rejection);
   });
   return { attempt, report };
+}
+
+/** What the back end's update has downloaded: `intelligence_download::Transferred`. */
+export type UpdateDownload = {
+  bytes: number;
+  size?: number;
+  bytesPerSecond?: number;
+};
+
+/**
+ * Hears what the update `attempt` (a `runLocalEval("update", …)`) downloads while it runs. The
+ * CLI itself says nothing until it ends, so the native side reads the cluster for it. Returns the
+ * call that stops listening.
+ */
+export function listenToUpdateDownload(
+  attempt: string,
+  heard: (download: UpdateDownload) => void,
+): () => void {
+  let stopped = false;
+  let unlisten: (() => void) | null = null;
+  void listen<UpdateDownload & { attempt: string }>(
+    "local-eval:download",
+    ({ payload: { attempt: of, ...download } }) => {
+      if (!stopped && of === attempt) heard(download);
+    },
+  )
+    .then((stop) => {
+      if (stopped) stop();
+      else unlisten = stop;
+    })
+    // Without a native side (a test, a plain browser) there is nothing to hear.
+    .catch(() => {});
+  return () => {
+    stopped = true;
+    unlisten?.();
+  };
 }
 
 /** Lists recorded stacks, so a stack id comes from the CLI. Cancel it like any other call. */

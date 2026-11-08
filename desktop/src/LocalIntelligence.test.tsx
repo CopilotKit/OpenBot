@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { cleanup, render, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import type { StartOutcome } from "./LocalIntelligence";
@@ -21,6 +21,24 @@ mock.module("@tauri-apps/api/core", () => ({
     return invokeHandler(command, args);
   },
 }));
+
+// Native events, as Tauri's `listen` delivers them: `{ payload }` to each listener of the name.
+type Heard = (event: { payload: unknown }) => void;
+const listeners = new Map<string, Set<Heard>>();
+mock.module("@tauri-apps/api/event", () => ({
+  listen: async (name: string, heard: Heard) => {
+    const named = listeners.get(name) ?? new Set<Heard>();
+    named.add(heard);
+    listeners.set(name, named);
+    return () => named.delete(heard);
+  },
+}));
+
+function emit(name: string, payload: unknown) {
+  act(() => {
+    for (const heard of listeners.get(name) ?? []) heard({ payload });
+  });
+}
 
 const { LocalIntelligence, LocalStatus, useLocalSequence } = await import(
   "./LocalIntelligence"
@@ -268,6 +286,85 @@ test("a back end an older app installed is updated to this app's release before 
   expect(
     screen.queryByRole("listitem", { name: "Updating the back end" }),
   ).toBeNull();
+});
+
+/**
+ * Reported on 0.3.3: "Waiting for the back end" sat at "In progress" with no progress at all while
+ * the update pulled the new release's images. The CLI says nothing until it ends, so the native
+ * side reads the cluster and says what has downloaded, for this update's call alone.
+ */
+test("the back end's update shows what it has downloaded out of the release's size", async () => {
+  const updating = deferred<LocalReport>();
+  let calls = 0;
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update") return updating.promise;
+    calls += 1;
+    return calls === 1
+      ? onRelease("0.16.0-rc.8", "0.16.0-rc.9")
+      : onRelease("0.16.0-rc.9", null);
+  };
+  const started: Startable[] = [];
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await waitFor(() =>
+    expect(row(screen, WAIT).textContent).toContain(
+      "Updating the back end to 0.16.0-rc.9. Its data stays.",
+    ),
+  );
+  const updateCall = invokeCalls.find(
+    (call) => (call.args as { action?: string })?.action === "update",
+  );
+  const attempt = (updateCall?.args as { attempt?: string } | undefined)
+    ?.attempt;
+  expect(attempt).toBeTruthy();
+  await waitFor(() =>
+    expect(listeners.get("local-eval:download")?.size).toBe(1),
+  );
+  const waiting = within(row(screen, WAIT));
+  // Nothing downloaded and no size yet: nothing to show beyond the update's sentence.
+  emit("local-eval:download", { attempt, bytes: 0 });
+  expect(waiting.queryByRole("progressbar")).toBeNull();
+  // Bytes before the size: said, and the bar claims no fraction.
+  emit("local-eval:download", { attempt, bytes: 52_000_000 });
+  let bar = waiting.getByRole("progressbar", { name: "Download progress" });
+  expect(bar.hasAttribute("value")).toBe(false);
+  expect(
+    waiting.getByText("52.0 MB downloaded, total size not known yet"),
+  ).toBeTruthy();
+  // Another call's download is not this one's.
+  emit("local-eval:download", {
+    attempt: "another",
+    bytes: 9_000_000_000,
+    size: 9_000_000_000,
+  });
+  expect(waiting.queryByText(/9\.0 GB/)).toBeNull();
+  emit("local-eval:download", {
+    attempt,
+    bytes: 207_000_000,
+    size: 315_000_000,
+    bytesPerSecond: 12_000_000,
+  });
+  bar = waiting.getByRole("progressbar", { name: "Download progress" });
+  expect(bar.getAttribute("value")).toBe("207000000");
+  expect(bar.getAttribute("max")).toBe("315000000");
+  expect(waiting.getByText("207.0 MB of 315.0 MB")).toBeTruthy();
+  expect(
+    waiting.getByText("Updating the back end to 0.16.0-rc.9. Its data stays."),
+  ).toBeTruthy();
+
+  updating.resolve(onRelease("0.16.0-rc.9", null));
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(within(row(screen, WAIT)).queryByRole("progressbar")).toBeNull();
+  // The call ended, so nothing is listening for it any more.
+  expect(listeners.get("local-eval:download")?.size ?? 0).toBe(0);
 });
 
 /**
