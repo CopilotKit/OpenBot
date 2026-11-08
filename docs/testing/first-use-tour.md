@@ -19,14 +19,14 @@ Host: macOS Apple silicon. Bun 1.4.2. App build uses CopilotKit React Core 1.85.
   of other preferences, account isolation and explicit cleanup of an empty failed conversation.
   Ordinary deletion keeps the claim even when the activity timestamp is missing.
 - Component tests use the real CopilotKit suggestion view with HTTP fixtures. They cover both IDs,
-  all five messages, later conversations, busy turns, double clicks, failed sends and
+  every message, later conversations, busy turns, double clicks, failed sends and
   unavailable interactive UI. Browser tasks are not blocked by stale or failed setup checks.
 - Route tests use the real home/new-conversation routes and ChannelChat. They check the selected
   Bot and first request, a second suggestion in the same conversation, later conversations without
   the tour, retry after a failed model save, pending in-conversation model saves and a single
   transcript error on failed turns. The model responses are fixtures.
 - The production app bundle was opened in Chrome on macOS at 1280x800 and 900x700 with HTTP
-  fixtures. All five suggestions were visible, there was no horizontal overflow or page error,
+  fixtures. All five suggestions were visible at the time, there was no horizontal overflow or page error,
   and there is no dismiss control. This is a UI check, not a desktop workflow pass.
 
 ## Required candidate tests
@@ -38,11 +38,10 @@ commit, backend release/image and OS for each result; the desktop shell can run 
 
 | Suggestion | Result that proves useful work | Mac candidate | Windows x64 candidate |
 | --- | --- | --- | --- |
-| Summarize email | Connect Gmail from the conversation, finish consent, return to the same thread, and compare the summary and links with up to five actual unread messages. An empty inbox must be reported accurately. Test blocked sign-in recovery, cancellation and retry. No email is sent or marked read. | Not run | Not run |
+| Chart Hacker News | A bar chart of the current Hacker News front page by points, then the same stories listed with points and links. Compare both with the live front page. Inspect the activity log for web search or fetch tools. | Not run | Not run |
+| Browse Google Maps | Watch the Bot open Google Maps in its browser, read the British Museum's Saturday opening hours, open walking directions from King's Cross, and give a leave-by time that matches the hours and walking time Maps shows. Nothing is signed in to or changed. | Not run | Not run |
+| Triage my inbox | Gmail's connect card appears in the conversation before any mail is read. Connect, finish consent, return to the same thread, and check the two emails it picks against the last 24 hours of mail. An empty day must be reported accurately. Test cancellation and retry. Nothing is marked read or changed. | Not run | Not run |
 | Build a trip budget | Generated controls start at $100 + $200 + $80 = $380. Change lodging to $250 and observe $430 without another model request. | Not run | Not run |
-| Find weekend plans | Supply a city, verify three dated activities and their sources. Inspect the activity log to confirm search/fetch tools and no browser navigation. | Not run | Not run |
-| Read a webpage | Supply a known URL. Watch the Bot open it and compare three returned facts against the page. No write. | Not run | Not run |
-| Try a browser task | The Bot adds Try OpenBot to the Playwright TodoMVC demo, follows applicable approvals, reloads and confirms the saved task. Independently reload/inspect it. Existing tasks remain untouched. | Not run | Not run |
 
 For each OS, also verify that the tour stays in its original conversation after restart; a second
 conversation with either supported ID has no tour; ordinary deletion does not reset eligibility; unrelated Bots and group

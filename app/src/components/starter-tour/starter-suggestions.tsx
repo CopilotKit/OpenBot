@@ -5,7 +5,11 @@ import { useRef, useState } from "react";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
-import { STARTER_SUGGESTIONS, showStarterTour } from "./suggestions";
+import {
+  INTERACTIVE_STARTER,
+  STARTER_SUGGESTIONS,
+  showStarterTour,
+} from "./suggestions";
 
 type Props = {
   agentId: string | undefined;
@@ -45,7 +49,12 @@ function StarterSuggestionChoices({ onSelect, disabled = false }: Props) {
   const choose = async (index: number) => {
     if (disabled || sendingRef.current) return;
     setError(null);
-    if (index === 1 && capabilities.data?.generativeUi !== true) {
+    const suggestion = STARTER_SUGGESTIONS[index];
+    if (!suggestion) return;
+    if (
+      suggestion === INTERACTIVE_STARTER &&
+      capabilities.data?.generativeUi !== true
+    ) {
       setError(
         capabilities.isPending
           ? "Still checking whether interactive answers are available. Try again in a moment."
@@ -53,8 +62,6 @@ function StarterSuggestionChoices({ onSelect, disabled = false }: Props) {
       );
       return;
     }
-    const suggestion = STARTER_SUGGESTIONS[index];
-    if (!suggestion) return;
     sendingRef.current = true;
     setSending(true);
     try {
