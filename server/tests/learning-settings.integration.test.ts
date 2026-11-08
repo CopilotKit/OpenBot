@@ -155,7 +155,7 @@ describe("durable Learning settings", () => {
       enabled: true,
       autoApprove: true,
       defaultTarget: { containerId: "openbot", pinnedBy: "a-newer-build" },
-    };
+    } as never;
     await database
       .insert(learningSettings)
       .values({ id: "current", settings: newer })
@@ -171,7 +171,8 @@ describe("durable Learning settings", () => {
   });
 
   test("a row that cannot be read never fails a chat run: the run goes ahead without Learning", async () => {
-    const broken = { enabled: "yes", defaultTarget: 7, agents: [] };
+    // Not a settings shape at all, as a corrupted row would be: the column's type cannot say it.
+    const broken = { enabled: "yes", defaultTarget: 7, agents: [] } as never;
     await database
       .insert(learningSettings)
       .values({ id: "current", settings: broken })
