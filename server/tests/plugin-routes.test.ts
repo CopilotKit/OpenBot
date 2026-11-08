@@ -2413,9 +2413,18 @@ describe("connecting an app whose secret a person types", () => {
     const response = await connectFields();
 
     expect(response.status).toBe(200);
-    // The vendor's own list, passed through rather than restated: `help` is written for the person
-    // filling the box in, and nothing here is in a position to improve on it.
-    expect(await response.json()).toEqual({ fields: PUBLISHED });
+    /*
+     * The vendor's own list under the vendor's own names, with the one generic label ("Base URL")
+     * said in the person's words, and a guide saying where the key comes from. Firecrawl is in
+     * the maintained map, so the link is Firecrawl's own API keys page.
+     */
+    expect(await response.json()).toEqual({
+      fields: [PUBLISHED[0], { ...PUBLISHED[1], label: "Web address" }],
+      guide: {
+        steps: "Sign in to Firecrawl and copy your key from the API Keys page.",
+        url: "https://www.firecrawl.dev/app/api-keys",
+      },
+    });
     /*
      * ASKED WITH THE SCHEME RECORDED ON THE ROW, never one derived again here. A form drawn for
      * `BASIC` in front of a config created for `API_KEY` asks for boxes the person's app does not
@@ -2582,7 +2591,7 @@ describe("connecting an app whose secret a person types", () => {
       published: [],
     });
 
-    expect(await (await connectFields()).json()).toEqual({ fields: [] });
+    expect((await (await connectFields()).json()).fields).toEqual([]);
 
     const response = await connectFields({ values: {} });
 

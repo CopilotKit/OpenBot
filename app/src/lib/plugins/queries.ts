@@ -214,6 +214,14 @@ export type ComposioApp = {
   classifiedCount: number | null;
   permissionCount: number | null;
   scopedActionCount: number | null;
+  /**
+   * How a person connects the app, as the server decided it off the broker's catalogue. `fields`
+   * is the one that asks for a key typed in; every other kind is a sign-in, or nothing at all.
+   * The directory says so on the row before anybody adds the app.
+   */
+  connection: {
+    kind: "consent" | "self-registering" | "fields" | "no-auth" | "unsupported";
+  };
   enabled: boolean;
 };
 

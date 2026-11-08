@@ -765,6 +765,17 @@ export type ConnectedAppBroker = {
     authScheme: FieldScheme;
   }): Promise<BrokerField[]>;
   /**
+   * The provider's own page for making the key this app asks for, where the broker publishes one.
+   *
+   * Optional because only a broker with a typed-key flow has anything to say: Arcade has no
+   * per-person fields at all. Null where the broker published no link, which is most apps; the
+   * connect route then falls back to the map in `./key-guides`.
+   */
+  connectionGuideUrl?(request: {
+    toolkit: string;
+    authScheme: FieldScheme;
+  }): Promise<string | null>;
+  /**
    * Connect this person with the secret they typed, answering the account it made.
    *
    * THE ONE CALL WHOSE IMPLEMENTATION MUST RETHROW WITH NO `cause`, WHICH IS AN INVERSION OF THE
