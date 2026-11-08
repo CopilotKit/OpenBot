@@ -44,6 +44,7 @@ import {
 } from "@/lib/settings/message-list";
 import { BotsNavBadge } from "../bot-profile/attention";
 import { BrowserNavItem } from "../browser/browser-nav-item";
+import { OpenBotLogo } from "../edition/openbot-logo";
 import { navigationRender } from "../edition/team-features-dialog";
 import { OpenBotVersion } from "../layout/openbot-version";
 import { Button } from "../ui/button";
@@ -236,6 +237,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               className="font-semibold text-[14px] tracking-tighter h-full leading-tight"
               render={(props) => (
                 <Link {...appLinkOptions} {...props}>
+                  {/* OpenBot's mark beside its name, as on open.bot and the desktop app. A deployment that renames the
+                      product (brand.yaml) has no mark here: the orb is OpenBot's, not theirs. */}
+                  {appConfig.brand.productName === "OpenBot" ? (
+                    <OpenBotLogo
+                      aria-hidden="true"
+                      className="size-5 shrink-0"
+                    />
+                  ) : null}
                   {appConfig.brand.productName}
                 </Link>
               )}
