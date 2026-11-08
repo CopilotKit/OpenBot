@@ -76,6 +76,7 @@ import { foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { ToolPlaceContext } from "@/lib/copilot/tool-place";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
+  type FolderNames,
   FolderNamesContext,
   folderNamesIn,
   folderStepBody,
@@ -2039,13 +2040,25 @@ export function ChatTranscript({
   const rowIdsRef = useRef(new Map<string, string>());
   const visible = dropRepeatedAppCards(toVisibleChatItems(messages));
   const items = groupToolSteps(visible, isDrawn, rowIdsRef.current);
-  // The folders this conversation's "Check your folders" steps named, for its other folder steps.
-  const folders = folderNamesIn(
+  /*
+   * The folders this conversation's "Check your folders" steps named, for its other folder steps.
+   * The same map while the names are the same: a new one on every render is a new context value,
+   * and every finished tool row under it drew again while a reply streamed.
+   */
+  const foldersRef = useRef<{ key: string; names: FolderNames }>({
+    key: "",
+    names: new Map(),
+  });
+  const named = folderNamesIn(
     visible.filter(
       (item): item is Extract<typeof item, { kind: "tool" }> =>
         item.kind === "tool",
     ),
   );
+  const namedKey = JSON.stringify([...named]);
+  if (namedKey !== foldersRef.current.key)
+    foldersRef.current = { key: namedKey, names: named };
+  const folders = foldersRef.current.names;
 
   /*
    * ONLY WHILE THERE IS NOTHING ELSE TO LOOK AT. Once a reply starts streaming, or a tool line
