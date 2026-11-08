@@ -42,8 +42,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `app/src/components/gallery/cards.tsx` and `table.tsx`.
 - A notice card's supporting point that is itself a list is drawn as that list, without a stray dot
   and an extra indent beside it.
-- A long link in a card's text (a notice, a checklist, a quotation, an approval) wraps, where it ran
-  under the card's edge and lost its end.
+- A long link in a card's text (a notice, a checklist, a quotation, an approval, a choice's
+  options) wraps, where it ran under the card's edge and lost its end.
 - A choice card's summary is drawn as Markdown, as an approval's is, where it showed the raw
   markers, such as `**two**`.
 - A bar chart with many bars on a narrow screen cuts each figure to its bar's width, as it cuts the
