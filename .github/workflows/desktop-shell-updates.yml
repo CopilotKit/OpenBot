@@ -86,6 +86,17 @@ jobs:
       - name: Install native UI dependencies
         working-directory: desktop
         run: bun install --frozen-lockfile
+      # Tauri downloads NSIS (Windows) and AppRun and linuxdeploy (Linux) from GitHub the first
+      # time it bundles, once each and with no retry, and a 504 there fails the build. The same
+      # pinned, checksummed tools desktop-build.yml fetches, put where Tauri looks first. The Mac
+      # bundler downloads nothing.
+      - name: Fetch Tauri's bundling tools
+        if: matrix.platform.name == 'windows' || matrix.platform.name == 'linux'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLATFORM: ${{ matrix.platform.name }}
+        run: desktop/scripts/prefetch-tauri-tools.sh "$PLATFORM"
       - name: Build signed updater artifact
         run: bun desktop/scripts/build-shell-update.ts --bundles ${{ matrix.platform.bundle }}
       - name: Collect artifact, signature, and reviewed manifest fragment
