@@ -38,6 +38,7 @@ function report(overrides: Partial<LocalReport> = {}): LocalReport {
     readiness: "unknown",
     licence: "unknown",
     licenceExpiresAt: null,
+    checksPassed: false,
     ...overrides,
   };
 }

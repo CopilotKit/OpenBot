@@ -8,15 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-- Skills learned from a person's recordings can be reviewed in OpenBot. An admin chooses who approves
-  them under Admin → Automatic learning: admins, or each person for their own Bots, and a skill a
-  person approves reaches only their own Bots until an admin approves sharing it. Settings → Learning
-  shows what is waiting for review, and Teach a Bot lists your recordings, which needs the back end
-  at 0.16 with recordings switched on. In the personal edition, Settings → Learning is now there, and
-  it approves new skills automatically until you turn that off. See [Automatic Learning](docs/automatic-learning.md#reviewing-learned-skills).
-- A recording the Recorder cannot send yet no longer reads "Saving" on Teach a Bot for the half hour it
-  retries: the page says it wasn't saved yet, and why. Your recordings are listed by when you made them,
-  and one the Recorder sends later shows up in the list when it lands, without leaving the page.
+- OpenBot Desktop opens OpenBot when an update to its local back end does not finish. A back end
+  whose update stopped (on a slow connection, at the image download) still runs the release it had,
+  with every check passing; the window said it was not healthy and stopped OpenBot. It now says
+  which release the back end runs and that the update did not finish, and the person opens OpenBot
+  from there. The next Start tries the update again, including after Quit, where the back end used
+  to refuse to start until the update was resumed by hand. A back end whose checks fail is still
+  not healthy.
 - Windows lists OpenBot Desktop's publisher as CopilotKit in Settings > Apps and in Programs and
   Features, where it said "copilotkit".
 - OpenBot Personal's Settings, Browsers says recordings go to your own Learning space, with no organization.
@@ -35,6 +33,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - A Bot's "What it can do" (Skills and access) page draws each of your skills' switches from the
   Bot's own grants. A Bot made a moment ago in OpenBot Personal is given every skill the first time
   it is listed, and its switches showed off until the page was opened again.
+- Skills learned from a person's recordings can be reviewed in OpenBot. An admin chooses who approves
+  them under Admin → Automatic learning: admins, or each person for their own Bots, and a skill a
+  person approves reaches only their own Bots until an admin approves sharing it. Settings → Learning
+  shows what is waiting for review, and Teach a Bot lists your recordings, which needs the back end
+  at 0.16 with recordings switched on. In the personal edition, Settings → Learning is now there, and
+  it approves new skills automatically until you turn that off. See [Automatic Learning](docs/automatic-learning.md#reviewing-learned-skills).
+- A recording the Recorder cannot send yet no longer reads "Saving" on Teach a Bot for the half hour it
+  retries: the page says it wasn't saved yet, and why. Your recordings are listed by when you made them,
+  and one the Recorder sends later shows up in the list when it lands, without leaving the page.
 
 ## 0.3.3
 
