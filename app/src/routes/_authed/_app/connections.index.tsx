@@ -191,13 +191,36 @@ export const AUTHORIZATION_NOTICES: ReadonlyMap<string, string> = new Map([
   ],
 ]);
 
+/**
+ * The personal edition's words for the codes whose team sentence sends somebody to an admin. It has
+ * one person and no admin: they set connecting apps up themselves (Settings, Setup), and nobody else
+ * changes what they can reach. Every other code reads the same in both editions.
+ */
+export const PERSONAL_AUTHORIZATION_NOTICES: ReadonlyMap<string, string> =
+  new Map([
+    [
+      "no-broker",
+      "Connecting apps isn't set up yet, so nothing was recorded. Set it up in Settings under Setup.",
+    ],
+    [
+      "not-permitted",
+      "You can't connect that app's account anymore, so nothing was recorded. The app's setup changed while the authorization was open. Start again from the app's page.",
+    ],
+    [
+      "not-recorded",
+      "Couldn't record that authorization, so nothing was saved. Start again from the app's page, or check OpenBot's logs if it keeps happening.",
+    ],
+  ]);
+
 /** The sentence for a code the verifier sent back, or null for one this build does not know. */
 export function authorizationNoticeFor(
   authorized: string | undefined,
+  edition: "team" | "personal" = "team",
 ): string | null {
-  return authorized
-    ? (keyedLookup(AUTHORIZATION_NOTICES, authorized) ?? null)
-    : null;
+  if (!authorized) return null;
+  const team = keyedLookup(AUTHORIZATION_NOTICES, authorized) ?? null;
+  if (team === null || edition !== "personal") return team;
+  return keyedLookup(PERSONAL_AUTHORIZATION_NOTICES, authorized) ?? team;
 }
 
 /** The same marks the admin connector list uses: these are the same vendors seen from your side. */
@@ -235,9 +258,13 @@ function RouteComponent() {
    * sentence outlives the URL it arrived in. That is what `?linked=` was already doing, and the
    * other two now do it for the same reason rather than by accident.
    */
+  /*
+   * The verifier's CODE is what is held, not its sentence: the sentence depends on the edition, and
+   * the edition may not have been read yet on the first render.
+   */
   const [arrival] = React.useState(() => ({
     outcome,
-    authorizationNotice: authorizationNoticeFor(authorized),
+    authorized,
     linked: linkedNotice(linked),
   }));
   /* The same cached list the Linked accounts section reads, so a Disconnect there retracts a success here. */
@@ -327,6 +354,10 @@ function RouteComponent() {
     paths.edition,
   );
   const browse = personal && moreApps.linked ? moreApps : null;
+  const authorizationNotice = authorizationNoticeFor(
+    arrival.authorized,
+    paths.edition,
+  );
   /*
    * Apps that need a key or an OAuth client typed first stay out of the personal grid until asked
    * for, or searched for by name. See `personalConnectionRows`.
@@ -408,9 +439,9 @@ function RouteComponent() {
        * because three of its refusals have no app to name, and a notice that sometimes appears one
        * level in and sometimes here would be a notice people learn to look for in two places.
        */}
-      {arrival.authorizationNotice ? (
+      {authorizationNotice ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {arrival.authorizationNotice}
+          {authorizationNotice}
         </p>
       ) : null}
       {connectApp.error ? (
