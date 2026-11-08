@@ -19,6 +19,7 @@ import {
   runLocalEval,
   setUpLocalEval,
   signInToCopilotKit,
+  wakeEngine,
 } from "./localEvalCli";
 import { localReadiness, onInstalledReleaseSaid } from "./localReadiness";
 import { asProblem, Failure, type Problem } from "./Problem";
@@ -477,11 +478,36 @@ export function useLocalSequence({
           : {}),
       });
     };
+    /*
+     * The engine first. Every CLI call below needs it, and a relaunch after a restart finds Docker
+     * Desktop quit or OpenBot's Podman machine stopped. Without this the CLI answered
+     * "docker-unavailable" and the sequence stopped at "Waiting for the back end", before Start,
+     * which is where the engine used to be woken. The screen says Docker's hand-off meanwhile (see
+     * `handOffNow`), and OpenBot comes back to the front once Docker answers. Start wakes the
+     * engine again itself, so a run that only starts OpenBot skips this.
+     */
+    const began = Date.now();
+    if (from !== "start") {
+      update({ at: from, running: true, since: began });
+      try {
+        await wakeEngine(root);
+      } catch (error) {
+        if (generation.current !== token) return;
+        update({ problem: asProblem(error) });
+        return stop();
+      }
+      if (generation.current !== token) return;
+    }
     for (const [phase] of PHASES.slice(PHASES.findIndex(([p]) => p === from))) {
       if (generation.current !== token) return;
       // Ready, and waiting for the go-ahead.
       if (phase === "start" && !go.current) return stop();
-      update({ at: phase, running: true, since: Date.now() });
+      // The first row keeps the time the engine took, so its elapsed time does not start over.
+      update({
+        at: phase,
+        running: true,
+        since: phase === from ? began : Date.now(),
+      });
       if (phase === "setup") {
         const carried = accepted.current;
         const started = setUpLocalEval(root, carried);
@@ -651,15 +677,19 @@ export function useLocalSequence({
 export function LocalIntelligence({
   sequence,
   offerStart = false,
+  handOff = null,
 }: {
   sequence: LocalSequence;
   offerStart?: boolean;
+  /** What Docker Desktop's window may want while the engine wakes: see `handOffNow`. */
+  handOff?: string | null;
 }) {
   const { at, running, stopped, problem } = sequence;
 
   return (
     <section aria-label="Back end on this computer">
       <SetupProgress steps={sequence.steps} />
+      {handOff && <StatusLine>{handOff}</StatusLine>}
       <LocalNeeds sequence={sequence} />
       {stopped && problem && <Failure problem={problem} />}
       <div className="row">

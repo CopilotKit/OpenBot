@@ -347,6 +347,94 @@ fn wake_saved_engine(
     }
 }
 
+/// `wake_saved_engine` on this machine, each line said on the setup window's rows. Opening Docker
+/// Desktop says the hand-off and brings OpenBot back once Docker answers: see
+/// `docker_desktop::start`.
+async fn wake_installation_engine<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    saved: Option<engine::Engine>,
+) -> Result<(), Problem> {
+    let progress_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        wake_saved_engine(
+            saved,
+            cfg!(any(target_os = "macos", target_os = "windows")),
+            || engine::detect_saved(saved).responding,
+            || {
+                let mut said = false;
+                let started = openbot_desktop_lib::docker_desktop::start_saved(
+                    &mut |line| {
+                        said = true;
+                        report_running_line(&progress_app, "engine", line, None)
+                    },
+                    &|| bring_to_front(&progress_app, "Docker Desktop answers"),
+                );
+                // The row that said the hand-off ends, so the window stops saying it.
+                if said {
+                    match &started {
+                        Ok(()) => {
+                            report(&progress_app, "engine", true, "Docker Desktop is running.")
+                        }
+                        Err(problem) => {
+                            report(&progress_app, "engine", false, problem.said.clone())
+                        }
+                    }
+                }
+                started
+            },
+            || acquire::machine_exists().unwrap_or(false),
+            || {
+                report_running(
+                    &progress_app,
+                    "start-machine",
+                    "Starting the engine machine.",
+                    None,
+                );
+                let started = acquire::start_machine();
+                report(
+                    &progress_app,
+                    "start-machine",
+                    started.ok,
+                    started.said.clone(),
+                );
+                if started.ok {
+                    Ok(())
+                } else {
+                    Err(started.problem())
+                }
+            },
+        )
+    })
+    .await
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot could not start the software it runs on. Try again.",
+            error.to_string(),
+        )
+    })?
+}
+
+/**
+The installation's engine, brought up before the back end is set up, connected or waited on.
+
+A relaunch after a restart finds Docker Desktop quit, or OpenBot's Podman machine stopped, and every
+Intelligence CLI call needs the engine. The window's relaunch sequence starts with the CLI, so
+before this, the CLI answered "docker-unavailable" and setup stopped at "Waiting for the back end",
+never reaching Start, which is where the engine used to be woken. Nothing is done while OpenBot's
+own containers are up, or when the engine already answers.
+*/
+#[tauri::command]
+async fn wake_engine(app: tauri::AppHandle, root: String) -> Result<(), Problem> {
+    let root = stack::root_from(&root);
+    if app.state::<Shell>().containers.lock().unwrap().is_some() {
+        return Ok(());
+    }
+    let asked = std::time::Instant::now();
+    let woken = wake_installation_engine(&app, preparation::saved_engine(&root)).await;
+    logging::outcome("wake engine", asked, &woken);
+    woken
+}
+
 /// Return a responding engine only after Compose is present too.
 fn ready_responding_engine_after_compose_repair(
     found: engine::EngineStatus,
@@ -2561,48 +2649,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
     let saved = preparation::saved_engine(&root);
     let owned = shell.containers.lock().unwrap().is_some();
     if !owned {
-        let progress_app = app.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            wake_saved_engine(
-                saved,
-                cfg!(any(target_os = "macos", target_os = "windows")),
-                || engine::detect_saved(saved).responding,
-                || {
-                    openbot_desktop_lib::docker_desktop::start_saved(
-                        &mut |line| report_running_line(&progress_app, "engine", line, None),
-                        &|| bring_to_front(&progress_app, "Docker Desktop answers"),
-                    )
-                },
-                || acquire::machine_exists().unwrap_or(false),
-                || {
-                    report_running(
-                        &progress_app,
-                        "start-machine",
-                        "Starting the engine machine.",
-                        None,
-                    );
-                    let started = acquire::start_machine();
-                    report(
-                        &progress_app,
-                        "start-machine",
-                        started.ok,
-                        started.said.clone(),
-                    );
-                    if started.ok {
-                        Ok(())
-                    } else {
-                        Err(started.problem())
-                    }
-                },
-            )
-        })
-        .await
-        .map_err(|error| {
-            Problem::with(
-                "OpenBot could not start the software it runs on. Try again.",
-                error.to_string(),
-            )
-        })??;
+        wake_installation_engine(&app, saved).await?;
         attempt.require_current()?;
     }
 
@@ -7665,6 +7712,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             record_setup_event,
             bring_setup_to_front,
+            wake_engine,
             fit_setup_window,
             detect_engine,
             windows_blocker,

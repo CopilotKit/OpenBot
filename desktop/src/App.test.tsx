@@ -1534,6 +1534,121 @@ test("relaunch starts a connected local stack that reports ready and valid", asy
   expect(view.getByRole("button", { name: "Start OpenBot" })).toBeTruthy();
 });
 
+const DOCKER_DID_NOT_START = {
+  said: "Docker Desktop didn't start. Open it and finish anything it shows, then try again.",
+};
+
+/**
+ * The engine as the CLI sees it: stopped until `wake_engine` opens Docker Desktop. Each wake
+ * waits on `docker.wake`, which the test settles with nothing (Docker answers) or a `Problem`.
+ * The native side's progress lines are emitted by the test, as `docker_desktop::start` says them.
+ */
+function withDockerQuit() {
+  const docker = {
+    running: false,
+    wakes: 0,
+    wake: deferred<unknown>(),
+  };
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "wake_engine") {
+      docker.wakes += 1;
+      const refused = await docker.wake.promise;
+      if (refused) throw refused;
+      docker.running = true;
+      return null;
+    }
+    if (
+      ["set_up_local_eval", "connect_local_eval", "run_local_eval"].includes(
+        command,
+      ) &&
+      !docker.running
+    ) {
+      return {
+        ...localStatus("unknown", "unknown"),
+        outcome: "blocked",
+        stack: null,
+        reason: "docker-unavailable",
+      };
+    }
+    return previous(command, args);
+  };
+  return docker;
+}
+
+test("relaunch with Docker Desktop quit opens it, says so, and starts once it answers", async () => {
+  // Live Mac check of #1295: after a reboot Docker Desktop was not running. The relaunch went
+  // straight to the CLI, which answered "docker-unavailable", and stopped at "Waiting for the back
+  // end" without ever opening Docker. Start, which opens it, was never reached.
+  setupConnectedLocalStack(
+    "/tmp/local-eval-docker-quit",
+    localStatus("ready", "valid"),
+  );
+  const docker = withDockerQuit();
+  const view = await renderApp();
+  // Docker is opened first, before any CLI call, and the screen says what to do.
+  await waitFor(() => expect(docker.wakes).toBe(1));
+  await view.findByRole("heading", { name: "Starting OpenBot" });
+  await emitDockerHandOff();
+  expectWorking(view, DOCKER_HAND_OFF);
+  const row = view.getByRole("listitem", { name: "Waiting for the back end" });
+  expect(row.textContent).toContain("In progress");
+  expect(localSequence()).toEqual([]);
+  // Docker answers: the hand-off goes, and the back end and OpenBot start.
+  await emitDockerSettled(true, "Docker Desktop is running.");
+  await act(async () => docker.wake.resolve(null));
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  expect(view.queryByText(DOCKER_HAND_OFF)).toBeNull();
+  expect(localSequence()).toEqual([
+    "run_local_eval",
+    "start_stack",
+    "show_openbot",
+  ]);
+  expect(
+    view.queryByText(
+      "The back end cannot start until the software it runs on is running.",
+    ),
+  ).toBeNull();
+});
+
+test("relaunch says when Docker Desktop did not start, and Retry opens it again", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-docker-never",
+    localStatus("ready", "valid"),
+  );
+  const docker = withDockerQuit();
+  const view = await renderApp();
+  await waitFor(() => expect(docker.wakes).toBe(1));
+  await emitDockerHandOff();
+  await emitDockerSettled(false, DOCKER_DID_NOT_START.said);
+  await act(async () => docker.wake.resolve(DOCKER_DID_NOT_START));
+  await view.findByText(DOCKER_DID_NOT_START.said);
+  expect(view.queryByText(DOCKER_HAND_OFF)).toBeNull();
+  expect(localSequence()).toEqual([]);
+  // Retry opens Docker Desktop again, and this time it answers.
+  docker.wake = deferred<unknown>();
+  await userEvent.click(view.getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(docker.wakes).toBe(2));
+  await act(async () => docker.wake.resolve(null));
+  await view.findByRole("heading", { name: "OpenBot is running" });
+});
+
+/** What `docker_desktop::start` says as it opens Docker Desktop. */
+async function emitDockerHandOff() {
+  await emitProgress({
+    step: "engine",
+    ok: true,
+    running: true,
+    elsewhere: true,
+    detail: DOCKER_HAND_OFF,
+  });
+}
+
+/** The engine row ending once Docker answers or is given up on. */
+async function emitDockerSettled(ok: boolean, detail: string) {
+  await emitProgress({ step: "engine", ok, running: false, detail });
+}
+
 /** Start finds the installation on an older release than this app, and `upgrade_and_start` answers. */
 function withOlderDeployment(outcome: unknown) {
   const previous = invokeHandler;
@@ -2999,6 +3114,9 @@ function setupRootConfiguration(
     if (command === "start_stack") return null;
     if (command === "show_openbot") return null;
     if (command === "connect_intelligence_apps") return null;
+    // The engine already answers, unless a test says otherwise.
+    if (command === "wake_engine") return null;
+    if (command === "bring_setup_to_front") return null;
     throw new Error(`unexpected command ${command}`);
   };
 }
@@ -3167,6 +3285,7 @@ function useCompatibleEndpointSetup(
     }
     if (command === "start_stack") return null;
     if (command === "show_openbot") return null;
+    if (command === "wake_engine") return null;
     throw new Error(`unexpected command ${command}`);
   };
   withLocalCli(readyLocal());

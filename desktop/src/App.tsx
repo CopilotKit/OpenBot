@@ -921,6 +921,8 @@ function Setup() {
         )
     : undefined;
   const updatingLine = updating && <StatusLine>{updating.detail}</StatusLine>;
+  // Docker Desktop opened before the back end starts, as after a restart: said under the rows.
+  const handOff = handOffNow(steps);
 
   if (!running && returningToInstallation && !refreshIntelligence) {
     return (
@@ -932,7 +934,7 @@ function Setup() {
               ? "Starting the back end first, then the rest of OpenBot."
               : "Your installation and saved connections are ready to reopen."}
           </p>
-          <LocalIntelligence sequence={local} offerStart />
+          <LocalIntelligence sequence={local} offerStart handOff={handOff} />
           {updatingLine}
           {displayedFailure && <Failure problem={displayedFailure} />}
           {/* While a local step runs, its Cancel is the only control. */}
@@ -1006,7 +1008,7 @@ function Setup() {
             OpenBot is setting up on this computer and starts by itself when
             it’s ready. This can take a few minutes.
           </p>
-          <LocalIntelligence sequence={local} offerStart />
+          <LocalIntelligence sequence={local} offerStart handOff={handOff} />
           {updatingLine}
           {/* Leftover data is a choice, offered above, not a failure to report here. */}
           {displayedFailure && leftoverVolumes.length === 0 && (

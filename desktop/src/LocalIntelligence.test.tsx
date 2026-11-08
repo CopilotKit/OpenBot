@@ -17,6 +17,9 @@ let invokeHandler: Invoke = async () => {
 
 mock.module("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => {
+    // The engine already answers here: these tests are about the CLI calls after it. Waking a
+    // stopped engine is App.test.tsx's "relaunch with Docker Desktop quit".
+    if (command === "wake_engine") return Promise.resolve(null);
     invokeCalls.push({ command, args });
     return invokeHandler(command, args);
   },

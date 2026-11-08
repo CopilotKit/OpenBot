@@ -347,6 +347,16 @@ export function connectLocalEval(root: string): {
   return { attempt, connection };
 }
 
+/**
+ * The installation's engine answering before any CLI call: Docker Desktop opened, or OpenBot's
+ * Podman machine started, when either is stopped. What the native side says meanwhile, such as
+ * Docker's hand-off, arrives as setup progress (see `handOffNow`). Rejects with a `Problem` when
+ * the engine would not start.
+ */
+export async function wakeEngine(root: string): Promise<void> {
+  await invoke("wake_engine", { root });
+}
+
 /** Whether the OpenBot app's page may offer the back end dashboard for `root`. */
 export function offerLocalIntelligence(
   root: string,
