@@ -28,8 +28,9 @@ function harness() {
   const store = {
     syncCatalogue: async (entries: CatalogueEntry[]) => {
       published.push(...entries);
-      return { added: entries.map((entry) => entry.name), refreshed: [] };
+      return { added: entries.map((entry) => entry.name) };
     },
+    followBuild: async () => [],
   } as unknown as ComponentStore;
 
   const app = new Hono().route(
