@@ -39,7 +39,7 @@ jobs:
         run: |
           failed=0; passed=0
           for i in $(seq 1 50); do
-            bun test tests/person-browser.test.ts -t "Desktop: installed Google Chrome, headless here > there is one browser" > run.log 2>&1 || true
+            bun test tests/person-browser.test.ts -t "Desktop: installed.*there is one browser" > run.log 2>&1 || true
             if grep -q "(pass) Desktop: installed Google Chrome, headless here > there is one browser" run.log; then
               passed=$((passed + 1))
             elif grep -q "(fail) Desktop: installed Google Chrome, headless here > there is one browser" run.log; then
