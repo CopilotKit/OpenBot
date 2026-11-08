@@ -8,7 +8,7 @@ import {
 } from "../src/memory/ingestion";
 import { createMemoryRoutes } from "../src/memory/routes";
 import type { MemoryStore } from "../src/memory/store";
-import { memoryTools } from "../src/memory/tools";
+import { memoryTools, offeredMemoryTools } from "../src/memory/tools";
 import {
   parseMemoryInput,
   parseMemoryPatch,
@@ -140,6 +140,23 @@ test("every memory tool can be offered to a remote Bot as JSON Schema", async ()
       agentId: "bot",
       sourceRef: null,
     },
+  ]);
+});
+
+test("a Bot in the personal edition is offered no memory tools, and in the team edition all four", () => {
+  // OpenBot Desktop's local Intelligence isn't licensed for memory, and its screens show none.
+  const options = {
+    store: {} as MemoryStore,
+    ingestion: {} as MemoryIngestion,
+    ownerUserId: "u1",
+    agentId: "bot",
+  };
+  expect(offeredMemoryTools("personal", options)).toEqual([]);
+  expect(offeredMemoryTools("team", options).map((tool) => tool.name)).toEqual([
+    "recall_personal_memory",
+    "remember_personal_fact",
+    "save_observed_memory",
+    "forget_personal_memory",
   ]);
 });
 

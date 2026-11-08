@@ -216,7 +216,7 @@ import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
 import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
-import { memoryTools } from "./memory/tools";
+import { offeredMemoryTools } from "./memory/tools";
 import { reportModelAvailability } from "./model-availability-check";
 import { createModelCatalogue } from "./model-catalogue";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
@@ -1693,7 +1693,7 @@ const loadToolsForActor =
       agentId: botId,
       initiator,
     }),
-    ...memoryTools({
+    ...offeredMemoryTools(config.edition, {
       store: personalMemoryStore,
       ingestion: memoryIngestion,
       ownerUserId: actorId,
@@ -2936,7 +2936,7 @@ const app = createApp(
       return { text, isError: text.startsWith(REFUSAL_MARKER) };
     }
     const { name, args, botId, actorId, initiator } = input;
-    const memory = memoryTools({
+    const memory = offeredMemoryTools(config.edition, {
       store: personalMemoryStore,
       ingestion: memoryIngestion,
       ownerUserId: actorId,

@@ -10,6 +10,10 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Switch } from "@/components/ui/switch";
+import {
+  deploymentCapabilitiesQueryOptions,
+  offersMemory,
+} from "@/lib/deployment/queries";
 import { proactiveAllowedQueryOptions } from "@/lib/proactive";
 import {
   saveUserPreferencesMutationOptions,
@@ -28,6 +32,12 @@ import { queryClient } from "@/query-client";
 export function CheckInsSection() {
   const preferences = useUserPreferences();
   const allowed = useQuery(proactiveAllowedQueryOptions());
+  // Each Bot's own check-ins are on its Memory page, or on What it can do where there is no memory.
+  const botPage = offersMemory(
+    useQuery(deploymentCapabilitiesQueryOptions()).data,
+  )
+    ? "Memory"
+    : "What it can do";
   const save = useMutation(
     saveUserPreferencesMutationOptions(queryClient, preferences.userId),
   );
@@ -58,7 +68,7 @@ export function CheckInsSection() {
                 {byAdmin
                   ? "Turned off by your admin."
                   : on
-                    ? "On. Each Bot's own check-ins are on its Memory page."
+                    ? `On. Each Bot's own check-ins are on its ${botPage} page.`
                     : "Off. None of your Bots check in for you."}
               </ItemDescription>
             </ItemContent>
