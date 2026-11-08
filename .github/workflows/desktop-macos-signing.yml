@@ -109,7 +109,8 @@ jobs:
       # downloads.copilotkit.ai
       # serving only the Latest stable release's signed installers. And every signed build carries
       # the Intelligence CLI, its Mac binaries signed for notarization: an app without it cannot set
-      # up Intelligence, and the updater would put it on every Mac.
+      # up Intelligence, and the updater would put it on every Mac. And each Mac app, the Intel one
+      # built on this Apple silicon runner included, is its own architecture all the way down.
       - name: Signed release regressions
         env:
           OPENBOT_REQUIRE_MINISIGN: "1"
@@ -119,6 +120,7 @@ jobs:
           scripts/sign-windows-update.test.ts
           ../scripts/release-latest.test.ts ../scripts/release-download-names.test.ts
           ../scripts/downloads-sync.test.ts scripts/release-cli-bundle.test.ts
+          scripts/verify-mac-arch.test.ts
         working-directory: desktop
       - name: Importing the Developer ID intermediate twice succeeds
         # The first real signing run stopped here: the .p12 already carried the intermediate, and a
@@ -131,7 +133,7 @@ jobs:
           desktop/scripts/import-developer-id-intermediate.sh "$keychain"
           desktop/scripts/import-developer-id-intermediate.sh "$keychain"
           security find-certificate -c "Developer ID Certification Authority" "$keychain" > /dev/null
-      - name: Stapling retries a dropped connection and still fails a missing ticket
+      - name: Stapling and validating retry a dropped connection and still fail a missing ticket
         # The first real signing run had Apple accept the Intel image, then lost the connection
         # while stapling and failed the job. A stand-in for xcrun fails twice, then succeeds.
         run: |
@@ -148,11 +150,26 @@ jobs:
           chmod +x "$fake"
           XCRUN="$fake" STAPLE_RETRY_DELAY=0 desktop/scripts/staple-with-retry.sh image.dmg 5
           test "$(cat "$STAPLE_CALLS")" = 3
+          # Validating retries the same way: a dry run lost CloudKit's connection mid-validate.
+          printf '0' > "$STAPLE_CALLS"
+          cat > "$fake" <<'FAKE'
+          #!/usr/bin/env bash
+          [ "$1 $2" = "stapler validate" ] || exit 9
+          n=$(( $(cat "$STAPLE_CALLS") + 1 ))
+          printf '%s' "$n" > "$STAPLE_CALLS"
+          [ "$n" -ge 2 ]
+          FAKE
+          STAPLER_ACTION=validate XCRUN="$fake" STAPLE_RETRY_DELAY=0 \
+            desktop/scripts/staple-with-retry.sh OpenBot.app 5
+          test "$(cat "$STAPLE_CALLS")" = 2
           printf '#!/usr/bin/env bash\nexit 1\n' > "$fake"
-          if XCRUN="$fake" STAPLE_RETRY_DELAY=0 desktop/scripts/staple-with-retry.sh image.dmg 3; then
-            echo "A ticket that never arrives must fail the job." >&2
-            exit 1
-          fi
+          for action in staple validate; do
+            if STAPLER_ACTION="$action" XCRUN="$fake" STAPLE_RETRY_DELAY=0 \
+              desktop/scripts/staple-with-retry.sh image.dmg 3; then
+              echo "A ticket that never arrives must fail the job." >&2
+              exit 1
+            fi
+          done
       - name: Check the updater is wired together
         run: |
           set -euo pipefail
@@ -198,10 +215,12 @@ jobs:
           fi
           echo 'Updater wiring is consistent across Cargo.toml, main.rs, the capability and both signing overlays.'
 
-  # One native runner per architecture, for the same reason `publish-release.yml` builds its images
-  # that way: the machines installing this are laptops of both kinds, and a cross build is a thing
-  # nobody has run. Each produces its own signed, notarized, stapled .app and .dmg, and, for a build
-  # that is not pinned, the updater archive.
+  # Both architectures on the Apple silicon runner, the Intel one built for `x86_64-apple-darwin` as
+  # Tauri documents (signed-build.ts names the target, and assembles the CLI and its Node runtime for
+  # it). The Intel runner took twice as long for the same build. Each produces its own signed,
+  # notarized, stapled .app and .dmg, and, for a build that is not pinned, the updater archive, and
+  # each is checked to be its own architecture all the way down (verify-mac-arch.sh), so an Intel
+  # app with an Apple silicon binary in it never ships.
   sign:
     name: Sign and notarize (${{ matrix.platform.target }})
     needs: checks
@@ -218,11 +237,18 @@ jobs:
           - runner: macos-15
             target: darwin-aarch64
             arch: arm64
-          - runner: macos-15-intel
+            rust-target: aarch64-apple-darwin
+            lipo-arch: arm64
+          - runner: macos-15
             target: darwin-x86_64
             arch: x64
+            rust-target: x86_64-apple-darwin
+            lipo-arch: x86_64
     env:
       SIGNING_SOURCE_SHA: ${{ github.sha }}
+      # Where Tauri leaves a build that names its Rust target, as signed-build.ts makes every Mac
+      # build do.
+      BUNDLE: desktop/src-tauri/target/${{ matrix.platform.rust-target }}/release/bundle
     steps:
       # The whole history: an internal build is numbered by its commit count (desktop-version.ts).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -307,9 +333,12 @@ jobs:
           no-cache: true
       # No caches in this job, Rust or Bun: it runs on release tags, and a signed, notarized build
       # must come from the tree and the lockfiles, not from anything an earlier run left behind.
+      # The standard library for the architecture this job builds, which on the Apple silicon
+      # runner is a second target for the Intel build.
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
+          targets: ${{ matrix.platform.rust-target }}
       - run: bun install --frozen-lockfile
         working-directory: desktop
       - run: bun run typecheck
@@ -356,7 +385,7 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
         run: |
           set -euo pipefail
-          images=(desktop/src-tauri/target/release/bundle/dmg/*.dmg)
+          images=("$BUNDLE"/dmg/*.dmg)
           test "${#images[@]}" -eq 1
           xcrun notarytool submit "${images[0]}" \
             --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
@@ -367,17 +396,18 @@ jobs:
       - name: Verify the signature, Gatekeeper and the notarization ticket
         run: |
           set -euo pipefail
-          app=desktop/src-tauri/target/release/bundle/macos/OpenBot.app
-          images=(desktop/src-tauri/target/release/bundle/dmg/*.dmg)
+          app="$BUNDLE/macos/OpenBot.app"
+          images=("$BUNDLE"/dmg/*.dmg)
 
-          # What the RED case fails. An ad-hoc build passes none of these three.
+          # What the RED case fails. An ad-hoc build passes none of these three. Validating the
+          # ticket asks Apple's CloudKit, and retries a dropped connection (see the script).
           codesign --verify --deep --strict --verbose=2 "$app"
           spctl -a -t exec -vv "$app"
-          xcrun stapler validate "$app"
+          STAPLER_ACTION=validate desktop/scripts/staple-with-retry.sh "$app"
 
           codesign --verify --strict --verbose=2 "${images[0]}"
           spctl -a -t open --context context:primary-signature -vv "${images[0]}"
-          xcrun stapler validate "${images[0]}"
+          STAPLER_ACTION=validate desktop/scripts/staple-with-retry.sh "${images[0]}"
 
           # Hardened runtime is what notarization requires and what the Entitlements.plist assumes;
           # a build that lost the flag is notarized today and rejected by the next macOS.
@@ -390,7 +420,23 @@ jobs:
 
           # The CLI is in the app, and every Mach-O in it is ours, hardened and timestamped.
           desktop/scripts/verify-cli-bundle.sh "$app" developer-id
-      # Named by architecture because both runners produce `OpenBot.app.tar.gz`, and latest.json
+      # Every Mach-O in the app, the bundled Node and the CLI's native modules included, is built for
+      # this job's architecture, and the image holds that same app. The Intel build is made on an
+      # Apple silicon runner, so this is what proves it is an Intel app.
+      - name: Verify the app is built for its architecture
+        env:
+          LIPO_ARCH: ${{ matrix.platform.lipo-arch }}
+        run: |
+          set -euo pipefail
+          ROSETTA_CHECK=1 desktop/scripts/verify-mac-arch.sh "$BUNDLE/macos/OpenBot.app" "$LIPO_ARCH"
+          images=("$BUNDLE"/dmg/*.dmg)
+          mount="$RUNNER_TEMP/openbot-arch-check"
+          mkdir -p "$mount"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount" "${images[0]}"
+          trap 'hdiutil detach "$mount"' EXIT
+          desktop/scripts/verify-mac-arch.sh "$mount/OpenBot.app" "$LIPO_ARCH"
+          codesign --verify --deep --strict --verbose=2 "$mount/OpenBot.app"
+      # Named by architecture because both builds produce `OpenBot.app.tar.gz`, and latest.json
       # points at one URL per platform. A pinned build made no updater archive.
       - name: Collect the artifacts
         env:
@@ -399,13 +445,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p signed
-          cp desktop/src-tauri/target/release/bundle/dmg/*.dmg signed/
+          cp "$BUNDLE"/dmg/*.dmg signed/
           if [ "$UPDATER" = true ]; then
-            cp "desktop/src-tauri/target/release/bundle/macos/OpenBot.app.tar.gz" \
-              "signed/OpenBot-$TARGET.app.tar.gz"
-            cp "desktop/src-tauri/target/release/bundle/macos/OpenBot.app.tar.gz.sig" \
-              "signed/OpenBot-$TARGET.app.tar.gz.sig"
-          elif [ -e desktop/src-tauri/target/release/bundle/macos/OpenBot.app.tar.gz ]; then
+            cp "$BUNDLE/macos/OpenBot.app.tar.gz" "signed/OpenBot-$TARGET.app.tar.gz"
+            cp "$BUNDLE/macos/OpenBot.app.tar.gz.sig" "signed/OpenBot-$TARGET.app.tar.gz.sig"
+          elif [ -e "$BUNDLE/macos/OpenBot.app.tar.gz" ]; then
             echo '::error::A build with no updater made an updater archive.'
             exit 1
           fi

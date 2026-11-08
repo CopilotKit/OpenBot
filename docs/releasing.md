@@ -82,8 +82,11 @@ ones people install, and [Windows signing](windows-signing.md) for signed NSIS b
 
 [Desktop macOS signing](../.github/workflows/desktop-macos-signing.yml) builds OpenBot with the
 Developer ID certificate, notarizes and staples both the `.app` and the `.dmg`, and produces the
-archive the in-app updater installs. It runs one native runner per architecture (`macos-15` for
-Apple silicon, `macos-15-intel` for Intel) and fails unless each build passes all three of:
+archive the in-app updater installs. It builds both architectures on the Apple silicon runner
+(`macos-15`), one job each, the Intel one for the Rust target `x86_64-apple-darwin` as
+[Tauri documents](https://v2.tauri.app/distribute/pipelines/github/). The Intel runner it used
+before took 22 minutes for what `macos-15` builds in 12. It fails unless each build passes all three
+of:
 
 ```sh
 codesign --verify --deep --strict --verbose=2 OpenBot.app
@@ -93,15 +96,25 @@ xcrun stapler validate OpenBot.app
 
 An ad-hoc build fails every one of them, which is why it needs "Open Anyway".
 
+Each build also has to be its own architecture all the way down.
+[`desktop/scripts/verify-mac-arch.sh`](../desktop/scripts/verify-mac-arch.sh) runs `lipo -archs` on
+every Mach-O file in the app and in the app inside the `.dmg`: the app itself, its frameworks, the
+bundled Node and every native module of the Intelligence CLI. Each must carry the job's
+architecture. The one exception is a package that ships a copy per architecture and picks one at run
+time, such as `@azure/msal-node-runtime`'s `dist/macos/arm64/` beside `dist/macos/x64/`: the other
+architecture's copy is accepted when this one's is beside it. On the Intel build it also starts the
+bundled Node under Rosetta once, to show it runs.
+
 When it runs:
 
 - pull requests and pushes to `main` that touch the desktop run only **Updater regressions
   (no Apple access)**. It holds no secrets.
-- every release starts it. After `publish-release.yml` creates the tag and the release, it
-  dispatches this workflow on the tag with `signing-mode: developer-id` and `release-tag` set to
-  that version. The tag alone would not start it, because GitHub starts no workflow from a push
-  made with `GITHUB_TOKEN`; a `workflow_dispatch` is the exception. The run still waits for a
-  required reviewer of the `macos-signing` environment to approve it.
+- every release starts it. As soon as `publish-release.yml` has created the tag and the release,
+  right after the images, it dispatches this workflow on the tag with `signing-mode: developer-id`
+  and `release-tag` set to that version, so signing builds while the rest of the publish run
+  finishes. The tag alone would not start it, because GitHub starts no workflow from a push made
+  with `GITHUB_TOKEN`; a `workflow_dispatch` is the exception. The run still waits for a required
+  reviewer of the `macos-signing` environment to approve it.
 - **Actions → Desktop macOS signing → Run workflow** with `signing-mode: developer-id` signs any
   ref and keeps the results as Actions artifacts for 14 days. Set `release-tag` to an existing
   release, e.g. `v0.2.1`, to also attach the `.dmg` files, the updater archives and their `.sig`
@@ -112,21 +125,25 @@ When it runs:
 - a `v*` tag pushed by a person starts it too. That tag is not a release: see
   [Cutting one](#cutting-one).
 
-Each signed `.dmg` is attached twice: under the name Tauri gives it, which replaces the ad-hoc
+Each signed `.dmg` is attached twice: under the name Tauri gives it, replacing a candidate's ad-hoc
 `.dmg` of the same name, and under its [fixed download name](#download-links). Both are attached
 before the release can become Latest.
 
 Signing imports the certificate into a temporary keychain made for the run, and always deletes
 that keychain afterwards, even when an earlier step failed.
 
-A release is signed as the same product its ad-hoc installer was.
-[`desktop/scripts/signed-build.ts`](../desktop/scripts/signed-build.ts) builds the signed app:
+[`desktop/scripts/signed-build.ts`](../desktop/scripts/signed-build.ts) builds the signed app, the
+same product a candidate's ad-hoc installer is:
 
 - a candidate or beta is pinned to its release's own `container-images.json`, as its ad-hoc
   installer is, and refuses one built from another commit. It has no updater, so it makes no
   updater archive and no `latest.json`, and the updater key never reaches its build;
 - a stable release is not pinned, and carries the updater;
-- either bundles the Intelligence CLI whenever the tree has `tauri.bundled-cli.conf.json`.
+- either bundles the Intelligence CLI whenever the tree has `tauri.bundled-cli.conf.json`, its
+  dependencies installed for the installer's platform (`npm install --os --cpu`), so the Intel
+  app built on the Apple silicon runner gets Intel binaries;
+- a Mac build names its Rust target, `x86_64-apple-darwin` or `aarch64-apple-darwin`, and Tauri
+  leaves it in `desktop/src-tauri/target/<target>/release/bundle`.
 
 Only the signing job produces Mac updater artifacts. `bundle.createUpdaterArtifacts` lives in
 `desktop/src-tauri/tauri.macos-signing.conf.json`, which that job alone passes to Tauri, because
@@ -283,6 +300,7 @@ The desktop installer bundles the Intelligence CLI and the Node runtime that run
     "version": "26.13.0",
     "sha256": {
       "darwin-arm64": "d38bd5e5a2ddce6bbb5ce45e46e208337da4d51fffe611e567fd32073d6439f6",
+      "darwin-x64": "525c9b29bb0263d687de60a4cec0e2a6db876a8eb032369e5795eca71e7c358e",
       "win32-x64": "14319838b3f355e0398c13569a90270bce4fc68f25189f58c59b03dadae0e6d5"
     }
   }
@@ -309,8 +327,9 @@ so does a platform with no pinned SHA-256. Because the pin is reviewed here, a n
 served a different binary with a matching `SHASUMS256.txt` would still be refused.
 
 To move to another Node version, change `version`, open
-`https://nodejs.org/dist/v<version>/SHASUMS256.txt`, and copy the hashes on two of its lines:
-`node-v<version>-darwin-arm64.tar.gz` for `darwin-arm64`, and `win-x64/node.exe` for `win32-x64`.
+`https://nodejs.org/dist/v<version>/SHASUMS256.txt`, and copy the hashes on three of its lines:
+`node-v<version>-darwin-arm64.tar.gz` for `darwin-arm64`, `node-v<version>-darwin-x64.tar.gz` for
+`darwin-x64`, and `win-x64/node.exe` for `win32-x64`.
 
 A version or URL that does not exist fails the build, because `npm pack` cannot fetch it. So does a
 package that does not ship `index.js` as its bin. Nothing falls back to a different CLI.
@@ -413,13 +432,15 @@ candidate, as it does for `main`. A stable release is never cut from a release b
 Each candidate or beta is published as a GitHub prerelease. It is never Latest, so customers who
 check for the latest release do not see it. Its images are tagged with the version and
 `sha-<commit>`, and never `latest`. A Mac (Apple Silicon) and a Windows (x64) installer are attached
-to it, pinned to that version and to those images, the same as an internal build is. The Mac one is
-ad-hoc signed until [Mac signing](#signed-mac-builds-and-the-updater) is approved and replaces it
-with a signed one, pinned the same way. Mac signing also adds the Intel installer. The Windows one
-is unsigned until [Windows signing](windows-signing.md) is approved and replaces it with a signed
-one, pinned the same way. Until then the first open needs the exceptions described under
-[Internal builds](#internal-builds). Link a candidate's installers by its version, as described
-under [Download links](#download-links).
+to it, pinned to that version and to those images, the same as an internal build is. They are built
+beside the release rather than before it, so the signing runs start as soon as the release and its
+`container-images.json` exist, and they are attached when they are built, unless a signed one is
+already there. The Mac one is ad-hoc signed until [Mac signing](#signed-mac-builds-and-the-updater)
+is approved and replaces it with a signed one, pinned the same way. Mac signing also adds the Intel
+installer. The Windows one is unsigned until [Windows signing](windows-signing.md) is approved and
+replaces it with a signed one, pinned the same way. Until then the first open needs the exceptions
+described under [Internal builds](#internal-builds). Link a candidate's installers by its version,
+as described under [Download links](#download-links).
 
 A candidate does not promote the changelog. Its notes are what is under `## Unreleased` at that
 moment, and the final promotes them, so
@@ -483,9 +504,10 @@ history and the next merge-back does not conflict.
 
 Every release carries each installer twice: under the name Tauri gives it, which contains the
 version, and under a fixed name that is the same in every release. A web page links to the fixed
-name. On a candidate or beta the publish workflow attaches both. On a stable release it attaches the
-unsigned installers under their versioned names only, and the signing runs attach the fixed names
-from the signed installers:
+name. On a candidate or beta the publish workflow attaches both for its ad-hoc and unsigned
+installers, and the signing runs replace both with the signed ones. On a stable release the publish
+workflow attaches no installer at all: the signing runs attach both names from the signed
+installers, which are the only installers a stable release carries:
 
 | Platform | Address |
 |---|---|
@@ -507,11 +529,18 @@ always give signed builds, and the Intel one always exists. Until then they give
 release's. Each signing run replaces its installers under both names, and running it again replaces
 them again.
 
-A re-run of the publish workflow keeps an installer that is already attached, signed or not. On a
-candidate or beta it makes the fixed-name copy from it, replacing a copy that is missing or differs;
-on a stable release it leaves the fixed names to the signing runs. So a re-run never puts an
-unsigned build back over a signed one, under either name. To replace an attached installer with a
-new build, delete it from the release first, then re-run.
+On a candidate or beta, the publish workflow's `installers` job runs while the signing runs may be
+attaching, so it never replaces anything
+([`scripts/release-attach-installers.sh`](../scripts/release-attach-installers.sh)): it uploads an
+installer, and its fixed-name copy, only when the release has no asset of that name, without
+`--clobber`, and when a signing run attached that name meanwhile it keeps the signed one. The
+fixed-name copy is made from the installer as the release has it, so when the signed one is already
+there the copy is signed too. A signing run always attaches with `--clobber`, so whichever runs
+first, the signed build is what stays, under both names. A re-run of the publish workflow does the
+same: it adds what is missing and keeps everything else, signed or not, so it never puts an unsigned
+build back over a signed one. A fixed name left stale by an interrupted signing upload is put right
+by running that signing run again. To replace an attached installer with a new build, delete it from
+the release first, then re-run.
 
 Linux installers are not attached to a release yet.
 
@@ -583,6 +612,9 @@ Then, in order:
 
 - the version in the tree is checked against the branch that is publishing it, and the changelog is
   checked for a section with that number
+- the commit is checked, as described under [What has to be green](#what-has-to-be-green): the full
+  CI suite, or, when the release PR changed only the release files on a commit main's CI passed,
+  that run and the checks that read the release files
 - one image is built and pushed to `ghcr.io/copilotkit/openbot`, tagged with the version, the
   commit as `sha-<commit>` and `latest` only when the release becomes Latest (a stable release with
   no newer release already out). A candidate or beta is never tagged `latest`
@@ -593,37 +625,37 @@ Then, in order:
   stops matching the Dockerfiles in the tree
 - a build provenance attestation is signed with the workflow's OIDC identity and pushed alongside
   every one of them
-- the macOS and Windows installers are built from the commit, with the CLI bundled when the tree has
-  `desktop/src-tauri/tauri.bundled-cli.conf.json`. A candidate or beta pins the images above; a
-  stable release does not
 - the commit is tagged and a GitHub Release is created, carrying the changelog section as its notes
   (for a candidate or beta, what is under `## Unreleased`), `container-images.json`, the source
-  archive, the chart, the release manifest and the installers as assets. A candidate or beta is
-  marked as a prerelease and never Latest. A stable release is published not Latest. A re-run keeps
-  any installer already on the release, so it never puts an unsigned installer back over a signed
-  one
-- a candidate or beta's installers are also attached under their
-  [fixed download names](#download-links). A stable release's fixed names come from the signing runs
-- [Desktop macOS signing](#signed-mac-builds-and-the-updater) is dispatched on the tag. It waits
-  for a `macos-signing` reviewer, then attaches the signed `.dmg` files to the release. The signed
-  `.dmg` has the same name as the ad-hoc one and replaces it, under both names. For a stable release
-  it also attaches the updater archives and lists them in `latest.json`, and then marks the release
-  Latest when `verify` decided it becomes Latest and Windows signing has already attached and
-  listed its installer (see
-  [Which release is Latest](#which-release-is-latest)). A
-  candidate or beta's signed `.dmg` is pinned to its images, and has no updater archive and no
-  `latest.json`
-- [Desktop Windows signing](windows-signing.md) is dispatched on the tag. It waits for a
-  `windows-signing` reviewer, then attaches the signed `-setup.exe`, which replaces the unsigned one
-  under both names. A candidate or beta's is pinned to its images. For a stable release it then
-  waits for a `macos-signing` reviewer to sign the installer for the updater, attaches that
-  signature, lists the installer in `latest.json`, and marks the release Latest when `verify`
-  decided it becomes Latest and Mac signing has already attached and listed its installers
+  archive, the chart and the release manifest as assets. A candidate or beta is marked as a
+  prerelease and never Latest. A stable release is published not Latest, with no installers yet
+- [Desktop macOS signing](#signed-mac-builds-and-the-updater) is dispatched on the tag straight
+  away. It waits for a `macos-signing` reviewer, then builds both Macs and attaches the signed `.dmg`
+  files to the release, under both names. For a stable release it also attaches the updater
+  archives and lists them in `latest.json`, and then marks the release Latest when `verify` decided
+  it becomes Latest and Windows signing has already attached and listed its installer (see
+  [Which release is Latest](#which-release-is-latest)). A candidate or beta's signed `.dmg` is
+  pinned to its images, and has no updater archive and no `latest.json`
+- [Desktop Windows signing](windows-signing.md) is dispatched on the tag at the same moment. It
+  waits for a `windows-signing` reviewer, then attaches the signed `-setup.exe` under both names. A
+  candidate or beta's is pinned to its images. For a stable release it then waits for a
+  `macos-signing` reviewer to sign the installer for the updater, attaches that signature, lists the
+  installer in `latest.json`, and marks the release Latest when `verify` decided it becomes Latest
+  and Mac signing has already attached and listed its installers
+- for a candidate or beta only, its macOS (Apple silicon) and Windows installers are built from the
+  commit while signing runs, ad-hoc signed and unsigned, with the CLI bundled when the tree has
+  `desktop/src-tauri/tauri.bundled-cli.conf.json` and pinned to the images above. They are attached
+  under both names wherever the release does not already have a signed one (see
+  [Download links](#download-links)). A stable release builds none here: the signing runs' builds
+  are the only installers it carries, and the Desktop workflow builds and tests the app on the
+  release commit's push to `main` anyway
 - for a final cut from `release/X.Y`, the merge-back PR opens as described under
   [Finishing a candidate](#finishing-a-candidate)
 
-Until signing is approved, the Mac installer attached to a release is ad-hoc signed and the
-Windows installer is unsigned, like every ordinary CI build, and a stable release is not yet Latest.
+Until signing is approved, a stable release has no installers and is not Latest, so
+`releases/latest` keeps serving the previous release's signed ones. A candidate or beta has its
+ad-hoc Mac installer and unsigned Windows installer, like every ordinary CI build, once they are
+built.
 
 ## Deploying a release
 
@@ -692,9 +724,32 @@ never starts, because nothing else here runs the thing it ships. It builds the c
 with embedded PostgreSQL, waits for `/api/capabilities`, and fails if a supervised service is
 respawning.
 
-These checks run again, against the release commit, when the release PR is merged. They gate the
-publish rather than the proposal, which is why the release PR arriving without its own checks does
-not matter: a pull request opened by a workflow does not trigger them.
+These checks gate the publish rather than the proposal, which is why the release PR arriving
+without its own checks does not matter: a pull request opened by a workflow does not trigger them.
+When the release PR merges, the publish workflow's `checks needed` job
+([`scripts/release-ci-gate.ts`](../scripts/release-ci-gate.ts)) decides whether they run again on the
+release commit:
+
+- When the release commit changes nothing but the release files from the commit it merged onto
+  (its first parent), and main's CI passed on that commit, they do not. That commit's tree has been
+  through all of them already. The release files are `CHANGELOG.md` and `release-policy.json`, which
+  may change freely, and the `version` in `package.json`, the `openbot-desktop` version line in
+  `desktop/src-tauri/Cargo.toml` and `Cargo.lock` and `appVersion` in `charts/openbot/Chart.yaml`,
+  which may change nothing else. Only a run of `ci.yml` for a push to this repository's `main`, at
+  exactly that commit, counts; a pull request's run tests a merge of the PR, not the commit, and
+  skips `image` unless it was labelled. A run still in progress is waited for, up to 40 minutes. In
+  their place the job re-runs the checks that read the files the release did change: formatting and
+  lint, the desktop and chart versions against `package.json`, and every test that names
+  `CHANGELOG.md` or `release-policy.json`.
+- Otherwise they all run again, as before: when any other path is added, removed, renamed or
+  changed, when a version file changes more than its version, or when main's CI on that commit
+  failed, was cancelled, never ran, could not be read, or was still running after the wait.
+
+The diff is read with renames turned off, so a source file moved onto a release file's name is still
+seen as the source file it removed. Every commit on `main` keeps its own CI run for this (the
+`concurrency` group in `ci.yml` is per commit on `main`), so a commit pushed while another's run was
+in progress still gets a result. A final's parent is its candidate on `release/X.Y`, which main's CI
+never ran on, so a final always runs the full suite.
 
 **No secrets are required to release.** CI and **Create release PR** use only the built-in
 `GITHUB_TOKEN`. **Publish release**, **Internal build** and the desktop build workflows also pass

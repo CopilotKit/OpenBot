@@ -12,9 +12,18 @@ on:
 permissions:
   contents: read
 
-# The newest push on a branch wins; main runs are retained for badge and release history.
+# The newest push on a pull request wins. Every commit on main keeps its own run, for the badge and
+# for the release: publishing a release relies on main's CI having passed on the commit the release
+# PR merged onto (scripts/release-ci-gate.ts). In one group, a push landing while another commit's
+# run was in progress replaced the pending run of the commit before it, and that commit never got a
+# result.
+#
+# `github.workflow` keeps the release's own call of these checks out of main's group. A called
+# workflow sees its caller's context, so without it Publish release's checks shared
+# `ci-refs/heads/main` with main's push runs: they queued behind whichever was in progress (the
+# five-minute wait before the checks of v0.3.1) and cancelled the one that was pending.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
