@@ -66,8 +66,10 @@ has_own_twin() {
 checked=0
 twins=0
 wrong=()
-while IFS= read -r -d '' file; do
-  case "$(file -b "$file")" in
+# One `file` for every file in the app, not one per file: the CLI's node_modules are thousands of
+# files. `-0` ends each name with a NUL, then ": <description>" and a newline.
+while IFS= read -r -d '' file && IFS= read -r kind; do
+  case "$kind" in
     *Mach-O*) ;;
     *) continue ;;
   esac
@@ -82,7 +84,7 @@ while IFS= read -r -d '' file; do
     continue
   fi
   wrong+=("${file#"$app"/} ($archs)")
-done < <(find "$app" -type f -print0)
+done < <(find "$app" -type f -exec file -0 -N {} +)
 
 if [ "$checked" -eq 0 ]; then
   echo "::error::$app holds no Mach-O file." >&2
