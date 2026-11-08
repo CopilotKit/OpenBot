@@ -88,7 +88,15 @@ export function useNarration({
           post(
             since === null ? { speaking: false } : { speaking: true, since },
           ),
-        status: setStatus,
+        status: (next) => {
+          setStatus(next);
+          // Narration that cannot hear the person (no microphone, or the browser refused it) turns itself off, and
+          // stays off past Stop and the next Record until the person turns it on again. Read from the status alone,
+          // it read on again once the recording ended and the status was gone, on a computer with no microphone.
+          // A speech service that could not be reached is still on: narration tries again by itself.
+          if (next.state === "failed" && next.problem !== "network")
+            setMuted(true);
+        },
       },
       depsNow.current ?? browserNarrationDeps(),
     );
@@ -112,17 +120,16 @@ export function useNarration({
 
   /**
    * Whether narration is on as it really is, which the switch shows. Muted is off. So is a narration that failed and
-   * stopped listening (no microphone, or the browser refused it): the page says narration is off then, and a switch that
-   * still read on contradicted it (seen in the fourth end-to-end run, in a browser with no microphone). A speech service
-   * that could not be reached is still on: narration tries again by itself.
+   * stopped listening (no microphone, or the browser refused it), which mutes itself: the page says narration is off
+   * then, and a switch that still read on contradicted it (seen in the fourth end-to-end run, in a browser with no
+   * microphone).
    */
-  const stopped = status?.state === "failed" && status.problem !== "network";
-  const on = !muted && !stopped;
+  const on = !muted;
 
   /**
-   * Turns narration on or off. On after a failure tries again: the person was never muted, so muting alone would not. On
-   * is always the person's click, the one thing that may ask the browser to download the language for recognition on
-   * their computer (@openbot/shared/on-device-speech), so it asks then; narration waits for the download.
+   * Turns narration on or off. On after a failure tries again. On is always the person's click, the one thing that may
+   * ask the browser to download the language for recognition on their computer (@openbot/shared/on-device-speech), so it
+   * asks then; narration waits for the download.
    */
   const setOn = useCallback(
     (next: boolean) => {
