@@ -5310,7 +5310,8 @@ pub(crate) struct DesktopStatus {
     engine: Option<&'static str>,
     root: String,
     app_port: Option<u16>,
-    version: &'static str,
+    /// The version this build was packaged as; see `desktop_version`.
+    version: String,
     build: String,
     /// The folder this app's log file is in (`logging`), for Open log folder. Absent from a desktop
     /// app older than the log, so a page can tell the button would have nothing to open.
@@ -5396,7 +5397,7 @@ fn read_desktop_status<R: tauri::Runtime>(
         engine: running.map(|engine| engine.binary()),
         root: root.display().to_string(),
         app_port: ports.map(|ports| ports.app),
-        version: env!("CARGO_PKG_VERSION"),
+        version: desktop_version(app),
         build: build_description(
             env!("OPENBOT_BUILD_COMMIT"),
             env!("OPENBOT_BUILD_BRANCH"),
@@ -7482,13 +7483,28 @@ mod macos_quit {
 }
 
 /**
+The version this build was packaged as, which the installer, the system's list of apps and the
+update check all name: `0.3.4-internal.892.g0c140734ecf0` for an internal build after 0.3.3, and
+exactly `0.3.3` for that release. The Status window, Settings → This computer, About and the log
+say this one too.
+
+Not `CARGO_PKG_VERSION`: Cargo.toml always names the last release, and an internal build's own
+version is set only in the Tauri configuration it is built with (`desktop-version.ts internal`
+writes `tauri.build-version.conf.json`). Reading Cargo's, an internal build after 0.3.3 called
+itself 0.3.3 while Windows called it 0.3.4-internal.
+*/
+fn desktop_version<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
+    app.package_info().version.to_string()
+}
+
+/**
 What About OpenBot says: the version, and which build this is.
 
 The build is the commit it was built from, marked `-dirty` when the tree had uncommitted changes,
 and when; see `build_identity` in build.rs. macOS shows the version and the build on one line and
 the credits under them; Windows and Linux show the comments.
 */
-fn about_openbot() -> tauri::menu::AboutMetadata<'static> {
+fn about_openbot(version: String) -> tauri::menu::AboutMetadata<'static> {
     let built = build_description(
         env!("OPENBOT_BUILD_COMMIT"),
         env!("OPENBOT_BUILD_BRANCH"),
@@ -7496,7 +7512,7 @@ fn about_openbot() -> tauri::menu::AboutMetadata<'static> {
     );
     tauri::menu::AboutMetadata {
         name: Some("OpenBot".into()),
-        short_version: Some(env!("CARGO_PKG_VERSION").into()),
+        short_version: Some(version),
         version: Some(env!("OPENBOT_BUILD_COMMIT").into()),
         credits: Some(built.clone()),
         comments: Some(built),
@@ -7524,7 +7540,7 @@ fn log_launch<R: tauri::Runtime>(app: &tauri::AppHandle<R>, local_offset: Option
         .unwrap_or_else(|error| format!("unknown ({error})"));
     log::info!(
         "[launch] OpenBot Desktop {} ({}) on {} {}; local time is {local}; logs in {folder}",
-        env!("CARGO_PKG_VERSION"),
+        desktop_version(app),
         build_description(
             env!("OPENBOT_BUILD_COMMIT"),
             env!("OPENBOT_BUILD_BRANCH"),
@@ -7642,7 +7658,7 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
         entries.push(MenuEntry::Native(PredefinedMenuItem::about(
             app,
             Some("About"),
-            Some(about_openbot()),
+            Some(about_openbot(desktop_version(app))),
         )?));
         if updates {
             entries.push(check_for_updates()?);
@@ -7667,7 +7683,7 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
         let mut entries = vec![MenuEntry::Native(PredefinedMenuItem::about(
             app,
             Some("About OpenBot"),
-            Some(about_openbot()),
+            Some(about_openbot(desktop_version(app))),
         )?)];
         // Where every Mac app keeps it: under About.
         if updates {
@@ -11846,13 +11862,56 @@ mod tests {
             build_description("397d98a", "", 0),
             "Built 1970-01-01 00:00 UTC from 397d98a"
         );
-        let about = about_openbot();
+        let about = about_openbot("0.3.4-internal.892.g0c140734ecf0".into());
         assert_eq!(
             about.short_version.as_deref(),
-            Some(env!("CARGO_PKG_VERSION"))
+            Some("0.3.4-internal.892.g0c140734ecf0")
         );
         assert_eq!(about.version.as_deref(), Some(env!("OPENBOT_BUILD_COMMIT")));
         assert!(about.credits.unwrap().starts_with("Built "));
+    }
+
+    /// An internal build after 0.3.3 is packaged as `0.3.4-internal.892.g0c140734ecf0`, and the
+    /// installer, the system's list of apps and the update check all named it so, while the Status
+    /// window and Settings → This computer said "Version 0.3.3": `status` answered Cargo.toml's
+    /// version, which is always the last release. This builds the app with that version, as
+    /// `tauri build` with `tauri.build-version.conf.json` does, and reads the real status command
+    /// against a fake engine. A release still names exactly its own version.
+    #[test]
+    fn status_names_the_version_this_build_was_packaged_as() {
+        if crate::test_support::isolated_process(
+            "tests::status_names_the_version_this_build_was_packaged_as",
+        ) {
+            return;
+        }
+        let _path = SerializedPath::set_only_with("docker", "desktop-status");
+        let status_of = |packaged: &str| {
+            let root = temp_root("desktop-status-version");
+            std::fs::create_dir_all(&root).unwrap();
+            let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+            context.package_info_mut().version = packaged.parse().unwrap();
+            let app = tauri::test::mock_builder()
+                .manage(Shell::default())
+                .build(context)
+                .unwrap();
+            *app.state::<Shell>().root.lock().unwrap() = Some(root);
+            let status = serde_json::to_value(read_desktop_status(app.handle(), false)).unwrap();
+            // The fake engine answered, so nothing on this machine was asked.
+            assert_eq!(status["engine"], "docker");
+            assert!(status["build"].as_str().unwrap().starts_with("Built "));
+            let about = about_openbot(desktop_version(app.handle()));
+            assert_eq!(about.short_version.as_deref(), Some(packaged));
+            status["version"].as_str().unwrap().to_owned()
+        };
+
+        let internal = "0.3.4-internal.892.g0c140734ecf0";
+        assert_ne!(internal, env!("CARGO_PKG_VERSION"));
+        assert_eq!(status_of(internal), internal);
+        // A release build's Tauri version is the root package.json's, which Cargo.toml matches.
+        assert_eq!(
+            status_of(env!("CARGO_PKG_VERSION")),
+            env!("CARGO_PKG_VERSION")
+        );
     }
 
     /// Windows: Podman also answers on Docker's pipe, so a CLI not told the engine finds "the Docker
