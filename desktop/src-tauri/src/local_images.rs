@@ -111,6 +111,30 @@ pub fn cli_images(source: &str) -> Option<CliImages> {
     })
 }
 
+/**
+The images `cli_images` leaves out, because k3d pulls them through the engine when the CLI creates
+the cluster and not into the node: the names the CLI's install filters out of its inventory (the
+k3s node image, k3d's proxy and tools), each by the digest the CLI gives k3d (`--image`,
+`K3D_IMAGE_LOADBALANCER`, `K3D_IMAGE_TOOLS`). `None` when any part cannot be read.
+*/
+pub fn cli_cluster_images(source: &str) -> Option<Vec<String>> {
+    let support: Support = serde_json::from_str(&json_of(literal_after(
+        source,
+        "define_CLI_LOCAL_EVALUATION_SUPPORT_default = ",
+    )?)?)
+    .ok()?;
+    let left_out: Vec<String> = serde_json::from_str(between(
+        source,
+        ".filter(([name]) => !",
+        ".includes(name))",
+    )?)
+    .ok()?;
+    left_out
+        .iter()
+        .map(|name| support.images.get(name)?.reference())
+        .collect()
+}
+
 #[derive(Deserialize)]
 struct Support {
     images: BTreeMap<String, Image>,

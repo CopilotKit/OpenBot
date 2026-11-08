@@ -6,7 +6,7 @@
  * Run by .github/workflows/downloads-sync.yml after scripts/downloads-sync.sh, for the same
  * release, and by hand. The release's `desktop-images.json` says which images: the Desktop app's
  * own code writes it when the release is published (desktop/src-tauri/src/release_images.rs), so
- * it names exactly what the app pulls. Only images on ghcr.io are copied; any other registry is
+ * it names exactly what the app pulls. Images on ghcr.io and Docker Hub are copied; any other registry is
  * left as it is.
  *
  * What it writes, in the bucket behind the CloudFront distribution: a read-only copy of the
@@ -17,7 +17,9 @@
  *   v2/<repo>/manifests/sha256:<hex>     each index and each linux/amd64 and linux/arm64 manifest,
  *                                        byte for byte, so its digest is the same; cached a year
  *   v2/<repo>/blobs/sha256:<hex>         each config and layer of those; cached a year
- * <repo> is the path on ghcr.io unchanged, such as copilotkit/openbot-server. Attestations and other
+ * <repo> is the path on ghcr.io unchanged, such as copilotkit/openbot-server, or for Docker Hub
+ * docker.io/ and its path, official images under library/ (docker.io/library/busybox). An image
+ * named by digest whose manifest is there already is not read again. Attestations and other
  * platforms are not copied; a client that asks for one gets 403 and goes to ghcr.io.
  *
  * Running it again changes nothing. Each object S3 holds is compared by the SHA-256 S3 computed on
@@ -70,17 +72,40 @@ const repoPattern =
 const tagPattern = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
 const digestPattern = /^sha256:[0-9a-f]{64}$/;
 
-export type Ref = { repo: string; tag?: string; digest?: string };
+export type Ref = {
+  /** How the image is named in messages: its registry and repository. */
+  name: string;
+  /** Its folder under v2/: the ghcr.io path, or docker.io/ and the Docker Hub path. */
+  path: string;
+  /** What crane reads it as. */
+  read: string;
+  tag?: string;
+  digest?: string;
+};
+
+const DOCKER_HUB = new Set([
+  "docker.io",
+  "index.docker.io",
+  "registry-1.docker.io",
+]);
 
 /**
- * An image reference on ghcr.io, or `undefined` for one on any other registry. A reference with no
- * registry is Docker Hub's, as Compose prints `busybox:1.37`. Pinned by digest when it has one.
+ * An image reference on ghcr.io or Docker Hub, or `undefined` for one on any other registry. A
+ * reference whose first part is not a host (no dot, no port, not localhost) is Docker Hub's, as
+ * Compose prints `pgvector/pgvector:pg17`, and a Docker Hub name of one part is an official image,
+ * `library/<name>`. Pinned by digest when it has one. `source` stands in for ghcr.io.
  */
-export function ghcrRef(reference: string): Ref | undefined {
+export function imageRef(
+  reference: string,
+  source = "ghcr.io",
+): Ref | undefined {
   const slash = reference.indexOf("/");
-  const host = slash === -1 ? "" : reference.slice(0, slash);
-  if (host !== "ghcr.io") return undefined;
-  let rest = reference.slice(slash + 1);
+  const first = slash === -1 ? "" : reference.slice(0, slash);
+  const hosted =
+    first.includes(".") || first.includes(":") || first === "localhost";
+  const host = hosted ? first : "docker.io";
+  if (host !== "ghcr.io" && !DOCKER_HUB.has(host)) return undefined;
+  let rest = hosted ? reference.slice(slash + 1) : reference;
   let digest: string | undefined;
   const at = rest.indexOf("@");
   if (at !== -1) {
@@ -101,8 +126,19 @@ export function ghcrRef(reference: string): Ref | undefined {
   ) {
     throw new Error(`${reference} is not an image reference this can copy.`);
   }
+  const where =
+    host === "ghcr.io"
+      ? { name: `ghcr.io/${rest}`, path: rest, read: `${source}/${rest}` }
+      : (() => {
+          const repo = rest.includes("/") ? rest : `library/${rest}`;
+          return {
+            name: `docker.io/${repo}`,
+            path: `docker.io/${repo}`,
+            read: `docker.io/${repo}`,
+          };
+        })();
   // A digest names the image exactly; a tag beside it is only a label, as it is to a client.
-  return digest ? { repo: rest, digest } : { repo: rest, tag };
+  return digest ? { ...where, digest } : { ...where, tag };
 }
 
 type Planned = {
@@ -453,12 +489,48 @@ async function copy(options: Copy): Promise<number> {
   const copied: Ref[] = [];
   const elsewhere: string[] = [];
   for (const image of options.images) {
-    const ref = ghcrRef(image);
+    const ref = imageRef(image, source);
     if (ref) copied.push(ref);
     else elsewhere.push(image);
   }
   for (const image of elsewhere)
-    console.log(`${image} is not on ghcr.io; it is left to its own registry.`);
+    console.log(
+      `${image} is not on ghcr.io or Docker Hub; it is left to its own registry.`,
+    );
+
+  // What S3 holds for a key: its SHA-256 as S3 computed it on an upload sent with one, its
+  // Content-Type and Cache-Control; `undefined` when the key is not there.
+  const held = async (key: string) => {
+    const head = await run([
+      "aws",
+      "s3api",
+      "head-object",
+      "--bucket",
+      bucket,
+      "--key",
+      key,
+      "--checksum-mode",
+      "ENABLED",
+      "--output",
+      "json",
+    ]);
+    if (head.code !== 0) {
+      if (head.stderr.includes("(404)")) return undefined;
+      fail(`Could not read s3://${bucket}/${key}: ${head.stderr.trim()}`);
+    }
+    const found = JSON.parse(new TextDecoder().decode(head.stdout)) as {
+      ChecksumSHA256?: string;
+      CacheControl?: string;
+      ContentType?: string;
+    };
+    return {
+      sha256: found.ChecksumSHA256
+        ? Buffer.from(found.ChecksumSHA256, "base64").toString("hex")
+        : "",
+      cache: found.CacheControl,
+      contentType: found.ContentType,
+    };
+  };
 
   // What to write, by key. Manifests are read now, to learn what they name; blobs only if missing.
   const plan = new Map<string, Planned>();
@@ -469,16 +541,16 @@ async function copy(options: Copy): Promise<number> {
     }
     plan.set(item.key, item);
   };
-  const manifest = async (repo: string, reference: string) => {
+  const manifest = async (ref: Ref, reference: string) => {
     const at = reference.startsWith("sha256:") ? "@" : ":";
     const read = await run([
       "crane",
       "manifest",
-      `${source}/${repo}${at}${reference}`,
+      `${ref.read}${at}${reference}`,
     ]);
     if (read.code !== 0) {
       fail(
-        `Could not read ghcr.io/${repo}${at}${reference}: ${read.stderr.trim()}`,
+        `Could not read ${ref.name}${at}${reference}: ${read.stderr.trim()}`,
       );
     }
     const bytes = read.stdout;
@@ -500,14 +572,14 @@ async function copy(options: Copy): Promise<number> {
     try {
       document = JSON.parse(new TextDecoder().decode(bytes));
     } catch {
-      fail(`ghcr.io/${repo}${at}${reference} is not a JSON manifest.`);
+      fail(`${ref.name}${at}${reference} is not a JSON manifest.`);
     }
     return { bytes, document, digest: `sha256:${sha256Hex(bytes)}` };
   };
-  const key = (repo: string, kind: "manifests" | "blobs", reference: string) =>
-    `${prefix}v2/${repo}/${kind}/${reference}`;
+  const key = (ref: Ref, kind: "manifests" | "blobs", reference: string) =>
+    `${prefix}v2/${ref.path}/${kind}/${reference}`;
   const blobs = (
-    repo: string,
+    ref: Ref,
     document: Awaited<ReturnType<typeof manifest>>["document"],
     name: string,
   ) => {
@@ -531,21 +603,31 @@ async function copy(options: Copy): Promise<number> {
         fail(`${name} names a blob without a digest and size.`);
       }
       add({
-        key: key(repo, "blobs", blob.digest),
+        key: key(ref, "blobs", blob.digest),
         kind: "blob",
         sha256: blob.digest.slice(7),
         contentType: "application/octet-stream",
         cache: IMMUTABLE,
-        source: `${source}/${repo}@${blob.digest}`,
+        source: `${ref.read}@${blob.digest}`,
         size: blob.size,
       });
     }
   };
 
+  let whole = 0;
   await pool(copied, parallel, async (ref) => {
     const reference = ref.digest ?? (ref.tag as string);
-    const name = `ghcr.io/${ref.repo}${ref.digest ? "@" : ":"}${reference}`;
-    const top = await manifest(ref.repo, reference);
+    const name = `${ref.name}${ref.digest ? "@" : ":"}${reference}`;
+    // An image named by digest whose manifest S3 holds already is whole: a manifest is uploaded
+    // only after everything it names. Not read again, so Docker Hub's pull limit is not spent.
+    if (ref.digest) {
+      const found = await held(key(ref, "manifests", ref.digest));
+      if (found?.sha256 === ref.digest.slice(7) && found.cache === IMMUTABLE) {
+        whole++;
+        return;
+      }
+    }
+    const top = await manifest(ref, reference);
     if (ref.digest && top.digest !== ref.digest) {
       fail(`${name} served bytes whose digest is ${top.digest}.`);
     }
@@ -561,8 +643,8 @@ async function copy(options: Copy): Promise<number> {
       for (const child of children) {
         if (!child.digest || !digestPattern.test(child.digest))
           fail(`${name} names a manifest without a digest.`);
-        const childName = `ghcr.io/${ref.repo}@${child.digest}`;
-        const found = await manifest(ref.repo, child.digest);
+        const childName = `${ref.name}@${child.digest}`;
+        const found = await manifest(ref, child.digest);
         if (found.digest !== child.digest)
           fail(`${childName} served bytes whose digest is ${found.digest}.`);
         const childType = found.document.mediaType ?? "";
@@ -575,17 +657,17 @@ async function copy(options: Copy): Promise<number> {
           );
         }
         add({
-          key: key(ref.repo, "manifests", child.digest),
+          key: key(ref, "manifests", child.digest),
           kind: "manifest",
           sha256: found.digest.slice(7),
           contentType: childType,
           cache: IMMUTABLE,
           bytes: found.bytes,
         });
-        blobs(ref.repo, found.document, childName);
+        blobs(ref, found.document, childName);
       }
       add({
-        key: key(ref.repo, "manifests", top.digest),
+        key: key(ref, "manifests", top.digest),
         kind: "index",
         sha256: top.digest.slice(7),
         contentType: type,
@@ -593,9 +675,9 @@ async function copy(options: Copy): Promise<number> {
         bytes: top.bytes,
       });
     } else if (MANIFEST_TYPES.has(type)) {
-      blobs(ref.repo, top.document, name);
+      blobs(ref, top.document, name);
       add({
-        key: key(ref.repo, "manifests", top.digest),
+        key: key(ref, "manifests", top.digest),
         kind: "manifest",
         sha256: top.digest.slice(7),
         contentType: type,
@@ -609,7 +691,7 @@ async function copy(options: Copy): Promise<number> {
     }
     if (ref.tag) {
       add({
-        key: key(ref.repo, "manifests", ref.tag),
+        key: key(ref, "manifests", ref.tag),
         kind: "tag",
         sha256: top.digest.slice(7),
         contentType: type,
@@ -636,38 +718,11 @@ async function copy(options: Copy): Promise<number> {
   const planned = [...plan.values()];
   const missing = new Set<string>();
   await pool(planned, parallel, async (item) => {
-    const head = await run([
-      "aws",
-      "s3api",
-      "head-object",
-      "--bucket",
-      bucket,
-      "--key",
-      item.key,
-      "--checksum-mode",
-      "ENABLED",
-      "--output",
-      "json",
-    ]);
-    if (head.code !== 0) {
-      if (head.stderr.includes("(404)")) {
-        missing.add(item.key);
-        return;
-      }
-      fail(`Could not read s3://${bucket}/${item.key}: ${head.stderr.trim()}`);
-    }
-    const held = JSON.parse(new TextDecoder().decode(head.stdout)) as {
-      ChecksumSHA256?: string;
-      CacheControl?: string;
-      ContentType?: string;
-    };
-    const sha = held.ChecksumSHA256
-      ? Buffer.from(held.ChecksumSHA256, "base64").toString("hex")
-      : "";
+    const found = await held(item.key);
     if (
-      sha !== item.sha256 ||
-      held.CacheControl !== item.cache ||
-      held.ContentType !== item.contentType
+      found?.sha256 !== item.sha256 ||
+      found.cache !== item.cache ||
+      found.contentType !== item.contentType
     ) {
       missing.add(item.key);
     }
@@ -685,7 +740,7 @@ async function copy(options: Copy): Promise<number> {
     .filter((item) => missing.has(item.key))
     .sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
   console.log(
-    `${copied.length} images on ghcr.io for ${options.label}: ${planned.length} objects, ${planned.length - uploads.length} already in s3://${bucket}, ${uploads.length} to upload.`,
+    `${copied.length} images for ${options.label} (${whole} already whole in s3://${bucket}): ${planned.length} objects, ${planned.length - uploads.length} already in s3://${bucket}, ${uploads.length} to upload.`,
   );
   if (uploads.length === 0) {
     console.log(
@@ -815,7 +870,7 @@ async function copy(options: Copy): Promise<number> {
     const lines = [
       `### downloads.copilotkit.ai now serves the images for ${options.label}`,
       "",
-      `${copied.length} images on ghcr.io, the source archive and the pinned tools; ${uploads.length} objects uploaded, ${planned.length - uploads.length} already there.`,
+      `${copied.length} images from ghcr.io and Docker Hub, the source archive and the pinned tools; ${uploads.length} objects uploaded, ${planned.length - uploads.length} already there.`,
       ...(elsewhere.length > 0
         ? [
             "",

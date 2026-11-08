@@ -12,7 +12,9 @@ it cannot name one image fewer than the app pulls:
   `container-images.json`, exactly as it does beside an installation.
 - The bundled back end's: `local_images::cli_images`, read from the very CLI the installer carries.
   The runtime repositories are named at the release's tag, because that is how the app reads them
-  (`repository:release`, then the index that tag serves).
+  (`repository:release`, then the index that tag serves). And the cluster's own images, which the
+  host's engine pulls when the CLI has k3d create the cluster (`local_images::cli_cluster_images`):
+  the k3s node image and k3d's proxy and tools, each at the digest the CLI gives k3d.
 
 The release publishes the list as `desktop-images.json` (`examples/release_images.rs`).
 */
@@ -62,6 +64,9 @@ pub fn release_images(compose: &Path, manifest: &Path, cli: &str) -> Result<Rele
     let back_end = crate::local_images::cli_images(cli).ok_or_else(|| {
         "this app cannot read which images the CLI pulls, so it would leave them to the CLI"
             .to_string()
+    })?;
+    let cluster = crate::local_images::cli_cluster_images(cli).ok_or_else(|| {
+        "this app cannot read which images the CLI has k3d pull for its cluster".to_string()
     })?;
 
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -118,6 +123,7 @@ pub fn release_images(compose: &Path, manifest: &Path, cli: &str) -> Result<Rele
         images.insert(format!("{repository}:{}", back_end.release));
     }
     images.extend(back_end.fixed.iter().cloned());
+    images.extend(cluster);
 
     Ok(ReleaseImages {
         openbot: pinned.version,
@@ -167,6 +173,10 @@ mod tests {
             "ghcr.io/copilotkit/intelligence/realtime-gateway:0.16.0-rc.9",
             "ghcr.io/copilotkit/intelligence/local-object-storage@sha256:1c2a56bcd21e6ef33b77ddefec998ba09b026c339af1c2827d312ee3df7b7280",
             "docker.io/rancher/mirrored-pause@sha256:74c4244427b7312c5b901fe0f67cbc53683d06f4f24c6faee65d4182bf0fa893",
+            // The cluster's own, which k3d has the host's engine pull.
+            "docker.io/rancher/k3s@sha256:53cf744fe2fabf140cee240d2db70d13a4f2d98f1a13c98f58f457f423096917",
+            "ghcr.io/k3d-io/k3d-proxy@sha256:d43e6ffd27c216d0b21815c1226c8aeac2e07086ac5a988eb39bd7e308f6e370",
+            "ghcr.io/k3d-io/k3d-tools@sha256:c5ceb2b9e8ff2cf55917b0bee8bc9c54fe1483a16366b734117e2cfac1417bed",
         ] {
             assert!(has(image), "missing {image} in {:#?}", found.images);
         }

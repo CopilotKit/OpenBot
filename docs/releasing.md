@@ -614,16 +614,23 @@ the ghcr.io path unchanged, such as `copilotkit/openbot-server`, so Docker and c
 pull from ghcr.io. Indexes are copied byte for byte, so every digest stays the same; attestations
 and other platforms are not copied. S3 cannot send `Docker-Content-Digest`, and clients do not need
 it: they hash what they receive. A key that is not there answers 403, not 404 (CloudFront has no
-`ListBucket`), and containerd moves on to its next host, ghcr.io, on any 4xx. Images on other
-registries (Docker Hub's `pgvector`, the Kubernetes system images) are left where they are.
+`ListBucket`), and containerd moves on to its next host, ghcr.io, on any 4xx.
+
+Docker Hub's images are copied the same way under `v2/docker.io/<repo>/`, official images under
+`library/` (`v2/docker.io/library/busybox`), so a client uses `downloads.copilotkit.ai/docker.io` as
+the mirror for `docker.io`. Images on any other registry are left where they are.
 
 Which images: `desktop-images.json` on the release, which the `image list` job of the publish
 workflow writes with the app's own code (`desktop/src-tauri/src/release_images.rs`, run as
-`cargo run --example release_images`): the images Compose names for every Bot the app can install,
-the two sign-in images, and the bundled CLI's back end images (its runtime images at its release's
-tag). A release published before this carries no list, and its images are skipped with a notice;
-`DOWNLOADS_IMAGES_FILE` names a list to use instead. Only ghcr.io images are copied, read with
-[crane](https://github.com/google/go-containerregistry) (a pinned release, checked by SHA-256).
+`cargo run --example release_images`): the images Compose names for every Bot the app can install
+(`pgvector` included), the two sign-in images, the bundled CLI's back end images (its runtime images
+at its release's tag, its pinned ones and the Kubernetes system images), and the cluster's own
+images that the host's engine pulls when k3d creates the cluster (the k3s node image and k3d's proxy
+and tools, at the digests the CLI gives k3d). A release published before this carries no list, and
+its images are skipped with a notice; `DOWNLOADS_IMAGES_FILE` names a list to use instead. Images
+are read with [crane](https://github.com/google/go-containerregistry) (a pinned release, checked by
+SHA-256). An image named by digest whose manifest the bucket already holds is not read again, which
+keeps the scheduled run inside Docker Hub's pull limits; tags are read on every run.
 Each object is compared with what S3 holds by SHA-256, Content-Type and Cache-Control, and only what
 is missing or differs is read and uploaded: blobs first, then manifests, then tags, so nothing is
 served before what it names. Every new object is then fetched once through the address, so the
