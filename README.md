@@ -9,13 +9,13 @@
 A modular, self-hostable workspace for AI coworkers.<br>
 Choose your models. Bring your agents. Own your infrastructure.
 
-[![Download for Mac — Apple silicon](https://img.shields.io/badge/Download-Mac_Apple_silicon-18181B?style=for-the-badge&logo=apple&logoColor=white)](https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg)
-[![Download for Mac — Intel](https://img.shields.io/badge/Download-Mac_Intel-18181B?style=for-the-badge&logo=apple&logoColor=white)](https://downloads.copilotkit.ai/latest/OpenBot-mac-x64.dmg)
-[![Download for Windows — x64](https://img.shields.io/badge/Download-Windows_x64-18181B?style=for-the-badge)](https://downloads.copilotkit.ai/latest/OpenBot-windows-x64-setup.exe)
+[**Mac (Apple silicon)**](https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg) · [**Mac (Intel)**](https://downloads.copilotkit.ai/latest/OpenBot-mac-x64.dmg) · [**Windows (x64)**](https://downloads.copilotkit.ai/latest/OpenBot-windows-x64-setup.exe) · [**Kubernetes**](#deploy-on-kubernetes)
 
-Free for personal use. Runs on your computer.
+Free for personal use on your laptop.
 
-[**OpenBot for Business · Early access →**](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=business&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [**Deploy on Kubernetes**](#deploy-on-kubernetes) · [**Docs**](docs/README.md)
+**Early access:** [iOS](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=ios&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Android](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=android&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Slack](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=slack&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Microsoft Teams](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=teams&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Hosted web](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=web&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access)
+
+[**OpenBot for Business · Get early access →**](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=business&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [**Docs**](docs/README.md)
 
 From [CopilotKit](https://www.copilotkit.ai), creators of [AG-UI](https://github.com/ag-ui-protocol/ag-ui).
 
@@ -25,7 +25,7 @@ From [CopilotKit](https://www.copilotkit.ai), creators of [AG-UI](https://github
 
 ### On your laptop
 
-1. **Download and open OpenBot** using the buttons above. On Mac, open the `.dmg` and move OpenBot to Applications. On Windows, run the `.exe` installer.
+1. **Download and open OpenBot** using the links above. On Mac, open the `.dmg` and move OpenBot to Applications. On Windows, run the `.exe` installer.
 2. **Follow the setup screens.** Sign in to CopilotKit, activate your free local license, and connect your AI provider. The app installs everything it needs. No terminal or developer tools required.
 3. **Give your Personal Assistant a job.** Try “Research three venues for a team offsite and compare them in a table.” Connect your apps when you need them.
 
@@ -37,7 +37,7 @@ Not sure which Mac download to choose? Open **Apple menu → About This Mac**: a
 
 **OpenBot for Business** brings your agents into one workspace with company sign-in, tool permissions, approvals, and audit. Deploy on your infrastructure or work with our engineers on hosting and customization.
 
-[**Get Business early access →**](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=business&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [**Talk to an engineer**](https://open.bot/business) · [**Kubernetes setup**](#deploy-on-kubernetes)
+[**Get early access to OpenBot for Business →**](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=business&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [**Talk to an engineer**](https://open.bot/business) · [**Kubernetes setup**](#deploy-on-kubernetes)
 
 <a id="early-access-platforms"></a>
 
