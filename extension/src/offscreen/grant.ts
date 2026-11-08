@@ -12,6 +12,7 @@ export type GrantVerdict =
   | { kind: "retry"; reason: string; retryAfterMs?: number }
   | { kind: "hold"; code: string; hint: string } // stop (hold): keep events, try again every 5 minutes
   | { kind: "park"; code: string; hint: string } // stop (park): keep events, try again at the next browser start
+  | { kind: "proxy"; hint: string } // keep events, take a fresh pass within seconds a few times, then hold
   | { kind: "signed-out"; reason: "revoked" | "removed" | "organization" };
 
 export class GrantError extends Error {
@@ -57,6 +58,8 @@ export const PASS_HINTS: Record<string, string> = {
   UNAUTHORIZED: "Learning capture is paused: OpenBot refused the capture pass.",
   GATEWAY_NOT_ALLOWED:
     "Learning capture is off: the capture pass pointed at a back end address your organization does not allow.",
+  PROXY_AUTHENTICATION:
+    "Learning capture is paused: this browser's network proxy has not let the capture pass through yet (407).",
   UNKNOWN_ANSWER:
     "Learning capture is paused: the capture pass got an answer the Recorder does not know (<status>).",
 };
@@ -172,6 +175,15 @@ export function classifyGrantError(
   if (status === 500 && !code) return retry(BUSY);
   // Row 22: any other 401.
   if (status === 401) return stop("hold", "UNAUTHORIZED");
+  /*
+   * Row 23b: the proxy this browser goes through asked for its credentials. On an OpenBot computer that is the egress
+   * filter, which answers 407 until the browser holds them, and the computer has the browser take them as it launches
+   * (agent-computer's `holdFilterCredentials`). A pass sent in the moment before (one a browser start resends) gets the
+   * 407, and the next, seconds later, goes with them: so a few quick passes rather than the five-minute hold of row 23a,
+   * and the hold only after those.
+   */
+  if (status === 407)
+    return { kind: "proxy", hint: PASS_HINTS.PROXY_AUTHENTICATION };
   // Row 23 is the streamer's own policy check on the grant (`isAllowedGatewayUrl`).
   // Row 23a: anything no row names.
   return status >= 500 ? retry(BUSY) : stop("hold", "UNKNOWN_ANSWER");
