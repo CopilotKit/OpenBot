@@ -41,7 +41,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   can bring them up to date on Admin → UI components, from the new text in
   `app/src/components/gallery/cards.tsx` and `table.tsx`.
 - A notice card's supporting point that is itself a list is drawn as that list, without a stray dot
-  and an extra indent beside it, and a long link in a notice wraps where it ran under the card's edge.
+  and an extra indent beside it.
+- A long link in a card's text (a notice, a checklist, a quotation, an approval) wraps, where it ran
+  under the card's edge and lost its end.
 
 ### Personal edition
 

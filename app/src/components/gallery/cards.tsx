@@ -228,8 +228,7 @@ export function NoticeCard({
       action={badge ? <Badge tone={noticeTone}>{badge}</Badge> : undefined}
       title={title}
     >
-      {/* A long link wraps rather than running under the card's edge, which hides its end. */}
-      <GalleryMarkdown className="break-words text-sm">{body}</GalleryMarkdown>
+      <GalleryMarkdown className="text-sm">{body}</GalleryMarkdown>
       {points?.length ? (
         <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
           {byPosition(points).map(({ item: entry, key }) => (
@@ -239,9 +238,7 @@ export function NoticeCard({
               key={key}
             >
               <span aria-hidden="true">·</span>
-              <GalleryMarkdown className="min-w-0 break-words">
-                {entry}
-              </GalleryMarkdown>
+              <GalleryMarkdown className="min-w-0">{entry}</GalleryMarkdown>
             </li>
           ))}
         </ul>
