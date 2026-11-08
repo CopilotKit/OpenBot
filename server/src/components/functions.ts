@@ -1,5 +1,6 @@
 import {
   ACTION_ENDINGS,
+  CALLS_RECORDED_AS_CHANGES,
   OPENBOT_WORKING_EVENT_TYPES,
 } from "@openbot/shared/activity-rows";
 import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
@@ -63,8 +64,9 @@ function bounded(
  *
  * The same rows the page asks for (`@openbot/shared/activity-rows`): none of OpenBot's own working,
  * each action once (the first row of an action that then failed, was stopped or was refused is not
- * counted), and a Bot's rows as its Bot column reads them: the Bot it names, the Bot a row was about
- * (an `agent` target), and the Bot an older folder row named as `botId`.
+ * counted, nor a Routines call whose routine change has its own row), and a Bot's rows as its Bot
+ * column reads them: the Bot it names, the Bot a row was about (an `agent` target), the Bot an older
+ * folder row named as `botId`, and the Bot a routine runs as.
  */
 async function personalBotActivity(database: Database, days: number) {
   const window = sql`created_at > now() - make_interval(days => ${days})`;
@@ -87,11 +89,17 @@ async function personalBotActivity(database: Database, days: number) {
                    case when jsonb_typeof(payload->'bot') = 'string' then payload->>'bot' end,
                    case when target_type = 'host_access' and jsonb_typeof(payload->'botId') = 'string'
                         then payload->>'botId' end,
+                   case when target_type = 'routine' and jsonb_typeof(payload->'agentId') = 'string'
+                        then payload->>'agentId' end,
                    case when target_type = 'agent' then target_id end
                  ) as bot
           from audit_events
           where ${window}
             and event_type not in (${list(OPENBOT_WORKING_EVENT_TYPES)})
+            and not (
+              event_type = 'mcp.call_succeeded'
+              and target_id in (${list(CALLS_RECORDED_AS_CHANGES)})
+            )
             and not (
               event_type = 'computer.action_allowed'
               and exists (

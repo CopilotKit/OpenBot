@@ -95,6 +95,16 @@ export type ComponentStore = {
   /** Hold this Bot back from this one component. Every other Bot is unaffected. */
   revoke(name: string, agentId: string, by: string): Promise<void>;
   grantFunction(name: string, functionName: string, by: string): Promise<void>;
+  /**
+   * Gives a component several functions in one statement, and answers with the ones this call gave:
+   * none it already held, and none another call gave first. Two page loads announcing at once give
+   * each function once, so the trail names each grant once.
+   */
+  grantFunctions(
+    name: string,
+    functionNames: readonly string[],
+    by: string,
+  ): Promise<string[]>;
   revokeFunction(name: string, functionName: string): Promise<void>;
   /**
    * May this component call this function?
@@ -358,6 +368,23 @@ export function createComponentStore(database: Database): ComponentStore {
         .insert(componentFunctions)
         .values({ componentName: name, functionName, grantedBy: by })
         .onConflictDoNothing();
+    },
+
+    async grantFunctions(name, functionNames, by) {
+      if (functionNames.length === 0) return [];
+      await requireComponent(name);
+      const given = await database
+        .insert(componentFunctions)
+        .values(
+          functionNames.map((functionName) => ({
+            componentName: name,
+            functionName,
+            grantedBy: by,
+          })),
+        )
+        .onConflictDoNothing()
+        .returning({ functionName: componentFunctions.functionName });
+      return given.map((row) => row.functionName);
     },
 
     async revokeFunction(name, functionName) {

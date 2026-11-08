@@ -1,8 +1,14 @@
-import { and, eq, isNull, like } from "drizzle-orm";
+import { and, eq, isNull, like, sql } from "drizzle-orm";
+import {
+  type AuditStore,
+  DEPLOYMENT_INITIATOR,
+  recordAuditEvent,
+} from "../audit";
 import type { Database } from "../db/client";
 import { reasonWithoutStatement } from "../db/query-failure";
 import { enterpriseSettings } from "../db/schema/admin";
 import { agentProfiles } from "../db/schema/coworker";
+import { learningSettings } from "../db/schema/learning";
 import {
   mcpServers,
   mcpTools,
@@ -51,6 +57,11 @@ export type PersonalDefaultsDeps = {
   skillsGiven(agentId: string): Promise<boolean>;
   /** Writes down that it has, so a skill switched off for it stays off. */
   rememberSkillsGiven(agentId: string): Promise<void>;
+  /**
+   * Takes every Bot left out of Automatic Learning (a per-Bot mapping of null) back in, so it
+   * follows the default container like every other Bot. Answers the Bots it took back in.
+   */
+  includeEveryBotInLearning(): Promise<string[]>;
 };
 
 /** Who the trail names for a grant nobody pressed a button for. */
@@ -150,6 +161,32 @@ export async function ensurePersonalSkills(
   deps: PersonalDefaultsDeps,
 ): Promise<void> {
   await giveEverySkillOnce(store, deps, await deps.bots());
+}
+
+/**
+ * In the personal edition every Bot takes part in Automatic Learning: its conversations go to the
+ * Learning container and it uses every Skill learned there and in the person's own space. There is
+ * no switch for one Bot there (the Admin screen that has one is the team edition's), so a Bot left
+ * out, which only a team edition's settings in the same database can do, is taken back in. At
+ * startup for the Bots that exist; every Bot's first listing or run checks again (see
+ * `withPersonalDefaults`). A Bot made later has no mapping and follows the default already.
+ *
+ * Writes only when a Bot was left out, and then an audit row naming the Bots, started by OpenBot.
+ */
+export async function ensurePersonalLearning(
+  deps: Pick<PersonalDefaultsDeps, "includeEveryBotInLearning">,
+  audit?: AuditStore,
+): Promise<string[]> {
+  if (currentEdition() !== "personal") return [];
+  const included = await deps.includeEveryBotInLearning();
+  if (included.length > 0 && audit)
+    await recordAuditEvent(audit, {
+      eventType: "configuration.changed",
+      targetType: "learning",
+      initiator: DEPLOYMENT_INITIATOR,
+      payload: { change: "every_bot_included_personal", bots: included },
+    });
+  return included;
 }
 
 /** The apps every Bot holds every tool of: all of them in the personal edition, else Routines. */
@@ -333,8 +370,9 @@ export function withPersonalDefaults<S extends Store>(
 
   /*
    * A Bot made after startup gets what every Bot has the first time it runs: Routines in every
-   * edition, and every connected app and every skill in the personal one. What a run is offered is
-   * what this answers, so it is the one moment every Bot, new or old, passes through.
+   * edition, and every connected app, every skill and Automatic Learning in the personal one. What a
+   * run is offered is what this answers, so it is the one moment every Bot, new or old, passes
+   * through.
    */
   const list = store.listForAgent;
   store.listForAgent = async function (this: S, agentId: string) {
@@ -346,6 +384,7 @@ export function withPersonalDefaults<S extends Store>(
       GRANTED_BY,
     );
     await giveEverySkillOnce(this, deps, [agentId]);
+    if (currentEdition() === "personal") await deps.includeEveryBotInLearning();
     return list.call(this, agentId);
   } as S["listForAgent"];
 
@@ -444,6 +483,45 @@ export function personalDefaultsDeps(database: Database): PersonalDefaultsDeps {
           updatedBy: GRANTED_BY,
         })
         .onConflictDoNothing();
+    },
+    /*
+     * One statement on the one settings row, so it cannot lose a change saved at the same moment and
+     * keeps every other key as it is. Matches no row, and writes nothing, while no Bot is left out.
+     */
+    async includeEveryBotInLearning() {
+      const rows = await database.execute<{ bots: string[] }>(sql`
+        WITH old AS (
+          SELECT ${learningSettings.settings} AS settings
+          FROM ${learningSettings}
+          WHERE ${learningSettings.id} = 'current'
+          FOR UPDATE
+        )
+        UPDATE ${learningSettings}
+        SET settings = jsonb_set(
+              ${learningSettings.settings},
+              '{agents}',
+              COALESCE(
+                (SELECT jsonb_object_agg(bot, target)
+                 FROM jsonb_each(${learningSettings.settings}->'agents') AS mapping(bot, target)
+                 WHERE target <> 'null'::jsonb),
+                '{}'::jsonb
+              )
+            ),
+            updated_at = now()
+        FROM old
+        WHERE ${learningSettings.id} = 'current'
+          AND jsonb_typeof(old.settings->'agents') = 'object'
+          AND EXISTS (
+            SELECT 1 FROM jsonb_each(old.settings->'agents') AS mapping(bot, target)
+            WHERE target = 'null'::jsonb
+          )
+        RETURNING (
+          SELECT COALESCE(array_agg(bot ORDER BY bot), '{}')
+          FROM jsonb_each(old.settings->'agents') AS mapping(bot, target)
+          WHERE target = 'null'::jsonb
+        ) AS bots
+      `);
+      return [...rows].flatMap((row) => row.bots);
     },
     async skillExists(slug) {
       const [row] = await database
