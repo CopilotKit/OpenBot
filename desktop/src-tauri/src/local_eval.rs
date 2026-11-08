@@ -2686,10 +2686,8 @@ pub(crate) fn setup_with(
                 images_limits,
             )?,
             // A first setup: its node does not exist until the CLI makes it, so its download is
-            // followed while the CLI pulls (`local_images::follow_new_stack`). The images k3d
-            // pulls through the engine to make the node come from OpenBot's mirror first.
+            // followed while the CLI pulls (`local_images::follow_new_stack`).
             None => {
-                pull_engine_images(&images.engine, cancel);
                 return setup_followed(
                     cli,
                     installation,
@@ -2706,31 +2704,6 @@ pub(crate) fn setup_with(
     };
     let limits = if downloaded { limits.0 } else { limits.1 };
     setup(cli, installation, accepted, limits, cancel)
-}
-
-/// Pull what `k3d cluster create` would pull through the engine (`CliImages::engine`) before a
-/// first setup runs it, through `pull_metrics::pull_image`, so each comes from downloads.copilotkit.ai
-/// first (`image_mirror`) and k3d finds it here. One that cannot be pulled is left for k3d to pull,
-/// as before.
-fn pull_engine_images(images: &[String], cancel: &Cancel) {
-    let Some(address) = ENGINE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone()
-    else {
-        return;
-    };
-    for image in images {
-        if cancel.requested() {
-            return;
-        }
-        if let Err(problem) = crate::pull_metrics::pull_image(&address, image, |_| {}, |_| {}) {
-            log::warn!(
-                "[local] {image} is left for k3d to pull: {}",
-                problem.detail.as_deref().unwrap_or(&problem.said)
-            );
-        }
-    }
 }
 
 /**
@@ -4935,6 +4908,96 @@ fn main() {
     }
 }
 "#;
+
+    /**
+    A first setup leaves the k3s node image and k3d's tools and proxy to k3d. The CLI hands k3d
+    them by digest and, after the cluster is made, checks the node's `Config.Image` is exactly that
+    digest reference. Pulled first and tagged by OpenBot, Podman on Windows recorded the node's
+    image as the tag (`docker.io/rancher/k3s:sha256-...`) with no digest, and every fresh install
+    failed right after the CLI inspected its runtime. So the engine is never asked to pull or tag
+    any of them, before or during the setup.
+    */
+    #[test]
+    fn a_first_setup_leaves_the_k3s_and_k3d_images_for_k3d_to_pull_by_digest() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_first_setup_leaves_the_k3s_and_k3d_images_for_k3d_to_pull_by_digest",
+        ) {
+            return;
+        }
+        let root = temp_root("first-setup-k3d-images");
+        std::fs::create_dir_all(&root).unwrap();
+        // Each program writes every argument list it is given beside itself, one per line, and
+        // fails: no stack is listed, no node answers, and nothing is ever pulled.
+        let recording = |name: &str| {
+            let source = root.join(format!("{name}.rs"));
+            std::fs::write(
+                &source,
+                format!(
+                    r#"
+use std::io::Write;
+fn main() {{
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let log = std::env::current_exe().unwrap().parent().unwrap().join("{name}-argv");
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(log).unwrap();
+    writeln!(file, "{{}}", args.join(" ")).unwrap();
+    std::process::exit(1);
+}}
+"#
+                ),
+            )
+            .unwrap();
+            let binary = root.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+            compile_fixture(&source, &binary);
+            binary
+        };
+        let engine = recording("docker");
+        let program = recording("copilotkit");
+        assert!(engine.is_file());
+        // The CLI's bundle, naming the k3s and k3d images k3d pulls through the engine.
+        let entry = root.join("index.js");
+        std::fs::write(
+            &entry,
+            include_str!("../test-fixtures/local-images/cli-48a3863-excerpt.txt"),
+        )
+        .unwrap();
+        let cli = PinnedCli {
+            program,
+            entry: Some(entry),
+            sha256: String::new(),
+        };
+        assert!(cli_images_of(&cli).is_some(), "the bundle is read");
+        std::env::set_var("PATH", &root);
+        use_engine(&crate::engine::Address::new(
+            crate::engine::Engine::Docker,
+            None,
+        ));
+        let installation = root.join("installation");
+        std::fs::create_dir_all(&installation).unwrap();
+        let limits = Limits::for_setup();
+        let _ = setup_with(
+            &cli,
+            "first-setup-k3d-images",
+            &installation,
+            None,
+            (limits, limits),
+            &Cancel::default(),
+            crate::local_images::Limits::standard(),
+        );
+        let ran = std::fs::read_to_string(root.join("copilotkit-argv")).unwrap_or_default();
+        assert!(ran.contains("local setup"), "the setup ran: {ran}");
+        let asked = std::fs::read_to_string(root.join("docker-argv")).unwrap_or_default();
+        for line in asked.lines() {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            let pulls_or_tags = words.iter().any(|word| *word == "pull" || *word == "tag");
+            let k3d_image = ["rancher/k3s", "k3d-io/k3d-tools", "k3d-io/k3d-proxy"]
+                .iter()
+                .any(|image| line.contains(image));
+            assert!(
+                !(pulls_or_tags && k3d_image),
+                "the engine was asked to `{line}`; k3d pulls these itself"
+            );
+        }
+    }
 
     fn compiled() -> &'static Path {
         static BINARY: OnceLock<PathBuf> = OnceLock::new();

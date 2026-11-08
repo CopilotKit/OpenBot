@@ -548,9 +548,17 @@ pub fn get(url: &str) -> Result<Vec<u8>, String> {
 pub const DOWNLOADS: &str = "https://downloads.copilotkit.ai";
 
 /// Where downloads.copilotkit.ai keeps its copy of a GitHub download, for the downloads it copies:
-/// OpenBot's release assets, and the Podman and Compose builds `install.rs` installs, each under the
-/// same version and file name. `None` for anything else.
+/// OpenBot's release assets and a tag's source archive (kept with the release, as
+/// `releases/<tag>/<tag>.tar.gz`), and the Podman and Compose builds `install.rs` installs, each
+/// under the same version and file name. `None` for anything else, a commit's archive included.
 pub fn mirrored(url: &str) -> Option<String> {
+    if let Some(tag) = url
+        .strip_prefix("https://github.com/CopilotKit/OpenBot/archive/refs/tags/")
+        .and_then(|rest| rest.strip_suffix(".tar.gz"))
+    {
+        return (!tag.is_empty() && !tag.contains('/'))
+            .then(|| format!("{DOWNLOADS}/releases/{tag}/{tag}.tar.gz"));
+    }
     const COPIES: [(&str, &str); 3] = [
         (
             "https://github.com/CopilotKit/OpenBot/releases/download/",
@@ -755,10 +763,16 @@ mod tests {
                 ))
             );
         }
-        // The source archive, the release lookup and other repositories stay on GitHub.
+        // A tag's source archive is kept with its release.
+        assert_eq!(
+            mirrored(&tarball_url("v0.3.3")).as_deref(),
+            Some("https://downloads.copilotkit.ai/releases/v0.3.3/v0.3.3.tar.gz")
+        );
+        // A commit's archive, the release lookup and other repositories stay on GitHub.
         for github in [
-            tarball_url("v0.3.4"),
             commit_tarball_url("0123456789abcdef"),
+            "https://github.com/CopilotKit/OpenBot/archive/refs/tags/.tar.gz".to_string(),
+            "https://github.com/someone/OpenBot/archive/refs/tags/v0.3.4.tar.gz".to_string(),
             "https://api.github.com/repos/CopilotKit/OpenBot/releases/latest".to_string(),
             "https://github.com/someone/OpenBot/releases/download/v0.3.4/container-images.json"
                 .to_string(),
