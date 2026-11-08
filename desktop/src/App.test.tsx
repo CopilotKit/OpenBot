@@ -16,8 +16,8 @@ type ProgressEvent = {
     done: number;
     total: number;
     bytes: number;
+    size?: number;
     bytesPerSecond?: number;
-    pulling: Array<{ name: string; bytes: number; size?: number }>;
   };
 };
 type Deferred<T> = {
@@ -552,16 +552,23 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
       done: 2,
       total: 7,
       bytes: 52_000_000,
+      size: 1_300_000_000,
       bytesPerSecond: 3_000_000,
-      pulling: [{ name: "agent-bot", bytes: 12_000_000, size: 40_000_000 }],
     },
   });
   expect(
     installing.queryByText("Checking which local software to download."),
   ).toBeNull();
-  expect(installing.getByText("5 of 7 items remaining")).toBeTruthy();
-  expect(installing.getByRole("progressbar").getAttribute("value")).toBe("2");
-  expect(installing.queryByText("agent-bot")).toBeNull();
+  expect(
+    installing.getByText("52.0 MB of 1.3 GB · 5 of 7 items remaining"),
+  ).toBeTruthy();
+  // The bar is the bytes, out of the whole download.
+  expect(installing.getByRole("progressbar").getAttribute("value")).toBe(
+    "52000000",
+  );
+  expect(installing.getByRole("progressbar").getAttribute("max")).toBe(
+    "1300000000",
+  );
   expectPlain(view);
   expect(
     setupEvents().filter(
