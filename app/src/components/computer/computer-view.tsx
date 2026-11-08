@@ -1,5 +1,5 @@
 import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
-import { IconX } from "@tabler/icons-react";
+import { IconLock, IconWorld, IconX } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -38,6 +38,25 @@ function hostOf(url: string): string {
     return new URL(url).host;
   } catch {
     return url;
+  }
+}
+
+/** An address as an address bar draws it: the site, the rest of the address after it, and whether it is secure. */
+function addressParts(
+  url: string,
+): { host: string; rest: string; secure: boolean } | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+      return null;
+    const rest = `${parsed.pathname === "/" ? "" : parsed.pathname}${parsed.search}`;
+    return {
+      host: parsed.host,
+      rest,
+      secure: parsed.protocol === "https:",
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -209,7 +228,7 @@ function NothingToSee({
           it.
         </span>
       ) : blankBrowser ? (
-        <span>The Bot hasn't opened a page yet.</span>
+        <span>Nothing is open in the Bot's browser right now.</span>
       ) : (
         <span>Waiting for the Bot's screen…</span>
       )}
@@ -684,7 +703,7 @@ export function ComputerView({
     : settled
       ? knownPage?.url
       : undefined;
-  const pageHost = pageUrl ? hostOf(pageUrl) : "";
+  const address = pageUrl ? addressParts(pageUrl) : null;
 
   return (
     <>
@@ -693,24 +712,40 @@ export function ComputerView({
         className="overflow-hidden rounded-2xl border bg-background"
       >
         {/*
-          The card read as a window: whose browser it is and where it is, on the frame above the page, with a dot
-          while the picture is of the browser as it is now rather than of a turn that is over.
+          The card read as a browser window: where it is, as an address bar says it (the site in ink, the rest of the
+          address quieter), with a dot in the colour that means a Bot is acting while the picture is of the browser as
+          it is now rather than of a turn that is over. With no page open, whose browser it is.
         */}
-        {name || pageHost ? (
+        {address || name ? (
           <figcaption className="flex h-8 items-center gap-2 border-b bg-sidebar px-3 text-xs">
-            {name ? (
-              <span className="flex min-w-0 shrink-0 items-center gap-1.5 font-medium">
+            {address ? (
+              <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                {address.secure ? (
+                  <IconLock
+                    aria-hidden="true"
+                    className="size-3 shrink-0 text-muted-foreground"
+                  />
+                ) : (
+                  <IconWorld
+                    aria-hidden="true"
+                    className="size-3 shrink-0 text-muted-foreground"
+                  />
+                )}
+                <span className="min-w-0 truncate">
+                  <span className="font-medium">{address.host}</span>
+                  <span className="text-muted-foreground">{address.rest}</span>
+                </span>
+              </span>
+            ) : (
+              <span className="flex min-w-0 flex-1 items-center gap-1.5 font-medium">
                 <ChannelAvatar participantIds={[computerId]} size={14} />
                 {name}
               </span>
-            ) : null}
-            <span className="min-w-0 flex-1 truncate text-right text-muted-foreground">
-              {pageHost}
-            </span>
+            )}
             {showScreen && !settled ? (
               <span
                 aria-hidden="true"
-                className="size-1.5 shrink-0 rounded-full bg-emerald-500 motion-safe:animate-pulse"
+                className="size-1.5 shrink-0 rounded-full bg-indigo-500 motion-safe:animate-pulse"
               />
             ) : null}
           </figcaption>
@@ -758,18 +793,25 @@ export function ComputerView({
           </button>
           {!settled && !(driving && !control?.transitioning) ? (
             <div className="absolute inset-x-2 bottom-2 flex items-center justify-between gap-2 rounded-xl border border-white/60 bg-white/75 py-1.5 pr-1.5 pl-3 shadow-lg backdrop-blur-md dark:border-white/10 dark:bg-black/55">
-              <span className="min-w-0 text-xs text-muted-foreground">
-                {!control
-                  ? "Checking who has control…"
-                  : control.transitioning
-                    ? "Finishing the current action…"
-                    : someoneElse
-                      ? "Someone else has control."
-                      : "The Bot has control."}
+              <span className="flex min-w-0 items-center gap-2 text-sm">
+                {control && !control.transitioning && !someoneElse ? (
+                  <ChannelAvatar participantIds={[computerId]} size={18} />
+                ) : null}
+                <span className="min-w-0 truncate">
+                  {!control
+                    ? "Checking who has control…"
+                    : control.transitioning
+                      ? "Finishing the current action…"
+                      : someoneElse
+                        ? "Someone else has control."
+                        : // Who holds the wheel, which is always true; whether it is acting right now, the page shows.
+                          `${name ?? "The Bot"} has control`}
+                </span>
               </span>
               <ComputerControlButton
                 computerId={computerId}
                 onTakeControl={() => setExpanded(true)}
+                prominent
               />
             </div>
           ) : null}

@@ -30,8 +30,8 @@ const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 const HEADING_ENTRANCE_SECONDS = 0.18;
 const HEADING_ENTRANCE_OFFSET = "translateY(4px)";
 
-/** Shared detail pane width for the live screen view. */
-const SCREEN_PANEL_WIDTH = 400;
+/** Shared detail pane width for the live screen view: wide enough that the page on it can be read, not glimpsed. */
+const SCREEN_PANEL_WIDTH = 560;
 
 export const Route = createFileRoute("/_authed/_app/channel/$channelId")({
   validateSearch: chatSearchSchema,
