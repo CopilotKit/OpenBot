@@ -31,6 +31,7 @@ export const localFailures = [
   "unexpected-exit",
   "invalid-acceptance",
   "rootless-podman",
+  "download-stalled",
 ] as const;
 export type LocalFailure = (typeof localFailures)[number];
 
@@ -239,6 +240,35 @@ export function copilotKitSignInPage(
   return invoke<CopilotKitSignInPage | null>("copilotkit_sign_in_page", {
     attempt,
   });
+}
+
+/** How much of the back end's download has arrived, in bytes, of how much in all. */
+export type LocalDownload = { done: number; total: number };
+
+/**
+ * How far the download before the setup or update `attempt` has got, while it downloads,
+ * or null. OpenBot downloads the back end's images itself before the CLI pulls them, so a slow
+ * line can be told apart from a stuck one.
+ */
+export async function localEvalDownload(
+  attempt: string,
+): Promise<LocalDownload | null> {
+  const found = await invoke<unknown>("local_eval_download", { attempt });
+  // Only two byte counts, and only once there is something to download.
+  if (!found || typeof found !== "object") return null;
+  const { done, total } = found as Partial<LocalDownload>;
+  return typeof done === "number" && typeof total === "number" && total > 0
+    ? { done, total }
+    : null;
+}
+
+/** "48 of 147 MB": decimal megabytes, one decimal place below ten. */
+export function downloadSaid({ done, total }: LocalDownload): string {
+  const megabytes = (bytes: number) => {
+    const mb = bytes / 1e6;
+    return mb < 10 ? mb.toFixed(1) : Math.round(mb).toString();
+  };
+  return `${megabytes(Math.min(done, total))} of ${megabytes(total)} MB`;
 }
 
 /**

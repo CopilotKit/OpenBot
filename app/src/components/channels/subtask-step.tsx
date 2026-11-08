@@ -86,7 +86,12 @@ export function SubtaskStep({
           </span>
           <span className="flex min-w-0 items-center gap-2">
             <StepIcon kind="subtask" />
-            <span className="shrink-0">{step.label}</span>
+            {/* Shimmers while it works, as every running step does. See `StepRow`. */}
+            <span
+              className={running ? "shrink-0 tool-line-running" : "shrink-0"}
+            >
+              {step.label}
+            </span>
             {step.detail ? (
               <span className="truncate text-muted-foreground">
                 {step.detail}

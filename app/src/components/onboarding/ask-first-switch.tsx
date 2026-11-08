@@ -8,6 +8,10 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import {
+  ASK_FIRST_DESCRIPTION,
+  ASK_FIRST_TITLE,
+} from "@/components/approvals/ask-first-copy";
 import { Switch } from "@/components/ui/switch";
 import {
   approvalInboxOptions,
@@ -16,9 +20,9 @@ import {
 import { queryClient } from "@/query-client";
 
 /**
- * The approval step's one setting, offered on the step rather than described: Ask before making
- * changes, the same switch and the same preference as Settings → Approvals. It takes effect when
- * switched, and a change that fails is said under it.
+ * The approval step's one setting, offered on the step rather than described: Always ask before
+ * making changes, the same switch and the same preference as Settings → Approvals, in the same
+ * words (ask-first-copy.ts). It takes effect when switched, and a change that fails is said under it.
  *
  * The step is still a picture of what a Bot asks; the switch sits with the words, outside the
  * picture's frame, because it is the one real control here.
@@ -40,14 +44,14 @@ export function AskFirstSwitch() {
           <IconHandStop />
         </ItemMedia>
         <ItemContent>
-          <ItemTitle>Ask before making changes</ItemTitle>
-          <ItemDescription>
-            Review a Bot's changes to websites, connected apps, and files.
+          <ItemTitle>{ASK_FIRST_TITLE}</ItemTitle>
+          <ItemDescription className="line-clamp-none">
+            {ASK_FIRST_DESCRIPTION}
           </ItemDescription>
         </ItemContent>
         <ItemActions>
           <Switch
-            aria-label="Ask before making changes"
+            aria-label={ASK_FIRST_TITLE}
             checked={checked}
             disabled={inbox.isPending || preferences.isPending}
             onCheckedChange={(enabled) => preferences.mutate({ enabled })}

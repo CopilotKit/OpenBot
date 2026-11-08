@@ -8,6 +8,7 @@ import {
   clearLearningRevisionFallback,
   createLearningRuntime,
   selectLearningTarget,
+  skillMdFirst,
 } from "../src/learning/runtime";
 import type { LearningSettingsStore } from "../src/learning/settings";
 import { skillSnapshot } from "./fixtures/learned-skills";
@@ -24,6 +25,9 @@ function fixture() {
     write: async (next) => {
       settings = next;
       return settings;
+    },
+    setAutoApprove: async (autoApprove) => {
+      settings = { ...settings, autoApprove };
     },
     saved: async () => true,
     adoptDefault: async () => false,
@@ -240,31 +244,40 @@ describe("Automatic Learning runtime", () => {
 test("Admin can clear an environment-seeded pin and follow latest", async () => {
   const previous = process.env.CPK_INTELLIGENCE_SKILLS_REVISION;
   try {
+    // The admin cleared the pin the environment seeded, so the saved target names no revision.
     process.env.CPK_INTELLIGENCE_SKILLS_REVISION = "r1";
-    const captured = {
-      containerId: "openbot",
-      revision: process.env.CPK_INTELLIGENCE_SKILLS_REVISION,
-    };
-    clearLearningRevisionFallback();
     const f = fixture();
-    await f.store.write({ enabled: true, defaultTarget: captured, agents: {} });
     await f.store.write({
       enabled: true,
       defaultTarget: { containerId: "openbot" },
       agents: {},
     });
-    let requestedRevision: string | undefined;
+    const requested: (string | undefined)[] = [];
     f.client.getLearnedSkillsSnapshot = async (request) => {
-      requestedRevision = request.revision;
-      return skillSnapshot("r2");
+      requested.push(request.revision);
+      return skillSnapshot(request.revision === "r1" ? "r1" : "r2");
     };
-    const invocation = await createLearningRuntime({
+    // While the variable is set, the SDK's registry falls back to it and pins the old revision anyway.
+    const pinned = await createLearningRuntime({
       client: f.client,
       store: f.store,
     }).acquire("bot");
-    expect(requestedRevision).toBeUndefined();
+    expect(requested).toEqual(["r1"]);
     expect(
-      await invocation?.execute("copilotkit_load_skill", {
+      await pinned?.execute("copilotkit_load_skill", {
+        skill_name: "public-answer",
+      }),
+    ).toContain("guidance r1");
+
+    clearLearningRevisionFallback();
+    expect(process.env.CPK_INTELLIGENCE_SKILLS_REVISION).toBeUndefined();
+    const latest = await createLearningRuntime({
+      client: f.client,
+      store: f.store,
+    }).acquire("bot");
+    expect(requested).toEqual(["r1", undefined]);
+    expect(
+      await latest?.execute("copilotkit_load_skill", {
         skill_name: "public-answer",
       }),
     ).toContain("guidance r2");
@@ -314,4 +327,30 @@ test("cancelling one acquisition leaves another run's shared refresh alive", asy
   snapshot.resolve(skillSnapshot());
   expect((await second)?.catalog).toContain("public-answer");
   expect(reads).toBe(1);
+});
+
+test("skillMdFirst puts SKILL.md first and gives a binary file no text", () => {
+  expect(
+    skillMdFirst([
+      { path: "reference.txt", text: "r" },
+      { path: "SKILL.md", text: "s" },
+      { path: "logo.png" },
+    ]),
+  ).toEqual([
+    { path: "SKILL.md", text: "s" },
+    { path: "reference.txt", text: "r" },
+    { path: "logo.png", text: null },
+  ]);
+});
+
+test("containerSkills reads a container's published files, SKILL.md first", async () => {
+  const f = fixture();
+  f.client.getLearnedSkillsSnapshot = async () => skillSnapshot("r1");
+  const runtime = createLearningRuntime({ client: f.client, store: f.store });
+  const result = await runtime.containerSkills("someone-elses-space");
+  if (!("skills" in result)) throw new Error("Expected skills");
+  const skill = result.skills.find((s) => s.name === "public-answer");
+  expect(skill?.files[0]?.path).toBe("SKILL.md");
+  expect(skill?.files[0]?.text).toEqual(expect.any(String));
+  expect(skill?.files.map((file) => file.path)).toContain("reference.txt");
 });

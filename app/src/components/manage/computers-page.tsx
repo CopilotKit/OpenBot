@@ -1,3 +1,4 @@
+import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import {
   IconAlertTriangle,
   IconBolt,
@@ -6,6 +7,10 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
+import {
+  ClearBrowserDialog,
+  useClearBrowserData,
+} from "@/components/browser/browser-bar";
 import {
   PageEmpty,
   PageRows,
@@ -32,6 +37,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { useBotNames } from "@/lib/agents/bot-names";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { clearBrowserMutationOptions } from "@/lib/browser/mutations";
 import {
   type HostAccessPendingOperation,
   type HostFolderGrant,
@@ -51,6 +57,14 @@ import { useManagePaths } from "@/lib/manage-paths";
 /** One row's identity: the computer, and on a shared computer the Bot's seat on it. */
 function rowId(computer: ComputerProfile): string {
   return `${computer.computer}|${computer.botId ?? ""}`;
+}
+
+/**
+ * A person's own OpenBot browser, the one Teach a Bot records in. It is listed beside the Bots' browsers, under an id
+ * that is no Bot's, so it read "A Bot no longer here" until it was named for what it is.
+ */
+function isOwnBrowser(computer: ComputerProfile): boolean {
+  return computer.botId !== undefined && isPersonBrowserId(computer.botId);
 }
 
 /**
@@ -75,6 +89,12 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
     useState<ComputerProfile | null>(null);
   const queryClient = useQueryClient();
   const nameFor = useBotNames();
+  /*
+   * The person's own OpenBot browser is cleared the way Teach a Bot clears it: a recording in it ends first, and its
+   * Recorder connection ends with the profile. A Bot's Reset does neither.
+   */
+  const clearOwnBrowser = useMutation(clearBrowserMutationOptions(queryClient));
+  const clearing = useClearBrowserData(clearOwnBrowser);
 
   const fleet = useQuery(computerFleetQueryOptions());
   const hostAccess = useQuery(hostAccessQueryOptions());
@@ -133,6 +153,13 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
    * computer a row is one person's seat on one Bot, so it names both.
    */
   const titleOf = (computer: ComputerProfile): string => {
+    if (isOwnBrowser(computer)) {
+      if (personal) return "Your OpenBot browser";
+      const owner = computer.person?.name ?? computer.person?.email;
+      return owner
+        ? `${owner}'s OpenBot browser`
+        : "A person's OpenBot browser";
+    }
     // One person, so a row is one of their Bots.
     if (personal) return computer.botId ? nameFor(computer.botId) : "Computer";
     const person =
@@ -147,6 +174,7 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
 
   /** What a row carries, said once before its state. */
   const scopeOf = (computer: ComputerProfile): string => {
+    if (isOwnBrowser(computer)) return "Their own browser for Teach a Bot";
     if (computer.kind === "person") {
       return computer.botId
         ? "This person's profile and folder for this Bot"
@@ -155,6 +183,22 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
     return isolation === "shared"
       ? "This Bot's profile from before each person had their own"
       : "Isolated: a computer of its own, shared by everyone who uses it";
+  };
+
+  /** Whether its browser runs, and when it starts again. */
+  const stateOf = (computer: ComputerProfile): string => {
+    const since = computer.running
+      ? `Browser running since ${new Date(computer.startedAt ?? "").toLocaleTimeString()}`
+      : "No browser running";
+    if (!isOwnBrowser(computer))
+      return computer.running
+        ? since
+        : `${since}. It starts when the Bot next needs it.`;
+    // In the team edition the row already says it is that person's browser for Teach a Bot.
+    if (!personal) return since;
+    return computer.running
+      ? `${since}. You record in it with Teach a Bot.`
+      : `${since}. It opens when you record with Teach a Bot.`;
   };
 
   return (
@@ -256,9 +300,7 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
                     </ItemTitle>
                     <ItemDescription>
                       {personal ? null : `${scopeOf(computer)} · `}
-                      {computer.running
-                        ? `Browser running since ${new Date(computer.startedAt ?? "").toLocaleTimeString()}`
-                        : "No browser running. It starts when the Bot next needs it."}
+                      {stateOf(computer)}
                       {personal
                         ? null
                         : ` · ${
@@ -290,14 +332,27 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
                     >
                       {busy === rowId(computer) ? "Working…" : "Stop browser"}
                     </Button>
-                    <Button
-                      disabled={busy === rowId(computer)}
-                      onClick={() => setConfirming(computer)}
-                      size="sm"
-                      variant="outline"
-                    >
-                      Reset
-                    </Button>
+                    {personal && isOwnBrowser(computer) ? (
+                      <Button
+                        disabled={
+                          busy === rowId(computer) || clearOwnBrowser.isPending
+                        }
+                        onClick={clearing.ask}
+                        size="sm"
+                        variant="outline"
+                      >
+                        Clear browser data
+                      </Button>
+                    ) : (
+                      <Button
+                        disabled={busy === rowId(computer)}
+                        onClick={() => setConfirming(computer)}
+                        size="sm"
+                        variant="outline"
+                      >
+                        Reset
+                      </Button>
+                    )}
                   </ItemActions>
                 </Item>
                 {index !== computers.length - 1 && <Separator />}
@@ -331,7 +386,9 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
             <DialogDescription>
               {confirming?.kind === "person" && !confirming.botId
                 ? "Every Bot's profile on this person's computer is deleted. Each is signed out of every service and starts clean."
-                : "Its profile is deleted. The Bot is signed out of every service and starts clean."}{" "}
+                : confirming && isOwnBrowser(confirming)
+                  ? "Its profile is deleted. The person is signed out of every site they signed in to in it."
+                  : "Its profile is deleted. The Bot is signed out of every service and starts clean."}{" "}
               You can't undo this.
             </DialogDescription>
           </DialogHeader>
@@ -358,6 +415,12 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ClearBrowserDialog
+        clear={clearOwnBrowser}
+        onOpenChange={clearing.setAsking}
+        open={clearing.asking}
+      />
 
       <Dialog
         onOpenChange={(open) => {
@@ -403,10 +466,16 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
 
       {personal ? (
         <p className="mt-4 text-muted-foreground text-sm">
-          <strong>Stop browser</strong> closes a Bot's browser and keeps its
-          sign-ins. It starts again the next time the Bot needs it.{" "}
-          <strong>Reset</strong> deletes the Bot's browser profile and signs it
-          out of everything. Both show in{" "}
+          <strong>Stop browser</strong> closes a browser and keeps its sign-ins.
+          It starts again the next time it's needed. <strong>Reset</strong>{" "}
+          deletes a Bot's browser profile and signs it out of everything.{" "}
+          {computers?.some(isOwnBrowser) ? (
+            <>
+              <strong>Clear browser data</strong> does the same for your OpenBot
+              browser.{" "}
+            </>
+          ) : null}
+          Each shows in{" "}
           <Link className="underline" {...paths.audit()}>
             {paths.auditLabel}
           </Link>
