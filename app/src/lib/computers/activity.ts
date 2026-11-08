@@ -1,11 +1,12 @@
+import type { Message } from "@ag-ui/core";
+import { useCopilotKit } from "@copilotkit/react-core/v2";
 import {
   DECLINED_BY_PERSON,
   declinedByPerson,
   doneByPerson,
   outcomeForPerson,
 } from "@openbot/shared/approval-outcomes";
-import type { Message } from "@ag-ui/core";
-import { useCopilotKit } from "@copilotkit/react-core/v2";
+import type { DecisionToolName } from "@openbot/shared/decision-tools";
 import { useEffect } from "react";
 import type { ToolOutcome } from "./call";
 import { followView, latestView } from "./panel-view";
@@ -575,7 +576,7 @@ export function detailsOf(
  * declined, in the words a declined command uses. Allowed, it is not listed at all: the command the
  * Bot runs next is the step, and it is listed once, with what it printed.
  */
-const ASK_APPROVAL = "askApproval";
+const ASK_APPROVAL = "askApproval" satisfies DecisionToolName;
 
 const approvals = new Map<string, { args: string; command: string | null }>();
 

@@ -18,6 +18,10 @@ import { createBotLifecycleRoutes } from "../src/agents/lifecycle-routes";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
+import {
+  createDecisionWaits,
+  DECISION_KIND,
+} from "../src/approvals/decision-waits";
 import { createApprovalResumeTick } from "../src/approvals/resume-sweep";
 import { createApprovalRoutes } from "../src/approvals/routes";
 import { createApprovalService } from "../src/approvals/service";
@@ -1219,6 +1223,73 @@ describe("what needs the person", () => {
           and(
             eq(workItems.kind, "person.question"),
             eq(workItems.key, questionKey),
+          ),
+        );
+    }
+  });
+
+  test("a card its Bot asks with in a task's conversation is the task needing input, never a question too, and its notice opens there", async () => {
+    const { owner, botId, item } = await seed();
+    script = (input) => reply(input, "Here is a first draft.");
+    const task = await start(owner, item.id);
+    await tasks.idle();
+    const before = await taskStore.get(owner.id, task.id);
+    expect(before.status).not.toBe("needs_input");
+    if (!before.threadId) throw new Error("The task has no thread.");
+    // The run ended on a form the person has not filled in yet (approvals/decision-waits.ts).
+    const toolCallId = `${prefix}-form-${randomUUID()}`;
+    await createDecisionWaits(database).opened({
+      threadId: before.threadId,
+      runId: randomUUID(),
+      botId,
+      calls: [
+        { toolCallId, toolName: "askForm", title: "Plan your next project" },
+      ],
+    });
+    const waiting = await taskStore.get(owner.id, task.id);
+    expect(waiting.status).toBe("needs_input");
+    expect(waiting.next).toBe(
+      "Waiting for your answer: Plan your next project",
+    );
+
+    const lifecycleRoutes = new Hono<{ Variables: AppVariables }>();
+    lifecycleRoutes.route(
+      "/api/bots",
+      createBotLifecycleRoutes(
+        {
+          lifecycle: createBotLifecycleStore(database),
+          reset: {} as never,
+          activity: createActivityStore(database),
+          wakeUps: {} as never,
+          profiles: profileStore,
+          tasks,
+        },
+        async (context, next) => {
+          context.set("actor", {
+            id: owner.id,
+            email: `${owner.id}@example.test`,
+            role: "user",
+          });
+          await next();
+        },
+      ),
+    );
+    try {
+      const response = await lifecycleRoutes.request("/api/bots/attention");
+      const { bots: rows } = (await response.json()) as AttentionResponse;
+      expect(rows.find((row) => row.agentId === botId)).toMatchObject({
+        questions: 0,
+        approvals: 0,
+        tasks: { needsInput: 1 },
+        waitingIn: task.channelId,
+      });
+    } finally {
+      await database
+        .delete(workItems)
+        .where(
+          and(
+            eq(workItems.kind, DECISION_KIND),
+            eq(workItems.key, `${before.threadId}:${toolCallId}`),
           ),
         );
     }

@@ -1,3 +1,4 @@
+import type { DecisionToolName } from "@openbot/shared/decision-tools";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -381,7 +382,7 @@ function FormEntry({
 
 export const GALLERY: GalleryComponent[] = [
   {
-    name: "askForm",
+    name: "askForm" satisfies DecisionToolName,
     title: "Form",
     kind: "decision",
     summary:
