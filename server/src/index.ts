@@ -238,6 +238,7 @@ import { backfillBrokeredLogos } from "./plugins/logos";
 import { redirectUriFor } from "./plugins/oauth";
 import {
   ensureAlwaysOnApp,
+  ensurePersonalLearning,
   ensurePersonalSkills,
   personalDefaultAppsMemory,
   personalDefaultsDeps,
@@ -1193,6 +1194,18 @@ await ensurePersonalSkills(pluginStore, personalDefaultsDeps(database)).catch(
     );
   },
 );
+/*
+ * Every Bot in the personal edition takes part in Automatic Learning. A failure is a warning: each
+ * Bot is checked again the first time it is listed or runs. Does nothing in the team edition.
+ */
+await ensurePersonalLearning(
+  personalDefaultsDeps(database),
+  bootAuditStore,
+).catch((error: unknown) => {
+  console.warn(
+    `Couldn't make sure every Bot takes part in Learning at startup; each Bot is checked again the first time it runs. ${error instanceof Error ? error.message : String(error)}`,
+  );
+});
 /*
  * The personal edition turns Parallel's keyless web search on once, on its first start. Not awaited:
  * adding it asks search.parallel.ai for its tools, and an offline start must still start. It keeps

@@ -60,7 +60,7 @@ const BOT = "personal-assistant";
 
 /** Every query Activity sends leaves these out, as the page writes it. */
 const LEAVE_OUT =
-  "?excludeEventType=mcp.tools_discovered%2Cchannel.routed%2Ccomponent.published%2Ccomputer.policy_loaded%2Ccomputer.isolation_loaded";
+  "?excludeEventType=mcp.tools_discovered%2Cchannel.routed%2Ccomponent.published%2Ccomputer.policy_loaded%2Ccomputer.isolation_loaded&excludeCalls=routines%2Fcreate_routine%2Croutines%2Fupdate_routine%2Croutines%2Fdelete_routine";
 
 function row(
   id: string,
@@ -242,7 +242,10 @@ test("Activity asks without routing, a build's components or the computer's star
   const openbot = "Started by OpenBot";
   expect(drawn(view.container)).toEqual([
     {
-      what: ["Read data for a component", "Activity report"],
+      what: [
+        "Read data for a component",
+        "Activity report · your Bots' activity",
+      ],
       who: ["Personal Assistant", person],
       decision: ["Refused", "It isn't allowed to read that data."],
     },

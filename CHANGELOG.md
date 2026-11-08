@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- In OpenBot Personal every Bot takes part in Automatic Learning, including Bots made later. A Bot
+  that settings carried over from a team deployment left out is taken back in at the next start (or
+  its first run), with one audit row naming the Bots. Every Bot still gets every skill once, and a
+  skill switched off for one Bot stays off. The team edition is unchanged.
+
 ## 0.3.3
 
 **Before upgrading.** Five migrations add columns: `0078_routine_title` adds a nullable
@@ -296,6 +301,10 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
   Activity lists for that Bot. In both editions the report names each Bot and says what was refused
   in words, where it showed ids, and one request writes one row, where a refused one wrote up to
   three.
+- **What OpenBot gave the Activity report reads once, and says what.** "Let a component read data /
+  Activity report · your Bots' activity and what was refused" is one row, where it was two identical
+  rows; rows already written each name their own data. A Bot creating, changing or deleting a
+  routine shows once, as the routine under its Bot, where its call to Routines was a second row.
 
 ### The Bot's browser
 

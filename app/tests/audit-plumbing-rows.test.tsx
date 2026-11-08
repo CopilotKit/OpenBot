@@ -35,7 +35,7 @@ const BOT = "personal-assistant";
 
 /** What Activity asks the server to leave out, as the page writes it into its query. */
 const LEAVE_OUT =
-  "excludeEventType=mcp.tools_discovered%2Cchannel.routed%2Ccomponent.published%2Ccomputer.policy_loaded%2Ccomputer.isolation_loaded";
+  "excludeEventType=mcp.tools_discovered%2Cchannel.routed%2Ccomponent.published%2Ccomputer.policy_loaded%2Ccomputer.isolation_loaded&excludeCalls=routines%2Fcreate_routine%2Croutines%2Fupdate_routine%2Croutines%2Fdelete_routine";
 
 function row(
   id: string,
