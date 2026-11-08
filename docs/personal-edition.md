@@ -112,7 +112,8 @@ variable to change:
 
 Settings an admin changes in the team edition are fixed here. Values left in the database by a team
 deployment are not read: capability switches, enterprise settings, network policies, team approval
-settings and team rules, and a paused Automatic Learning.
+settings and team rules, and a paused Automatic Learning. Every Bot takes part in Automatic
+Learning: a Bot those settings left out is taken back in at the next start, or its first run.
 
 | | Personal edition |
 | --- | --- |

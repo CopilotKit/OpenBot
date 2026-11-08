@@ -101,6 +101,7 @@ function fakeStore(
     rememberSkillsGiven: async (agentId: string) => {
       given.add(agentId);
     },
+    includeEveryBotInLearning: async () => [] as string[],
   };
   const wrapped = withPersonalDefaults(store, deps);
   return { store: wrapped, grants, grantedBy, added, deps };
