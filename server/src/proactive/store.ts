@@ -157,6 +157,18 @@ const claimable = and(
   sql`not exists (select 1 from ${botLifecycle} where ${botLifecycle.ownerUserId} = ${proactiveSettings.ownerUserId} and ${botLifecycle.agentId} = ${proactiveSettings.agentId} and ${botLifecycle.pausedAt} is not null)`,
 );
 
+/**
+ * A moment on this server's clock, for SQL that counts a next check-in from it.
+ *
+ * The sweep decides a check-in is due on this server's clock (`claimDue`), so its next run is counted
+ * on the same one. Counted from the database's `now()`, it was off from one interval by however far
+ * the two clocks differ: a database a few milliseconds ahead put a 240-minute check-in a few
+ * milliseconds past 240 minutes out.
+ */
+function fromServerClock(at: Date = new Date()) {
+  return sql`${at.toISOString()}::timestamptz`;
+}
+
 /** A new item as a check-in raises it. Its id, status and normalized title are the store's. */
 export type NewSuggestion = Omit<
   ProactiveSuggestion,
@@ -314,7 +326,7 @@ export function createProactiveStore(database: Database) {
     const patch = parseWith(proactiveSettingPatchSchema, input);
     const minutes =
       patch.intervalMinutes ?? sql`${proactiveSettings.intervalMinutes}`;
-    const oneIntervalOut = sql`now() + make_interval(mins => ${minutes}::int)`;
+    const oneIntervalOut = sql`${fromServerClock()} + make_interval(mins => ${minutes}::int)`;
     const kept =
       patch.intervalMinutes === undefined
         ? sql`${proactiveSettings.nextRunAt}`
@@ -440,7 +452,7 @@ export function createProactiveStore(database: Database) {
             threadId,
             ...parsed,
             sourceLink,
-            nextRunAt: sql`now() + make_interval(mins => ${parsed.intervalMinutes}::int)`,
+            nextRunAt: new Date(Date.now() + parsed.intervalMinutes * 60_000),
           })
           .returning();
         if (!row)
@@ -488,17 +500,18 @@ export function createProactiveStore(database: Database) {
         .limit(Math.min(limit, 10));
       const claimed: ProactiveSetting[] = [];
       for (const { id } of due) {
+        const at = new Date();
         const [row] = await database
           .update(proactiveSettings)
           .set({
-            nextRunAt: sql`now() + make_interval(mins => ${proactiveSettings.intervalMinutes})`,
-            updatedAt: new Date(),
+            nextRunAt: sql`${fromServerClock(at)} + make_interval(mins => ${proactiveSettings.intervalMinutes})`,
+            updatedAt: at,
           })
           .where(
             and(
               eq(proactiveSettings.id, id),
               eq(proactiveSettings.enabled, true),
-              lte(proactiveSettings.nextRunAt, new Date()),
+              lte(proactiveSettings.nextRunAt, at),
             ),
           )
           .returning();
