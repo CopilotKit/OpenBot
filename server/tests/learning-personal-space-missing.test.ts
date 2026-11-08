@@ -90,6 +90,7 @@ function learningOver(apiUrl: string, open: OpenSkillSource[] = []) {
     people: {
       containerFor: space,
       openSkills: async () => open,
+      withheld: async () => new Map(),
       sharingAllowed: () => true,
     },
     now: () => clock,
@@ -150,7 +151,11 @@ test("a space somebody opened to everyone that is now missing is still a warning
     [space(ADA), adaSkills],
   ]);
   const { learning } = learningOver(intelligence(published), [
-    { userId: GRACE, containerId: space(GRACE), skills: "all" },
+    {
+      userId: GRACE,
+      containerId: space(GRACE),
+      skills: "all",
+    },
   ]);
   const warned = spyOn(console, "warn").mockImplementation(() => {});
   const told = spyOn(console, "info").mockImplementation(() => {});
