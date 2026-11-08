@@ -223,7 +223,7 @@ function IntelligenceSection({
   const memory = totalMemory(status.intelligenceContainers);
   return (
     <PageSection
-      description="Keeps your Bots' conversations, memory and skills. OpenBot uses it while it runs."
+      description="Keeps your Bots' conversations and skills. OpenBot uses it while it runs."
       title="Back end"
     >
       <PageRows>

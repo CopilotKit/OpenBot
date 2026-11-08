@@ -171,7 +171,7 @@ import {
 import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
-import { setEdition } from "./edition";
+import { editionHasMemory, setEdition } from "./edition";
 import {
   createHostAccessBroker,
   HostAccessRefusedError,
@@ -214,6 +214,7 @@ import {
 } from "./learning/sharing";
 import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
+import { createMemoryRuntime } from "./memory/runtime";
 import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
 import { offeredMemoryTools } from "./memory/tools";
@@ -1636,6 +1637,7 @@ const memoryDefaults = createMemoryDefaults({
   ingestion: memoryIngestion,
   sources: config.memoryDefaults.sources,
   research: config.memoryDefaults.research,
+  edition: config.edition,
   channelBots: async (ownerUserId, channelId) =>
     (await channelStore.get(await actorFor(ownerUserId), channelId))
       ?.agentIds ?? null,
@@ -1648,39 +1650,14 @@ const memoryDefaults = createMemoryDefaults({
     teamBots.publishedByAnother(ownerUserId, agentId),
 });
 personSpoke = memoryDefaults.personSpoke;
-const loadPersonalMemoryForActor = (ownerUserId: string) => (botId: string) => {
-  // Apps connected since this Bot's last turn become its memory sources. Never waits.
-  memoryDefaults.botTurn(ownerUserId, botId);
-  return memoryIngestion.contextFor(ownerUserId, botId);
-};
-const memorySweep = repeatAfterEach(async () => {
-  try {
-    await memoryIngestion.syncDue();
-  } catch (error) {
-    console.error(
-      JSON.stringify({
-        type: "memory-sweep-error",
-        error: error instanceof Error ? error.name : "UnknownError",
-        context: { operation: "syncDue" },
-        timestamp: new Date().toISOString(),
-      }),
-    );
-  }
-  // Mirror to Intelligence what is out of step: the backfill on the first passes after a deployment
-  // becomes entitled, and afterwards whatever an outage left behind. A no-op without Intelligence.
-  try {
-    await personalMemoryStore.mirrorPending();
-  } catch (error) {
-    console.error(
-      JSON.stringify({
-        type: "memory-sweep-error",
-        error: error instanceof Error ? error.name : "UnknownError",
-        context: { operation: "mirrorPending" },
-        timestamp: new Date().toISOString(),
-      }),
-    );
-  }
-}, 60_000);
+// Nothing of it in the personal edition: no memory in a turn, no sync. See memory/runtime.ts.
+const memoryRuntime = createMemoryRuntime({
+  edition: config.edition,
+  defaults: memoryDefaults,
+  ingestion: memoryIngestion,
+  store: personalMemoryStore,
+});
+const memorySweep = repeatAfterEach(memoryRuntime.sweep, 60_000);
 // Follow-ups a Bot schedules for itself, on the shared work queue. See agents/wake-up.ts.
 const wakeUpStore = createWakeUpStore(database, { auditStore: bootAuditStore });
 
@@ -2138,7 +2115,9 @@ const actorAgentResolver = createActorAgentResolver({
   get acquireLearnedSkills() {
     return copilotRuntime.learning?.acquire;
   },
-  loadPersonalMemoryForActor,
+  ...(memoryRuntime.loadForActor
+    ? { loadPersonalMemoryForActor: memoryRuntime.loadForActor }
+    : {}),
   recordToolLimitRefusalForActor: toolLimitRecorder(bootAuditStore),
 });
 
@@ -2513,7 +2492,8 @@ const taskSweep = repeatAfterEach(async () => {
  */
 const proactiveEngine = createProactiveEngine({
   store: proactiveStore,
-  memory: personalMemoryStore,
+  // A check-in forms memories only where there is memory.
+  ...(editionHasMemory(config.edition) ? { memory: personalMemoryStore } : {}),
   queue: createWorkQueue(database),
   owner: workOwner("proactive"),
   runTurn: createTurnRunner({

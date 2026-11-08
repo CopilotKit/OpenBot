@@ -7,7 +7,7 @@ import {
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { defer, from, type Observable, switchMap } from "rxjs";
 import { z } from "zod";
-import type { Edition } from "../edition";
+import { type Edition, editionHasMemory } from "../edition";
 import { MEMORY_TOOLS_SERVER } from "../plugins/plugin-store/model";
 import type { MemoryIngestion } from "./ingestion";
 import type { MemoryStore } from "./store";
@@ -87,7 +87,7 @@ export function offeredMemoryTools(
   edition: Edition,
   options: MemoryToolOptions,
 ): GrantedTool[] {
-  return edition === "personal" ? [] : memoryTools(options);
+  return editionHasMemory(edition) ? memoryTools(options) : [];
 }
 
 export function memoryTools(options: MemoryToolOptions): GrantedTool[] {

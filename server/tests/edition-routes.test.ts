@@ -14,6 +14,11 @@ function appFor(edition: Edition) {
 }
 
 const closed = [
+  // No memory in the personal edition: OpenBot Desktop's local Intelligence isn't licensed for it.
+  "/api/memory",
+  "/api/memory/sources",
+  "/api/memory/sources/available/expenses",
+  "/api/memory/m1",
   "/api/admin/people",
   "/api/admin/people/abc/role",
   "/api/admin/identity-providers",
@@ -45,6 +50,7 @@ const open = [
   "/api/team-bots",
   // Prefixes, not substrings: a sibling that merely starts the same way stays open.
   "/api/admin/peoplex",
+  "/api/memoryx",
 ];
 
 describe("the personal edition", () => {

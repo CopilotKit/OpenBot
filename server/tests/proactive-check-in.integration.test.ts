@@ -420,6 +420,8 @@ function replica(
     store?: ProactiveStore;
     /** The catalogue it names apps from; the deployment's own unless a test watches it. */
     catalogue?: Pick<typeof plugins, "listServers">;
+    /** False for an edition without memory, where the server gives the engine no memory store. */
+    memory?: false;
   } = {},
 ) {
   const requests: RunAgentInput[] = [];
@@ -461,7 +463,7 @@ function replica(
   });
   engine = createProactiveEngine({
     store: options.store ?? store,
-    memory,
+    ...(options.memory === false ? {} : { memory }),
     queue,
     owner: `replica-${randomUUID()}`,
     runTurn: async (input) => {
@@ -674,6 +676,19 @@ describe("a check-in", () => {
       Date.now() + 55 * 60_000,
     );
     expect(after?.lastStatus).toBe("succeeded");
+  });
+
+  test("without memory, as in the personal edition, is offered no form_memory and told nothing of it", async () => {
+    await due(inbox);
+    const { engine, requests, turns } = replica({ memory: false });
+    await engine.sweep();
+
+    expect(requests[0]?.tools.map((tool) => tool.name)).toEqual([
+      "suggest_next_step",
+      "clear_next_step",
+    ]);
+    expect(turns[0]?.instruction).toContain("suggest_next_step");
+    expect(turns[0]?.instruction).not.toContain("form_memory");
   });
 
   test("a model asking for a write tool is refused, while what it raises is kept with its source and pinged", async () => {

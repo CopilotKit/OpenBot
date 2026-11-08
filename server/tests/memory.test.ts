@@ -8,6 +8,7 @@ import {
 } from "../src/memory/ingestion";
 import { createMemoryRoutes } from "../src/memory/routes";
 import type { MemoryStore } from "../src/memory/store";
+import { createMemoryRuntime } from "../src/memory/runtime";
 import { memoryTools, offeredMemoryTools } from "../src/memory/tools";
 import {
   parseMemoryInput,
@@ -158,6 +159,41 @@ test("a Bot in the personal edition is offered no memory tools, and in the team 
     "save_observed_memory",
     "forget_personal_memory",
   ]);
+});
+
+test("the personal edition puts no memory in a Bot's turn and its sweep reads no source", async () => {
+  const calls: string[] = [];
+  const parts = {
+    defaults: {
+      botTurn: (owner: string, bot: string) => {
+        calls.push(`adopt ${owner} ${bot}`);
+      },
+    },
+    ingestion: {
+      contextFor: async () => {
+        calls.push("context");
+        return "Prefers mornings";
+      },
+      syncDue: async () => {
+        calls.push("sync");
+      },
+    },
+    store: {
+      mirrorPending: async () => {
+        calls.push("mirror");
+      },
+    },
+  } as unknown as Omit<Parameters<typeof createMemoryRuntime>[0], "edition">;
+
+  const personal = createMemoryRuntime({ edition: "personal", ...parts });
+  expect(personal.loadForActor).toBeUndefined();
+  await personal.sweep();
+  expect(calls).toEqual([]);
+
+  const team = createMemoryRuntime({ edition: "team", ...parts });
+  expect(await team.loadForActor?.("u1")("bot")).toBe("Prefers mornings");
+  await team.sweep();
+  expect(calls).toEqual(["adopt u1 bot", "context", "sync", "mirror"]);
 });
 
 test("a source sync a connector's policy refuses answers 400 with the reason, not 503", async () => {

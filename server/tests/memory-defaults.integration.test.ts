@@ -64,6 +64,7 @@ function defaults(
     },
     sources: true,
     research: true,
+    edition: "team",
     channelBots: async () => [bot],
     canDeliver: async (person) => person === owner,
     mintThreadId: () => `thread-${randomUUID()}`,
@@ -428,5 +429,27 @@ describe("background research, on by default", () => {
     }
     expect(await researchOf(owner, bot)).toHaveLength(1);
     expect(await sourcesOf(owner, bot)).toHaveLength(1);
+  });
+});
+
+describe("the personal edition", () => {
+  const channel = `personal-channel-${suite}`;
+
+  test("adopts no memory source, on a Bot's turn or when the person speaks, and still adopts research", async () => {
+    await reset();
+    synced.length = 0;
+    // OpenBot Desktop's local Intelligence isn't licensed for memory. The switch is left on.
+    const personal = defaults({ edition: "personal" });
+    expect(await personal.adoptSources(owner, bot)).toEqual([]);
+    personal.botTurn(owner, bot);
+    personal.personSpoke(owner, channel);
+    for (let attempt = 0; attempt < 50; attempt++) {
+      if ((await researchOf(owner, bot)).length) break;
+      await Bun.sleep(50);
+    }
+    await Bun.sleep(200);
+    expect(await researchOf(owner, bot)).toHaveLength(1);
+    expect(await sourcesOf(owner, bot)).toEqual([]);
+    expect(synced).toEqual([]);
   });
 });
