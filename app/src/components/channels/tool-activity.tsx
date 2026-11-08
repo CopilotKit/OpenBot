@@ -679,10 +679,18 @@ export function StepRow({
 }) {
   if (step.kind === "subtask")
     return <SubtaskStep active={active} step={step} />;
+  /*
+   * The step still working shimmers, as the group's own line does while it runs. "In progress" in
+   * muted text beside a label drawn exactly like the finished steps above it read as one more static
+   * row: a person watching four "Fetch emails" lines and a fifth with no result took the Bot for dead.
+   */
+  const running = active && step.pending;
   const line = (
     <span className="flex min-w-0 items-center gap-2">
       <StepIcon kind={step.kind} />
-      <span className="shrink-0">{step.label}</span>
+      <span className={running ? "shrink-0 tool-line-running" : "shrink-0"}>
+        {step.label}
+      </span>
       {step.href ? (
         <a
           href={step.href}
