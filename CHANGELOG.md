@@ -39,6 +39,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   its top emails used to wrap the list in a notice. An existing deployment keeps the Notice and
   Checklist descriptions it already published; an admin can bring them up to date on Admin → UI
   components, from the new text in `app/src/components/gallery/cards.tsx`.
+- A notice card's supporting point that is itself a list is drawn as that list, without a stray dot
+  and an extra indent beside it, and a long link in a notice wraps where it ran under the card's edge.
 
 ### Personal edition
 

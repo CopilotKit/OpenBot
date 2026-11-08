@@ -228,13 +228,20 @@ export function NoticeCard({
       action={badge ? <Badge tone={noticeTone}>{badge}</Badge> : undefined}
       title={title}
     >
-      <GalleryMarkdown className="text-sm">{body}</GalleryMarkdown>
+      {/* A long link wraps rather than running under the card's edge, which hides its end. */}
+      <GalleryMarkdown className="break-words text-sm">{body}</GalleryMarkdown>
       {points?.length ? (
         <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
           {byPosition(points).map(({ item: entry, key }) => (
-            <li className="flex gap-2" key={key}>
+            // A point that is itself a list keeps only its own markers and indent, not a dot beside it.
+            <li
+              className="flex gap-2 [&:has(>div>:is(ol,ul):first-child)>span]:hidden [&>div>:is(ol,ul)]:pl-0"
+              key={key}
+            >
               <span aria-hidden="true">·</span>
-              <GalleryMarkdown className="min-w-0">{entry}</GalleryMarkdown>
+              <GalleryMarkdown className="min-w-0 break-words">
+                {entry}
+              </GalleryMarkdown>
             </li>
           ))}
         </ul>
