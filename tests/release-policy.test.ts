@@ -115,9 +115,20 @@ function publisher(
     },
   };
 }
+// The fixture's starting releases all ship the policy's first starting database, so the policy it
+// writes starts from that one alone. The committed policy can list more than one (a release that
+// upgrades from several releases with different last migrations), and copied whole it would name a
+// starting database no fixture release has.
 const forVersion = (version: string, fromVersions = ["v0.3.0"]) => ({
   ...policy,
   version,
+  compatibility: {
+    ...policy.compatibility,
+    database: {
+      ...policy.compatibility.database,
+      from: [policy.compatibility.database.from[0]],
+    },
+  },
   upgrade: { ...policy.upgrade, fromVersions },
 });
 

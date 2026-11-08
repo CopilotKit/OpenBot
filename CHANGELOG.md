@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.3.4
+
 **Before upgrading.** One migration: `0083_learning_skill_approvals` creates the table
 `learning_skill_approvals`, which records who approved a skill learned from a person's recordings
 and whether sharing it was asked for. It starts empty and changes no existing row. The database
