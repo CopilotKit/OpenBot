@@ -10,6 +10,7 @@ import { noticeOptions } from "@/lib/notifications/notice";
 // Whether this browser, or OpenBot Desktop, lets OpenBot interrupt: the same answer the offer to
 // turn notifications on reads, so the two cannot disagree.
 import { notificationsAllowed } from "@/lib/notifications/permission";
+import { showNotice } from "@/lib/notifications/show";
 import {
   type ProactiveSuggestion,
   proactiveSuggestionsQueryOptions,
@@ -150,20 +151,12 @@ function useAttentionNotifications(bots: BotAttention[] | undefined) {
       const now = asksOf(bot);
       if (bot.notify === "none" || now <= (previous.get(bot.agentId) ?? 0))
         continue;
-      try {
-        new Notification(
-          `${bot.name} needs you`,
-          noticeOptions(
-            {
-              body: attentionSummary(bot),
-              tag: `openbot-attention-${bot.agentId}`,
-            },
-            `/bots/${encodeURIComponent(bot.agentId)}`,
-          ),
-        );
-      } catch {
-        // A browser that refuses the constructor still has the badge.
-      }
+      showNotice({
+        title: `${bot.name} needs you`,
+        body: attentionSummary(bot),
+        tag: `openbot-attention-${bot.agentId}`,
+        path: `/bots/${encodeURIComponent(bot.agentId)}`,
+      });
     }
   }, [bots]);
 }
@@ -202,18 +195,13 @@ function usePingNotifications(
         (agentId) =>
           names.current?.find((bot) => bot.agentId === agentId)?.name,
       );
-      try {
-        // Bots lists what the ping carried first, under Needs you.
-        new Notification(
-          notice.title,
-          noticeOptions(
-            { body: notice.body, tag: `openbot-ping-${lastPingId}` },
-            "/bots",
-          ),
-        );
-      } catch {
-        // A browser that refuses the constructor still has the badge and the list.
-      }
+      // Bots lists what the ping carried first, under Needs you.
+      showNotice({
+        title: notice.title,
+        body: notice.body,
+        tag: `openbot-ping-${lastPingId}`,
+        path: "/bots",
+      });
     });
   }, [lastPingId, refetch]);
 }

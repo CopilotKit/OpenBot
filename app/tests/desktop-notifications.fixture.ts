@@ -55,6 +55,11 @@ export function launchDesktop(options: {
    * question, asked as the page starts, is refused.
    */
   grantedLate?: boolean;
+  /**
+   * Whether the desktop app has its own `notify` (desktop_page.rs), which shows a notice that
+   * opens its page from Windows' notification centre too. False: a desktop app from before it.
+   */
+  notifyCommand?: boolean;
 }) {
   const calls: DesktopCall[] = [];
   let nextCallback = 1;
@@ -65,6 +70,12 @@ export function launchDesktop(options: {
     async invoke(command, args) {
       calls.push({ command, args });
       const [plugin, name] = command.replace("plugin:", "").split("|");
+      if (plugin === "openbot-desktop" && name === "notify") {
+        if (options.notifyCommand === false)
+          throw "openbot-desktop.notify not allowed. Command not found";
+        // `notify(title, body, path)` answers nothing once the system has the notice.
+        return null;
+      }
       if (plugin !== "notification") return null;
       // Tauri refuses a command of a plugin it does not have with a string, not an Error.
       if (!options.plugin)
@@ -115,11 +126,32 @@ export function launchDesktop(options: {
     },
     /** The commands the shell refused because the page's origin was not granted yet. */
     refused: () => [...refused],
-    /** What the page asked the system to show, in the order it asked. */
+    /**
+     * What the page asked the system to show, in the order it asked, through the desktop app's
+     * own `notify` or the plugin's: its title, body and the page a click opens.
+     */
     shown: () =>
-      calls
-        .filter((call) => call.command === "plugin:notification|notify")
-        .map((call) => call.args?.options),
+      calls.flatMap((call) => {
+        if (
+          call.command === "plugin:openbot-desktop|notify" &&
+          options.notifyCommand !== false
+        )
+          return [call.args];
+        if (call.command !== "plugin:notification|notify") return [];
+        const plugin = call.args?.options as
+          | { title?: string; body?: string; extra?: { path?: string } }
+          | undefined;
+        return [
+          {
+            title: plugin?.title,
+            body: plugin?.body,
+            path: plugin?.extra?.path,
+          },
+        ];
+      }),
+    /** The calls that reached the desktop app's own `notify`. */
+    toDesktopNotify: () =>
+      calls.filter((call) => call.command === "plugin:openbot-desktop|notify"),
   };
 }
 

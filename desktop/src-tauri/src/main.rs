@@ -10,6 +10,7 @@ mod desktop_page;
 mod desktop_status;
 mod desktop_telemetry;
 mod intelligence_bridge;
+mod notice;
 mod outside_links;
 
 #[cfg(test)]
@@ -110,6 +111,8 @@ struct Shell {
     /// so `trust_owned_app` can grant them ahead of the page. Tauri panics on a grant of a
     /// permission it does not know, as in a test app built from a mock context.
     app_page_grants_known: std::sync::atomic::AtomicBool,
+    /// The page a click on a notification asked for while OpenBot's page was not there yet.
+    waiting_notice_page: Mutex<Option<String>>,
     /// A newer OpenBot Desktop, as the feed last said, and an install of it under way.
     app_update: app_update::Known,
 }
@@ -4920,6 +4923,15 @@ mod app_page_tests {
             checked += 1;
         }
         assert!(checked >= 2, "found {checked} Tauri config files");
+        // The installer registers the scheme a toast's link opens by: a click in the notification
+        // centre can only bring an unpackaged app back by protocol (`notice.rs`).
+        let base: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(folder.join("tauri.conf.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            base["plugins"]["deep-link"]["desktop"]["schemes"],
+            serde_json::json!([notice::SCHEME])
+        );
         let hooks = std::fs::read_to_string(folder.join("windows/hooks.nsh")).unwrap();
         assert!(
             !hooks.contains("CreateShortcut"),
@@ -6885,11 +6897,43 @@ fn notification_destination(
 }
 
 /**
-A click on one of a Bot's notifications: OpenBot comes forward, as it does for a second launch, at
-the page the notice is about. The notification plugin reports a click (`tap`) on macOS and on
-Windows, there only while the toast is on screen; a click in Windows' notification centre starts
-OpenBot.exe from its Start menu shortcut, which the single-instance plugin turns into the same
-restore.
+A Bot's notification, shown by the system: OpenBot's page asks for it (`desktop_page::notify`) with
+the page a click opens.
+
+On Windows a toast of our own, which opens an `openbot://` link by protocol: the only way an app
+installed without a package is brought back from the notification centre (see `notice.rs`). On
+macOS and Linux the notification plugin's, carrying the page in `extra.path` for its click report.
+*/
+fn show_notice<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    title: &str,
+    body: &str,
+    path: Option<&str>,
+) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let link = path.map_or_else(|| format!("{}://open", notice::SCHEME), notice::open_link);
+        notice::show_toast(
+            &app.config().identifier,
+            &notice::toast_xml(title, body, &link),
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        use tauri_plugin_notification::NotificationExt;
+        let mut builder = app.notification().builder().title(title).body(body);
+        if let Some(path) = path {
+            builder = builder.extra("path", path);
+        }
+        builder.show().map_err(|error| error.to_string())
+    }
+}
+
+/**
+A click on one of a Bot's notifications, as the notification plugin reports it (`tap`): opens the
+page it names. The plugin reports one only for notices it showed; on macOS, with notify-rust 4.18
+and mac-notification-sys 0.6.15, not even then (a notice without buttons is sent without waiting
+for a response).
 */
 fn open_from_notification(
     app: &tauri::AppHandle,
@@ -6898,7 +6942,33 @@ fn open_from_notification(
     if performed.action_id() != "tap" {
         return;
     }
+    let path = performed
+        .notification()
+        .and_then(|notification| notification.extra().get("path"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    open_notice_page(app, path);
+}
+
+/// An `openbot://open?path=…` link, which a click on a Windows toast opens, from the notification
+/// centre too: Windows starts OpenBot.exe with it and the single-instance plugin hands it here.
+fn open_from_link(app: &tauri::AppHandle, link: &tauri::Url) {
+    if link.scheme() != notice::SCHEME {
+        return;
+    }
+    open_notice_page(app, notice::path_of(link));
+}
+
+/**
+OpenBot comes forward, as it does for a second launch, at the page a notice is about. While the
+window does not show this OpenBot yet (it is still starting, from a click that launched it), the
+page waits for it: `open_waiting_notice_page` opens it once OpenBot's page has loaded.
+*/
+fn open_notice_page(app: &tauri::AppHandle, path: Option<String>) {
     show_whichever_applies(app);
+    let Some(path) = path else {
+        return;
+    };
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
@@ -6909,13 +6979,37 @@ fn open_from_notification(
         window_page(app, &current),
         WindowPage::OwnedApp | WindowPage::LocalApp
     );
-    let path = performed
-        .notification()
-        .and_then(|notification| notification.extra().get("path"))
-        .and_then(serde_json::Value::as_str);
-    if let Some(target) = notification_destination(&current, owned, path) {
-        if target != current {
-            if let Err(error) = window.navigate(target) {
+    if !owned {
+        *app.state::<Shell>().waiting_notice_page.lock().unwrap() = Some(path);
+        return;
+    }
+    navigate_to_notice_page(&current, &path, |target| window.navigate(target));
+}
+
+/// The page a click asked for before OpenBot's page was there, now that it is.
+fn open_waiting_notice_page<R: tauri::Runtime>(window: &tauri::Webview<R>, loaded: &tauri::Url) {
+    let waiting = window
+        .app_handle()
+        .state::<Shell>()
+        .waiting_notice_page
+        .lock()
+        .unwrap()
+        .take();
+    if let Some(path) = waiting {
+        navigate_to_notice_page(loaded, &path, |target| window.navigate(target));
+    }
+}
+
+/// Goes to `path` on the OpenBot at `current`, unless it is there already or `path` is not one of
+/// its pages (`notification_destination`).
+fn navigate_to_notice_page(
+    current: &tauri::Url,
+    path: &str,
+    navigate: impl FnOnce(tauri::Url) -> tauri::Result<()>,
+) {
+    if let Some(target) = notification_destination(current, true, Some(path)) {
+        if &target != current {
+            if let Err(error) = navigate(target) {
                 log::warn!("[notification] could not open the page it named: {error}");
             }
         }
@@ -7751,6 +7845,9 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             restore_after_second_instance(app);
         }))
+        // The `openbot://` links a click on a Windows notification opens. Right after the
+        // single-instance plugin, whose `deep-link` feature hands it a second launch's link.
+        .plugin(tauri_plugin_deep_link::init())
         // The log file, before anything that logs. After the single-instance plugin, so a second
         // launch, which that plugin ends, never opens (or rotates) the file the first one writes.
         .plugin(logging::plugin())
@@ -7834,6 +7931,7 @@ fn main() {
                 && payload.event() == tauri::webview::PageLoadEvent::Finished
             {
                 allow_app_page(window.app_handle(), payload.url());
+                open_waiting_notice_page(window, payload.url());
                 // macOS draws the window's outline from it; Windows tints the title bar with it.
                 if cfg!(any(target_os = "macos", target_os = "windows")) {
                     let _ = window.eval(APP_THEME_PAGE);
@@ -7878,6 +7976,23 @@ fn main() {
                 let handle = app.handle().clone();
                 app.notification()
                     .on_action(move |performed| open_from_notification(&handle, performed))?;
+            }
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    for link in event.urls() {
+                        open_from_link(&handle, &link);
+                    }
+                });
+                // OpenBot started by a click on a notification: its page, once OpenBot shows.
+                if let Ok(Some(links)) = app.deep_link().get_current() {
+                    for link in links {
+                        if let Some(path) = notice::path_of(&link) {
+                            *app.state::<Shell>().waiting_notice_page.lock().unwrap() = Some(path);
+                        }
+                    }
+                }
             }
             // A signed Mac or Windows build updates itself. The window asks once at launch and
             // installs only if the person says yes; the plugin refuses anything whose minisign
