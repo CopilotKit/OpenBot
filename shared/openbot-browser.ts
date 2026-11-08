@@ -63,6 +63,12 @@ export type LauncherState = {
    * stands for this browser rather than making another each time the browser is opened.
    */
   connectionId?: string;
+  /**
+   * The address it reaches OpenBot at (`LauncherConnection.openbotUrl`, as an origin), when it holds a connection:
+   * OpenBot keeps that connection only while it is still the address OpenBot hands out, which moves on OpenBot Desktop
+   * when its app is given another port.
+   */
+  openbotUrl?: string;
   phase: "idle" | "starting" | "recording" | "stopping";
   recordingId?: string;
   title?: string;

@@ -419,11 +419,13 @@ test("connect stores the connection as an approved Connect does, with no Connect
       via: "openbot-browser",
     },
   });
-  // With the connection it holds by id, which OpenBot keeps rather than making another at every open.
+  // With the connection it holds by id and the address it reaches OpenBot at, which OpenBot keeps rather than making
+  // another at every open while that is still its address.
   expect(await launcher().state()).toEqual({
     connected: true,
     userId: ada.id,
     connectionId: connection().connectionId,
+    openbotUrl: gateway.httpUrl,
     phase: "idle",
     actions: 0,
     narration: "external",
