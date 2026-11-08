@@ -32,6 +32,8 @@ export type ApprovalInboxData = {
     id: string;
     status: string;
     createdAt: string;
+    /** When the person (or a rule) decided it; null while it waits. */
+    decidedAt?: string | null;
     action: {
       botId: string;
       toolRef: string;
@@ -88,6 +90,41 @@ export const approvalInboxOptions = () =>
     },
     refetchInterval: 10_000,
   });
+/**
+ * A request the person has decided and the server has not finished carrying on from.
+ *
+ * Decided (`approved` or `denied`) or started (`consumed`), the server runs the action, or tells the
+ * Bot it was declined, and then picks the conversation up where it stopped, in a turn no browser
+ * streams. It marks the request `completed` only once that turn has ended. So between the two, the
+ * conversation is the Bot's: the same fact a run on the wire is for a turn started here.
+ */
+const CARRYING_ON = new Set(["approved", "denied", "consumed"]);
+
+/**
+ * How long after the decision a request still counts as the server carrying on.
+ *
+ * The server stops a turn it carries on at five minutes (`TURN_LIMITS.turnTimeoutMs` in
+ * toolkit/limits.ts), and this allows twice that, as the routine sweep does for a run. A request
+ * still not `completed` after it is one the resume loop is retrying or giving up on, not a turn this
+ * conversation is in, and counting it would leave "Thinking" and Stop up, and messages parked behind
+ * them, for good.
+ */
+const CARRY_ON_MS = 2 * 5 * 60_000;
+
+/** Whether the server is carrying this conversation on after one of its approvals was decided. */
+export function carryingOnAfterApproval(
+  inbox: ApprovalInboxData | undefined,
+  threadId: string,
+  now = Date.now(),
+): boolean {
+  return (inbox?.requests ?? []).some(
+    (request) =>
+      request.action.threadId === threadId &&
+      CARRYING_ON.has(request.status) &&
+      now - Date.parse(request.decidedAt ?? request.createdAt) < CARRY_ON_MS,
+  );
+}
+
 /** Whether a conversation asks before every step, by its thread. Its own root: see below. */
 export const approvalThreadKeys = {
   all: ["approval-thread"] as const,

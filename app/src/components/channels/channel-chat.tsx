@@ -36,6 +36,7 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   answerPersonQuestionMutationOptions,
   approvalInboxOptions,
+  carryingOnAfterApproval,
 } from "@/lib/approvals";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import {
@@ -203,6 +204,12 @@ export function channelHistoryNotice({
  * following shared anchor, append the missing tail: the store cannot place it among local-only rows.
  * Return the original array when nothing was added so refreshes can wait for the store to catch up.
  *
+ * ONE KIND OF LOCAL CONTENT GIVES WAY: a Bot's words that the store holds more of. A reply this tab
+ * never streamed (a turn the server carried on) is known here only from a read, and a read taken
+ * while the platform was still catching up holds it half written. Kept as it was, "...shared with"
+ * stayed the reply until the conversation was opened again. Only a reply the stored copy carries on
+ * from is replaced, so a read can lengthen what is on screen and never cut it short or change it.
+ *
  * Exported for its tests.
  */
 export function mergeStoredMessages(
@@ -244,9 +251,28 @@ export function mergeStoredMessages(
       pending.push(message);
     }
   }
-  if (before.size === 0 && pending.length === 0) return local;
+  const storedById = new Map(stored.map((message) => [message.id, message]));
+  let lengthened = false;
+  const current = local.map((message) => {
+    const later = storedById.get(message.id);
+    if (
+      message.role !== "assistant" ||
+      later?.role !== "assistant" ||
+      typeof message.content !== "string" ||
+      typeof later.content !== "string" ||
+      later.content.length <= message.content.length ||
+      !later.content.startsWith(message.content)
+    )
+      return message;
+    lengthened = true;
+    return { ...message, content: later.content };
+  });
+  if (!lengthened && before.size === 0 && pending.length === 0) return local;
   return [
-    ...local.flatMap((message) => [...(before.get(message.id) ?? []), message]),
+    ...current.flatMap((message) => [
+      ...(before.get(message.id) ?? []),
+      message,
+    ]),
     ...pending,
   ];
 }
@@ -584,6 +610,8 @@ export function ChannelChat({
    * Retried briefly, because the roster is patched when the turn is on record with the runner and
    * the platform's read of the thread can be a beat behind it.
    */
+  /* The read below, for a turn that ends without the roster saying so: see `carryingOn`. */
+  const pullHistoryRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     const authoredActivity = (): ChannelActivitySignature | null => {
       const cache = queryClient.getQueryData<{
@@ -678,6 +706,7 @@ export function ChannelChat({
      * streamed here, so it is read: see `turns-finished-away.ts`.
      */
     const offFinishedAway = onTurnFinishedAway(channel.id, pull);
+    pullHistoryRef.current = pull;
     void (async () => {
       await joinGatePromise;
       if (
@@ -692,6 +721,7 @@ export function ChannelChat({
       cancelled = true;
       unsubscribe();
       offFinishedAway();
+      pullHistoryRef.current = null;
     };
   }, [
     channel.id,
@@ -815,6 +845,37 @@ export function ChannelChat({
     };
   }, []);
   const [runsInFlight, setRunsInFlight] = useState(0);
+
+  /*
+   * THE THIRD FACT: THE SERVER HAS THE TURN. When the person answers an approval, the run that asked
+   * has already ended here (it stopped on the interrupt), and the server runs the action and carries
+   * the conversation on in a turn no browser streams. Neither counter above sees it and neither does
+   * `agent.isRunning`, so the conversation sat idle, with no "Thinking" and no Stop, for as long as
+   * the Bot went on working: found on the Mac, after Allow once on a Google Maps step.
+   *
+   * Read from the approval itself, which the server marks `completed` only once that turn has ended,
+   * so it is the same record whichever tab or device decided it. Polled faster while it is going, so
+   * the conversation stops saying it is working soon after it is done.
+   */
+  const carryingOn =
+    useQuery({
+      ...approvalInboxOptions(),
+      select: (inbox) => carryingOnAfterApproval(inbox, channel.threadId),
+      refetchInterval: (query) =>
+        carryingOnAfterApproval(query.state.data, channel.threadId)
+          ? 2_000
+          : 10_000,
+    }).data === true;
+  /*
+   * When the server's turn ends, what it wrote is read, whether or not the roster says the Bot
+   * replied. A turn the person stopped has no reply to announce, and what it said before the Stop
+   * would otherwise appear only when the conversation was opened again.
+   */
+  const wasCarryingOn = useRef(false);
+  useEffect(() => {
+    if (wasCarryingOn.current && !carryingOn) pullHistoryRef.current?.();
+    wasCarryingOn.current = carryingOn;
+  }, [carryingOn]);
 
   /**
    * Tell the roster what was just said. Failures here must not block the conversation.
@@ -1294,6 +1355,7 @@ export function ChannelChat({
                     historyLoading ||
                     agent.isRunning ||
                     turnsInFlight > 0 ||
+                    carryingOn ||
                     Boolean(question) ||
                     call.active ||
                     runModel.saving
@@ -1315,7 +1377,7 @@ export function ChannelChat({
              * and `agent.isRunning` alone leaves that gap unmarked — which is the one moment the
              * "Thinking" line exists for. Same value as `pending`, deliberately.
              */
-            busy={agent.isRunning || turnsInFlight > 0}
+            busy={agent.isRunning || turnsInFlight > 0 || carryingOn}
             // The `/` menu exposes only skills granted to this Bot.
             commands={skillCommands}
             modelPicker={
@@ -1433,7 +1495,7 @@ export function ChannelChat({
              * middle of an answer: a second turn racing the first on one thread, with a fabricated
              * result stitched over a tool call that is still executing.
              */
-            pending={agent.isRunning || turnsInFlight > 0}
+            pending={agent.isRunning || turnsInFlight > 0 || carryingOn}
             /*
              * A channel outlives its turns, so it is the screen where waiting is worth offering. A
              * correction typed mid-answer is held here, in this tab, and runs as one follow-up turn the
@@ -1446,6 +1508,10 @@ export function ChannelChat({
              * The run, not the turn. Stop reaches a run through the core's abort controller, and that
              * controller does not exist until `say` has finished waiting for the runtime agent — so
              * this is the one place the narrower fact is the honest one to draw a button from.
+             */
+            /*
+             * Not while the server carries the conversation on after an approval: this tab has no
+             * run of its own for Stop to reach then, and a Stop that does nothing is worse than none.
              */
             stoppable={agent.isRunning || runsInFlight > 0}
             /*

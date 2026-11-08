@@ -8,6 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- After you answer an approval in a conversation, it shows the Bot working until the Bot has carried on and finished, and its reply arrives whole. If the Bot then needs another approval, it stops and asks in the conversation, and does nothing more until you decide. It used to look idle while the Bot was still going, could cut its reply off until the conversation was opened again, and could answer past an action you had not approved.
 - OpenBot Desktop keeps trying when GitHub stops sending the new version during an update. A
   download that gets nothing for 30 seconds is tried again, six times in all with longer waits
   between, for about four minutes. Before, three tries in a minute and a half gave up and put the
