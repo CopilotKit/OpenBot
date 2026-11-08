@@ -4922,6 +4922,58 @@ fn main() {
             .collect()
     }
 
+    /**
+    Run a program this test has just copied, once, the first time it is run.
+
+    On Linux, running a file that was just written can fail with ETXTBSY ("Text file busy"). Another
+    test thread may fork a child while this one has the copy open for writing. The child holds that
+    write handle until it calls exec, and the kernel refuses to run a file someone has open for
+    writing. Seen on CI as `too_much_output_stops_the_call` failing with `ExecutableFileBusy`. The
+    handle goes as soon as the child execs, so a short retry is enough. The first run is the only
+    one at risk: once it ran, the copy is no longer open anywhere for writing.
+    */
+    fn warm_copied_program(program: &Path) -> std::process::ExitStatus {
+        let mut tries = 0;
+        loop {
+            match std::process::Command::new(program).arg("--warm").status() {
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 50 =>
+                {
+                    tries += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                result => return result.unwrap(),
+            }
+        }
+    }
+
+    /// The CI flake made certain: the copy is held open for writing, as a forked child would hold
+    /// it, while it is first run. Linux refuses to run it until the handle goes.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_copied_program_still_open_for_writing_runs_once_the_handle_goes() {
+        let root = temp_root("local-eval-busy-copy");
+        std::fs::create_dir_all(&root).unwrap();
+        let program = root.join("cli");
+        std::fs::copy(compiled(), &program).unwrap();
+        let held = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&program)
+            .unwrap();
+        // Busy while held: the failure CI saw.
+        let busy = std::process::Command::new(&program).arg("--warm").status();
+        assert_eq!(
+            busy.unwrap_err().kind(),
+            std::io::ErrorKind::ExecutableFileBusy
+        );
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            drop(held);
+        });
+        assert!(warm_copied_program(&program).success());
+        release.join().unwrap();
+    }
+
     struct Fixture {
         root: PathBuf,
         program: PathBuf,
@@ -4934,8 +4986,7 @@ fn main() {
             let program = root.join(format!("cli{}", std::env::consts::EXE_SUFFIX));
             std::fs::copy(compiled(), &program).unwrap();
             std::fs::write(root.join("scenario"), scenario).unwrap();
-            let warm = std::process::Command::new(&program).arg("--warm").status();
-            assert!(warm.unwrap().success());
+            assert!(warm_copied_program(&program).success());
             Self { root, program }
         }
 
