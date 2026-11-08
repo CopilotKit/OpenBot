@@ -298,6 +298,7 @@ moves to `0083_learning_skill_approvals`. Six things change for an existing depl
   OpenBot's name, and the app is set in Atkinson Hyperlegible Next. A skin keeps its own faces.
 - Settings → General lists your answers as rows that open a dialog. Settings → Notifications shows
   a switch only for channels that are set up, and says how to set them up, or that your admin does.
+  In OpenBot Desktop it says those channels need OpenBot running on a server.
 
 ## 0.3.3
 
