@@ -110,7 +110,9 @@ jobs:
       # serving only the Latest stable release's signed installers. And every signed build carries
       # the Intelligence CLI, its Mac binaries signed for notarization: an app without it cannot set
       # up Intelligence, and the updater would put it on every Mac. And each Mac app, the Intel one
-      # built on this Apple silicon runner included, is its own architecture all the way down.
+      # built on this Apple silicon runner included, is its own architecture all the way down. And
+      # stapling and validating the ticket try a dropped connection to Apple again, which failed
+      # v0.3.3's signing run three times, and fail at once on a file with no ticket.
       - name: Signed release regressions
         env:
           OPENBOT_REQUIRE_MINISIGN: "1"
@@ -120,7 +122,7 @@ jobs:
           scripts/sign-windows-update.test.ts
           ../scripts/release-latest.test.ts ../scripts/release-download-names.test.ts
           ../scripts/downloads-sync.test.ts scripts/release-cli-bundle.test.ts
-          scripts/verify-mac-arch.test.ts
+          scripts/verify-mac-arch.test.ts scripts/staple-with-retry.test.ts
         working-directory: desktop
       - name: Importing the Developer ID intermediate twice succeeds
         # The first real signing run stopped here: the .p12 already carried the intermediate, and a
@@ -133,43 +135,6 @@ jobs:
           desktop/scripts/import-developer-id-intermediate.sh "$keychain"
           desktop/scripts/import-developer-id-intermediate.sh "$keychain"
           security find-certificate -c "Developer ID Certification Authority" "$keychain" > /dev/null
-      - name: Stapling and validating retry a dropped connection and still fail a missing ticket
-        # The first real signing run had Apple accept the Intel image, then lost the connection
-        # while stapling and failed the job. A stand-in for xcrun fails twice, then succeeds.
-        run: |
-          set -euo pipefail
-          fake="$RUNNER_TEMP/fake-xcrun"
-          export STAPLE_CALLS="$RUNNER_TEMP/staple-calls"
-          printf '0' > "$STAPLE_CALLS"
-          cat > "$fake" <<'FAKE'
-          #!/usr/bin/env bash
-          n=$(( $(cat "$STAPLE_CALLS") + 1 ))
-          printf '%s' "$n" > "$STAPLE_CALLS"
-          [ "$n" -ge 3 ]
-          FAKE
-          chmod +x "$fake"
-          XCRUN="$fake" STAPLE_RETRY_DELAY=0 desktop/scripts/staple-with-retry.sh image.dmg 5
-          test "$(cat "$STAPLE_CALLS")" = 3
-          # Validating retries the same way: a dry run lost CloudKit's connection mid-validate.
-          printf '0' > "$STAPLE_CALLS"
-          cat > "$fake" <<'FAKE'
-          #!/usr/bin/env bash
-          [ "$1 $2" = "stapler validate" ] || exit 9
-          n=$(( $(cat "$STAPLE_CALLS") + 1 ))
-          printf '%s' "$n" > "$STAPLE_CALLS"
-          [ "$n" -ge 2 ]
-          FAKE
-          STAPLER_ACTION=validate XCRUN="$fake" STAPLE_RETRY_DELAY=0 \
-            desktop/scripts/staple-with-retry.sh OpenBot.app 5
-          test "$(cat "$STAPLE_CALLS")" = 2
-          printf '#!/usr/bin/env bash\nexit 1\n' > "$fake"
-          for action in staple validate; do
-            if STAPLER_ACTION="$action" XCRUN="$fake" STAPLE_RETRY_DELAY=0 \
-              desktop/scripts/staple-with-retry.sh image.dmg 3; then
-              echo "A ticket that never arrives must fail the job." >&2
-              exit 1
-            fi
-          done
       - name: Check the updater is wired together
         run: |
           set -euo pipefail
