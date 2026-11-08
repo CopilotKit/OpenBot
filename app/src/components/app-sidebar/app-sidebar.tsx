@@ -28,11 +28,12 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
+import { untitledLine } from "@/lib/channels/label";
 import {
   type ChannelSummary,
   channelListQueryOptions,
 } from "@/lib/channels/queries";
-import { untitledLine } from "@/lib/channels/label";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
@@ -51,7 +52,6 @@ import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
 import { ChannelPagination } from "./channel-pagination";
-import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { useSignOut } from "./use-sign-out";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
@@ -234,7 +234,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarMenu>
           <SidebarMenuItem className="flex flex-row gap-1.5">
             <SidebarMenuButton
-              className="font-semibold text-[14px] tracking-tighter h-full leading-tight"
+              // The product's name, not a menu row: nothing changes on hover or press (the row fill read as a blue box on
+              // the frosted sidebar). It still goes home when clicked, and the keyboard's focus ring stays.
+              className="h-full cursor-default font-semibold text-[14px] leading-tight tracking-tighter hover:bg-transparent hover:text-sidebar-foreground active:bg-transparent active:text-sidebar-foreground"
               render={(props) => (
                 <Link {...appLinkOptions} {...props}>
                   {/* OpenBot's mark beside its name, as on open.bot and the desktop app. A deployment that renames the
