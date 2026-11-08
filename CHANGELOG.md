@@ -310,6 +310,10 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
 
 ### Smaller changes
 
+- A check-in's next run is counted on the server's clock, the clock that decides when it is due. It
+  was counted on the database's clock, so with the two clocks apart a check-in came that much
+  earlier or later than its interval: a database a few milliseconds ahead put a 4-hour check-in a
+  few milliseconds past 4 hours out.
 - Asked which AI model it runs on, a Bot whose model you pick in the composer names the one the
   model picker shows, such as "GPT-6.1 Terra", and the new one after you pick another, where it said
   it couldn't see its model's name.
