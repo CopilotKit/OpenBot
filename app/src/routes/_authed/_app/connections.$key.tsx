@@ -519,7 +519,7 @@ function AppConnectionPage() {
           <PageRows className="mt-0">
             <BrokeredAccountRow
               account={brokeredAccount}
-              deployment={paths.deploymentName}
+              edition={paths.edition}
               reader="person"
               /* Said beside the button rather than after it: disconnecting ends the account at
                  Composio, so what it undoes is not the row here but the grant on your own mailbox,

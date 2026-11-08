@@ -324,6 +324,7 @@ function RouteComponent() {
   const moreApps = moreAppsRow(
     provider,
     plugins.data?.composioConfigured ?? false,
+    paths.edition,
   );
   const browse = personal && moreApps.linked ? moreApps : null;
   /*
