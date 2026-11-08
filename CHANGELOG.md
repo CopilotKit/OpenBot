@@ -19,6 +19,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   nothing while the app was still checking that notifications were on, so the first question after
   each launch, asked while OpenBot was minimised or behind another window, went unannounced.
 
+- **CopilotKit Intelligence 0.16.0-rc.10.** OpenBot Desktop's back end and the Helm chart move to
+  Intelligence 0.16.0-rc.10 (CLI `copilotkit@647a03b`). A first back end setup now downloads its
+  images through downloads.copilotkit.ai too, because the CLI's own pulls read the cluster's
+  mirrors, and a setup step that fails now reports its own error instead of only that the command
+  did not finish.
+
 ## 0.3.4
 
 **Before upgrading.** One migration: `0083_learning_skill_approvals` creates the table
