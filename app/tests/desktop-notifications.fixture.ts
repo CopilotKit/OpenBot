@@ -47,9 +47,19 @@ function windowNotification() {
  * when the desktop app carries it, the notification plugin's script over it. Each call is a launch:
  * the window's answer starts over, as WKWebView's does.
  */
-export function launchDesktop(options: { plugin: boolean }) {
+export function launchDesktop(options: {
+  plugin: boolean;
+  /**
+   * The page's origin is granted the plugin's commands only once `grant()` is called, as when the
+   * shell granted it once the page had loaded (0.3.3 to this fix): the plugin script's first
+   * question, asked as the page starts, is refused.
+   */
+  grantedLate?: boolean;
+}) {
   const calls: DesktopCall[] = [];
   let nextCallback = 1;
+  let granted = !options.grantedLate;
+  const refused: string[] = [];
   const shell: ShellIpc = {
     transformCallback: () => nextCallback++,
     async invoke(command, args) {
@@ -59,6 +69,15 @@ export function launchDesktop(options: { plugin: boolean }) {
       // Tauri refuses a command of a plugin it does not have with a string, not an Error.
       if (!options.plugin)
         throw `notification.${name} not allowed. Plugin not found`;
+      if (!granted) {
+        // Tauri refuses it ("notification.is_permission_granted not allowed on origin ..."), and
+        // the plugin script does not catch that: an unhandled rejection in the window's console,
+        // and its `Notification.permission` left at "default". The refusal is recorded and left
+        // unanswered here, which leaves the page in that same state without failing the test run
+        // on the script's unhandled rejection.
+        refused.push(command);
+        return new Promise(() => {});
+      }
       switch (name) {
         case "is_permission_granted":
           return true;
@@ -90,6 +109,12 @@ export function launchDesktop(options: { plugin: boolean }) {
   }
   return {
     calls,
+    /** The shell grants the page's origin, as it did once the page had loaded. */
+    grant: () => {
+      granted = true;
+    },
+    /** The commands the shell refused because the page's origin was not granted yet. */
+    refused: () => [...refused],
     /** What the page asked the system to show, in the order it asked. */
     shown: () =>
       calls

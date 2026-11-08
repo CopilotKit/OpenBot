@@ -128,6 +128,17 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
   return answer;
 }
 
+/**
+ * Whether a notification may be shown now. In OpenBot Desktop, the desktop app's answer, the one
+ * the offer reads: not the plugin script's `Notification.permission`, which stays "default" for as
+ * long as the page is open when its own first question went unanswered. In a browser, the browser's,
+ * read afresh each time, so a site setting changed meanwhile counts.
+ */
+export function notificationsAllowed(): boolean {
+  if (desktopShell()) return read() === "granted";
+  return notificationPermission() === "granted";
+}
+
 /** Reads the browser's answer again, for a "Check again" after somebody changed a site setting. */
 export function refreshNotificationPermission() {
   current = null;

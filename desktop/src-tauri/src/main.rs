@@ -106,6 +106,10 @@ struct Shell {
     owned_app_origins: Mutex<Vec<String>>,
     /// The origins already given the window's controls (`allow_app_page`).
     app_page_grants: Mutex<Vec<String>>,
+    /// Whether the app was built with the permissions `allow_app_page` grants (`generate_context!`),
+    /// so `trust_owned_app` can grant them ahead of the page. Tauri panics on a grant of a
+    /// permission it does not know, as in a test app built from a mock context.
+    app_page_grants_known: std::sync::atomic::AtomicBool,
     /// A newer OpenBot Desktop, as the feed last said, and an install of it under way.
     app_update: app_update::Known,
 }
@@ -4511,6 +4515,12 @@ Record `address` as the OpenBot app this shell verified it owns, and let it use 
 Called with an address `owned_app_url` verified, before the window navigates there. Its origin is
 then the only loopback origin the window treats as OpenBot (`window_page`) and gives the window's
 controls to (`allow_app_page`).
+
+They are granted here, before the page exists, and not only once it has loaded: the notification
+plugin's script asks `is_permission_granted` as the page starts, and a page whose origin was not yet
+granted was refused, kept "default" as its answer for as long as it stayed open, and never showed a
+notification. MEASURED on a Mac: no Bot's notice reached the system (usernoted never heard from the
+app) while the offer to turn them on, asked later, was rightly hidden.
 */
 fn trust_owned_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>, address: &str) {
     if let Some(origin) = intelligence_bridge::app_origin(address) {
@@ -4520,7 +4530,22 @@ fn trust_owned_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>, address: &str) 
             trusted.push(origin);
         }
     }
+    let known = app
+        .state::<Shell>()
+        .app_page_grants_known
+        .load(std::sync::atomic::Ordering::SeqCst);
+    if let (true, Ok(url)) = (known, address.parse::<tauri::Url>()) {
+        allow_app_page(app, &url);
+    }
     intelligence_bridge::allow(app, address);
+}
+
+/// Lets `trust_owned_app` grant OpenBot's page its permissions before the page loads. Only for an
+/// app built by `generate_context!`, which compiles them in.
+fn know_app_page_grants<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    app.state::<Shell>()
+        .app_page_grants_known
+        .store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
 /// Whether `url` is on the origin of the OpenBot app this shell verified it owns.
@@ -4611,6 +4636,8 @@ mod app_page_tests {
             .manage(Shell::default())
             .build(tauri::generate_context!(test = true))
             .unwrap();
+        // As the app's setup does: this context compiles the page's permissions in.
+        know_app_page_grants(app.handle());
         let window = app.get_webview_window("main").unwrap_or_else(|| {
             tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
                 .build()
@@ -4795,6 +4822,32 @@ mod app_page_tests {
             !reached.to_string().contains("not allowed") && reached.to_string().contains("options"),
             "{reached}"
         );
+    }
+
+    /// The notification plugin's script asks whether notifications are on as OpenBot's page
+    /// starts, before it has loaded. Its origin is granted when the shell trusts it, ahead of the
+    /// window going there, so that first question is answered. It used to be granted only once the
+    /// page had loaded: the question was refused, and the page never showed a notification.
+    #[test]
+    fn the_owned_app_page_is_answered_from_its_first_moment() {
+        let (app, window) = app();
+        let starting = "http://127.0.0.1:3010/";
+        trust_owned_app(app.handle(), "http://127.0.0.1:3010");
+        // No page load has finished: nothing but the trust has happened.
+        assert_eq!(
+            ask(
+                &window,
+                starting,
+                "plugin:notification|is_permission_granted"
+            ),
+            Ok(serde_json::json!(true))
+        );
+        assert!(ask(
+            &window,
+            "http://127.0.0.1:3011/",
+            "plugin:notification|is_permission_granted"
+        )
+        .is_err());
     }
 
     /// A click on a Bot's notification opens the page it names, on the OpenBot the window shows,
@@ -7817,6 +7870,9 @@ fn main() {
         })
         .setup(move |app| {
             log_launch(app.handle(), local_offset);
+            // Built by `generate_context!`, so the permissions OpenBot's page is granted are
+            // compiled in. First, before anything that could trust an app and open it.
+            know_app_page_grants(app.handle());
             {
                 use tauri_plugin_notification::NotificationExt;
                 let handle = app.handle().clone();

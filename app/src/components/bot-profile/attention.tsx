@@ -5,6 +5,9 @@ import {
   botAttentionQueryOptions,
   lastPingQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
+// Whether this browser, or OpenBot Desktop, lets OpenBot interrupt: the same answer the offer to
+// turn notifications on reads, so the two cannot disagree.
+import { notificationsAllowed } from "@/lib/notifications/permission";
 import {
   type ProactiveSuggestion,
   proactiveSuggestionsQueryOptions,
@@ -68,18 +71,6 @@ export function attentionSummary(bot: BotAttention): string {
     parts.push(count(bot.tasks.failed, "failed task", "failed tasks"));
   if (bot.unread) parts.push(`${bot.unread} unread`);
   return parts.join(", ");
-}
-
-/** Whether this browser lets OpenBot interrupt. Some browsers throw on the mere question. */
-function notificationsAllowed() {
-  try {
-    return (
-      typeof Notification !== "undefined" &&
-      Notification.permission === "granted"
-    );
-  } catch {
-    return false;
-  }
 }
 
 /**
