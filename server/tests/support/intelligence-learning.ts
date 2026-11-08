@@ -70,6 +70,13 @@ const ERRORS = {
     "Check that this organization has an active subscription: every current plan grants Learning, and this organization is not entitled to it.",
     "permission",
   ],
+  // apps/app-api/src/errors/registry.ts: a run asked of an installation whose Learning agent has
+  // no model (runtime-learning-routes.ts).
+  LEARNING_MODEL_NOT_CONFIGURED: [
+    409,
+    "No Learning model is configured for this installation. Run `copilotkit local setup` to add one.",
+    "conflict",
+  ],
   INTERNAL_SERVER_ERROR: [500, "Unexpected server error.", "internal", true],
   AUTH_UNAUTHENTICATED: [401, "Authentication is required.", "auth"],
 } as const;
@@ -351,6 +358,8 @@ export function fakeIntelligence(
     starting?: { migrating?: number; keyless?: number };
     failCreates?: number;
     inspector?: "no-dashboard" | "dashboard" | "dashboard-before-opt-in";
+    /** The installation's Learning agent has no model, so a run is refused. */
+    noModel?: boolean;
     /** Files that replace a candidate's bundle, by candidate id. */
     bundles?: Record<string, { path: string; content: string }[]>;
   } = {},
@@ -446,7 +455,9 @@ export function fakeIntelligence(
       if (!collection) return Response.json({ container: found });
       if (collection === "runs")
         return request.method === "POST"
-          ? Response.json({ run: run() }, { status: 202 })
+          ? options.noModel
+            ? intelligenceError("LEARNING_MODEL_NOT_CONFIGURED")
+            : Response.json({ run: run() }, { status: 202 })
           : Response.json({ runs: [run("succeeded")] });
       if (collection === "insights")
         return itemId === INSIGHT_ID &&

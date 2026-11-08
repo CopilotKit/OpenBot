@@ -6,6 +6,7 @@ import type {
   LearningRunSummary,
 } from "@openbot/shared/learning";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import type { LearningModelCalls } from "./model-endpoint";
 
 /** The runtime key's own Learning routes: a project's containers, runs and proposed Skills. */
 export type LearningManagement = Pick<
@@ -32,8 +33,37 @@ export function requestFailure(error: unknown): {
   };
 }
 
+/** Why Learning has no model on this machine, as OpenBot Desktop recorded it. */
+export type LearningModelUnavailable = "unsupported";
+
+/**
+ * Desktop's reason, from `OPENBOT_LEARNING_MODEL_UNAVAILABLE`, or undefined. Only Desktop writes the
+ * setting, so an OpenBot whose Learning runs on an organization's Intelligence keeps the message for
+ * whoever runs that back end.
+ */
+export function learningModelUnavailable(
+  environment: Record<string, string | undefined>,
+): LearningModelUnavailable | undefined {
+  return environment.OPENBOT_LEARNING_MODEL_UNAVAILABLE?.trim() ===
+    "unsupported"
+    ? "unsupported"
+    : undefined;
+}
+
+/** What Learn now says when the Learning agent has no model. */
+export function noLearningModel(
+  unavailable: LearningModelUnavailable | undefined,
+): string {
+  return unavailable === "unsupported"
+    ? "Learning can't run on the model you signed in with. To use it, sign OpenBot in with an OpenAI or Anthropic API key, or a Claude or ChatGPT plan."
+    : "The back end has no Learning model yet. Give its Learning agent a model and key, then try again.";
+}
+
 /** What to tell an admin when Intelligence refused a Learning request, and with which status. */
-export function learningFailure(error: unknown): {
+export function learningFailure(
+  error: unknown,
+  unavailable?: LearningModelUnavailable,
+): {
   status: ContentfulStatusCode;
   error: string;
 } {
@@ -67,8 +97,7 @@ export function learningFailure(error: unknown): {
   if (code === "LEARNING_MODEL_NOT_CONFIGURED")
     return {
       status: 409,
-      error:
-        "The back end has no Learning model yet. Give its Learning agent a model and key, then try again.",
+      error: noLearningModel(unavailable),
     };
   if (status === 429 || code === "RATE_LIMIT_EXCEEDED")
     return {
@@ -79,6 +108,62 @@ export function learningFailure(error: unknown): {
     status: 502,
     error: "Couldn't reach Learning in the back end. Try again.",
   };
+}
+
+/** The codes Intelligence gives a run whose Learning agent did not finish a phase. */
+const AGENT_FAILURES = new Set([
+  "BatchInsightAgentFailed",
+  "ReductionAgentFailed",
+  "SkillProposalAgentFailed",
+  "MalformedBatchOutput",
+]);
+
+/** The codes Intelligence gives a run its own queue or jobs stopped. */
+const BACK_END_FAILURES = new Set([
+  "QueueDeadLettered",
+  "KubernetesJobError",
+  "TransientReducerError",
+]);
+
+/**
+ * Why a failed run stopped, in words for the person, or null for a run that did not fail.
+ *
+ * Intelligence records a code, never the Learning agent's own error (`learning-agent-client.ts` wraps
+ * it "without exposing response text"). Where Learning thinks on the person's plan through this
+ * server (`calls`), what reached the endpoint while the run went says the rest: nothing at all is a
+ * Learning agent that could not reach OpenBot, which is what "Connection error." was on every call.
+ */
+export function runFailure(
+  run: Pick<
+    Run,
+    "status" | "failureCode" | "createdAt" | "startedAt" | "completedAt"
+  >,
+  calls?: LearningModelCalls,
+  now: () => number = Date.now,
+): string | null {
+  if (run.status !== "failed") return null;
+  const code = run.failureCode ?? "";
+  if (code === "LEARNING_MODEL_NOT_CONFIGURED")
+    return "Learning has no model to think with. Sign OpenBot in to a model, then choose Learn now.";
+  if (AGENT_FAILURES.has(code)) {
+    if (calls) {
+      const from = Date.parse(run.startedAt ?? run.createdAt);
+      const to = run.completedAt ? Date.parse(run.completedAt) : now();
+      const seen = calls.between(from, to);
+      if (seen.includes("sign-in"))
+        return "Your model plan needs signing in again. Sign in to it in OpenBot, then choose Learn now.";
+      if (seen.includes("refused"))
+        return "Learning couldn't sign in to OpenBot. Quit OpenBot and open it again, then choose Learn now.";
+      if (seen.length === 0)
+        return "Learning couldn't reach OpenBot to use your model plan. Quit OpenBot and open it again, then choose Learn now.";
+      if (!seen.includes("answered") || seen.includes("unanswered"))
+        return "Your model plan didn't answer Learning. Try Learn now again in a few minutes.";
+    }
+    return "Learning's model didn't finish. Check that your model key works and has credit, then choose Learn now.";
+  }
+  if (BACK_END_FAILURES.has(code))
+    return "Learning was stopped before it finished. Choose Learn now to try again.";
+  return "Learning stopped before it finished. Choose Learn now to try again.";
 }
 
 export const CANDIDATE_ID =
@@ -102,7 +187,11 @@ export type Run = Awaited<
   ReturnType<LearningManagement["listLearningRuns"]>
 >[number];
 
-export function runSummary(run: Run): LearningRunSummary {
+export function runSummary(
+  run: Run,
+  calls?: LearningModelCalls,
+  now: () => number = Date.now,
+): LearningRunSummary {
   return {
     id: run.id,
     status: run.status,
@@ -110,6 +199,7 @@ export function runSummary(run: Run): LearningRunSummary {
     proposals: run.candidateCount,
     insights: run.insightCount,
     failureCode: run.failureCode,
+    failure: runFailure(run, calls, now),
     createdAt: run.createdAt,
     startedAt: run.startedAt,
     completedAt: run.completedAt,

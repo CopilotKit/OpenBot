@@ -26,11 +26,14 @@ import {
   reviewProposal,
   runSummary,
 } from "./review";
+import type { LearningModelCalls } from "./model-endpoint";
 import type { LearningSettingsStore } from "./settings";
 import type { LearningSharingStore } from "./sharing";
 
 export type PersonalLearningRouteDeps = {
   store: LearningSharingStore;
+  /** What became of the Learning endpoint's calls, on a plan, so a failed run says why. */
+  modelCalls?: LearningModelCalls;
   /** Who approved each skill in the person's space and where a request to share it stands. */
   approvals: SkillApprovalStore;
   /** The Skills in this person's own space, read the way a run reads them (learning/runtime.ts `personalSkills`). */
@@ -342,7 +345,7 @@ export function createPersonalLearningRoutes(
           proposals.value?.filter(
             (entry) => entry.status === "pending_review",
           ) ?? null,
-        latestRun: latest ? runSummary(latest) : null,
+        latestRun: latest ? runSummary(latest, deps.modelCalls) : null,
       };
     });
     const answer: PersonalReview = {

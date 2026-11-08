@@ -983,7 +983,7 @@ test("a key app nobody has connected keeps the screen's own reassurance", async 
    */
   expect(
     view.getByText(
-      /Setup is complete without it, and it reaches your documents only/,
+      /Setup is complete without it, and it reaches only your own Gmail account/,
     ),
   ).toBeTruthy();
 });
