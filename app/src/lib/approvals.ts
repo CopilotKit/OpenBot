@@ -19,7 +19,11 @@ export type ApprovalRuleInput = {
   scope: string;
   behaviour: RuleBehaviour;
 };
-export type ApprovalRuleRow = ApprovalRuleInput & { id: string };
+export type ApprovalRuleRow = ApprovalRuleInput & {
+  id: string;
+  /** The one account at the app a saved rule is for, where the person holds several. */
+  account?: string | null;
+};
 export const BEHAVIOUR_LABELS: Record<RuleBehaviour, string> = {
   allow: "Take action without asking",
   pre_approved: "Take action if pre-approved",
@@ -41,6 +45,8 @@ export type ApprovalInboxData = {
       toolCallId?: string;
       args: unknown;
       target: unknown;
+      /** Which of the person's accounts at the app, where they hold several. */
+      account?: string;
       policy?: {
         behaviour: "allow" | "ask" | "hand_off" | "deny";
         source: string;

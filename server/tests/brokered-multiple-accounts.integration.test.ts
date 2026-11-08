@@ -4,6 +4,8 @@ import { ComposioMultipleConnectedAccountsError } from "@composio/core";
 import { and, eq, inArray } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import type { z } from "zod";
+import { equivalenceOf } from "../src/approvals/service";
+import type { ApprovalCandidate, ApprovalGate } from "../src/approvals/types";
 import { createAuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import { createDatabase } from "../src/db/client";
@@ -276,7 +278,10 @@ async function enableGmail(toolkit: string) {
   });
 }
 
-function storeFor(broker: ReturnType<typeof composioHolding>["broker"]) {
+function storeFor(
+  broker: ReturnType<typeof composioHolding>["broker"],
+  approvalGate?: ApprovalGate,
+) {
   return createPluginStore({
     brokerProvider: "composio",
     database,
@@ -286,6 +291,7 @@ function storeFor(broker: ReturnType<typeof composioHolding>["broker"]) {
     policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
     broker,
     deploymentId: `acme-${suite}`,
+    ...(approvalGate ? { approvalGate } : {}),
   });
 }
 
@@ -600,6 +606,30 @@ describe("a person with two Gmail accounts", () => {
     expect(ended.status).toBe(404);
     expect(defaulted.status).toBe(404);
     expect(composio.asked.deleted).toEqual([]);
+  });
+});
+
+describe("asking the person first", () => {
+  test("two otherwise identical calls to different accounts reach the approval step as different requests, each naming its account", async () => {
+    const toolkit = `gmail-${suite}-approval`;
+    await enableGmail(toolkit);
+    const composio = composioHolding(toolkit, twoMailboxes(toolkit));
+    const asked: ApprovalCandidate[] = [];
+    const store = storeFor(composio.broker, async (candidate) => {
+      asked.push(candidate);
+      return undefined;
+    });
+    await listAccounts(routesAs(store, composio.broker, PERSON), toolkit);
+
+    await fetchEmails(store, toolkit, { account: WORK, query: "is:unread" });
+    await fetchEmails(store, toolkit, { account: HOME, query: "is:unread" });
+
+    expect(asked.map((candidate) => candidate.account)).toEqual([WORK, HOME]);
+    // The account is not one of the action's own arguments, and it is part of the comparison.
+    expect(asked[0]?.args).toEqual(asked[1]?.args);
+    const [work, home] = asked;
+    if (!work || !home) throw new Error("the approval step was not asked");
+    expect(equivalenceOf(work)).not.toBe(equivalenceOf(home));
   });
 });
 

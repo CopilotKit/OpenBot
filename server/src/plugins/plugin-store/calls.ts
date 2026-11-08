@@ -642,6 +642,12 @@ export function callMethods(context: StoreContext) {
           scope: gateApp ? gateApp.id : serverId,
           args: vendorArgs,
           target: { serverId, toolName, url: row.url, effect },
+          /*
+           * WHICH MAILBOX, where the person holds more than one. It is part of what the gate
+           * compares and stores, so an approval, a denial or "Always allow here" for one account
+           * never answers for another, and the card says which account it is asking about.
+           */
+          ...(pinned && pinned.among > 1 ? { account: pinned.label } : {}),
           continuation: currentApprovalContext(),
           /*
            * Whether this is a reviewed read of the person's own app: an app they connected with their

@@ -156,6 +156,8 @@ export function approvalWords(action: {
   scope: string;
   /** What the action is aimed at, as the server resolved it. A folder's carries its name. */
   target?: unknown;
+  /** Which of the person's accounts at the app, where they hold several: "from dana@work.example". */
+  account?: string;
 }): {
   action: string;
   place: string;
@@ -164,8 +166,9 @@ export function approvalWords(action: {
   const app = action.toolRef.slice(0, slash);
   if (slash > 0 && app === action.scope) {
     const { label } = appToolName(app, action.toolRef.slice(slash + 1));
+    const words = label.charAt(0).toLowerCase() + label.slice(1);
     return {
-      action: label.charAt(0).toLowerCase() + label.slice(1),
+      action: action.account ? `${words} from ${action.account}` : words,
       place: connectorName(app),
     };
   }

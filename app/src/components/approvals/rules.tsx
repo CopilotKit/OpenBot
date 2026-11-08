@@ -123,6 +123,8 @@ export function RuleRow({
   const match = [
     rule.effect !== "*" ? rule.effect : null,
     rule.scope !== "*" ? `on ${rule.scope}` : null,
+    // A rule saved for one of several accounts at the app covers that account only.
+    rule.account ? `from ${rule.account}` : null,
     rule.botId !== "*" ? `for ${rule.botId}` : null,
   ]
     .filter(Boolean)

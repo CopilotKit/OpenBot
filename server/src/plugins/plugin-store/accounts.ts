@@ -25,6 +25,8 @@ export type PinnedAccount = {
   /** The vendor's id for the account, or null where the user id alone names it. */
   accountId: string | null;
   label: string;
+  /** How many accounts the person holds at the app, which says whether there was a choice. */
+  among: number;
 };
 
 type PersonAccount = Extract<AccountRef, { holder: "person" }>;
@@ -215,6 +217,7 @@ export function accountBook(context: StoreContext) {
       vendorUserId: row.vendorUserId,
       accountId: row.accountId === "" ? null : row.accountId,
       label,
+      among: rows.length,
     });
 
     if (named === undefined || named === null || named === "") {
