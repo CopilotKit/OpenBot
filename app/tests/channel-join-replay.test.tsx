@@ -2,9 +2,18 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { CopilotKitProvider, useCopilotKit } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import { ChannelChat } from "@/components/channels/channel-chat";
+import { Route as ChannelRoute } from "@/routes/_authed/_app/channel/$channelId";
 import {
   type AgentChannel,
   type ChannelPage,
@@ -47,14 +56,19 @@ const channel: AgentChannel = {
 };
 const TOPIC = `thread:${channel.threadId}`;
 
-/** What the gateway does once the browser has joined the thread: send, wait, and say it is idle. */
+/**
+ * What the gateway does once the browser has joined the thread: send, wait, and say it is idle.
+ * Told which join this is, counting from 1 in each test.
+ */
 type Script = (
   send: (event: string, payload: unknown) => void,
+  join: number,
 ) => Promise<void>;
 
 let originalFetch: typeof fetch;
 let gateway: ReturnType<typeof Bun.serve>;
 let script: Script = async () => {};
+let joins = 0;
 let history: () => Response;
 let historyReads = 0;
 let core: ReturnType<typeof useCopilotKit>["copilotkit"] | undefined;
@@ -105,7 +119,10 @@ beforeAll(() => {
             { status: "ok", response: {} },
           ]),
         );
-        if (event === "phx_join" && topic === TOPIC) void script(send);
+        if (event === "phx_join" && topic === TOPIC) {
+          joins += 1;
+          void script(send, joins);
+        }
       },
     },
   });
@@ -169,6 +186,9 @@ beforeAll(() => {
         historyReads += 1;
         return history();
       }
+      // The conversation's own page, for the test that goes through the router.
+      if (url.pathname === `/api/channels/${channel.id}`)
+        return NativeResponse.json({ channel });
       throw new Error(`Unexpected fixture request: ${url.pathname}`);
     },
     {
@@ -182,6 +202,7 @@ afterEach(() => {
   cleanup();
   queryClient.clear();
   historyReads = 0;
+  joins = 0;
   joinHeld = null;
 });
 afterAll(() => {
@@ -343,3 +364,112 @@ test("a reply still being written when the conversation is opened arrives whole"
   expect(shown(view.container, ASKING_TEXT)).toBe(1);
   expect(shown(view.container, ASKED_TEXT)).toBe(1);
 }, 15_000);
+
+/*
+ * The conversation's real route, under the app's layout ids, beside a home page to leave it for.
+ * TanStack's generated tree wires a file route with update({ id, path, getParentRoute })
+ * (app/src/routeTree.gen.ts); the update type tests see leaves those fields out, hence the cast.
+ */
+const rootRoute = createRootRoute({ component: Outlet });
+const authedRoute = createRoute({
+  id: "/_authed",
+  getParentRoute: () => rootRoute,
+  component: Outlet,
+});
+const appRoute = createRoute({
+  id: "/_app",
+  getParentRoute: () => authedRoute,
+  component: Outlet,
+});
+const homeRoute = createRoute({
+  path: "/",
+  getParentRoute: () => appRoute,
+  component: () => <p>Home page</p>,
+});
+const conversationRoute = ChannelRoute.update({
+  id: "/channel/$channelId",
+  path: "/channel/$channelId",
+  getParentRoute: () => appRoute,
+} as Parameters<typeof ChannelRoute.update>[0] & {
+  id: string;
+  path: string;
+  getParentRoute: () => typeof appRoute;
+});
+
+test("a reply is shown once and whole after leaving its conversation and coming back while the Bot answers", async () => {
+  const start = askPersonReplayStart(channel.threadId);
+  const end = askPersonReplayEnd(channel.threadId);
+  script = async (send, join) => {
+    // Each join replays the turn so far. The first is left while the Bot is still answering; the
+    // second carries the rest of the reply, later than the join's deadline.
+    sending(send, start);
+    send("replay_complete", { latestEventId: `event-${start.length - 1}` });
+    if (join === 1) return;
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    sending(send, end, start.length);
+    send("stream_idle", {
+      latestEventId: `event-${start.length + end.length - 1}`,
+    });
+  };
+  // The store, read meanwhile, holds the reply as far as it has got.
+  history = () =>
+    NativeResponse.json({ messages: askPersonStored("asked", ASKED_SO_FAR) });
+  roster("2026-11-08T00:00:01.000Z", "Ask me which colour of apple");
+  queryClient.setQueryData(channelKeys.detail(channel.id), channel);
+
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([
+      authedRoute.addChildren([
+        appRoute.addChildren([homeRoute, conversationRoute]),
+      ]),
+    ]),
+    history: createMemoryHistory({
+      initialEntries: [`/channel/${channel.id}`],
+    }),
+  });
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <CopilotKitProvider runtimeUrl="http://localhost/api/copilotkit">
+        <CoreProbe />
+        <HoldJoin />
+        <RouterProvider router={router as never} />
+      </CopilotKitProvider>
+    </QueryClientProvider>,
+  );
+  await view.findByText(ASKED_SO_FAR, undefined, { timeout: 4000 });
+
+  // The person goes elsewhere in the app while the Bot is still answering, and comes back.
+  await act(() => router.navigate({ to: "/" }));
+  await view.findByText("Home page");
+  let release: () => void = () => {};
+  joinHeld = new Promise((resolve) => {
+    release = resolve;
+  });
+  const reached = new Promise<void>((resolve) => {
+    joinReached = resolve;
+  });
+  await act(async () => router.history.back());
+  await act(() => reached);
+  // The Bot's question lands in the roster while the conversation is joining again.
+  await announce(
+    "2026-11-08T00:00:02.000Z",
+    "A question needs your answer: Which colour of apple do you prefer?",
+  );
+  await sleep(300);
+  joinHeld = null;
+  await act(async () => release());
+
+  await waitFor(
+    () => expect(shown(view.container, ASKED_TEXT)).toBeGreaterThanOrEqual(1),
+    { timeout: 6000 },
+  );
+  await sleep(300);
+  expect(
+    core
+      ?.getAgent(`channel:${channel.id}`)
+      ?.messages.filter((message) => message.role === "assistant")
+      .map((message) => message.content),
+  ).toEqual([ASKING_TEXT, ASKED_TEXT]);
+  expect(shown(view.container, ASKING_TEXT)).toBe(1);
+  expect(shown(view.container, ASKED_TEXT)).toBe(1);
+}, 20_000);
