@@ -519,6 +519,45 @@ test("your recordings show under a browser shown in the page", async () => {
   expect(await view.findByText("Refund an order")).toBeTruthy();
 });
 
+test("an empty tab shows a start page with one field to search or go to a site, which goes where the address bar would", async () => {
+  state = {
+    ...screenState(),
+    tabs: [
+      { id: "tab-2", url: "about:blank", title: "about:blank", active: true },
+    ],
+  };
+  openAnswer = answerFor("screen");
+  const user = userEvent.setup({ document });
+  const view = draw(<BrowserPage />);
+  const field = await view.findByRole("textbox", {
+    name: "Search or go to a site",
+  });
+  await user.type(field, "openbot.ai{Enter}");
+  await waitFor(() =>
+    expect(
+      writes.filter((write) => write.path === "/api/browser/navigate"),
+    ).toEqual([
+      {
+        path: "/api/browser/navigate",
+        method: "POST",
+        body: { url: "https://openbot.ai" },
+      },
+    ]),
+  );
+  // Sent, the field is cleared for the next place to go.
+  expect((field as HTMLInputElement).value).toBe("");
+});
+
+test("a tab with a page open shows the page and no start page", async () => {
+  state = screenState();
+  openAnswer = answerFor("screen");
+  const view = draw(<BrowserPage />);
+  expect(await view.findByLabelText(SCREEN)).toBeTruthy();
+  expect(
+    view.queryByRole("textbox", { name: "Search or go to a site" }),
+  ).toBeNull();
+});
+
 test("Teach a Bot says what it is above the browser, and leads from the recordings to Settings, Learning", async () => {
   state = screenState();
   openAnswer = answerFor("screen");
