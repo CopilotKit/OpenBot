@@ -9,9 +9,11 @@
 A modular, self-hostable workspace for AI coworkers.<br>
 Choose your models. Bring your agents. Own your infrastructure.
 
-[Mac / Apple silicon](https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg) · [Mac / Intel](https://downloads.copilotkit.ai/latest/OpenBot-mac-x64.dmg) · [Windows](https://downloads.copilotkit.ai/latest/OpenBot-windows-x64-setup.exe) · [Kubernetes](#deploy-on-kubernetes)
+[Web](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=web&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Mac / Apple silicon](https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg) · [Mac / Intel](https://downloads.copilotkit.ai/latest/OpenBot-mac-x64.dmg) · [Windows](https://downloads.copilotkit.ai/latest/OpenBot-windows-x64-setup.exe)
 
-[iOS](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=ios&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Android](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=android&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Slack](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=slack&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Teams](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=teams&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Web](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=web&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access)
+[iOS](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=ios&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Android](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=android&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Slack](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=slack&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Teams](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=teams&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access)
+
+[Kubernetes](#deploy-on-kubernetes)
 
 [**OpenBot for Business · Get early access →**](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=business&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [**Docs**](docs/README.md)
 
@@ -25,13 +27,13 @@ From [CopilotKit](https://www.copilotkit.ai), creators of [AG-UI](https://github
 
 The easiest way to get started is with the fully self-contained app that runs on your laptop, combining the OpenBot frontend and Docker-based backend in one application.
 
-[Mac / Apple silicon](https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg) · [Mac / Intel](https://downloads.copilotkit.ai/latest/OpenBot-mac-x64.dmg) · [Windows](https://downloads.copilotkit.ai/latest/OpenBot-windows-x64-setup.exe)
+[Web](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=web&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Mac / Apple silicon](https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg) · [Mac / Intel](https://downloads.copilotkit.ai/latest/OpenBot-mac-x64.dmg) · [Windows](https://downloads.copilotkit.ai/latest/OpenBot-windows-x64-setup.exe)
 
 <a id="early-access-platforms"></a>
 
-[iOS](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=ios&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Android](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=android&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Slack](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=slack&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Teams](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=teams&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Web](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=web&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access)
+[iOS](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=ios&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Android](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=android&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Slack](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=slack&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Teams](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=teams&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access)
 
-[Run from source](#run-from-source) · [Kubernetes](#deploy-on-kubernetes)
+[Kubernetes](#deploy-on-kubernetes) · [Run from source](#run-from-source)
 
 ### For your team
 
