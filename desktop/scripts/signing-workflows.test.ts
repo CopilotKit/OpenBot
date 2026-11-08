@@ -211,7 +211,10 @@ test("every release and internal build that bundles on Windows or Linux fetches 
       }
       checked.push(`${file}:${id}`);
       const fetch = steps.findIndex((step) => step.run?.includes(prefetch));
-      expect({ job: `${file}:${id}`, fetchesFirst: fetch >= 0 && fetch < build }).toEqual({
+      expect({
+        job: `${file}:${id}`,
+        fetchesFirst: fetch >= 0 && fetch < build,
+      }).toEqual({
         job: `${file}:${id}`,
         fetchesFirst: true,
       });
@@ -221,9 +224,13 @@ test("every release and internal build that bundles on Windows or Linux fetches 
       // The job's own read-only token, for the API the tools come through.
       expect(step.env?.GH_TOKEN).toBe(expression("github.token"));
       // A platform the script knows, named outright or taken from the job's matrix.
-      const platform = step.run?.slice(step.run.indexOf(prefetch) + prefetch.length).trim();
+      const platform = step.run
+        ?.slice(step.run.indexOf(prefetch) + prefetch.length)
+        .trim();
       if (platform === '"$PLATFORM"') {
-        expect(step.env?.PLATFORM).toMatch(/^\$\{\{ matrix\.platform(\.name)? \}\}$/);
+        expect(step.env?.PLATFORM).toMatch(
+          /^\$\{\{ matrix\.platform(\.name)? \}\}$/,
+        );
         expect(step.if).toContain("'windows'");
         expect(step.if).toContain("'linux'");
       } else {
