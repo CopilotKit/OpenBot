@@ -32,6 +32,7 @@ import {
 import type { Profiles } from "../src/profiles";
 import { startScreencast } from "../src/screencast";
 import { setWebBotAuth } from "../src/web-bot-auth";
+import { browsersOnProfile } from "./fixtures/browser-process";
 
 /**
  * A person's browser, launched for real and driven through the real browser routes.
@@ -208,26 +209,19 @@ function disabledFeatures(switches: string[]): string[] {
 }
 
 /**
- * The browser's own process, found by the profile it runs on: the one with no `--type`, which its renderers, GPU and
- * utility processes all have. That process answers DevTools, so stopping it is a browser that does not answer.
+ * The browser's own process, found by the profile it runs on (see `browsersOnProfile`). That process answers
+ * DevTools, so stopping it is a browser that does not answer.
  */
 async function browserProcess(profile: string): Promise<number> {
   const listing = Bun.spawnSync(["ps", "-axo", "pid=,ppid=,command="]);
-  const lines = listing.stdout
-    .toString()
-    .split("\n")
-    .filter(
-      (line) =>
-        line.includes(`--user-data-dir=${profile}`) &&
-        !line.includes("--type="),
-    );
+  const browsers = browsersOnProfile(listing.stdout.toString(), profile);
   // Each one whole when there are two: which process the second one is (its parent, its program,
-  // its switches) is what says why. It failed on CI as "found 2" and nothing else.
-  if (lines.length !== 1)
+  // its switches) is what says why.
+  if (browsers.length !== 1)
     throw new Error(
-      `Expected one browser on ${profile}, found ${lines.length}:\n${lines.map((line) => line.trim().slice(0, 600)).join("\n")}`,
+      `Expected one browser on ${profile}, found ${browsers.length}:\n${browsers.map(({ line }) => line.slice(0, 600)).join("\n")}`,
     );
-  return Number.parseInt((lines[0] as string).trim(), 10);
+  return (browsers[0] as { pid: number }).pid;
 }
 
 /** Every browser the tests start, closed at the end whatever happened. */
