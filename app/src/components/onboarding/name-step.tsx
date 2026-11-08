@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { useId, useState } from "react";
+import { type CSSProperties, useId, useState } from "react";
+import { ORB_GLOW_REACH } from "@/components/agents/orb/agent-orb";
 import { DemoOrb } from "@/components/onboarding/demo-orb";
 import { useSaveProfileName } from "@/components/settings/profile";
 import { Input } from "@/components/ui/input";
@@ -96,6 +97,12 @@ export const FINISH_MS = 1_200;
 /**
  * OpenBot's orb, listening while somebody types their name. `finished` settles it into done, which
  * is how onboarding ends.
+ *
+ * ROOM FOR ITS GLOW. In one column the orb comes first, right under the header with the step
+ * dashes, which is sticky and painted over the page. The orb's glow reaches past its box
+ * (`ORB_GLOW_REACH`), so without room above it the header cut the top of the orb flat (reported on
+ * a fresh Windows install). Two columns centre it in its own pane, where the same room above and
+ * below keeps it centred and clear of the pane's edges.
  */
 export function NameOrb({
   finished = false,
@@ -106,8 +113,13 @@ export function NameOrb({
 }) {
   return (
     <span
-      className="flex justify-center"
+      className="flex justify-center pt-(--orb-glow) lg:py-(--orb-glow)"
       data-onboarding-finish={finished ? "" : undefined}
+      style={
+        {
+          "--orb-glow": `${Math.ceil(size * ORB_GLOW_REACH)}px`,
+        } as CSSProperties
+      }
     >
       <DemoOrb size={size} state={finished ? "done" : "listening"} />
     </span>

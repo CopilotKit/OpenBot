@@ -4,8 +4,20 @@ import { type ReactNode, useEffect, useState } from "react";
 export const INSTALL_BLURB =
   "This installs OpenBot on this computer: the front end, the back end, the database, your Bots, and the computers they work on. It's a large download the first time, so you might want to grab a coffee or tea.";
 
-/** Counts used by the installer from the native `pull_metrics::Downloads` event. */
-type Downloads = { done: number; total: number };
+/**
+ * A download while it runs: Install's images (`pull_metrics::Downloads`), or the back end's update
+ * (`intelligence_download::Transferred`), which has no item count.
+ */
+export type Downloads = {
+  /** Downloaded so far. */
+  bytes: number;
+  /** The whole download, once it is known. Absent until then, and never guessed. */
+  size?: number;
+  bytesPerSecond?: number;
+  /** Items finished, of `total`. */
+  done?: number;
+  total?: number;
+};
 
 /** One setup step, as the native side reports it or the window runs it. */
 export type Progress = {
@@ -17,7 +29,28 @@ export type Progress = {
   downloads?: Downloads;
   /** When a running row began, if earlier than the row appeared on this screen. */
   startedAt?: number;
+  /**
+   * The detail sends the person to another app's window: Docker Desktop starting, or the system's
+   * password prompt. That window is in front of this one. See `handOffNow`.
+   */
+  elsewhere?: boolean;
 };
+
+/**
+ * What another app's window wants from the person right now, if anything: the detail of a running
+ * step that sent them there.
+ *
+ * Opening Docker Desktop, or Podman's installer asking for a password, puts that app's window in
+ * front of OpenBot's. Its row alone is not enough: the person waits on whichever screen they are
+ * on, often the account step, and a row they cannot see says nothing. So the setup screens say
+ * this line until the step ends, and OpenBot comes back to the front.
+ */
+export function handOffNow(steps: Progress[]): string | null {
+  const handedOff = [...steps]
+    .reverse()
+    .find((step) => step.running && step.elsewhere && step.detail);
+  return handedOff?.detail ?? null;
+}
 
 export function SetupProgress({
   steps,
@@ -97,11 +130,11 @@ const PREPARING = new Set([
  * An installation's native rows as two plain ones, for local mode: "Preparing this computer" and
  * "Installing OpenBot". A failure is shown in full under the rows.
  *
- * Keep actionable directions for the current step. Image pulls only need an item count.
- * "Preparing this computer" says, for instance, "Starting Docker Desktop.
- * Accept anything it asks in its own window." Docker is named on purpose. Its agreement and
- * helper prompt appear in windows of their own, and a row that only said "Preparing" sat for
- * minutes while one of them waited, unseen, behind this one.
+ * Keep actionable directions for the current step. Image pulls show their download instead.
+ * "Preparing this computer" says, for instance, "Docker Desktop is starting in its own window."
+ * Docker is named on purpose. Its agreement and helper prompt appear in windows of their own, and
+ * a row that only said "Preparing" sat for minutes while one of them waited, unseen, behind this
+ * one.
  */
 export function plainInstallSteps(
   steps: Progress[],
@@ -132,7 +165,7 @@ export function plainInstallSteps(
     const restNow = installingNow
       ? [...rest].reverse().find((step) => step.running)
       : undefined;
-    // The initial check has a useful status sentence. Once transfers report counts
+    // The initial check has a useful status sentence. Once transfers report their download
     // (or only bytes), the install row no longer needs their technical detail.
     const pulling =
       restNow?.downloads != null ||
@@ -185,31 +218,72 @@ function SetupProgressRow({
           downloads == null &&
           ` ${formatDownloadBytes(step.downloadBytes)} downloaded.`}
       </span>
-      {downloads && downloads.total > 0 && (
-        <ItemProgress downloads={downloads} />
+      {downloads && showsDownload(downloads) && (
+        <DownloadProgress downloads={downloads} />
       )}
     </li>
   );
 }
 
-function ItemProgress({
-  downloads: { done, total },
-}: {
-  downloads: Downloads;
-}) {
-  const remaining = total - done;
-  const summary = `${remaining} of ${total} ${total === 1 ? "item" : "items"} remaining`;
+/**
+ * Install shows its download from the start, items and all. The back end's update shows one only
+ * once it has something to say: an update with nothing to download is not a download.
+ */
+function showsDownload({ bytes, size, total }: Downloads): boolean {
+  return (total ?? 0) > 0 || bytes > 0 || (size ?? 0) > 0;
+}
+
+/**
+ * The bytes downloaded out of the whole download, with a bar driven by the bytes. Until the size
+ * is known the line says so and the bar is indeterminate: it claims no fraction it cannot know.
+ */
+function DownloadProgress({ downloads }: { downloads: Downloads }) {
+  const summary = downloadSummary(downloads);
+  const known = downloads.size != null && downloads.size > 0;
   return (
     <div className="downloads">
-      <progress
-        aria-label="Item download progress"
-        aria-valuetext={summary}
-        value={done}
-        max={total}
-      />
+      {known ? (
+        <progress
+          aria-label="Download progress"
+          aria-valuetext={summary}
+          value={Math.min(downloads.bytes, downloads.size ?? 0)}
+          max={downloads.size}
+        />
+      ) : (
+        <progress aria-label="Download progress" aria-valuetext={summary} />
+      )}
       <span aria-hidden="true">{summary}</span>
     </div>
   );
+}
+
+/** "1.2 GB of 3.4 GB · 1 of 5 items remaining", or what is known of it. */
+export function downloadSummary({
+  bytes,
+  size,
+  done,
+  total,
+}: Downloads): string {
+  const parts: string[] = [];
+  if (size != null) {
+    if (size > 0)
+      parts.push(
+        `${formatDownloadBytes(bytes)} of ${formatDownloadBytes(size)}`,
+      );
+  } else if (bytes > 0) {
+    parts.push(
+      `${formatDownloadBytes(bytes)} downloaded, total size not known yet`,
+    );
+  } else {
+    parts.push("Total size not known yet");
+  }
+  if (total != null && total > 0) {
+    const remaining = total - (done ?? 0);
+    parts.push(
+      `${remaining} of ${total} ${total === 1 ? "item" : "items"} remaining`,
+    );
+  }
+  return parts.join(" · ");
 }
 
 export function formatDownloadBytes(bytes: number): string {

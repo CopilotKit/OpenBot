@@ -27,6 +27,11 @@ export type ChannelActivityEvent = {
   lastMessage: string | null;
   lastMessageAt: string | null;
   lastMessageAgentId: string | null;
+  /**
+   * A Bot's reply, its first line as plain text: what a notification says when the reply lands while
+   * OpenBot is out of sight. `lastMessage` runs every line into one. Only on a Bot's message.
+   */
+  firstLine?: string;
   /** Newly written summary, on its own event: the sweep runs seconds after the activity it follows. */
   summary?: string;
   /** A person's first words, newly written, on its own event: the row's name until `summary`. */

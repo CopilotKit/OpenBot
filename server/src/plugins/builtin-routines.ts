@@ -1,6 +1,7 @@
 import { runTimeZone } from "@openbot/shared/person-time-zone";
 import { currentApprovalContext } from "@openbot/toolkit/continuation";
 import { cutAtCodeUnits } from "../channels/text";
+import { appsPage } from "../edition";
 import {
   callGoalTool,
   GOAL_TOOLS,
@@ -674,7 +675,7 @@ export async function callTool(
     }
 
     return failure(
-      `${toolName} is not a tool Routines implements. The stored tool list is out of date; refresh it on the Plugins page.`,
+      `${toolName} is not a tool Routines implements. The stored tool list is out of date; refresh it on the ${appsPage()} page.`,
     );
   } catch (error) {
     /*

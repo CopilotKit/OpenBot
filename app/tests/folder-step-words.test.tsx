@@ -3,9 +3,17 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { DECLINED_BY_PERSON } from "@openbot/shared/approval-outcomes";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
+import { subjectText } from "../src/components/audit/audit-cells";
 import type { VisibleChatItem } from "../src/components/channels/chat-messages";
 import { ServerToolLine } from "../src/components/channels/chat-transcript";
-import { stepDetails } from "../src/components/channels/tool-activity";
+import {
+  stepDetails,
+  stepDetailsIn,
+} from "../src/components/channels/tool-activity";
+import {
+  FolderNamesContext,
+  folderNamesIn,
+} from "../src/lib/folders/folder-steps";
 import { REFUSAL_MARKER } from "../src/lib/plugins/tool-result";
 import { settleReactWork } from "./settle-react-work";
 
@@ -172,4 +180,144 @@ test("an opened folder step never lists the grant's internal id", () => {
   const { inputs } = stepDetails(item);
   expect(inputs.map(([key]) => key)).toEqual(["path", "content"]);
   expect(JSON.stringify(inputs)).not.toContain("host-grant");
+});
+
+/*
+ * FOUND ON WINDOWS (main 0c140734): opening "Check your folders" showed the tool's answer as it
+ * came, {"connected":true,"folders":[{"grantId":"host-grant-7712-…","displayName":"share"}]}, and
+ * the Save step named the file but not the folder it was in. A person reads the folders by name, no
+ * JSON and no grant id, and a folder step names its file and folder as the card does:
+ * "todo.txt in share".
+ */
+const GRANT = "host-grant-7712-1794100000000000000";
+const listing = JSON.stringify({
+  connected: true,
+  folders: [{ grantId: GRANT, displayName: "share" }],
+});
+const listStep: Extract<VisibleChatItem, { kind: "tool" }> = {
+  kind: "tool",
+  id: "l",
+  toolCall: {
+    id: "l",
+    type: "function",
+    function: { name: "host_list_folders", arguments: "{}" },
+  },
+  result: listing,
+};
+const saveStep: Extract<VisibleChatItem, { kind: "tool" }> = {
+  kind: "tool",
+  id: "w2",
+  toolCall: {
+    id: "w2",
+    type: "function",
+    function: {
+      name: "host_write_file",
+      arguments: JSON.stringify({
+        grantId: GRANT,
+        path: "todo.txt",
+        content: "pick up dry cleaning",
+      }),
+    },
+  },
+  result: "Wrote file. Backup, if the file existed, is .openbot-backups/x",
+};
+
+test("an opened Check your folders step names the folders, never JSON or a grant id", () => {
+  const view = line("host_list_folders", "{}", listing);
+  const text = view.container.textContent ?? "";
+  expect(text).toContain("Folders it can read: share.");
+  expect(text).not.toContain("{");
+  expect(text).not.toContain("host-grant");
+  view.unmount();
+
+  expect(stepDetails(listStep).output).toBe("Folders it can read: share.");
+  const offline = line(
+    "host_list_folders",
+    "{}",
+    JSON.stringify({ connected: false, folders: [] }),
+  );
+  expect(offline.container.textContent).toContain(
+    "No folders are shared with this Bot. OpenBot Desktop isn't running.",
+  );
+});
+
+test("no folder step shows an answer written as JSON", () => {
+  for (const name of [
+    "host_list_files",
+    "host_read_file",
+    "host_run_command",
+  ]) {
+    const item: Extract<VisibleChatItem, { kind: "tool" }> = {
+      ...saveStep,
+      toolCall: {
+        ...saveStep.toolCall,
+        function: { name, arguments: JSON.stringify({ grantId: GRANT }) },
+      },
+      result: JSON.stringify({ grantId: GRANT }),
+    };
+    expect(stepDetails(item).output).toBeUndefined();
+  }
+  // A file's contents or a command's output is what the person asked about, and stays.
+  expect(
+    stepDetails({ ...saveStep, result: "pick up dry cleaning\n" }).output,
+  ).toBe("pick up dry cleaning\n");
+});
+
+test("a folder step names its file and the folder it is in, as the card does", () => {
+  const folders = folderNamesIn([listStep, saveStep]);
+  expect(folders.get(GRANT)).toBe("share");
+
+  const view = render(
+    <QueryClientProvider client={new QueryClient()}>
+      <FolderNamesContext.Provider value={folders}>
+        <ServerToolLine
+          args={saveStep.toolCall.function.arguments}
+          name="host_write_file"
+          result={saveStep.result}
+        />
+      </FolderNamesContext.Provider>
+    </QueryClientProvider>,
+  );
+  expect(view.container.textContent).toContain("todo.txt in share");
+  view.unmount();
+
+  expect(stepDetailsIn(folders)(saveStep).detail).toBe("todo.txt in share");
+  // A command or a listing is on the whole folder.
+  expect(
+    stepDetailsIn(folders)({
+      ...saveStep,
+      toolCall: {
+        ...saveStep.toolCall,
+        function: {
+          name: "host_run_command",
+          arguments: JSON.stringify({ grantId: GRANT, command: "dir" }),
+        },
+      },
+    }).detail,
+  ).toBe("in share");
+});
+
+test("Activity names a folder step's file and folder", () => {
+  const row = (payload: Record<string, unknown>) =>
+    subjectText(
+      {
+        id: "e",
+        createdAt: "2026-11-08T00:00:00.000Z",
+        eventType: "computer.action_allowed",
+        targetType: "host_access",
+        targetId: GRANT,
+        actorUserId: "person",
+        initiatorKind: "person",
+        payload,
+      } as unknown as Parameters<typeof subjectText>[0],
+      false,
+    );
+  expect(
+    row({ action: "host/write_file", file: "todo.txt", folder: "share" }),
+  ).toBe("todo.txt in share");
+  expect(
+    row({ action: "host/run_command", command: "dir", folder: "share" }),
+  ).toBe("dir in share");
+  // A row written before rows named their folder keeps the file alone.
+  expect(row({ action: "host/write_file", file: "todo.txt" })).toBe("todo.txt");
 });

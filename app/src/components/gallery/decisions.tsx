@@ -1,3 +1,4 @@
+import type { DecisionToolName } from "@openbot/shared/decision-tools";
 import { useState } from "react";
 import { z } from "zod";
 import { DecisionCard, OTHER } from "@/components/decisions/decision-card";
@@ -254,7 +255,7 @@ function readChoice(
  */
 export const GALLERY: GalleryComponent[] = [
   {
-    name: "askApproval",
+    name: "askApproval" satisfies DecisionToolName,
     title: "Approval",
     kind: "decision",
     summary:
@@ -282,7 +283,7 @@ export const GALLERY: GalleryComponent[] = [
     },
   },
   {
-    name: "askChoice",
+    name: "askChoice" satisfies DecisionToolName,
     title: "Choice",
     kind: "decision",
     summary:

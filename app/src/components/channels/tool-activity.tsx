@@ -35,6 +35,12 @@ import {
 import { Streamdown } from "streamdown";
 import { PendingApprovals } from "@/components/approvals/inline-approval";
 import { codingLook, foreignCodingCall } from "@/lib/copilot/coding-calls";
+import {
+  type FolderNames,
+  FolderNamesContext,
+  folderStepBody,
+  folderStepSubject,
+} from "@/lib/folders/folder-steps";
 import { markdownComponents, markdownPlugins } from "@/lib/markdown";
 import {
   RESEARCH_RESULTS_LABELS,
@@ -373,6 +379,17 @@ function readableInputs(
 }
 
 export function stepDetails(step: ToolItem): StepDetails {
+  return detailsOf(step, new Map());
+}
+
+/** `stepDetails`, naming a folder step's folder from the conversation's folder names. */
+export function stepDetailsIn(
+  folders: FolderNames,
+): (step: ToolItem) => StepDetails {
+  return (step) => detailsOf(step, folders);
+}
+
+function detailsOf(step: ToolItem, folders: FolderNames): StepDetails {
   const args = objectOf(step.toolCall.function.arguments);
   const inputs = readableInputs(step.toolCall.function.name, args);
   if (isBrowserStep(step)) {
@@ -431,10 +448,16 @@ export function stepDetails(step: ToolItem): StepDetails {
     // Neither what it was given nor what it said: both were for the model (a tool search's query
     // and limit), so the line says what it did and does not open.
     inputs: own ? [] : inputs,
-    ...(body && !own
-      ? { output: unoffered ? UNOFFERED_TOOL_SENTENCE : body }
+    ...(body && !own && folderStepBody(name, body)
+      ? {
+          output: unoffered
+            ? UNOFFERED_TOOL_SENTENCE
+            : (folderStepBody(name, body) ?? ""),
+        }
       : {}),
   };
+  // A folder step names its file and folder ("todo.txt in share"), never a grant id.
+  const folderSubject = folderStepSubject(name, args, folders);
   // Not a connector: one of this deployment's own tools, or one an external agent runs itself.
   // Named in words, never as an identifier.
   if (!name.startsWith("mcp__"))
@@ -445,6 +468,7 @@ export function stepDetails(step: ToolItem): StepDetails {
       label:
         (refused ? ownToolAttempt(name) : null) ??
         readToolName(name, outcome.pending).label,
+      ...(folderSubject ? { detail: folderSubject } : {}),
       pages: 0,
     };
 
@@ -827,7 +851,8 @@ export function ToolActivity({
   /** This is the newest row of a turn still in flight, so a step without a result is running. */
   active: boolean;
 }) {
-  const steps = group.steps.map(stepDetails);
+  const folders = useContext(FolderNamesContext);
+  const steps = group.steps.map(stepDetailsIn(folders));
   const running = active && steps.some((step) => step.pending);
   const current = steps.find((step) => step.pending);
   const working = steps.filter(

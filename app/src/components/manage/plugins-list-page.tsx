@@ -42,6 +42,7 @@ import {
   pluginsPageQueryOptions,
   pluginsProvider,
 } from "@/lib/plugins/queries";
+import { toolsListError } from "@/lib/plugins/tools-error";
 
 /**
  * What this deployment can reach, as one list per state.
@@ -218,7 +219,10 @@ export function PluginsListPage({
                               server.lastError ? "text-destructive" : undefined
                             }
                           >
-                            {server.lastError ?? server.summary}
+                            {toolsListError(server.lastError, {
+                              title: server.title,
+                              personal: false,
+                            }) ?? server.summary}
                           </ItemDescription>
                         </ItemContent>
                         <ItemActions>

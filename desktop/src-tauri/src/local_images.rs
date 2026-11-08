@@ -280,14 +280,14 @@ pub enum Done {
 
 /// The stack's k3d node, reached through the container engine the CLI runs on.
 pub struct Node<'a> {
-    engine: &'a dyn Fn() -> Command,
+    engine: &'a (dyn Fn() -> Command + Sync),
     stack: String,
     name: String,
 }
 
 impl<'a> Node<'a> {
     /// The node k3d names for `stack`, as the CLI names it: `k3d-<stack>-server-0`.
-    pub fn for_stack(engine: &'a dyn Fn() -> Command, stack: &str) -> Self {
+    pub fn for_stack(engine: &'a (dyn Fn() -> Command + Sync), stack: &str) -> Self {
         Self {
             engine,
             stack: stack.to_owned(),
@@ -674,53 +674,15 @@ fn download_into(
             Ok(())
         }
     };
-    let (Some(names), Some(architecture)) = (node.image_names(limits), node.architecture(limits))
-    else {
-        return Ok(Done::Unavailable);
+    let planned = match plan(node, images, limits, &check, true)? {
+        Planned::Unavailable => return Ok(Done::Unavailable),
+        Planned::NothingToDo => return Ok(Done::NothingToDo),
+        Planned::Images(planned) => planned,
     };
-    // The runtime images by the digest of the index their release's tag serves, as the CLI reads it.
-    let mut wanted: Vec<(String, Option<Vec<u8>>)> = Vec::new();
-    for repository in &images.tagged {
-        check()?;
-        if let Some(index) = node.fetch(&format!("{repository}:{}", images.release), limits) {
-            wanted.push((format!("{repository}@{}", sha256(&index)), Some(index)));
-        }
-    }
-    wanted.extend(images.fixed.iter().map(|fixed| (fixed.clone(), None)));
-    let mut seen = HashSet::new();
-    wanted.retain(|(reference, _)| !names.contains(reference) && seen.insert(reference.clone()));
-    if wanted.is_empty() {
-        return Ok(Done::NothingToDo);
-    }
-    let mut planned = Vec::new();
-    for (reference, known) in wanted {
-        check()?;
-        // One that cannot be read is left for the CLI to pull.
-        if let Some(blobs) = blobs_of(node, &reference, known, architecture, limits) {
-            planned.push((reference, blobs));
-        }
-    }
     let Some(content) = node.content(limits) else {
         return Ok(Done::Unavailable);
     };
-    if planned.is_empty() {
-        return Ok(Done::Unavailable);
-    }
-    // The images being downloaded, whole, shared layers once: what containerd already holds of
-    // them, from an earlier attempt or another image, has arrived. A resumed download goes on
-    // from the figure the stopped one reached.
-    let mut blobs_wanted: BTreeMap<String, u64> = BTreeMap::new();
-    for (_, blobs) in &planned {
-        for (blob, size) in blobs {
-            blobs_wanted.insert(blob.clone(), *size);
-        }
-    }
-    let mut progress = Progress {
-        total: blobs_wanted.values().sum(),
-        blobs: blobs_wanted,
-        best: 0,
-        last_new: Instant::now(),
-    };
+    let mut progress = Progress::of(&planned);
     progress.observe(&content, shown);
     for (reference, blobs) in &planned {
         pull_one(
@@ -739,6 +701,209 @@ fn download_into(
     Ok(Done::Downloaded)
 }
 
+/// Each image the CLI will pull, with the blobs it is made of for the node, by digest and size.
+type Images = Vec<(String, Vec<(String, u64)>)>;
+
+/// What there is to download into a node.
+enum Planned {
+    /// The node's containerd, or every image's manifests, could not be read.
+    Unavailable,
+    /// Every image is already in the node.
+    NothingToDo,
+    Images(Images),
+}
+
+/**
+The images `images` names, as the node's containerd will pull them, with their blobs. Read through
+the node's own containerd, as the CLI's pull reads them: the runtime images by the digest of the
+index their release's tag serves, the rest by the digest the CLI names. `skip_present` leaves out an
+image the node already lists. One whose manifests cannot be read is left out, for the CLI to pull.
+*/
+fn plan(
+    node: &Node,
+    images: &CliImages,
+    limits: Limits,
+    check: &dyn Fn() -> Result<(), Stop>,
+    skip_present: bool,
+) -> Result<Planned, Stop> {
+    let (Some(names), Some(architecture)) = (node.image_names(limits), node.architecture(limits))
+    else {
+        return Ok(Planned::Unavailable);
+    };
+    check()?;
+    let indexes = at_once(&images.tagged, |repository| {
+        node.fetch(&format!("{repository}:{}", images.release), limits)
+            .map(|index| (format!("{repository}@{}", sha256(&index)), Some(index)))
+    });
+    let mut wanted: Vec<(String, Option<Vec<u8>>)> = indexes.into_iter().flatten().collect();
+    wanted.extend(images.fixed.iter().map(|fixed| (fixed.clone(), None)));
+    let mut seen = HashSet::new();
+    wanted.retain(|(reference, _)| {
+        !(skip_present && names.contains(reference)) && seen.insert(reference.clone())
+    });
+    if wanted.is_empty() {
+        return Ok(Planned::NothingToDo);
+    }
+    check()?;
+    let planned: Vec<_> = at_once(&wanted, |(reference, known)| {
+        blobs_of(node, reference, known.clone(), architecture, limits)
+            .map(|blobs| (reference.clone(), blobs))
+    })
+    .into_iter()
+    .flatten()
+    .collect();
+    check()?;
+    Ok(if planned.is_empty() {
+        Planned::Unavailable
+    } else {
+        Planned::Images(planned)
+    })
+}
+
+/// How many image lookups run at once.
+///
+/// Each is an `exec` into the node and a registry round trip, about a second and a half on Windows
+/// with Podman. The pinned CLI's release is 16 images, about 34 lookups, and one after another they
+/// held back the first figure for close to a minute of a fresh install's download. Six at once is
+/// a few seconds, and few enough not to crowd the CLI's own pulls or the registry's limits.
+pub const LOOKUPS_AT_ONCE: usize = 6;
+
+/// `look` for each of `items`, at most `LOOKUPS_AT_ONCE` at a time, the answers in `items`' order.
+fn at_once<T: Sync, R: Send>(items: &[T], look: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let answers: Mutex<Vec<Option<R>>> = Mutex::new((0..items.len()).map(|_| None).collect());
+    std::thread::scope(|scope| {
+        for _ in 0..LOOKUPS_AT_ONCE.min(items.len()) {
+            scope.spawn(|| loop {
+                let at = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let Some(item) = items.get(at) else {
+                    return;
+                };
+                let answer = look(item);
+                answers.lock().unwrap_or_else(|p| p.into_inner())[at] = Some(answer);
+            });
+        }
+    });
+    answers
+        .into_inner()
+        .unwrap_or_else(|p| p.into_inner())
+        .into_iter()
+        .map(|answer| answer.expect("every item was looked at"))
+        .collect()
+}
+
+/// How long the last figure stays on the row once everything has arrived: long enough for the
+/// window, which asks every second, to show the whole download before the row moves on.
+pub const SHOWN_WHOLE: Duration = Duration::from_secs(4);
+
+/**
+Follow the CLI's own pull into the node of a stack it is creating, and say how far it has got.
+
+A FIRST SETUP CANNOT BE DOWNLOADED FOR FIRST. `local setup` creates the stack's k3d node itself
+(Intelligence `apps/cli/src/services/local-install.ts`, `createLocalCluster`) and starts pulling into
+it seconds later, so there is no node to download into before the CLI's pulls begin. What can be
+done is what the person needs: say how much of the download has arrived. So this waits for a node
+that was not there when the setup began (`before`, from `stack_nodes`), confirms it by the label the
+CLI gives it, plans the release's images as `download` does, and reports what containerd holds of
+them until all of it has arrived or `cancelled`. It pulls nothing and changes nothing in the node.
+The node is new, so everything in it arrived during this setup: nothing is left out as present.
+*/
+pub fn follow_new_stack(
+    engine: &(dyn Fn() -> Command + Sync),
+    images: &CliImages,
+    before: &HashSet<String>,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    shown: &mut dyn FnMut(Download),
+) {
+    let check = || {
+        if cancelled() {
+            Err(Stop::Cancelled)
+        } else {
+            Ok(())
+        }
+    };
+    let wait = |for_how_long: Duration| {
+        let until = Instant::now() + for_how_long;
+        while Instant::now() < until && !cancelled() {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+    // The new stack's node, once its containerd answers.
+    let stack = loop {
+        if cancelled() {
+            return;
+        }
+        let found = stack_nodes(engine, limits)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|stack| !before.contains(stack))
+            .find(|stack| {
+                let node = Node::for_stack(engine, stack);
+                node.running(limits) == Some(true) && node.image_names(limits).is_some()
+            });
+        if let Some(stack) = found {
+            break stack;
+        }
+        wait(limits.poll);
+    };
+    let node = Node::for_stack(engine, &stack);
+    let planned = loop {
+        match plan(&node, images, limits, &check, false) {
+            Ok(Planned::Images(planned)) => break planned,
+            Ok(Planned::NothingToDo) | Err(_) => return,
+            // The node's containerd may not reach the registry yet: ask again.
+            Ok(Planned::Unavailable) => wait(limits.poll),
+        }
+        if cancelled() {
+            return;
+        }
+    };
+    let mut progress = Progress::of(&planned);
+    while !cancelled() {
+        if let Some(content) = node.content(limits) {
+            progress.observe(&content, shown);
+            if progress.best >= progress.total {
+                // Whole: said for a moment, so the row shows 100% before it moves on.
+                wait(SHOWN_WHOLE);
+                return;
+            }
+        }
+        wait(limits.poll);
+    }
+}
+
+/// The stacks whose k3d node is on the engine now, by the name k3d gives it: `k3d-<stack>-server-0`.
+/// None when the engine does not answer.
+pub fn stack_nodes(
+    engine: &(dyn Fn() -> Command + Sync),
+    limits: Limits,
+) -> Option<HashSet<String>> {
+    let probe = Node {
+        engine,
+        stack: String::new(),
+        name: String::new(),
+    };
+    let (ok, out) = probe.run(
+        &[
+            "ps",
+            "-a",
+            "--filter",
+            "name=k3d-",
+            "--format",
+            "{{.Names}}",
+        ],
+        limits.call,
+        1 << 20,
+    )?;
+    ok.then(|| {
+        lines(&out)
+            .filter_map(|name| name.strip_prefix("k3d-")?.strip_suffix("-server-0"))
+            .map(str::to_owned)
+            .collect()
+    })
+}
+
 /// The blobs the download is for, and when a new byte of them last arrived.
 struct Progress {
     blobs: BTreeMap<String, u64>,
@@ -748,6 +913,24 @@ struct Progress {
 }
 
 impl Progress {
+    /// The images being downloaded, whole, shared layers once: what containerd already holds of
+    /// them, from an earlier attempt or another image, has arrived. A resumed download goes on
+    /// from the figure the stopped one reached.
+    fn of(planned: &Images) -> Self {
+        let mut blobs: BTreeMap<String, u64> = BTreeMap::new();
+        for (_, image) in planned {
+            for (blob, size) in image {
+                blobs.insert(blob.clone(), *size);
+            }
+        }
+        Self {
+            total: blobs.values().sum(),
+            blobs,
+            best: 0,
+            last_new: Instant::now(),
+        }
+    }
+
     /// Count what containerd holds. Only more than ever before is progress; it is all that is said.
     fn observe(&mut self, content: &Content, shown: &mut dyn FnMut(Download)) {
         let done = self
@@ -999,6 +1182,129 @@ mod tests {
             Some("sha256:3a68d8567335f56c168c36b53059c5dd4dfe23c2edbf4d9251e9ed3170dfacd8")
         );
         assert_eq!(platform_manifest(&index, "riscv64"), None);
+    }
+
+    /**
+    An engine whose every call into the node takes as long as `delay` says, as `podman exec` into a
+    k3d node and a registry round trip take on Windows. It answers with real bytes: the
+    `app-api:0.16.0-rc.9` index for any tag or index digest, that index's linux/arm64 manifest for
+    its digest, and a `ctr content active` captured during that image's pull.
+    */
+    const SLOW_ENGINE: &str = r#"
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+    let read = |name: &str| std::fs::read(dir.join(name)).unwrap();
+    let delay: u64 = String::from_utf8(read("delay")).unwrap().trim().parse().unwrap();
+    let stack = String::from_utf8(read("stack")).unwrap().trim().to_owned();
+    let out = |bytes: &[u8]| { use std::io::Write; std::io::stdout().write_all(bytes).unwrap(); };
+    let a: Vec<&str> = args.iter().map(String::as_str).collect();
+    match a.as_slice() {
+        ["ps", ..] => out(format!("k3d-{stack}-server-0\n").as_bytes()),
+        ["inspect", ..] => out(format!("true {stack}\n").as_bytes()),
+        ["exec", _, rest @ ..] => {
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+            match rest {
+                ["ctr", "images", "ls", "-q"] => {}
+                ["uname", "-m"] => out(b"aarch64\n"),
+                ["ctr", "content", "fetch-object", reference] => {
+                    if reference.ends_with(&String::from_utf8(read("manifest-digest")).unwrap().trim().to_owned()) {
+                        out(&read("manifest"));
+                    } else {
+                        out(&read("index"));
+                    }
+                }
+                ["sh", "-c", _] => { out(b"-----\n"); out(&read("active")); }
+                _ => std::process::exit(2),
+            }
+        }
+        _ => std::process::exit(2),
+    }
+}
+"#;
+
+    /**
+    The Windows fresh install: the back end's card did not appear until about 480 of 605 MB had
+    arrived. Before saying anything, the release's 16 images were looked up one after another,
+    about 34 calls into the node at a second and a half each. Here each call takes a second: one
+    after another that is over 36 seconds before the first figure, and at `LOOKUPS_AT_ONCE` about
+    eleven. The first figure is the whole release's size, with what the captured ingests hold.
+    */
+    #[test]
+    fn a_first_setups_download_is_shown_within_seconds_of_its_node_appearing() {
+        let root = crate::test_support::temp_root("slow-engine");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("engine.rs");
+        std::fs::write(&source, SLOW_ENGINE).unwrap();
+        let engine_binary = root.join(format!("engine{}", std::env::consts::EXE_SUFFIX));
+        crate::test_support::compile_fixture(&source, &engine_binary);
+        let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/test-fixtures/local-images/");
+        let copy = |from: &str, to: &str| {
+            std::fs::copy(format!("{fixtures}{from}"), root.join(to)).unwrap();
+        };
+        copy("app-api-0.16.0-rc.9-index.raw", "index");
+        copy("app-api-0.16.0-rc.9-linux-arm64.raw", "manifest");
+        copy("ctr-content-active.txt", "active");
+        let manifest_digest =
+            "sha256:7a586c51e16004343d7dbab513da2e12cf727fe022f75e5a9b8b36f1eb3c3b8f";
+        std::fs::write(root.join("manifest-digest"), manifest_digest).unwrap();
+        std::fs::write(root.join("delay"), "1000").unwrap();
+        std::fs::write(root.join("stack"), "local-fresh").unwrap();
+        // The pinned CLI's release: five images at its tag, eleven by digest.
+        let index_digest =
+            "sha256:9ee3006d92a656a72be43f9bda0e0738aec910f3b8098aba8e029f28061e85b7";
+        let images = CliImages {
+            release: "0.16.0-rc.9".into(),
+            tagged: (0..5)
+                .map(|n| format!("ghcr.io/copilotkit/intelligence/service-{n}"))
+                .collect(),
+            fixed: (0..11)
+                .map(|n| format!("docker.io/example/fixed-{n}@{index_digest}"))
+                .collect(),
+        };
+        let engine = || crate::quiet::command(&engine_binary);
+        let limits = Limits {
+            stall: Duration::from_secs(60),
+            image: Duration::from_secs(60),
+            poll: Duration::from_millis(100),
+            call: Duration::from_secs(30),
+        };
+        let started = Instant::now();
+        let give_up = started + Duration::from_secs(25);
+        let mut first: Option<(Duration, Download)> = None;
+        let shown = std::sync::atomic::AtomicBool::new(false);
+        follow_new_stack(
+            &engine,
+            &images,
+            &HashSet::new(),
+            limits,
+            &|| shown.load(std::sync::atomic::Ordering::SeqCst) || Instant::now() >= give_up,
+            &mut |download| {
+                first.get_or_insert((started.elapsed(), download));
+                shown.store(true, std::sync::atomic::Ordering::SeqCst);
+            },
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let (after, download) = first.expect("a figure was shown");
+        assert!(
+            after < Duration::from_secs(20),
+            "first figure after {after:?}"
+        );
+        // The image's config and twelve layers, once however many images share them.
+        let manifest: Value = serde_json::from_slice(
+            &std::fs::read(format!("{fixtures}app-api-0.16.0-rc.9-linux-arm64.raw")).unwrap(),
+        )
+        .unwrap();
+        let whole: u64 = manifest["config"]["size"].as_u64().unwrap()
+            + manifest["layers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|layer| layer["size"].as_u64().unwrap())
+                .sum::<u64>();
+        assert_eq!(download.total, whole);
+        // The two layers the captured ingests were part way through: 14.68 MB each so far.
+        assert_eq!(download.done, 2 * 14_680_000);
     }
 }
 
@@ -1575,9 +1881,20 @@ fn main() {
         print!("{{\"version\":1,\"command\":\"local status\",\"status\":\"completed\",\"stack\":{saved},\"nextAction\":null,\"error\":null,\"diagnostics\":[]}}");
         return;
     }
+    // A first setup: no stack is recorded yet, and `local setup` makes the node (the lab's, held
+    // under the name `fresh` gives) a moment after it starts, then pulls into it.
+    let fresh = std::fs::read_to_string(dir.join("fresh")).ok();
     if command == "local list" {
-        print!("{{\"version\":1,\"command\":\"local list\",\"status\":\"completed\",\"stacks\":[{saved}],\"nextAction\":null,\"error\":null,\"diagnostics\":[]}}");
+        let stacks = if fresh.is_some() { String::new() } else { saved };
+        print!("{{\"version\":1,\"command\":\"local list\",\"status\":\"completed\",\"stacks\":[{stacks}],\"nextAction\":null,\"error\":null,\"diagnostics\":[]}}");
         return;
+    }
+    if let (Some(held), "local setup") = (fresh, command.as_str()) {
+        std::thread::sleep(Duration::from_secs(1));
+        let made = Command::new("docker").args(["rename", held.trim(), &node])
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+            .status().unwrap();
+        assert!(made.success());
     }
     let mut pulled = true;
     for image in lines.map(str::trim).filter(|line| !line.is_empty()) {
@@ -1913,6 +2230,74 @@ var init_define_CLI_LOCAL_EVALUATION_SUPPORT = __esm({{
         assert!(seen
             .last()
             .is_some_and(|d| d.done == d.total && d.total > 6_000_000));
+    }
+
+    /**
+    The Windows fresh-install probe: a first setup's row said nothing for minutes while ~690 MB of
+    back-end images came down. A first setup has no node until the CLI makes it, so nothing was
+    downloaded or followed for it. Here the CLI makes the node after it starts and pulls into it on a
+    slow line, and the setup's attempt is told how far that pull has got, out of the whole download,
+    until all of it has arrived. Nothing is pulled by OpenBot: the CLI's own pulls finish it.
+    */
+    #[test]
+    #[ignore = "runs a privileged k3s node, a registry and a proxy on Docker"]
+    fn a_first_setup_shows_the_download_the_cli_pulls_into_the_node_it_makes() {
+        use crate::local_eval::{setup_with, Cancel, Limits as CliLimits};
+        let lab = Lab::new("384k");
+        let (runtime, fixed, system) = release_images(&lab);
+        let (cli, installation) = pulling_cli(
+            "pulling-cli-first-setup",
+            &lab,
+            &runtime,
+            &fixed,
+            &system,
+            &[&fixed, &runtime, &system],
+            120,
+            true,
+        );
+        // The node is not there yet: it is held under another name until the CLI makes it.
+        let held = format!("{}-not-yet", lab.stack);
+        assert!(docker(&["rename", &lab.node, &held]).0);
+        std::fs::write(installation.parent().unwrap().join("fresh"), &held).unwrap();
+        let limits = CliLimits::for_setup();
+        let (report, seen) = watching("first-setup", || {
+            setup_with(
+                &cli,
+                "first-setup",
+                &installation,
+                None,
+                (limits, limits),
+                &Cancel::default(),
+                test_limits(),
+            )
+        });
+        assert_eq!(
+            report.map(|report| report.outcome),
+            Ok(crate::local_eval::Outcome::Completed)
+        );
+        assert_eq!(ran(&installation), ["local list", "local setup"]);
+        assert!(lab.images().contains(&runtime));
+        // Seen moving, out of the whole release (three images, shared blobs once), never back.
+        assert!(
+            seen.iter()
+                .filter(|d| d.done < d.total && d.total > 6_000_000)
+                .count()
+                >= 3,
+            "{seen:?}"
+        );
+        assert!(
+            seen.windows(2)
+                .all(|w| w[0].done <= w[1].done && w[0].total == w[1].total),
+            "{seen:?}"
+        );
+        // Only the CLI pulled: OpenBot read manifests, and the layer was sent once.
+        let (layer, _) = layer_of(&lab, &runtime);
+        let gets: Vec<String> = lab
+            .requests()
+            .into_iter()
+            .filter(|line| line.starts_with("GET ") && line.contains(&layer))
+            .collect();
+        assert_eq!(gets.len(), 1, "{gets:?}");
     }
 
     /// A node the download started is stopped again when the download stops: Retry then finds the

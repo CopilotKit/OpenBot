@@ -37,11 +37,22 @@ export function sharingSummary(
     : "Specific people and groups";
 }
 
-export function setupSummary(agent: {
-  builtIn: boolean;
-  endpoint: string | null;
-}): string {
+/**
+ * Where it runs. The personal edition names what runs it when OpenBot knows: its one person
+ * picked that harness at setup, and the address is the container OpenBot started for it, which
+ * means nothing to them. A team deployment shows the address, which an admin or owner gave it.
+ */
+export function setupSummary(
+  agent: {
+    builtIn: boolean;
+    endpoint: string | null;
+    framework?: string;
+  },
+  edition: "team" | "personal" = "team",
+): string {
   if (agent.builtIn || !agent.endpoint) return "Built in";
+  if (edition === "personal" && agent.framework)
+    return `Runs on ${agent.framework}`;
   try {
     return new URL(agent.endpoint).host;
   } catch {

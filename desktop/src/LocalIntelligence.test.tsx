@@ -17,6 +17,9 @@ let invokeHandler: Invoke = async () => {
 
 mock.module("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => {
+    // The engine already answers here: these tests are about the CLI calls after it. Waking a
+    // stopped engine is App.test.tsx's "relaunch with Docker Desktop quit".
+    if (command === "wake_engine") return Promise.resolve(null);
     invokeCalls.push({ command, args });
     return invokeHandler(command, args);
   },
@@ -206,6 +209,66 @@ test("the whole sequence runs by itself: set up, connect, wait for ready and val
   }
   // Nothing to press: the installation is the consent.
   expect(screen.queryByRole("button", { name: /Connect/ })).toBeNull();
+});
+
+/**
+ * The Windows fresh-install probe: "Setting up OpenBot · In progress" said nothing while ~690 MB of
+ * back-end images came down, and the person waited behind the AI screen with nothing either. A
+ * first setup's download now shows on its row, with the bar Install shows, and on the screen in
+ * front of it while it runs there.
+ */
+test("a first setup shows its download on its row and on the screen in front of it", async () => {
+  const settingUp = deferred<LocalReport>();
+  let arrived: { done: number; total: number } | null = null;
+  invokeHandler = async (command) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return arrived;
+    if (command === "set_up_local_eval") return settingUp.promise;
+    throw new Error(`unexpected ${command}`);
+  };
+  const screen = view({ prepare: true });
+  await waitFor(() =>
+    expect(row(screen, SETUP).textContent).toContain("In progress"),
+  );
+  arrived = { done: 245_000_000, total: 690_000_000 };
+  await waitFor(
+    () =>
+      expect(row(screen, SETUP).textContent).toContain("245.0 MB of 690.0 MB"),
+    { timeout: 3_000 },
+  );
+  const setting = within(row(screen, SETUP));
+  expect(setting.getByText("Downloading the back end.")).toBeTruthy();
+  const bar = setting.getByRole("progressbar", { name: "Download progress" });
+  expect(bar.getAttribute("value")).toBe("245000000");
+  expect(bar.getAttribute("max")).toBe("690000000");
+  // The screen in front (Install, or Connect your AI) shows the same download while it runs.
+  const behind = within(
+    screen.getByRole("list", { name: "Back end download" }),
+  );
+  expect(
+    behind.getByRole("listitem", { name: "Downloading the back end" })
+      .textContent,
+  ).toContain("245.0 MB of 690.0 MB");
+  expect(
+    behind
+      .getByRole("progressbar", { name: "Download progress" })
+      .getAttribute("value"),
+  ).toBe("245000000");
+  // It asked about the setup's own call.
+  const setup = invokeCalls.find(
+    (call) => call.command === "set_up_local_eval",
+  );
+  expect(
+    invokeCalls.find((call) => call.command === "local_eval_download")?.args,
+  ).toEqual({
+    attempt: (setup?.args as { attempt?: string } | undefined)?.attempt,
+  });
+  // Downloaded: both bars go, and the setup carries on.
+  arrived = null;
+  await waitFor(() => expect(screen.queryByRole("progressbar")).toBeNull(), {
+    timeout: 3_000,
+  });
+  expect(screen.queryByRole("list", { name: "Back end download" })).toBeNull();
 });
 
 test("a recorded, connected stack skips straight to waiting", async () => {
@@ -468,9 +531,7 @@ test("a retried update shows its download, and a stall keeps the line that it di
   arrived = { done: 61_400_000, total: 147_000_000 };
   await waitFor(
     () =>
-      expect(row(screen, WAIT).textContent).toContain(
-        "Downloading the back end update: 61 of 147 MB",
-      ),
+      expect(row(screen, WAIT).textContent).toContain("61.4 MB of 147.0 MB"),
     { timeout: 3_000 },
   );
   updating.reject("download-stalled");
@@ -522,12 +583,16 @@ test("an update says how much of its download has arrived, so a slow line reads 
   arrived = { done: 48_200_000, total: 147_000_000 };
   await waitFor(
     () =>
-      expect(row(screen, WAIT).textContent).toContain(
-        "Downloading the back end update: 48 of 147 MB",
-      ),
+      expect(row(screen, WAIT).textContent).toContain("48.2 MB of 147.0 MB"),
     { timeout: 3_000 },
   );
-  // Downloaded: the CLI's update runs, and the row says so again.
+  // The same bar Install shows, driven by the bytes, out of the whole download.
+  const waiting = within(row(screen, WAIT));
+  expect(waiting.getByText("Downloading the back end update.")).toBeTruthy();
+  const bar = waiting.getByRole("progressbar", { name: "Download progress" });
+  expect(bar.getAttribute("value")).toBe("48200000");
+  expect(bar.getAttribute("max")).toBe("147000000");
+  // Downloaded: the CLI's update runs, and the row says so again, with no bar.
   arrived = null;
   await waitFor(
     () =>
@@ -536,6 +601,7 @@ test("an update says how much of its download has arrived, so a slow line reads 
       ),
     { timeout: 3_000 },
   );
+  expect(waiting.queryByRole("progressbar")).toBeNull();
   updating.resolve(onRelease("0.16.0-rc.9", null));
   await waitFor(() => expect(started).toEqual([startableUrls]));
   const asked = invokeCalls.find(
@@ -939,6 +1005,31 @@ test("polling stops when cancelled", async () => {
   await screen.findByRole("button", { name: "Retry" });
   expect(statusCalls()).toHaveLength(1);
   expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+});
+
+/*
+ * Closing the window halts the setup and asks the CLI to stop, but the call it made settles only once the CLI has. The
+ * download it followed was asked about every second until then, from a window no longer there: in App.test.tsx those
+ * asks landed in later tests, one of which counts every call the window makes while it quits.
+ */
+test("a closed window stops asking how far the download has got, before the CLI call it followed has settled", async () => {
+  invokeHandler = async (command) => {
+    if (command === "set_up_local_eval") return new Promise(() => {});
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    throw new Error(`unexpected ${command}`);
+  };
+  const screen = view();
+  const asked = () =>
+    invokeCalls.filter((call) => call.command === "local_eval_download").length;
+  await waitFor(() => expect(asked()).toBe(1));
+  screen.unmount();
+  expect(
+    invokeCalls.filter((call) => call.command === "cancel_local_eval"),
+  ).toHaveLength(1);
+  // Past the next ask (DOWNLOAD_EVERY_MS, one second): none comes.
+  await new Promise((resolve) => setTimeout(resolve, 1_300));
+  expect(asked()).toBe(1);
 });
 
 test("a stopped stack is started, then polled", async () => {
