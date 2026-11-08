@@ -303,6 +303,10 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
   Activity lists for that Bot. In both editions the report names each Bot and says what was refused
   in words, where it showed ids, and one request writes one row, where a refused one wrote up to
   three.
+- **What OpenBot gave the Activity report reads once, and says what.** "Let a component read data /
+  Activity report · your Bots' activity and what was refused" is one row, where it was two identical
+  rows; rows already written each name their own data. A Bot creating, changing or deleting a
+  routine shows once, as the routine under its Bot, where its call to Routines was a second row.
 
 ### The Bot's browser
 

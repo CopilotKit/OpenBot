@@ -8,6 +8,7 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import {
+  CALLS_RECORDED_AS_CHANGES,
   OPENBOT_WORKING_EVENT_TYPES,
   oneRowPerAction,
 } from "@openbot/shared/activity-rows";
@@ -102,7 +103,42 @@ beforeAll(async () => {
     targetId: BOT,
     payload: {},
   });
+  /*
+   * The Bot creating a routine: its call to Routines, and the routine the routine store recorded.
+   * One action. A second call that failed made no routine and is its own row.
+   */
+  await record("mcp.call_succeeded", {
+    targetType: "mcp_tool",
+    targetId: "routines/create_routine",
+    payload: { bot: BOT, tool: "create_routine" },
+  });
+  await record("routine.created", {
+    targetType: "routine",
+    targetId: randomUUID(),
+    payload: {
+      agentId: BOT,
+      channelId: null,
+      cron: "0 9 * * *",
+      timezone: "UTC",
+    },
+  });
+  await record("mcp.call_failed", {
+    targetType: "mcp_tool",
+    targetId: "routines/create_routine",
+    payload: { bot: BOT, tool: "create_routine", failure: "Invalid schedule." },
+  });
 });
+
+/** The page's own query for this Bot, as `withoutOpenBotWorking` writes it. */
+async function shownOnActivity() {
+  const { events } = await reader.list({
+    limit: ACTIONS + 100,
+    bot: BOT,
+    excludeEventType: OPENBOT_WORKING_EVENT_TYPES.join(","),
+    excludeCalls: CALLS_RECORDED_AS_CHANGES.join(","),
+  });
+  return oneRowPerAction(events);
+}
 
 afterEach(() => setEdition("team"));
 
@@ -123,15 +159,12 @@ async function reported() {
 describe("the Activity report's count for a Bot", () => {
   test("in the personal edition is the number of rows Activity shows for it", async () => {
     setEdition("personal");
-    // The page's own query, narrowed to this Bot, then each action drawn once.
-    const { events } = await reader.list({
-      limit: ACTIONS + 100,
-      bot: BOT,
-      excludeEventType: OPENBOT_WORKING_EVENT_TYPES.join(","),
-    });
-    const shown = oneRowPerAction(events).length;
-    // Its own actions, the denied write once, the folder it was given, and its pause.
-    expect(shown).toBe(ACTIONS + 3);
+    const shown = (await shownOnActivity()).length;
+    /*
+     * Its own actions, the denied write once, the folder it was given, its pause, the routine it
+     * made once, and the call that failed.
+     */
+    expect(shown).toBe(ACTIONS + 5);
     expect(await reported()).toBe(shown);
   });
 
@@ -140,5 +173,18 @@ describe("the Activity report's count for a Bot", () => {
       sql`select count(*)::int as count from audit_events where payload->>'bot' = ${BOT}`,
     );
     expect(await reported()).toBe(named?.count);
+  });
+});
+
+describe("a Bot creating a routine", () => {
+  test("is one row on Activity, the routine, under the Bot that runs it", async () => {
+    const routineRows = (await shownOnActivity())
+      .filter(
+        (event) =>
+          event.eventType === "routine.created" ||
+          event.targetId === "routines/create_routine",
+      )
+      .map((event) => event.eventType);
+    expect(routineRows).toEqual(["mcp.call_failed", "routine.created"]);
   });
 });
