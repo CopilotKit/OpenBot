@@ -81,6 +81,11 @@ export type AgentProfile = {
    * are its role description, and its profile leaves this out.
    */
   instructions?: string | null;
+  /**
+   * What runs it, by the name a person reads ("LangChain (LangGraph)", "OpenBot"). Absent when
+   * OpenBot doesn't know, such as an agent connected by address with no framework named.
+   */
+  framework?: string;
 };
 
 /**
