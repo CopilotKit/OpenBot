@@ -75,8 +75,11 @@ test("OpenBot Desktop never offers notifications: not on opening, not on coming 
   expect(reopened.queryByText(OFFER)).toBeNull();
 });
 
-test("in OpenBot Desktop a Bot that starts needing the person is shown by the system, through the plugin, naming the page a click opens", async () => {
-  const desktop = launch();
+/**
+ * The sidebar's badge, with Expenses asking nothing, then asking one question: what the page
+ * notices as a Bot starting to need the person.
+ */
+async function aBotStartsNeedingThePerson() {
   let questions = 0;
   globalThis.fetch = (async () =>
     Response.json({
@@ -109,21 +112,47 @@ test("in OpenBot Desktop a Bot that starts needing the person is shown by the sy
       "success",
     ),
   );
+  await act(settleReactWork);
 
   questions = 1;
   await act(async () => {
     await client.refetchQueries({ queryKey: botLifecycleKeys.attention });
   });
+}
 
-  await waitFor(() =>
-    expect(desktop.shown()).toEqual([
-      {
-        title: "Expenses needs you",
-        body: "1 question",
-        tag: "openbot-attention-expenses",
-        // The page a click opens (`open_from_notification` in the shell).
-        extra: { path: "/bots/expenses" },
-      },
-    ]),
-  );
+const EXPENSES_NEEDS_YOU = {
+  title: "Expenses needs you",
+  body: "1 question",
+  tag: "openbot-attention-expenses",
+  // The page a click opens (`open_from_notification` in the shell).
+  extra: { path: "/bots/expenses" },
+};
+
+test("in OpenBot Desktop a Bot that starts needing the person is shown by the system, through the plugin, naming the page a click opens", async () => {
+  const desktop = launch();
+
+  await aBotStartsNeedingThePerson();
+
+  await waitFor(() => expect(desktop.shown()).toEqual([EXPENSES_NEEDS_YOU]));
+});
+
+test("in OpenBot Desktop a Bot's notification is shown though the plugin's own first question went unanswered", async () => {
+  // As on a Mac with 0.3.3's grant timing: the plugin script asked as the page started, was
+  // refused, and its Notification.permission stays "default" for good. The shell answers yes from
+  // then on.
+  const desktop = launchDesktop({ plugin: true, grantedLate: true });
+  await act(settleReactWork);
+  expect(desktop.refused()).toEqual([
+    "plugin:notification|is_permission_granted",
+  ]);
+  expect(
+    (globalThis as { Notification?: { permission: string } }).Notification
+      ?.permission,
+  ).toBe("default");
+  desktop.grant();
+  refreshNotificationPermission();
+
+  await aBotStartsNeedingThePerson();
+
+  await waitFor(() => expect(desktop.shown()).toEqual([EXPENSES_NEEDS_YOU]));
 });
