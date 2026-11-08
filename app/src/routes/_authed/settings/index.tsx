@@ -6,8 +6,8 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { MessageListPreference } from "@/components/settings/message-list-preference";
-import { ProfileSettings } from "@/components/settings/profile";
-import { StandingInstructions } from "@/components/settings/standing-instructions";
+import { NameRow } from "@/components/settings/profile";
+import { StandingInstructionsRow } from "@/components/settings/standing-instructions";
 import { useTheme } from "@/components/theme-provider";
 import {
   Item,
@@ -38,11 +38,21 @@ function RouteComponent() {
    */
   return (
     <PageShell
-      description="Customize OpenBot’s appearance and message display. Your skin and message settings apply to your account; the theme applies only to this browser."
-      title="Preferences"
+      description="Set your name, how OpenBot looks, and the instructions every Bot follows."
+      title="General"
     >
-      <ProfileSettings />
-      <PageSection title="General">
+      {/*
+       * What OpenBot and every Bot know of the person, first: their name and how they want things done. Both are free
+       * text, so both are a summary that opens a dialog.
+       */}
+      <PageSection title="About you">
+        <PageRows>
+          <NameRow />
+          <Separator />
+          <StandingInstructionsRow />
+        </PageRows>
+      </PageSection>
+      <PageSection title="Appearance">
         <PageRows>
           <Item size="sm">
             <ItemContent>
@@ -64,11 +74,6 @@ function RouteComponent() {
         </PageRows>
         <MessageListPreference />
       </PageSection>
-      {/*
-       * Above the shortcuts and below the appearance preferences, because it is the only thing on this
-       * screen that changes what a coworker says rather than what this browser looks like.
-       */}
-      <StandingInstructions />
       {/*
        * Drawn from the same registry the listeners match against, so this list is what the keys
        * actually do rather than what somebody remembered they did. Read-only on purpose: these
