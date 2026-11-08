@@ -47,6 +47,12 @@ export type AgentProfile = {
    * person made runs on its role description, and a package's own Bot keeps its prompt to itself.
    */
   instructions?: string | null;
+  /**
+   * What runs it, by the name a person reads ("LangChain (LangGraph)", "OpenBot"), or absent when
+   * OpenBot doesn't know, such as an agent connected by address with no framework named. Read from
+   * what runs it, never its subtitle (`frameworkOf`).
+   */
+  framework?: string;
 };
 
 export type CreateAgentInput = Pick<

@@ -183,6 +183,10 @@ services:
       # at `.openbot/model-oauth.json` beside this one, and reaches the container through the mount
       # below, so a host path here becomes the mount's. Empty stays empty: no sign-in, no file.
       OPENBOT_MODEL_OAUTH_FILE: ${OPENBOT_MODEL_OAUTH_FILE:+/openbot/model-oauth.json}
+      # The secret local Intelligence's Learning agent sends when it asks the person's Claude or
+      # ChatGPT plan for a step (server/src/learning/model-endpoint.ts). OpenBot Desktop mints it
+      # once per installation and gives it to this service and that agent alone.
+      OPENBOT_LEARNING_MODEL_TOKEN: ${LEARNING_MODEL_TOKEN:-}
     # Who the server runs as. The image's own user by default. On Linux the desktop names the host's,
     # because the sign-in file below is the host user's and readable by nobody else, and a bind mount
     # there keeps the host's numbers; Docker Desktop's file sharing on macOS and Windows does not.

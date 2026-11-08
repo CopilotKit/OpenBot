@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { type AppVariables, requireAdmin } from "../../auth/guards";
+import { appsPage, currentEdition } from "../../edition";
 import { BROKERED_PROFILE, type BrokerProvider } from "../access";
 import type {
   AppAccess,
@@ -83,11 +84,11 @@ function unavailableSentence(
     case "composio_unconfigured":
       return `${title} can't be connected until ${BROKERED_PROFILE[provider].envVar} is set. Set it, then ${again}.`;
     case "scheme_unreadable":
-      return `${title} is turned on, but OpenBot can't read how it connects. Remove it and turn it on again under Plugins, then ${again}.`;
+      return `${title} is turned on, but OpenBot can't read how it connects. Remove it and turn it on again under ${appsPage()}, then ${again}.`;
     case "oauth_client_missing":
-      return `${title} has no OAuth client yet. Register one on its page under Plugins, then ${again}.`;
+      return `${title} has no OAuth client yet. Register one on its page under ${appsPage()}, then ${again}.`;
     case "token_missing":
-      return `${title} has no token yet. Add one on its page under Plugins, then ${again}.`;
+      return `${title} has no token yet. Add one on its page under ${appsPage()}, then ${again}.`;
   }
 }
 
@@ -159,6 +160,40 @@ export function mountAppAccessRoutes({
       },
     });
     return context.json({ error: input.error }, input.status);
+  };
+
+  /**
+   * Whether this app's tools arrive with the presser's own sign-in, so turning it on is the whole of
+   * the press and there is nothing to give a Bot yet.
+   *
+   * ONLY IN THE PERSONAL EDITION, where signing in to an app lists its tools and gives every Bot
+   * all of them (`withPersonalDefaults`). Notion is the case: its server lists tools only for a
+   * person who has signed in, so before that the list is empty however often it is asked. The chat
+   * card's Connect turns the app on here and opens the sign-in next, the way Connect on the
+   * Connections page does. Refusing for want of tools stopped that press before the sign-in that
+   * would have brought them.
+   *
+   * In the team edition an admin's approval is the grant itself, so an approval that gave nothing
+   * is still refused.
+   */
+  const toolsComeWithSignIn = async (
+    app: string,
+    agentId: string,
+    context: RouteContext,
+  ): Promise<boolean> => {
+    if (currentEdition() !== "personal") return false;
+    const mine = await store.inspectApp({
+      app,
+      agentId,
+      userId: context.var.actor.id,
+      composioConfigured,
+      directory,
+    });
+    return (
+      mine?.access.account === "personal" &&
+      (mine.access.connect === "oauth" || mine.access.connect === "consent") &&
+      mine.access.connectedAt === null
+    );
   };
 
   /**
@@ -251,7 +286,7 @@ export function mountAppAccessRoutes({
         if (needed)
           return deny(
             "needs_admin_input",
-            `${title} needs ${needed}. Add it on its page under Plugins, then ${again}.`,
+            `${title} needs ${needed}. Add it on its page under ${appsPage()}, then ${again}.`,
             409,
           );
         try {
@@ -281,7 +316,7 @@ export function mountAppAccessRoutes({
       if (!inspected || inspected.unavailable)
         return deny(
           "enable_failed",
-          `${title} was turned on but still can't be used. Open its page under Plugins to see why.`,
+          `${title} was turned on but still can't be used. Open its page under ${appsPage()} to see why.`,
           409,
         );
     }
@@ -297,46 +332,65 @@ export function mountAppAccessRoutes({
       const name = inspected.access.displayName;
       if (!(await store.agentIsRegistered(agentId)) || !serverId)
         return deny("no_such_bot", "That Bot is no longer here.", 409);
-      const tools = await store.appTools(serverId);
-      const advertised = tools.map((tool) => tool.ref);
-      const refs =
-        chosen ?? tools.filter((tool) => tool.read).map((tool) => tool.ref);
-      const outside = refs.filter((ref) => !advertised.includes(ref));
-      if (outside.length > 0)
-        return deny(
-          "refs_outside_app",
-          `${outside.join(", ")} ${outside.length === 1 ? "is" : "are"} not among ${name}'s tools.`,
-          400,
-        );
-      if (advertised.length === 0)
-        return deny(
-          "no_tools",
-          `${name} has no tools to give yet. Refresh its tools on its page under Plugins, then ${again}.`,
-          409,
-        );
-      if (refs.length === 0)
-        return deny(
-          "no_read_only_tools",
-          `None of ${name}'s actions are marked read-only, so approving here gives this Bot nothing. Choose its actions on ${name}'s page under Plugins, then ${again}.`,
-          409,
-        );
-      for (const ref of refs) {
-        await store.grant("mcp", ref, agentId, actorEmail(context));
+      let tools = await store.appTools(serverId);
+      /*
+       * NO TOOLS YET IS ASKED FOR BEFORE IT IS REFUSED. The list saved when the app was turned on
+       * can be empty because the vendor was not reachable then, or because it lists only for a
+       * person who has signed in. Asked again here, as whoever pressed, so the press does what a
+       * Refresh on the app's page would have done instead of sending them there to do it.
+       */
+      if (tools.length === 0) {
+        await store.refreshTools(serverId, context.var.actor.id);
+        tools = await store.appTools(serverId);
       }
-      const sharedDecision = await sharedGrantApproval(
-        { store, shared },
-        refs[0] ?? "",
-        agentId,
-        undefined,
-      );
-      if (sharedDecision !== "unreadable" && sharedDecision.approval && shared)
-        await shared.use.setApproval({
-          botId: agentId,
-          serverId: sharedDecision.appId,
-          approval: sharedDecision.approval,
-          by: context.var.actor.id,
-        });
-      granted = refs;
+      if (
+        tools.length > 0 ||
+        !(await toolsComeWithSignIn(request.appKey, agentId, context))
+      ) {
+        const advertised = tools.map((tool) => tool.ref);
+        const refs =
+          chosen ?? tools.filter((tool) => tool.read).map((tool) => tool.ref);
+        const outside = refs.filter((ref) => !advertised.includes(ref));
+        if (outside.length > 0)
+          return deny(
+            "refs_outside_app",
+            `${outside.join(", ")} ${outside.length === 1 ? "is" : "are"} not among ${name}'s tools.`,
+            400,
+          );
+        if (advertised.length === 0)
+          return deny(
+            "no_tools",
+            `${name} has no tools to give yet. Open its page under ${appsPage()} to see why, then ${again}.`,
+            409,
+          );
+        if (refs.length === 0)
+          return deny(
+            "no_read_only_tools",
+            `None of ${name}'s actions are marked read-only, so approving here gives this Bot nothing. Choose its actions on ${name}'s page under ${appsPage()}, then ${again}.`,
+            409,
+          );
+        for (const ref of refs) {
+          await store.grant("mcp", ref, agentId, actorEmail(context));
+        }
+        const sharedDecision = await sharedGrantApproval(
+          { store, shared },
+          refs[0] ?? "",
+          agentId,
+          undefined,
+        );
+        if (
+          sharedDecision !== "unreadable" &&
+          sharedDecision.approval &&
+          shared
+        )
+          await shared.use.setApproval({
+            botId: agentId,
+            serverId: sharedDecision.appId,
+            approval: sharedDecision.approval,
+            by: context.var.actor.id,
+          });
+        granted = refs;
+      }
     }
 
     if (
@@ -346,7 +400,7 @@ export function mountAppAccessRoutes({
     )
       return deny(
         "shared_not_connected",
-        `The shared ${inspected.access.displayName} account is not connected yet. Connect it on ${inspected.access.displayName}'s page under Plugins, then approve this request.`,
+        `The shared ${inspected.access.displayName} account is not connected yet. Connect it on ${inspected.access.displayName}'s page under ${appsPage()}, then approve this request.`,
         409,
       );
 

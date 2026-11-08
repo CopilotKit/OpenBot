@@ -202,3 +202,38 @@ test("the rows for goals, reach, memory and rules say what this Bot has and open
   await row("Memory", "1 source", "memory");
   await row("Approval rules", "1 rule", "approvals");
 });
+
+/** The personal starter on the harness picked at setup, as OpenBot Desktop on Windows starts it. */
+const ON_HARNESS: AgentProfile = {
+  ...BOT,
+  endpoint: "http://agent-harness:4206/ag-ui",
+  builtIn: false,
+  keyFromOpenBot: true,
+  framework: "LangChain (LangGraph)",
+};
+
+function withEdition(edition: "team" | "personal") {
+  const served = global.fetch;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+    String(input) === "/api/capabilities"
+      ? Response.json({ edition })
+      : served(input, init)) as unknown as typeof fetch;
+}
+
+test("the personal edition's Setup row names the Bot's framework, not the harness's address", async () => {
+  serving("admin");
+  withEdition("personal");
+  const view = draw(ON_HARNESS);
+  expect(await view.findByText("Runs on LangChain (LangGraph)")).toBeTruthy();
+  expect(view.queryByText("agent-harness:4206")).toBeNull();
+});
+
+test("a team deployment's Setup row still shows the address", async () => {
+  serving("admin");
+  withEdition("team");
+  const view = draw(ON_HARNESS);
+  expect(await view.findByText("Setup")).toBeTruthy();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(view.getByText("agent-harness:4206")).toBeTruthy();
+  expect(view.queryByText("Runs on LangChain (LangGraph)")).toBeNull();
+});
