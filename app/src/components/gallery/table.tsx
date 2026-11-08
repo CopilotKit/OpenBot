@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import { FailedCard, UNREADABLE } from "./failed";
 import { Badge, GalleryFrame } from "./frame";
+import { GalleryMarkdown } from "./markdown";
 import { byPosition } from "./positions";
 import { GalleryStreamingContext } from "./streaming";
 
@@ -182,6 +183,8 @@ export function DataTable(props: Record<string, unknown>) {
                         </span>
                         <span className="sr-only">Empty</span>
                       </>
+                    ) : typeof row.cells[index] === "string" ? (
+                      <GalleryMarkdown>{row.cells[index]}</GalleryMarkdown>
                     ) : (
                       row.cells[index]
                     )}
