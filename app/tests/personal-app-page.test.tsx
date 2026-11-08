@@ -389,11 +389,13 @@ test("Gmail's page says what each tool does as a person would, not as its descri
       .textContent;
   await view.findByText("Create filter");
   expect(said("Create filter")).toContain(
-    "Create a new Gmail filter with specified criteria and actions.",
+    "Creates a new Gmail filter with specified criteria and actions.",
   );
-  expect(said("Delete filter")).toContain("Permanently delete a Gmail filter.");
+  expect(said("Delete filter")).toContain(
+    "Permanently deletes a Gmail filter.",
+  );
   expect(said("Delete thread")).toContain(
-    "Immediately and permanently delete a specified thread and all its messages.",
+    "Immediately and permanently deletes a specified thread and all its messages.",
   );
   expect(said("Delete label")).toContain(
     "Permanently deletes a user-created Gmail label from the account (not from a message).",
@@ -403,7 +405,7 @@ test("Gmail's page says what each tool does as a person would, not as its descri
   );
   // A name written in capitals is not a word said loudly.
   expect(said("Insert message")).toContain(
-    "Insert a message into the user's mailbox similar to IMAP append.",
+    "Inserts a message into the user's mailbox similar to IMAP append.",
   );
   const text = view.container.textContent ?? "";
   expect(text).not.toMatch(/Tool to|DELETES|by (its )?ID/);
@@ -573,4 +575,121 @@ test("Routines is always on in the team edition too, with no switch to turn it o
   expect(await view.findByText("Always on")).toBeTruthy();
   expect(view.queryByText("Enable for this deployment")).toBeNull();
   expect(view.queryByRole("switch", { name: /Routines/ })).toBeNull();
+});
+
+/** Gmail's tools whose names read as their stored ids did, as Composio lists them on main cb764bf6. */
+const gmailNamedLikeIds = {
+  ...gmailServer,
+  tools: [
+    gmailTool(
+      "GMAIL_WHO_AM_I",
+      "read",
+      "Return the identity (email, name) of the connected Gmail account.",
+    ),
+    gmailTool(
+      "GMAIL_UPDATE_IMAP_SETTINGS",
+      "write",
+      "Tool to update IMAP settings for a Gmail account. Use when you need to modify IMAP configuration such as enabling/disabling IMAP, setting auto-expunge behavior, or configuring folder size limits.",
+    ),
+    gmailTool(
+      "GMAIL_UPDATE_POP_SETTINGS",
+      "write",
+      "Tool to update POP settings for a Gmail account. Use when you need to configure POP access window or message disposition behavior.",
+    ),
+    gmailTool(
+      "GMAIL_SETTINGS_GET_IMAP",
+      "read",
+      "Retrieves the IMAP settings for a Gmail user account, including whether IMAP is enabled, auto-expunge behavior, expunge behavior, and maximum folder size.",
+    ),
+    gmailTool(
+      "GMAIL_SETTINGS_GET_POP",
+      "read",
+      "Tool to retrieve POP settings for a Gmail account. Use when you need to check the current POP configuration including access window and message disposition.",
+    ),
+    gmailTool(
+      "GMAIL_SETTINGS_SEND_AS_GET",
+      "read",
+      "Tool to retrieve a specific send-as alias configuration for a Gmail user. Use when you need to get details about a send-as email address including display name, signature, SMTP settings, and verification status.",
+    ),
+    gmailTool(
+      "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID",
+      "read",
+      "Fetches a Gmail message by its message ID in the requested format and returns formatted message details. Available fields depend on the format.",
+    ),
+    gmailTool(
+      "GMAIL_FETCH_MESSAGE_BY_THREAD_ID",
+      "read",
+      "Retrieves messages from an accessible Gmail thread by thread ID, returning thread details and a messages array.",
+    ),
+    gmailTool(
+      "GMAIL_LIST_CSE_IDENTITIES",
+      "read",
+      "Lists a page of client-side encrypted identities and their key-pair associations. A response indicating that CSE is not enabled is returned as an empty list.",
+    ),
+    gmailTool(
+      "GMAIL_LIST_CSE_KEYPAIRS",
+      "read",
+      "Lists a page of client-side encryption key pairs, including public keys and enablement states.",
+    ),
+    gmailTool(
+      "GMAIL_STOP_WATCH",
+      "write",
+      "Tool to stop receiving push notifications for a Gmail mailbox. Use when you need to disable watch notifications previously set up via the watch endpoint.",
+    ),
+    gmailTool(
+      "GMAIL_UNTRASH_MESSAGE",
+      "write",
+      "Tool to remove a message from trash in Gmail. Use when you need to restore a previously trashed email message.",
+    ),
+    gmailTool(
+      "GMAIL_UPDATE_CONTACT",
+      "write",
+      "Replace selected fields on an existing saved Google contact.",
+    ),
+  ],
+} as unknown as PluginServer;
+
+test("Gmail's page names each tool as a person would, and says what each one does", async () => {
+  const view = draw("personal", [gmailNamedLikeIds], "composio-gmail");
+  await view.findByText("Who am I");
+  const names = [...view.container.querySelectorAll("[data-slot=item-title]")]
+    .map((title) => title.textContent)
+    .slice(-13);
+  expect(names).toEqual([
+    "Who am I",
+    "Update IMAP settings",
+    "Update POP settings",
+    "Get IMAP settings",
+    "Get POP settings",
+    "Get send-as settings",
+    "Fetch message",
+    "Fetch thread messages",
+    "List CSE identities",
+    "List CSE keypairs",
+    "Stop watching",
+    "Untrash message",
+    "Update contact",
+  ]);
+  const said = (name: string) =>
+    (view.getByText(name).closest("[data-slot=item]") as HTMLElement)
+      .textContent;
+  // Every sentence says what the tool does, the way most of them already do.
+  expect(said("Who am I")).toContain(
+    "Returns the identity (email, name) of the connected Gmail account.",
+  );
+  expect(said("Update IMAP settings")).toContain(
+    "Updates IMAP settings for a Gmail account.",
+  );
+  expect(said("Get send-as settings")).toContain(
+    "Retrieves a specific send-as alias configuration for a Gmail user.",
+  );
+  expect(said("Stop watching")).toContain(
+    "Stops receiving push notifications for a Gmail mailbox.",
+  );
+  expect(said("Untrash message")).toContain(
+    "Removes a message from trash in Gmail.",
+  );
+  expect(said("Update contact")).toContain(
+    "Replaces selected fields on an existing saved Google contact.",
+  );
 });

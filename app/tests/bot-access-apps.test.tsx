@@ -292,3 +292,21 @@ test("when the states cannot be read, the apps are still listed and the failure 
   );
   expect(await view.findByText("Google Drive")).toBeTruthy();
 });
+
+test("Routines' tools are listed as commands, like every other app's, not as what was done", async () => {
+  serving({
+    tools: [
+      "complete_goal",
+      "create_goal",
+      "create_routine",
+      "create_trigger",
+    ].map((name) => tool(`routines/${name}`, `mcp__routines__${name}`)),
+  });
+  const view = draw();
+  expect(
+    await view.findByText(
+      "Complete goal, Create goal, Create routine, Create trigger",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText(/Created a goal|Marked a goal complete/)).toBeNull();
+});
