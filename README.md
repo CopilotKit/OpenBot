@@ -59,12 +59,20 @@ Watch a Bot use its browser and tools, review interactive results, and take over
 </div>
 
 - **Choose your models.** Use OpenAI, Claude, Gemini, or open models through an OpenAI-compatible endpoint, hosted by a provider or on your own infrastructure. Keep your provider relationships and change models as your needs change.
-- **Bring your agents.** Run built-in Bots in the OpenBot server, or connect your existing agents through AG-UI from any agent execution platform. LangChain, Claude Agent SDK, Google ADK, Mastra, CrewAI, AWS Strands, and more can work in the same workspace.
+- **Bring your agents.** Run built-in Bots in the OpenBot server, or connect your existing agents through AG-UI from any agent execution platform. Agents built with different stacks can work in the same workspace.
 - **Make it yours.** Use the MIT-licensed template as-is, white-label it, or customize it deeply. AG-UI connects agents, MCP connects tools, and the frontends and backend can evolve independently.
 - **Govern work across your team.** Company sign-in, roles, tool permissions, approvals, and audit apply across the workspace. Your agents use OpenBot's tools and computers under the same policies.
 - **Get help deploying it.** CopilotKit's engineers can work with your team to deploy OpenBot, connect your systems, and automate parts of specific jobs.
 
 [Connect your agent](#bring-your-own-agent) · [Configure models and tools](docs/configuration.md) · [Explore OpenBot for Business](https://open.bot/business)
+
+## Built on CopilotKit and AG-UI
+
+OpenBot is built on [CopilotKit](https://www.copilotkit.ai), which is [used in production by a majority of Fortune 500 companies](https://www.copilotkit.ai/blog/series-a).
+
+**Your agent stack.** [AG-UI](https://docs.ag-ui.com/introduction#supported-integrations) has first-class integrations across the major agent frameworks and harnesses, including Anthropic's Claude Agent SDK, Microsoft Agent Framework and Agent Harness, Google ADK, AWS Strands, Oracle Agent Spec, LangChain, Mastra, Pydantic AI, Agno, and CrewAI. Many ship first-party support; [Amazon Bedrock AgentCore supports AG-UI directly](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-agui.html).
+
+**Your execution platform.** Keep your agents on Amazon Bedrock AgentCore, Claude Managed Agents, [Google's Agent Platform](https://docs.cloud.google.com/gemini-enterprise-agent-platform), LangChain's Managed Deep Agents, [Microsoft Foundry Agent Service](https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/hosted-agents), or your own infrastructure. Connect them to OpenBot through an AG-UI endpoint, using an adapter where needed. Your choice of agent platform stays independent of your workspace.
 
 ## Architecture
 

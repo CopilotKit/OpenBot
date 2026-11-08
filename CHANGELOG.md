@@ -56,6 +56,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Personal edition
 
+- In Activity, a Bot's call to an app you haven't connected reads "Not connected" and "Gmail isn't
+  connected. Connect it in Connections.", rows already recorded included. It read "The server
+  didn't answer" and printed raw `[connect-app]` text, which Admin → Audit no longer shows either.
 - Home no longer shows an empty Explore Bots box.
 
 ### Smaller changes
