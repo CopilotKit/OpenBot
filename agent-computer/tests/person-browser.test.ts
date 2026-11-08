@@ -869,37 +869,6 @@ for (const variant of VARIANTS) {
       expect(back.tabs.length).toBeGreaterThan(0);
     }, 60_000);
 
-    /*
-     * One browser on the profile from the moment it is opened again, read every few milliseconds. Google Chrome on
-     * Linux runs its own binary with the browser's command line and `--product-version` a moment after it starts, to see
-     * whether a newer version was installed under it: a child that exits without opening the profile, and alive for a
-     * few milliseconds. Counted as a browser, it failed the test above on CI as "found 2". A second browser started on a
-     * profile the first still held would be found here too.
-     */
-    test("there is one browser on its profile through a close and an open, though Chrome checks its own version", async () => {
-      const profile = join(root, PERSON);
-      expect((await api("/browser/close", {})).status).toBe(200);
-      const seen: string[] = [];
-      let settled = 0;
-      const opening = api("/browser/open", { connection: CONNECTION }).finally(
-        () => {
-          settled = Date.now();
-        },
-      );
-      while (settled === 0 || Date.now() - settled < 10_000) {
-        const ps = Bun.spawn(["ps", "-axo", "pid=,ppid=,command="]);
-        const browsers = browsersOnProfile(
-          await new Response(ps.stdout).text(),
-          profile,
-        );
-        if (browsers.length > 1)
-          seen.push(browsers.map(({ line }) => line.slice(0, 600)).join("\n"));
-        await wait(2);
-      }
-      expect((await opening).status).toBe(200);
-      expect(seen).toEqual([]);
-    }, 60_000);
-
     test("launches with the Recorder and nothing that makes it a test browser", async () => {
       const person = profiles.person(PERSON);
       if (!person) throw new Error("The browser should be open.");
@@ -1182,6 +1151,37 @@ for (const variant of VARIANTS) {
      * row each time. So an open that brings no connection leaves the Recorder holding its own, and says which it holds
      * (`recorder.connectionId`), for OpenBot to decide whether it stands.
      */
+    /*
+     * One browser on the profile from the moment it is opened again, read every few milliseconds. Google Chrome on
+     * Linux runs its own binary with the browser's command line and `--product-version` a moment after it starts, to see
+     * whether a newer version was installed under it: a child that exits without opening the profile, and alive for a
+     * few milliseconds. Counted as a browser, it failed the test above on CI as "found 2". A second browser started on a
+     * profile the first still held would be found here too.
+     */
+    test("there is one browser on its profile through a close and an open, though Chrome checks its own version", async () => {
+      const profile = join(root, PERSON);
+      expect((await api("/browser/close", {})).status).toBe(200);
+      const seen: string[] = [];
+      let settled = 0;
+      const opening = api("/browser/open", { connection: CONNECTION }).finally(
+        () => {
+          settled = Date.now();
+        },
+      );
+      while (settled === 0 || Date.now() - settled < 10_000) {
+        const ps = Bun.spawn(["ps", "-axo", "pid=,ppid=,command="]);
+        const browsers = browsersOnProfile(
+          await new Response(ps.stdout).text(),
+          profile,
+        );
+        if (browsers.length > 1)
+          seen.push(browsers.map(({ line }) => line.slice(0, 600)).join("\n"));
+        await wait(2);
+      }
+      expect((await opening).status).toBe(200);
+      expect(seen).toEqual([]);
+    }, 60_000);
+
     test("an open that brings no connection leaves the Recorder the one it holds, open, and closed and opened again", async () => {
       const held = {
         connected: true,
