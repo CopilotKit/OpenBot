@@ -89,6 +89,43 @@ export function parseLearningSettings(
   return { ok: true, settings: structuredClone(input) as LearningSettings };
 }
 
+/**
+ * A saved row as this build reads it: the keys it knows, and nothing it does not.
+ *
+ * A newer build may save a key this one has never heard of, and builds do go back (an update that is
+ * rolled back). Read strictly, one such key ("autoApprove") made the whole row invalid, and every chat
+ * run failed with "Failed to resolve Learning Container". What is written is still checked strictly
+ * (`parseLearningSettings`); only what is read back is forgiving.
+ */
+export function parseStoredLearningSettings(
+  input: unknown,
+): ReturnType<typeof parseLearningSettings> {
+  const known = (value: unknown, keys: readonly string[]) =>
+    object(value)
+      ? Object.fromEntries(
+          Object.entries(value).filter(([key]) => keys.includes(key)),
+        )
+      : value;
+  const targetKeys = ["containerId", "revision"] as const;
+  if (!object(input)) return parseLearningSettings(input);
+  const kept = known(input, ["enabled", "defaultTarget", "agents"]) as Record<
+    string,
+    unknown
+  >;
+  return parseLearningSettings({
+    ...kept,
+    defaultTarget: known(kept.defaultTarget, targetKeys),
+    agents: object(kept.agents)
+      ? Object.fromEntries(
+          Object.entries(kept.agents).map(([id, value]) => [
+            id,
+            known(value, targetKeys),
+          ]),
+        )
+      : kept.agents,
+  });
+}
+
 /** Reads the database each time so changes take effect across replicas without a stale cache. */
 export function createLearningSettingsStore(
   database?: Database,
@@ -110,7 +147,7 @@ export function createLearningSettingsStore(
       .where(eq(learningSettings.id, "current"))
       .limit(1);
     if (!row) return structuredClone(fallback);
-    const parsed = parseLearningSettings(row.settings);
+    const parsed = parseStoredLearningSettings(row.settings);
     if (!parsed.ok) throw new Error("Stored learning settings are invalid.");
     return parsed.settings;
   };
