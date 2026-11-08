@@ -179,9 +179,38 @@ export function approvalWords(action: {
      * card as "write file on host-grant-15407-1794112361547002000".
      */
     place:
-      (action.toolRef.startsWith("host/") && folderName(action.target)) ||
+      (action.toolRef.startsWith("host/") &&
+        // "write file on todo.txt in share"; a command or a listing is on the folder itself.
+        (folderFile(action.target)
+          ? inFolder(folderFile(action.target), folderName(action.target))
+          : folderName(action.target))) ||
       action.scope,
   };
+}
+
+/**
+ * A file and the folder on the person's computer it is in, said the same way on the approval card,
+ * on the step and in Activity: "todo.txt in share". A step on the whole folder (a listing, a
+ * command) is "in share". Undefined when neither is known.
+ */
+export function inFolder(
+  file: string | undefined,
+  folder: string | undefined,
+): string | undefined {
+  if (file && folder) return `${file} in ${folder}`;
+  if (folder) return `in ${folder}`;
+  return file || undefined;
+}
+
+/** The file a folder action's target names, or undefined for the folder itself. */
+function folderFile(target: unknown): string | undefined {
+  if (!target || typeof target !== "object") return undefined;
+  const { relativePath } = target as { relativePath?: unknown };
+  return typeof relativePath === "string" &&
+    relativePath.trim() &&
+    relativePath !== "."
+    ? relativePath
+    : undefined;
 }
 
 /** The name of the folder a folder action's target names, or undefined. */
