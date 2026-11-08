@@ -9,10 +9,7 @@ import {
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import {
-  BUSINESS_PAGE_URL,
-  BusinessLink,
-} from "@/components/edition/business-link";
+import { BusinessLink } from "@/components/edition/business-link";
 import { deploymentKeys } from "@/lib/deployment/queries";
 
 /**
@@ -49,7 +46,7 @@ function draw(edition: "personal" | "team") {
 test("the personal edition links to OpenBot for Business in a new tab", () => {
   const view = draw("personal");
   const link = view.getByRole("link", { name: "Meet OpenBot for Business" });
-  expect(link.getAttribute("href")).toBe(BUSINESS_PAGE_URL);
+  expect(link.getAttribute("href")).toBe("https://open.bot/business");
   expect(link.getAttribute("target")).toBe("_blank");
 });
 

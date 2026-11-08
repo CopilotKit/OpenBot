@@ -1,0 +1,154 @@
+{
+  "updateDidNotFinish": {
+    "outcome": "completed",
+    "stack": {
+      "id": "local-abc123",
+      "installedRelease": "0.16.0-rc.5",
+      "step": "cluster",
+      "urls": {
+        "api": "http://localhost:18082",
+        "dashboard": "http://localhost:18080",
+        "gateway": "ws://localhost:14401"
+      },
+      "hasFailedStep": true,
+      "updateInProgress": true,
+      "unfinishedUpdate": {
+        "to": "0.16.0-rc.9",
+        "prepared": true,
+        "stoppedDownloading": true
+      },
+      "observed": {
+        "running": true,
+        "services": [
+          {
+            "name": "cpki-app-api-6d9f7c8b5-x2k4p",
+            "phase": "Running",
+            "ready": true
+          },
+          {
+            "name": "cpki-app-frontend-7c8d9f6b4-m8q2r",
+            "phase": "Running",
+            "ready": true
+          },
+          {
+            "name": "cpki-realtime-gateway-5b7c9d8f6-t4n7w",
+            "phase": "Running",
+            "ready": true
+          },
+          {
+            "name": "cpki-postgresql-0",
+            "phase": "Running",
+            "ready": true
+          },
+          {
+            "name": "cpki-redis-subchart-master-0",
+            "phase": "Running",
+            "ready": true
+          },
+          {
+            "name": "cpki-local-object-storage-0",
+            "phase": "Running",
+            "ready": true
+          }
+        ]
+      }
+    },
+    "reason": null,
+    "readiness": "degraded",
+    "licence": "valid",
+    "licenceExpiresAt": "2099-12-31T00:00:00.000Z",
+    "updateTo": "0.16.0-rc.9",
+    "checksPassed": true
+  },
+  "apiCheckFails": {
+    "outcome": "completed",
+    "stack": {
+      "id": "local-abc123",
+      "installedRelease": "0.16.0-rc.5",
+      "step": "cluster",
+      "urls": {
+        "api": "http://localhost:18082",
+        "dashboard": "http://localhost:18080",
+        "gateway": "ws://localhost:14401"
+      },
+      "hasFailedStep": true,
+      "updateInProgress": true,
+      "unfinishedUpdate": {
+        "to": "0.16.0-rc.9",
+        "prepared": true,
+        "stoppedDownloading": true
+      },
+      "observed": {
+        "running": true,
+        "services": [
+          {
+            "name": "cpki-app-api-6d9f7c8b5-x2k4p",
+            "phase": "Running",
+            "ready": true
+          },
+          {
+            "name": "cpki-app-frontend-7c8d9f6b4-m8q2r",
+            "phase": "Running",
+            "ready": true
+          },
+          {
+            "name": "cpki-realtime-gateway-5b7c9d8f6-t4n7w",
+            "phase": "Running",
+            "ready": true
+          },
+          {
+            "name": "cpki-postgresql-0",
+            "phase": "Running",
+            "ready": true
+          },
+          {
+            "name": "cpki-redis-subchart-master-0",
+            "phase": "Running",
+            "ready": true
+          },
+          {
+            "name": "cpki-local-object-storage-0",
+            "phase": "Running",
+            "ready": true
+          }
+        ]
+      }
+    },
+    "reason": null,
+    "readiness": "degraded",
+    "licence": "valid",
+    "licenceExpiresAt": "2099-12-31T00:00:00.000Z",
+    "updateTo": "0.16.0-rc.9",
+    "checksPassed": false
+  },
+  "stoppedByQuit": {
+    "outcome": "completed",
+    "stack": {
+      "id": "local-abc123",
+      "installedRelease": "0.16.0-rc.5",
+      "step": "cluster",
+      "urls": {
+        "api": "http://localhost:18082",
+        "dashboard": "http://localhost:18080",
+        "gateway": "ws://localhost:14401"
+      },
+      "hasFailedStep": true,
+      "updateInProgress": true,
+      "unfinishedUpdate": {
+        "to": "0.16.0-rc.9",
+        "prepared": true,
+        "stoppedDownloading": true
+      },
+      "observed": {
+        "running": false,
+        "services": []
+      }
+    },
+    "reason": null,
+    "readiness": "stopped",
+    "licence": "valid",
+    "licenceExpiresAt": "2099-12-31T00:00:00.000Z",
+    "updateTo": "0.16.0-rc.9",
+    "checksPassed": false
+  }
+}

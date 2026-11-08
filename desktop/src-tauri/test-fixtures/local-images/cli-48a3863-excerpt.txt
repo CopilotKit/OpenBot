@@ -1,0 +1,184 @@
+// Verbatim lines from the CopilotKit CLI bundle OpenBot pins (copilotkit 4.34.0-pre.48a3863,
+// index.js sha256 f644ff50178d00c97b1c2af88d9e33cc935b665f80b328c203ee57689bceb076): the lines
+// local_images::cli_images reads, in their original order. Elided lines are marked.
+
+// <define:__CLI_LOCAL_EVALUATION_SUPPORT__>
+var define_CLI_LOCAL_EVALUATION_SUPPORT_default;
+var init_define_CLI_LOCAL_EVALUATION_SUPPORT = __esm({
+  "<define:__CLI_LOCAL_EVALUATION_SUPPORT__>"() {
+    define_CLI_LOCAL_EVALUATION_SUPPORT_default = {
+      schema: {
+        version: "app-db-sql-sha256:dcb5c26fea36b5411b1bc1fddc727bb0578d99edee842e90416e4f2b5981a385",
+        compatibleFrom: []
+      },
+      images: {
+        redis: {
+          repository: "docker.io/bitnamilegacy/redis",
+          digest: "sha256:a25b5d07a14ec13730022c7cd9bab6308d55ccd86b74af7315553c17be884889"
+        },
+        objectStorage: {
+          repository: "ghcr.io/copilotkit/intelligence/local-object-storage",
+          digest: "sha256:1c2a56bcd21e6ef33b77ddefec998ba09b026c339af1c2827d312ee3df7b7280"
+        },
+        objectStorageInit: {
+          repository: "ghcr.io/copilotkit/intelligence/local-object-storage-init",
+          digest: "sha256:1c2a56bcd21e6ef33b77ddefec998ba09b026c339af1c2827d312ee3df7b7280"
+        },
+        k3s: {
+          repository: "docker.io/rancher/k3s",
+          digest: "sha256:53cf744fe2fabf140cee240d2db70d13a4f2d98f1a13c98f58f457f423096917"
+        },
+        k3dProxy: {
+          repository: "ghcr.io/k3d-io/k3d-proxy",
+          digest: "sha256:d43e6ffd27c216d0b21815c1226c8aeac2e07086ac5a988eb39bd7e308f6e370"
+        },
+        k3dTools: {
+          repository: "ghcr.io/k3d-io/k3d-tools",
+          digest: "sha256:c5ceb2b9e8ff2cf55917b0bee8bc9c54fe1483a16366b734117e2cfac1417bed"
+        }
+      },
+      kubernetesImages: [
+        {
+          repository: "docker.io/rancher/klipper-helm",
+          digest: "sha256:73ff7ef399717ba8339559054557bd427bdafb47db112165a8c0c358d1ca0283",
+          reference: "docker.io/rancher/klipper-helm:v0.9.3-build20241008"
+        },
+        {
+          repository: "docker.io/rancher/klipper-lb",
+          digest: "sha256:dd380f5d89a52f2a07853ff17a6048f805c1f8113b50578f3efc3efb9bcf670a",
+          reference: "docker.io/rancher/klipper-lb:v0.4.9"
+        },
+        {
+          repository: "docker.io/rancher/local-path-provisioner",
+          digest: "sha256:9b914881170048f80ae9302f36e5b99b4a6b18af73a38adc1c66d12f65d360be",
+          reference: "docker.io/rancher/local-path-provisioner:v0.0.30"
+        },
+        {
+          repository: "docker.io/rancher/mirrored-coredns-coredns",
+          digest: "sha256:82979ddf442c593027a57239ad90616deb874e90c365d1a96ad508c2104bdea5",
+          reference: "docker.io/rancher/mirrored-coredns-coredns:1.12.0"
+        },
+        {
+          repository: "docker.io/rancher/mirrored-library-busybox",
+          digest: "sha256:8a45424ddf949bbe9bb3231b05f9032a45da5cd036eb4867b511b00734756d6f",
+          reference: "docker.io/rancher/mirrored-library-busybox:1.36.1"
+        },
+        {
+          repository: "docker.io/rancher/mirrored-library-traefik",
+          digest: "sha256:25df7bff0b414867f16a74c571c0dc84920404e45cc7780976cec77809230e09",
+          reference: "docker.io/rancher/mirrored-library-traefik:2.11.18"
+        },
+        {
+          repository: "docker.io/rancher/mirrored-metrics-server",
+          digest: "sha256:dccf8474fb910fef261d31d9483d7e4c1df7b86cf4d638fb6a7d7c88bd51600a",
+          reference: "docker.io/rancher/mirrored-metrics-server:v0.7.2"
+        },
+        {
+          repository: "docker.io/rancher/mirrored-pause",
+          digest: "sha256:74c4244427b7312c5b901fe0f67cbc53683d06f4f24c6faee65d4182bf0fa893",
+          reference: "docker.io/rancher/mirrored-pause:3.6"
+        }
+      ],
+      platforms: [
+        {
+          os: "darwin",
+          arch: "x64",
+          tools: {
+            k3d: {
+              version: "5.8.3",
+              url: "https://github.com/k3d-io/k3d/releases/download/v5.8.3/k3d-darwin-amd64",
+              sha256: "fd0f8e9e8ea4d8bc3674572ca6ed0833b639bf57c43c708616d937377324cfea"
+            },
+            helm: {
+              version: "3.17.3",
+              url: "https://get.helm.sh/helm-v3.17.3-darwin-amd64.tar.gz",
+              sha256: "20ef8df4671349a6fc556a621be1170dd709c6c0cf5f7e83a2d9fb0515fd97fc"
+            }
+          }
+        },
+        {
+          os: "darwin",
+          arch: "arm64",
+          tools: {
+            k3d: {
+              version: "5.8.3",
+              url: "https://github.com/k3d-io/k3d/releases/download/v5.8.3/k3d-darwin-arm64",
+              sha256: "8da468daa7dc7cf7cdd4735f90a9bb05179fa27858250f62e3d8cdf5b5ca0698"
+            },
+            helm: {
+              version: "3.17.3",
+              url: "https://get.helm.sh/helm-v3.17.3-darwin-arm64.tar.gz",
+              sha256: "89aec43ce07b06239f1bba4a6507236bb48ae487bc5065a8e254d3ce58a16997"
+            }
+          }
+        },
+        {
+          os: "linux",
+          arch: "x64",
+          tools: {
+            k3d: {
+              version: "5.8.3",
+              url: "https://github.com/k3d-io/k3d/releases/download/v5.8.3/k3d-linux-amd64",
+              sha256: "dbaa79a76ace7f4ca230a1ff41dc7d8a5036a8ad0309e9c54f9bf3836dbe853e"
+            },
+            helm: {
+              version: "3.17.3",
+              url: "https://get.helm.sh/helm-v3.17.3-linux-amd64.tar.gz",
+              sha256: "ee88b3c851ae6466a3de507f7be73fe94d54cbf2987cbaa3d1a3832ea331f2cd"
+            }
+          }
+        },
+        {
+          os: "linux",
+          arch: "arm64",
+          tools: {
+            k3d: {
+              version: "5.8.3",
+              url: "https://github.com/k3d-io/k3d/releases/download/v5.8.3/k3d-linux-arm64",
+              sha256: "0b8110f2229631af7402fb828259330985918b08fefd38b7f1b788a1c8687216"
+            },
+            helm: {
+              version: "3.17.3",
+              url: "https://get.helm.sh/helm-v3.17.3-linux-arm64.tar.gz",
+              sha256: "7944e3defd386c76fd92d9e6fec5c2d65a323f6fadc19bfb5e704e3eee10348e"
+            }
+          }
+        },
+        {
+          os: "win32",
+          arch: "x64",
+          tools: {
+            k3d: {
+              version: "5.8.3",
+              url: "https://github.com/k3d-io/k3d/releases/download/v5.8.3/k3d-windows-amd64.exe",
+              sha256: "655d2aadcb1f0a0dd196c5cbc564687ba945a9547c8e82c9fc532051fb260e22"
+            },
+            helm: {
+              version: "3.17.3",
+              url: "https://get.helm.sh/helm-v3.17.3-windows-amd64.zip",
+              sha256: "8ea93e2f6285e649dede583ac90ff8cdb938ca53ec6cf5fe909f2303fbc22d96"
+            }
+          }
+        }
+      ]
+    };
+  }
+});
+// ...
+    const workloadImages = [...new Set(Object.entries(release4.images).filter(([name]) => !["k3s", "k3dProxy", "k3dTools"].includes(name)).map(([, image3]) => `${image3.repository}@${image3.digest}`))];
+// ...
+  const pinnedVersion = false ? "" : "0.16.0-rc.9";
+// ...
+    const images = { ...support.images };
+    const observed = /* @__PURE__ */ new Map();
+    for (const [key, service] of Object.entries(runtimeServices)) {
+      const repository = `ghcr.io/copilotkit/intelligence/${service}`;
+// ...
+    runtimeServices = {
+      appApi: "app-api",
+      appFrontend: "app-frontend",
+      realtimeGateway: "realtime-gateway",
+      migrations: "db-migrations",
+      bootstrap: "db-migrations",
+      postgresql: "postgres-pgvector"
+    };

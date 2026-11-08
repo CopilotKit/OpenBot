@@ -3,9 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { BUSINESS_URL } from "@/lib/openbot-for-business";
 import { cn } from "@/lib/utils";
-
-export const BUSINESS_PAGE_URL = "https://openbot.co/business";
 
 /**
  * Closed for this session only. The link comes back the next time the app starts, or the next tab:
@@ -43,7 +42,7 @@ export function BusinessLink() {
           buttonVariants({ size: "sm", variant: "ghost" }),
           "text-muted-foreground",
         )}
-        href={BUSINESS_PAGE_URL}
+        href={BUSINESS_URL}
         rel="noopener noreferrer"
         target="_blank"
       >

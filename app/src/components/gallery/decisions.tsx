@@ -3,6 +3,7 @@ import { z } from "zod";
 import { DecisionCard, OTHER } from "@/components/decisions/decision-card";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import { GalleryFrame } from "./frame";
+import { GalleryMarkdown } from "./markdown";
 import { byPosition } from "./positions";
 
 /**
@@ -108,7 +109,7 @@ export function ApprovalCard(props: Waiting<ApprovalArgs> & { name?: string }) {
       submitting={sending || !respond}
       title={args.title}
     >
-      <p className="text-sm">{args.summary}</p>
+      <GalleryMarkdown className="text-sm">{args.summary}</GalleryMarkdown>
       {command || details.length ? (
         <dl className="mt-3 grid grid-cols-[minmax(0,9rem)_1fr] gap-x-4 gap-y-1.5 rounded-lg bg-muted/60 px-3 py-2 text-sm">
           {command ? (
@@ -122,7 +123,9 @@ export function ApprovalCard(props: Waiting<ApprovalArgs> & { name?: string }) {
           {byPosition(details).map(({ item: detail, key }) => (
             <div className="contents" key={key}>
               <dt className="truncate text-muted-foreground">{detail.label}</dt>
-              <dd className="min-w-0 break-words">{detail.value}</dd>
+              <dd className="min-w-0 break-words">
+                <GalleryMarkdown>{detail.value}</GalleryMarkdown>
+              </dd>
             </div>
           ))}
         </dl>

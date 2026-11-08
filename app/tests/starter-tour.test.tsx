@@ -157,6 +157,22 @@ test("a claimed tour is shown only in its saved channel, never home or a later c
   }
 });
 
+/*
+ * Reported from the Desktop: the row of tasks sat directly on the composer, and in a window narrower
+ * than the conversation column its first task was flush with the pane's edge. happy-dom lays nothing
+ * out, so this pins the classes that hold the row off both: the composer's own inset (`px-3`) and
+ * the app's gap between stacked controls (`mb-3`).
+ */
+test("the starter tasks are inset like the composer and stand clear of it", async () => {
+  server();
+  const view = draw({ agentId: "picked-harness" });
+  const row = await view.findByRole("region", { name: "Starter tasks" });
+  const classes = row.className.split(/\s+/);
+  expect(classes).toContain("px-3");
+  expect(classes).toContain("mb-3");
+  expect(classes).not.toContain("mb-2");
+});
+
 test("starter tasks have no dismiss control", async () => {
   server();
   const view = draw({ agentId: "picked-harness" });
