@@ -23,9 +23,18 @@ on the stack that is already running changes the Learning agent alone, and the s
 nothing (Intelligence `apps/cli/src/services/local-setup.ts`). The file is the CLI's own shape
 (`apps/cli/src/services/local-inputs.ts`), and the CLI turns it into `LEARNING_AGENT_MODEL`, the
 provider key or `LEARNING_AGENT_MODEL_BASE_URL` and `LEARNING_AGENT_MODEL_API_KEY`, and the limits
-(`apps/cli/src/services/local-values.ts`). A loopback address there becomes the host name the
-cluster reaches this machine by (`host.k3d.internal`, or the engine's own under Podman), which is
-the one name this path dials that is not numeric: inside the cluster, 127.0.0.1 is the pod.
+(`apps/cli/src/services/local-values.ts`).
+
+THE PLAN ENDPOINT IS GIVEN BY NUMBER, the IPv4 address the engine gives containers for this machine
+(`host.docker.internal` inside OpenBot's own `server` container, see `stack::host_gateway_ipv4`).
+Inside the cluster, 127.0.0.1 is the pod. Given a loopback address, the CLI swaps in
+`host.k3d.internal` (`localModelEndpoint` in `local-values.ts`), and that name does not survive a
+restart: k3s rewrites CoreDNS's NodeHosts every time the cluster starts and drops the entry k3d
+added (k3d-io/k3d#1221), and OpenBot starts the cluster on every Start. Measured on Docker Desktop:
+every Learning call then failed with "Connection error.". The CLI passes any other address through
+as written, and the engine's address for this machine does not depend on the cluster's DNS: Docker
+Desktop's is 192.168.65.254, a Podman machine's the address `acquire` configures (192.168.127.254),
+and both lead to this machine's loopback, where the server's port is published.
 */
 
 use serde_json::{json, Value};
@@ -92,12 +101,27 @@ pub enum Learning {
     Without(Unavailable),
 }
 
-/// The Learning agent's model for this sign-in. `server_port` is the server's port on this machine.
-pub fn for_credential(credential: &ModelCredential, server_port: u16, token: &str) -> Learning {
+/// Whether this sign-in reaches Learning through the server, and so needs its address.
+pub fn through_openbot(credential: &ModelCredential) -> bool {
+    matches!(
+        credential,
+        ModelCredential::ChatGptPlan { .. } | ModelCredential::ClaudePlan { .. }
+    )
+}
+
+/**
+The Learning agent's model for this sign-in. `server` is where the cluster reaches OpenBot's server:
+this machine's address as the engine gives it to containers, and the server's port on this machine.
+*/
+pub fn for_credential(
+    credential: &ModelCredential,
+    server: std::net::SocketAddrV4,
+    token: &str,
+) -> Learning {
     let plan = |model: &str, (context, output): (u32, u32)| {
         Learning::Model(json!({
             "model": model,
-            "baseUrl": format!("http://127.0.0.1:{server_port}{ENDPOINT_PATH}"),
+            "baseUrl": format!("http://{server}{ENDPOINT_PATH}"),
             "apiKey": token,
             "contextWindow": context,
             "maxTokens": output,
@@ -121,11 +145,29 @@ pub fn for_credential(credential: &ModelCredential, server_port: u16, token: &st
 
 /// The server's setting for this sign-in: the reason, or empty. None leaves the file alone.
 pub fn unavailable_setting(credential: &ModelCredential) -> Option<&'static str> {
-    match for_credential(credential, 0, "") {
+    match for_credential(
+        credential,
+        std::net::SocketAddrV4::new(std::net::Ipv4Addr::UNSPECIFIED, 0),
+        "",
+    ) {
         Learning::Keep => None,
         Learning::Model(_) => Some(""),
         Learning::Without(why) => Some(why.as_str()),
     }
+}
+
+/**
+This machine's IPv4 address in `getent ahostsv4 host.docker.internal` output, as the engine gives it
+to containers: the first address on a line, if it is one a container can dial. Loopback and the
+unspecified address would be the pod or nothing at all.
+*/
+pub fn host_gateway_in(getent: &str) -> Option<std::net::Ipv4Addr> {
+    getent
+        .lines()
+        .filter_map(|line| line.split_whitespace().next()?.parse().ok())
+        .find(|ip: &std::net::Ipv4Addr| {
+            !ip.is_loopback() && !ip.is_unspecified() && !ip.is_broadcast()
+        })
 }
 
 /// The folder the model file is handed over in, beside the installation's other handoffs.
@@ -208,6 +250,9 @@ pub enum Given {
     Given,
     /// The CLI answered, but not completed.
     Refused(crate::local_eval::Outcome),
+    /// The address the cluster reaches this machine at could not be found, so a plan's endpoint
+    /// could not be given. Never a name the cluster may not resolve in its place.
+    NoAddress,
     Failed(String),
 }
 
@@ -223,6 +268,7 @@ pub fn apply(
     credential: &ModelCredential,
     server_port: u16,
     token: &str,
+    host: impl FnOnce() -> Option<std::net::Ipv4Addr>,
     status: impl FnOnce(
         &crate::local_eval::StackId,
     ) -> Result<crate::local_eval::Report, crate::local_eval::Failure>,
@@ -231,8 +277,7 @@ pub fn apply(
     ) -> Result<crate::local_eval::Report, crate::local_eval::Failure>,
 ) -> Given {
     use crate::local_eval::{Outcome, Readiness};
-    let learning = for_credential(credential, server_port, token);
-    if learning == Learning::Keep {
+    if *credential == ModelCredential::None {
         return Given::Nothing;
     }
     let Some(state) =
@@ -245,6 +290,19 @@ pub fn apply(
         Ok(_) => return Given::NotReady,
         Err(failure) => return Given::Failed(format!("{failure:?}")),
     }
+    let address = if through_openbot(credential) {
+        match host() {
+            Some(ip) => ip,
+            None => return Given::NoAddress,
+        }
+    } else {
+        std::net::Ipv4Addr::UNSPECIFIED
+    };
+    let learning = for_credential(
+        credential,
+        std::net::SocketAddrV4::new(address, server_port),
+        token,
+    );
     match give(root, &learning, configure) {
         Ok(None) => Given::Nothing,
         Ok(Some(report)) if report.outcome == Outcome::Completed => Given::Given,
@@ -259,9 +317,13 @@ mod tests {
     use super::*;
 
     const TOKEN_VALUE: &str = "per-install-learning-secret";
+    /// Docker Desktop's address for this machine, as `getent` answered inside a container there.
+    const DOCKER_DESKTOP_HOST: std::net::Ipv4Addr = std::net::Ipv4Addr::new(192, 168, 65, 254);
+    const DOCKER_DESKTOP_SERVER: std::net::SocketAddrV4 =
+        std::net::SocketAddrV4::new(DOCKER_DESKTOP_HOST, 3011);
 
     fn config(credential: ModelCredential) -> Learning {
-        for_credential(&credential, 3011, TOKEN_VALUE)
+        for_credential(&credential, DOCKER_DESKTOP_SERVER, TOKEN_VALUE)
     }
 
     /// Each sign-in, and the file the CLI is given for it, exactly: the CLI refuses any field it
@@ -297,7 +359,7 @@ mod tests {
             }),
             Learning::Model(json!({
                 "model": "openbot/chatgpt-plan",
-                "baseUrl": "http://127.0.0.1:3011/api/learning-model/v1",
+                "baseUrl": "http://192.168.65.254:3011/api/learning-model/v1",
                 "apiKey": TOKEN_VALUE,
                 "contextWindow": 272_000,
                 "maxTokens": 128_000
@@ -314,7 +376,7 @@ mod tests {
             learning,
             Learning::Model(json!({
                 "model": "openbot/claude-plan",
-                "baseUrl": "http://127.0.0.1:3011/api/learning-model/v1",
+                "baseUrl": "http://192.168.65.254:3011/api/learning-model/v1",
                 "apiKey": TOKEN_VALUE,
                 "contextWindow": 200_000,
                 "maxTokens": 64_000
@@ -438,6 +500,7 @@ mod tests {
             &plan,
             3011,
             TOKEN_VALUE,
+            || Some(DOCKER_DESKTOP_HOST),
             |stack| {
                 assert_eq!(stack.as_str(), "local-abc123");
                 Ok(report(Readiness::Ready))
@@ -453,8 +516,21 @@ mod tests {
         assert_eq!(handed["apiKey"], TOKEN_VALUE);
         assert_eq!(
             handed["baseUrl"],
-            "http://127.0.0.1:3011/api/learning-model/v1"
+            "http://192.168.65.254:3011/api/learning-model/v1"
         );
+
+        // No address for this machine: no endpoint is given, rather than a name the cluster may not
+        // resolve.
+        let given = apply(
+            &root,
+            &plan,
+            3011,
+            TOKEN_VALUE,
+            || None,
+            |_| Ok(report(Readiness::Ready)),
+            |_| panic!("no endpoint is given without this machine's address"),
+        );
+        assert_eq!(given, Given::NoAddress);
 
         // A stack that is not ready is left for the next Start: setup there installs it all again.
         let given = apply(
@@ -462,6 +538,7 @@ mod tests {
             &plan,
             3011,
             TOKEN_VALUE,
+            || Some(DOCKER_DESKTOP_HOST),
             |_| Ok(report(Readiness::Stopped)),
             |_| panic!("setup must not run on a stack that is not ready"),
         );
@@ -482,11 +559,66 @@ mod tests {
             },
             3011,
             TOKEN_VALUE,
+            || panic!("a shared stack is not asked"),
             |_| panic!("a shared stack is not asked"),
             |_| panic!("a shared stack is not changed"),
         );
         assert_eq!(given, Given::Nothing);
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    /**
+    The plan endpoint the Learning agent is given is dialled by number, so it still resolves after the
+    cluster restarts.
+
+    Measured on Docker Desktop: given `127.0.0.1`, the CLI wrote `host.k3d.internal`, which k3s drops
+    from CoreDNS on every cluster start (k3d-io/k3d#1221), and every Learning call failed with
+    "Connection error.". The CLI rewrites only `localhost`, `localhost.`, `[::1]`,
+    `host.docker.internal` and `127.*` (`localModelEndpoint` in the pinned CLI's `local-values.ts`)
+    and passes anything else through, so the host here is what the pod dials.
+    */
+    #[test]
+    fn a_plan_endpoint_is_an_address_the_cluster_reaches_without_its_dns() {
+        for credential in [
+            ModelCredential::ChatGptPlan { store: "{}".into() },
+            ModelCredential::ClaudePlan { token: "t".into() },
+        ] {
+            let Learning::Model(file) = config(credential) else {
+                panic!("a plan gets a model")
+            };
+            let base = file["baseUrl"].as_str().unwrap();
+            let host = base
+                .strip_prefix("http://")
+                .and_then(|rest| rest.split(':').next())
+                .unwrap();
+            let ip: std::net::Ipv4Addr = host.parse().expect("a number, never a name");
+            assert!(!ip.is_loopback(), "{base} would be the pod itself");
+            for rewritten in ["localhost", "localhost.", "[::1]", "host.docker.internal"] {
+                assert_ne!(host, rewritten);
+            }
+        }
+    }
+
+    /// `getent ahostsv4 host.docker.internal` as it answers inside a container on Docker Desktop and
+    /// on a Podman machine.
+    #[test]
+    fn this_machines_address_is_read_from_what_the_engine_gives_containers() {
+        assert_eq!(
+            host_gateway_in(
+                "192.168.65.254  STREAM host.docker.internal\n192.168.65.254  DGRAM  host.docker.internal\n"
+            ),
+            Some(DOCKER_DESKTOP_HOST)
+        );
+        assert_eq!(
+            host_gateway_in("192.168.127.254 STREAM host.docker.internal\n"),
+            Some(std::net::Ipv4Addr::new(192, 168, 127, 254))
+        );
+        assert_eq!(
+            host_gateway_in("127.0.0.1 STREAM host.docker.internal\n"),
+            None
+        );
+        assert_eq!(host_gateway_in(""), None);
+        assert_eq!(host_gateway_in("getent: not found"), None);
     }
 
     #[test]

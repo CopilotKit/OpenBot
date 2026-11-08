@@ -241,6 +241,8 @@ export type LearningRunSummary = {
   proposals: number | null;
   insights: number | null;
   failureCode: string | null;
+  /** Why a failed run stopped, said for the person, with what to do. Null or absent unless it failed. */
+  failure?: string | null;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;

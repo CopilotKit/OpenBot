@@ -204,7 +204,10 @@ import {
   learningSetupInstructions,
 } from "./learning/ensure-container";
 import { createInspectorLearningReader } from "./learning/inspector";
-import { learningModelEndpointFor } from "./learning/model-endpoint";
+import {
+  createLearningModelCalls,
+  learningModelEndpointFor,
+} from "./learning/model-endpoint";
 import { learningModelUnavailable } from "./learning/routes";
 import { createLearningPeople } from "./learning/people";
 import {
@@ -783,6 +786,15 @@ const storedApprovals = createApprovalStore(database);
 // Before anything reads the model environment: blank base URLs removed, Anthropic given its `/v1`.
 normalizeModelBaseUrls();
 const runtimeModel = runtimeModelForEnvironment(tenantPackage.model);
+/**
+ * Where local Intelligence's Learning thinks on the person's plan, with a record of what became of
+ * each call so Settings can say why a run failed. Absent off a plan or without Desktop's secret.
+ */
+const learningModelEndpoint = learningModelEndpointFor(
+  runtimeModel.plan,
+  process.env.OPENBOT_LEARNING_MODEL_TOKEN,
+  createLearningModelCalls(),
+);
 // And before any Bot's model is resolved: behind a gateway, the API that model takes tools on (chooseOpenAIApi).
 if (chooseOpenAIApi(runtimeModel) === "responses")
   console.info(
@@ -3131,12 +3143,12 @@ const app = createApp(
           },
         }
       : {}),
-    learningModel: learningModelEndpointFor(
-      runtimeModel.plan,
-      process.env.OPENBOT_LEARNING_MODEL_TOKEN,
-    ),
+    learningModel: learningModelEndpoint,
     personalLearning: {
       store: learningSharingStore,
+      ...(learningModelEndpoint?.calls
+        ? { modelCalls: learningModelEndpoint.calls }
+        : {}),
       approvals: skillApprovalStore,
       autoApprover,
       skillsOf: (userId) =>

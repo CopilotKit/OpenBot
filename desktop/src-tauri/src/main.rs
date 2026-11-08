@@ -2911,6 +2911,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
     preparation::save_selected_root(&config, &root)?;
     give_learning_its_model(
         root.clone(),
+        found.clone(),
         credential,
         ports.server,
         secrets
@@ -2934,6 +2935,7 @@ again. The CLI takes its turn with the window's own calls (`local_eval::one_at_a
 */
 fn give_learning_its_model(
     root: PathBuf,
+    engine: engine::Address,
     credential: openbot_env::ModelCredential,
     server_port: u16,
     token: String,
@@ -2946,6 +2948,7 @@ fn give_learning_its_model(
             &credential,
             server_port,
             &token,
+            || stack::host_gateway_ipv4(&engine, &root),
             |stack| local_eval::run_installed(&attempt, local_eval::Action::Status, stack),
             |file| local_eval::configure_learning_model_installed(&attempt, &root, file),
         );

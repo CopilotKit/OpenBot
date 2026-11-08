@@ -887,7 +887,10 @@ export function createLearningRoutes(
     const containerId = scope.target.containerId;
     try {
       const runs = await manage.listLearningRuns({ containerId });
-      return context.json({ containerId, runs: runs.map(runSummary) });
+      return context.json({
+        containerId,
+        runs: runs.map((run) => runSummary(run)),
+      });
     } catch (error) {
       const failure = learningFailure(error, dependencies.modelUnavailable);
       return context.json({ error: failure.error }, failure.status);

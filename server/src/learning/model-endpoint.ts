@@ -39,15 +39,54 @@ export type LearningModelEndpoint = {
   plan: PlanModelConfig;
   /** The per-installation secret the Learning agent sends as its key. */
   token: string;
+  /** What became of each call, so a failed run can say why (`review.ts` `runFailure`). */
+  calls?: LearningModelCalls;
 };
 
 /** The endpoint, when this deployment answers on a plan and Desktop minted Learning's secret. */
 export function learningModelEndpointFor(
   plan: PlanModelConfig | undefined,
   token: string | undefined,
+  calls?: LearningModelCalls,
 ): LearningModelEndpoint | undefined {
   const secret = token?.trim();
-  return plan && secret ? { plan, token: secret } : undefined;
+  return plan && secret
+    ? { plan, token: secret, ...(calls ? { calls } : {}) }
+    : undefined;
+}
+
+/**
+ * What became of one call to the endpoint. Intelligence keeps only a code for a failed run, never the
+ * agent's own error, so this is how Settings can tell a Learning agent that never reached OpenBot from
+ * a plan that needs signing in again.
+ */
+export type LearningModelCallOutcome =
+  | "answered"
+  | "sign-in"
+  | "unanswered"
+  | "refused";
+
+export type LearningModelCalls = {
+  record: (outcome: LearningModelCallOutcome) => void;
+  /** The outcomes recorded between two instants, in milliseconds since the epoch. */
+  between: (from: number, to: number) => LearningModelCallOutcome[];
+};
+
+/** This server's record of the endpoint's recent calls, in memory: a restart starts it again. */
+export function createLearningModelCalls(
+  now: () => number = Date.now,
+): LearningModelCalls {
+  const kept: { at: number; outcome: LearningModelCallOutcome }[] = [];
+  return {
+    record: (outcome) => {
+      kept.push({ at: now(), outcome });
+      if (kept.length > 500) kept.splice(0, kept.length - 500);
+    },
+    between: (from, to) =>
+      kept
+        .filter((call) => call.at >= from && call.at <= to)
+        .map((call) => call.outcome),
+  };
 }
 
 const text = z.union([
@@ -206,11 +245,14 @@ function refused(status: 400 | 401 | 502, error: string): Response {
 }
 
 /** Why the plan's harness could not answer, in words the Learning run records. */
-function failureOf(error: unknown): Response {
-  if (
-    error instanceof Error &&
-    error.name === "OpenBotModelAuthenticationError"
-  )
+function failureOf(
+  error: unknown,
+  record: (outcome: LearningModelCallOutcome) => void,
+): Response {
+  const signIn =
+    error instanceof Error && error.name === "OpenBotModelAuthenticationError";
+  record(signIn ? "sign-in" : "unanswered");
+  if (signIn)
     return refused(
       401,
       "The model plan OpenBot is signed in to needs signing in again.",
@@ -246,10 +288,13 @@ function chunk(
 export function createLearningModelHandler(
   endpoint: LearningModelEndpoint,
 ): (request: Request) => Promise<Response> {
+  const record = endpoint.calls?.record ?? (() => {});
   return async (incoming) => {
     const offered = incoming.headers.get("authorization") ?? "";
-    if (!sameToken(offered, `Bearer ${endpoint.token}`))
+    if (!sameToken(offered, `Bearer ${endpoint.token}`)) {
+      record("refused");
       return refused(401, "This endpoint answers OpenBot's Learning only.");
+    }
 
     let body: ChatRequest;
     try {
@@ -317,7 +362,7 @@ export function createLearningModelHandler(
       }
     } catch (error) {
       finish();
-      return failureOf(error);
+      return failureOf(error, record);
     }
 
     const completion: Completion = {
@@ -358,10 +403,11 @@ export function createLearningModelHandler(
                 : "stop";
         }
       } catch (error) {
-        return failureOf(error);
+        return failureOf(error, record);
       } finally {
         finish();
       }
+      record("answered");
       return Response.json(
         {
           ...completion,
@@ -438,9 +484,10 @@ export function createLearningModelHandler(
             }
           }
           send("data: [DONE]\n\n");
+          record("answered");
         } catch (error) {
           // The OpenAI client the Learning agent runs on raises an `error` event as the call's error.
-          const answer = (await failureOf(error).json()) as unknown;
+          const answer = (await failureOf(error, record).json()) as unknown;
           send(`data: ${JSON.stringify(answer)}\n\n`);
         } finally {
           finish();

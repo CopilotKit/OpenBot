@@ -20,10 +20,13 @@ import {
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { Hono } from "hono";
 import {
+  createLearningModelCalls,
   LEARNING_MODEL_ROUTE,
+  type LearningModelCalls,
   learningModelEndpointFor,
   mountLearningModelEndpoint,
 } from "../src/learning/model-endpoint";
+import { runFailure } from "../src/learning/review";
 import { clearDesktopConnectionFailure } from "../src/desktop-connection-failure";
 
 const LEARNING_SECRET = "per-install-learning-secret";
@@ -84,7 +87,11 @@ function planHarness(steps: Record<string, unknown>[][]) {
 }
 
 /** OpenBot's server with the Learning endpoint, on the plan whose harness is at `harness`. */
-function openBot(provider: "chatgpt" | "claude", harness: URL) {
+function openBot(
+  provider: "chatgpt" | "claude",
+  harness: URL,
+  calls?: LearningModelCalls,
+) {
   const app = new Hono();
   const endpoint = new URL(harness);
   if (provider === "claude") endpoint.pathname = "/model";
@@ -93,6 +100,7 @@ function openBot(provider: "chatgpt" | "claude", harness: URL) {
     learningModelEndpointFor(
       { provider, endpoint, token: DEPLOYMENT_TOKEN },
       LEARNING_SECRET,
+      calls,
     ),
   );
   const server = Bun.serve({
@@ -327,4 +335,86 @@ test("a plan that needs signing in again is said as that, not as a broken stream
   expect(answer.errorMessage).toContain(
     "The model plan OpenBot is signed in to needs signing in again.",
   );
+});
+
+/**
+ * Intelligence keeps a failed run's code and never the Learning agent's error, so Settings says why a
+ * run failed from the code and from what reached this endpoint while it ran. The codes are the ones
+ * Intelligence's `learning-agent-client.ts` and planner record.
+ */
+test("a failed run says why, from what reached OpenBot while it ran", async () => {
+  const run = {
+    status: "failed" as const,
+    failureCode: "BatchInsightAgentFailed",
+    createdAt: "2026-11-08T10:00:00.000Z",
+    startedAt: "2026-11-08T10:00:01.000Z",
+    completedAt: "2026-11-08T10:05:00.000Z",
+  };
+  const during = Date.parse("2026-11-08T10:02:00.000Z");
+  const record = (
+    ...outcomes: Parameters<LearningModelCalls["record"]>[0][]
+  ) => {
+    const calls = createLearningModelCalls(() => during);
+    for (const outcome of outcomes) calls.record(outcome);
+    return calls;
+  };
+
+  // What the live check met: the agent's every call failed with "Connection error." and none
+  // reached OpenBot.
+  expect(runFailure(run, record())).toBe(
+    "Learning couldn't reach OpenBot to use your model plan. Quit OpenBot and open it again, then choose Learn now.",
+  );
+  expect(runFailure(run, record("answered", "sign-in"))).toBe(
+    "Your model plan needs signing in again. Sign in to it in OpenBot, then choose Learn now.",
+  );
+  expect(runFailure(run, record("refused"))).toBe(
+    "Learning couldn't sign in to OpenBot. Quit OpenBot and open it again, then choose Learn now.",
+  );
+  expect(runFailure(run, record("unanswered"))).toBe(
+    "Your model plan didn't answer Learning. Try Learn now again in a few minutes.",
+  );
+  // A call from before the run is not this run's.
+  const earlier = createLearningModelCalls(() =>
+    Date.parse("2026-11-08T09:00:00.000Z"),
+  );
+  earlier.record("sign-in");
+  expect(runFailure(run, earlier)).toContain("couldn't reach OpenBot");
+
+  // On a key, Learning never calls OpenBot.
+  expect(runFailure(run)).toBe(
+    "Learning's model didn't finish. Check that your model key works and has credit, then choose Learn now.",
+  );
+  expect(runFailure({ ...run, failureCode: "QueueDeadLettered" })).toBe(
+    "Learning was stopped before it finished. Choose Learn now to try again.",
+  );
+  expect(
+    runFailure({ ...run, status: "succeeded", failureCode: null }),
+  ).toBeNull();
+});
+
+test("the endpoint records what became of each call", async () => {
+  const harness = planHarness([
+    [
+      { type: "TEXT_MESSAGE_START", messageId: "m", role: "assistant" },
+      { type: "TEXT_MESSAGE_CONTENT", messageId: "m", delta: "ok" },
+      { type: "TEXT_MESSAGE_END", messageId: "m" },
+    ],
+    [
+      {
+        type: "RUN_ERROR",
+        message: "refresh token was revoked",
+        code: "OPENBOT_MODEL_AUTH_REQUIRED",
+      },
+    ],
+  ]);
+  const calls = createLearningModelCalls();
+  const base = openBot("chatgpt", harness.url, calls);
+  await learningAgent(base, LEARNING_SECRET, "chatgpt-plan")(context());
+  await learningAgent(base, LEARNING_SECRET, "chatgpt-plan")(context());
+  await learningAgent(base, "a-guess", "chatgpt-plan")(context());
+  expect(calls.between(0, Date.now())).toEqual([
+    "answered",
+    "sign-in",
+    "refused",
+  ]);
 });
