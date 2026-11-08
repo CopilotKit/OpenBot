@@ -1,16 +1,27 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { Streamdown } from "streamdown";
+import {
+  QuestionNotice,
+  type WaitingQuestion,
+} from "@/components/approvals/question-notice";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import {
   MessageContent,
   MessageHeader,
   Message as MessageRow,
 } from "@/components/ui/message";
+import { agentListQueryOptions } from "@/lib/agents/queries";
+import {
+  type ApprovalInboxData,
+  answerPersonQuestionMutationOptions,
+  approvalInboxOptions,
+} from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
   type GroupMessage,
+  groupKeys,
   groupQueryOptions,
   sendGroupMessageMutationOptions,
 } from "@/lib/groups";
@@ -31,6 +42,11 @@ import { TeamBotConsentCard } from "./team-bot-consent";
  * agent for a browser run to bind to; the person posts a message, the server runs every addressed
  * Bot through the ordinary headless AG-UI path, and this draws what each of them said, attributed.
  * `@Name` in the composer addresses one Bot; otherwise every Bot answers, one after another.
+ *
+ * A Bot here can ask the person something (`ask_person`), as it can in a conversation of its own.
+ * The question waits above the composer, and what the person sends while it does is their answer,
+ * unless they address another Bot. The server puts the answer in the transcript and runs the Bot
+ * that asked on it (`approvals/questions.ts`).
  */
 export function GroupChat({ channelId }: { channelId: string }) {
   const queryClient = useQueryClient();
@@ -45,6 +61,34 @@ export function GroupChat({ channelId }: { channelId: string }) {
   const working = messages.some(
     (message) => message.status === "running" || message.status === "queued",
   );
+
+  const inbox = useQuery(approvalInboxOptions());
+  const question = groupQuestion(inbox.data, channelId);
+  // The Bot whose conversation it is: for a hand-off, the one that handed the work on.
+  const askerId = question?.conversationBotId ?? question?.botId;
+  const asker = useQuery(agentListQueryOptions()).data?.find(
+    (bot) => bot.id === askerId,
+  );
+  const answer = useMutation(answerPersonQuestionMutationOptions(queryClient));
+  const answerTo = async (text: string, asked: WaitingQuestion) => {
+    await answer.mutateAsync({ id: asked.id, response: text });
+    // The answer is in the transcript now, and the Bot's turn on it is queued.
+    await queryClient.invalidateQueries({
+      queryKey: groupKeys.detail(channelId),
+    });
+  };
+  /*
+   * The inbox is read every 10 s, and a Bot that asks ends its turn on the question. Read again the
+   * moment the Bots stop, so the question is above the composer when the reply that asks it is.
+   */
+  const wasWorking = useRef(working);
+  useEffect(() => {
+    if (wasWorking.current && !working)
+      void queryClient.invalidateQueries({
+        queryKey: approvalInboxOptions().queryKey,
+      });
+    wasWorking.current = working;
+  }, [working, queryClient]);
 
   /*
    * LAND AT THE BOTTOM BEFORE THE FIRST PAINT, THEN FOLLOW ONLY A READER WHO IS STILL THERE.
@@ -132,16 +176,41 @@ export function GroupChat({ channelId }: { channelId: string }) {
             {send.error.message}
           </p>
         ) : null}
+        {answer.error ? (
+          <p className="pb-2 text-sm text-destructive" role="alert">
+            {answer.error.message}
+          </p>
+        ) : null}
+        {/* The same drawer a conversation with one Bot draws its question in. */}
+        {question ? (
+          <div
+            className="mx-5 -mb-4 rounded-t-2xl border border-border border-b-0 bg-muted pb-4"
+            data-slot="composer-drawer"
+          >
+            <QuestionNotice
+              avatarSeed={asker?.avatarSeed || (askerId ?? question.id)}
+              botName={
+                (askerId && names.get(askerId)) || asker?.name || "A Bot"
+              }
+              onAnswered={(text) => answerTo(text, question)}
+              question={question}
+            />
+          </div>
+        ) : null}
         <Composer
           agents={toAgentOptions(bots)}
-          className="mt-auto w-full"
+          className="relative mt-auto w-full"
           commands={[]}
           compact
           disabled={bots.length === 0}
-          pending={send.isPending || working}
+          pending={send.isPending || answer.isPending || working}
           autoFocus
           onSubmit={async (draft) => {
             if (!draft.text) return;
+            if (question && (!draft.agentId || draft.agentId === askerId)) {
+              await answerTo(draft.text, question);
+              return;
+            }
             await send.mutateAsync({
               id: newId(),
               text: draft.text,
@@ -152,6 +221,17 @@ export function GroupChat({ channelId }: { channelId: string }) {
       </div>
     </div>
   );
+}
+
+/**
+ * The newest open question a Bot asked in this group, from an inbox read. Each Bot here asks from a
+ * thread of its own, so it is found by the conversation, not by a thread.
+ */
+export function groupQuestion(
+  inbox: ApprovalInboxData | undefined,
+  channelId: string,
+): WaitingQuestion | undefined {
+  return inbox?.questions.find((question) => question.channelId === channelId);
 }
 
 /** One attributed line: a person's bubble, and a Bot's named reply on the left. */
