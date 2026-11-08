@@ -164,7 +164,7 @@ test("closed is the default: Only my Bots is checked and your skills are listed 
     "false",
   );
   expect(view.getByText("Your skills")).toBeTruthy();
-  expect(view.getByText("refund-order")).toBeTruthy();
+  expect(view.getByText("Refund order")).toBeTruthy();
   expect(view.queryByRole("switch")).toBeNull();
 });
 
@@ -174,8 +174,8 @@ test("Your skills shows in every sharing mode", async () => {
     answer = { ...answer, mode };
     const view = draw();
     await view.findByText("Your skills");
-    expect(view.getByText("refund-order")).toBeTruthy();
-    expect(view.getByText("close-ticket")).toBeTruthy();
+    expect(view.getByText("Refund order")).toBeTruthy();
+    expect(view.getByText("Close ticket")).toBeTruthy();
     expect(view.queryAllByRole("switch")).toHaveLength(
       mode === "choose" ? 2 : 0,
     );
@@ -221,10 +221,10 @@ test("under The skills I choose, each skill in your space has a switch that open
   const view = draw();
   await view.findByText("Your skills");
   const refund = view.getByRole("switch", {
-    name: "Open refund-order to everyone",
+    name: "Open Refund order to everyone",
   });
   const close = view.getByRole("switch", {
-    name: "Open close-ticket to everyone",
+    name: "Open Close ticket to everyone",
   });
   expect(refund.getAttribute("aria-checked")).toBe("false");
   expect(close.getAttribute("aria-checked")).toBe("true");
@@ -245,7 +245,7 @@ test("under The skills I choose, each skill in your space has a switch that open
   await waitFor(() =>
     expect(
       view
-        .getByRole("switch", { name: "Open refund-order to everyone" })
+        .getByRole("switch", { name: "Open Refund order to everyone" })
         .getAttribute("aria-checked"),
     ).toBe("true"),
   );
@@ -316,10 +316,10 @@ test("a choice made before sharing was turned off says it applies again, and an 
     "An admin hasn't turned on sharing skills with every Bot, so only the Bots you use draw on yours. Your choice below applies again if an admin turns it on.",
   );
   const refund = view.getByRole("switch", {
-    name: "Open refund-order to everyone",
+    name: "Open Refund order to everyone",
   });
   const close = view.getByRole("switch", {
-    name: "Open close-ticket to everyone",
+    name: "Open Close ticket to everyone",
   });
   expect(refund.hasAttribute("data-disabled")).toBe(true);
   expect(close.hasAttribute("data-disabled")).toBe(false);
@@ -358,13 +358,13 @@ test("each of Your skills opens its SKILL.md", async () => {
   await view.findByText("Your skills");
   // Toggling the switch does not open the Skill.
   fireEvent.click(
-    view.getByRole("switch", { name: "Open refund-order to everyone" }),
+    view.getByRole("switch", { name: "Open Refund order to everyone" }),
   );
   await waitFor(() => expect(sent).toHaveLength(1));
   expect(fetched).toEqual([]);
   expect(view.queryByText(/Step one: look up the order/)).toBeNull();
   // Pressing the row does.
-  fireEvent.click(view.getByRole("button", { name: /refund-order/ }));
+  fireEvent.click(view.getByRole("button", { name: /Refund order/ }));
   await view.findByText(/Step one: look up the order/);
   expect(fetched).toEqual(["/api/settings/learning/skills/refund-order"]);
 });
@@ -374,7 +374,7 @@ test("pressing a Your skills row opens its SKILL.md where there is no switch", a
   const view = draw();
   await view.findByText("Your skills");
   expect(view.queryByRole("switch")).toBeNull();
-  fireEvent.click(view.getByRole("button", { name: /refund-order/ }));
+  fireEvent.click(view.getByRole("button", { name: /Refund order/ }));
   await view.findByText(/Step one: look up the order/);
   expect(fetched).toEqual(["/api/settings/learning/skills/refund-order"]);
 });
@@ -426,15 +426,15 @@ test("under Everyone's Bots, a skill waiting for an admin has one control: Ask t
   };
   const posts = recordPosts();
   const view = draw();
-  await view.findByText("refund-order");
+  await view.findByText("Refund order");
   expect(view.queryAllByRole("switch")).toHaveLength(0);
   expect(view.getAllByRole("button", { name: "Ask to share" })).toHaveLength(1);
   expect(view.getByText("Asked to share")).toBeTruthy();
-  const refundRow = view.getByText("refund-order").closest("button");
+  const refundRow = view.getByText("Refund order").closest("button");
   expect(refundRow?.textContent).toContain("Only your Bots use it.");
   // Scoped to the row itself: the title div's own closest("div") would be the title.
   const reopenRow = view
-    .getByText("reopen-ticket")
+    .getByText("Reopen ticket")
     .closest('[data-slot="item"]') as HTMLElement;
   expect(reopenRow.textContent).toContain("Reopens a ticket.");
   expect(reopenRow.textContent).not.toContain("Only your Bots use it.");
@@ -463,7 +463,7 @@ test("under The skills I choose, every skill keeps its switch, including ones wa
     ],
   };
   const view = draw();
-  await view.findByText("refund-order");
+  await view.findByText("Refund order");
   expect(view.getAllByRole("switch")).toHaveLength(3);
   expect(view.queryByRole("button", { name: "Ask to share" })).toBeNull();
   expect(view.getByText("Asked to share")).toBeTruthy();
@@ -479,7 +479,7 @@ test("an open skill waiting for an admin can be closed", async () => {
   };
   const view = draw();
   const toggle = await view.findByRole("switch", {
-    name: "Open close-ticket to everyone",
+    name: "Open Close ticket to everyone",
   });
   expect(toggle.getAttribute("aria-checked")).toBe("true");
   fireEvent.click(toggle);
@@ -503,7 +503,7 @@ test("switching on a skill waiting for an admin opens it and asks to share", asy
   const posts = recordPosts();
   const view = draw();
   fireEvent.click(
-    await view.findByRole("switch", { name: "Open refund-order to everyone" }),
+    await view.findByRole("switch", { name: "Open Refund order to everyone" }),
   );
   await waitFor(() =>
     expect(posts).toEqual([
@@ -528,7 +528,7 @@ test("a skill already asked about is switched on without a second request", asyn
   const posts = recordPosts();
   const view = draw();
   fireEvent.click(
-    await view.findByRole("switch", { name: "Open refund-order to everyone" }),
+    await view.findByRole("switch", { name: "Open Refund order to everyone" }),
   );
   await waitFor(() => expect(sent).toHaveLength(1));
   await new Promise((resolve) => setTimeout(resolve, 20));
@@ -577,7 +577,7 @@ test("the personal edition lists Your skills with no sharing choice and no switc
   };
   const view = draw();
   await view.findByText("Your skills");
-  await view.findByText("refund-order");
+  await view.findByText("Refund order");
   expect(view.queryByText("Who else's Bots use your skills")).toBeNull();
   expect(choices(view)).toHaveLength(0);
   expect(view.queryAllByRole("switch")).toHaveLength(0);
@@ -586,7 +586,7 @@ test("the personal edition lists Your skills with no sharing choice and no switc
   expect(
     view.queryByText(/Only the Bots you use|Open a skill to let/),
   ).toBeNull();
-  fireEvent.click(view.getByRole("button", { name: /refund-order/ }));
+  fireEvent.click(view.getByRole("button", { name: /Refund order/ }));
   await view.findByText(/Step one: look up the order/);
   expect(fetched).toEqual(["/api/settings/learning/skills/refund-order"]);
 });

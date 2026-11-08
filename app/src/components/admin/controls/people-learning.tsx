@@ -15,6 +15,7 @@ import {
 } from "@/components/layout/page-shell";
 import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
 import { ProposalDialog } from "@/components/learning/proposal-dialog";
+import { skillTitle } from "@/lib/learning/display";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -280,7 +281,9 @@ export function PeopleProposalsSection() {
                       <IconSparkles />
                     </ItemMedia>
                     <ItemContent>
-                      <ItemTitle>{proposal.title}</ItemTitle>
+                      <ItemTitle>
+                        {skillTitle(proposal.title, proposal.description)}
+                      </ItemTitle>
                       <ItemDescription>{person.name}</ItemDescription>
                     </ItemContent>
                     <ItemActions>
@@ -390,7 +393,7 @@ export function SharingRequestsSection() {
                   <IconShare />
                 </ItemMedia>
                 <ItemContent>
-                  <ItemTitle>{request.skillName}</ItemTitle>
+                  <ItemTitle>{skillTitle(request.skillName)}</ItemTitle>
                   <ItemDescription>{request.name}</ItemDescription>
                 </ItemContent>
                 <ItemActions>
@@ -447,6 +450,7 @@ export function SharingRequestsSection() {
           ) : undefined
         }
         name={open?.skillName ?? null}
+        title={open ? skillTitle(open.skillName) : undefined}
         onClose={close}
         source={{ kind: "person", userId: open?.userId ?? "" }}
       />

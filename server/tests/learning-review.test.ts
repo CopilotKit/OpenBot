@@ -6,6 +6,7 @@ import {
   type LearningManagement,
   readProposal,
   readProposals,
+  readSkillRecordings,
   reviewProposal,
 } from "../src/learning/review";
 import { fakeIntelligence, RUNTIME_KEY } from "./support/intelligence-learning";
@@ -132,6 +133,110 @@ describe("readProposal", () => {
         item.kind === "recording" ? [item.title] : [],
       ),
     ).toEqual([null, null, null]);
+  });
+});
+
+describe("readSkillRecordings", () => {
+  /** A reviewed proposal as Intelligence lists it: its title is the SKILL.md name of the skill it publishes. */
+  const listed = (
+    id: string,
+    title: string,
+    status: "approved" | "rejected" | "pending_review",
+    operation: "add" | "update" | "remove" = "add",
+  ) => ({ ...candidate, id, title, status, operation }) as unknown as Candidate;
+  const trajectory = (id: string, present = true) => ({
+    kind: "trajectory",
+    trajectoryId: id,
+    trajectoryPresent: present,
+    unavailable: null,
+    eventCount: 1,
+    events: [{ name: "click" }],
+  });
+
+  function intelligence(
+    candidates: Candidate[],
+    evidenceOf: Record<string, unknown[]>,
+  ) {
+    const opened: string[] = [];
+    const manage = {
+      listLearningCandidates: async () => candidates,
+      getLearningCandidate: async ({
+        candidateId,
+      }: {
+        candidateId: string;
+      }) => {
+        opened.push(candidateId);
+        return {
+          ...detail,
+          id: candidateId,
+          supportingInsights: [
+            { id: `${candidateId}-insight`, statement: "", impact: "" },
+          ],
+        };
+      },
+      getLearningInsightEvidence: async ({
+        insightId,
+      }: {
+        insightId: string;
+      }) => {
+        const found = evidenceOf[insightId.replace(/-insight$/, "")];
+        if (!found) throw new Error("unreadable");
+        return found;
+      },
+    } as unknown as LearningManagement;
+    return { manage, opened };
+  }
+
+  test("reads the recordings of the approved proposals that published the skill, newest first", async () => {
+    const { manage, opened } = intelligence(
+      [
+        listed("pending", "example-nav", "pending_review"),
+        listed("update", "example-nav", "approved", "update"),
+        listed("other-skill", "another-skill", "approved"),
+        listed("rejected", "example-nav", "rejected"),
+        listed("first", "example-nav", "approved"),
+      ],
+      {
+        update: [trajectory("rec-b"), entries[0]],
+        first: [trajectory("rec-a"), trajectory("rec-b", false)],
+      },
+    );
+    expect(await readSkillRecordings(manage, "space", "example-nav")).toEqual([
+      { id: "rec-b", available: true },
+      { id: "rec-a", available: true },
+    ]);
+    expect(opened).toEqual(["update", "first"]);
+  });
+
+  test("stops at the skill's last removal: a skill learned again starts over", async () => {
+    const { manage } = intelligence(
+      [
+        listed("again", "example-nav", "approved"),
+        listed("removed", "example-nav", "approved", "remove"),
+        listed("before", "example-nav", "approved"),
+      ],
+      { again: [trajectory("rec-new")], before: [trajectory("rec-old")] },
+    );
+    expect(await readSkillRecordings(manage, "space", "example-nav")).toEqual([
+      { id: "rec-new", available: true },
+    ]);
+  });
+
+  test("a skill with no approved proposal, or evidence that can't be read, has no recordings", async () => {
+    const { manage } = intelligence(
+      [listed("pending", "example-nav", "pending_review")],
+      {},
+    );
+    expect(await readSkillRecordings(manage, "space", "example-nav")).toEqual(
+      [],
+    );
+    const unreadable = intelligence(
+      [listed("approved", "example-nav", "approved")],
+      {},
+    );
+    expect(
+      await readSkillRecordings(unreadable.manage, "space", "example-nav"),
+    ).toEqual([]);
   });
 });
 

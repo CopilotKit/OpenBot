@@ -9,6 +9,7 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import type {
+  LearnedSkillDetail,
   LearningSettings,
   PersonalReview,
 } from "@openbot/shared/learning";
@@ -21,6 +22,7 @@ import { users } from "../src/db/schema/core";
 import { learningSkillApprovals } from "../src/db/schema/learning";
 import { currentEdition, setEdition } from "../src/edition";
 import { createSkillApprovalStore } from "../src/learning/approvals";
+import { createAutoApprover } from "../src/learning/auto-approve";
 import { runtimeKeyClient } from "../src/learning/auto-assign";
 import { personalLearningContainerId } from "../src/learning/personal-space";
 import type { LearningManagement } from "../src/learning/review";
@@ -33,9 +35,11 @@ import {
 } from "../src/learning/sharing-routes";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import {
+  EVIDENCE,
   type FakeIntelligence,
   fakeIntelligence,
   RUNTIME_KEY,
+  SKILL_MD,
 } from "./support/intelligence-learning";
 
 /*
@@ -814,6 +818,117 @@ describe("Your Skills in the personal edition", () => {
       )
     ).json()) as { skills: unknown[] };
     expect(body.skills).toEqual([]);
+  });
+});
+
+describe("the recordings a published skill was learned from", () => {
+  /*
+   * Intelligence publishes a skill with only its name, description and files. Which recordings it came from is read
+   * through the proposal that published it, whether the person approved it or OpenBot did automatically.
+   */
+  const RECORDING = EVIDENCE.flatMap((entry) =>
+    "kind" in entry ? [entry.trajectoryId] : [],
+  )[0] as string;
+  const published: PersonalLearningRouteDeps["containerSkills"] = async (id) =>
+    id === personalLearningContainerId(ada)
+      ? {
+          skills: [
+            {
+              name: "Refund triage",
+              description: "Sort refund requests.",
+              files: [{ path: "SKILL.md", text: SKILL_MD }],
+            },
+          ],
+        }
+      : { unavailable: "unavailable" };
+  const asked: string[][] = [];
+  const recordingTitles: PersonalLearningRouteDeps["recordingTitles"] = async (
+    userId,
+    ids,
+  ) => {
+    asked.push(ids);
+    // Only the person's own recordings have a title to give; another id is left out.
+    return new Map(
+      userId === ada && ids.includes(RECORDING)
+        ? [[RECORDING, "Refund a late order"]]
+        : [],
+    );
+  };
+  const read = async (app: ReturnType<typeof review>) =>
+    (
+      (await (
+        await app.request(`/skills/${encodeURIComponent("Refund triage")}`)
+      ).json()) as { skill: LearnedSkillDetail }
+    ).skill;
+
+  test("a skill the person approved names the recording it came from", async () => {
+    setEdition("personal");
+    asked.length = 0;
+    const app = review({ containerSkills: published, recordingTitles });
+    // Not approved yet: nothing has published it, so it has no recordings.
+    expect((await read(app)).recordings).toEqual([]);
+    const approved = await app.request(
+      `/proposals/${PROPOSAL}/approve?container=${personalLearningContainerId(ada)}`,
+      { method: "POST" },
+    );
+    expect(approved.status).toBe(200);
+    const skill = await read(app);
+    expect(skill.recordings).toEqual([
+      { id: RECORDING, title: "Refund a late order", available: true },
+    ]);
+    expect(asked.at(-1)).toEqual([RECORDING]);
+    // The text the Bot loads is what Intelligence published.
+    expect(skill.files).toEqual([{ path: "SKILL.md", text: SKILL_MD }]);
+  });
+
+  test("a skill approved automatically names it too", async () => {
+    setEdition("personal");
+    let manage: LearningManagement | undefined;
+    const app = review({
+      containerSkills: published,
+      recordingTitles,
+      wrapManage: (inner) => {
+        manage = inner;
+        return inner;
+      },
+      autoApprover: {
+        sweep: () =>
+          createAutoApprover({
+            manage: manage as LearningManagement,
+            enabled: async () => true,
+            sources: async () => [
+              {
+                containerId: personalLearningContainerId(ada),
+                kind: "recordings",
+                label: "From your recordings",
+              },
+            ],
+            approvals,
+            userId: ada,
+          }).sweep(),
+      },
+    });
+    // Opening Settings, Learning runs the sweep, as the page does.
+    const swept = (await (
+      await app.request("/review")
+    ).json()) as PersonalReview;
+    expect(swept.approved).toBe(1);
+    expect((await read(app)).recordings).toEqual([
+      { id: RECORDING, title: "Refund a late order", available: true },
+    ]);
+  });
+
+  test("a recording that is not the person's is left out", async () => {
+    setEdition("personal");
+    const app = review({
+      containerSkills: published,
+      recordingTitles: async () => new Map(),
+    });
+    await app.request(
+      `/proposals/${PROPOSAL}/approve?container=${personalLearningContainerId(ada)}`,
+      { method: "POST" },
+    );
+    expect((await read(app)).recordings).toEqual([]);
   });
 });
 

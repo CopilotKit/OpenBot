@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop keeps trying when GitHub stops sending the new version during an update. A
+  download that gets nothing for 30 seconds is tried again, six times in all with longer waits
+  between, for about four minutes. Before, three tries in a minute and a half gave up and put the
+  update back, though opening OpenBot again two minutes later downloaded it in seconds. A download
+  that keeps arriving is never cut off, however slow.
+- In the personal edition, an app's tools are named as a person would name them ("Get IMAP settings", not "Settings get imap"; "Fetch thread messages", not "Fetch message by thread id"; "Who am I"), each sentence says what the tool does ("Creates a new Gmail filter"), and a Bot's What it can do lists every app's tools the same way, so Routines reads "Complete goal, Create goal" and not "Marked a goal complete, Created a goal".
 - In the personal edition, a Bot's page names what runs it ("Runs on LangChain (LangGraph)") instead of the address of the harness OpenBot started for it, and its Pinned, Hidden, Reset and Delete rows no longer mention other people: Delete says you can still read your conversations with it.
 - In the personal edition, Settings, Setup says the Bot computer is Ready whenever the computer answers, including after a Bot has used it and its browser has closed. Before, it said "Not checked" and that a computer starts when a Bot first needs one.
 - In a narrow window, the sidebar closes when you pick a conversation, Bots, Connections, Teach a Bot, or an item in your account menu. Before, it stayed open over the page you opened until you clicked outside it.
