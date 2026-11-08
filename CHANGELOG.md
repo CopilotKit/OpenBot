@@ -8,6 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Teach a Bot: narration that can't hear you (no microphone) stays off after Stop until you turn it on, and "We're capturing your voice" shows only while a recording is hearing you.
 - Work apps are connected through OpenBot. Connections, an app's page, the app directory, chat
   connect cards and admin Plugins no longer name the connector provider ("Browse Composio" is now
   "Browse apps"). Admin pages still name the setting an admin sets, such as `COMPOSIO_API_KEY`.
