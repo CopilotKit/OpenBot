@@ -19,6 +19,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   paths), the release's `container-images.json`, Mac updater archives and source archive, and the
   Podman and Compose installers the app pins. Each release lists its images in
   `desktop-images.json`, written by the app's own code.
+- A Bot asked to read a day of Gmail reads all of it. Listing emails used to bring back each
+  message's raw MIME, tens of thousands of characters per email, so the answer was cut inside the
+  first message, the Bot could not page on, and a large page failed at Composio as too large. A
+  listing now asks Gmail for sender, recipients, subject, time, labels and snippet, 20 messages per
+  call with the page token to the next, and says how many of the matches the page holds; a message
+  or a thread read whole keeps each decoded body, Cc and Reply-To and drops the raw MIME. Any app's
+  answer that is still too long for a Bot is cut between
+  whole records, with the call that reads the rest, instead of mid-record ending "[truncated]".
 - OpenBot Desktop's Status window, Settings, This computer, Copy diagnostics and About name the version of the build that is installed, as the installer and Windows do: an internal build after 0.3.3 says `0.3.4-internal.892.g0c140734ecf0`, not 0.3.3. A release still says exactly its own version.
 - Activity, a conversation's steps and approvals name an app's tool in the words its page uses ("Get IMAP settings", not "Settings get imap"), and the app's page in the personal edition lists its tools in the order of those names.
 - After you answer an approval in a conversation, it shows the Bot working until the Bot has carried on and finished, and its reply arrives whole. If the Bot then needs another approval, it stops and asks in the conversation, and does nothing more until you decide. It used to look idle while the Bot was still going, could cut its reply off until the conversation was opened again, and could answer past an action you had not approved.
