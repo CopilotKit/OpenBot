@@ -218,7 +218,7 @@ describe("an app's page in the personal edition", () => {
       ],
     } as unknown as PluginServer;
     const view = draw("personal", [withTools]);
-    expect(await view.findByText("search")).toBeTruthy();
+    expect(await view.findByText("Search")).toBeTruthy();
     expect(view.getByText(/Every Bot can use these/)).toBeTruthy();
     expect(view.queryByRole("button", { name: "Grant tools…" })).toBeNull();
     expect(view.queryByText("By Bot")).toBeNull();
@@ -229,6 +229,118 @@ describe("an app's page in the personal edition", () => {
     const view = draw("personal", [notionServer]);
     const back = await view.findByRole("button", { name: /Connections/ });
     expect(back.getAttribute("href")).toBe("/connections");
+  });
+});
+
+/**
+ * Gmail as Browse apps adds it, with tools and descriptions as Composio lists them on main
+ * 0c140734: the Windows run showed the stored names and a documents sentence on this page.
+ */
+const gmailTool = (
+  name: string,
+  effect: "read" | "write",
+  description: string,
+) => ({
+  serverId: "composio-gmail",
+  name,
+  ref: `composio-gmail/${name}`,
+  description,
+  inputSchema: {},
+  effect,
+  destructive: false,
+  grantedTo: [],
+});
+const gmailServer = {
+  ...notionServer,
+  id: "composio-gmail",
+  title: "Gmail",
+  vendor: "Composio",
+  url: "composio://gmail",
+  summary: "",
+  provenance: "composio",
+  hasCredential: false,
+  dynamicClient: false,
+  authScheme: "OAUTH2",
+  accountMode: "personal",
+  sharedOnly: false,
+  tools: [
+    gmailTool(
+      "GMAIL_ADD_LABEL_TO_EMAIL",
+      "write",
+      "Adds and/or removes specified Gmail labels for a message; ensure `message_id` and all `label_ids` are valid (use 'listLabels' for custom label IDs).",
+    ),
+    gmailTool(
+      "GMAIL_GET_DRAFT",
+      "read",
+      "Retrieves a single Gmail draft by its ID. Use this to fetch and inspect draft content before sending via GMAIL_SEND_DRAFT. The format parameter controls the level of detail returned.",
+    ),
+    gmailTool(
+      "GMAIL_GET_PROFILE",
+      "read",
+      "Retrieves Gmail profile information (email address, aggregate messagesTotal/threadsTotal, historyId) for a user. messagesTotal counts individual emails; threadsTotal counts conversations.",
+    ),
+    gmailTool(
+      "GMAIL_LIST_MESSAGES",
+      "read",
+      "DEPRECATED: Use GMAIL_FETCH_EMAILS instead. Lists the messages in the user's mailbox.",
+    ),
+    gmailTool(
+      "GMAIL_SEND_EMAIL",
+      "write",
+      "Sends an email immediately through Gmail to specified To, Cc, or Bcc recipients, with a subject or body and optional attachments. Supports plain text or HTML and may append the configured Gmail signature; attachments are limited to 20 MiB in total before encoding.",
+    ),
+  ],
+} as unknown as PluginServer;
+
+describe("Gmail's page in the personal edition", () => {
+  test("names each tool in words, with what it does and whether it changes things", async () => {
+    const view = draw("personal", [gmailServer], "composio-gmail");
+    const add = await view.findByText("Add label to email");
+    const row = add.closest("[data-slot=item]") as HTMLElement;
+    expect(row.textContent).toContain(
+      "Adds and/or removes specified Gmail labels for a message.",
+    );
+    expect(row.textContent).toContain("changes things");
+    expect(view.getByText("Send email")).toBeTruthy();
+    expect(view.getByText("Get draft")).toBeTruthy();
+    expect(
+      view.getByText("Retrieves a single Gmail draft by its ID."),
+    ).toBeTruthy();
+    // A first sentence that names an id is left out, and the row keeps its words and its marker.
+    const profile = view
+      .getByText("Get profile")
+      .closest("[data-slot=item]") as HTMLElement;
+    expect(profile.textContent).toBe("Get profilereads");
+    expect(view.getAllByText("changes things")).toHaveLength(2);
+    expect(view.getAllByText("reads")).toHaveLength(3);
+
+    const text = view.container.textContent ?? "";
+    expect(text).not.toContain("GMAIL_");
+    expect(text).not.toMatch(/`|\w_\w|listLabels|historyId/);
+  });
+
+  test("says what connecting Gmail does, not a documents app's sentence", async () => {
+    const view = draw("personal", [gmailServer], "composio-gmail");
+    expect(
+      await view.findByText(
+        "Connect your Gmail account so your Bots can use it.",
+      ),
+    ).toBeTruthy();
+    const text = view.container.textContent ?? "";
+    expect(text).not.toContain("documents");
+    expect(text).not.toContain("connector");
+    expect(text).not.toContain("Composio");
+  });
+
+  test("team Admin keeps the stored names, and names Gmail's account", async () => {
+    const view = draw("team", [gmailServer], "composio-gmail");
+    expect(await view.findByText("GMAIL_ADD_LABEL_TO_EMAIL")).toBeTruthy();
+    expect(
+      view.getByText(
+        /Setup is complete without it, and it reaches only your own Gmail account\./,
+      ),
+    ).toBeTruthy();
+    expect(view.container.textContent).not.toContain("documents");
   });
 });
 
