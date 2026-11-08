@@ -3162,6 +3162,7 @@ const app = createApp(
       invalidate: () => openSkillIndex.invalidate(),
       sharingAllowed: skillSharingAllowed,
       manage: learningProbeIntelligence.experimental.learning,
+      modelUnavailable: learningModelUnavailable(process.env),
       recordingTitles: recorderExtension.recordingTitles,
       settings: learningSettings,
       scopesFor: async (actor) =>
