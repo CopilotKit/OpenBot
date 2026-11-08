@@ -1,11 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import { eq, inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import {
   learningSettings,
   learningThreadBindings,
 } from "../src/db/schema/learning";
+import { createLearningRuntime } from "../src/learning/runtime";
 import { createLearningSettingsStore } from "../src/learning/settings";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -138,6 +140,65 @@ describe("durable Learning settings", () => {
     await database
       .delete(learningSettings)
       .where(eq(learningSettings.id, "current"));
+  });
+
+  /*
+   * FOUND ON THE MAC: a build of an unmerged branch saved this row with an "autoApprove" key, and the
+   * Desktop was then put back to a main build that does not know it. Main's reader refused the whole
+   * row ("Stored learning settings are invalid."), and every chat run failed with "Failed to resolve
+   * Learning Container". Builds do go back (an update rolled back), so a key a newer build wrote is
+   * dropped and the ones this build knows are kept.
+   */
+  test("a row a newer build saved, with a key this build does not know, is read for the keys it does", async () => {
+    const newer = {
+      agents: {},
+      enabled: true,
+      autoApprove: true,
+      defaultTarget: { containerId: "openbot", pinnedBy: "a-newer-build" },
+    } as never;
+    await database
+      .insert(learningSettings)
+      .values({ id: "current", settings: newer })
+      .onConflictDoUpdate({
+        target: learningSettings.id,
+        set: { settings: newer },
+      });
+    expect(await createLearningSettingsStore(database).read()).toEqual({
+      enabled: true,
+      defaultTarget: { containerId: "openbot" },
+      agents: {},
+    });
+  });
+
+  test("a row that cannot be read never fails a chat run: the run goes ahead without Learning", async () => {
+    // Not a settings shape at all, as a corrupted row would be: the column's type cannot say it.
+    const broken = { enabled: "yes", defaultTarget: 7, agents: [] } as never;
+    await database
+      .insert(learningSettings)
+      .values({ id: "current", settings: broken })
+      .onConflictDoUpdate({
+        target: learningSettings.id,
+        set: { settings: broken },
+      });
+    const store = createLearningSettingsStore(database);
+    // An administrator reading the settings is still told.
+    await expect(store.read()).rejects.toThrow(
+      "Stored learning settings are invalid.",
+    );
+    const learning = createLearningRuntime({
+      store,
+      client: new CopilotKitIntelligence({ apiKey: "synthetic-never-sent" }),
+    });
+    const threadId = `broken-${randomUUID()}`;
+    threads.push(threadId);
+    expect(
+      await learning.containerForThread({
+        userId: "person",
+        threadId,
+        agentId: "bot",
+      }),
+    ).toBeUndefined();
+    expect(await learning.acquire("bot")).toBeUndefined();
   });
 
   test("two users independently bind the same supplied thread ID", async () => {

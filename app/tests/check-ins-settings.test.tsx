@@ -19,13 +19,14 @@ import type { ReactNode } from "react";
 import { CheckInsSection } from "@/components/settings/check-ins";
 import { ProactiveResearchSettings } from "@/components/suggestions/proactive-panel";
 import { authKeys } from "@/lib/auth/queries";
+import { deploymentKeys } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
 /*
  * The person's own switch for every Bot's check-ins, in Settings, Notifications, and what it says
- * when an admin turned check-ins off for them. Each Bot's own check-ins on its Memory page say the
- * same, since none of them runs while either is off.
+ * when an admin turned check-ins off for them. Each Bot's own check-ins (on its Memory page, or on
+ * What it can do in the personal edition) say the same, since none of them runs while either is off.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -137,6 +138,24 @@ test("turning check-ins off for all Bots saves it and says so", async () => {
     await view.findByText("Off. None of your Bots check in for you."),
   ).toBeTruthy();
   expect(toggle.getAttribute("aria-checked")).toBe("false");
+});
+
+test("in the personal edition, each Bot's own check-ins are on its What it can do page", async () => {
+  serving();
+  // No memory there, so no Memory page: see `offersMemory`.
+  queryClient.setQueryData(deploymentKeys.capabilities(), {
+    generativeUi: true,
+    selfHostBanner: false,
+    localEvaluation: true,
+    edition: "personal",
+  });
+  const view = await draw(<CheckInsSection />);
+  expect(
+    await view.findByText(
+      "On. Each Bot's own check-ins are on its What it can do page.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText(/Memory page/)).toBeNull();
 });
 
 test("turned off by an admin, the switch says who and can't be turned back on", async () => {

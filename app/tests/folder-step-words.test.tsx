@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { DECLINED_BY_PERSON } from "@openbot/shared/approval-outcomes";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
 import type { VisibleChatItem } from "../src/components/channels/chat-messages";
@@ -92,4 +93,83 @@ test("in a folded run, a blocked folder step is named for what was tried beside 
   });
   const { result: _blocked, ...running } = item;
   expect(stepDetails(running)).toMatchObject({ label: "Saving a file" });
+});
+
+/*
+ * FOUND ON THE MAC (main 3b400d2c1): with "Ask before making changes" on, the person pressed Deny on
+ * the conversation's own card for a folder edit. The file was not touched and the Bot said so, but
+ * the step read "Saved a file  notes.txt", done. The approval service answers a declined step with
+ * the sentence it tells the Bot, with no refusal marker, so the line took it for the tool's result.
+ * It reads as declined now, the way a Bot's own computer step does, live and when the conversation
+ * is opened again (the thread keeps the same answer).
+ */
+test("a folder change declined on the conversation's card reads as declined, not saved", () => {
+  const edit = JSON.stringify({
+    grantId: "host-grant-15407-1794112361547002000",
+    path: "notes.txt",
+    content: "FOLDER-EDITED-43",
+  });
+  const view = line("host_write_file", edit, DECLINED_BY_PERSON);
+  const text = view.container.textContent ?? "";
+  expect(text).toContain("Blocked: Save a file");
+  expect(text).toContain("notes.txt · You declined it.");
+  expect(text).not.toContain("Saved a file");
+  // The sentence written for the Bot is not what the person reads.
+  expect(text).not.toContain("Do not try this action");
+  view.unmount();
+
+  const command = line(
+    "host_run_command",
+    JSON.stringify({ grantId: "g", command: "wc -c notes.txt" }),
+    DECLINED_BY_PERSON,
+  );
+  expect(command.container.textContent).toContain("Blocked: Run a command");
+  expect(command.container.textContent).toContain("You declined it.");
+  expect(command.container.textContent).not.toContain("Ran a command");
+});
+
+test("in a folded run, a folder step declined on the card is Blocked, named for what was tried", () => {
+  const item: Extract<VisibleChatItem, { kind: "tool" }> = {
+    kind: "tool",
+    id: "d",
+    toolCall: {
+      id: "d",
+      type: "function",
+      function: { name: "host_write_file", arguments: write },
+    },
+    result: DECLINED_BY_PERSON,
+  };
+  expect(stepDetails(item)).toMatchObject({
+    refused: true,
+    label: "Save a file",
+  });
+  expect(stepDetails(item).output).toBe("You declined it.");
+});
+
+/*
+ * FOUND ON THE MAC: an opened folder step in a folded run listed its raw arguments, the grant's
+ * internal id first ("grantId  host-grant-74138-1794115092137885000"). What a person reads leaves
+ * it out; the path and the content stay.
+ */
+test("an opened folder step never lists the grant's internal id", () => {
+  const item: Extract<VisibleChatItem, { kind: "tool" }> = {
+    kind: "tool",
+    id: "s",
+    toolCall: {
+      id: "s",
+      type: "function",
+      function: {
+        name: "host_write_file",
+        arguments: JSON.stringify({
+          grantId: "host-grant-74138-1794115092137885000",
+          path: "notes.txt",
+          content: "FOLDER-EDITED-45",
+        }),
+      },
+    },
+    result: JSON.stringify({ ok: true }),
+  };
+  const { inputs } = stepDetails(item);
+  expect(inputs.map(([key]) => key)).toEqual(["path", "content"]);
+  expect(JSON.stringify(inputs)).not.toContain("host-grant");
 });

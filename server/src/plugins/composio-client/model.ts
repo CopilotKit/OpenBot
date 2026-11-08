@@ -666,6 +666,30 @@ export const REVOCABLE: VendorAccountStatus[] = [
 export const DIRECTORY_TTL_MS = 10 * 60 * 1000;
 
 /**
+ * The toolkits Composio publishes about ITSELF, which are left out of the directory entirely.
+ *
+ * Composio's catalogue lists its own tooling beside the apps it connects: "Composio" (its meta
+ * tools), "Composio Search" and "Browser Tool". None of them is an app a person works in, and each
+ * puts the connector provider's name in front of a person browsing for apps, which is the one word
+ * these screens are written not to say. Verified against the live catalogue, which publishes the
+ * three under exactly these slugs, each as a no-auth toolkit.
+ *
+ * DROPPED WHERE THE DIRECTORY IS READ, so every caller agrees: the admin picker and its search, the
+ * enable route's check (a hand-composed request for one is refused as not listed), and the chat's
+ * connect suggestions, which name an app nobody enabled out of this same directory. An app already
+ * enabled is untouched: its row, its grants and its calls never read the directory, so it stays
+ * in that deployment's enabled apps and keeps working until an administrator removes it.
+ *
+ * Slugs, never names: the slug is the only identifier Composio keeps stable. Exa and every other
+ * search or browser app stay, because they are third-party apps rather than Composio's own.
+ */
+export const VENDOR_OWN_TOOLKITS: ReadonlySet<string> = new Set([
+  "composio",
+  "composio_search",
+  "browser_tool",
+]);
+
+/**
  * The held catalogue as a copy nobody else holds, which is what makes handing it out safe.
  *
  * WHAT WAS HANDED OUT WAS THE CACHE ITSELF. One array of one set of row objects was returned to

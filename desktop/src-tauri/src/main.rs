@@ -5734,15 +5734,26 @@ async fn run_local_eval(
         let selected = shell.selected_root.lock().unwrap().clone();
         selected.unwrap_or_else(stack::default_root)
     };
-    let mut report = tauri::async_runtime::spawn_blocking(move || {
-        know_cli_engine(&root);
-        local_eval::run_installed(&attempt, action, &stack)
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        local_eval_answer(&root, &attempt, action, &stack)
     })
     .await
     .map_err(|_| local_eval::Failure::Spawn)??;
     learn_dashboards(&app, report.stack.iter());
-    // An Intelligence an older app installed, behind the release this app's CLI installs: the
-    // window updates it before it starts OpenBot on it.
+    Ok(report)
+}
+
+/// What `run_local_eval` answers the window for one CLI call, from the installed CLI.
+fn local_eval_answer(
+    root: &Path,
+    attempt: &str,
+    action: local_eval::Action,
+    stack: &local_eval::StackId,
+) -> Result<local_eval::Report, local_eval::Failure> {
+    know_cli_engine(root);
+    let mut report = local_eval::run_installed(attempt, action, stack)?;
+    // An Intelligence an older app installed, behind the release this app's CLI installs, or one
+    // whose update did not finish: the window updates it before it starts OpenBot on it.
     if action == local_eval::Action::Status {
         report.update_to =
             local_eval::update_due(&report, local_eval::bundled_release().as_deref());
@@ -7993,6 +8004,7 @@ mod tests {
 
     include!("stop_ipc_tests.rs");
     include!("composio_ipc_tests.rs");
+    include!("local_eval_ipc_tests.rs");
     include!("logging_file_tests.rs");
 
     // The release half (it starts the install thread) is the app's own launch; a test runs a debug build.
@@ -10693,6 +10705,7 @@ mod tests {
             licence: local_eval::Licence::Unknown,
             licence_expires_at: None,
             update_to: None,
+            checks_passed: false,
         }
     }
 
@@ -10879,6 +10892,7 @@ mod tests {
             },
             has_failed_step: false,
             update_in_progress: false,
+            unfinished_update: None,
             observed: None,
         }
     }

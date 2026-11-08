@@ -217,7 +217,14 @@ export function nextStepOf(
  */
 export function waitingLine(
   waiting:
-    | { kind: "approval"; toolRef: string; scope: string; handOff: boolean }
+    | {
+        kind: "approval";
+        toolRef: string;
+        scope: string;
+        /** What it is aimed at: a folder's carries its name (`approvalWords`). */
+        target?: unknown;
+        handOff: boolean;
+      }
     | { kind: "question"; question: string },
 ): string {
   if (waiting.kind === "question") {
@@ -361,6 +368,7 @@ export async function readTaskStates(
         threadId: approvalThread,
         toolRef: sql<string>`${approvalRequests.action}->>'toolRef'`,
         scope: sql<string>`${approvalRequests.action}->>'scope'`,
+        target: sql<unknown>`${approvalRequests.action}->'target'`,
         handOff: sql<boolean>`coalesce(${approvalRequests.action}->'policy'->>'behaviour' = 'hand_off', false)`,
         createdAt: approvalRequests.createdAt,
       })
@@ -474,6 +482,7 @@ export async function readTaskStates(
         kind: "approval",
         toolRef: row.toolRef ?? "",
         scope: row.scope ?? "",
+        target: row.target,
         handOff: row.handOff,
       }),
     );

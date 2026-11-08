@@ -8,6 +8,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop opens OpenBot when an update to its local back end does not finish. A back end
+  whose update stopped (on a slow connection, at the image download) still runs the release it had,
+  with every check passing; the window said it was not healthy and stopped OpenBot. It now says
+  which release the back end runs and that the update did not finish, and the person opens OpenBot
+  from there. The next Start tries the update again, including after Quit, where the back end used
+  to refuse to start until the update was resumed by hand. A back end whose checks fail is still
+  not healthy.
+- Windows lists OpenBot Desktop's publisher as CopilotKit in Settings > Apps and in Programs and
+  Features, where it said "copilotkit".
+- OpenBot Personal's Settings, Browsers says recordings go to your own Learning space, with no organization.
+- OpenBot Personal's New Bot sheet lists every app the new Bot gets, not only Routines.
+- A Bot's question in a conversation with several Bots now waits in that conversation and is answered there, as in a conversation with one Bot.
+- Teach a Bot: narration that can't hear you (no microphone) stays off after Stop until you turn it on, and "We're capturing your voice" shows only while a recording is hearing you.
 - Work apps are connected through OpenBot. Connections, an app's page, the app directory, chat
   connect cards and admin Plugins no longer name the connector provider ("Browse Composio" is now
   "Browse apps"). Admin pages still name the setting an admin sets, such as `COMPOSIO_API_KEY`.
@@ -17,6 +30,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   that settings carried over from a team deployment left out is taken back in at the next start (or
   its first run), with one audit row naming the Bots. Every Bot still gets every skill once, and a
   skill switched off for one Bot stays off. The team edition is unchanged.
+- A Bot's "What it can do" (Skills and access) page draws each of your skills' switches from the
+  Bot's own grants. A Bot made a moment ago in OpenBot Personal is given every skill the first time
+  it is listed, and its switches showed off until the page was opened again.
 
 ## 0.3.3
 
