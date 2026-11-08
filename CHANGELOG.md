@@ -44,6 +44,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   and an extra indent beside it.
 - A long link in a card's text (a notice, a checklist, a quotation, an approval) wraps, where it ran
   under the card's edge and lost its end.
+- A choice card's summary is drawn as Markdown, as an approval's is, where it showed the raw
+  markers, such as `**two**`.
 
 ### Personal edition
 

@@ -6,7 +6,7 @@ import {
   NoticeCard,
   RecordCard,
 } from "@/components/gallery/cards";
-import { ApprovalCard } from "@/components/gallery/decisions";
+import { ApprovalCard, ChoiceCard } from "@/components/gallery/decisions";
 import { QuoteCard } from "@/components/gallery/quote";
 import { DataTable } from "@/components/gallery/table";
 import { settleReactWork } from "./settle-react-work";
@@ -190,6 +190,22 @@ test("an approval's summary and detail values draw markdown", () => {
   );
   expectOneLink(container);
   expect(container.querySelector(BOLD)?.textContent).toBe("Contoso");
+});
+
+test("a choice's summary draws markdown", () => {
+  const { container } = render(
+    <ChoiceCard
+      args={{
+        title: "Which one should I archive?",
+        summary: LINE,
+        options: [{ id: "contoso", label: "Contoso" }],
+      }}
+      respond={async () => {}}
+      result={undefined}
+      status="executing"
+    />,
+  );
+  expectOneLink(container);
 });
 
 test("a table's text cells draw markdown and its number cells stay numbers", () => {
