@@ -29,7 +29,28 @@ export type Progress = {
   downloads?: Downloads;
   /** When a running row began, if earlier than the row appeared on this screen. */
   startedAt?: number;
+  /**
+   * The detail sends the person to another app's window: Docker Desktop starting, or the system's
+   * password prompt. That window is in front of this one. See `handOffNow`.
+   */
+  elsewhere?: boolean;
 };
+
+/**
+ * What another app's window wants from the person right now, if anything: the detail of a running
+ * step that sent them there.
+ *
+ * Opening Docker Desktop, or Podman's installer asking for a password, puts that app's window in
+ * front of OpenBot's. Its row alone is not enough: the person waits on whichever screen they are
+ * on, often the account step, and a row they cannot see says nothing. So the setup screens say
+ * this line until the step ends, and OpenBot comes back to the front.
+ */
+export function handOffNow(steps: Progress[]): string | null {
+  const handedOff = [...steps]
+    .reverse()
+    .find((step) => step.running && step.elsewhere && step.detail);
+  return handedOff?.detail ?? null;
+}
 
 export function SetupProgress({
   steps,
@@ -110,10 +131,10 @@ const PREPARING = new Set([
  * "Installing OpenBot". A failure is shown in full under the rows.
  *
  * Keep actionable directions for the current step. Image pulls show their download instead.
- * "Preparing this computer" says, for instance, "Starting Docker Desktop.
- * Accept anything it asks in its own window." Docker is named on purpose. Its agreement and
- * helper prompt appear in windows of their own, and a row that only said "Preparing" sat for
- * minutes while one of them waited, unseen, behind this one.
+ * "Preparing this computer" says, for instance, "Docker Desktop is starting in its own window."
+ * Docker is named on purpose. Its agreement and helper prompt appear in windows of their own, and
+ * a row that only said "Preparing" sat for minutes while one of them waited, unseen, behind this
+ * one.
  */
 export function plainInstallSteps(
   steps: Progress[],
