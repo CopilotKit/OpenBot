@@ -36,10 +36,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Bots answer ordinary questions, summaries and short lists directly in Markdown by default. A
   notice card is kept for a distinct alert that needs you to act, or for when you ask for one, and
   other components for when a chart, table or card makes the answer easier to use. A Bot asked for
-  its top emails used to wrap the list in a notice. An existing deployment keeps the Notice,
-  Checklist, Record, Headline figures and Data table descriptions it already published; an admin
-  can bring them up to date on Admin → UI components, from the new text in
-  `app/src/components/gallery/cards.tsx` and `table.tsx`.
+  its top emails used to wrap the list in a notice.
+- A component description nobody has edited now follows OpenBot's own when you upgrade, so the new
+  Notice, Checklist, Record, Headline figures and Data table descriptions reach an existing
+  deployment. A description an admin has saved, or a component an admin has published or
+  unpublished, keeps what they chose. Each update is one row in Admin → Audit, started by OpenBot.
 - A notice card's supporting point that is itself a list is drawn as that list, without a stray dot
   and an extra indent beside it.
 - A long link in a card's text (a notice, a checklist, a quotation, an approval, a choice's

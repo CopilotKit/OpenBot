@@ -168,7 +168,7 @@ export function createComponentRoutes(
       });
     }
 
-    const { added } = await store.syncCatalogue(valid);
+    const { added, refreshed } = await store.syncCatalogue(valid);
     // Only arrivals are recorded. Announcing happens on every page load, and a row per load would
     // bury the trail it is written into. Started by OpenBot: a build's component is published on
     // arrival by OpenBot's own rule, and whoever's page happened to announce it decided nothing.
@@ -179,6 +179,19 @@ export function createComponentRoutes(
         name,
         {
           note: "First seen in a build, published and available to every Bot.",
+        },
+        DEPLOYMENT_INITIATOR,
+      );
+    }
+    // A description nobody here had edited, brought up to the build's own. Only rows this call
+    // changed are named, so two page loads announcing an upgrade at once write one row each.
+    for (const name of refreshed) {
+      await audit(
+        context,
+        "component.description_updated",
+        name,
+        {
+          note: "Its description follows this version of OpenBot. Nobody had edited it here.",
         },
         DEPLOYMENT_INITIATOR,
       );

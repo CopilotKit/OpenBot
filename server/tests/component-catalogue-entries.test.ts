@@ -28,7 +28,7 @@ function harness() {
   const store = {
     syncCatalogue: async (entries: CatalogueEntry[]) => {
       published.push(...entries);
-      return { added: entries.map((entry) => entry.name) };
+      return { added: entries.map((entry) => entry.name), refreshed: [] };
     },
   } as unknown as ComponentStore;
 

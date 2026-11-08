@@ -23,7 +23,7 @@ const asSignedIn: MiddlewareHandler<{ Variables: AppVariables }> = async (
   return next();
 };
 
-function harness() {
+function harness(refreshed: string[] = []) {
   const published: CatalogueEntry[] = [];
   const trail: AuditEventInput[] = [];
   const auditStore: AuditStore = {
@@ -34,7 +34,10 @@ function harness() {
   const store = {
     syncCatalogue: async (entries: CatalogueEntry[]) => {
       published.push(...entries);
-      return { added: entries.map((entry) => entry.name) };
+      return {
+        added: entries.map((entry) => entry.name),
+        refreshed,
+      };
     },
   } as unknown as ComponentStore;
 
@@ -131,6 +134,19 @@ describe("a build announcing what it can draw", () => {
         targetId: "weatherPanel",
         initiator: { kind: "deployment" },
       },
+    ]);
+  });
+
+  test("records a description brought up to the build's as OpenBot's own change", async () => {
+    // Only what the store says it changed is recorded, so a page load that changed nothing adds nothing.
+    const { trail, announce } = harness(["weatherPanel"]);
+    await announce([entry()]);
+    expect(
+      trail
+        .filter((row) => row.eventType === "component.description_updated")
+        .map((row) => ({ targetId: row.targetId, initiator: row.initiator })),
+    ).toEqual([
+      { targetId: "weatherPanel", initiator: { kind: "deployment" } },
     ]);
   });
 

@@ -29,6 +29,8 @@ export const OPENBOT_WORKING_EVENT_TYPES = [
    * a person to publish or withdraw one, so every such row is OpenBot setting itself up.
    */
   "component.published",
+  // The same build's newer wording for a description nobody had edited.
+  "component.description_updated",
   /*
    * The computer's boundary and isolation as the server read them at start-up, two rows at every
    * start. The personal edition has one computer and no admin setting either.
