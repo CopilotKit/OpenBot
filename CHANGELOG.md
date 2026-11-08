@@ -19,6 +19,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   paths), the release's `container-images.json`, Mac updater archives and source archive, and the
   Podman and Compose installers the app pins. Each release lists its images in
   `desktop-images.json`, written by the app's own code.
+- OpenBot Desktop's Status window, Settings, This computer, Copy diagnostics and About name the version of the build that is installed, as the installer and Windows do: an internal build after 0.3.3 says `0.3.4-internal.892.g0c140734ecf0`, not 0.3.3. A release still says exactly its own version.
+- Activity, a conversation's steps and approvals name an app's tool in the words its page uses ("Get IMAP settings", not "Settings get imap"), and the app's page in the personal edition lists its tools in the order of those names.
 - After you answer an approval in a conversation, it shows the Bot working until the Bot has carried on and finished, and its reply arrives whole. If the Bot then needs another approval, it stops and asks in the conversation, and does nothing more until you decide. It used to look idle while the Bot was still going, could cut its reply off until the conversation was opened again, and could answer past an action you had not approved.
 - OpenBot Desktop keeps trying when GitHub stops sending the new version during an update. A
   download that gets nothing for 30 seconds is tried again, six times in all with longer waits

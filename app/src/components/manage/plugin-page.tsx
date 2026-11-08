@@ -80,7 +80,7 @@ import {
   botSharedAppsQueryOptions,
   describeApproval,
 } from "@/lib/plugins/shared-use";
-import { toolInWords } from "@/lib/plugins/tool-words";
+import { toolInWords, toolName } from "@/lib/plugins/tool-words";
 
 /**
  * One vendor: what it needs from this deployment, and which Bots hold its tools.
@@ -163,6 +163,22 @@ function ToolInWords({
       {summary ? <ItemDescription>{summary}</ItemDescription> : null}
     </>
   );
+}
+
+/**
+ * An app's tools in the order its page lists them. In the personal edition, by the names the page
+ * shows ("Get IMAP settings" under G), not by the stored names they arrive sorted by, which put it
+ * under S as `GMAIL_SETTINGS_GET_IMAP`. Admin keeps the stored order beside the stored names.
+ */
+function listedTools<T extends { name: string }>(
+  tools: readonly T[],
+  personalApp: string | null,
+): readonly T[] {
+  if (personalApp === null) return tools;
+  return tools
+    .map((tool) => ({ tool, name: toolName(personalApp, tool.name) }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(({ tool }) => tool);
 }
 
 /**
@@ -613,6 +629,7 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
     );
   }
 
+  const listed = server ? listedTools(server.tools, personal ? key : null) : [];
   /* The grant dialog's two halves of the tool list, split by what a boundary would see. */
   const reads = server?.tools.filter((tool) => tool.effect !== "write") ?? [];
   const writes = server?.tools.filter((tool) => tool.effect === "write") ?? [];
@@ -1298,7 +1315,7 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
             </PageEmpty>
           ) : (
             <PageRows>
-              {server.tools.map((tool, index) => (
+              {listed.map((tool, index) => (
                 <React.Fragment key={tool.ref}>
                   {/* A real link with no children: children passed to `render` replace the row's own. */}
                   {/* A list in the personal edition: there is nobody to give a tool to one at a time. */}
