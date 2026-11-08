@@ -28,6 +28,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Conversations
 
+- **The sidebar's + opens a new conversation with To: empty** and the Bot menu open, where it
+  picked a Bot for you, as do Shift+N and a skin's new conversation link. A Bot's own Message link
+  still starts with that Bot, and a message sent before a Bot is picked stays in the box with
+  "Choose a Bot first."
 - The Bot's browser beside a conversation is a 360px glimpse with the address it is on and Take
   control on the picture, and its full-size view fits its window to the page.
 - Home says which Bot is working, with a way to it, and a conversation says "Working" in the
