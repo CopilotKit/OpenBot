@@ -2909,10 +2909,57 @@ async fn start_stack_inner<R: tauri::Runtime>(
         )
     })?;
     preparation::save_selected_root(&config, &root)?;
+    give_learning_its_model(
+        root.clone(),
+        found.clone(),
+        credential,
+        ports.server,
+        secrets
+            .get(openbot_desktop_lib::learning_model::TOKEN)
+            .cloned()
+            .unwrap_or_default(),
+    );
     watch_connections(app.clone(), root, host_token, generation, ports.server);
 
     report(&app, "answering", true, "OpenBot is ready.");
     Ok(())
+}
+
+/**
+Give local Intelligence's Learning agent the model the person signed in to, once OpenBot answers.
+See `learning_model`.
+
+In the background, on its own thread. Learning is not what Start waits on, and a CLI call that
+fails here leaves OpenBot running, Settings saying why Learning can't run, and the next Start trying
+again. The CLI takes its turn with the window's own calls (`local_eval::one_at_a_time`).
+*/
+fn give_learning_its_model(
+    root: PathBuf,
+    engine: engine::Address,
+    credential: openbot_env::ModelCredential,
+    server_port: u16,
+    token: String,
+) {
+    use openbot_desktop_lib::learning_model;
+    std::thread::spawn(move || {
+        let attempt = format!("learning-model-{:016x}", rand::random::<u64>());
+        let given = learning_model::apply(
+            &root,
+            &credential,
+            server_port,
+            &token,
+            || stack::host_gateway_ipv4(&engine, &root),
+            |stack| local_eval::run_installed(&attempt, local_eval::Action::Status, stack),
+            |file| local_eval::configure_learning_model_installed(&attempt, &root, file),
+        );
+        match given {
+            learning_model::Given::Nothing => {}
+            learning_model::Given::Given => {
+                log::info!("[learning] the Learning agent has the model this sign-in gives it")
+            }
+            other => log::warn!("[learning] the Learning agent's model was not changed: {other:?}"),
+        }
+    });
 }
 
 /// Local folder access for the deployment at `root`, answering to its server with the per-run

@@ -106,6 +106,10 @@ import {
   type LearningAdminDependencies,
 } from "./learning/routes";
 import {
+  type LearningModelEndpoint,
+  mountLearningModelEndpoint,
+} from "./learning/model-endpoint";
+import {
   createPersonalLearningRoutes,
   type PersonalLearningRouteDeps,
 } from "./learning/sharing-routes";
@@ -497,6 +501,11 @@ export function createApp(
     models?: ModelCatalogueReader;
     /** Each person's pick per conversation. Absent, `/api/channels/:id/model` is not mounted. */
     modelChoices?: ModelChoices;
+    /**
+     * The model local Intelligence's Learning agent is pointed at on a Claude or ChatGPT plan. See
+     * learning/model-endpoint.ts. Absent, nothing is mounted.
+     */
+    learningModel?: LearningModelEndpoint;
   },
   /**
    * Whether to offer help self-hosting, which also hides it from a deployment that pays for
@@ -516,6 +525,7 @@ export function createApp(
   app.use("/api/*", createOriginGuard(config));
   mountDesktopConnectionFailure(app, desktopHostToken);
   mountProviderOAuthProxy(app, modelProviderProxy);
+  mountLearningModelEndpoint(app, coworker?.learningModel);
 
   app.get("/health", (context) => context.json({ status: "ok" }));
   app.route("/", createReleaseStatusRoutes());
