@@ -551,6 +551,50 @@ jobs:
           gh workflow run desktop-signing.yml -R "$GITHUB_REPOSITORY" --ref "$VERSION" \
             -f signing-mode=keyvault -f release-tag="$VERSION" -f make-latest="$BECOMES_LATEST"
 
+  # Every container image the Desktop app downloads for this release, listed by the app's own code
+  # (desktop/src-tauri/src/release_images.rs) from this commit's Compose file, the images above and
+  # the CLI the installers bundle, and attached as desktop-images.json. Downloads sync copies those
+  # images to downloads.copilotkit.ai (scripts/downloads-images.ts). Beside the signing runs, not
+  # before them; a sync that runs before it is attached copies the images on its next run.
+  image-list:
+    name: image list
+    needs: [metadata, images, github-release]
+    if: ${{ !cancelled() && needs.github-release.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write # attach desktop-images.json
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+          no-cache: true
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.images.outputs.manifest-artifact }}
+      # The same CLI the Mac installer bundles; its index.js is the same file on every platform.
+      - run: bun desktop/scripts/cli-bundle.ts darwin arm64
+      - name: List the images and attach them
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          cargo run --locked --manifest-path desktop/src-tauri/Cargo.toml --example release_images -- \
+            docker-compose.yml container-images.json desktop/src-tauri/cli-bundle/cli/index.js > desktop-images.json
+          cat desktop-images.json
+          gh release upload "$VERSION" desktop-images.json --clobber -R "$GITHUB_REPOSITORY"
+
   # A candidate or beta's ad-hoc and unsigned installers, onto the release once `desktop` has built
   # them, so testers have a link before signing is approved. Signing is already running by now, and
   # may attach first. So nothing here replaces anything: each installer, and its fixed-name copy, is

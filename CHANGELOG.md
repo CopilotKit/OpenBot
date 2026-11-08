@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- downloads.copilotkit.ai now serves everything OpenBot Desktop downloads for the Latest release,
+  not only its installers: every container image the app pulls (its own and the bundled back
+  end's, copied from GitHub's registry under the registry's own paths), the release's
+  `container-images.json`, Mac updater archives and source archive, and the Podman and Compose
+  installers the app pins. Each release lists its images in `desktop-images.json`, written by the
+  app's own code.
 - OpenBot Desktop keeps trying when GitHub stops sending the new version during an update. A
   download that gets nothing for 30 seconds is tried again, six times in all with longer waits
   between, for about four minutes. Before, three tries in a minute and a half gave up and put the
