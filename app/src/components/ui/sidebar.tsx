@@ -65,6 +65,25 @@ function useOptionalSidebar() {
 }
 
 /**
+ * Whether a click follows a link in this window. A modified or middle click, or a link to a new
+ * tab, opens the page somewhere else and leaves the person where they are.
+ */
+function followsLinkHere(event: React.MouseEvent): boolean {
+  if (
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey
+  ) {
+    return false;
+  }
+  const link =
+    event.target instanceof Element ? event.target.closest("a[href]") : null;
+  return link !== null && link.getAttribute("target") !== "_blank";
+}
+
+/**
  * Sidebar state, uncontrolled by default.
  *
  * This vendored file used to write a `sidebar_state` cookie on every toggle, so a server-rendered
@@ -206,6 +225,14 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
+          /*
+           * The sheet covers the page a link in it opens, so following one closes it: a
+           * conversation, Bots, Connections, Teach a Bot. Clicks reach here from the menus the
+           * sidebar opens too (the account menu), because React passes them up through a portal.
+           */
+          onClick={(event) => {
+            if (followsLinkHere(event)) setOpenMobile(false);
+          }}
           className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
           style={
             {

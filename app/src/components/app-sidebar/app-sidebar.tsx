@@ -25,6 +25,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
@@ -224,6 +225,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const animateOrder =
     !searching && (channels.data?.length ?? 0) <= MAX_ANIMATED_ROWS;
   const navigation = useNavigationItems();
+  const { setOpenMobile } = useSidebar();
 
   return (
     <Sidebar variant="inset" {...props}>
@@ -384,7 +386,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                       className={userMenuItemClassName}
                       key={item.id}
                       nativeButton={item.kind === "dialog"}
-                      render={navigationRender(item)}
+                      // A link closes a narrow window's sheet as it is followed; a dialog has to
+                      // close it itself, or the sheet waits behind the dialog.
+                      render={navigationRender(
+                        item,
+                        item.kind === "dialog"
+                          ? { onClick: () => setOpenMobile(false) }
+                          : {},
+                      )}
                     >
                       <item.icon />
                       {item.label}

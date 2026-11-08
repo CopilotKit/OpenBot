@@ -8,6 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- In a narrow window, the sidebar closes when you pick a conversation, Bots, Connections, Teach a Bot, or an item in your account menu. Before, it stayed open over the page you opened until you clicked outside it.
 - OpenBot Desktop's Status window says the back end is "On this computer" instead of its stack id ("local-08ff56ec…"). The id is still in Copy diagnostics, for support.
 - On Windows, Ctrl+Q in the OpenBot Desktop window quits OpenBot, as the tray menu's Quit says. Before, Ctrl+Q in the window did nothing.
 - A skill picked from the `/` menu works for a built-in Bot on a Claude plan. The Bot answered
