@@ -10,7 +10,8 @@
 #   latest/<fixed name>              each installer under its fixed download name
 #                                    (scripts/release-download-names.sh), and latest.json; cached
 #                                    for five minutes
-#   releases/<tag>/<versioned name>  each installer under the name Tauri gave it; never changes,
+#   releases/<tag>/<versioned name>  each installer under the name Tauri gave it, container-images.json
+#                                    and the Mac updater archives; never changes,
 #                                    so cached for a year
 #
 # Env:
@@ -136,6 +137,13 @@ for fixed in "${fixed_names[@]}"; do
     exit 1
   fi
   add "releases/$tag/${versioned[0]}" "${versioned[0]}" "$release_cache"
+done
+# The rest of what the app downloads from the release: the image list a deployment pins
+# (desktop/src-tauri/src/deployment.rs) and the Mac updater's archives, which latest.json names.
+for asset in container-images.json OpenBot-darwin-aarch64.app.tar.gz OpenBot-darwin-x86_64.app.tar.gz; do
+  if grep -qxF "$asset" <<<"$names"; then
+    add "releases/$tag/$asset" "$asset" "$release_cache"
+  fi
 done
 if [ "$mode" = latest ]; then
   for fixed in "${fixed_names[@]}"; do
