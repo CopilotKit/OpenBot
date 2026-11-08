@@ -151,6 +151,8 @@ class CodexBackend:
         self.answers = []
         # The real backend refuses a model the plan does not offer; a test turns that on.
         self.refuse_unlisted = False
+        # A refusal sent inside the streamed answer instead of as an HTTP status; a test sets it.
+        self.stream_refusal = None
 
     def install(self, monkeypatch):
         listing_send = httpx.AsyncClient.send
@@ -182,6 +184,13 @@ class CodexBackend:
                         "detail": f"The '{body['model']}' model is not supported when using "
                         "Codex with a ChatGPT account."
                     },
+                    request=request,
+                )
+            if self.stream_refusal:
+                return httpx2.Response(
+                    200,
+                    content=self.stream_refusal(body["model"]),
+                    headers={"content-type": "text/event-stream"},
                     request=request,
                 )
             return httpx2.Response(
@@ -345,6 +354,78 @@ async def test_a_plan_refusing_a_model_ends_the_run_with_its_reason_and_refreshe
     # The listing is read again on the next use, not after six hours.
     assert (await get("/models")).status_code == 200
     assert len(plan.listings) == 2
+
+
+# The Codex backend's refusal of a tool schema, as the harness log showed it on OpenBot Desktop:
+# `openai.APIError: Invalid JSON schema: regex lookaround is not supported. Found at
+# $.properties.email_address.pattern.` raised from `bind_tools(model).ainvoke`. The message is the
+# backend's, verbatim. The envelope is the one shape that raises that class from a stream: the
+# OpenAI SDK raises `APIError` (no status, `body` = the `error` object) for a server-sent event
+# whose data carries an `error` object (`openai/_streaming.py`), and reads only its `message`.
+SCHEMA_REFUSAL = (
+    "Invalid JSON schema: regex lookaround is not supported. Found at "
+    "$.properties.email_address.pattern."
+)
+
+
+def schema_refused_in_stream(model):
+    created = {
+        "id": "resp-proof",
+        "object": "response",
+        "created_at": 0,
+        "model": model,
+        "status": "in_progress",
+        "output": [],
+        "parallel_tool_calls": False,
+        "tool_choice": "auto",
+        "tools": [],
+    }
+    events = [
+        ("response.created", {"type": "response.created", "response": created, "sequence_number": 0}),
+        ("error", {"type": "error", "error": {"message": SCHEMA_REFUSAL}, "sequence_number": 1}),
+    ]
+    return "".join(
+        f"event: {name}\ndata: {json.dumps(data)}\n\n" for name, data in events
+    ).encode()
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_inside_the_streamed_answer_ends_the_run_with_a_terminal_error(plan):
+    """Raised, it ended the stream with no terminal event, and the person read "Remote agent ended
+    without a terminal event." in red, with nothing about why."""
+    plan.stream_refusal = schema_refused_in_stream
+
+    events = await run(run_body(model={"model": "gpt-5.6-terra"}, tools=["connect_app"]))
+
+    types = [event["type"] for event in events]
+    assert types[0] == "RUN_STARTED", events
+    assert types[-1] == "RUN_ERROR", "every run ends with a terminal event"
+    assert "RUN_FINISHED" not in types
+    # The provider's words, marked as a refusal, so the server says it in words of its own
+    # (server/src/agents/provider-refusal.ts) and keeps these for its log.
+    assert events[-1]["code"] == "OPENBOT_MODEL_REFUSED"
+    assert SCHEMA_REFUSAL in events[-1]["message"]
+    # The tools went to the backend: this is the request the backend refused.
+    assert [tool["name"] for tool in plan.answers[0]["body"]["tools"]] == ["connect_app"]
+
+
+@pytest.mark.asyncio
+async def test_a_run_that_fails_for_its_own_reason_still_ends_with_a_terminal_error(
+    plan, monkeypatch
+):
+    """Not every failure is the provider's. Whatever it is, the run says so and ends."""
+
+    async def broken():
+        raise RuntimeError("synthetic harness fault")
+
+    monkeypatch.setattr(main, "_plan_model", broken)
+
+    events = await run(run_body())
+
+    assert [event["type"] for event in events][-1] == "RUN_ERROR", events
+    assert events[-1]["message"] == "The Bot stopped before it finished answering. Try again."
+    # The harness's own words stay in its log, never in front of the person.
+    assert "synthetic harness fault" not in json.dumps(events)
 
 
 @pytest.mark.asyncio
