@@ -4717,6 +4717,37 @@ mod app_page_tests {
         }
     }
 
+    /// On Windows the tray said "Quit  Ctrl+Q" and Ctrl+Q in the window did nothing: a tray menu's
+    /// shortcut is only a label there, and the window has no menu bar. The window's pages now ask
+    /// to quit themselves (`quit-shortcut.js`), so the setup screens and OpenBot's own page must be
+    /// able to, and a page on another loopback port must not.
+    #[test]
+    fn ctrl_q_on_windows_can_quit_from_setup_and_openbot_but_not_another_page() {
+        const QUIT: &str = "plugin:openbot-desktop|quit";
+        let (app, window) = app();
+        // The setup screens, served by the app itself, at the address each platform gives them.
+        let setup = if cfg!(windows) {
+            "http://tauri.localhost/"
+        } else {
+            "tauri://localhost/"
+        };
+        assert_eq!(ask(&window, setup, QUIT), Ok(serde_json::Value::Null));
+        let foreign = "http://127.0.0.1:3011/";
+        allow_app_page(app.handle(), &foreign.parse().unwrap());
+        assert!(ask(&window, foreign, QUIT).is_err());
+        trust_owned_app(app.handle(), "http://127.0.0.1:3010");
+        let owned = "http://127.0.0.1:3010/";
+        allow_app_page(app.handle(), &owned.parse().unwrap());
+        assert_eq!(ask(&window, owned, QUIT), Ok(serde_json::Value::Null));
+
+        // Read as text, as the outside-links test does: the real webview cannot be built here.
+        let main = include_str!("main.rs");
+        assert!(main.contains(
+            "if cfg!(target_os = \"windows\") && page != WindowPage::Other {\n                let _ = window.eval(desktop_page::QUIT_SHORTCUT_PAGE);"
+        ));
+        assert!(desktop_page::QUIT_SHORTCUT_PAGE.contains("\"plugin:openbot-desktop|quit\""));
+    }
+
     /// Every command OpenBot's page may ask, the update banner's among them (installing an update
     /// stops OpenBot and restarts the app), answers only the OpenBot this shell owns.
     #[test]
@@ -7629,6 +7660,10 @@ fn main() {
             match_title_bar(&window.window(), page);
             if matches!(page, WindowPage::OwnedApp | WindowPage::LocalApp) {
                 let _ = window.eval(outside_links::PAGE);
+            }
+            // Ctrl+Q quits, as the tray says. Windows only: no menu there carries the shortcut.
+            if cfg!(target_os = "windows") && page != WindowPage::Other {
+                let _ = window.eval(desktop_page::QUIT_SHORTCUT_PAGE);
             }
             if matches!(page, WindowPage::OwnedApp | WindowPage::LocalApp)
                 && payload.event() == tauri::webview::PageLoadEvent::Finished

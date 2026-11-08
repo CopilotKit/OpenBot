@@ -8,6 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- On Windows, Ctrl+Q in the OpenBot Desktop window quits OpenBot, as the tray menu's Quit says. Before, Ctrl+Q in the window did nothing.
 - A skill picked from the `/` menu works for a built-in Bot on a Claude plan. The Bot answered
   "Unknown command: /tide-report" without asking the model, because Claude Code took the message,
   which starts with the skill's command, for a slash command of its own.
