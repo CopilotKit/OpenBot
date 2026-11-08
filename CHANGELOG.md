@@ -8,8 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-- OpenBot Desktop downloads the back end's images from downloads.copilotkit.ai first, with ghcr.io
-  after it when an image is not there or the mirror does not answer.
+- OpenBot Desktop downloads everything from downloads.copilotkit.ai first, and from GitHub only
+  when that fails: OpenBot's images and the back end's images (named as their ghcr.io images, so
+  nothing downloads them again), the release's image list, the latest release, and the Podman and
+  Compose builds it installs.
 - OpenBot Desktop keeps trying when GitHub stops sending the new version during an update. A
   download that gets nothing for 30 seconds is tried again, six times in all with longer waits
   between, for about four minutes. Before, three tries in a minute and a half gave up and put the
