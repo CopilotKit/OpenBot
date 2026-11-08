@@ -1,3 +1,4 @@
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import type { TurnRunner } from "@openbot/toolkit/run-turn";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -39,6 +40,20 @@ export function createApprovalResumeTick(deps: {
     scope: DeliveryScope,
     input: { id: string; text: string; kind: "reply" },
   ) => Promise<void>;
+  /**
+   * Resolves once the thread's stored history holds a carried-on turn's reply, or gives up.
+   *
+   * The conversation reads its history again when the channel says the Bot replied, and the
+   * platform's read of a thread can trail the run that wrote it. Told first, the browser read the
+   * reply half written ("...shared with") and kept that half, because a message it already holds is
+   * never read twice. So the channel is told, and the request finished, only once the reply is there
+   * to read. Absent, the channel is told at once.
+   */
+  transcriptHolds?: (input: {
+    ownerUserId: string;
+    threadId: string;
+    replyText: string;
+  }) => Promise<void>;
 }): () => Promise<void> {
   const {
     approvalQueue,
@@ -112,20 +127,48 @@ export function createApprovalResumeTick(deps: {
               input.ownerUserId,
               approvalId,
             );
-            // A group turn's approval also writes the resumed reply into the shared transcript.
-            const outcome = await groupConversations.continueWaiting(
-              approvalId,
-              () =>
-                approvalContinuationRunner({
-                  ownerUserId: input.ownerUserId,
-                  routineId: "approval",
-                  agentId: request.action.botId,
-                  threadId: snapshot.threadId,
-                  instruction: "",
-                  initiator: snapshot.initiator ?? PERSON_INITIATOR,
-                  continuation: { snapshot, result, messageId },
-                }),
-            );
+            /*
+             * ASKING AGAIN IS WHERE THE TURN STOPS, NOT A FAILURE. A carried-on turn that reaches
+             * another action needing the person opens its own request and stops on it, nothing
+             * done, exactly as a run in the browser does. Thrown on from here, the resume loop
+             * took it for a failure: it released this decision and carried the conversation on
+             * again, from the same place, until its tries ran out, while the new request sat
+             * pending where nobody was shown it. Now this decision is finished, the conversation
+             * says what it waits on, and the new request carries it on when it is answered.
+             */
+            let waitingOn: { message: string; approvalId?: string } | undefined;
+            let outcome: { replyText: string };
+            try {
+              // A group turn's approval also writes the resumed reply into the shared transcript.
+              outcome = await groupConversations.continueWaiting(
+                approvalId,
+                () =>
+                  approvalContinuationRunner({
+                    ownerUserId: input.ownerUserId,
+                    routineId: "approval",
+                    agentId: request.action.botId,
+                    threadId: snapshot.threadId,
+                    instruction: "",
+                    initiator: snapshot.initiator ?? PERSON_INITIATOR,
+                    continuation: { snapshot, result, messageId },
+                  }),
+              );
+            } catch (error) {
+              if (!(error instanceof HeadlessToolSuspension)) throw error;
+              waitingOn = {
+                message: error.message,
+                ...(typeof error.waiting.approvalId === "string"
+                  ? { approvalId: error.waiting.approvalId }
+                  : {}),
+              };
+              outcome = { replyText: "" };
+            }
+            if (outcome.replyText)
+              await deps.transcriptHolds?.({
+                ownerUserId: input.ownerUserId,
+                threadId: snapshot.threadId,
+                replyText: outcome.replyText,
+              });
             const [source] = await database
               .select({ channelId: intelligenceChannelMappings.channelId })
               .from(intelligenceChannelMappings)
@@ -147,6 +190,18 @@ export function createApprovalResumeTick(deps: {
                 },
                 { id: messageId },
               );
+            // The conversation's last line says what it waits on, and its card is read with it.
+            if (source && waitingOn)
+              await channelStore.recordActivity(
+                await actorFor(input.ownerUserId),
+                source.channelId,
+                {
+                  text: waitingOn.message,
+                  agentId: request.action.botId,
+                  at: new Date(),
+                },
+                { id: `${messageId}:waiting` },
+              );
             // A decision made in Slack, SMS or the phone gets its result back there too.
             if (source && outcome.replyText)
               await deps.notify(
@@ -158,6 +213,22 @@ export function createApprovalResumeTick(deps: {
                 },
                 { id: messageId, text: outcome.replyText, kind: "reply" },
               );
+            // A routine run waiting on this decision now waits on the request its turn opened.
+            if (waitingOn) {
+              if (waitingOn.approvalId)
+                await database
+                  .update(routineRuns)
+                  .set({
+                    waiting: sql`jsonb_set(${routineRuns.waiting}, '{approvalId}', to_jsonb(${waitingOn.approvalId}::text))`,
+                  })
+                  .where(
+                    and(
+                      eq(routineRuns.status, "waiting"),
+                      sql`${routineRuns.waiting}->>'approvalId' = ${approvalId}`,
+                    ),
+                  );
+              return;
+            }
             await database
               .update(routineRuns)
               .set({

@@ -62,6 +62,7 @@ import {
   type PersonQuestion,
   questionConversationBot,
 } from "./approvals/questions";
+import { waitForReplyInTranscript } from "./approvals/reply-in-transcript";
 import { createApprovalResumeTick } from "./approvals/resume-sweep";
 import { createApprovalStore } from "./approvals/store";
 import { ApprovalRefusedError } from "./approvals/types";
@@ -2467,6 +2468,15 @@ const approvalSweep = repeatAfterEach(
     actorFor,
     // Assigned further down, once delivery is wired.
     notify: (scope, input) => deliveryNotifications(scope, input),
+    transcriptHolds: waitForReplyInTranscript({
+      read: async ({ ownerUserId, threadId }) =>
+        (
+          await routineIntelligence.getThreadMessages({
+            threadId,
+            userId: ownerUserId,
+          })
+        ).messages,
+    }),
   }),
   2_000,
 );
