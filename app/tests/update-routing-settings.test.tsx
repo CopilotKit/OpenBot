@@ -156,12 +156,49 @@ test("with no channel set up, it says updates stay in OpenBot, and whoever can s
   expect(view.queryAllByRole("switch")).toHaveLength(0);
   expect(
     view.getByText(
-      "Push, Slack, Microsoft Teams and SMS show up here once they're set up where OpenBot runs.",
+      "Push, Slack, Microsoft Teams and text messages show up here once they're set up where OpenBot runs.",
     ),
   ).toBeTruthy();
   const how = view.getByRole("link", { name: "How to set them up" });
   expect(how.getAttribute("href")).toBe(CHANNEL_SETUP_DOCS);
   expect(how.getAttribute("target")).toBe("_blank");
+});
+
+test("the section asks where updates go only above switches to choose with", async () => {
+  const ASK = /Choose where to receive each type of update/;
+  available = { slack: false, teams: false, sms: false, push: false };
+  serving();
+  const empty = draw(ADMIN);
+  expect(await empty.findByText("Updates stay in OpenBot")).toBeTruthy();
+  expect(empty.queryByText(ASK)).toBeNull();
+  cleanup();
+  available = everyChannel;
+  serving();
+  const choosing = draw(ADMIN);
+  await choosing.findByRole("switch", { name: "Progress by Slack" });
+  expect(choosing.getByText(ASK)).toBeTruthy();
+});
+
+test("in OpenBot Desktop, where these channels can't reach anyone, it says so and links no setup docs", async () => {
+  // What the Desktop window injects (`desktopShell`): the page is inside OpenBot Desktop.
+  const shell = window as { __TAURI_INTERNALS__?: unknown };
+  shell.__TAURI_INTERNALS__ = {
+    invoke: async () => undefined,
+    transformCallback: () => 0,
+  };
+  try {
+    available = { slack: false, teams: false, sms: false, push: false };
+    serving();
+    const view = draw({ role: "member", localEvaluation: true });
+    expect(
+      await view.findByText(
+        "Push, Slack, Microsoft Teams and text messages need OpenBot running on a server.",
+      ),
+    ).toBeTruthy();
+    expect(view.queryByRole("link", { name: "How to set them up" })).toBeNull();
+  } finally {
+    delete shell.__TAURI_INTERNALS__;
+  }
 });
 
 test("someone running OpenBot on their own computer gets the way to set channels up too", async () => {
@@ -179,7 +216,7 @@ test("a member who can't set channels up is told their admin does, with no link"
   const view = draw({ role: "member", localEvaluation: false });
   expect(
     await view.findByText(
-      "Push, Slack, Microsoft Teams and SMS show up here once your admin sets them up.",
+      "Push, Slack, Microsoft Teams and text messages show up here once your admin sets them up.",
     ),
   ).toBeTruthy();
   expect(view.queryByRole("link", { name: "How to set them up" })).toBeNull();

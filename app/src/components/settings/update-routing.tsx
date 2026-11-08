@@ -26,6 +26,7 @@ import {
 } from "@/lib/bot-lifecycle/queries";
 import { deliveryQueryOptions } from "@/lib/delivery";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { desktopShell } from "@/lib/desktop/shell";
 import { mayOpenSetup } from "@/lib/setup/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -95,9 +96,24 @@ export function UpdateRoutingSection() {
    * and shows again once the channel is set up.
    */
   const shown = TRANSPORTS.filter((transport) => configured(transport.id));
+  const choosing =
+    !routing.isPending &&
+    !reach.isPending &&
+    !routing.error &&
+    shown.length > 0;
+  /*
+   * OpenBot Desktop runs OpenBot on this computer, and every one of these channels needs OpenBot where the internet can
+   * reach it (a phone, OpenTag, Twilio calling it). Its settings are the Desktop's own, so it gets no link to them.
+   */
+  const desktop = desktopShell() !== null;
   return (
     <PageSection
-      description="Choose where to receive each type of update when you’re away. All updates remain available in the web app."
+      // Said only above the switches: above the empty state it would point at nothing to choose.
+      description={
+        choosing
+          ? "Choose where to receive each type of update when you’re away. All updates remain available in the web app."
+          : undefined
+      }
       title="Where updates go"
     >
       {routing.isPending || reach.isPending ? null : routing.error ? (
@@ -107,7 +123,7 @@ export function UpdateRoutingSection() {
       ) : shown.length === 0 ? (
         <PageEmpty
           action={
-            setsUp ? (
+            setsUp && !desktop ? (
               // An anchor rather than Button: Base UI gives a rendered anchor role="button", and this is a link.
               <a
                 className={cn(
@@ -124,9 +140,11 @@ export function UpdateRoutingSection() {
           icon={IconRoute}
           title="Updates stay in OpenBot"
         >
-          {setsUp
-            ? "Push, Slack, Microsoft Teams and SMS show up here once they're set up where OpenBot runs."
-            : "Push, Slack, Microsoft Teams and SMS show up here once your admin sets them up."}
+          {desktop
+            ? "Push, Slack, Microsoft Teams and text messages need OpenBot running on a server."
+            : setsUp
+              ? "Push, Slack, Microsoft Teams and text messages show up here once they're set up where OpenBot runs."
+              : "Push, Slack, Microsoft Teams and text messages show up here once your admin sets them up."}
         </PageEmpty>
       ) : (
         <PageRows>
