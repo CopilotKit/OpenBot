@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { noticeChannelEvent } from "@/lib/notifications/reply-notice";
 import { socketUrl as buildSocketUrl } from "@/lib/socket-url";
 import {
   type AgentChannel,
@@ -78,6 +79,12 @@ export type ChannelActivityEvent = {
   lastMessage: string | null;
   lastMessageAt: string | null;
   lastMessageAgentId: string | null;
+  /**
+   * A Bot's reply, its first line as plain text, for the notice a reply raises while OpenBot is out
+   * of sight. `lastMessage` runs every line into one. Only on a Bot's message, and absent from a
+   * server older than this.
+   */
+  firstLine?: string;
   /** The channel's newly written summary. Absent on an ordinary activity event. */
   summary?: string;
   /** A person's first words, newly written: the row's name until its summary. Absent otherwise. */
@@ -365,6 +372,14 @@ export function useChannelEvents() {
             return data;
           },
         );
+
+        // A Bot's reply, while OpenBot is out of sight: the notice, when the person allowed them.
+        noticeChannelEvent(activity, queryClient, (channelId) => {
+          void router.navigate({
+            to: "/channel/$channelId",
+            params: { channelId },
+          });
+        });
 
         if (activity.work !== undefined) {
           queryClient.setQueryData(

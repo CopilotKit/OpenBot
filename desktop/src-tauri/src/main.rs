@@ -10,6 +10,7 @@ mod desktop_page;
 mod desktop_status;
 mod desktop_telemetry;
 mod intelligence_bridge;
+mod notice;
 mod outside_links;
 
 #[cfg(test)]
@@ -106,6 +107,12 @@ struct Shell {
     owned_app_origins: Mutex<Vec<String>>,
     /// The origins already given the window's controls (`allow_app_page`).
     app_page_grants: Mutex<Vec<String>>,
+    /// Whether the app was built with the permissions `allow_app_page` grants (`generate_context!`),
+    /// so `trust_owned_app` can grant them ahead of the page. Tauri panics on a grant of a
+    /// permission it does not know, as in a test app built from a mock context.
+    app_page_grants_known: std::sync::atomic::AtomicBool,
+    /// The page a click on a notification asked for while OpenBot's page was not there yet.
+    waiting_notice_page: Mutex<Option<String>>,
     /// A newer OpenBot Desktop, as the feed last said, and an install of it under way.
     app_update: app_update::Known,
 }
@@ -1510,18 +1517,26 @@ async fn prepare_installation_inner(
         let images = preparation::installation_pull_set(&address, &root, &root, harness.as_ref())?;
         // Several pulls run at once. Stop is checked before each pull starts; running pulls finish.
         let pacer = Mutex::new(pull_metrics::Pacer::default());
+        // How big the download is, from each image's registry, while the pulls start.
+        let sizes = {
+            let address = address.clone();
+            pull_metrics::size_images(&images, move |image| {
+                preparation::image_present(&address, image).unwrap_or(false)
+            })
+        };
         pull_metrics::pull_images_limited(
             &images,
             pull_metrics::IMAGE_PULLS_AT_ONCE,
-            |_, image, on_bytes| {
-                pull_metrics::pull_image(&address, image, on_bytes, |metrics| {
+            sizes,
+            |_, image, on_layer| {
+                pull_metrics::pull_image(&address, image, on_layer, |metrics| {
                     desktop_telemetry::pull_completed(&handle, metrics)
                 })
             },
             || attempt.require_current(),
             |downloads| {
-                // `done` counts FINISHED pulls; the bytes are the sum over every pull, running and
-                // finished. Paced to a few reports a second, which also measures the speed.
+                // `done` counts FINISHED pulls; the bytes and the size are over every image.
+                // Paced to a few reports a second, which also measures the speed.
                 let paced = pacer
                     .lock()
                     .unwrap()
@@ -4564,6 +4579,12 @@ Record `address` as the OpenBot app this shell verified it owns, and let it use 
 Called with an address `owned_app_url` verified, before the window navigates there. Its origin is
 then the only loopback origin the window treats as OpenBot (`window_page`) and gives the window's
 controls to (`allow_app_page`).
+
+They are granted here, before the page exists, and not only once it has loaded: the notification
+plugin's script asks `is_permission_granted` as the page starts, and a page whose origin was not yet
+granted was refused, kept "default" as its answer for as long as it stayed open, and never showed a
+notification. MEASURED on a Mac: no Bot's notice reached the system (usernoted never heard from the
+app) while the offer to turn them on, asked later, was rightly hidden.
 */
 fn trust_owned_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>, address: &str) {
     if let Some(origin) = intelligence_bridge::app_origin(address) {
@@ -4573,7 +4594,22 @@ fn trust_owned_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>, address: &str) 
             trusted.push(origin);
         }
     }
+    let known = app
+        .state::<Shell>()
+        .app_page_grants_known
+        .load(std::sync::atomic::Ordering::SeqCst);
+    if let (true, Ok(url)) = (known, address.parse::<tauri::Url>()) {
+        allow_app_page(app, &url);
+    }
     intelligence_bridge::allow(app, address);
+}
+
+/// Lets `trust_owned_app` grant OpenBot's page its permissions before the page loads. Only for an
+/// app built by `generate_context!`, which compiles them in.
+fn know_app_page_grants<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    app.state::<Shell>()
+        .app_page_grants_known
+        .store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
 /// Whether `url` is on the origin of the OpenBot app this shell verified it owns.
@@ -4587,8 +4623,25 @@ fn is_owned_app_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri
 }
 
 /**
+The page's Notification API, which the notification plugin's script stands in for in this window:
+whether notifications are on, turning them on, and showing one. Nothing else of the plugin's.
+
+MEASURED: the window's own Notification API cannot be granted. In a WKWebView set up as wry sets it
+up, `Notification.requestPermission()` answers "denied" at once with no prompt, and the next launch
+reads "default" again, so the page's offer to turn them on came back after every yes. The plugin
+shows them through the system instead, and answers that they are allowed: a desktop app needs no
+permission of its own to post one (tauri-plugin-notification, `desktop.rs`).
+*/
+const APP_PAGE_NOTIFICATIONS: [&str; 3] = [
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "notification:allow-notify",
+];
+
+/**
 Lets OpenBot's own page move and zoom the window from its drag handle, set the window's appearance
-to its own theme, and use Settings → This computer (`desktop_page`), and nothing more.
+to its own theme, use Settings → This computer (`desktop_page`), and show a Bot's notifications
+(`APP_PAGE_NOTIFICATIONS`), and nothing more.
 
 Only the origin this shell verified as its own OpenBot (`trust_owned_app`). A page on any other
 loopback port, which a link in a reply can open in this window, gets none of it: Settings → This
@@ -4611,8 +4664,11 @@ fn allow_app_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url
             .window("main")
             .permission("core:window:allow-start-dragging")
             .permission("core:window:allow-internal-toggle-maximize");
-    for permission in desktop_page::PERMISSIONS {
-        capability = capability.permission(permission);
+    for permission in desktop_page::PERMISSIONS
+        .iter()
+        .chain(&APP_PAGE_NOTIFICATIONS)
+    {
+        capability = capability.permission(*permission);
     }
     match app.add_capability(capability) {
         Ok(()) => granted.push(origin),
@@ -4639,10 +4695,13 @@ mod app_page_tests {
                 .build();
         let app = tauri::test::mock_builder()
             .plugin(stand_in)
+            .plugin(tauri_plugin_notification::init())
             .plugin(intelligence_bridge::plugin())
             .manage(Shell::default())
             .build(tauri::generate_context!(test = true))
             .unwrap();
+        // As the app's setup does: this context compiles the page's permissions in.
+        know_app_page_grants(app.handle());
         let window = app.get_webview_window("main").unwrap_or_else(|| {
             tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
                 .build()
@@ -4813,6 +4872,163 @@ mod app_page_tests {
                 .unwrap_or_else(|| home.join(".local").join("share"));
             assert_eq!(folder, data.join(&identifier).join("logs"));
         }
+    }
+
+    /// OpenBot's own page turns notifications on and shows them through the notification plugin,
+    /// whose script stands in for the page's Notification API. It answers that they are on, as the
+    /// plugin does on every desktop, so the page's offer to turn them on does not come back. A page
+    /// on another port gets none of it: it could post notices in OpenBot's name.
+    #[test]
+    fn only_the_owned_app_origin_can_turn_on_and_show_notifications() {
+        let (app, window) = app();
+        let foreign: tauri::Url = "http://127.0.0.1:3011/".parse().unwrap();
+        let owned: tauri::Url = "http://127.0.0.1:3010/channel/c-1".parse().unwrap();
+        allow_app_page(app.handle(), &foreign);
+        trust_owned_app(app.handle(), "http://127.0.0.1:3010");
+        allow_app_page(app.handle(), &owned);
+        for command in ["is_permission_granted", "request_permission", "notify"] {
+            let command = format!("plugin:notification|{command}");
+            let refused = ask(&window, foreign.as_str(), &command).unwrap_err();
+            assert!(
+                refused.to_string().contains("not allowed"),
+                "{command} from another page: {refused}"
+            );
+        }
+        assert_eq!(
+            ask(
+                &window,
+                owned.as_str(),
+                "plugin:notification|is_permission_granted"
+            ),
+            Ok(serde_json::json!(true))
+        );
+        assert_eq!(
+            ask(
+                &window,
+                owned.as_str(),
+                "plugin:notification|request_permission"
+            ),
+            Ok(serde_json::json!("granted"))
+        );
+        // Showing one is the page's to ask. Asked with no notice, so the command is reached (it
+        // refuses the arguments, not the page) and a test run posts nothing to the system.
+        let reached = ask(&window, owned.as_str(), "plugin:notification|notify").unwrap_err();
+        assert!(
+            !reached.to_string().contains("not allowed") && reached.to_string().contains("options"),
+            "{reached}"
+        );
+    }
+
+    /// The notification plugin's script asks whether notifications are on as OpenBot's page
+    /// starts, before it has loaded. Its origin is granted when the shell trusts it, ahead of the
+    /// window going there, so that first question is answered. It used to be granted only once the
+    /// page had loaded: the question was refused, and the page never showed a notification.
+    #[test]
+    fn the_owned_app_page_is_answered_from_its_first_moment() {
+        let (app, window) = app();
+        let starting = "http://127.0.0.1:3010/";
+        trust_owned_app(app.handle(), "http://127.0.0.1:3010");
+        // No page load has finished: nothing but the trust has happened.
+        assert_eq!(
+            ask(
+                &window,
+                starting,
+                "plugin:notification|is_permission_granted"
+            ),
+            Ok(serde_json::json!(true))
+        );
+        assert!(ask(
+            &window,
+            "http://127.0.0.1:3011/",
+            "plugin:notification|is_permission_granted"
+        )
+        .is_err());
+    }
+
+    /// A click on a Bot's notification opens the page it names, on the OpenBot the window shows,
+    /// and nowhere else: not another site, not another port, and not while the window shows setup.
+    #[test]
+    fn a_click_on_a_notification_opens_only_a_page_of_the_shown_openbot() {
+        let current: tauri::Url = "http://127.0.0.1:3010/channel/c-1".parse().unwrap();
+        let open = |owned, path| {
+            notification_destination(&current, owned, path).map(|url| url.to_string())
+        };
+        assert_eq!(
+            open(true, Some("/bots/expenses")).as_deref(),
+            Some("http://127.0.0.1:3010/bots/expenses")
+        );
+        assert_eq!(
+            open(true, Some("/bots")).as_deref(),
+            Some("http://127.0.0.1:3010/bots")
+        );
+        for path in [
+            "//example.com/bots",
+            "https://example.com/",
+            "http://127.0.0.1:3011/bots",
+            "bots",
+            "/\\example.com",
+            "javascript:alert(1)",
+        ] {
+            assert_eq!(open(true, Some(path)), None, "{path}");
+        }
+        assert_eq!(open(true, None), None);
+        assert_eq!(open(false, Some("/bots")), None);
+    }
+
+    /// A toast from an app Windows did not install from a package is shown under the app whose
+    /// AppUserModelID it names, and only when a Start menu shortcut carries that ID. The
+    /// notification plugin names the bundle identifier in an installed app (`desktop.rs`,
+    /// `notification.app_id(&self.identifier)`), and Tauri's own NSIS template stamps the same
+    /// `${BUNDLEID}` on the Start menu shortcut it names after the product (`installer.nsi`,
+    /// `SetLnkAppUserModelId`). So a toast reads "OpenBot" as long as the installer is that template
+    /// and the identifier and product name stay what they are.
+    #[test]
+    fn windows_toasts_name_the_app_the_start_menu_shortcut_carries() {
+        let (app, _) = app();
+        let config = app.config();
+        assert_eq!(config.identifier, "ai.copilotkit.openbot.desktop");
+        assert_eq!(config.product_name.as_deref(), Some("OpenBot"));
+        // Read from the files the installer is built from, the base and every overlay a build
+        // passes with --config: the app's runtime config leaves the bundle settings out.
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut checked = 0;
+        for entry in std::fs::read_dir(folder).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if !(name.starts_with("tauri.") && name.ends_with(".json")) {
+                continue;
+            }
+            let file: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let nsis = &file["bundle"]["windows"]["nsis"];
+            assert!(
+                nsis.get("template").is_none(),
+                "{name}: a custom NSIS template has to stamp the Start menu shortcut's \
+                 AppUserModelID itself"
+            );
+            if let Some(identifier) = file.get("identifier") {
+                assert_eq!(identifier, "ai.copilotkit.openbot.desktop", "{name}");
+            }
+            if let Some(product) = file.get("productName") {
+                assert_eq!(product, "OpenBot", "{name}");
+            }
+            checked += 1;
+        }
+        assert!(checked >= 2, "found {checked} Tauri config files");
+        // The installer registers the scheme a toast's link opens by: a click in the notification
+        // centre can only bring an unpackaged app back by protocol (`notice.rs`).
+        let base: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(folder.join("tauri.conf.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            base["plugins"]["deep-link"]["desktop"]["schemes"],
+            serde_json::json!([notice::SCHEME])
+        );
+        let hooks = std::fs::read_to_string(folder.join("windows/hooks.nsh")).unwrap();
+        assert!(
+            !hooks.contains("CreateShortcut"),
+            "a shortcut the hooks make carries no AppUserModelID"
+        );
     }
 
     /// Narration listens through the shell's speech recognition from OpenBot's own page, and from
@@ -6754,6 +6970,171 @@ where
         .spawn(move || restore(context))
 }
 
+/**
+Where a click on one of a Bot's notifications takes the window: the page the notice names
+(`extra.path`, which OpenBot's page sets as it posts it), on the OpenBot the window shows. Nothing
+when the window shows anything else, or for a path that is not one of that OpenBot's own pages.
+*/
+fn notification_destination(
+    current: &tauri::Url,
+    owned: bool,
+    path: Option<&str>,
+) -> Option<tauri::Url> {
+    let path = path.filter(|path| owned && path.starts_with('/') && !path.starts_with("//"))?;
+    if path.contains('\\') {
+        return None;
+    }
+    let target = current.join(path).ok()?;
+    (target.origin() == current.origin()).then_some(target)
+}
+
+/**
+A Bot's notification, shown by the system: OpenBot's page asks for it (`desktop_page::notify`) with
+the page a click opens.
+
+On Windows a toast of our own, which opens an `openbot://` link by protocol: the only way an app
+installed without a package is brought back from the notification centre (see `notice.rs`). On
+macOS and Linux the notification plugin's, carrying the page in `extra.path` for its click report.
+*/
+fn show_notice<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    title: &str,
+    body: &str,
+    path: Option<&str>,
+    tag: Option<&str>,
+) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let link = path.map_or_else(|| format!("{}://open", notice::SCHEME), notice::open_link);
+        notice::show_toast(
+            &app.config().identifier,
+            &notice::toast_xml(title, body, &link),
+            tag.map(notice::toast_tag).as_deref(),
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        // The plugin has no tag to replace a notice by: the page sends one notice per moment.
+        let _ = tag;
+        use tauri_plugin_notification::NotificationExt;
+        let mut builder = app.notification().builder().title(title).body(body);
+        if let Some(path) = path {
+            builder = builder.extra("path", path);
+        }
+        builder.show().map_err(|error| error.to_string())
+    }
+}
+
+/**
+A click on one of a Bot's notifications, as the notification plugin reports it (`tap`): opens the
+page it names. The plugin reports one only for notices it showed; on macOS, with notify-rust 4.18
+and mac-notification-sys 0.6.15, not even then (a notice without buttons is sent without waiting
+for a response).
+*/
+fn open_from_notification(
+    app: &tauri::AppHandle,
+    performed: &tauri_plugin_notification::ActionPerformed,
+) {
+    if performed.action_id() != "tap" {
+        return;
+    }
+    let path = performed
+        .notification()
+        .and_then(|notification| notification.extra().get("path"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    open_notice_page(app, path);
+}
+
+/// An `openbot://open?path=…` link, which a click on a Windows toast opens, from the notification
+/// centre too: Windows starts OpenBot.exe with it and the single-instance plugin hands it here.
+fn open_from_link(app: &tauri::AppHandle, link: &tauri::Url) {
+    if link.scheme() != notice::SCHEME {
+        return;
+    }
+    open_notice_page(app, notice::path_of(link));
+}
+
+/**
+OpenBot comes forward, as it does for a second launch, at the page a notice is about. While the
+window does not show this OpenBot yet (it is still starting, from a click that launched it), the
+page waits for it: `open_waiting_notice_page` opens it once OpenBot's page has loaded.
+*/
+fn open_notice_page(app: &tauri::AppHandle, path: Option<String>) {
+    show_whichever_applies(app);
+    // On the window's own thread, which is the thread `AttachThreadInput` lends the foreground's
+    // input to. Logged with how the click's launch fared passing the foreground on.
+    #[cfg(windows)]
+    if let Some(hwnd) = app
+        .get_webview_window("main")
+        .and_then(|window| window.hwnd().ok())
+    {
+        let hwnd = hwnd.0 as isize;
+        let _ = app.run_on_main_thread(move || {
+            let handoff = notice::take_handoff();
+            let forward = notice::bring_to_front(hwnd as *mut core::ffi::c_void);
+            log::info!(
+                "[notification] to the front: {forward:?} (the click's launch: {})",
+                handoff.as_deref().unwrap_or("no record")
+            );
+        });
+    }
+    let Some(path) = path else {
+        return;
+    };
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let Ok(current) = window.url() else {
+        return;
+    };
+    let owned = matches!(
+        window_page(app, &current),
+        WindowPage::OwnedApp | WindowPage::LocalApp
+    );
+    if !owned {
+        *app.state::<Shell>().waiting_notice_page.lock().unwrap() = Some(path);
+        return;
+    }
+    navigate_to_notice_page(&current, &path, |script| window.eval(script));
+}
+
+/// The page a click asked for before OpenBot's page was there, now that it is.
+fn open_waiting_notice_page<R: tauri::Runtime>(window: &tauri::Webview<R>, loaded: &tauri::Url) {
+    let waiting = window
+        .app_handle()
+        .state::<Shell>()
+        .waiting_notice_page
+        .lock()
+        .unwrap()
+        .take();
+    if let Some(path) = waiting {
+        navigate_to_notice_page(loaded, &path, |script| window.eval(script));
+    }
+}
+
+/**
+Goes to `path` on the OpenBot at `current`, unless it is there already or `path` is not one of its
+pages (`notification_destination`).
+
+As a route change in the page (`notice::open_script`), never by loading the page again: a click on a
+notice used to reload OpenBot and lose what the person was in the middle of. A page from before the
+page handled it is loaded at the target instead.
+*/
+fn navigate_to_notice_page(
+    current: &tauri::Url,
+    path: &str,
+    eval: impl FnOnce(String) -> tauri::Result<()>,
+) {
+    if let Some(target) = notification_destination(current, true, Some(path)) {
+        if &target != current {
+            if let Err(error) = eval(notice::open_script(path, target.as_str())) {
+                log::warn!("[notification] could not open the page it named: {error}");
+            }
+        }
+    }
+}
+
 fn restore_after_second_instance(app: &tauri::AppHandle) {
     let app = app.clone();
     let reporting_app = app.clone();
@@ -7537,6 +7918,12 @@ fn install_recorder_host_at_start() -> Option<std::thread::JoinHandle<()>> {
 
 fn main() {
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    // Windows opening a notification's link: pass the foreground on, before the single-instance plugin
+    // hands the link to the OpenBot already running and this launch exits. See `notice.rs`.
+    #[cfg(windows)]
+    if notice::launched_by_link(args.iter().map(|arg| arg.to_string_lossy().into_owned())) {
+        notice::let_running_openbot_come_forward();
+    }
     // Chrome, Edge or Chromium starting the Recorder's native messaging host: answer it and exit, before
     // anything of the app (the single-instance plugin would forward this launch to a running app).
     if let Some(origin) = recorder_host::caller_origin(&args) {
@@ -7583,12 +7970,16 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             restore_after_second_instance(app);
         }))
+        // The `openbot://` links a click on a Windows notification opens. Right after the
+        // single-instance plugin, whose `deep-link` feature hands it a second launch's link.
+        .plugin(tauri_plugin_deep_link::init())
         // The log file, before anything that logs. After the single-instance plugin, so a second
         // launch, which that plugin ends, never opens (or rotates) the file the first one writes.
         .plugin(logging::plugin())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(intelligence_bridge::plugin())
         .plugin(desktop_page::plugin())
         .plugin(outside_links_guard())
@@ -7669,6 +8060,7 @@ fn main() {
                 && payload.event() == tauri::webview::PageLoadEvent::Finished
             {
                 allow_app_page(window.app_handle(), payload.url());
+                open_waiting_notice_page(window, payload.url());
                 // macOS draws the window's outline from it; Windows tints the title bar with it.
                 if cfg!(any(target_os = "macos", target_os = "windows")) {
                     let _ = window.eval(APP_THEME_PAGE);
@@ -7705,6 +8097,32 @@ fn main() {
         })
         .setup(move |app| {
             log_launch(app.handle(), local_offset);
+            // Built by `generate_context!`, so the permissions OpenBot's page is granted are
+            // compiled in. First, before anything that could trust an app and open it.
+            know_app_page_grants(app.handle());
+            {
+                use tauri_plugin_notification::NotificationExt;
+                let handle = app.handle().clone();
+                app.notification()
+                    .on_action(move |performed| open_from_notification(&handle, performed))?;
+            }
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    for link in event.urls() {
+                        open_from_link(&handle, &link);
+                    }
+                });
+                // OpenBot started by a click on a notification: its page, once OpenBot shows.
+                if let Ok(Some(links)) = app.deep_link().get_current() {
+                    for link in links {
+                        if let Some(path) = notice::path_of(&link) {
+                            *app.state::<Shell>().waiting_notice_page.lock().unwrap() = Some(path);
+                        }
+                    }
+                }
+            }
             // A signed Mac or Windows build updates itself. The window asks once at launch and
             // installs only if the person says yes; the plugin refuses anything whose minisign
             // signature does not match the public key compiled in from the signing overlay

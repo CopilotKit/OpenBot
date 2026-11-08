@@ -24,7 +24,7 @@ pub const PLUGIN: &str = "openbot-desktop";
 pub const QUIT_SHORTCUT_PAGE: &str = include_str!("quit-shortcut.js");
 
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 15] = [
+pub const PERMISSIONS: [&str; 16] = [
     "openbot-desktop:allow-appearance",
     "openbot-desktop:allow-status",
     "openbot-desktop:allow-restart",
@@ -39,6 +39,7 @@ pub const PERMISSIONS: [&str; 15] = [
     "openbot-desktop:allow-speech-stop",
     "openbot-desktop:allow-speech-abort",
     "openbot-desktop:allow-open-logs",
+    "openbot-desktop:allow-notify",
     "openbot-desktop:allow-quit",
 ];
 
@@ -170,6 +171,25 @@ async fn open_logs(app: tauri::AppHandle) -> Result<(), String> {
     crate::open_log_folder_now(&app)
 }
 
+/// A Bot's notification: shown by the system, and opening OpenBot at `path` when it is clicked,
+/// from the notification centre too. See `notice.rs`.
+#[tauri::command]
+async fn notify(
+    app: tauri::AppHandle,
+    title: String,
+    body: Option<String>,
+    path: Option<String>,
+    tag: Option<String>,
+) -> Result<(), String> {
+    crate::show_notice(
+        &app,
+        &title,
+        body.as_deref().unwrap_or(""),
+        path.as_deref(),
+        tag.as_deref(),
+    )
+}
+
 /// Quit, by the same path as the tray's Quit: Ctrl+Q in the window on Windows, where no menu
 /// carries the shortcut.
 #[tauri::command]
@@ -194,6 +214,7 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             speech_stop,
             speech_abort,
             open_logs,
+            notify,
             quit
         ])
         .build()
