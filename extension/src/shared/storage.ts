@@ -49,6 +49,10 @@ export type DrainRecord = {
   /** Set while its events are kept after a stop (hold) or stop (park) row, or while it waits for its person to connect
    * again; cleared on offscreen.done. */
   kept?: KeptEvents;
+  /** Why its events are not going out right now while the document keeps retrying the back end (from the second
+   * failure in a row, the streamer's own sentence), so OpenBot can say it is not saved yet rather than "Saving" for the
+   * half hour before a retry streak turns into a hold. Cleared once they go out again. */
+  retrying?: string;
   /** The steps its service worker still held when the browser quit (`heldSteps`), as they are sent: the document that
    * recovers it puts them in its outbox before the interrupted outcome, and says so (offscreen.held). */
   held?: HeldEvent[];

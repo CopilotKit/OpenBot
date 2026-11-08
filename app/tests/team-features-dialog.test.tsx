@@ -39,9 +39,7 @@ describe("the team features dialog", () => {
     }
     const links = view.queryAllByRole("link");
     expect(links.map((link) => link.textContent)).toEqual(["Talk to us"]);
-    expect(links[0]?.getAttribute("href")).toBe(
-      "https://calendly.com/d/dwfr-k64-8d2/openbot-for-business",
-    );
+    expect(links[0]?.getAttribute("href")).toBe("https://open.bot/business");
     expect(links[0]?.getAttribute("target")).toBe("_blank");
     expect(
       view.queryAllByRole("button").map((button) => button.textContent),

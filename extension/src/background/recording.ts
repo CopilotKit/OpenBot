@@ -853,6 +853,8 @@ export function installRecording(
   /** Recordings the document could not send at all, with the sentence that says so. */
   const failedSends = new Map<string, string>();
   const earlyKept = new Map<string, KeptEvents>();
+  /** Retrying sentences (`offscreen.retrying`) for the live recording, applied when it reaches `drains`. */
+  const earlyRetrying = new Map<string, string>();
 
   /** Opening and closing the document never cross. */
   let documentQueue: Promise<unknown> = Promise.resolve();
@@ -1111,6 +1113,11 @@ export function installRecording(
           report("finishing a drain"),
         );
         return;
+      case "offscreen.retrying":
+        void noteRetrying(message.recordingId, message.reason).catch(
+          report("noting a retry"),
+        );
+        return;
       case "offscreen.kept":
         void keepEvents(message.recordingId, {
           reason: message.reason,
@@ -1224,6 +1231,34 @@ export function installRecording(
     });
     if (updated) publishDrains(updated);
     await maybeCloseDocument();
+  }
+
+  /** Why a recording's events are not going out while the document retries, or none once they go again: on its drain,
+   * or held for the live recording until Stop makes it one. */
+  async function noteRetrying(
+    recordingId: string,
+    reason: string | undefined,
+  ): Promise<void> {
+    const updated = await serially(async () => {
+      const drains = (await readLocal("drains")) ?? [];
+      const drain = drains.find((entry) => entry.recordingId === recordingId);
+      if (drain) {
+        if (drain.retrying === reason) return null;
+        const next = drains.map((entry) => {
+          if (entry.recordingId !== recordingId) return entry;
+          const { retrying: _was, ...rest } = entry;
+          return reason === undefined ? rest : { ...rest, retrying: reason };
+        });
+        await writeDrains(next);
+        return next;
+      }
+      if ((await readLocal("activeRecording"))?.recordingId === recordingId) {
+        if (reason === undefined) earlyRetrying.delete(recordingId);
+        else earlyRetrying.set(recordingId, reason);
+      }
+      return null;
+    });
+    if (updated) publishDrains(updated);
   }
 
   // ---- Record -------------------------------------------------------------------------------
@@ -1766,10 +1801,13 @@ export function installRecording(
       if (record?.recordingId !== recordingId) return current;
       const kept = earlyKept.get(recordingId);
       earlyKept.delete(recordingId);
+      const retrying = earlyRetrying.get(recordingId);
+      earlyRetrying.delete(recordingId);
       const drain: DrainRecord = defined({
         ...record,
         discarding: flags.discarding ? true : undefined,
         kept: flags.discarding ? undefined : kept,
+        retrying: flags.discarding ? undefined : retrying,
         held: flags.held?.length ? flags.held : undefined,
       });
       const next = [
@@ -2217,11 +2255,13 @@ export function installRecording(
       if (!previous) return existing;
       const kept = earlyKept.get(previous.recordingId);
       earlyKept.delete(previous.recordingId);
+      const retrying = earlyRetrying.get(previous.recordingId);
+      earlyRetrying.delete(previous.recordingId);
       const changed = [
         ...existing.filter(
           (drain) => drain.recordingId !== previous.recordingId,
         ),
-        defined({ ...previous, kept }),
+        defined({ ...previous, kept, retrying }),
       ];
       await writeLocal("activeRecording", {
         ...previous,
