@@ -54,31 +54,42 @@ export function stoppedReason(reported: unknown): string {
  * and before the run that answered it, and a stale failure is worse than none. The caller drops the
  * answer the same way when the join ran out of time.
  *
+ * STILL GOING IS HEARD TOO. A run the replay started and has not ended is a turn the Bot is answering
+ * now, and the join is what carries the rest of it to this screen (see `joinWithin`).
+ *
  * Subscribe before the connect starts: the agent hands a connect the subscribers it has then.
  */
 export function followLastRun(agent: Pick<AbstractAgent, "subscribe">): {
   /** The last run's failure, in its own words, or null when it did not fail. */
   failure: () => string | null;
+  /** Whether the last run the join has heard of started and has not ended yet. */
+  running: () => boolean;
   stop: () => void;
 } {
   let failure: string | null = null;
   let broken = false;
+  let running = false;
   const subscription = agent.subscribe({
     onRunStartedEvent: () => {
       failure = null;
+      running = true;
     },
     onRunFinishedEvent: () => {
       failure = null;
+      running = false;
     },
     onRunErrorEvent: ({ event }) => {
       failure = stoppedReason(event?.message);
+      running = false;
     },
     onRunFailed: () => {
       broken = true;
+      running = false;
     },
   });
   return {
     failure: () => (broken ? null : failure),
+    running: () => !broken && running,
     stop: () => subscription.unsubscribe(),
   };
 }

@@ -3,6 +3,12 @@
  *
  * THE DEADLINE ENDS THE CONNECT RATHER THAN OUTRUNNING IT: one left in flight is torn down by the
  * next run, and ends by replacing the agent's messages — losing anything added in between.
+ *
+ * EXCEPT WHILE THE BOT IS ANSWERING. A join stays open until the thread's turn is over, so joining a
+ * conversation whose Bot is still writing is a join that outlives any deadline, and it is the only
+ * thing bringing the rest of that reply to this screen. Ended at the deadline, the reply stopped
+ * where the join was, mid-word ("Which colour of apple do"), and stayed that way until a reload.
+ * Nothing can be lost by letting it run: while it does the agent is running, so nothing is sent.
  */
 
 /**
@@ -11,11 +17,16 @@
  * Says which: `"connected"` when the connect finished on its own, `"deadline"` when it was ended.
  * Whatever an ended connect replayed stops part way through the thread's history, so a caller that
  * reads something off the replay (how the last run ended) cannot trust it after `"deadline"`.
+ *
+ * A join that is carrying a turn still going (`answering`) is not ended at the deadline: the caller
+ * is told (`onAnswering`), so it can show what has arrived, and this resolves when the turn is over.
  */
 export async function joinWithin({
   connect,
   deadline,
   detach,
+  answering = () => false,
+  onAnswering = () => {},
 }: {
   /** The join already in progress. Its rejection is an outcome, not a failure of this function. */
   connect: Promise<unknown>;
@@ -23,6 +34,10 @@ export async function joinWithin({
   deadline: Promise<void>;
   /** End the in-flight connect. Asked for once, and only when the deadline came first. */
   detach: () => Promise<unknown>;
+  /** Whether the join, at the deadline, is carrying a turn the Bot has not finished. */
+  answering?: () => boolean;
+  /** Called once, at the deadline, when the join is left to carry that turn to its end. */
+  onAnswering?: () => void;
 }): Promise<"connected" | "deadline"> {
   // Settled either way: a connect that failed is a join that is over, and the caller restores
   // history separately. Kept as one promise so it can be awaited twice without a second rejection.
@@ -37,6 +52,11 @@ export async function joinWithin({
   ]);
   if (outcome === "connected") {
     return outcome;
+  }
+  if (answering()) {
+    onAnswering();
+    await finished;
+    return "connected";
   }
 
   try {
