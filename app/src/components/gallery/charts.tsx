@@ -206,7 +206,8 @@ export function BarChartCard({
               className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1.5"
               key={key}
             >
-              <span className="text-xs tabular-nums text-muted-foreground">
+              {/* Cut to its bar's width as the label is: ten bars on a phone ran their figures together. */}
+              <span className="w-full truncate text-center text-xs tabular-nums text-muted-foreground">
                 {formatNumber(entry.value)}
               </span>
               {/* The bar lives in its own flexible box so the number above and the label below keep
