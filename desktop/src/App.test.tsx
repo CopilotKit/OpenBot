@@ -1618,6 +1618,94 @@ test("relaunch with Docker Desktop quit opens it, says so, and starts once it an
   ).toBeNull();
 });
 
+test("relaunch with the engine machine stopped says it is starting it, in setup's words", async () => {
+  // Seen on Windows: Podman's machine was stopped, and for the ten seconds it took to start the
+  // screen said only "Waiting for the back end", while the log said "Starting the engine machine".
+  setupConnectedLocalStack(
+    "/tmp/local-eval-machine-stopped",
+    localStatus("ready", "valid"),
+  );
+  const machine = deferred<unknown>();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) =>
+    command === "wake_engine" ? machine.promise : previous(command, args);
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "Starting OpenBot" });
+  // As `wake_installation_engine` reports it, before the machine answers.
+  await emitProgress({
+    step: "start-machine",
+    ok: true,
+    running: true,
+    detail: "Starting the engine machine.",
+  });
+  expectWorking(view, "Starting the engine machine.");
+  await emitProgress({
+    step: "start-machine",
+    ok: true,
+    running: false,
+    detail: "The engine machine is running.",
+  });
+  expect(view.queryByText("Starting the engine machine.")).toBeNull();
+  await act(async () => machine.resolve(null));
+  await view.findByRole("heading", { name: "OpenBot is running" });
+});
+
+test("the running screen shows none of Start's own steps, and names the system tray on Windows", async () => {
+  // Seen on Windows: "OpenBot is running" flashed "settings written, credentials stored" and
+  // "containers up" for the moment before OpenBot opened, and sent the person to "the menu bar",
+  // which Windows does not have.
+  Object.defineProperty(navigator, "userAgent", {
+    configurable: true,
+    value:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+  });
+  try {
+    setupConnectedLocalStack(
+      "/tmp/local-eval-running-words",
+      localStatus("ready", "valid"),
+    );
+    const started = deferred<unknown>();
+    const previous = invokeHandler;
+    invokeHandler = async (command, args) =>
+      command === "start_stack"
+        ? started.promise.then(() => previous(command, args))
+        : previous(command, args);
+    const view = await renderApp();
+    await waitFor(() => expect(localSequence()).toContain("start_stack"));
+    // What the native side reports as it starts OpenBot.
+    for (const progress of [
+      { step: "env", ok: true, detail: "Your settings are saved." },
+      {
+        step: "services",
+        ok: true,
+        running: true,
+        detail: "Starting OpenBot's services.",
+      },
+      { step: "services", ok: true, detail: "OpenBot's services are running." },
+      { step: "answering", ok: true, detail: "OpenBot is ready." },
+    ])
+      await emitProgress(progress);
+    await act(async () => started.resolve(null));
+    await view.findByRole("heading", { name: "OpenBot is running" });
+    const screen = document.body.textContent ?? "";
+    expect(view.queryByRole("list", { name: "Setup progress" })).toBeNull();
+    for (const internal of [
+      "settings written",
+      "credentials stored",
+      "containers up",
+      "menu bar",
+    ])
+      expect(screen).not.toContain(internal);
+    expect(
+      view.getByText(
+        "OpenBot is open in this window. You can also show it or stop it from its icon in the system tray.",
+      ),
+    ).toBeTruthy();
+  } finally {
+    delete (navigator as { userAgent?: string }).userAgent;
+  }
+});
+
 test("relaunch says when Docker Desktop did not start, and Retry opens it again", async () => {
   setupConnectedLocalStack(
     "/tmp/local-eval-docker-never",

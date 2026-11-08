@@ -2874,7 +2874,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
             );
         }
         let (settings, mut secrets) = persist_start_environment(&root, settings, &credential)?;
-        report(&app, "env", true, "settings written, credentials stored");
+        report(&app, "env", true, "Your settings are saved.");
         // Compose gives inherited environment precedence over .env. Pin this run's chosen ports.
         secrets.extend(ports.settings());
         for key in [
@@ -2906,7 +2906,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
 
         // Installation already verified these images. Start only raises the local containers;
         // its no-pull policy sends missing assets back to the installation step.
-        report_running(&app, "services", "starting installed containers", None);
+        report_running(&app, "services", "Starting OpenBot's services.", None);
 
         // Only an installed harness needs the local service; a BYO endpoint is already running elsewhere.
         let installed_harness = picked
@@ -2922,7 +2922,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         let requested_services = stack::up(&found, &root, installed_harness, &secrets)?;
         // The migrations ran with that: `migrate` is the dependency Compose completes before it
         // starts `server`, once, and a failed one fails the `up`.
-        report(&app, "services", true, "containers up");
+        report(&app, "services", true, "OpenBot's services are running.");
 
         // `compose up` succeeds once it has asked for everything. A service that then exits is not its
         // problem, and both Bots exit immediately without a model key. Reported and made fatal here;

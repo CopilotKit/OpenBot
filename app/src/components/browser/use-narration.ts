@@ -12,6 +12,7 @@ import {
   type NarrationStatus,
   startNarration,
 } from "@/lib/browser/narration";
+import { useMicrophone } from "./use-microphone";
 
 /** The longest phrase the narration route takes. */
 const PHRASE_MAX = 4000;
@@ -64,6 +65,8 @@ export function useNarration({
   const sendNow = useRef(send);
   sendNow.current = send;
   const supported = (deps ?? browserNarrationDeps()).Recognition !== null;
+  /** No microphone on this computer: narration is off whatever the person chose, and their choice is kept for one. */
+  const noMicrophone = useMicrophone() === false;
 
   const post = useCallback((body: NarrationPost) => {
     posted.current = posted.current.then(async () => {
@@ -122,9 +125,9 @@ export function useNarration({
    * Whether narration is on as it really is, which the switch shows. Muted is off. So is a narration that failed and
    * stopped listening (no microphone, or the browser refused it), which mutes itself: the page says narration is off
    * then, and a switch that still read on contradicted it (seen in the fourth end-to-end run, in a browser with no
-   * microphone).
+   * microphone). So is narration on a computer with no microphone, before any recording has tried it.
    */
-  const on = !muted;
+  const on = !muted && !noMicrophone;
 
   /**
    * Turns narration on or off. On after a failure tries again. On is always the person's click, the one thing that may
@@ -144,7 +147,7 @@ export function useNarration({
     [language],
   );
 
-  return { supported, on, setOn, status, lost, finish };
+  return { supported, on, noMicrophone, setOn, status, lost, finish };
 }
 
 export type NarrationControls = ReturnType<typeof useNarration>;
