@@ -23,7 +23,7 @@ import { settleReactWork } from "./settle-react-work";
  * FOUND ON WINDOWS: the person pressed Deny on OpenBot Desktop's "Allow this file change?" and the
  * step read "Blocked: Saved a file", past tense for a file that was never saved. A blocked step says
  * what was tried, and which file, the way a blocked step on the Bot's own computer does
- * ("Blocked: Save file  notes.txt · You declined it.").
+ * ("Blocked: Save a file  notes.txt · You declined it.").
  */
 
 beforeAll(() => GlobalRegistrator.register());

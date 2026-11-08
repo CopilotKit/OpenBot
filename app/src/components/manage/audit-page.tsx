@@ -30,6 +30,7 @@ import { auditEventsQueryOptions, auditExportUrl } from "@/lib/audit/queries";
 import { client } from "@/lib/client";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
+import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
 import { cn } from "@/lib/utils";
 
 /**
@@ -93,6 +94,26 @@ export function withoutOpenBotWorking(search: string): string {
   return `?${params.toString()}`;
 }
 
+/**
+ * Each row about a skill with the title the skill's page shows, so "Give a Bot a skill" names
+ * "Write a skill" and not `skill-creator`, on rows written before and after. A skill since deleted
+ * has no title to find, and reads as its slug in words.
+ */
+function withSkillTitles(
+  events: AuditEvent[],
+  skills: readonly { slug: string; title: string }[] | undefined,
+): AuditEvent[] {
+  if (!skills?.length) return events;
+  const titles = new Map(skills.map((skill) => [skill.slug, skill.title]));
+  return events.map((event) => {
+    const title =
+      event.targetType === "skill" && event.targetId
+        ? titles.get(event.targetId)
+        : undefined;
+    return title ? { ...event, subjectTitle: title } : event;
+  });
+}
+
 /** What the page says under its title in Admin, where an admin reviews every Bot against policy. */
 const ADMIN_DESCRIPTION =
   "Review Bot actions and actions blocked by this deployment’s policy.";
@@ -126,7 +147,15 @@ export function AuditPage({
       : withBot(view, bot);
   const [query, setQuery] = useState("");
   const events = useQuery(auditEventsQueryOptions(search));
-  const rows = oneRowPerAction((events.data?.events ?? []) as AuditEvent[]);
+  // Activity names a skill by the title its page shows; the trail keeps only its slug.
+  const skills = useQuery({
+    ...pluginsPageQueryOptions(),
+    enabled: edition === "personal",
+  }).data?.skills;
+  const rows = withSkillTitles(
+    oneRowPerAction((events.data?.events ?? []) as AuditEvent[]),
+    skills,
+  );
   const nameFor = useBotNames();
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);

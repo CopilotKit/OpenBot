@@ -15,6 +15,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { ASK_FIRST_TITLE } from "@/components/approvals/ask-first-copy";
 import { AccessRequestsSection } from "@/components/plugins/access-requests";
 import { AccountModeDialog } from "@/components/plugins/account-mode-dialog";
 import {
@@ -1299,7 +1300,8 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
           }
           description={
             personal
-              ? "Every Bot can use these. It asks you before one that changes things while Ask before acting is on."
+              ? // The setting by the name Settings > Approvals gives it, so a person can find it there.
+                `Every Bot can use these. While ${ASK_FIRST_TITLE} is on, a Bot asks you before it uses one that makes changes.`
               : "A Bot only sees the tools it has been given. Each call is checked when it happens, so removing access applies from the next call."
           }
           title="Tools"
