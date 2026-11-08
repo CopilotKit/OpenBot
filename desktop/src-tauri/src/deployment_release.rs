@@ -101,10 +101,39 @@ pub fn latest_url(policy: &Distribution) -> String {
 pub fn resolve_version(root: &Path) -> Result<String, String> {
     resolve_version_with(root, deployment::pinned().as_ref(), || {
         let policy = distribution(root)?;
+        // OpenBot's own releases: the app update feed on downloads.copilotkit.ai names the same
+        // Latest release, and GitHub is asked only when it cannot be read.
+        if policy.repository == "CopilotKit/OpenBot" {
+            match deployment::get_from_mirror(LATEST_FEED).and_then(|body| feed_tag(&body)) {
+                Ok(tag) => return Ok(tag),
+                Err(error) => {
+                    log::warn!("[download] {error}; asking GitHub for the latest release")
+                }
+            }
+        }
         let body = deployment::get(&latest_url(&policy))
             .map_err(|error| format!("could not find the latest OpenBot release: {error}"))?;
         release_tag(&body)
     })
+}
+
+/// The app update feed for the Latest release, copied to downloads.copilotkit.ai as each stable
+/// release becomes Latest.
+const LATEST_FEED: &str = "https://downloads.copilotkit.ai/latest/latest.json";
+
+/// The release tag the update feed names: its `version` is the tag without its `v`.
+fn feed_tag(body: &[u8]) -> Result<String, String> {
+    #[derive(Deserialize)]
+    struct Feed {
+        version: String,
+    }
+    let feed: Feed = serde_json::from_slice(body)
+        .map_err(|error| format!("{LATEST_FEED} is not readable: {error}"))?;
+    let version = feed.version.trim().trim_start_matches('v');
+    if version.is_empty() {
+        return Err(format!("{LATEST_FEED} names no version"));
+    }
+    Ok(format!("v{version}"))
 }
 
 /// With an installed deployment of this build's kind, or one laid out completely, its own version.
@@ -152,6 +181,15 @@ mod tests {
         let root = temp_root(label);
         std::fs::create_dir_all(&root).unwrap();
         root
+    }
+
+    #[test]
+    fn reads_the_latest_release_from_the_update_feed() {
+        // The shape downloads.copilotkit.ai/latest/latest.json had for v0.3.3.
+        let feed = br#"{"version":"0.3.3","notes":"...","pub_date":"2026-11-07T00:00:00Z","platforms":{}}"#;
+        assert_eq!(feed_tag(feed).unwrap(), "v0.3.3");
+        assert!(feed_tag(br#"{"version":""}"#).is_err());
+        assert!(feed_tag(b"<Error><Code>AccessDenied</Code></Error>").is_err());
     }
 
     #[test]

@@ -11,6 +11,7 @@ pub mod engine;
 pub mod env;
 pub mod harness;
 pub mod host_access;
+pub mod image_mirror;
 pub mod install;
 pub mod learning_model;
 pub mod local_eval;
