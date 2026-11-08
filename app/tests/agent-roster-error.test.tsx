@@ -16,6 +16,7 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
+import { deploymentKeys } from "@/lib/deployment/queries";
 import { Route as HomeRoute } from "@/routes/_authed/_app/index";
 
 /**
@@ -229,4 +230,28 @@ test("a failed REFETCH on / with explore empty shows it as empty, not broken", a
       "Couldn't load your Bots, so there's no one to send this to. Reload the page.",
     ),
   ).toBeNull();
+});
+
+test("the personal edition's / has no Explore section: nobody else is there to share a Bot", async () => {
+  const mine = agent({ id: "mine-1", name: "Mine Agent", mine: true });
+  const queryClient = staleQueryClient([mine]);
+  queryClient.setQueryData(deploymentKeys.capabilities(), {
+    generativeUi: true,
+    selfHostBanner: false,
+    localEvaluation: true,
+    edition: "personal",
+  });
+
+  const view = renderHome(queryClient);
+  await waitForFailedRefetch(queryClient);
+
+  expect(
+    await view.findByText(
+      "OpenBot picks the right Bot. Type",
+      { exact: false },
+      HOME_FIND_TIMEOUT,
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText("Explore Bots")).toBeNull();
+  expect(view.queryByText("Nobody has shared a Bot with you yet.")).toBeNull();
 });

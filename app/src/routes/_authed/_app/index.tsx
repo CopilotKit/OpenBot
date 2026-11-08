@@ -35,6 +35,8 @@ import {
   routeMessage,
 } from "@/lib/channels/route";
 import { useStartChannel } from "@/lib/channels/start";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { editionOf } from "@/lib/edition-guard";
 import { newId } from "@/lib/new-id";
 import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
 
@@ -42,10 +44,18 @@ import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
 const EXPLORE_SHOWN = 4;
 
 export const Route = createFileRoute("/_authed/_app/")({
+  // The edition decides whether there is an Explore section at all, so it is read before the page draws and the
+  // composer never moves when it arrives.
+  beforeLoad: async ({ context }) => {
+    await editionOf(context.queryClient);
+  },
   component: RouteComponent,
 });
 
 function RouteComponent() {
+  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
+  // One person on their own computer: nobody else can share a Bot with them, so there is nothing to explore.
+  const personal = capabilities?.edition === "personal";
   const { data: user } = useQuery(currentUserQueryOptions());
   const channels = useInfiniteQuery(channelListQueryOptions());
   const {
@@ -243,8 +253,8 @@ function RouteComponent() {
          * somebody shared another Bot, so the rest are one "All Bots" away. Every state below
          * reserves the same two rows, so the composer above it does not move when the list settles.
          */}
-        <div className="mt-10 w-full max-w-2xl">
-          {loading ? (
+        <div className={personal ? "hidden" : "mt-10 w-full max-w-2xl"}>
+          {personal ? null : loading ? (
             <>
               <h2 className="font-semibold text-base">Explore Bots</h2>
               <Skeleton className="mt-4 h-[140px]" />
