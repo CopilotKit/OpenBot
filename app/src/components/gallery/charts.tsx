@@ -1,8 +1,10 @@
+import { useContext } from "react";
 import { z } from "zod";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import { GalleryFrame } from "./frame";
 import { seriesColour } from "./palette";
 import { byPosition } from "./positions";
+import { GalleryStreamingContext } from "./streaming";
 
 const point = z.object({
   label: z
@@ -151,8 +153,30 @@ function formatNumber(value: unknown): string {
   return String(Math.round(value * 100) / 100);
 }
 
-/** Nothing to draw is a sentence. An empty axis reads as a component that failed. */
+/**
+ * Nothing to draw is a sentence. An empty axis reads as a component that failed.
+ *
+ * NOT WHILE THE FIGURES ARE ARRIVING. A chart has no points until its first one streams in, and it
+ * read "There is no data to chart." for that whole wait, as if the Bot had come back empty. While the
+ * call's arguments may still arrive it shimmers as a running tool line does, at the chart's height
+ * so nothing moves when the figures land. A call that was stopped, or reloaded with no result, is
+ * not arriving (see `ArgumentsArrivingContext`), so it says there is no data instead of shimmering
+ * for good.
+ */
 function Empty() {
+  const arriving = useContext(GalleryStreamingContext);
+  if (arriving) {
+    return (
+      <p
+        className="flex items-center justify-center text-sm text-muted-foreground"
+        // `status`, as a running tool line's is: the words say what the shimmer shows.
+        role="status"
+        style={{ height: HEIGHT }}
+      >
+        <span className="tool-line-running">Drawing the chart…</span>
+      </p>
+    );
+  }
   return (
     <p className="py-10 text-center text-sm text-muted-foreground">
       There is no data to chart.
