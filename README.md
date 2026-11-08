@@ -9,9 +9,9 @@
 A modular, self-hostable workspace for AI coworkers.<br>
 Choose your models. Bring your agents. Own your infrastructure.
 
-[![Download for Mac — Apple silicon](https://img.shields.io/badge/Mac-Apple_silicon-18181B?style=for-the-badge&logo=apple&logoColor=white)](https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg)
-[![Download for Mac — Intel](https://img.shields.io/badge/Mac-Intel-18181B?style=for-the-badge&logo=apple&logoColor=white)](https://downloads.copilotkit.ai/latest/OpenBot-mac-x64.dmg)
-[![Download for Windows — x64](https://img.shields.io/badge/Windows-x64-18181B?style=for-the-badge)](https://downloads.copilotkit.ai/latest/OpenBot-windows-x64-setup.exe)
+[![Download for Mac — Apple silicon](https://img.shields.io/badge/Download-Mac_Apple_silicon-18181B?style=for-the-badge&logo=apple&logoColor=white)](https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg)
+[![Download for Mac — Intel](https://img.shields.io/badge/Download-Mac_Intel-18181B?style=for-the-badge&logo=apple&logoColor=white)](https://downloads.copilotkit.ai/latest/OpenBot-mac-x64.dmg)
+[![Download for Windows — x64](https://img.shields.io/badge/Download-Windows_x64-18181B?style=for-the-badge)](https://downloads.copilotkit.ai/latest/OpenBot-windows-x64-setup.exe)
 
 Free for personal use. Runs on your computer.
 
@@ -584,7 +584,6 @@ Use `bash scripts/start.sh` for the whole stack and `bash scripts/stop.sh` to ta
 
 [![GitHub Trending: #5 Repository Of The Day](https://trendshift.io/api/badge/repositories/175080)](https://trendshift.io/repositories/175080)
 [![Trendshift: #3 Repository Of The Day](https://trendshift.io/api/badge/trendshift/repositories/175080/daily)](https://trendshift.io/repositories/175080)
-
 
 ## Documentation
 
