@@ -30,6 +30,7 @@ pub mod recorder_external;
 pub mod recorder_host;
 pub mod recorder_install;
 pub mod registry;
+pub mod release_images;
 pub mod saved_intent;
 pub mod shell_updates;
 pub mod speech;
