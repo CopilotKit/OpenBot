@@ -25,10 +25,12 @@ import { settleReactWork } from "./settle-react-work";
  * A SKILL ON THE FIRST MESSAGE OF A NEW CONVERSATION, FROM THE `/` CHIP TO THE RUN THAT LEAVES THE
  * BROWSER.
  *
- * In a conversation that already exists, `channel-chat` reads the draft's `/` chips and puts each
- * skill's instruction in front of the person's message as a system row. `/channel/new` handed only
- * the draft's text to the channel it created, so the first message of a new conversation reached
- * every Bot, built-in or remote, with its chip showing and its skill missing.
+ * A picked skill leaves the browser as `/<command>` at the start of the person's words, and the
+ * server gives the Bot that skill's stored instructions (server/src/plugins/picked-skill.ts). The
+ * browser used to send the instructions as a system row of its own, which no Bot read as
+ * instructions, and `/channel/new` once dropped even that for the first message of a new
+ * conversation. The first message has to leave exactly as a later one does: command first, and no
+ * row of the browser's own carrying the skill.
  *
  * Everything below the HTTP boundary is real: the `/channel/new` route and its composer, the start
  * sequence, the hand-over to the channel screen, `ChannelChat`, its agent and the run request. Only
@@ -263,10 +265,10 @@ test("the first message of a new conversation carries its skill, as the next one
       message.role === "user" &&
       textOf(message).includes("Count the north store room."),
   );
-  expect(asked).toBeGreaterThan(0);
-  // The skill's instruction, as a system row just ahead of the message that used it.
-  expect(messages[asked - 1]?.role).toBe("system");
-  expect(textOf(messages[asked - 1] as Message)).toBe(INSTRUCTION);
-  // And only there: the person's own words are not rewritten to carry it.
-  expect(textOf(messages[asked] as Message)).not.toContain(INSTRUCTION);
+  expect(asked).toBeGreaterThanOrEqual(0);
+  // The command at the start of the words, where the server finds the skill.
+  expect(textOf(messages[asked] as Message)).toStartWith("/tally ");
+  // And the instructions nowhere in what the browser sent: only the server's stored copy counts.
+  for (const message of messages)
+    expect(textOf(message)).not.toContain(INSTRUCTION);
 });
