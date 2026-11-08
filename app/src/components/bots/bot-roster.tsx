@@ -125,7 +125,7 @@ export function BotRoster() {
       ) : null}
       <DoneTasks done={list.done} />
       {hidden.data?.length ? (
-        <HiddenSection agents={hidden.data} byId={byId} />
+        <HiddenSection agents={hidden.data} byId={byId} personal={personal} />
       ) : null}
     </>
   );
@@ -133,14 +133,17 @@ export function BotRoster() {
 
 /**
  * The Bots this person hid, folded until asked for: a way back for somebody who hid something, not
- * a fourth list everybody reads past. A Bot's page is where Unhide lives.
+ * a fourth list everybody reads past. A Bot's page is where Unhide lives. The personal edition has
+ * nobody else with a list, so it doesn't say only theirs changed.
  */
 function HiddenSection({
   agents,
   byId,
+  personal,
 }: {
   agents: AgentProfile[];
   byId: Map<string, BotAttention>;
+  personal: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -150,7 +153,7 @@ function HiddenSection({
           {open ? "Hide" : "Show"}
         </Button>
       }
-      description={`${agents.length} ${agents.length === 1 ? "Bot" : "Bots"} you hid. Only your list changes.`}
+      description={`${agents.length} ${agents.length === 1 ? "Bot" : "Bots"} you hid.${personal ? "" : " Only your list changes."}`}
       title="Hidden"
     >
       {open ? <RosterRows agents={agents} byId={byId} /> : null}

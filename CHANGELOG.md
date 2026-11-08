@@ -8,6 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- In the personal edition, a Bot's page names what runs it ("Runs on LangChain (LangGraph)") instead of the address of the harness OpenBot started for it, and its Pinned, Hidden, Reset and Delete rows no longer mention other people: Delete says you can still read your conversations with it.
 - In the personal edition, Settings, Setup says the Bot computer is Ready whenever the computer answers, including after a Bot has used it and its browser has closed. Before, it said "Not checked" and that a computer starts when a Bot first needs one.
 - In a narrow window, the sidebar closes when you pick a conversation, Bots, Connections, Teach a Bot, or an item in your account menu. Before, it stayed open over the page you opened until you clicked outside it.
 - OpenBot Desktop's Status window says the back end is "On this computer" instead of its stack id ("local-08ff56ec…"). The id is still in Copy diagnostics, for support.
