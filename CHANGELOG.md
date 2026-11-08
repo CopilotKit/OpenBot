@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot asked to read a day of Gmail reads all of it. Listing emails used to bring back each
+  message's raw MIME, tens of thousands of characters per email, so the answer was cut inside the
+  first message, the Bot could not page on, and a large page failed at Composio as too large. A
+  listing now asks Gmail for sender, recipients, subject, time, labels and snippet, 20 messages per
+  call with the page token to the next, and says how many of the matches the page holds; a message
+  or a thread read whole keeps each decoded body, Cc and Reply-To and drops the raw MIME. Any app's
+  answer that is still too long for a Bot is cut between
+  whole records, with the call that reads the rest, instead of mid-record ending "[truncated]".
 - OpenBot Desktop opens OpenBot when an update to its local back end does not finish. A back end
   whose update stopped (on a slow connection, at the image download) still runs the release it had,
   with every check passing; the window said it was not healthy and stopped OpenBot. It now says
