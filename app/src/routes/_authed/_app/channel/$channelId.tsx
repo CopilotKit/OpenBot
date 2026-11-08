@@ -12,12 +12,12 @@ import { ConversationActions } from "@/components/channels/conversation-actions"
 import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerViewPanel } from "@/components/computer/computer-panel";
 import { useAutoWatchScreen } from "@/components/computer/use-auto-watch-screen";
-import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
 import { useMarkOpenChannelRead } from "@/lib/channels/mark-read";
 import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
+import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
 
 const chatSearchSchema = z.object({
   settings: z.boolean().optional(),
@@ -30,8 +30,11 @@ const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 const HEADING_ENTRANCE_SECONDS = 0.18;
 const HEADING_ENTRANCE_OFFSET = "translateY(4px)";
 
-/** Shared detail pane width for the live screen view: wide enough that the page on it can be read, not glimpsed. */
-const SCREEN_PANEL_WIDTH = 560;
+/**
+ * Shared detail pane width for the live screen view. A glimpse, not a place to read the page: it shows that the Bot is
+ * browsing and roughly what, and the full-size view (one click on the picture) is where the page is read.
+ */
+const SCREEN_PANEL_WIDTH = 360;
 
 export const Route = createFileRoute("/_authed/_app/channel/$channelId")({
   validateSearch: chatSearchSchema,

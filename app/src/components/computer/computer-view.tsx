@@ -707,9 +707,11 @@ export function ComputerView({
 
   return (
     <>
+      {/* A container, so the status over the picture can be compact in the narrow side panel (a glimpse) and roomy
+          where the card is wide in the conversation. */}
       <figure
         ref={previewRef}
-        className="overflow-hidden rounded-2xl border bg-background"
+        className="@container overflow-hidden rounded-2xl border bg-background"
       >
         {/*
           The card read as a browser window: where it is, as an address bar says it (the site in ink, the rest of the
@@ -793,9 +795,11 @@ export function ComputerView({
           </button>
           {!settled && !(driving && !control?.transitioning) ? (
             <div className="absolute inset-x-2 bottom-2 flex items-center justify-between gap-2 rounded-xl border border-white/60 bg-white/75 py-1.5 pr-1.5 pl-3 shadow-lg backdrop-blur-md dark:border-white/10 dark:bg-black/55">
-              <span className="flex min-w-0 items-center gap-2 text-sm">
+              <span className="flex min-w-0 items-center gap-2 text-xs @sm:text-sm">
                 {control && !control.transitioning && !someoneElse ? (
-                  <ChannelAvatar participantIds={[computerId]} size={18} />
+                  <span className="hidden shrink-0 @sm:flex">
+                    <ChannelAvatar participantIds={[computerId]} size={18} />
+                  </span>
                 ) : null}
                 <span className="min-w-0 truncate">
                   {!control
