@@ -6,7 +6,6 @@
  * decisions stay in the CLI: readiness and licence are its own states, read by exact value.
  */
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import type { Problem } from "./Problem";
 
 /** `update` installs the release this app's CLI installs over an older stack, keeping its data. */
@@ -32,6 +31,7 @@ export const localFailures = [
   "unexpected-exit",
   "invalid-acceptance",
   "rootless-podman",
+  "download-stalled",
 ] as const;
 export type LocalFailure = (typeof localFailures)[number];
 
@@ -87,6 +87,13 @@ export type LocalReport = {
     urls: { api: string; dashboard: string; gateway: string };
     hasFailedStep: boolean;
     updateInProgress: boolean;
+    /** `local_eval::UnfinishedUpdate`: an update the CLI keeps on record because it did not finish. */
+    unfinishedUpdate: null | {
+      to: string;
+      /** No migration started: the release that answers is `installedRelease`. */
+      prepared: boolean;
+      stoppedDownloading: boolean;
+    };
     observed: null | {
       running: boolean;
       services: { name: string; phase: string; ready: boolean }[];
@@ -103,6 +110,11 @@ export type LocalReport = {
    * (`local_eval::update_due`). Absent or null when there is nothing to update.
    */
   updateTo?: string | null;
+  /**
+   * Every check the CLI made from this computer passed: API, gateway and dashboard. Not readiness:
+   * see `onInstalledRelease`.
+   */
+  checksPassed: boolean;
 };
 
 /** What `local connect` answered. The key it wrote went to the credential store, not here. */
@@ -151,42 +163,6 @@ export function runLocalEval(
     throw failure(rejection);
   });
   return { attempt, report };
-}
-
-/** What the back end's update has downloaded: `intelligence_download::Transferred`. */
-export type UpdateDownload = {
-  bytes: number;
-  size?: number;
-  bytesPerSecond?: number;
-};
-
-/**
- * Hears what the update `attempt` (a `runLocalEval("update", …)`) downloads while it runs. The
- * CLI itself says nothing until it ends, so the native side reads the cluster for it. Returns the
- * call that stops listening.
- */
-export function listenToUpdateDownload(
-  attempt: string,
-  heard: (download: UpdateDownload) => void,
-): () => void {
-  let stopped = false;
-  let unlisten: (() => void) | null = null;
-  void listen<UpdateDownload & { attempt: string }>(
-    "local-eval:download",
-    ({ payload: { attempt: of, ...download } }) => {
-      if (!stopped && of === attempt) heard(download);
-    },
-  )
-    .then((stop) => {
-      if (stopped) stop();
-      else unlisten = stop;
-    })
-    // Without a native side (a test, a plain browser) there is nothing to hear.
-    .catch(() => {});
-  return () => {
-    stopped = true;
-    unlisten?.();
-  };
 }
 
 /** Lists recorded stacks, so a stack id comes from the CLI. Cancel it like any other call. */
@@ -264,6 +240,26 @@ export function copilotKitSignInPage(
   return invoke<CopilotKitSignInPage | null>("copilotkit_sign_in_page", {
     attempt,
   });
+}
+
+/** How much of the back end's download has arrived, in bytes, of how much in all. */
+export type LocalDownload = { done: number; total: number };
+
+/**
+ * How far the download before the setup or update `attempt` has got, while it downloads,
+ * or null. OpenBot downloads the back end's images itself before the CLI pulls them, so a slow
+ * line can be told apart from a stuck one.
+ */
+export async function localEvalDownload(
+  attempt: string,
+): Promise<LocalDownload | null> {
+  const found = await invoke<unknown>("local_eval_download", { attempt });
+  // Only two byte counts, and only once there is something to download.
+  if (!found || typeof found !== "object") return null;
+  const { done, total } = found as Partial<LocalDownload>;
+  return typeof done === "number" && typeof total === "number" && total > 0
+    ? { done, total }
+    : null;
 }
 
 /**
@@ -383,9 +379,37 @@ function intelligenceReady(report: ChatGateInput["intelligence"]): boolean {
   if (report === null || typeof report === "string") return false;
   return (
     report.outcome === "completed" &&
-    canonical(report.readiness, "ready") &&
+    (canonical(report.readiness, "ready") ||
+      onInstalledRelease(report) !== null) &&
     canonical(report.licence, "valid")
   );
+}
+
+/**
+ * The back end runs the release it has, and is ready on it, while the CLI keeps an update it did
+ * not finish on record. Null for anything else.
+ *
+ * Found on a slow connection: `local update` stopped downloading one of the new release's images
+ * at the CLI's own limit. Nothing in the cluster had changed and every check passed, but the CLI
+ * reports `degraded` for as long as the record stays, and the window said the back end was not
+ * healthy and stopped. Ready here only when every check passed and the update was still
+ * `prepared`, so no migration had started. A check that fails is still not healthy.
+ */
+export function onInstalledRelease(report: LocalReport): {
+  release: string;
+  update: NonNullable<NonNullable<LocalReport["stack"]>["unfinishedUpdate"]>;
+} | null {
+  const update = report.stack?.unfinishedUpdate;
+  if (
+    report.outcome !== "completed" ||
+    !canonical(report.readiness, "degraded") ||
+    report.checksPassed !== true ||
+    !report.stack ||
+    !update?.prepared
+  ) {
+    return null;
+  }
+  return { release: report.stack.installedRelease, update };
 }
 
 // Positive match only: a future value that is not exactly the good one still blocks.

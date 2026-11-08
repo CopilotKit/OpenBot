@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { act, cleanup, render, waitFor, within } from "@testing-library/react";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import type { StartOutcome } from "./LocalIntelligence";
@@ -21,24 +21,6 @@ mock.module("@tauri-apps/api/core", () => ({
     return invokeHandler(command, args);
   },
 }));
-
-// Native events, as Tauri's `listen` delivers them: `{ payload }` to each listener of the name.
-type Heard = (event: { payload: unknown }) => void;
-const listeners = new Map<string, Set<Heard>>();
-mock.module("@tauri-apps/api/event", () => ({
-  listen: async (name: string, heard: Heard) => {
-    const named = listeners.get(name) ?? new Set<Heard>();
-    named.add(heard);
-    listeners.set(name, named);
-    return () => named.delete(heard);
-  },
-}));
-
-function emit(name: string, payload: unknown) {
-  act(() => {
-    for (const heard of listeners.get(name) ?? []) heard({ payload });
-  });
-}
 
 const { LocalIntelligence, LocalStatus, useLocalSequence } = await import(
   "./LocalIntelligence"
@@ -66,12 +48,14 @@ function report(overrides: Partial<LocalReport> = {}): LocalReport {
       },
       hasFailedStep: false,
       updateInProgress: false,
+      unfinishedUpdate: null,
       observed: null,
     },
     reason: null,
     readiness: "unknown",
     licence: "unknown",
     licenceExpiresAt: null,
+    checksPassed: false,
     ...overrides,
   };
 }
@@ -110,7 +94,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-type Startable = { apiUrl: string; gatewayWsUrl: string };
+type Startable = { apiUrl: string; gatewayWsUrl: string; notice?: string };
 
 type Props = {
   stack?: string | null;
@@ -170,12 +154,15 @@ function statusCalls() {
   );
 }
 
+/** The steps the sequence ran. Asking how far a download has got is not one. */
 function commands() {
-  return invokeCalls.map((call) =>
-    call.command === "run_local_eval"
-      ? `${call.command}:${(call.args as { action: string }).action}`
-      : call.command,
-  );
+  return invokeCalls
+    .filter((call) => call.command !== "local_eval_download")
+    .map((call) =>
+      call.command === "run_local_eval"
+        ? `${call.command}:${(call.args as { action: string }).action}`
+        : call.command,
+    );
 }
 
 function row(screen: ReturnType<typeof view>, name: string) {
@@ -289,85 +276,6 @@ test("a back end an older app installed is updated to this app's release before 
 });
 
 /**
- * Reported on 0.3.3: "Waiting for the back end" sat at "In progress" with no progress at all while
- * the update pulled the new release's images. The CLI says nothing until it ends, so the native
- * side reads the cluster and says what has downloaded, for this update's call alone.
- */
-test("the back end's update shows what it has downloaded out of the release's size", async () => {
-  const updating = deferred<LocalReport>();
-  let calls = 0;
-  invokeHandler = async (command, args) => {
-    if (command === "cancel_local_eval") return null;
-    const action = (args as { action: string }).action;
-    if (action === "update") return updating.promise;
-    calls += 1;
-    return calls === 1
-      ? onRelease("0.16.0-rc.8", "0.16.0-rc.9")
-      : onRelease("0.16.0-rc.9", null);
-  };
-  const started: Startable[] = [];
-  const screen = view({
-    stack: "local-abc123",
-    connected: true,
-    onStart: async (startable) => {
-      started.push(startable);
-      return "started";
-    },
-  });
-  await waitFor(() =>
-    expect(row(screen, WAIT).textContent).toContain(
-      "Updating the back end to 0.16.0-rc.9. Its data stays.",
-    ),
-  );
-  const updateCall = invokeCalls.find(
-    (call) => (call.args as { action?: string })?.action === "update",
-  );
-  const attempt = (updateCall?.args as { attempt?: string } | undefined)
-    ?.attempt;
-  expect(attempt).toBeTruthy();
-  await waitFor(() =>
-    expect(listeners.get("local-eval:download")?.size).toBe(1),
-  );
-  const waiting = within(row(screen, WAIT));
-  // Nothing downloaded and no size yet: nothing to show beyond the update's sentence.
-  emit("local-eval:download", { attempt, bytes: 0 });
-  expect(waiting.queryByRole("progressbar")).toBeNull();
-  // Bytes before the size: said, and the bar claims no fraction.
-  emit("local-eval:download", { attempt, bytes: 52_000_000 });
-  let bar = waiting.getByRole("progressbar", { name: "Download progress" });
-  expect(bar.hasAttribute("value")).toBe(false);
-  expect(
-    waiting.getByText("52.0 MB downloaded, total size not known yet"),
-  ).toBeTruthy();
-  // Another call's download is not this one's.
-  emit("local-eval:download", {
-    attempt: "another",
-    bytes: 9_000_000_000,
-    size: 9_000_000_000,
-  });
-  expect(waiting.queryByText(/9\.0 GB/)).toBeNull();
-  emit("local-eval:download", {
-    attempt,
-    bytes: 207_000_000,
-    size: 315_000_000,
-    bytesPerSecond: 12_000_000,
-  });
-  bar = waiting.getByRole("progressbar", { name: "Download progress" });
-  expect(bar.getAttribute("value")).toBe("207000000");
-  expect(bar.getAttribute("max")).toBe("315000000");
-  expect(waiting.getByText("207.0 MB of 315.0 MB")).toBeTruthy();
-  expect(
-    waiting.getByText("Updating the back end to 0.16.0-rc.9. Its data stays."),
-  ).toBeTruthy();
-
-  updating.resolve(onRelease("0.16.0-rc.9", null));
-  await waitFor(() => expect(started).toEqual([startableUrls]));
-  expect(within(row(screen, WAIT)).queryByRole("progressbar")).toBeNull();
-  // The call ended, so nothing is listening for it any more.
-  expect(listeners.get("local-eval:download")?.size ?? 0).toBe(0);
-});
-
-/**
  * Found on a Mac: Quit stops the back end, so the first Start after an app update finds an rc.8
  * stack stopped. Updated while stopped, the CLI waited three minutes for services that were not
  * running and failed. It is started first, as any stopped stack is, and updated once it is up.
@@ -437,6 +345,7 @@ test("an update that fails says so and starts OpenBot on the release the back en
     let calls = 0;
     invokeHandler = async (command, args) => {
       if (command === "cancel_local_eval") return null;
+      if (command === "local_eval_download") return null;
       const action = (args as { action: string }).action;
       if (action === "update") {
         if (failed instanceof Error) throw "timeout";
@@ -468,6 +377,236 @@ test("an update that fails says so and starts OpenBot on the release the back en
     cleanup();
     invokeCalls = [];
   }
+});
+
+/** `run_local_eval` answers from the CLI this app pins: see `local_eval_ipc_tests.rs`. */
+const pinnedCli = JSON.parse(
+  readFileSync(
+    join(
+      import.meta.dir,
+      "../src-tauri/test-fixtures/local-eval/update-did-not-finish.json",
+    ),
+    "utf8",
+  ),
+);
+
+/**
+ * Quit stopped the back end with an update on record. The CLI refuses `start` then, and `update`
+ * starts the stack itself. When the update stops again, the release the stack had is still coming
+ * up: its checks fail for a while, and it is waited on, not called not healthy.
+ */
+test("after Quit, the unfinished update starts the stack, and the release it had is waited on", async () => {
+  const statuses = [
+    pinnedCli.stoppedByQuit,
+    pinnedCli.apiCheckFails,
+    pinnedCli.updateDidNotFinish,
+  ];
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update")
+      return report({
+        outcome: "failed",
+        stack: null,
+        reason: "local-command-failed",
+      });
+    if (action !== "status") throw new Error(`unexpected ${action}`);
+    return statuses.length > 1 ? statuses.shift() : statuses[0];
+  };
+  const started: Startable[] = [];
+  view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await waitFor(() =>
+    expect(started).toEqual([
+      {
+        apiUrl: "http://localhost:18082",
+        gatewayWsUrl: "ws://localhost:14401",
+        notice:
+          "The back end is running 0.16.0-rc.5. Downloading 0.16.0-rc.9 did not finish, so OpenBot tries again the next time it starts.",
+      },
+    ]),
+  );
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:update",
+    "run_local_eval:status",
+    "run_local_eval:status",
+  ]);
+});
+
+/**
+ * The next Start's retry of an update that did not finish: its download shows on the back end's
+ * row while it runs, and when it stalls OpenBot opens on the release the back end has, with the
+ * running screen's "did not finish" line.
+ */
+test("a retried update shows its download, and a stall keeps the line that it did not finish", async () => {
+  const updating = deferred<LocalReport>();
+  let arrived: { done: number; total: number } | null = null;
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return arrived;
+    const action = (args as { action: string }).action;
+    if (action === "update") return updating.promise;
+    if (action !== "status") throw new Error(`unexpected ${action}`);
+    return pinnedCli.updateDidNotFinish;
+  };
+  const started: Startable[] = [];
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  arrived = { done: 61_400_000, total: 147_000_000 };
+  await waitFor(
+    () =>
+      expect(row(screen, WAIT).textContent).toContain("61.4 MB of 147.0 MB"),
+    { timeout: 3_000 },
+  );
+  updating.reject("download-stalled");
+  await waitFor(() =>
+    expect(started).toEqual([
+      {
+        apiUrl: "http://localhost:18082",
+        gatewayWsUrl: "ws://localhost:14401",
+        notice:
+          "The back end is running 0.16.0-rc.5. Downloading 0.16.0-rc.9 did not finish, so OpenBot tries again the next time it starts.",
+      },
+    ]),
+  );
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:update",
+    "run_local_eval:status",
+  ]);
+});
+
+test("an update says how much of its download has arrived, so a slow line reads as moving", async () => {
+  const updating = deferred<LocalReport>();
+  let arrived: { done: number; total: number } | null = null;
+  let calls = 0;
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return arrived;
+    const action = (args as { action: string }).action;
+    if (action === "update") return updating.promise;
+    calls += 1;
+    return calls === 1
+      ? onRelease("0.16.0-rc.5", "0.16.0-rc.9")
+      : onRelease("0.16.0-rc.9", null);
+  };
+  const started: Startable[] = [];
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await waitFor(() =>
+    expect(row(screen, WAIT).textContent).toContain(
+      "Updating the back end to 0.16.0-rc.9. Its data stays.",
+    ),
+  );
+  arrived = { done: 48_200_000, total: 147_000_000 };
+  await waitFor(
+    () =>
+      expect(row(screen, WAIT).textContent).toContain("48.2 MB of 147.0 MB"),
+    { timeout: 3_000 },
+  );
+  // The same bar Install shows, driven by the bytes, out of the whole download.
+  const waiting = within(row(screen, WAIT));
+  expect(waiting.getByText("Downloading the back end update.")).toBeTruthy();
+  const bar = waiting.getByRole("progressbar", { name: "Download progress" });
+  expect(bar.getAttribute("value")).toBe("48200000");
+  expect(bar.getAttribute("max")).toBe("147000000");
+  // Downloaded: the CLI's update runs, and the row says so again, with no bar.
+  arrived = null;
+  await waitFor(
+    () =>
+      expect(row(screen, WAIT).textContent).toContain(
+        "Updating the back end to 0.16.0-rc.9. Its data stays.",
+      ),
+    { timeout: 3_000 },
+  );
+  expect(waiting.queryByRole("progressbar")).toBeNull();
+  updating.resolve(onRelease("0.16.0-rc.9", null));
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  const asked = invokeCalls.find(
+    (call) => call.command === "local_eval_download",
+  );
+  const update = invokeCalls.find(
+    (call) => (call.args as { action?: string })?.action === "update",
+  );
+  // It asked about the update's own call.
+  expect(asked?.args).toEqual({
+    attempt: (update?.args as { attempt?: string } | undefined)?.attempt,
+  });
+});
+
+test("an update whose download stopped says so, and that the next start continues it", async () => {
+  let calls = 0;
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update") throw "download-stalled";
+    calls += 1;
+    return onRelease("0.16.0-rc.5", "0.16.0-rc.9");
+  };
+  const started: Startable[] = [];
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(row(screen, "Updating the back end").textContent).toContain(
+    "The back end update stopped downloading, so the back end stays on 0.16.0-rc.5. OpenBot continues the download where it left off the next time it starts.",
+  );
+  expect(calls).toBe(2);
+});
+
+test("a setup whose download stopped offers Retry, which continues where it left off", async () => {
+  let setups = 0;
+  invokeHandler = async (command) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    if (command === "set_up_local_eval") {
+      setups += 1;
+      if (setups === 1) throw "download-stalled";
+      return report();
+    }
+    if (command === "connect_local_eval") return connection();
+    return ready;
+  };
+  const started: Startable[] = [];
+  const screen = view({
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await waitFor(() =>
+    expect(row(screen, "Setting up OpenBot").textContent).toContain(
+      "The back end download stopped. Retry continues where it left off.",
+    ),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(setups).toBe(2);
 });
 
 const blockedOnSignIn = report({

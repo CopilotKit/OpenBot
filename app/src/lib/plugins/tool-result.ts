@@ -1,3 +1,5 @@
+import { declinedByPerson } from "@openbot/shared/approval-outcomes";
+
 /**
  * What the server puts in front of a refused call's reason.
  *
@@ -9,6 +11,20 @@
  * administrator rephrases a policy message, and fails silently by drawing a refusal as a result.
  */
 export const REFUSAL_MARKER = "Refused.";
+
+/**
+ * Why a step was not carried out, when it was refused, or undefined when it was not: the reason
+ * behind {@link REFUSAL_MARKER}, or the sentence the approval service answers a step the person
+ * declined on the conversation's card with. That one carries no marker (the service answers every
+ * kind of step the same way), and read as a result, a folder edit the person declined was drawn as
+ * "Saved a file".
+ */
+export function refusalOf(answer: string | undefined): string | undefined {
+  if (answer === undefined) return undefined;
+  if (answer.startsWith(REFUSAL_MARKER))
+    return answer.slice(REFUSAL_MARKER.length).trim();
+  return declinedByPerson(answer) ? answer.trim() : undefined;
+}
 
 /**
  * The tool's own answer, out of whatever the transcript is carrying it in.

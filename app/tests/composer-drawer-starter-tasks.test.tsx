@@ -131,6 +131,31 @@ test("while the Bot waits on an answer, nothing is drawn between its question an
   expect(view.getByRole("button", { name: "Send answer" })).toBeTruthy();
 });
 
+/*
+ * Reported from the Desktop: in a pane narrower than the 768px composer column, the composer and the
+ * starter tasks ran to the pane's border while the transcript kept 16px a side. The column now pads
+ * like the transcript's (`px-4`) and is allowed 2rem past `max-w-3xl` to pay for it, so a wide pane
+ * still draws the same 768px composer. Measured in a render of this view: 768px wide at 1000px and
+ * 820px, and 16px off each edge at 790px, 640px and 420px. happy-dom lays nothing out, so this pins
+ * the classes.
+ */
+test("the composer column keeps the transcript's side inset in a narrow pane", () => {
+  const view = render(
+    <ConversationView
+      channelId="c-1"
+      messages={MESSAGES}
+      onSubmit={() => {}}
+      starterSuggestions={STARTER_TASKS}
+    />,
+  );
+
+  const classes = column(view).className.split(/\s+/);
+  expect(classes).toContain("px-4");
+  expect(classes).toContain("max-w-[calc(var(--container-3xl)+2rem)]");
+  expect(classes).not.toContain("px-0");
+  expect(classes).not.toContain("max-w-3xl");
+});
+
 test("with no question waiting, the starter tasks sit directly above the composer", () => {
   const view = render(
     <ConversationView

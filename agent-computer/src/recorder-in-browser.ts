@@ -10,6 +10,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { BrowserContext, CDPSession, Page } from "playwright";
+import { FILTER_CREDENTIALS_HOST } from "./egress";
 import { isRecorderSetupPage, type Recorder } from "./recorder";
 import {
   createRecorderLauncher,
@@ -50,6 +51,54 @@ export function closeRecorderSetupPages(
   };
   for (const page of context.pages()) watch(page);
   context.on("page", watch);
+}
+
+/**
+ * Make a browser behind the egress filter hold the filter's credentials before its Recorder asks
+ * anything, by asking the filter once from one of its pages.
+ *
+ * WHY. The filter's browser listener answers 407 to a request without credentials. Chromium is not
+ * given them at launch: Playwright answers the challenge over DevTools (`Fetch.authRequired`), and
+ * only for the targets it attaches to, which are pages and service workers. It detaches from the
+ * Recorder's offscreen document, so the document's requests are answered by nobody and its fetch
+ * gets the 407 itself. They go with the credentials only once the browser holds them, which it does
+ * from the first challenge Playwright answered: Chromium keeps a proxy's credentials for the whole
+ * profile (`HttpAuthCache` never partitions proxy entries) and sends them up front from then on. A
+ * computer that starts again opens the person's browser on the profile it had, where the Recorder
+ * still holds its connection and asks OpenBot nothing, so the first request of that browser to go
+ * through the filter was the capture pass Record asks for from the offscreen document: the 407 held
+ * the recording, and every one made before a page had loaded was not saved.
+ *
+ * Asked over https, because only a tunnel's CONNECT is challenged whatever Playwright does with a
+ * plain request's headers, and for a host the filter answers itself (`FILTER_CREDENTIALS_HOST`), so
+ * nothing leaves the computer. The fetch fails, as it should: the credentials are kept when they
+ * are sent, whatever the answer. Never fatal: a browser that does not hold them is the browser as it
+ * was before this, and is said so.
+ * https://chromium.googlesource.com/chromium/src/+/main/net/http/http_auth_cache.cc
+ * https://chromedevtools.github.io/devtools-protocol/tot/Fetch/#event-authRequired
+ */
+export async function holdFilterCredentials(
+  page: Page,
+  botId: string,
+): Promise<void> {
+  try {
+    await page.evaluate(
+      (url) =>
+        fetch(url, { mode: "no-cors", cache: "no-store" }).then(
+          () => undefined,
+          () => undefined,
+        ),
+      `https://${FILTER_CREDENTIALS_HOST}/`,
+    );
+  } catch (error) {
+    console.info(
+      JSON.stringify({
+        type: "computer-filter-credentials-not-held",
+        botId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  }
 }
 
 /**

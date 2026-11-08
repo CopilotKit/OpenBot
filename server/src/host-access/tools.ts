@@ -79,6 +79,8 @@ type HostAudit = {
   botId: string;
   operation: string;
   grantId?: string;
+  /** The folder by the name Settings > Computer shows, never only the grant's id. */
+  folder?: string;
   /** The file, relative to the folder granted. Never its contents. */
   file?: string;
   /** The command, in full, as a computer's is. Never its output. */
@@ -107,6 +109,7 @@ async function auditHostAccess(
       bot: options.botId,
       actor: options.actorId,
       ...(options.grantId ? { grant: options.grantId } : {}),
+      ...(options.folder ? { folder: options.folder } : {}),
       ...(options.file ? { file: options.file } : {}),
       ...(options.command ? { command: options.command } : {}),
       ...(input.attempt ? { attempt: input.attempt } : {}),
@@ -191,6 +194,10 @@ export function hostAccessTools(options: {
     botId,
     operation,
     ...(grantId ? { grantId } : {}),
+    ...(() => {
+      const folder = grants.find((grant) => grant.id === grantId)?.displayName;
+      return folder ? { folder } : {};
+    })(),
     // The folder itself is no file to name.
     ...(target.file && target.file !== "." ? { file: target.file } : {}),
     ...(target.command ? { command: target.command } : {}),

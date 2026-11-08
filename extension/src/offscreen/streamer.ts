@@ -131,6 +131,8 @@ const MAX_NAME_CODE_POINTS = 200;
 const BACKOFF_FIRST_MS = 1_000;
 const BACKOFF_MAX_MS = 60_000;
 const REGRANT_WINDOW_MS = 30_000;
+/** How many capture passes a proxy's 407 gets before the recording is held (row 23b). */
+const PROXY_PASSES = 5;
 const DEFAULT_HOLD_RETRY_MS = 300_000;
 const DEFAULT_RETRY_ESCALATE_MS = 1_800_000;
 
@@ -172,6 +174,7 @@ type Kept = { reason: string; parked: boolean };
 
 /** The table's re-grant rows: every event stays and a fresh pass is taken at once; the escalation is the row's own. */
 type RegrantRow =
+  | "23b"
   | "24"
   | "25"
   | "25a"
@@ -324,6 +327,15 @@ function passFailure(error: unknown): Failure {
     case "hold":
     case "park":
       return { kind: verdict.kind, reason: verdict.hint };
+    case "proxy":
+      // Row 23b: a fresh pass at once, then 2, 4 and 8 seconds on (`backoff`), and the hold after the fifth.
+      return {
+        kind: "regrant",
+        row: "23b",
+        reason: verdict.hint,
+        holdAt: PROXY_PASSES,
+        showFrom: PROXY_PASSES,
+      };
     case "signed-out":
       return { kind: "signed-out", reason: verdict.reason };
   }

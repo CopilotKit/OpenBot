@@ -17,8 +17,7 @@ mod test_support;
 
 use openbot_desktop_lib::{
     acquire, app_update, deployment, deployment_release, docker_config, engine, env as openbot_env,
-    harness, host_access, install, intelligence_download, local_eval, local_eval_state, logging,
-    preparation,
+    harness, host_access, install, local_eval, local_eval_state, logging, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
     telemetry, tray, upgrade, windows as win,
@@ -2673,10 +2672,16 @@ async fn start_stack_inner<R: tauri::Runtime>(
             );
         }
         let ours = stack::ports_we_already_publish(&found, &root);
+        // The last run's own ports are waited for before anything moves off them (`for_start`).
+        let own = openbot_env::Ports::recorded(&root).map_err(|error| {
+            Problem::with("OpenBot could not read its local ports.", error.to_string())
+        })?;
         let ports = previous_ports
-            .available(
+            .for_start(
+                &own,
                 &ours,
                 picked.as_ref().and_then(|picked| picked.installed_port()),
+                openbot_env::OWN_PORTS_PATIENCE,
             )
             .map_err(|error| {
                 Problem::with(
@@ -5727,14 +5732,6 @@ fn cancel_model_oauth(attempt_id: String) {
     openbot_desktop_lib::provider_oauth::cancel(&attempt_id);
 }
 
-/// What the back end's update has downloaded, for the window's `run_local_eval` call `attempt`.
-#[derive(Clone, Serialize)]
-struct UpdateDownload {
-    attempt: String,
-    #[serde(flatten)]
-    transferred: intelligence_download::Transferred,
-}
-
 /// One Intelligence CLI call for the local evaluation. Returns only the normalized report or a
 /// static failure category; the CLI's own output never reaches the window. `attempt` names the
 /// call so `cancel_local_eval` can stop it, including before it has started.
@@ -5751,43 +5748,26 @@ async fn run_local_eval(
         let selected = shell.selected_root.lock().unwrap().clone();
         selected.unwrap_or_else(stack::default_root)
     };
-    let handle = app.clone();
-    let mut report = tauri::async_runtime::spawn_blocking(move || {
-        know_cli_engine(&root);
-        if action != local_eval::Action::Update {
-            return local_eval::run_installed(&attempt, action, &stack);
-        }
-        // The CLI says nothing while it updates: what it downloads is read from its cluster, for
-        // the back end's row. See `intelligence_download`.
-        let stop = std::sync::atomic::AtomicBool::new(false);
-        std::thread::scope(|scope| {
-            scope.spawn(|| {
-                intelligence_download::watch(
-                    stack.as_str(),
-                    local_eval::bundled_release(),
-                    local_eval::engine_command,
-                    &stop,
-                    |transferred| {
-                        let _ = handle.emit(
-                            "local-eval:download",
-                            UpdateDownload {
-                                attempt: attempt.clone(),
-                                transferred,
-                            },
-                        );
-                    },
-                )
-            });
-            let report = local_eval::run_installed(&attempt, action, &stack);
-            stop.store(true, std::sync::atomic::Ordering::SeqCst);
-            report
-        })
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        local_eval_answer(&root, &attempt, action, &stack)
     })
     .await
     .map_err(|_| local_eval::Failure::Spawn)??;
     learn_dashboards(&app, report.stack.iter());
-    // An Intelligence an older app installed, behind the release this app's CLI installs: the
-    // window updates it before it starts OpenBot on it.
+    Ok(report)
+}
+
+/// What `run_local_eval` answers the window for one CLI call, from the installed CLI.
+fn local_eval_answer(
+    root: &Path,
+    attempt: &str,
+    action: local_eval::Action,
+    stack: &local_eval::StackId,
+) -> Result<local_eval::Report, local_eval::Failure> {
+    know_cli_engine(root);
+    let mut report = local_eval::run_installed(attempt, action, stack)?;
+    // An Intelligence an older app installed, behind the release this app's CLI installs, or one
+    // whose update did not finish: the window updates it before it starts OpenBot on it.
     if action == local_eval::Action::Status {
         report.update_to =
             local_eval::update_due(&report, local_eval::bundled_release().as_deref());
@@ -5901,6 +5881,13 @@ async fn sign_in_to_copilotkit(
 #[tauri::command]
 fn copilotkit_sign_in_page(attempt: String) -> Option<local_eval::SignInPage> {
     local_eval::shown_sign_in_page(&attempt)
+}
+
+/// How much of the back end's download the setup or update `attempt` has, of how much,
+/// while it downloads, so its row can show a slow line moving. Bytes only.
+#[tauri::command]
+fn local_eval_download(attempt: String) -> Option<openbot_desktop_lib::local_images::Download> {
+    local_eval::downloading(&attempt)
 }
 
 /// The evaluation agreement local setup needs accepted, for the window to show before Accept.
@@ -7573,6 +7560,7 @@ fn main() {
             set_up_local_eval,
             sign_in_to_copilotkit,
             copilotkit_sign_in_page,
+            local_eval_download,
             local_eval_terms,
             connect_copilotkit_apps,
             connect_local_eval,
@@ -8038,6 +8026,7 @@ mod tests {
 
     include!("stop_ipc_tests.rs");
     include!("composio_ipc_tests.rs");
+    include!("local_eval_ipc_tests.rs");
     include!("logging_file_tests.rs");
 
     // The release half (it starts the install thread) is the app's own launch; a test runs a debug build.
@@ -10738,6 +10727,7 @@ mod tests {
             licence: local_eval::Licence::Unknown,
             licence_expires_at: None,
             update_to: None,
+            checks_passed: false,
         }
     }
 
@@ -10924,6 +10914,7 @@ mod tests {
             },
             has_failed_step: false,
             update_in_progress: false,
+            unfinished_update: None,
             observed: None,
         }
     }

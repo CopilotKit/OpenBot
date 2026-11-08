@@ -147,7 +147,7 @@ test("someone who neither owns the Bot nor administers the deployment does not s
   expect(view.queryByText("Sharing")).toBeNull();
 });
 
-test("the personal edition has four rows: Memory, Routines, What it can do and Setup", async () => {
+test("the personal edition has three rows: Routines, What it can do and Setup", async () => {
   serving("admin");
   const served = global.fetch;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
@@ -160,17 +160,19 @@ test("the personal edition has four rows: Memory, Routines, What it can do and S
   await new Promise((resolve) => setTimeout(resolve, 50));
   // Nobody to share a Bot with.
   expect(view.queryByText("Sharing")).toBeNull();
-  // Approval rules and Goals are sections of What it can do; no Slack, Teams or text.
+  // Approval rules, Goals and check-ins are sections of What it can do; no Slack, Teams or text,
+  // and no memory, which the personal edition's Intelligence isn't licensed for.
   expect(view.getByText("What it can do")).toBeTruthy();
   for (const gone of [
     "Skills and access",
     "Approval rules",
     "Goals",
     "Reaching you",
+    "Memory",
   ])
     expect(view.queryByText(gone)).toBeNull();
-  expect(view.getByText("Memory")).toBeTruthy();
   expect(view.getByText("Routines")).toBeTruthy();
+  expect(view.container.querySelector('a[href$="/memory"]')).toBeNull();
 });
 
 test("an administrator sees Sharing on somebody else's Bot", async () => {

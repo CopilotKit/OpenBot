@@ -79,3 +79,18 @@ export function parseEdition(raw: string | undefined): Edition {
     `OPENBOT_EDITION is "${value}". It must be "team" or "personal", or unset for "team".`,
   );
 }
+
+/**
+ * Whether this edition has memory: what a person's Bots remember about them, the apps they learn it
+ * from, and the background sync that reads them. Not the personal edition: OpenBot Desktop runs a
+ * local Intelligence whose licence leaves memory out, so there memory has no screens, no routes, no
+ * tools, no sources and no place in a Bot's context.
+ *
+ * The edition, not Intelligence's memory entitlement: that answer only chooses where memory is kept
+ * (Intelligence, or OpenBot's own tables when Intelligence is unlicensed or unreachable), and it
+ * changes while Intelligence starts. The browser reads the same rule (`offersMemory` in the app's
+ * `lib/deployment/queries.ts`).
+ */
+export function editionHasMemory(edition: Edition): boolean {
+  return edition !== "personal";
+}

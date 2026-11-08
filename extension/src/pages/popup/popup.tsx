@@ -268,7 +268,12 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     >
       <Notices notice={view.notice} kept={state.kept} onDismiss={dismiss} />
       {state.phase === "idle" ? (
-        <AfterStop state={state} connected onDiscard={discardKept} />
+        <AfterStop
+          state={state}
+          connected
+          openbotUrl={connection.openbotUrl}
+          onDiscard={discardKept}
+        />
       ) : (
         <RecordingView
           state={state}

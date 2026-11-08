@@ -19,6 +19,11 @@
 //!   sign-in's approval page and code are the one CLI-printed text the window shows, checked
 //!   first (`sign_in_page`).
 //!
+//! One exception to leaving the CLI's work to it: the images `local update` (a new update, or the
+//! retry of one that did not finish) and a resumed `local setup` pull. The CLI pulls each under a
+//! fixed limit that a slow line cannot meet, so OpenBot downloads the same images into the same
+//! node first (`local_images`, `run_with`, `setup_installed`) and the CLI finds them there.
+//!
 //! A command that *completed* is not Intelligence that is ready or licensed. Those two facts come
 //! only from the additive v1 `readiness` and `license` fields of `local status`, read by exact
 //! value. A CLI that does not publish them, or publishes something else, reads as `unknown`, and
@@ -121,6 +126,9 @@ pub enum Failure {
     /// refuse it too, as an engine it does not support. See `acquire::create_machine` for why the
     /// switch is the person's to make.
     RootlessPodman,
+    /// The back end's images stopped downloading: no new bytes for `local_images::Limits::stall`.
+    /// What arrived is kept, and the next attempt continues from there. See `local_images`.
+    DownloadStalled,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -220,9 +228,17 @@ pub struct Report {
     pub licence: Licence,
     /// When the licence expires, as a strict ISO-8601 instant, so the window can warn ahead of it.
     pub licence_expires_at: Option<String>,
-    /// On `status`: the release this app's CLI installs, when the stack runs an older one. The window
-    /// runs `update` once, before it starts OpenBot on that stack (see `update_due`).
+    /// On `status`: the release this app's CLI installs, when the stack runs an older one, or the
+    /// release an update the CLI did not finish was moving to. The window runs `update` once,
+    /// before it starts OpenBot on that stack (see `update_due`).
     pub update_to: Option<String>,
+    /// Every check the CLI made from this computer passed: the back end's API, its gateway and its
+    /// dashboard each answered (`readiness.checks`). Only the result is kept.
+    ///
+    /// Not readiness. The CLI says `degraded` for as long as it keeps an update it did not finish
+    /// on record, however well the release it has answers. This is how the window tells that apart
+    /// from a back end that is down (see `UnfinishedUpdate`).
+    pub checks_passed: bool,
 }
 
 /// What `local connect` answered. The settings it wrote stay in the installation's `.env`; their
@@ -255,7 +271,33 @@ pub struct Stack {
     pub urls: Urls,
     pub has_failed_step: bool,
     pub update_in_progress: bool,
+    /// The update the CLI keeps on record because it did not finish, when its record names it.
+    pub unfinished_update: Option<UnfinishedUpdate>,
     pub observed: Option<Observed>,
+}
+
+/**
+An update `local update` started and did not finish, as `local status` reports its record.
+
+Found on a slow connection: the CLI stopped downloading one of 0.16.0-rc.9's images at its own
+ten-minute limit and recorded `failedStep: "image-download"`, with the update still `prepared`.
+Nothing in the cluster had changed and every check passed, yet the CLI reports `degraded` for as
+long as the record stays, and the window said the back end was not healthy and stopped.
+
+Only facts the window turns into its own sentences: the release (an identifier, like
+`installedRelease`), whether the update was still `prepared`, and whether it stopped downloading.
+The recovery command and the schema are not kept.
+*/
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnfinishedUpdate {
+    /// The release the update was moving to.
+    pub to: String,
+    /// The CLI's update state is still `prepared`: no migration has started, so the release that
+    /// answers is the one installed (`installedRelease`).
+    pub prepared: bool,
+    /// The step that failed was one of the image downloads.
+    pub stopped_downloading: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -534,6 +576,8 @@ fn report(command: &str, exit_code: i32, stdout: &[u8]) -> Result<Report, Failur
     } else {
         (Readiness::Unknown, (Licence::Unknown, None))
     };
+    // Believed with the readiness they came with: a malformed `readiness` carries no checks either.
+    let checks_passed = readiness != Readiness::Unknown && checks_passed(wire.get("readiness"));
     Ok(Report {
         outcome,
         stack: reported_stack(outcome, wire)?,
@@ -542,6 +586,7 @@ fn report(command: &str, exit_code: i32, stdout: &[u8]) -> Result<Report, Failur
         licence,
         licence_expires_at,
         update_to: None,
+        checks_passed,
     })
 }
 
@@ -813,6 +858,24 @@ fn readiness(value: Option<&Value>) -> Readiness {
 }
 
 /**
+Whether `readiness.checks` names the CLI's three checks, `api`, `gateway` and `dashboard`, and every
+check it lists passed. Anything else is false, an empty list, a missing check or one in another
+shape included, and the rest of the report still stands: an older CLI publishes no checks at all.
+*/
+fn checks_passed(value: Option<&Value>) -> bool {
+    let Some(Value::Array(checks)) = value.and_then(|readiness| readiness.get("checks")) else {
+        return false;
+    };
+    let passed = |check: &Value| check.get("ok") == Some(&Value::Bool(true));
+    let listed = |name: &str| {
+        checks
+            .iter()
+            .any(|check| check.get("name").and_then(Value::as_str) == Some(name))
+    };
+    checks.iter().all(passed) && ["api", "gateway", "dashboard"].into_iter().all(listed)
+}
+
+/**
 `license.state` and `license.expiresAt`, by the same rule. `expiresAt` must be present, as `null`
 or a strict instant; anything else makes the whole licence `Unknown`, so a valid state never
 travels with an expiry nobody could read. The organization and renewal fields are not kept.
@@ -1023,6 +1086,22 @@ fn stack(value: &Value) -> Result<Stack, Failure> {
             true
         }
     };
+    let unfinished_update = match saved.get("update") {
+        Some(Value::Object(update))
+            if update.get("attemptedRelease").is_some_and(Value::is_string) =>
+        {
+            Some(UnfinishedUpdate {
+                to: text(update.get("attemptedRelease"))?,
+                prepared: update.get("state").and_then(Value::as_str) == Some("prepared"),
+                // The steps the CLI's own progress calls downloading the release's images.
+                stopped_downloading: matches!(
+                    saved.get("failedStep").and_then(Value::as_str),
+                    Some("image-download" | "system-image-download" | "system-image-tag")
+                ),
+            })
+        }
+        _ => None,
+    };
     Ok(Stack {
         id: id.0,
         installed_release: text(saved.get("installedRelease"))?,
@@ -1034,6 +1113,7 @@ fn stack(value: &Value) -> Result<Stack, Failure> {
         },
         has_failed_step,
         update_in_progress,
+        unfinished_update,
         observed: observation(saved.get("observed"))?,
     })
 }
@@ -1319,18 +1399,29 @@ app's CLI installs, does not.
 
 THE RULE. Due when the stack's installed release is older, by semantic version, than `target`, the
 release this app's CLI installs (`bundled_release`). Never when it is the same or newer: a stack is
-not moved back. Never when either version cannot be read, or a saved update is already under way
-(the CLI resumes that itself on `start`). The CLI's own `local update` does the work, keeping the
-stack's data and app connections, and leaves the stack as it was when it fails.
+not moved back. Never when either version cannot be read. The CLI's own `local update` does the
+work, keeping the stack's data and app connections, and leaves the stack as it was when it fails.
+
+AN UPDATE THAT DID NOT FINISH is due again, to the release it was moving to: `local update` with no
+candidate resumes the one on record. The window promises that retry ("OpenBot tries again the next
+time it starts") and nothing else makes it. The window opens OpenBot on a running stack without
+calling `start`, and on a stopped one the CLI refuses `start` while a `prepared` update is on record
+(`update_recovery_required`, naming `local update`). A record that does not name its release is
+left alone.
 */
 pub fn update_due(report: &Report, target: Option<&str>) -> Option<String> {
     let target = target?;
     let stack = report.stack.as_ref()?;
-    if report.outcome != Outcome::Completed || stack.update_in_progress {
+    if report.outcome != Outcome::Completed {
         return None;
     }
     let version = |text: &str| semver::Version::parse(text.trim().trim_start_matches('v')).ok();
-    (version(target)? > version(&stack.installed_release)?).then(|| target.to_owned())
+    let to = if stack.update_in_progress {
+        &stack.unfinished_update.as_ref()?.to
+    } else {
+        target
+    };
+    (version(to)? > version(&stack.installed_release)?).then(|| to.to_owned())
 }
 
 pub fn installed() -> Result<PinnedCli, Failure> {
@@ -1561,34 +1652,6 @@ impl CliEngine {
     }
 }
 
-/// The engine the CLI runs its cluster on, as a command with the same engine variables the CLI is
-/// given, so it reaches the same engine. Only for reading what the cluster holds while the CLI
-/// works (`intelligence_download`); None before the app has said which engine OpenBot runs on.
-pub fn engine_command() -> Option<std::process::Command> {
-    let engine = recorded_engine()?;
-    let mut command = crate::quiet::command(
-        crate::engine::program(engine.engine).unwrap_or_else(|| engine.engine.binary().into()),
-    );
-    let engines: &[crate::engine::Engine] = match engine.engine {
-        crate::engine::Engine::Podman => {
-            &[crate::engine::Engine::Docker, crate::engine::Engine::Podman]
-        }
-        _ => &[crate::engine::Engine::Docker],
-    };
-    if let Some(path) = crate::engine::path_with_engines(engines) {
-        command.env("PATH", path);
-    }
-    for (name, value) in engine_environment(Some(&engine)) {
-        match value {
-            Some(value) => command.env(name, value),
-            None => command.env_remove(name),
-        };
-    }
-    command.stdin(std::process::Stdio::null());
-    command.stderr(std::process::Stdio::null());
-    Some(command)
-}
-
 fn recorded_engine() -> Option<CliEngine> {
     let address = ENGINE
         .lock()
@@ -1667,6 +1730,36 @@ fn command_inheriting(
     if let Some(entry) = &cli.entry {
         command.arg(entry);
     }
+    cli_environment(&mut command, engine, var, docker_config);
+    if let Some(folder) = folder {
+        command.current_dir(folder);
+    }
+    command.args(arguments);
+    command
+}
+
+/// The container engine the CLI runs on, with the environment the CLI itself gets: for
+/// `local_images`, which pulls into the same k3d node the CLI pulls into.
+fn engine_command(engine: Option<&CliEngine>) -> std::process::Command {
+    let binary = engine.map_or(crate::engine::Engine::Docker, |engine| engine.engine);
+    let mut command = crate::quiet::command(binary.binary());
+    cli_environment(
+        &mut command,
+        engine,
+        |name| std::env::var_os(name),
+        crate::docker_config::owned(),
+    );
+    command
+}
+
+/// Only `INHERITED`, OpenBot's Docker configuration, the engines' directories on `PATH` and the
+/// variables that name the engine.
+fn cli_environment(
+    command: &mut std::process::Command,
+    engine: Option<&CliEngine>,
+    var: impl Fn(&str) -> Option<std::ffi::OsString>,
+    docker_config: Option<&std::path::Path>,
+) {
     command.env_clear();
     for name in INHERITED {
         if let Some(value) = var(name) {
@@ -1699,11 +1792,6 @@ fn command_inheriting(
             None => command.env_remove(name),
         };
     }
-    if let Some(folder) = folder {
-        command.current_dir(folder);
-    }
-    command.args(arguments);
-    command
 }
 
 /**
@@ -2251,7 +2339,7 @@ pub fn run_installed_with(
     stack: &StackId,
     limits: Limits,
 ) -> Result<Report, Failure> {
-    run_attempt(Attempt::register(attempt), action, stack, limits)
+    run_attempt(attempt, Attempt::register(attempt), action, stack, limits)
 }
 
 /// `stop` for Stop or Quit itself: the one call let through while closing. A later Quit still
@@ -2262,6 +2350,7 @@ pub fn stop_for_shutdown(
     limits: Limits,
 ) -> Result<Report, Failure> {
     run_attempt(
+        attempt,
         Attempt::register_for_shutdown(attempt),
         Action::Stop,
         stack,
@@ -2270,30 +2359,261 @@ pub fn stop_for_shutdown(
 }
 
 fn run_attempt(
+    id: &str,
     attempt: Attempt,
     action: Action,
     stack: &StackId,
     limits: Limits,
 ) -> Result<Report, Failure> {
-    one_at_a_time(&attempt.0, limits, |limits| {
+    one_at_a_time(&attempt.0, limits, |remaining| {
         let cli = installed()?;
-        run(&cli, action, stack, limits, &attempt.0)
+        run_with(
+            &cli,
+            id,
+            action,
+            stack,
+            (limits, remaining),
+            &attempt.0,
+            crate::local_images::Limits::standard(),
+        )
     })
+}
+
+/**
+`run`, after downloading the images the call is about to pull (`local_images`).
+
+Only `local update` pulls. A new update pulls the release this CLI installs. One that did not finish
+is resumed by `local update` (`update_due`), to the release on record, so that release's images are
+downloaded when it is this CLI's, and left to the CLI when it is not. `local start` pulls nothing:
+the CLI refuses it while an update is on record (`localStartRelease`, `update_recovery_required`).
+A download has its own limits, so a CLI call that followed one gets its whole limit (`limits.0`)
+rather than what was left of it after the wait for its turn (`limits.1`).
+*/
+pub(crate) fn run_with(
+    cli: &PinnedCli,
+    attempt: &str,
+    action: Action,
+    stack: &StackId,
+    limits: (Limits, Limits),
+    cancel: &Cancel,
+    images_limits: crate::local_images::Limits,
+) -> Result<Report, Failure> {
+    // A CLI whose images cannot be read runs exactly as before, with nothing asked of it first.
+    let downloaded = match (action, cli_images_of(cli)) {
+        (Action::Update, Some(images)) => match update_resumes(cli, stack, cancel)? {
+            Some(resumed) => download_images(
+                &images,
+                &arguments(action, stack),
+                stack,
+                resumed.as_deref(),
+                attempt,
+                cancel,
+                images_limits,
+            )?,
+            None => false,
+        },
+        _ => false,
+    };
+    let limits = if downloaded { limits.0 } else { limits.1 };
+    run(cli, action, stack, limits, cancel)
+}
+
+/// What `cli` pulls, read from its own bytes (`local_images::cli_images`): the script a runtime
+/// runs, or the program itself. Larger than this is not a CLI it can read.
+fn cli_images_of(cli: &PinnedCli) -> Option<crate::local_images::CliImages> {
+    const MAX_SOURCE: u64 = 128 << 20;
+    let mut bytes = Vec::new();
+    std::fs::File::open(cli.entry.as_ref().unwrap_or(&cli.program))
+        .ok()?
+        .take(MAX_SOURCE)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    crate::local_images::cli_images(&String::from_utf8_lossy(&bytes))
+}
+
+/**
+Download `images` into `stack`'s node before the CLI pulls them. True when it downloaded, false when
+there was nothing it could do, which leaves the pull to the CLI as before: a release other than
+`expected` when one is, or a node it cannot reach.
+
+A download that stops is the call's failure, and the CLI does not run: on a line that stopped it
+would only fail again, later. What arrived is kept for the next attempt.
+*/
+fn download_images(
+    images: &crate::local_images::CliImages,
+    arguments: &[&str],
+    stack: &StackId,
+    expected: Option<&str>,
+    attempt: &str,
+    cancel: &Cancel,
+    limits: crate::local_images::Limits,
+) -> Result<bool, Failure> {
+    use crate::local_images::{download, Done, Node, Showing, Stop};
+    if expected.is_some_and(|release| release != images.release) {
+        return Ok(false);
+    }
+    let engine = recorded_engine();
+    // Where the CLI would refuse to run, nothing is downloaded for it either.
+    refuse_rootless(arguments, engine.as_ref())?;
+    let command = || engine_command(engine.as_ref());
+    let node = Node::for_stack(&command, stack.as_str());
+    let _running = Running::start();
+    let showing = Showing::new(attempt);
+    match download(
+        &node,
+        images,
+        limits,
+        &|| cancel.requested(),
+        &mut |progress| showing.show(progress),
+    ) {
+        Ok(Done::Downloaded) => Ok(true),
+        Ok(Done::NothingToDo | Done::Unavailable) => Ok(false),
+        Err(Stop::Stalled) => Err(Failure::DownloadStalled),
+        Err(Stop::TooLong) => Err(Failure::Timeout),
+        Err(Stop::Cancelled) => Err(Failure::Cancelled),
+    }
+}
+
+/// What `local update` on `stack` would install, as far as `local status` says: `Some(None)` for a
+/// new update, `Some(Some(release))` to resume the one the CLI keeps on record because it did not
+/// finish (`UnfinishedUpdate::to`), and `None` when status does not say.
+fn update_resumes(
+    cli: &PinnedCli,
+    stack: &StackId,
+    cancel: &Cancel,
+) -> Result<Option<Option<String>>, Failure> {
+    match run(
+        cli,
+        Action::Status,
+        stack,
+        Limits::for_action(Action::Status),
+        cancel,
+    ) {
+        Ok(Report {
+            outcome: Outcome::Completed,
+            stack: Some(saved),
+            ..
+        }) => Ok(match saved.unfinished_update {
+            Some(unfinished) => Some(Some(unfinished.to)),
+            // An update on record that does not name its release is the CLI's own business.
+            None if saved.update_in_progress => None,
+            None => Some(None),
+        }),
+        Err(Failure::Cancelled) => Err(Failure::Cancelled),
+        // The update itself says what is wrong; this was only a look.
+        _ => Ok(None),
+    }
+}
+
+/**
+The stack `local setup` in `installation` resumes, when it has images still to pull: the one the CLI
+recorded for that folder (`appPaths`, which it keeps as the folder's real path), with its release,
+and not already set up. `None` for a first setup, which has no node to download into yet.
+*/
+fn stack_set_up_in(
+    cli: &PinnedCli,
+    installation: &std::path::Path,
+    cancel: &Cancel,
+) -> Result<Option<(StackId, String)>, Failure> {
+    let (code, bytes) = match execute(
+        cli,
+        &LIST_ARGUMENTS,
+        None,
+        Limits::for_action(Action::Status),
+        cancel,
+    ) {
+        Ok(answer) => answer,
+        Err(Failure::Cancelled) => return Err(Failure::Cancelled),
+        Err(_) => return Ok(None),
+    };
+    let Ok((Outcome::Completed, wire)) = parse_envelope("local list", code, &bytes) else {
+        return Ok(None);
+    };
+    let Ok(folder) = installation.canonicalize() else {
+        return Ok(None);
+    };
+    let here = |saved: &Value| {
+        saved
+            .get("appPaths")
+            .and_then(Value::as_array)
+            .is_some_and(|paths| {
+                paths.iter().any(|path| {
+                    path.get("path")
+                        .and_then(Value::as_str)
+                        .and_then(|path| std::path::Path::new(path).canonicalize().ok())
+                        .is_some_and(|path| path == folder)
+                })
+            })
+    };
+    let stacks = wire.get("stacks").and_then(Value::as_array);
+    Ok(stacks
+        .into_iter()
+        .flatten()
+        .filter(|saved| here(saved))
+        .find_map(|saved| {
+            let id = StackId::parse(saved.get("id")?.as_str()?).ok()?;
+            let release = text(saved.get("installedRelease")).ok()?;
+            let finished = saved.get("step").and_then(Value::as_str) == Some("ready")
+                && saved.get("failedStep").is_none_or(Value::is_null)
+                && saved.get("update").is_none_or(Value::is_null);
+            (!finished).then_some((id, release))
+        }))
 }
 
 /// `local setup` in `installation` against the installed CLI, in its turn like every other call.
 /// The digest of the CLI that ran comes back with the report, so the caller records which one.
+///
+/// A setup that resumes a stack whose node is there downloads its images first (`local_images`):
+/// on a slow line that is how a first setup that stopped in its image download finishes.
 pub fn setup_installed(
     attempt: &str,
     installation: &std::path::Path,
     accepted: Option<&EulaVersion>,
 ) -> Result<(Report, String), Failure> {
+    let id = attempt;
     let attempt = Attempt::register(attempt);
-    one_at_a_time(&attempt.0, Limits::for_setup(), |limits| {
+    one_at_a_time(&attempt.0, Limits::for_setup(), |remaining| {
         let cli = installed()?;
-        let report = setup(&cli, installation, accepted, limits, &attempt.0)?;
+        let report = setup_with(
+            &cli,
+            id,
+            installation,
+            accepted,
+            (Limits::for_setup(), remaining),
+            &attempt.0,
+            crate::local_images::Limits::standard(),
+        )?;
         Ok((report, cli.sha256().to_owned()))
     })
+}
+
+/// `setup`, after downloading the images a resumed setup is about to pull. Limits as `run_with`.
+pub(crate) fn setup_with(
+    cli: &PinnedCli,
+    attempt: &str,
+    installation: &std::path::Path,
+    accepted: Option<&EulaVersion>,
+    limits: (Limits, Limits),
+    cancel: &Cancel,
+    images_limits: crate::local_images::Limits,
+) -> Result<Report, Failure> {
+    let downloaded = match cli_images_of(cli) {
+        Some(images) => match stack_set_up_in(cli, installation, cancel)? {
+            Some((stack, release)) => download_images(
+                &images,
+                &setup_arguments(accepted),
+                &stack,
+                Some(&release),
+                attempt,
+                cancel,
+                images_limits,
+            )?,
+            None => false,
+        },
+        None => false,
+    };
+    let limits = if downloaded { limits.0 } else { limits.1 };
+    setup(cli, installation, accepted, limits, cancel)
 }
 
 /// The CopilotKit account sign-in against the installed CLI. While it waits, `shown_sign_in_page`
@@ -2332,6 +2652,11 @@ impl Drop for ShowingSignIn {
     fn drop(&mut self) {
         sign_in_pages().retain(|(attempt, _)| attempt != &self.0);
     }
+}
+
+/// How far the back end's image download before the call `attempt` has got, while it runs.
+pub fn downloading(attempt: &str) -> Option<crate::local_images::Download> {
+    crate::local_images::downloading(attempt)
 }
 
 /// The approval page the account sign-in `attempt` is waiting on, once the CLI has opened one.
@@ -2537,11 +2862,29 @@ mod tests {
         // Not known: a CLI with no pinned release, or a version that does not read.
         assert_eq!(update_due(&on_release("0.16.0-rc.8"), None), None);
         assert_eq!(update_due(&on_release("latest"), target), None);
-        // A saved update is the CLI's own to resume, on `start`.
+        // An update that did not finish is due again, to the release on record, as the CLI 48a3863
+        // reports it, whatever release this app's CLI would choose now: `local update` resumes it.
         let mut resuming = envelope();
-        resuming["stack"]["installedRelease"] = json!("0.16.0-rc.8");
-        resuming["stack"]["update"] = json!({ "attemptedRelease": { "version": "0.16.0-rc.9" } });
-        assert_eq!(update_due(&status(&resuming).unwrap(), target), None);
+        resuming["stack"]["installedRelease"] = json!("0.16.0-rc.5");
+        resuming["stack"]["failedStep"] = json!("image-download");
+        resuming["stack"]["update"] = json!({
+            "attemptedRelease": "0.16.0-rc.9",
+            "state": "prepared",
+            "observedSchema": null,
+            "recoveryCommand": "copilotkit local update --stack local-abc123"
+        });
+        let resuming = status(&resuming).unwrap();
+        for target in [Some("0.16.0-rc.9"), Some("0.16.0-rc.10")] {
+            assert_eq!(
+                update_due(&resuming, target).as_deref(),
+                Some("0.16.0-rc.9")
+            );
+        }
+        // A record that does not name its release is left alone.
+        let mut unnamed = envelope();
+        unnamed["stack"]["installedRelease"] = json!("0.16.0-rc.8");
+        unnamed["stack"]["update"] = json!({ "state": "migrated" });
+        assert_eq!(update_due(&status(&unnamed).unwrap(), target), None);
         // A report that is not a completed status says nothing about the stack's release.
         let mut blocked = on_release("0.16.0-rc.8");
         blocked.outcome = Outcome::Blocked;
@@ -4212,6 +4555,7 @@ mod tests {
             Failure::UnexpectedExit,
             Failure::InvalidAcceptance,
             Failure::RootlessPodman,
+            Failure::DownloadStalled,
         ];
         // Adding a variant without listing it above stops compiling here.
         for failure in all {
@@ -4232,7 +4576,8 @@ mod tests {
                 | Failure::ContractMismatch
                 | Failure::UnexpectedExit
                 | Failure::InvalidAcceptance
-                | Failure::RootlessPodman => {}
+                | Failure::RootlessPodman
+                | Failure::DownloadStalled => {}
             }
             let name = serde_json::to_string(&failure).unwrap();
             assert!(window.contains(&name), "localEvalCli.ts is missing {name}");

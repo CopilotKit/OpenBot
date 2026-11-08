@@ -25,11 +25,13 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { SELF_HOST_URL } from "@/components/layout/self-host-banner";
 import { queryClient } from "@/query-client";
 import type { RouterContext } from "@/router-context";
 import { Route as OnboardingRoute } from "@/routes/_authed/onboarding";
 import { settleReactWork } from "./settle-react-work";
+
+/** Book a call opens the OpenBot for Business page, with its booking calendar, never CopilotKit's generic one. */
+const OPENBOT_FOR_BUSINESS = "https://open.bot/business";
 
 /**
  * Where somebody is in onboarding lives in the address: `?step=<id>`. A reload stays on the step,
@@ -375,7 +377,7 @@ test("on every step, its name in the list of steps is its heading", async () => 
   ]);
 });
 
-test("Welcome asks to set up permissions, with Ask before making changes beside the words, not in the picture", async () => {
+test("Welcome asks to set up permissions, with Always ask before making changes beside the words, not in the picture", async () => {
   const view = open("/onboarding?step=welcome");
   await heading(view, "Welcome to OpenBot");
 
@@ -383,17 +385,8 @@ test("Welcome asks to set up permissions, with Ask before making changes beside 
     name: "Set up your permissions",
   });
   expect(permissions.tagName).toBe("H2");
-  expect(
-    view.getByText("Turn this on to review changes before a Bot makes them."),
-  ).toBeTruthy();
-  // What always waits is said for what it covers: a Bot's own computer is its scratch space.
-  expect(
-    view.getByText(
-      "Paying, changing account security, and deleting, sending, sharing or posting in your apps and on websites always wait for you. A Bot's own computer is its scratch space. You can change this later in Settings.",
-    ),
-  ).toBeTruthy();
   const ask = await view.findByRole("switch", {
-    name: "Ask before making changes",
+    name: "Always ask before making changes",
   });
   // A real control: with the words, and nowhere inside the inert illustration.
   expect(ask.closest("[data-onboarding-intro]")).not.toBeNull();
@@ -404,12 +397,59 @@ test("Welcome asks to set up permissions, with Ask before making changes beside 
   ).not.toBeNull();
 });
 
-test("switching Ask before making changes on Welcome saves it, and moves nothing on", async () => {
+/*
+ * REPORTED ON 0.3.3: "Ask before making changes" read as if turning it off also stopped the asks for
+ * deleting, sending, sharing and posting, and the sentence saying they always ask sat under the
+ * switch where it was missed. What always asks is said first, above the switch, and the switch says
+ * it adds routine changes on top (server/src/approvals/policy.ts: safety before the default).
+ */
+test("Welcome says what always asks before the switch, and the switch says it covers every change", async () => {
   const view = open("/onboarding?step=welcome");
   await heading(view, "Welcome to OpenBot");
 
   const ask = await view.findByRole("switch", {
-    name: "Ask before making changes",
+    name: "Always ask before making changes",
+  });
+  const always = view.getByText(
+    /^Bots always ask for your approval before deleting, sending, sharing, or posting content in your apps or on websites\./,
+  );
+  expect(always.textContent).toContain(
+    "Bots leave payments and account security changes for you to do yourself.",
+  );
+  // Above the switch in the reading order, not under it.
+  expect(
+    always.compareDocumentPosition(ask) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+
+  const row = ask.closest("[data-slot='item']");
+  expect(row?.textContent).toContain("Always ask before making changes");
+  expect(row?.textContent).toContain(
+    "Require your approval for every change to your apps, websites, and files, including routine edits and updates.",
+  );
+  expect(row?.textContent).not.toContain(
+    "Review a Bot's changes to websites, connected apps, and files.",
+  );
+
+  // The workspace exception and where to change it later come after the switch, each on its own.
+  const workspace = view.getByText(
+    "Bots can create, edit, and delete files in their own workspace without asking, unless this is on.",
+  );
+  const later = view.getByText(
+    "You can change this setting anytime in Settings.",
+  );
+  expect(
+    ask.compareDocumentPosition(workspace) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(workspace).not.toBe(later);
+  expect(view.queryByText(/always wait for you/)).toBeNull();
+});
+
+test("switching Always ask before making changes on Welcome saves it, and moves nothing on", async () => {
+  const view = open("/onboarding?step=welcome");
+  await heading(view, "Welcome to OpenBot");
+
+  const ask = await view.findByRole("switch", {
+    name: "Always ask before making changes",
   });
   await waitFor(() => expect(ask.hasAttribute("data-disabled")).toBe(false));
   expect(ask.getAttribute("aria-checked")).toBe("false");
@@ -420,7 +460,7 @@ test("switching Ask before making changes on Welcome saves it, and moves nothing
   await waitFor(() =>
     expect(
       view
-        .getByRole("switch", { name: "Ask before making changes" })
+        .getByRole("switch", { name: "Always ask before making changes" })
         .getAttribute("aria-checked"),
     ).toBe("true"),
   );
@@ -608,7 +648,9 @@ test("somebody trying OpenBot alone gets Talk to us before the name, and Book a 
     expect(footerButtons(view)).toEqual(["Back", "Book a call", "Not now"]);
 
     fireEvent.click(view.getByRole("button", { name: "Book a call" }));
-    expect(opened).toEqual([[SELF_HOST_URL, "_blank", "noopener,noreferrer"]]);
+    expect(opened).toEqual([
+      [OPENBOT_FOR_BUSINESS, "_blank", "noopener,noreferrer"],
+    ]);
     expect(await heading(view, "What should we call you?")).toBeTruthy();
     expect(completed).toBe(false);
   });
@@ -759,7 +801,9 @@ test("somebody trying OpenBot alone whose name is known books a call in a new ta
 
     fireEvent.click(await ready(view, "Book a call"));
 
-    expect(opened).toEqual([[SELF_HOST_URL, "_blank", "noopener,noreferrer"]]);
+    expect(opened).toEqual([
+      [OPENBOT_FOR_BUSINESS, "_blank", "noopener,noreferrer"],
+    ]);
     await waitFor(() => expect(completed).toBe(true));
     await waitFor(() => expect(view.getByText("Home")).toBeTruthy(), {
       timeout: 3000,
