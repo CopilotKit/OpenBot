@@ -15,6 +15,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   and the end of its error output. A setup that stopped used to leave nothing in the log. The card
   says whether the back end stopped with an error partway, quit without saying why, or could not
   be run, where all three said "The back end could not start."
+- The first Bot to need you after OpenBot Desktop starts raises its notification. It used to raise
+  nothing while the app was still checking that notifications were on, so the first question after
+  each launch, asked while OpenBot was minimised or behind another window, went unannounced.
 
 ## 0.3.4
 
