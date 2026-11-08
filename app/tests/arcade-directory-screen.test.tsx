@@ -154,7 +154,7 @@ test("the Arcade directory renders the coverage warning and the breadth line on 
 
   // Not pending, not a redirect: the screen itself.
   expect(view.queryByText("the plugins index")).toBeNull();
-  expect(view.getByText("Browse Arcade")).toBeTruthy();
+  expect(view.getByText("Browse apps")).toBeTruthy();
 
   await waitFor(() => {
     expect(row.textContent).toContain(
@@ -173,7 +173,7 @@ test("the Arcade directory redirects on a Composio deployment", async () => {
   await waitFor(() => {
     expect(view.getByText("the plugins index")).toBeTruthy();
   });
-  expect(view.queryByLabelText("Search Arcade apps")).toBeNull();
+  expect(view.queryByLabelText("Search apps")).toBeNull();
 });
 
 test("the Arcade directory draws nothing until the page names a provider", async () => {
@@ -190,7 +190,7 @@ test("the Arcade directory draws nothing until the page names a provider", async
   }) as unknown as typeof fetch;
 
   const view = renderDirectory();
-  expect(view.queryByLabelText("Search Arcade apps")).toBeNull();
+  expect(view.queryByLabelText("Search apps")).toBeNull();
   expect(view.queryByText("the plugins index")).toBeNull();
   expect(view.queryByRole("alert")).toBeNull();
   release();

@@ -80,6 +80,43 @@ export function brokerRefusal(
 }
 
 /**
+ * The broker's name, as a sentence written for an operator spells it.
+ *
+ * A person connects their work apps through OpenBot and is never told which company sits behind
+ * it. Most of the broker layer's sentences were written for an operator who can open that company's
+ * dashboard, so they name it; a route a person calls passes each one through {@link forPerson}.
+ */
+const NAMES_THE_BROKER = /\bComposio\b/;
+
+/**
+ * A sentence a person reads, kept free of the broker's name.
+ *
+ * A sentence that names the broker was written for the operator, and its remedy is somewhere a
+ * person cannot go. The person gets the route's own sentence instead, which says what failed and
+ * who to ask, and the operator's sentence goes to the log, where the admin who can act on it reads.
+ * The status is unchanged: only the words differ.
+ */
+export function forPerson(sentence: string, generic: string): string {
+  if (!NAMES_THE_BROKER.test(sentence)) return sentence;
+  console.error(
+    JSON.stringify({
+      type: "broker-sentence-kept-from-person",
+      note: sentence,
+    }),
+  );
+  return generic;
+}
+
+/** {@link brokerRefusal} for a route a person calls: see {@link forPerson}. */
+export function personRefusal(
+  error: unknown,
+  generic: string,
+): { error: string; status: 502 | 503 } {
+  const refusal = brokerRefusal(error, generic);
+  return { ...refusal, error: forPerson(refusal.error, generic) };
+}
+
+/**
  * A return address this deployment could not use, said once where an operator will read it.
  *
  * THE REMEDY AND THE READER HAD COME APART, WHICH IS WHAT THIS CLOSES. Both routes that check a
@@ -114,13 +151,13 @@ export function logReturnUrlRefusal(error: unknown, serverId: string): void {
  * names the setting rather than quoting it: a key that was pasted with a space in it, or one for
  * another project, is the likeliest reason the vendor will not talk to this deployment at all.
  *
- * THE VENDOR AND ITS SETTING COME OFF THE ACTIVE PROVIDER'S PROFILE, because the client shows the
- * server's sentence in preference to its own fallback: a sentence that spelled one broker was read
- * by an operator of the other.
+ * THE SETTING COMES OFF THE ACTIVE PROVIDER'S PROFILE, because the client shows the server's
+ * sentence in preference to its own fallback: a sentence that spelled one broker's variable was read
+ * by an operator of the other. The broker itself is not named: the directory is OpenBot's.
  */
 export function directoryUnavailable(provider: BrokerProvider): string {
-  const { vendor, envVar } = BROKERED_PROFILE[provider];
-  return `${vendor} would not answer with its app directory, and said nothing about why. Check that ${envVar} is this project's key, and check ${vendor}'s status if it persists.`;
+  const { envVar } = BROKERED_PROFILE[provider];
+  return `Couldn't load the apps you can connect, and no reason was given. Check that ${envVar} is this project's key, and try again in a moment.`;
 }
 
 /**

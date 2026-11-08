@@ -49,7 +49,6 @@ describe("useAnyBotSkillCommands", () => {
         name: "Standup notes",
         description: "Turns yesterday's work into a standup update",
         kind: "chip",
-        prompt: "Summarise yesterday.",
       },
     ]);
     expect(result.current.botsFor("standup")).toEqual(["ada", "linus"]);
