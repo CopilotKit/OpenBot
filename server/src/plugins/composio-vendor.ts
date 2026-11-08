@@ -1,3 +1,4 @@
+import { itsAppPage } from "../edition";
 import {
   BrokerAccountGoneError,
   BrokerAccountHeldError,
@@ -1825,7 +1826,7 @@ function vendorRefusal(
      */
     case "ComposioToolNotFoundError":
       return refusal(
-        `Composio would not hand that action over at the version this deployment recorded for it, so ${outcome}. This deployment's @composio/core reports an action Composio has withdrawn and a request for one that failed — a timeout, a dropped connection, a 500, a refused key — under one condition and says nothing that tells the two apart, so neither can this deployment. Refreshing ${app}'s tools on its Plugins page records what Composio publishes now, which settles it where the action is gone; where every action of every app is failing the same way, it is the request rather than the action, and Composio's status page is where that shows.`,
+        `Composio would not hand that action over at the version this deployment recorded for it, so ${outcome}. This deployment's @composio/core reports an action Composio has withdrawn and a request for one that failed — a timeout, a dropped connection, a 500, a refused key — under one condition and says nothing that tells the two apart, so neither can this deployment. Refreshing ${app}'s tools on ${itsAppPage()} records what Composio publishes now, which settles it where the action is gone; where every action of every app is failing the same way, it is the request rather than the action, and Composio's status page is where that shows.`,
       );
 
     /*
@@ -1836,7 +1837,7 @@ function vendorRefusal(
      */
     case "ComposioToolVersionRequiredError":
       return refusal(
-        `Composio refuses a call whose toolkit version is "latest", and that is the version travelling with this one, so ${outcome}. A dated version is recorded when an app's actions are listed, so refreshing ${app}'s tools on its Plugins page replaces "latest" with a version Composio will accept.`,
+        `Composio refuses a call whose toolkit version is "latest", and that is the version travelling with this one, so ${outcome}. A dated version is recorded when an app's actions are listed, so refreshing ${app}'s tools on ${itsAppPage()} replaces "latest" with a version Composio will accept.`,
       );
 
     /*
