@@ -1,3 +1,4 @@
+import { itsAppPage } from "../../edition";
 import {
   type ComposioAction,
   type ComposioActions,
@@ -174,7 +175,7 @@ export function actionsFor(context: ClientContext): ComposioActions {
         throw new Error(
           `${call.slug} was not sent to Composio: this connection is for ${call.toolkit}, and Composio resolves that action to ${
             ran ?? "no app at all"
-          }. Refreshing this app's tools on its Plugins page recovers it where the action was recorded against a url that has since changed.`,
+          }. Refreshing this app's tools on ${itsAppPage()} recovers it where the action was recorded against a url that has since changed.`,
         );
       }
 

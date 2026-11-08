@@ -516,7 +516,7 @@ export function pluginsPageQueryOptions() {
     queryKey: pluginKeys.page(),
     queryFn: async (): Promise<PluginsPage> => {
       const response = await client("/api/plugins", {
-        fallback: "Plugins could not be loaded.",
+        fallback: "Couldn't load your apps. Reload the page.",
       });
       return response.json();
     },
