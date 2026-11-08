@@ -404,6 +404,11 @@ export function LearningPage() {
                       ? "Choose a Bot, or set a default container."
                       : "No Learning container is assigned."}
               </p>
+              {snapshot.modelProblem && (
+                <p role="alert" className="text-destructive text-sm">
+                  {snapshot.modelProblem}
+                </p>
+              )}
               <dl className="grid grid-cols-2 gap-4 rounded-lg border p-4 text-sm">
                 {(
                   [

@@ -409,6 +409,20 @@ describe("reviewing proposed skills", () => {
     expect(posts).toEqual(["/api/admin/learning/runs"]);
   });
 
+  test("a sign-in Learning can't use is said on the page, before anyone presses Learn now", async () => {
+    const said =
+      "Learning can't run on the model you signed in with. To use it, sign OpenBot in with an OpenAI or Anthropic API key, or a Claude or ChatGPT plan.";
+    intelligence({ ...noDashboard, modelProblem: said });
+    const view = shared();
+    expect((await view.findByText(said)).getAttribute("role")).toBe("alert");
+    cleanup();
+    queryClient.clear();
+    intelligence();
+    const fine = shared();
+    await fine.findByText("OpenBot (openbot)");
+    expect(fine.queryByText(said)).toBeNull();
+  });
+
   test("with no dashboard there is no link into one, and with one the links stay", async () => {
     intelligence();
     const without = shared();

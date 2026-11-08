@@ -202,6 +202,8 @@ import {
   learningSetupInstructions,
 } from "./learning/ensure-container";
 import { createInspectorLearningReader } from "./learning/inspector";
+import { learningModelEndpointFor } from "./learning/model-endpoint";
+import { learningModelUnavailable } from "./learning/routes";
 import {
   createPersonalLearningSpaces,
   createPersonSpaceStore,
@@ -2988,6 +2990,7 @@ const app = createApp(
       ? createInspectorLearningReader(config.runtime.intelligence)
       : undefined,
     manage: learningProbeIntelligence.experimental.learning,
+    modelUnavailable: learningModelUnavailable(process.env),
   },
   {
     productTelemetry,
@@ -3058,6 +3061,10 @@ const app = createApp(
           },
         }
       : {}),
+    learningModel: learningModelEndpointFor(
+      runtimeModel.plan,
+      process.env.OPENBOT_LEARNING_MODEL_TOKEN,
+    ),
     personalLearning: {
       store: learningSharingStore,
       skillsOf: (userId) =>

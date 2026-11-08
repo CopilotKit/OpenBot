@@ -39,7 +39,37 @@ export type LearningAdminDependencies = {
   inspect?: (input: InspectorLearningRequest) => Promise<InspectorLearning>;
   /** Review and publish here, which an Intelligence with no dashboard of its own needs. */
   manage?: LearningManagement;
+  /**
+   * Why OpenBot Desktop could not give its local Intelligence's Learning agent a model, from
+   * `OPENBOT_LEARNING_MODEL_UNAVAILABLE`. See `learningModelUnavailable`.
+   */
+  modelUnavailable?: LearningModelUnavailable;
 };
+
+/** Why Learning has no model on this machine, as OpenBot Desktop recorded it. */
+export type LearningModelUnavailable = "unsupported";
+
+/**
+ * Desktop's reason, or undefined. Only Desktop writes the setting, so an OpenBot whose Learning runs
+ * on an organization's Intelligence keeps the message for whoever runs that back end.
+ */
+export function learningModelUnavailable(
+  environment: Record<string, string | undefined>,
+): LearningModelUnavailable | undefined {
+  return environment.OPENBOT_LEARNING_MODEL_UNAVAILABLE?.trim() ===
+    "unsupported"
+    ? "unsupported"
+    : undefined;
+}
+
+/** What Learn now says when the Learning agent has no model. */
+export function noLearningModel(
+  unavailable: LearningModelUnavailable | undefined,
+): string {
+  return unavailable === "unsupported"
+    ? "Learning can't run on the model you signed in with. To use it, sign OpenBot in with an OpenAI or Anthropic API key, or a Claude or ChatGPT plan."
+    : "The back end has no Learning model yet. Give its Learning agent a model and key, then try again.";
+}
 
 /** An Inspector link, when it is one a browser can open on the dashboard's own origin. */
 function link(
@@ -151,7 +181,10 @@ function requestFailure(error: unknown): { status?: number; code?: string } {
 }
 
 /** What to tell an admin when Intelligence refused a Learning request, and with which status. */
-function learningFailure(error: unknown): {
+function learningFailure(
+  error: unknown,
+  unavailable?: LearningModelUnavailable,
+): {
   status: ContentfulStatusCode;
   error: string;
 } {
@@ -185,8 +218,7 @@ function learningFailure(error: unknown): {
   if (code === "LEARNING_MODEL_NOT_CONFIGURED")
     return {
       status: 409,
-      error:
-        "The back end has no Learning model yet. Give its Learning agent a model and key, then try again.",
+      error: noLearningModel(unavailable),
     };
   if (status === 429 || code === "RATE_LIMIT_EXCEEDED")
     return {
@@ -410,6 +442,10 @@ export function createLearningRoutes(
     const scope = await targetFor(context);
     if (!scope.ok) return context.json({ error: "Invalid Bot ID." }, 400);
     const { agentId, target } = scope;
+    // Said before anyone presses Learn now: automatic Learning runs on the same model.
+    const modelProblem = dependencies.modelUnavailable
+      ? { modelProblem: noLearningModel(dependencies.modelUnavailable) }
+      : {};
     try {
       if (dependencies.inspect) {
         try {
@@ -418,7 +454,9 @@ export function createLearningRoutes(
             ...(agentId ? { agentId } : {}),
             ...(target ? { runtimeContainerId: target.containerId } : {}),
           });
-          return context.json({ overview: overview(snapshot) });
+          return context.json({
+            overview: { ...overview(snapshot), ...modelProblem },
+          });
         } catch (error) {
           // No Inspector panel: an older Intelligence with no dashboard, or Learning off. The
           // project key's own routes answer the first and name the second.
@@ -428,10 +466,13 @@ export function createLearningRoutes(
       }
       if (!dependencies.manage) throw new Error("No Learning management.");
       return context.json({
-        overview: await managedOverview(dependencies.manage, target),
+        overview: {
+          ...(await managedOverview(dependencies.manage, target)),
+          ...modelProblem,
+        },
       });
     } catch (error) {
-      const failure = learningFailure(error);
+      const failure = learningFailure(error, dependencies.modelUnavailable);
       return context.json(
         {
           error:
@@ -460,7 +501,7 @@ export function createLearningRoutes(
       const candidates = await manage.listLearningCandidates({ containerId });
       return context.json({ containerId, proposals: candidates.map(proposal) });
     } catch (error) {
-      const failure = learningFailure(error);
+      const failure = learningFailure(error, dependencies.modelUnavailable);
       return context.json({ error: failure.error }, failure.status);
     }
   });
@@ -503,7 +544,7 @@ export function createLearningRoutes(
       );
       return context.json({ proposal: proposalDetail(candidate, insights) });
     } catch (error) {
-      const failure = learningFailure(error);
+      const failure = learningFailure(error, dependencies.modelUnavailable);
       return context.json({ error: failure.error }, failure.status);
     }
   });
@@ -566,7 +607,7 @@ export function createLearningRoutes(
           proposal: { id: candidateId, status: review.status },
         });
       } catch (error) {
-        const failure = learningFailure(error);
+        const failure = learningFailure(error, dependencies.modelUnavailable);
         if (audit)
           await recordAuditEvent(audit, {
             eventType: "configuration.changed",
@@ -620,7 +661,7 @@ export function createLearningRoutes(
         });
       return context.json({ run: { id: run.id, status: run.status } });
     } catch (error) {
-      const failure = learningFailure(error);
+      const failure = learningFailure(error, dependencies.modelUnavailable);
       return context.json({ error: failure.error }, failure.status);
     }
   });

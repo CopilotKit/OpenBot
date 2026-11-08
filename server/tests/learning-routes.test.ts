@@ -12,7 +12,10 @@ import {
   withLearningAutoAssign,
 } from "../src/learning/auto-assign";
 import { createInspectorLearningReader } from "../src/learning/inspector";
-import { createLearningRoutes } from "../src/learning/routes";
+import {
+  createLearningRoutes,
+  learningModelUnavailable,
+} from "../src/learning/routes";
 import { createLearningSettingsStore } from "../src/learning/settings";
 import {
   type FakeIntelligence,
@@ -224,11 +227,13 @@ describe("reviewing proposed skills in Admin, against Intelligence's project-key
     version: Parameters<typeof fakeIntelligence>[0] = "current",
     role: "admin" | "user" = "admin",
     inspector?: "no-dashboard" | "dashboard" | "dashboard-before-opt-in",
+    model: { noModel?: boolean; modelUnavailable?: "unsupported" } = {},
   ) {
     const intelligence = fakeIntelligence(version, {
       containers: ["openbot"],
       candidates: [PROPOSAL],
       ...(inspector ? { inspector } : {}),
+      ...(model.noModel ? { noModel: true } : {}),
     });
     served.push(intelligence);
     const client = runtimeKeyClient(
@@ -258,6 +263,9 @@ describe("reviewing proposed skills in Admin, against Intelligence's project-key
           apiKey: RUNTIME_KEY,
         }),
         manage: client.experimental.learning,
+        ...(model.modelUnavailable
+          ? { modelUnavailable: model.modelUnavailable }
+          : {}),
       },
       requireUser,
       ["https://openbot.example.com"],
@@ -406,6 +414,43 @@ describe("reviewing proposed skills in Admin, against Intelligence's project-key
       actorUserId: "admin-ada",
       payload: { change: "learning_run_started", containerId: "openbot" },
     });
+  });
+
+  test("on a sign-in Learning can't use, Learn now and the overview say why and what to do", async () => {
+    const { app, store } = admin("current", "admin", "no-dashboard", {
+      noModel: true,
+      modelUnavailable: learningModelUnavailable({
+        OPENBOT_LEARNING_MODEL_UNAVAILABLE: "unsupported",
+      }),
+    });
+    await useDefault(store);
+    const said =
+      "Learning can't run on the model you signed in with. To use it, sign OpenBot in with an OpenAI or Anthropic API key, or a Claude or ChatGPT plan.";
+    const response = await post(app, "/runs");
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: said });
+    const overview = (await (await app.request("/overview")).json()) as {
+      overview: LearningOverview;
+    };
+    expect(overview.overview.modelProblem).toBe(said);
+  });
+
+  test("an Intelligence OpenBot Desktop did not set up keeps telling its admin to give it a model", async () => {
+    const { app, store } = admin("current", "admin", "no-dashboard", {
+      noModel: true,
+      modelUnavailable: learningModelUnavailable({}),
+    });
+    await useDefault(store);
+    const response = await post(app, "/runs");
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error:
+        "The back end has no Learning model yet. Give its Learning agent a model and key, then try again.",
+    });
+    const overview = (await (await app.request("/overview")).json()) as {
+      overview: LearningOverview;
+    };
+    expect(overview.overview.modelProblem).toBeUndefined();
   });
 
   test("with no dashboard, the overview has the Inspector panel's counts and links nowhere", async () => {

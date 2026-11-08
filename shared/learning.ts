@@ -43,6 +43,8 @@ export type LearningOverview = {
     candidates: string | null;
     runs: string | null;
   };
+  /** Why Learning can't run on this machine's model, and what to do. Absent when it can. */
+  modelProblem?: string;
 };
 
 /** A Skill change Intelligence proposed, as Admin → Automatic learning lists it. */
