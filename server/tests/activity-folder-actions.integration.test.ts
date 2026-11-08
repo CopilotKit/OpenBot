@@ -104,6 +104,7 @@ async function rows(eventType: string) {
     action: event.payload.action,
     bot: event.payload.bot,
     file: event.payload.file,
+    folder: event.payload.folder,
     command: event.payload.command,
     refusal: event.payload.refusal,
     attempt: typeof event.payload.attempt === "string",
@@ -139,6 +140,8 @@ describe("a Bot's folder actions", () => {
       action: "host/read_file",
       bot: BOT,
       file: "todo.txt",
+      // The folder by its name, never only the grant's id (seen on the Mac: "host-grant-…").
+      folder: "Notes",
       command: undefined,
       refusal: undefined,
       attempt: true,
