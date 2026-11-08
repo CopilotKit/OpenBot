@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { ManageSection } from "@/components/bot-profile/manage";
 import type { AgentProfile } from "@/lib/agents/queries";
+import type { ResetPlan } from "@/lib/bot-lifecycle/queries";
+import { deploymentKeys } from "@/lib/deployment/queries";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -63,10 +65,19 @@ function draw(
     onDuplicated?: (copyId: string) => void;
     onDeleted?: () => void;
   } = {},
+  edition?: "team" | "personal",
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  if (edition) {
+    client.setQueryData(deploymentKeys.capabilities(), {
+      generativeUi: true,
+      selfHostBanner: false,
+      localEvaluation: edition === "personal",
+      edition,
+    });
+  }
   return render(
     <QueryClientProvider client={client}>
       <ManageSection
@@ -148,4 +159,51 @@ test("rows that open a dialog show a chevron, and Duplicate, which acts at once,
   expect(chevron(/^Reset/)).not.toBeNull();
   expect(chevron(/^Delete/)).not.toBeNull();
   expect(chevron(/^Duplicate/)).toBeNull();
+});
+
+/** A reset plan with a conversation to delete, so the notice lists something. */
+function servingResetPlan() {
+  const plan: ResetPlan = {
+    conversations: 1,
+    sharedConversationsKept: 0,
+    memorySources: 0,
+    memories: 0,
+    routines: 0,
+    responsibilities: 0,
+    followUps: 0,
+    formedMemories: 0,
+    backgroundResearch: 0,
+    standingApprovals: 0,
+  };
+  global.fetch = (async () =>
+    Response.json({ plan })) as unknown as typeof fetch;
+}
+
+/*
+ * The personal edition has no memory (see `offersMemory`), so Reset promises none: neither the row
+ * nor the notice it opens says the Bot remembers anything for you.
+ */
+test("Reset promises no memory in the personal edition", async () => {
+  servingResetPlan();
+  const view = draw(BOT, {}, "personal");
+  const row = view.getByRole("button", { name: /^Reset/ });
+  expect(row.textContent).toContain(
+    "Delete your conversations with it and its scheduled work.",
+  );
+  expect(row.textContent).not.toMatch(/remember|memor/i);
+  fireEvent.click(row);
+  expect(await view.findByText("1 conversation")).toBeTruthy();
+  expect(document.body.textContent).not.toMatch(/remember|memor/i);
+});
+
+test("Reset still names what a Bot remembers for you in the team edition", async () => {
+  servingResetPlan();
+  const view = draw(BOT, {}, "team");
+  const row = view.getByRole("button", { name: /^Reset/ });
+  expect(row.textContent).toContain("what it remembers for you");
+  fireEvent.click(row);
+  expect(await view.findByText("1 conversation")).toBeTruthy();
+  expect(
+    view.getByText("Memories you told a Bot yourself are kept."),
+  ).toBeTruthy();
 });
