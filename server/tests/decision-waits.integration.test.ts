@@ -286,6 +286,7 @@ afterAll(async () => {
     .where(inArray(channels.id, [conversation, deleted, othersConversation]));
   await database.delete(agents).where(eq(agents.id, bot));
   await database.delete(users).where(inArray(users.id, [owner, other]));
+  await database.$client.close();
 });
 
 describe("a card the Bot asks with in the conversation", () => {

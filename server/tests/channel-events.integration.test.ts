@@ -289,7 +289,9 @@ describe("channel activity delivery", () => {
 
     const person = replies.find((event) => event.lastMessageAgentId === null);
     const bot = replies.find((event) => event.lastMessageAgentId !== null);
-    expect(person?.firstLine).toBeUndefined();
+    // A person's message has no first line to notify with: the key is absent, not just empty.
+    expect(person).toBeDefined();
+    expect(person).not.toHaveProperty("firstLine");
     expect(bot).toMatchObject({
       lastMessage: "Categorized three expenses. The receipts are in Drive.",
       firstLine: "Categorized three expenses.",
