@@ -51,6 +51,7 @@ function report(overrides: Partial<LocalReport> = {}): LocalReport {
       },
       hasFailedStep: false,
       updateInProgress: false,
+      unfinishedUpdate: null,
       observed: {
         running: true,
         services: [
@@ -62,6 +63,7 @@ function report(overrides: Partial<LocalReport> = {}): LocalReport {
     readiness: "unknown",
     licence: "unknown",
     licenceExpiresAt: null,
+    checksPassed: false,
     ...overrides,
   };
 }

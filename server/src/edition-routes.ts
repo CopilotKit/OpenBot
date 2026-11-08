@@ -11,8 +11,12 @@ import type { Edition } from "./edition";
  * group conversations (`/api/groups`, several Bots in one conversation), Shared app approvals and
  * Team Bots, which a person's own screens read; the capability switches refuse what the edition
  * turns off.
+ *
+ * Memory is closed too: the personal edition has none (`editionHasMemory`), and its screens never
+ * ask for it.
  */
 export const PERSONAL_CLOSED_ROUTES: readonly RegExp[] = [
+  "/api/memory",
   "/api/admin/people",
   "/api/admin/identity-providers",
   "/api/admin/enterprise",

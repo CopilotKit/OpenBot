@@ -10,6 +10,7 @@ import {
 } from "@copilotkit/runtime/internal/learned-skills";
 import type { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import type {
+  LearnedSkillContent,
   LearningDeliveryStatus,
   LearningSettings,
   LearningTarget,
@@ -18,7 +19,7 @@ import { z } from "zod";
 import type { LearningSettingsStore } from "./settings";
 import type { OpenSkillSource } from "./sharing";
 
-// This published internal export is pinned to runtime 1.73.1. Keep its use here: the SDK owns
+// This published internal export is pinned with @copilotkit/runtime in server/package.json. Keep its use here: the SDK owns
 // archive verification, refresh, revocation and stale-cache policy for every OpenBot framework.
 export type LearnedSkillInvocation = {
   readonly catalog: string;
@@ -68,9 +69,11 @@ function excludedFromLearning(
   );
 }
 
-/** Skills another person opened, with the snapshot of their space they came from. */
+/** Skills another person opened, the ones among them they approved only for themselves, and their space's snapshot. */
 export type OpenedSkills = {
   source: OpenSkillSource;
+  /** Read fresh for this run (`PersonalSkillSources.withheld`), never from the open-Skill index. */
+  withheld: ReadonlySet<string>;
   snapshot: VerifiedSnapshot;
 };
 
@@ -79,10 +82,10 @@ export type OpenedSkills = {
  *
  * 1. The Bot's own (its Learning target, as before). Always kept as they are.
  * 2. The run's person's own space. A Skill whose name the Bot already has is left out: the Bot's own wins.
- * 3. Skills other people opened (`open`, or picked under `choose`). One whose name the Bot or the person already has is
- *    left out. When two or more people opened a Skill with the same name, all of them are kept, each named
- *    `<their space id>/<name>` (the SDK's own multi-container naming), so none is lost and the choice never depends on
- *    timing; a name only one person opened keeps its plain name.
+ * 3. Skills other people opened (`open`, or picked under `choose`), never one the person withheld. One whose name the Bot
+ *    or the person already has is left out. When two or more people opened a Skill with the same name, all of them are
+ *    kept, each named `<their space id>/<name>` (the SDK's own multi-container naming), so none is lost and the choice
+ *    never depends on timing; a name only one person opened keeps its plain name.
  *
  * Nothing merged is the Bot's own snapshot unchanged.
  */
@@ -101,10 +104,12 @@ export function mergeLearnedSkills(input: {
     taken.add(skill.name);
   }
   const candidates = opened
-    .flatMap(({ source, snapshot }) =>
+    .flatMap(({ source, withheld, snapshot }) =>
       snapshot.skills
         .filter(
-          (skill) => source.skills === "all" || source.skills.has(skill.name),
+          (skill) =>
+            (source.skills === "all" || source.skills.has(skill.name)) &&
+            !withheld.has(skill.name),
         )
         .map((skill) => ({ containerId: source.containerId, skill })),
     )
@@ -129,11 +134,12 @@ export function mergeLearnedSkills(input: {
       JSON.stringify([
         input.bot ? [input.bot.revision, input.bot.etag] : null,
         input.own ? [input.own.revision, input.own.etag] : null,
-        opened.map(({ source, snapshot }) => [
+        opened.map(({ source, withheld, snapshot }) => [
           source.containerId,
           snapshot.revision,
           snapshot.etag,
           source.skills === "all" ? "all" : [...source.skills].sort(),
+          [...withheld].sort(),
         ]),
       ]),
     )
@@ -195,6 +201,15 @@ export type PersonalSkillSources = {
   /** Everyone's opened Skills, from the in-memory index (learning/sharing.ts), never read per person per run. */
   openSkills(): Promise<readonly OpenSkillSource[]>;
   /**
+   * The Skills each of these people approved only for themselves, which must not reach other people's Bots until an
+   * administrator approves sharing them (learning/approvals.ts `withheld`). Read on every run that has an opened
+   * source, never cached: an approval made through another replica holds a Skill back on the very next run here. A read
+   * that fails leaves every opened source out of that run.
+   */
+  withheld(
+    userIds: string[],
+  ): Promise<ReadonlyMap<string, ReadonlySet<string>>>;
+  /**
    * Whether an administrator lets people open their Skills to every Bot (Admin, Automatic learning, Skill sharing).
    * Asked on every run, before the index: while it is off, a Skill somebody opened reaches no other person's Bot, and
    * their choice is kept for when it is on again. A gate that cannot be read counts as off.
@@ -209,6 +224,17 @@ const PERSONAL_READ_MS = 5_000;
 /** A space that refused (missing, revoked, not entitled, unreadable) is not asked again by runs for this long. */
 const PERSONAL_RETRY_MS = 60_000;
 
+/** A Skill's files with SKILL.md first and the rest in their given order; a binary file has no text. */
+export function skillMdFirst(
+  files: readonly { path: string; text?: string }[],
+): { path: string; text: string | null }[] {
+  return [...files]
+    .sort(
+      (a, b) => Number(b.path === "SKILL.md") - Number(a.path === "SKILL.md"),
+    )
+    .map((file) => ({ path: file.path, text: file.text ?? null }));
+}
+
 export function createLearningRuntime(options: {
   store: LearningSettingsStore;
   client: CopilotKitIntelligence;
@@ -222,6 +248,26 @@ export function createLearningRuntime(options: {
   const personalWaitMs = options.personalWaitMs ?? PERSONAL_WAIT_MS;
   const now = options.now ?? Date.now;
   const registries = new Map<string, SkillRegistry>();
+  /*
+   * The settings, for a chat run, or undefined when they cannot be read. A saved row this build
+   * cannot read used to fail every run ("Failed to resolve Learning Container"); a run now goes ahead
+   * without Learning and the failure is logged. Admin still reads the settings through the store and
+   * is told they are invalid. Never logs the thrown value, which can carry row contents.
+   */
+  const settingsForRun = async (
+    operation: "acquire" | "containerForThread",
+  ): Promise<LearningSettings | undefined> => {
+    try {
+      return await store.read();
+    } catch {
+      console.error({
+        error: "learning_settings_unreadable",
+        context: { operation, outcome: "run continues without Learning" },
+        timestamp: new Date().toISOString(),
+      });
+      return undefined;
+    }
+  };
   const registryKey = (target: LearningTarget) =>
     JSON.stringify([target.containerId, target.revision]);
   const registryFor = (target: LearningTarget) => {
@@ -323,23 +369,48 @@ export function createLearningRuntime(options: {
       console.warn(JSON.stringify({ type: "learning-open-skills-unread" }));
     }
     const others = sources.filter((source) => source.userId !== userId);
-    const [own, ...opened] = await Promise.all([
+    // Read alongside the spaces rather than before them, so it adds no wait of its own.
+    const withheldRead = (async (): Promise<
+      ReadonlyMap<string, ReadonlySet<string>> | undefined
+    > => {
+      if (others.length === 0) return new Map();
+      try {
+        return await people.withheld(others.map((source) => source.userId));
+      } catch {
+        console.warn(JSON.stringify({ type: "learning-withheld-unread" }));
+        return undefined;
+      }
+    })();
+    const [withheld, own, ...opened] = await Promise.all([
+      withheldRead,
       softSnapshot(people.containerFor(userId), signal, true),
       ...others.map((source) => softSnapshot(source.containerId, signal)),
     ]);
+    // FAILS SAFE: with no word on what each person kept to themselves, nothing of anyone else's reaches this run.
+    if (!withheld) return own ? { own, opened: [] } : { opened: [] };
     return {
       ...(own ? { own } : {}),
       opened: others.flatMap((source, index) => {
         const snapshot = opened[index];
-        return snapshot ? [{ source, snapshot }] : [];
+        return snapshot
+          ? [
+              {
+                source,
+                withheld: withheld.get(source.userId) ?? new Set<string>(),
+                snapshot,
+              },
+            ]
+          : [];
       }),
     };
   };
 
   const acquire: AcquireLearnedSkills = async (agentId, signal, userId) => {
     signal?.throwIfAborted();
-    const settings = await store.read();
+    const settings = await settingsForRun("acquire");
     signal?.throwIfAborted();
+    // Unreadable: the run goes ahead without learned Skills. See `settingsForRun`.
+    if (!settings) return undefined;
     // Learning off, or this Bot excluded by an administrator: no learned Skills of any kind.
     if (!settings.enabled || excludedFromLearning(settings, agentId)) {
       return undefined;
@@ -379,13 +450,46 @@ export function createLearningRuntime(options: {
     };
   };
 
+  /**
+   * The Skills published in any one Learning space, with their files (SKILL.md first), read the way a run reads them
+   * (the same registry and Intelligence call). `off` when Automatic Learning is off here; `unavailable` when
+   * Intelligence did not deliver them (its Learning delivery off, the space not made yet, or not reachable).
+   */
+  const containerSkills = async (
+    containerId: string,
+  ): Promise<
+    { skills: LearnedSkillContent[] } | { unavailable: "off" | "unavailable" }
+  > => {
+    if (!(await store.read()).enabled) return { unavailable: "off" };
+    try {
+      const snapshot = await waitForSnapshot(
+        registryFor({ containerId }).acquireSnapshot(),
+        AbortSignal.timeout(PERSONAL_READ_MS),
+      );
+      return {
+        skills: snapshot.skills.map(({ name, description, files }) => ({
+          name,
+          description,
+          files: skillMdFirst(files),
+        })),
+      };
+    } catch (error) {
+      // The space exists and nothing is published in it yet.
+      if (
+        error !== null &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "REVISION_NOT_FOUND"
+      )
+        return { skills: [] };
+      return { unavailable: "unavailable" };
+    }
+  };
+
   return {
     acquire,
-    /**
-     * The Skills published in this person's own Learning space, read the way a run reads them (the same registry and
-     * Intelligence call), for Settings, Learning. `off` when Automatic Learning is off here; `unavailable` when
-     * Intelligence did not deliver them (its Learning delivery off, the space not made yet, or not reachable).
-     */
+    containerSkills,
+    /** The Skills published in this person's own Learning space, for Settings, Learning. */
     async personalSkills(
       userId: string,
     ): Promise<
@@ -393,31 +497,14 @@ export function createLearningRuntime(options: {
       | { unavailable: "off" | "unavailable" }
     > {
       if (!people) return { unavailable: "unavailable" };
-      if (!(await store.read()).enabled) return { unavailable: "off" };
-      try {
-        const snapshot = await waitForSnapshot(
-          registryFor({
-            containerId: people.containerFor(userId),
-          }).acquireSnapshot(),
-          AbortSignal.timeout(PERSONAL_READ_MS),
-        );
-        return {
-          skills: snapshot.skills.map(({ name, description }) => ({
-            name,
-            description,
-          })),
-        };
-      } catch (error) {
-        // The space exists and nothing is published in it yet.
-        if (
-          error !== null &&
-          typeof error === "object" &&
-          "code" in error &&
-          error.code === "REVISION_NOT_FOUND"
-        )
-          return { skills: [] };
-        return { unavailable: "unavailable" };
-      }
+      const result = await containerSkills(people.containerFor(userId));
+      if ("unavailable" in result) return result;
+      return {
+        skills: result.skills.map(({ name, description }) => ({
+          name,
+          description,
+        })),
+      };
     },
     /**
      * Bind once, before thread creation. The SDK calls this selector before its ownership check,
@@ -428,7 +515,10 @@ export function createLearningRuntime(options: {
     ): Promise<string | undefined> {
       if (!input.userId.trim())
         throw new Error("Learning Thread assignment requires a verified user.");
-      const target = selectLearningTarget(await store.read(), input.agentId);
+      const settings = await settingsForRun("containerForThread");
+      // Unreadable: the thread is not bound to Learning, and the run goes ahead. See `settingsForRun`.
+      if (!settings) return undefined;
+      const target = selectLearningTarget(settings, input.agentId);
       if (!target) return undefined;
       let exists = false;
       try {

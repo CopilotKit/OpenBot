@@ -10,10 +10,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { UserPreferences } from "@openbot/shared/user-preferences";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import {
-  SELF_HOST_URL,
-  SelfHostBanner,
-} from "@/components/layout/self-host-banner";
+import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
@@ -102,14 +99,13 @@ function setup({
   return { client, view };
 }
 
-test("offers self-hosting with a link CopilotKit can tell came from the app", () => {
+test("offers self-hosting with a link to book an OpenBot for Business call", () => {
   const { view } = setup();
   expect(
     view.getByText("Self-host OpenBot for your organization."),
   ).toBeTruthy();
   const link = view.getByRole("link", { name: "Book a call" });
-  expect(link.getAttribute("href")).toBe(SELF_HOST_URL);
-  expect(SELF_HOST_URL).toContain("ref=openbot_app");
+  expect(link.getAttribute("href")).toBe("https://open.bot/business");
   expect(link.getAttribute("target")).toBe("_blank");
   expect(link.getAttribute("rel")).toBe("noopener noreferrer");
 });

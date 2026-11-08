@@ -9,6 +9,18 @@
 @import "./openmuse/skin.css";
 
 /*
+ * OpenBot's own composer column pads `px-4`, the transcript's inset, so a narrow pane keeps it off
+ * the edges. A skin keeps the column it was drawn with, which had no padding unless the skin gave it
+ * some, so the padding goes back to none here. `:where` holds this to the specificity of a single
+ * attribute, so a skin's own padding (OpenDuet's 12px, OpenDots' 16px in a narrow window) still wins,
+ * while being outside Tailwind's layers is enough to beat the `px-4` utility. Before the width
+ * rule below, which is more specific, so the stylesheet reads in ascending specificity.
+ */
+:where(:root[data-skin]) [data-slot="composer-column"] {
+  padding-inline: 0;
+}
+
+/*
  * OpenBot's own look draws a Bot's answers and the composer in a 768px column. Every skin keeps the
  * column it was drawn with, 672px for both.
  */

@@ -6,7 +6,7 @@
 
 A Bot can use a browser, work with files, and call the tools you grant it. You can watch it work, take over to sign in, and hand the browser back.
 
-[**Talk to an engineer**](https://copilotkit.ai/talk-to-an-engineer?ref=openbot_readme) · [**Have us build it with you**](https://copilotkit.ai/talk-to-an-engineer?ref=openbot_readme) · [**openbot.co**](https://openbot.co) · [**Quick start**](#quick-start) · [**Docs**](docs/README.md)
+[**Talk to an engineer**](https://open.bot/business) · [**Have us build it with you**](https://open.bot/business) · [**open.bot**](https://open.bot) · [**Quick start**](#quick-start) · [**Docs**](docs/README.md)
 
 [![CI](https://github.com/CopilotKit/openbot/actions/workflows/ci.yml/badge.svg)](https://github.com/CopilotKit/openbot/actions/workflows/ci.yml)
 [![security](https://github.com/CopilotKit/openbot/actions/workflows/security_zizmor.yml/badge.svg)](https://github.com/CopilotKit/openbot/actions/workflows/security_zizmor.yml)
@@ -34,7 +34,7 @@ You can get started with OpenBot in three ways.
 
 - **Use the open-source template.** Clone the MIT-licensed application and make it your own. Replace the example tenant package under `examples/` with your own coworkers, channels, and skills. The [quick start](#quick-start) runs the template from source.
 - **Download Personal Edition.** Choose your installer for [Mac (Apple silicon)](https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg), [Mac (Intel)](https://downloads.copilotkit.ai/latest/OpenBot-mac-x64.dmg), or [Windows (x64)](https://downloads.copilotkit.ai/latest/OpenBot-windows-x64-setup.exe). The desktop app runs the workspace and CopilotKit Intelligence locally on your computer. Connect your model and start with the built-in Personal Assistant. Your model provider bills for usage separately.
-- **OpenBot for Business.** Deploy on your infrastructure with the [Helm chart](charts/openbot/README.md) or have CopilotKit host your workspace. Both options are in [early access](https://openbot.co/business). Our engineers can help you deploy and customize OpenBot for your team. [**Start the conversation**](https://copilotkit.ai/talk-to-an-engineer?ref=openbot_readme).
+- **OpenBot for Business.** Deploy on your infrastructure with the [Helm chart](charts/openbot/README.md) or have CopilotKit host your workspace. Both options are in [early access](https://open.bot/business). Our engineers can help you deploy and customize OpenBot for your team. [**Start the conversation**](https://open.bot/business).
 
 ## What it is
 
@@ -44,7 +44,7 @@ The team template comes with two Bots. **General Assistant** helps with everyday
 
 To add a Bot, open `/bots` or start from one of the [YAML examples](examples/fintech/catalog/). For example, [Meeting Follow-ups](examples/fintech/catalog/meeting-follow-ups.yaml) reads meeting notes and lists who agreed to do what. Copy its file into `examples/fintech/agents/` and restart OpenBot to try it. You grant tool access separately, so you can let a Bot read a document without giving it permission to edit it.
 
-More at [openbot.co](https://openbot.co).
+More at [open.bot](https://open.bot).
 
 ## Built on AG-UI
 
@@ -455,7 +455,7 @@ Use `bash scripts/start.sh` for the whole stack and `bash scripts/stop.sh` to ta
 
 ## Documentation
 
-- [openbot.co](https://openbot.co)
+- [open.bot](https://open.bot)
 - [docs/README.md](docs/README.md)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/configuration.md](docs/configuration.md)
@@ -478,4 +478,4 @@ Use `bash scripts/start.sh` for the whole stack and `bash scripts/stop.sh` to ta
 
 ## License
 
-The OpenBot application source is [MIT-licensed](./LICENSE) © CopilotKit. CopilotKit Intelligence is separately licensed. OpenBot for Business includes Intelligence for use with OpenBot. See [plans and pricing](https://openbot.co/pricing).
+The OpenBot application source is [MIT-licensed](./LICENSE) © CopilotKit. CopilotKit Intelligence is separately licensed. OpenBot for Business includes Intelligence for use with OpenBot. See [plans and pricing](https://open.bot/pricing).

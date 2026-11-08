@@ -1,11 +1,14 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import { eq, inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import {
   learningSettings,
   learningThreadBindings,
 } from "../src/db/schema/learning";
+import { currentEdition, setEdition } from "../src/edition";
+import { createLearningRuntime } from "../src/learning/runtime";
 import { createLearningSettingsStore } from "../src/learning/settings";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -140,6 +143,91 @@ describe("durable Learning settings", () => {
       .where(eq(learningSettings.id, "current"));
   });
 
+  /*
+   * FOUND ON THE MAC: a build of an unmerged branch saved this row with an "autoApprove" key, and the
+   * Desktop was then put back to a main build that does not know it. Main's reader refused the whole
+   * row ("Stored learning settings are invalid."), and every chat run failed with "Failed to resolve
+   * Learning Container". Builds do go back (an update rolled back), so a key a newer build wrote is
+   * dropped and the ones this build knows are kept.
+   */
+  test("a row a newer build saved, with a key this build does not know, is read for the keys it does", async () => {
+    const newer = {
+      agents: {},
+      enabled: true,
+      fromANewerBuild: true,
+      defaultTarget: { containerId: "openbot", pinnedBy: "a-newer-build" },
+    } as never;
+    await database
+      .insert(learningSettings)
+      .values({ id: "current", settings: newer })
+      .onConflictDoUpdate({
+        target: learningSettings.id,
+        set: { settings: newer },
+      });
+    expect(await createLearningSettingsStore(database).read()).toEqual({
+      enabled: true,
+      defaultTarget: { containerId: "openbot" },
+      agents: {},
+    });
+  });
+
+  test("who reviews and automatic approval are read back from a saved row, not dropped as a newer build's keys", async () => {
+    // Merging main's forgiving reader into this branch first listed only the keys main knew, so a person's choice to
+    // review their own skills, and automatic approval switched off, were dropped every time the row was read.
+    const saved = {
+      agents: {},
+      enabled: true,
+      defaultTarget: { containerId: "openbot" },
+      personalReview: "people",
+      autoApprove: false,
+    } as never;
+    await database
+      .insert(learningSettings)
+      .values({ id: "current", settings: saved })
+      .onConflictDoUpdate({
+        target: learningSettings.id,
+        set: { settings: saved },
+      });
+    expect(await createLearningSettingsStore(database).read()).toEqual({
+      enabled: true,
+      defaultTarget: { containerId: "openbot" },
+      agents: {},
+      personalReview: "people",
+      autoApprove: false,
+    });
+  });
+
+  test("a row that cannot be read never fails a chat run: the run goes ahead without Learning", async () => {
+    // Not a settings shape at all, as a corrupted row would be: the column's type cannot say it.
+    const broken = { enabled: "yes", defaultTarget: 7, agents: [] } as never;
+    await database
+      .insert(learningSettings)
+      .values({ id: "current", settings: broken })
+      .onConflictDoUpdate({
+        target: learningSettings.id,
+        set: { settings: broken },
+      });
+    const store = createLearningSettingsStore(database);
+    // An administrator reading the settings is still told.
+    await expect(store.read()).rejects.toThrow(
+      "Stored learning settings are invalid.",
+    );
+    const learning = createLearningRuntime({
+      store,
+      client: new CopilotKitIntelligence({ apiKey: "synthetic-never-sent" }),
+    });
+    const threadId = `broken-${randomUUID()}`;
+    threads.push(threadId);
+    expect(
+      await learning.containerForThread({
+        userId: "person",
+        threadId,
+        agentId: "bot",
+      }),
+    ).toBeUndefined();
+    expect(await learning.acquire("bot")).toBeUndefined();
+  });
+
   test("two users independently bind the same supplied thread ID", async () => {
     const store = createLearningSettingsStore(database);
     const threadId = `learning-${randomUUID()}`;
@@ -167,4 +255,141 @@ describe("durable Learning settings", () => {
         .where(eq(learningThreadBindings.threadId, threadId)),
     ).toHaveLength(2);
   });
+});
+
+describe("automatic approval is saved on its own", () => {
+  const clear = () =>
+    database.delete(learningSettings).where(eq(learningSettings.id, "current"));
+  const stores = [
+    ["in the database", () => createLearningSettingsStore(database)],
+    ["in memory", () => createLearningSettingsStore()],
+  ] as const;
+  const edition = currentEdition();
+  afterEach(async () => {
+    setEdition(edition);
+    await clear();
+  });
+
+  test.each(stores)(
+    "personal edition: switching it before the default container is adopted still lets it be adopted (%s)",
+    async (_where, create) => {
+      await clear();
+      setEdition("personal");
+      const store = create();
+      await store.setAutoApprove(false);
+      expect(await store.saved()).toBe(false);
+      expect(await store.adoptDefault({ containerId: "openbot" })).toBe(true);
+      expect(await store.saved()).toBe(true);
+      const settings = await store.read();
+      expect(settings.defaultTarget?.containerId).toBe("openbot");
+      expect(settings.autoApprove).toBe(false);
+      expect(await store.adoptDefault({ containerId: "other" })).toBe(false);
+      expect((await store.read()).defaultTarget).toEqual({
+        containerId: "openbot",
+      });
+    },
+  );
+
+  test.each(stores)(
+    "personal edition: adopting keeps every other saved key (%s)",
+    async (_where, create) => {
+      await clear();
+      setEdition("personal");
+      const store = create();
+      await store.write({
+        enabled: true,
+        defaultTarget: null,
+        agents: { bot: { containerId: "support" }, excluded: null },
+        personalReview: "people",
+        autoApprove: true,
+      });
+      expect(await store.saved()).toBe(false);
+      expect(await store.adoptDefault({ containerId: "openbot" })).toBe(true);
+      expect(await store.read()).toEqual({
+        enabled: true,
+        defaultTarget: { containerId: "openbot" },
+        agents: { bot: { containerId: "support" }, excluded: null },
+        personalReview: "people",
+        autoApprove: true,
+      });
+    },
+  );
+
+  test.each([
+    [
+      "in the database",
+      () =>
+        createLearningSettingsStore(database, { containerId: "configured" }),
+    ],
+    [
+      "in memory",
+      () =>
+        createLearningSettingsStore(undefined, { containerId: "configured" }),
+    ],
+  ] as const)(
+    "with nothing saved, a configured default container is kept beside it (%s)",
+    async (_where, create) => {
+      await clear();
+      setEdition("personal");
+      const store = create();
+      await store.setAutoApprove(true);
+      expect(await store.read()).toEqual({
+        enabled: true,
+        defaultTarget: { containerId: "configured" },
+        agents: {},
+        autoApprove: true,
+      });
+    },
+  );
+
+  test.each(stores)(
+    "a stored off stays off when automatic approval is switched (%s)",
+    async (_where, create) => {
+      await clear();
+      setEdition("team");
+      const store = create();
+      const off = {
+        enabled: false,
+        defaultTarget: { containerId: "support" },
+        agents: { bot: null },
+      };
+      await store.write(off);
+      setEdition("personal");
+      await store.setAutoApprove(true);
+      setEdition("team");
+      expect(await store.read()).toEqual({ ...off, autoApprove: true });
+    },
+  );
+
+  test("the database row keeps a stored off when automatic approval is switched", async () => {
+    await clear();
+    setEdition("team");
+    const store = createLearningSettingsStore(database);
+    await store.write({ enabled: false, defaultTarget: null, agents: {} });
+    setEdition("personal");
+    await store.setAutoApprove(true);
+    const [row] = await database
+      .select({ settings: learningSettings.settings })
+      .from(learningSettings)
+      .where(eq(learningSettings.id, "current"));
+    expect(row?.settings).toEqual({
+      enabled: false,
+      defaultTarget: null,
+      agents: {},
+      autoApprove: true,
+    });
+  });
+
+  test.each(stores)(
+    "team edition: a saved null default is an admin's choice and is never adopted over (%s)",
+    async (_where, create) => {
+      await clear();
+      setEdition("team");
+      const store = create();
+      await store.write({ enabled: true, defaultTarget: null, agents: {} });
+      expect(await store.saved()).toBe(true);
+      expect(await store.adoptDefault({ containerId: "openbot" })).toBe(false);
+      expect((await store.read()).defaultTarget).toBeNull();
+    },
+  );
 });

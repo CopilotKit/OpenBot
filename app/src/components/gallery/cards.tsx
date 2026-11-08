@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import { Badge, GalleryFrame, type Tone } from "./frame";
+import { GalleryMarkdown } from "./markdown";
 import { byPosition } from "./positions";
 
 const tone = z
@@ -49,7 +50,9 @@ export function RecordCard({
           <div className="contents" key={key}>
             <dt className="truncate text-muted-foreground">{field.label}</dt>
             {/* Field values wrap because truncation can hide the reported data. */}
-            <dd className="min-w-0 break-words">{field.value}</dd>
+            <dd className="min-w-0 break-words">
+              <GalleryMarkdown>{field.value}</GalleryMarkdown>
+            </dd>
           </div>
         ))}
       </dl>
@@ -166,19 +169,18 @@ export function ChecklistCard({
              * Done is the tick and a muted line, never a line through it. A strike reads as deleted,
              * and a list whose every item is finished was drawn as an answer crossed out.
              */}
-            <span className="min-w-0">
-              <span className={item.done ? "text-muted-foreground" : ""}>
+            <div className="min-w-0">
+              <div className={item.done ? "text-muted-foreground" : ""}>
                 <span className="sr-only">
                   {item.done ? "Done: " : "To do: "}
                 </span>
-                {item.text}
-              </span>
-              {item.note ? (
-                <span className="block text-xs text-muted-foreground">
-                  {item.note}
-                </span>
-              ) : null}
-            </span>
+                <GalleryMarkdown>{item.text}</GalleryMarkdown>
+              </div>
+              {/* Inline code in a reply is a fixed text-sm, which stood taller than this smaller line. */}
+              <GalleryMarkdown className="text-xs text-muted-foreground [&_code]:text-xs">
+                {item.note}
+              </GalleryMarkdown>
+            </div>
           </li>
         ))}
       </ul>
@@ -226,13 +228,13 @@ export function NoticeCard({
       action={badge ? <Badge tone={noticeTone}>{badge}</Badge> : undefined}
       title={title}
     >
-      <p className="text-sm">{body}</p>
+      <GalleryMarkdown className="text-sm">{body}</GalleryMarkdown>
       {points?.length ? (
         <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
           {byPosition(points).map(({ item: entry, key }) => (
             <li className="flex gap-2" key={key}>
               <span aria-hidden="true">·</span>
-              <span className="min-w-0">{entry}</span>
+              <GalleryMarkdown className="min-w-0">{entry}</GalleryMarkdown>
             </li>
           ))}
         </ul>

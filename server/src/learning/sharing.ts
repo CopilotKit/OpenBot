@@ -10,6 +10,10 @@ import { personalLearningContainerId } from "./personal-space";
 /**
  * One person's Skills that every Bot in the deployment may use: all of them (`open`), or the ones they opened by name
  * (`choose`). A person whose choice is `closed`, or `choose` with nothing opened, has no entry.
+ *
+ * Which of them the person approved only for themselves (and so must not reach other people's Bots) is not part of it:
+ * a run reads that fresh (learning/runtime.ts `PersonalSkillSources.withheld`), because a replica that did not handle an
+ * approval would otherwise keep sharing the Skill until its index expired.
  */
 export type OpenSkillSource = {
   userId: string;
@@ -20,24 +24,32 @@ export type OpenSkillSource = {
 /** The sharing choice a person made for the Skills in their own Learning space. */
 export function createLearningSharingStore(database: Database) {
   return {
-    /** Their choice (`closed` when they never made one) and every Skill they opened under `choose`. */
+    /**
+     * Their choice (`closed` when they never made one) and every Skill they opened under `choose`, both from one
+     * snapshot, so a change saved between the two reads cannot produce a pair that never existed.
+     */
     async read(
       userId: string,
     ): Promise<{ mode: LearningSharingMode; openSkills: string[] }> {
-      const [row] = await database
-        .select({ mode: learningSkillSharing.mode })
-        .from(learningSkillSharing)
-        .where(eq(learningSkillSharing.userId, userId))
-        .limit(1);
-      const opened = await database
-        .select({ name: learningOpenSkills.skillName })
-        .from(learningOpenSkills)
-        .where(eq(learningOpenSkills.userId, userId))
-        .orderBy(learningOpenSkills.skillName);
-      return {
-        mode: row?.mode ?? "closed",
-        openSkills: opened.map((skill) => skill.name),
-      };
+      return database.transaction(
+        async (transaction) => {
+          const [row] = await transaction
+            .select({ mode: learningSkillSharing.mode })
+            .from(learningSkillSharing)
+            .where(eq(learningSkillSharing.userId, userId))
+            .limit(1);
+          const opened = await transaction
+            .select({ name: learningOpenSkills.skillName })
+            .from(learningOpenSkills)
+            .where(eq(learningOpenSkills.userId, userId))
+            .orderBy(learningOpenSkills.skillName);
+          return {
+            mode: row?.mode ?? "closed",
+            openSkills: opened.map((skill) => skill.name),
+          };
+        },
+        { isolationLevel: "repeatable read", accessMode: "read only" },
+      );
     },
 
     /** Saves the choice and says what it was before. Two saves at once are taken in turn, so each `from` is true. */
@@ -124,11 +136,23 @@ export function createLearningSharingStore(database: Database) {
       return sharing.flatMap((row): OpenSkillSource[] => {
         const containerId = personalLearningContainerId(row.userId);
         if (row.mode === "open") {
-          return [{ userId: row.userId, containerId, skills: "all" }];
+          return [
+            {
+              userId: row.userId,
+              containerId,
+              skills: "all",
+            },
+          ];
         }
         const names = byPerson.get(row.userId);
         return names && names.size > 0
-          ? [{ userId: row.userId, containerId, skills: names }]
+          ? [
+              {
+                userId: row.userId,
+                containerId,
+                skills: names,
+              },
+            ]
           : [];
       });
     },
@@ -154,23 +178,34 @@ export function createOpenSkillIndex(deps: {
   const ttlMs = deps.ttlMs ?? INDEX_TTL_MS;
   const now = deps.now ?? Date.now;
   let current: { sources: OpenSkillSource[]; readAt: number } | undefined;
-  let reading: Promise<OpenSkillSource[]> | undefined;
-  /** Bumped by `invalidate`, so a read that began before a change cannot overwrite what came after. */
+  /**
+   * Bumped by `invalidate`. A read that began before a change is neither shared with callers that come after it nor
+   * kept as the index, so neither sees the answer from before the change.
+   */
   let generation = 0;
+  /** The read in flight for the current generation, which every caller in that generation shares. */
+  let reading:
+    | { generation: number; sources: Promise<OpenSkillSource[]> }
+    | undefined;
 
   const refresh = () => {
-    if (reading) return reading;
+    if (reading?.generation === generation) return reading.sources;
     const started = generation;
-    reading = deps
-      .read()
-      .then((sources) => {
-        if (started === generation) current = { sources, readAt: now() };
-        return sources;
-      })
-      .finally(() => {
-        reading = undefined;
-      });
-    return reading;
+    const read: NonNullable<typeof reading> = {
+      generation: started,
+      sources: deps
+        .read()
+        .then((sources) => {
+          if (started === generation) current = { sources, readAt: now() };
+          return sources;
+        })
+        .finally(() => {
+          // A read from an older generation must not clear the one that replaced it.
+          if (reading === read) reading = undefined;
+        }),
+    };
+    reading = read;
+    return read.sources;
   };
 
   return {

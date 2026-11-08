@@ -31,7 +31,6 @@ sha_b64() { openssl dgst -sha256 -binary "$1" | openssl base64 -A; }`;
 const GH = `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\\n' "gh $*" >> "$FAKE_LOG"
-${SHA}
 jq_flag() {
   local prev=""
   for arg in "$@"; do
@@ -44,18 +43,10 @@ emit() {
   filter="$(jq_flag "$@")"
   if [ -n "$filter" ]; then jq -r "$filter"; else cat; fi
 }
+# Each asset's digest and size were worked out when it was attached, as GitHub works them out on
+# upload, so a read is one jq and not a hash of every asset on every call.
 release_json() {
-  local tag="$1" dir="$FAKE_STATE/releases/$1" assets='[]' name
-  if [ -d "$dir/assets" ]; then
-    for file in "$dir/assets"/*; do
-      [ -e "$file" ] || continue
-      name="$(basename "$file")"
-      assets="$(jq -c --arg name "$name" --arg digest "sha256:$(sha_hex "$file")" \\
-        --argjson size "$(wc -c < "$file" | tr -d ' ')" \\
-        '. + [{name: $name, digest: $digest, size: $size, state: "uploaded"}]' <<<"$assets")"
-    done
-  fi
-  jq -c --arg tag "$tag" --argjson assets "$assets" '. + {tagName: $tag, assets: $assets}' "$dir/release.json"
+  jq -c --arg tag "$1" '. + {tagName: $tag}' "$FAKE_STATE/releases/$1/release.json"
 }
 if [ "$1" = api ] && [[ "$2" == repos/*/releases/latest ]]; then
   latest="$(cat "$FAKE_STATE/latest")"
@@ -98,7 +89,7 @@ if [ "$1 $2" = "release download" ]; then
   matched=0
   for file in "$FAKE_STATE/releases/$tag/assets"/*; do
     [ -e "$file" ] || continue
-    name="$(basename "$file")"
+    name="\${file##*/}"
     # shellcheck disable=SC2053
     if [[ "$name" == $pattern ]]; then
       if [ -e "$dir/$name" ]; then
@@ -273,15 +264,28 @@ export function fakeDownloads(): FakeDownloads {
     release: (tag, assets, flags = {}) => {
       const at = join(state, "releases", tag);
       mkdirSync(join(at, "assets"), { recursive: true });
+      for (const [name, content] of Object.entries(assets))
+        writeFileSync(join(at, "assets", name), content);
+      // GitHub works out each asset's digest once, on upload, and every read reports it.
+      const attached = readdirSync(join(at, "assets"))
+        .sort()
+        .map((name) => {
+          const bytes = readFileSync(join(at, "assets", name));
+          return {
+            name,
+            digest: `sha256:${new Bun.CryptoHasher("sha256").update(bytes).digest("hex")}`,
+            size: bytes.length,
+            state: "uploaded",
+          };
+        });
       writeFileSync(
         join(at, "release.json"),
         JSON.stringify({
           isDraft: flags.draft ?? false,
           isPrerelease: flags.prerelease ?? false,
+          assets: attached,
         }),
       );
-      for (const [name, content] of Object.entries(assets))
-        writeFileSync(join(at, "assets", name), content);
     },
     setLatest: (tag) => writeFileSync(join(state, "latest"), tag),
     bucket: () =>

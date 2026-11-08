@@ -1,6 +1,12 @@
+import { useQuery } from "@tanstack/react-query";
+import { Navigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { MemoryList, RememberFact } from "@/components/memory/memories";
 import { RoutinesList } from "@/components/routines/routines-list";
+import {
+  deploymentCapabilitiesQueryOptions,
+  offersMemory,
+} from "@/lib/deployment/queries";
 
 /**
  * OpenDots' workspace page: a small eyebrow, a large quiet title and one line under it, with the
@@ -55,8 +61,14 @@ export function RoutinesScreen() {
   );
 }
 
-/** "Memories": what the person's Bots know about them, as OpenBot's memory. */
+/**
+ * "Memories": what the person's Bots know about them, as OpenBot's memory. Home where memory isn't
+ * offered, as the screen route does for a screen this skin doesn't have (see `offersMemory`).
+ */
 export function MemoriesScreen() {
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
+  if (capabilities.isPending) return null;
+  if (!offersMemory(capabilities.data)) return <Navigate replace to="/" />;
   return (
     <OpenDotsPage
       action={<RememberFact />}

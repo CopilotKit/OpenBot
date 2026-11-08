@@ -247,9 +247,17 @@ jobs:
           print(f"Verified packaged Mac version: {build['version']}")
           PY
       # Frontend assets and platform dependencies are ready after the packaged build.
-      # Include main.rs regressions as well as lib.rs; ignored live tests remain opt-in.
+      # Include main.rs regressions as well as lib.rs; ignored live tests remain opt-in, apart from
+      # the image download's on Linux, below.
       - name: Rust regression tests
         run: cargo test --locked --lib --bins
+        working-directory: desktop/src-tauri
+      # The back end's image download against a real containerd: the k3s node the CLI creates, a
+      # registry and a throttling proxy, on the runner's Docker. Linux runners have Docker; the
+      # others do not.
+      - name: Back end image download regression tests
+        if: matrix.platform == 'linux'
+        run: cargo test --locked --lib local_images::live -- --ignored --test-threads=1
         working-directory: desktop/src-tauri
       # The binary run as the Recorder's browsers run it: the native messaging host Chrome starts, and
       # the install that writes its manifests. The host name and extension id come from
