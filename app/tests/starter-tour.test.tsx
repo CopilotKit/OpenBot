@@ -15,7 +15,10 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
-import { STARTER_SUGGESTIONS } from "@/components/starter-tour/suggestions";
+import {
+  INTERACTIVE_STARTER,
+  STARTER_SUGGESTIONS,
+} from "@/components/starter-tour/suggestions";
 import { authKeys } from "@/lib/auth/queries";
 import { settleReactWork } from "./settle-react-work";
 
@@ -128,9 +131,48 @@ for (const agentId of ["picked-harness", "personal-assistant"]) {
       fireEvent.click(button);
       await waitFor(() => expect(sent.at(-1)).toBe(suggestion.message));
     }
-    expect(sent).toHaveLength(5);
+    expect(sent).toHaveLength(STARTER_SUGGESTIONS.length);
   });
 }
+
+test("the starters tour search with a chart, the Bot's browser, Gmail and an interactive budget", async () => {
+  server();
+  const view = draw({ agentId: "personal-assistant" });
+  await view.findByRole("region", { name: "Starter tasks" });
+  const shown = (await view.findAllByRole("button")).map(
+    (button) => button.textContent,
+  );
+  expect(shown).toEqual([
+    "Chart Hacker News",
+    "Browse Google Maps",
+    "Triage my inbox",
+    "Build a trip budget",
+  ]);
+  expect(
+    STARTER_SUGGESTIONS.map(({ title, message }) => ({ title, message })),
+  ).toEqual([
+    {
+      title: "Chart Hacker News",
+      message:
+        "Use web search to find the top 10 stories on the Hacker News front page right now. Show me a bar chart of them by points, then list them with their points and links.",
+    },
+    {
+      title: "Browse Google Maps",
+      message:
+        "Use your browser to open Google Maps and check the British Museum's Saturday opening hours. Then show walking directions from King's Cross station and tell me when to leave to arrive at opening time. Don't sign in or change anything.",
+    },
+    {
+      title: "Triage my inbox",
+      message:
+        "Use Gmail to read my emails from the past 24 hours and tell me the top 2 that need my attention, and why. Don't mark anything as read or change anything. If Gmail isn't connected, help me connect it here, then continue this request.",
+    },
+    {
+      title: "Build a trip budget",
+      message:
+        "Build an interactive weekend trip budget in this conversation. Start with transport $100, lodging $200 and food $80. Let me edit each cost and see the total update immediately. Use clearly labeled sample amounts, not live prices.",
+    },
+  ]);
+});
 
 test("unrelated Bots never render the starter tasks", async () => {
   server();
@@ -178,7 +220,7 @@ test("starter tasks have no dismiss control", async () => {
   const view = draw({ agentId: "picked-harness" });
   await view.findByRole("region", { name: "Starter tasks" });
   expect(view.queryByRole("button", { name: "Hide starter tasks" })).toBeNull();
-  expect(view.getAllByRole("button")).toHaveLength(5);
+  expect(view.getAllByRole("button")).toHaveLength(STARTER_SUGGESTIONS.length);
 });
 
 test("one user's claimed conversation does not hide tasks for a second user in the same cache", async () => {
@@ -261,7 +303,7 @@ test("disabled interactive answers explain the limitation without an irrelevant 
     onSelect: (message) => sent.push(message),
   });
   const button = await view.findByRole("button", {
-    name: STARTER_SUGGESTIONS[1].title,
+    name: INTERACTIVE_STARTER.title,
   });
   await waitFor(() =>
     expect(
@@ -276,35 +318,33 @@ test("disabled interactive answers explain the limitation without an irrelevant 
   expect(sent).toEqual([]);
 });
 
+const BROWSER_STARTER = STARTER_SUGGESTIONS[1];
+
 for (const status of ["not_checked", "needs_setup", "request_failed"]) {
-  for (const index of [3, 4]) {
-    test(`browser task ${index} sends despite stale or failed checklist: ${status}`, async () => {
-      server({}, false);
-      const sent: string[] = [];
-      const view = draw({
-        agentId: "personal-assistant",
-        onSelect: (message) => sent.push(message),
-      });
-      await act(async () => {
-        view.client.setQueryData(
-          ["setup", "checklist"],
-          status === "request_failed"
-            ? undefined
-            : {
-                audience: "admin",
-                rows: [{ id: "computer", status, ready: false }],
-              },
-        );
-      });
-      fireEvent.click(
-        await view.findByRole("button", {
-          name: STARTER_SUGGESTIONS[index].title,
-        }),
-      );
-      await waitFor(() =>
-        expect(sent).toEqual([STARTER_SUGGESTIONS[index].message]),
-      );
-      expect(view.queryByRole("alert")).toBeNull();
+  test(`the browser task sends despite stale or failed checklist: ${status}`, async () => {
+    server({}, false);
+    const sent: string[] = [];
+    const view = draw({
+      agentId: "personal-assistant",
+      onSelect: (message) => sent.push(message),
     });
-  }
+    await act(async () => {
+      view.client.setQueryData(
+        ["setup", "checklist"],
+        status === "request_failed"
+          ? undefined
+          : {
+              audience: "admin",
+              rows: [{ id: "computer", status, ready: false }],
+            },
+      );
+    });
+    fireEvent.click(
+      await view.findByRole("button", {
+        name: BROWSER_STARTER.title,
+      }),
+    );
+    await waitFor(() => expect(sent).toEqual([BROWSER_STARTER.message]));
+    expect(view.queryByRole("alert")).toBeNull();
+  });
 }
