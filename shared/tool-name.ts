@@ -151,7 +151,12 @@ export function connectorName(server: string): string {
  * action keeps the words it had: a computer's on the site or folder it acts on, a command on the
  * computer it runs on.
  */
-export function approvalWords(action: { toolRef: string; scope: string }): {
+export function approvalWords(action: {
+  toolRef: string;
+  scope: string;
+  /** What the action is aimed at, as the server resolved it. A folder's carries its name. */
+  target?: unknown;
+}): {
   action: string;
   place: string;
 } {
@@ -168,8 +173,24 @@ export function approvalWords(action: { toolRef: string; scope: string }): {
     action: action.toolRef
       .replace(/^computer_|^host\//, "")
       .replaceAll("_", " "),
-    place: action.scope,
+    /*
+     * A folder on the person's computer by the name Settings > Computer shows. Its scope is the id
+     * OpenBot gave the grant, which kept a rule saved from the card on that grant, and read on the
+     * card as "write file on host-grant-15407-1794112361547002000".
+     */
+    place:
+      (action.toolRef.startsWith("host/") && folderName(action.target)) ||
+      action.scope,
   };
+}
+
+/** The name of the folder a folder action's target names, or undefined. */
+function folderName(target: unknown): string | undefined {
+  if (!target || typeof target !== "object") return undefined;
+  const { displayName } = target as { displayName?: unknown };
+  return typeof displayName === "string" && displayName.trim()
+    ? displayName
+    : undefined;
 }
 
 type OwnTool = {

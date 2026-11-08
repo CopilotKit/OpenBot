@@ -248,6 +248,26 @@ export function createLearningRuntime(options: {
   const personalWaitMs = options.personalWaitMs ?? PERSONAL_WAIT_MS;
   const now = options.now ?? Date.now;
   const registries = new Map<string, SkillRegistry>();
+  /*
+   * The settings, for a chat run, or undefined when they cannot be read. A saved row this build
+   * cannot read used to fail every run ("Failed to resolve Learning Container"); a run now goes ahead
+   * without Learning and the failure is logged. Admin still reads the settings through the store and
+   * is told they are invalid. Never logs the thrown value, which can carry row contents.
+   */
+  const settingsForRun = async (
+    operation: "acquire" | "containerForThread",
+  ): Promise<LearningSettings | undefined> => {
+    try {
+      return await store.read();
+    } catch {
+      console.error({
+        error: "learning_settings_unreadable",
+        context: { operation, outcome: "run continues without Learning" },
+        timestamp: new Date().toISOString(),
+      });
+      return undefined;
+    }
+  };
   const registryKey = (target: LearningTarget) =>
     JSON.stringify([target.containerId, target.revision]);
   const registryFor = (target: LearningTarget) => {
@@ -387,8 +407,10 @@ export function createLearningRuntime(options: {
 
   const acquire: AcquireLearnedSkills = async (agentId, signal, userId) => {
     signal?.throwIfAborted();
-    const settings = await store.read();
+    const settings = await settingsForRun("acquire");
     signal?.throwIfAborted();
+    // Unreadable: the run goes ahead without learned Skills. See `settingsForRun`.
+    if (!settings) return undefined;
     // Learning off, or this Bot excluded by an administrator: no learned Skills of any kind.
     if (!settings.enabled || excludedFromLearning(settings, agentId)) {
       return undefined;
@@ -493,7 +515,10 @@ export function createLearningRuntime(options: {
     ): Promise<string | undefined> {
       if (!input.userId.trim())
         throw new Error("Learning Thread assignment requires a verified user.");
-      const target = selectLearningTarget(await store.read(), input.agentId);
+      const settings = await settingsForRun("containerForThread");
+      // Unreadable: the thread is not bound to Learning, and the run goes ahead. See `settingsForRun`.
+      if (!settings) return undefined;
+      const target = selectLearningTarget(settings, input.agentId);
       if (!target) return undefined;
       let exists = false;
       try {

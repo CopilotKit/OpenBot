@@ -17,6 +17,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - A recording the Recorder cannot send yet no longer reads "Saving" on Teach a Bot for the half hour it
   retries: the page says it wasn't saved yet, and why. Your recordings are listed by when you made them,
   and one the Recorder sends later shows up in the list when it lands, without leaving the page.
+- Windows lists OpenBot Desktop's publisher as CopilotKit in Settings > Apps and in Programs and
+  Features, where it said "copilotkit".
 - OpenBot Personal's Settings, Browsers says recordings go to your own Learning space, with no organization.
 - OpenBot Personal's New Bot sheet lists every app the new Bot gets, not only Routines.
 - A Bot's question in a conversation with several Bots now waits in that conversation and is answered there, as in a conversation with one Bot.

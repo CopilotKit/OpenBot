@@ -321,6 +321,8 @@ export function createHostAccessBroker(
             grantId: grant.id,
             displayName: grant.displayName,
             relativePath: input.relativePath ?? "",
+            // What the card and the trail name a command by. See `targetSubject`.
+            ...(input.command ? { command: input.command } : {}),
           },
           continuation: currentApprovalContext(),
         }));
