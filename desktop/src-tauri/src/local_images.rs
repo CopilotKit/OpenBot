@@ -52,6 +52,10 @@ pub struct CliImages {
     pub fixed: Vec<String>,
     /// Repositories whose image is the one the release's tag names.
     pub tagged: Vec<String>,
+    /// The inventory's images its install leaves out, named by digest: the k3s node and k3d's tools
+    /// and proxy, which `k3d cluster create` pulls through the engine itself (the CLI hands k3d
+    /// exactly these references, as `--image`, `K3D_IMAGE_TOOLS` and `K3D_IMAGE_LOADBALANCER`).
+    pub engine: Vec<String>,
 }
 
 /**
@@ -86,9 +90,14 @@ pub fn cli_images(source: &str) -> Option<CliImages> {
         return None;
     }
     let mut fixed = Vec::new();
+    let mut engine = Vec::new();
     for (name, image) in &support.images {
+        if left_out.contains(name) {
+            push_unique(&mut engine, image.reference()?);
+            continue;
+        }
         // The runtime images replace the inventory's entries of the same name.
-        if left_out.contains(name) || services.contains_key(name) {
+        if services.contains_key(name) {
             continue;
         }
         push_unique(&mut fixed, image.reference()?);
@@ -108,6 +117,7 @@ pub fn cli_images(source: &str) -> Option<CliImages> {
         release,
         fixed,
         tagged,
+        engine,
     })
 }
 
@@ -1276,6 +1286,15 @@ mod tests {
                 "docker.io/rancher/mirrored-pause@sha256:74c4244427b7312c5b901fe0f67cbc53683d06f4f24c6faee65d4182bf0fa893",
             ]
         );
+        // What k3d pulls through the engine, as the CLI hands them to it.
+        assert_eq!(
+            images.engine,
+            [
+                "ghcr.io/k3d-io/k3d-proxy@sha256:d43e6ffd27c216d0b21815c1226c8aeac2e07086ac5a988eb39bd7e308f6e370",
+                "ghcr.io/k3d-io/k3d-tools@sha256:c5ceb2b9e8ff2cf55917b0bee8bc9c54fe1483a16366b734117e2cfac1417bed",
+                "docker.io/rancher/k3s@sha256:53cf744fe2fabf140cee240d2db70d13a4f2d98f1a13c98f58f457f423096917",
+            ]
+        );
     }
 
     #[test]
@@ -1958,6 +1977,7 @@ pub(crate) mod live {
             release: "9.9.9-test.1".into(),
             fixed: fixed.iter().map(|image| (*image).to_owned()).collect(),
             tagged: Vec::new(),
+            engine: Vec::new(),
         }
     }
 

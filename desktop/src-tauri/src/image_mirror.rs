@@ -8,7 +8,9 @@
 //! copy of ghcr.io's registry tree at the same paths (`/v2/<repo>/manifests/<tag or digest>`,
 //! `/v2/<repo>/blobs/<digest>`), so `downloads.copilotkit.ai/<repo>@<digest>` is the image
 //! `ghcr.io/<repo>@<digest>`. A key it does not hold answers 403, not 404, and it asks for no
-//! credentials.
+//! credentials. Docker Hub's images are copied under `docker.io/`, official images under
+//! `library/` as Docker Hub keeps them: `downloads.copilotkit.ai/docker.io/library/busybox:1.37` is
+//! `busybox:1.37`, and the image comes from Docker Hub when the mirror cannot give it.
 //!
 //! WHY THE APP DOES THIS, AND NOT THE ENGINE. Docker's `registry-mirrors` setting mirrors Docker Hub
 //! and nothing else (https://docs.docker.com/docker-hub/image-library/mirror/). Docker Engine 28 and
@@ -65,10 +67,17 @@ impl Mirror {
         }
     }
 
-    /// `image` at the mirror: the same repository, tag and digest, on the mirror's host. `None` for
-    /// an image on any other registry, which the mirror does not carry.
+    /// `image` at the mirror: the same repository, tag and digest, on the mirror's host, and for a
+    /// Docker Hub image under `docker.io/`. `None` for an image on any other registry, which the
+    /// mirror does not carry.
     pub fn mirrored(&self, image: &str) -> Option<String> {
-        let path = image.strip_prefix(&self.upstream)?.strip_prefix('/')?;
+        let path = match image
+            .strip_prefix(&self.upstream)
+            .and_then(|rest| rest.strip_prefix('/'))
+        {
+            Some(path) => path.to_string(),
+            None => format!("docker.io/{}", docker_hub(image)?),
+        };
         (!path.is_empty()).then(|| format!("{}/{path}", self.mirror))
     }
 
@@ -113,6 +122,26 @@ impl Mirror {
     }
 }
 
+/// A Docker Hub image's path in Docker Hub's own registry, read as an engine reads a reference:
+/// `docker.io/` (or `index.docker.io/`) or no registry at all, and `library/` before an official
+/// image's single name. `None` for an image on any other registry.
+fn docker_hub(image: &str) -> Option<String> {
+    let path = match image.split_once('/') {
+        Some((host, rest)) if host == "docker.io" || host == "index.docker.io" => rest,
+        Some((host, _)) if host.contains(['.', ':']) || host == "localhost" => return None,
+        _ => image,
+    };
+    let name = &path[..path.find(['@', ':']).unwrap_or(path.len())];
+    if name.is_empty() {
+        return None;
+    }
+    Some(if name.contains('/') {
+        path.to_string()
+    } else {
+        format!("library/{path}")
+    })
+}
+
 /// The tagged name an image from the mirror is given in the upstream registry's repository.
 ///
 /// An engine will not tag with a digest, so a digest-only reference is tagged `sha256-<hex>` after
@@ -149,14 +178,41 @@ mod tests {
                 .as_deref(),
             Some("downloads.copilotkit.ai/spiffe/spire-agent:1.15.1")
         );
-        // Docker Hub and every other registry are left alone, and so is a host that only starts
-        // with the same letters.
+        // Docker Hub's images under `docker.io/`, however they are named: the Compose file's, and
+        // the k3s node the CLI hands k3d.
+        for (hub, copy) in [
+            (
+                "pgvector/pgvector:pg17",
+                "downloads.copilotkit.ai/docker.io/pgvector/pgvector:pg17",
+            ),
+            (
+                "busybox:1.37",
+                "downloads.copilotkit.ai/docker.io/library/busybox:1.37",
+            ),
+            (
+                "docker.io/library/registry:2",
+                "downloads.copilotkit.ai/docker.io/library/registry:2",
+            ),
+            (
+                "docker.io/rancher/k3s@sha256:53cf744fe2fabf140cee240d2db70d13a4f2d98f1a13c98f58f457f423096917",
+                "downloads.copilotkit.ai/docker.io/rancher/k3s@sha256:53cf744fe2fabf140cee240d2db70d13a4f2d98f1a13c98f58f457f423096917",
+            ),
+            (
+                "index.docker.io/library/nginx",
+                "downloads.copilotkit.ai/docker.io/library/nginx",
+            ),
+        ] {
+            assert_eq!(mirror.mirrored(hub).as_deref(), Some(copy), "{hub}");
+        }
+        // Every other registry is left alone, and so is a host that only starts with the same
+        // letters.
         for other in [
-            "pgvector/pgvector:pg17",
-            "busybox:1.37",
             "ghcr.io.example.com/copilotkit/openbot-server:v1",
-            "docker.io/library/registry:2",
+            "quay.io/keycloak/keycloak:26.0.2",
+            "127.0.0.1:5050/openbot-server",
+            "localhost/openbot-server",
             "ghcr.io/",
+            "docker.io/",
         ] {
             assert_eq!(mirror.mirrored(other), None, "{other}");
         }
@@ -263,6 +319,9 @@ mod live {
         address: Address,
         upstream: String,
         repository: String,
+        /// How a release names the image, without its digest: on the upstream registry, or on
+        /// Docker Hub by its single name.
+        name: String,
         digest: String,
         /// The mirror's files on this computer, before they are copied into nginx.
         tree: PathBuf,
@@ -272,7 +331,10 @@ mod live {
     }
 
     impl Lab {
-        fn new(label: &str) -> Self {
+        /// A lab whose image is on the upstream registry, or with `hub`, one a release names as a
+        /// Docker Hub official image, which the mirror keeps under `docker.io/library/`. The
+        /// upstream registry holds it at that path too, only to lay the mirror out from.
+        fn new(label: &str, hub: bool) -> Self {
             let one = ONE_LAB
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -303,12 +365,20 @@ mod live {
                 ]);
                 port
             };
+            let upstream = format!("127.0.0.1:{port}");
+            let (repository, name) = if hub {
+                (format!("docker.io/library/{prefix}"), prefix.clone())
+            } else {
+                let repository = format!("copilotkit/{prefix}");
+                (repository.clone(), format!("{upstream}/{repository}"))
+            };
             let mut lab = Self {
                 _one: one,
                 containers: vec![format!("{prefix}-upstream")],
                 address,
-                upstream: format!("127.0.0.1:{port}"),
-                repository: format!("copilotkit/{prefix}"),
+                upstream,
+                repository,
+                name,
                 digest: String::new(),
                 tree: crate::test_support::temp_root(&format!("mirror-{label}")),
                 types: Vec::new(),
@@ -422,7 +492,7 @@ mod live {
 
         /// The image as a release names it: the upstream registry, the repository, the digest.
         fn image(&self) -> String {
-            format!("{}/{}@{}", self.upstream, self.repository, self.digest)
+            format!("{}@{}", self.name, self.digest)
         }
 
         /// Copy one manifest, and everything it names, from upstream into the mirror's tree.
@@ -619,7 +689,7 @@ http {{
     #[test]
     #[ignore = "needs a Docker engine"]
     fn an_image_the_mirror_holds_comes_from_the_mirror_and_nothing_comes_from_upstream() {
-        let mut lab = Lab::new("hit");
+        let mut lab = Lab::new("hit", false);
         let mirror = lab.mirror();
         // Laying out the mirror read the image from upstream; only what follows counts.
         let blobs = lab.upstream_blobs();
@@ -670,5 +740,27 @@ http {{
             manifests,
             "nor asked upstream for the image at all"
         );
+    }
+
+    #[test]
+    #[ignore = "needs a Docker engine"]
+    fn a_docker_hub_image_the_mirror_holds_comes_from_its_docker_io_copy() {
+        let mut lab = Lab::new("hub", true);
+        let mirror = lab.mirror();
+        // Named as the Compose file names Docker Hub's images: no registry, and no `library/`.
+        // Docker Hub has no such image, so only the mirror can give it.
+        lab.pull(&mirror).unwrap();
+        assert_upstream_name_only(&lab, &mirror);
+        assert!(
+            lab.asked("mirror", "blobs") > 0,
+            "the mirror sent the layers from /v2/docker.io/library/"
+        );
+        assert!(
+            lab.present(&format!("docker.io/library/{}", lab.image())),
+            "it answers to its Docker Hub name in full too"
+        );
+        let container = format!("{}-run", lab.prefix);
+        lab.containers.push(container.clone());
+        ok(&["create", "--name", &container, &lab.image()]);
     }
 }
