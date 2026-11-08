@@ -10,8 +10,8 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { type UseMutationOptions, useMutation } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Item,
@@ -21,6 +21,14 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   openAndStartBrowserRecordingMutationOptions,
   startBrowserRecordingMutationOptions,
@@ -475,8 +483,10 @@ export function RecordingRow({
 }
 
 /**
- * The same controls in one line, for the bar above a browser shown in the page (hosted OpenBot). `children` sits
- * before Stop while recording: the narration switch.
+ * The same controls for the toolbar of a browser shown in the page (hosted OpenBot). Idle, they are one Record button at
+ * the toolbar's end, where a browser keeps its own actions, and Record opens a small popover with the task's name and
+ * `children` (the narration switch), so the toolbar stays one line and never shows a second field beside the address.
+ * While recording, the toolbar itself holds the recording's name, its time and actions, `children` and Stop.
  */
 export function RecordingBar({
   recording,
@@ -485,6 +495,8 @@ export function RecordingBar({
   recording: Recording;
   children?: ReactNode;
 }) {
+  const [naming, setNaming] = useState(false);
+  const field = useRef<HTMLInputElement>(null);
   if (recording.phase !== "idle") {
     return (
       <div className="flex min-w-0 flex-wrap items-center gap-3">
@@ -512,31 +524,54 @@ export function RecordingBar({
     );
   }
   return (
-    <form
-      aria-label="Record a task"
-      className="flex min-w-0 items-center gap-2"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void recording.record();
-      }}
-    >
-      <Input
-        aria-label="Task name"
-        className="h-7 w-64 min-w-0"
-        maxLength={200}
-        onChange={(event) => recording.setTitle(event.target.value)}
-        placeholder="Name the task to record"
-        title={recording.waiting ?? undefined}
-        value={recording.title}
-      />
-      {children}
-      <Button disabled={!recording.canRecord} size="sm" type="submit">
+    <Popover onOpenChange={setNaming} open={naming}>
+      <PopoverTrigger
+        className={buttonVariants({ size: "sm" })}
+        disabled={recording.starting}
+      >
         <IconPlayerRecordFilled
           className="text-red-500"
           data-icon="inline-start"
         />
         {recording.starting ? "Starting…" : "Record"}
-      </Button>
-    </form>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        className="w-80 gap-3 p-3"
+        initialFocus={field}
+      >
+        <PopoverHeader>
+          <PopoverTitle>Record a task</PopoverTitle>
+          <PopoverDescription>
+            {recording.waiting ??
+              "Do it once in this browser, and your Bots learn to do it."}
+          </PopoverDescription>
+        </PopoverHeader>
+        <form
+          aria-label="Record a task"
+          className="flex flex-col gap-3 [&>[data-slot=narration-switch]]:w-full"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!recording.canRecord) return;
+            // Closed first: Record may ask about narration next, in a dialog of its own.
+            setNaming(false);
+            void recording.record();
+          }}
+        >
+          <Input
+            aria-label="Task name"
+            maxLength={200}
+            onChange={(event) => recording.setTitle(event.target.value)}
+            placeholder="Name the task, like Submit an expense report"
+            ref={field}
+            value={recording.title}
+          />
+          {children}
+          <Button disabled={!recording.canRecord} size="sm" type="submit">
+            Start recording
+          </Button>
+        </form>
+      </PopoverContent>
+    </Popover>
   );
 }

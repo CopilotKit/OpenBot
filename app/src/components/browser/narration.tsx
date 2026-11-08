@@ -116,7 +116,8 @@ export function NativeNarrationRow({
 }
 
 /**
- * Narration on and off, for the bar above a browser shown in the page. A switch, because it takes effect at once:
+ * Narration on and off, for a browser shown in the page: in Record's popover, and in the toolbar while a recording
+ * runs. A switch, because it takes effect at once:
  * off stops listening after the phrase being said, on listens again (and tries again after a failure). It is the
  * person's choice, so `onChange` keeps it as well. It shows the state narration is in, so a narration that failed reads
  * off, as the notice under the bar says; while a recording runs and the page hears the person, it says Listening beside
@@ -139,7 +140,11 @@ export function NarrationSwitch({
   const listening = recording && narration.status?.state === "listening";
   const Icon = on ? IconMicrophone : IconMicrophoneOff;
   return (
-    <span className="flex shrink-0 items-center gap-2 text-sm">
+    // `data-slot` lets Record's popover lay it out as a row of its own, the switch at the row's end.
+    <span
+      className="flex shrink-0 items-center gap-2 text-sm"
+      data-slot="narration-switch"
+    >
       {listening ? (
         <span
           className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400"
@@ -160,6 +165,7 @@ export function NarrationSwitch({
       {/* Named by the label's id as well: the switch is a span with role="switch", which `htmlFor` cannot name. */}
       <Switch
         aria-labelledby={labelId}
+        className="ml-auto"
         id={id}
         checked={on}
         onCheckedChange={onChange}
