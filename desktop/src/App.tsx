@@ -28,6 +28,7 @@ import {
 import { Sections } from "./Sections";
 import { StartFresh } from "./StartFresh";
 import {
+  handOffNow,
   INSTALL_BLURB,
   type Progress,
   plainInstallSteps,
@@ -75,6 +76,15 @@ function installationKeyFor(root: string, harness: HarnessChoice | null) {
     harness?.id ?? DEFAULT_HARNESS,
     harness?.agentUrl?.trim() ?? "",
   ]);
+}
+
+/**
+ * This window in front of whatever is there, for a step that is the person's next. The native side
+ * activates the app, not only the window: see `bring_to_front` in main.rs. A window that could not
+ * come forward is still where it was, so a failure here changes nothing.
+ */
+function comeForward(why: string) {
+  invoke("bring_setup_to_front", { why }).catch(() => {});
 }
 
 export function App() {
@@ -417,6 +427,8 @@ function Setup() {
       setSteps((current) => settleProgress(current, problem));
       setPreparation({ key: installationKey, status: "failed" });
       setFailure(problem);
+      // The failure is the person's to act on, wherever they went while it installed.
+      comeForward("the installation failed");
       return false;
     } finally {
       setBusy(false);
@@ -482,6 +494,9 @@ function Setup() {
   async function installLocally(again = false) {
     setStep("install");
     if (!(await beginLocalInstall(again))) return;
+    // The person was waiting on the install, and what comes next is theirs: the AI screen, or
+    // Start carrying on. In front, wherever they went while it installed.
+    comeForward("the installation is complete");
     setSteps([]);
     if (
       again &&
@@ -825,6 +840,8 @@ function Setup() {
       <main>
         <CopilotKitAccount
           root={root.trim()}
+          // Install runs behind this step. When it opens Docker Desktop, this step says so.
+          handOff={handOffNow(steps)}
           onDone={(acceptedVersion) => {
             if (acceptedVersion) local.acceptTerms(acceptedVersion);
             // Intelligence sets itself up once the install has Docker answering; see above. The

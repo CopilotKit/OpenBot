@@ -236,6 +236,9 @@ struct Progress {
     /// Install's image downloads, while they run: see `pull_metrics::Downloads`.
     #[serde(skip_serializing_if = "Option::is_none")]
     downloads: Option<pull_metrics::Downloads>,
+    /// The detail sends the person to another app's window: see `engine::StepLine`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    elsewhere: bool,
 }
 
 #[derive(Serialize)]
@@ -422,6 +425,7 @@ fn report<R: tauri::Runtime>(
             running: false,
             download_bytes: None,
             downloads: None,
+            elsewhere: false,
         },
     );
 }
@@ -442,7 +446,20 @@ fn report_running<R: tauri::Runtime>(
     detail: impl Into<String>,
     download_bytes: Option<u64>,
 ) {
-    let detail = detail.into();
+    report_running_line(app, step, engine::StepLine::here(detail), download_bytes);
+}
+
+/// A running step's line, marked when it sends the person to another app's window.
+fn report_running_line<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    step: &str,
+    line: engine::StepLine,
+    download_bytes: Option<u64>,
+) {
+    let engine::StepLine {
+        said: detail,
+        elsewhere,
+    } = line;
     {
         let mut logged = RUNNING_LOGGED
             .lock()
@@ -462,8 +479,43 @@ fn report_running<R: tauri::Runtime>(
             running: true,
             download_bytes,
             downloads: None,
+            elsewhere,
         },
     );
+}
+
+/// OpenBot's window in front of whatever is there, at a moment setup needs the person: Docker
+/// Desktop has answered, the system's password prompt has closed, the installation failed or is
+/// done, OpenBot has started. `why` goes in the log.
+///
+/// On macOS that means activating the app, not only ordering its window to the front. A window an
+/// inactive app orders front stays behind the active app's. Tauri's `set_focus` does both: tao
+/// sends `makeKeyAndOrderFront:` and then `activateIgnoringOtherApps:YES`. macOS 14 deprecated that
+/// call for `activate`, which is cooperative: it works only if the app in front yields, and Docker
+/// Desktop does not. Measured on macOS 26.6 with Finder in front: `activateIgnoringOtherApps:YES`
+/// brought a regular app forward, while `activate` and `NSRunningApplication`'s `activate` left it
+/// behind. So the deprecated call, through `set_focus`, is the one used. `AppHandle::show` first
+/// unhides an app hidden with Command-H, which `set_focus` does not.
+///
+/// On Windows `set_focus` gets past the foreground lock (tao's `force_window_active`).
+/// `set_focus` does nothing to a hidden or minimised window, hence `show` and `unminimize` first.
+fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
+    log::info!("[front] {why}");
+    #[cfg(target_os = "macos")]
+    let _ = app.show();
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+}
+
+/// The setup window asks to come to the front: its installation finished or failed, and the next
+/// step is the person's. See `bring_to_front`.
+#[tauri::command]
+fn bring_setup_to_front(app: tauri::AppHandle, why: String) {
+    bring_to_front(&app, &why);
 }
 
 /// Install's running image downloads: the step's sentence, the overall bytes as `downloadBytes`
@@ -481,6 +533,7 @@ fn report_downloads<R: tauri::Runtime>(
             running: true,
             download_bytes: (downloads.bytes > 0).then_some(downloads.bytes),
             downloads: Some(downloads),
+            elsewhere: false,
         },
     );
 }
@@ -1647,6 +1700,7 @@ async fn engine_ready(
     );
     let telemetry_app = app.clone();
     let progress_app = app.clone();
+    let back_app = app.clone();
     let installed = tauri::async_runtime::spawn_blocking(move || {
         install::install_engine_observed(
             &stack::default_root(),
@@ -1668,7 +1722,9 @@ async fn engine_ready(
                 );
             },
             // Installing Podman or starting Docker Desktop can take minutes; each line says where it is.
-            &mut |said| report_running(&progress_app, "install-engine", said, None),
+            &mut |line| report_running_line(&progress_app, "install-engine", line, None),
+            // Docker Desktop's window, or the password prompt, came to the front over OpenBot's.
+            &|| bring_to_front(&back_app, "the engine no longer needs another app's window"),
         )
     })
     .await
@@ -1702,20 +1758,26 @@ async fn engine_ready(
     // One at a time, and each only if the last one worked. Written as a loop over an array once,
     // which ran all three before the first was checked: a failed `machine init` was still followed
     // by `machine start`.
-    report_running(
+    report_running_line(
         app,
         "create-machine",
         if cfg!(target_os = "windows") {
             // Podman's own installer for WSL, when WSL is missing: its dialog, then Windows' own
-            // administrator prompt, then a restart. Said before it happens rather than after.
-            "Preparing the engine machine. If Windows Subsystem for Linux is missing, Podman \
-             offers to install it. Windows then asks for administrator approval and a restart."
+            // administrator prompt, then a restart. Said before it happens rather than after, and
+            // on whichever screen the person is on: those windows come to the front over OpenBot's.
+            engine::StepLine::elsewhere(
+                "Preparing the engine machine. If Windows Subsystem for Linux is missing, Podman \
+                 offers to install it. Windows then asks for administrator approval and a restart.",
+            )
         } else {
-            "Preparing the engine machine."
+            engine::StepLine::here("Preparing the engine machine.")
         },
         None,
     );
     let created = acquire::create_machine(4, 6144, 60);
+    if cfg!(target_os = "windows") {
+        bring_to_front(app, "the engine machine is prepared");
+    }
     report(app, "create-machine", created.ok, created.said.clone());
     if !created.ok {
         return Err(created.problem());
@@ -2506,9 +2568,10 @@ async fn start_stack_inner<R: tauri::Runtime>(
                 cfg!(any(target_os = "macos", target_os = "windows")),
                 || engine::detect_saved(saved).responding,
                 || {
-                    openbot_desktop_lib::docker_desktop::start_saved(&mut |said| {
-                        report_running(&progress_app, "engine", said, None)
-                    })
+                    openbot_desktop_lib::docker_desktop::start_saved(
+                        &mut |line| report_running_line(&progress_app, "engine", line, None),
+                        &|| bring_to_front(&progress_app, "Docker Desktop answers"),
+                    )
                 },
                 || acquire::machine_exists().unwrap_or(false),
                 || {
@@ -3210,6 +3273,7 @@ impl QuitStatus {
             running: state == QuitStepState::Running,
             download_bytes: None,
             downloads: None,
+            elsewhere: false,
         };
         match self.steps.iter_mut().find(|known| known.step == row.step) {
             Some(known) => *known = row,
@@ -4127,6 +4191,11 @@ fn show_openbot_on<R: tauri::Runtime>(
         )
         .map_err(|_| Problem::plain("OpenBot could not navigate to its app."));
     log::info!("[show] navigate returned {outcome:?}");
+    // Setup is over and OpenBot is what the person uses now: in front, wherever they had gone
+    // while it started.
+    if outcome.is_ok() {
+        bring_to_front(&app, "OpenBot is showing");
+    }
     outcome
 }
 
@@ -7595,6 +7664,7 @@ fn main() {
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
             record_setup_event,
+            bring_setup_to_front,
             fit_setup_window,
             detect_engine,
             windows_blocker,

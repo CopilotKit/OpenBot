@@ -11,6 +11,7 @@ type ProgressEvent = {
   ok: boolean;
   detail: string;
   running?: boolean;
+  elsewhere?: boolean;
   downloadBytes?: number;
   downloads?: {
     done: number;
@@ -680,6 +681,91 @@ test("the account step waits for a container engine Install is still setting up,
   expect(asked).toBe(2);
   expect(view.queryByText(/Couldn.t check your CopilotKit account/)).toBeNull();
 }, 15000);
+
+// What the native side says as it opens Docker Desktop: `docker_desktop::HAND_OFF`.
+const DOCKER_HAND_OFF =
+  "Docker Desktop is starting in its own window. If it asks you to accept its terms or sign in, do that there. OpenBot comes back when Docker is ready.";
+
+function broughtToFront() {
+  return invokeCalls.filter((call) => call.command === "bring_setup_to_front");
+}
+
+test("the account step says Docker Desktop is starting while Install waits on it, until Docker answers", async () => {
+  // Dogfooding 0.3.3: Install opened Docker Desktop, whose window came to the front. OpenBot's,
+  // behind it on the account step, said only "Checking your CopilotKit account…" for minutes.
+  setupRootConfiguration("/tmp/hand-off-docker", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    prepare_installation: () => new Promise(() => {}),
+    // The account check waits on the engine Install is bringing up.
+    local_eval_terms: () => ({ status: "engine-not-ready" }),
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByRole("heading", { name: "Sign in to CopilotKit" });
+
+  await emitProgress({
+    step: "install-engine",
+    ok: true,
+    running: true,
+    elsewhere: true,
+    detail: DOCKER_HAND_OFF,
+  });
+  expectWorking(view, DOCKER_HAND_OFF);
+  // One line, saying what the wait is for.
+  expect(view.queryByText("Checking your CopilotKit account…")).toBeNull();
+
+  // Docker answers: the line goes, and the account check is what is left.
+  await emitProgress({
+    step: "install-engine",
+    ok: true,
+    running: false,
+    detail: "Docker Desktop is running.",
+  });
+  expect(view.queryByText(DOCKER_HAND_OFF)).toBeNull();
+  expectWorking(view, "Checking your CopilotKit account…");
+});
+
+test("a line about OpenBot's own work is not said as a hand-off on the account step", async () => {
+  setupRootConfiguration("/tmp/hand-off-none", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    prepare_installation: () => new Promise(() => {}),
+    local_eval_terms: () => ({ status: "engine-not-ready" }),
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByRole("heading", { name: "Sign in to CopilotKit" });
+  await emitProgress({
+    step: "install-engine",
+    ok: true,
+    running: true,
+    detail: "Installing Podman.",
+  });
+  expect(view.queryByText("Installing Podman.")).toBeNull();
+  expectWorking(view, "Checking your CopilotKit account…");
+});
+
+test("a finished install brings the window to the front for the next step", async () => {
+  const { view, preparation } = await beginPendingInstallation();
+  // Nothing is the person's while it installs: the window stays where they left it.
+  expect(broughtToFront()).toHaveLength(0);
+  await act(async () => preparation.resolve());
+  await view.findByRole("heading", { name: "Connect your AI" });
+  expect(broughtToFront()).toHaveLength(1);
+});
+
+test("a failed install brings the window to the front with its failure", async () => {
+  const { view, preparation } = await beginPendingInstallation();
+  expect(broughtToFront()).toHaveLength(0);
+  await act(async () =>
+    preparation.reject({ said: "The download was interrupted." }),
+  );
+  await view.findByRole("button", { name: "Retry installation" });
+  expect(broughtToFront()).toHaveLength(1);
+});
 
 const APPS_UNAVAILABLE = {
   said: "OpenBot couldn't connect your apps. Check your connection, then choose Connect apps. If it keeps happening, ask an admin.",
