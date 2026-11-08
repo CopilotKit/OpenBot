@@ -1,7 +1,7 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
-import { createRuntimeAgentLoader } from "../src/agents/runtime-agents";
+import { Hono } from "hono";
 import { authFromConfiguration } from "../src/agents/auth-header";
 import {
   AgentNotFoundError,
@@ -16,6 +16,9 @@ import type {
   AgentProfile,
   CreateAgentInput,
 } from "../src/agents/profile-types";
+import { createAgentRoutes } from "../src/agents/routes";
+import { createRuntimeAgentLoader } from "../src/agents/runtime-agents";
+import type { AppVariables } from "../src/auth/guards";
 import { DEPLOYMENT_ROUTES } from "../src/computer/deployment-routes";
 import { createDatabase } from "../src/db/client";
 import {
@@ -980,5 +983,56 @@ describe("agent profile store integration", () => {
       configuration: { endpoint: managedAgentAgUiUrl.toString() },
       packageId: null,
     });
+  });
+
+  /*
+   * The personal starter on the harness picked at setup sits at the address of the container
+   * OpenBot started for it, "agent-harness:4206" on OpenBot Desktop. Its Bot page names the
+   * framework instead, so the profile it reads says which one runs it, by what runs it.
+   */
+  test("serves the framework a Bot runs on, read from what runs it, for its Bot page", async () => {
+    const saved = {
+      PICKED_HARNESS_URL: process.env.PICKED_HARNESS_URL,
+      PICKED_HARNESS_IMAGE: process.env.PICKED_HARNESS_IMAGE,
+      PICKED_HARNESS_SOURCE: process.env.PICKED_HARNESS_SOURCE,
+    };
+    process.env.PICKED_HARNESS_URL = "http://agent-harness:4206";
+    process.env.PICKED_HARNESS_IMAGE =
+      "ghcr.io/copilotkit/openbot-agent-langgraph-agui:0.3.3";
+    delete process.env.PICKED_HARNESS_SOURCE;
+    try {
+      const owner = await createUser();
+      const picked = await createProfileFixture({
+        owner,
+        title: "Everyday life.",
+        configuration: { endpoint: "http://agent-harness:4206" },
+      });
+      const unnamed = await createProfileFixture({ owner });
+      const app = new Hono<{ Variables: AppVariables }>();
+      app.route(
+        "/",
+        createAgentRoutes(store, async (context, next) => {
+          context.set("actor", { ...owner, email: `${owner.id}@example.test` });
+          await next();
+        }),
+      );
+      const detail = async (agentId: string) =>
+        (
+          (await (
+            await app.request(`http://openbot.test/${agentId}`)
+          ).json()) as { agent: Record<string, unknown> }
+        ).agent;
+
+      expect((await detail(picked.agentId)).framework).toBe(
+        "LangChain (LangGraph)",
+      );
+      // An agent connected by address with no framework named: OpenBot doesn't know, so it says none.
+      expect(await detail(unnamed.agentId)).not.toHaveProperty("framework");
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
   });
 });

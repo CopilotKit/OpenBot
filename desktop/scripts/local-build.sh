@@ -71,6 +71,8 @@ logged() {
 
 ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 cd "$ROOT"
+# shellcheck source-path=SCRIPTDIR source=download.sh
+source "$ROOT/desktop/scripts/download.sh"
 
 # --- Preconditions -------------------------------------------------------------------------------
 stage "check the checkout"
@@ -113,11 +115,10 @@ if [ "${OPENBOT_LOCAL_NO_PUSH:-}" != 1 ]; then
   fi
 fi
 archive="https://github.com/$REPOSITORY/archive/$COMMIT.tar.gz"
-for attempt in 1 2 3 4 5 6; do
-  if curl -fsSL -r 0-0 -o /dev/null "$archive"; then break; fi
-  [ "$attempt" = 6 ] && die "GitHub does not serve $archive. The app would fail to lay out its deployment."
-  sleep 5
-done
+# Downloaded whole: GitHub ignores a byte range on an archive. Through download.sh, so a GitHub that
+# stops sending is given up after 30 seconds and tried again, never waited on forever.
+download -o /dev/null "$archive" \
+  || die "GitHub does not serve $archive. The app would fail to lay out its deployment."
 echo "GitHub serves $archive"
 stage_done
 
@@ -136,7 +137,9 @@ case "$state" in
   *) docker start "$REGISTRY_NAME" > /dev/null ;;
 esac
 for attempt in $(seq 1 20); do
-  curl -fsS "http://$REGISTRY/v2/" > /dev/null 2>&1 && break
+  # A probe of the registry on this Mac, whose answer is a few bytes, so a cap on the whole request
+  # is right here.
+  curl -fsS --connect-timeout 5 --max-time 10 "http://$REGISTRY/v2/" > /dev/null 2>&1 && break
   [ "$attempt" = 20 ] && die "the registry at $REGISTRY does not answer"
   sleep 1
 done
@@ -181,7 +184,7 @@ for image in ${IMAGES[@]+"${IMAGES[@]}"}; do
   digest="$(jq -r '."containerimage.digest" // empty' "$meta")"
   [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || die "the build of $image reported no digest"
   # Read back from the registry, as images.yml does, so a digest that was not pushed fails here.
-  code="$(curl -s -o /dev/null -w '%{http_code}' \
+  code="$(curl -s --connect-timeout 5 --max-time 30 -o /dev/null -w '%{http_code}' \
     -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \
     "http://$REGISTRY/v2/openbot-$image/manifests/$digest")"
   [ "$code" = 200 ] || die "the registry does not have openbot-$image@$digest (HTTP $code)"

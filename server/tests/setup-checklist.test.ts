@@ -1,5 +1,22 @@
-import { describe, expect, jest, setSystemTime, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  describe,
+  expect,
+  jest,
+  setSystemTime,
+  test,
+} from "bun:test";
+import { randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { reservePort } from "../../tests/support/reserved-port";
 import { createApp } from "../src/app";
+import { withPersonBrowsers } from "../src/browser/host";
+import { withPolicyPushOnWake } from "../src/computer/policy-network";
+import { createComputerProvider } from "../src/computer/provider";
 import { loadConfig } from "../src/config";
 import type { CredentialStatus } from "../src/credentials";
 import type { ModelCheckOutcome } from "../src/model-availability-check";
@@ -1396,5 +1413,155 @@ describe("Slack and Teams on the personal edition", () => {
       kind: "env",
       names: ["OPENTAG_SHARED_SECRET", "OPENTAG_URL"],
     });
+  });
+});
+
+/*
+ * The personal edition's one computer, the real agent-computer, as OpenBot Desktop runs it. The
+ * computer is always up; what starts and stops on it is each Bot's browser, which closes after it
+ * sits idle. On Windows, after the Personal Assistant had browsed Google Maps, Settings › Setup said
+ * "Bot computer: Not checked. It's set up. A computer starts when a Bot first needs one."
+ */
+describe("the personal edition's one computer", () => {
+  const token = `computer-${randomUUID()}`;
+  /** The seat a Bot used, as the computer keeps it once its browser has closed: a profile on disk. */
+  const usedSeat = "dev-local-user~picked-harness";
+  let base = "";
+  let dir = "";
+  let child: ReturnType<typeof Bun.spawn> | undefined;
+
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), "openbot-setup-computer-"));
+    await Promise.all(
+      ["profiles", "workspace", "recorder"].map((name) =>
+        mkdir(join(dir, name)),
+      ),
+    );
+    await mkdir(join(dir, "profiles", usedSeat));
+    const port = await reservePort();
+    base = `http://127.0.0.1:${port}`;
+    child = Bun.spawn([process.execPath, "--no-env-file", "src/index.ts"], {
+      cwd: fileURLToPath(new URL("../../agent-computer", import.meta.url)),
+      env: {
+        HOME: process.env.HOME,
+        PATH: process.env.PATH,
+        TMPDIR: tmpdir(),
+        PORT: String(port),
+        PROFILES_DIR: join(dir, "profiles"),
+        WORKSPACE_DIR: join(dir, "workspace"),
+        OPENBOT_RECORDER_DIR: join(dir, "recorder"),
+        COMPUTER_BROWSER_BACKEND: "managed",
+        COMPUTER_BROWSER_MODE: "headless",
+        COMPUTER_TOKEN: token,
+        COMPUTER_PERSON_ID: "personal",
+        OPENBOT_EDITION: "personal",
+      },
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    const deadline = Date.now() + 20_000;
+    while (
+      !(await fetch(`${base}/health`).then(
+        (response) => response.ok,
+        () => false,
+      ))
+    ) {
+      if (Date.now() > deadline || child.exitCode !== null)
+        throw new Error("The computer did not start.");
+      await Bun.sleep(100);
+    }
+  });
+
+  afterAll(async () => {
+    child?.kill();
+    await child?.exited;
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  /** The checklist over the computer provider the server builds from this configuration (index.ts). */
+  function personalApp(serverToken: string) {
+    const environment = {
+      ...PERSONAL,
+      AGENT_COMPUTER_URL: base,
+      COMPUTER_TOKEN: serverToken,
+    };
+    const config = loadConfig(testEnvironment(environment));
+    if (!config.computer) throw new Error("Expected the one computer.");
+    const policyForBot = async () => ({
+      mode: "allow_all" as const,
+      rules: [],
+    });
+    const provider = withPolicyPushOnWake(
+      withPersonBrowsers(
+        createComputerProvider(config.computer),
+        config.browser?.url,
+        config.edition,
+      ),
+      { policyForBot, token: serverToken },
+    );
+    return appWith({
+      who: "admin",
+      environment,
+      modelCheckAtBoot: { kind: "available" },
+      computer: true,
+      computerCheck: createComputerCheck({
+        provider,
+        controls: () => ({ policyForBot }),
+        token: serverToken,
+      }),
+    });
+  }
+
+  test("a Bot used it and its browser has closed: the row is Ready, not waiting for a computer to start", async () => {
+    // What the real computer says: the Bot's seat is there, and no browser is running on it.
+    const listed = (await (
+      await fetch(`${base}/computers`, {
+        headers: { "x-openbot-computer-token": token },
+      })
+    ).json()) as { computers: { botId: string; running: boolean }[] };
+    expect(listed.computers).toEqual([
+      expect.objectContaining({ botId: "picked-harness", running: false }),
+    ]);
+
+    const { checklist } = await checklistFrom(personalApp(token));
+    expect(row(checklist.rows, "computer")).toMatchObject({
+      status: "ready",
+      detail: "Bots can browse the web and work with files.",
+    });
+  });
+
+  // A team deployment's computers are made per person. A stopped one would have to be woken to ask.
+  test("a computer per person that is stopped is still not checked, and is not woken", async () => {
+    const { checklist } = await checklistFrom(
+      appWith({
+        who: "admin",
+        environment: {},
+        computer: true,
+        computerCheck: createComputerCheck({
+          provider: {
+            isolation: "per-person",
+            list: async () => [
+              {
+                key: { kind: "person", personId: "alice" },
+                status: "stopped",
+                url: "http://alice.local",
+              },
+            ],
+          },
+          controls: () => ({
+            policyForBot: async () => ({ mode: "allow_all", rules: [] }),
+          }),
+        }),
+      }),
+    );
+    expect(row(checklist.rows, "computer")).toMatchObject({
+      status: "not_checked",
+      detail: "It's set up. A computer starts when a Bot first needs one.",
+    });
+  });
+
+  test("a computer that refuses the server's token is not Ready", async () => {
+    const { checklist } = await checklistFrom(personalApp("not-its-token"));
+    expect(row(checklist.rows, "computer").status).toBe("needs_setup");
   });
 });

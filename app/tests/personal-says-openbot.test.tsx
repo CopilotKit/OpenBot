@@ -178,12 +178,12 @@ test("the same page in Admin keeps its word", async () => {
   expect(text).toContain("This deployment registers itself with the vendor");
 });
 
-test("a brokered app's sentences name OpenBot where the page does", () => {
-  const personal = managePaths("personal").deploymentName;
-  expect(brokeredReach("composio", personal).description).toContain(
-    "OpenBot holds one key",
-  );
-  expect(brokeredKeyMissing("composio", personal)).toContain("on OpenBot.");
+test("a brokered app's sentences name no deployment in personal, and keep it in Admin", () => {
+  const personal = managePaths("personal").edition;
+  expect(
+    brokeredReach("composio", { title: "Gmail", kind: "consent" }).description,
+  ).not.toContain("deployment");
+  expect(brokeredKeyMissing("composio", personal)).not.toContain("deployment");
   expect(brokeredReach("composio").description).toContain(
     "This deployment holds one key",
   );

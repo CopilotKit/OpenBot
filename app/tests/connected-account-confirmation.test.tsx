@@ -327,7 +327,7 @@ test("no screen names the broker, and only an admin is told the variable to set"
     expect(brokeredDisconnectNote(provider)).toBe(
       "Disconnecting also removes OpenBot's access to your account.",
     );
-    expect(brokeredKeyMissing(provider, "this deployment", "person")).toBe(
+    expect(brokeredKeyMissing(provider, "team", "person")).toBe(
       "Connecting apps isn't set up yet, so this account can't be connected or disconnected here. Ask an admin to set it up.",
     );
   }

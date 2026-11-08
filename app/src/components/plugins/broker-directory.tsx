@@ -31,6 +31,7 @@ import {
   invalidatePlugins,
 } from "@/lib/plugins/mutations";
 import {
+  directoryDescriptions,
   directoryReadFailure,
   type PluginsProvider,
   providerVocabulary,
@@ -132,11 +133,11 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
   return (
     <PageShell
       backButton={{ label: paths.pluginsLabel, linkProps: paths.plugins() }}
-      description="Add an app to make its tools available to Bots. Each person still connects their own account before a Bot reads anything."
+      description={directoryDescriptions(paths.edition).page}
       title={directoryLabel}
     >
       <PageSection
-        description="Search by name. Nobody here has reviewed these apps."
+        description={directoryDescriptions(paths.edition).search}
         title="Apps"
       >
         {enableError ? (
