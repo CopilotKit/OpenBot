@@ -8,7 +8,7 @@
  * Plain file reads only, so it runs on the Windows signing runner as well as the Mac one.
  */
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const root = join(import.meta.dir, "../..");
@@ -18,6 +18,7 @@ type Step = {
   name?: string;
   id?: string;
   if?: string;
+  shell?: string;
   uses?: string;
   run?: string;
   env?: Record<string, string>;
@@ -29,6 +30,8 @@ type Workflow = {
     string,
     {
       if?: string;
+      "runs-on"?: string;
+      strategy?: { matrix?: unknown };
       needs?: string | string[];
       environment?: string;
       permissions?: Record<string, string>;
@@ -183,4 +186,57 @@ test("a stable release becomes Latest only once its feed lists Mac and Windows",
   expect(read("scripts/release-make-latest.sh")).toContain(
     'release-update-feed.sh" --platforms',
   );
+});
+
+test("every release and internal build that bundles on Windows or Linux fetches Tauri's tools first", () => {
+  // Tauri downloads NSIS, AppRun and linuxdeploy from GitHub the first time it bundles, once each
+  // with no retry, and on 2026-11-08 a 504 there failed the desktop builds. prefetch-tauri-tools.sh
+  // puts them where Tauri looks first; this holds every workflow that bundles to running it before
+  // the build. The Mac bundler (app, dmg) downloads nothing, so a Mac-only job needs no fetch.
+  const bundles = /tauri build|signed-build\.ts|build-shell-update\.ts/;
+  const prefetch = "desktop/scripts/prefetch-tauri-tools.sh";
+  const checked: string[] = [];
+  const macOnly: string[] = [];
+  for (const file of readdirSync(join(root, ".github/workflows"))) {
+    if (!file.endsWith(".yml")) continue;
+    const path = `.github/workflows/${file}`;
+    for (const [id, job] of Object.entries(workflow(path).jobs)) {
+      const steps = job.steps ?? [];
+      const build = steps.findIndex((step) => bundles.test(step.run ?? ""));
+      if (build < 0) continue;
+      const runners = `${job["runs-on"] ?? ""} ${JSON.stringify(job.strategy?.matrix ?? {})}`;
+      if (/macos/.test(runners) && !/windows|ubuntu|linux/i.test(runners)) {
+        macOnly.push(`${file}:${id}`);
+        continue;
+      }
+      checked.push(`${file}:${id}`);
+      const fetch = steps.findIndex((step) => step.run?.includes(prefetch));
+      expect({ job: `${file}:${id}`, fetchesFirst: fetch >= 0 && fetch < build }).toEqual({
+        job: `${file}:${id}`,
+        fetchesFirst: true,
+      });
+      const step = steps[fetch] as Step;
+      // Bash on every runner: the script is bash, and a Windows job's default shell is PowerShell.
+      expect(step.shell).toBe("bash");
+      // The job's own read-only token, for the API the tools come through.
+      expect(step.env?.GH_TOKEN).toBe(expression("github.token"));
+      // A platform the script knows, named outright or taken from the job's matrix.
+      const platform = step.run?.slice(step.run.indexOf(prefetch) + prefetch.length).trim();
+      if (platform === '"$PLATFORM"') {
+        expect(step.env?.PLATFORM).toMatch(/^\$\{\{ matrix\.platform(\.name)? \}\}$/);
+        expect(step.if).toContain("'windows'");
+        expect(step.if).toContain("'linux'");
+      } else {
+        expect(platform).toBe("windows");
+      }
+    }
+  }
+  // The builds this exists for, so a renamed job or step cannot make the check pass by finding
+  // nothing to check.
+  expect(checked.sort()).toEqual([
+    "desktop-build.yml:app",
+    "desktop-shell-updates.yml:signed-artifacts",
+    "desktop-signing.yml:sign",
+  ]);
+  expect(macOnly).toEqual(["desktop-macos-signing.yml:sign"]);
 });
