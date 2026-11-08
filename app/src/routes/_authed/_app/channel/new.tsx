@@ -11,7 +11,10 @@ import {
   startsGroup,
   toFieldChange,
 } from "@/components/channels/compose-state";
-import type { ComposerDraft } from "@/components/channels/composer";
+import {
+  type ComposerDraft,
+  toAgentOptions,
+} from "@/components/channels/composer";
 import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { seedMessage } from "@/components/channels/transcript-messages";
@@ -205,9 +208,11 @@ function NewConversation({ composition }: { composition: string }) {
     if (group) {
       setError(null);
       try {
+        // An `@` addresses one Bot, as it does in every later message of the group.
         await startGroup(
           recipients.map((entry) => entry.id),
           draft.text,
+          draft.agentId,
         );
       } catch (caught) {
         setError(
@@ -368,6 +373,12 @@ function NewConversation({ composition }: { composition: string }) {
         }}
       />
       <ConversationView
+        /*
+         * `@` offers the Bots in To:. The conversation does not exist until the first message is
+         * sent, so the people it is with are the ones picked here, and a first message can address
+         * one of them as every later one can.
+         */
+        agents={toAgentOptions(selected)}
         // Choosing a coworker answers the "To:" field, so the message is what remains: the caret
         // lands in the composer the moment a recipient exists, whether picked here or in the URL.
         // Not before: an empty To: keeps the caret, even though the composer below takes words.
