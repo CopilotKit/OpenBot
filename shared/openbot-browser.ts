@@ -63,6 +63,12 @@ export type LauncherState = {
    * stands for this browser rather than making another each time the browser is opened.
    */
   connectionId?: string;
+  /**
+   * The address it reaches OpenBot at (`LauncherConnection.openbotUrl`, as an origin), when it holds a connection:
+   * OpenBot keeps that connection only while it is still the address OpenBot hands out, which moves on OpenBot Desktop
+   * when its app is given another port.
+   */
+  openbotUrl?: string;
   phase: "idle" | "starting" | "recording" | "stopping";
   recordingId?: string;
   title?: string;
@@ -93,6 +99,12 @@ export type LauncherState = {
      * keeps what is not sent yet for the person's next connection here instead of sending it now.
      */
     sending?: boolean;
+    /**
+     * While `sending`, why none of it is going out right now: the Recorder keeps retrying (OpenBot or its back end is
+     * busy or unreachable) and says so in its own sentence. Absent while it goes out, and once it is kept or sent.
+     * OpenBot then says the recording is not saved yet, and why, rather than that it is being saved.
+     */
+    retrying?: string;
     /**
      * Some of this recording is not in Intelligence, and is kept in this browser instead:
      * - `refused`: Intelligence turned the recording's capture pass away (a stop (hold) or stop (park) row, such as an

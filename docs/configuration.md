@@ -104,9 +104,9 @@ value leave the capability on. The server configures both runtime renderers and 
 setting through `/api/capabilities` to the browser.
 
 **`OPENBOT_SELF_HOST_BANNER`** shows a slim bar at the top of the signed-in app offering
-CopilotKit's help self-hosting OpenBot, linking to `https://copilotkit.ai/talk-to-an-engineer` with
-`ref=openbot_app`. Closing it is saved to that person's preferences, so it stays closed on every
-device they sign in from. Set `false` or `0` to hide it for everybody, which suits a fork running
+CopilotKit's help self-hosting OpenBot, linking to the OpenBot for Business page,
+`https://open.bot/business`, where a call can be booked. Closing it is saved to that person's
+preferences, so it stays closed on every device they sign in from. Set `false` or `0` to hide it for everybody, which suits a fork running
 OpenBot for its own organization. Any other value, or none, leaves it on.
 
 Left on, it still never shows on a deployment that pays for Intelligence. The server reads the

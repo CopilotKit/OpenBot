@@ -685,6 +685,10 @@ export const auditEventTypes = [
   /* A person opened one of their own learned Skills to every Bot, or closed it again. Target and payload `skill`. */
   "learning.skill_opened",
   "learning.skill_closed",
+  /* A person asked an admin to share a Skill they approved themselves. Target and payload `skill`. */
+  "learning.sharing_requested",
+  /* An admin answered such a request. Target `skill`; payload `skill`, `userId` and `decision`, `approved` or `declined`. */
+  "learning.sharing_decided",
 ] as const;
 
 export type AuditEventType = (typeof auditEventTypes)[number];

@@ -98,26 +98,13 @@ describe("the Settings sidebar", () => {
     );
   });
 
-  test("has no Learning page, which is about sharing Skills with other people", async () => {
-    expect(
-      settingsSidebarItems("personal").map((item) => item.title),
-    ).not.toContain("Learning");
-    expect(settingsSidebarItems("team").map((item) => item.title)).toContain(
-      "Learning",
-    );
-    const guard = LearningRoute.options.beforeLoad as unknown as (input: {
-      context: { queryClient: QueryClient };
-    }) => Promise<unknown>;
-    let sentTo: unknown = "open";
-    try {
-      await guard({ context: { queryClient: clientFor("personal") } });
-    } catch (thrown) {
-      sentTo = isRedirect(thrown) ? thrown.options.to : thrown;
+  test("Learning shows in the personal edition's settings", () => {
+    for (const edition of ["personal", "team"] as const) {
+      expect(settingsSidebarItems(edition).map((item) => item.title)).toContain(
+        "Learning",
+      );
     }
-    expect(sentTo).toBe("/settings");
-    await expect(
-      guard({ context: { queryClient: clientFor("team") } }),
-    ).resolves.toBeUndefined();
+    expect(LearningRoute.options.beforeLoad).toBeUndefined();
   });
 
   test("lists none of it in the team edition", () => {

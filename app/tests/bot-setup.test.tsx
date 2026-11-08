@@ -224,7 +224,7 @@ test("the personal edition's Setup has no Visibility or Isolated: one person, on
         name: "Give each Bot its own computer with OpenBot for Business.",
       })
       .getAttribute("href"),
-  ).toBe("https://calendly.com/d/dwfr-k64-8d2/openbot-for-business");
+  ).toBe("https://open.bot/business");
   expect(view.queryByText("Visibility")).toBeNull();
   expect(view.queryByText("Isolated")).toBeNull();
 });
