@@ -19,7 +19,9 @@ import type { InspectorLearning, InspectorLearningRequest } from "./inspector";
 import {
   CANDIDATE_ID,
   type LearningManagement,
+  type LearningModelUnavailable,
   learningFailure,
+  noLearningModel,
   readProposal,
   readProposals,
   requestFailure,
@@ -28,7 +30,8 @@ import {
 } from "./review";
 import { type LearningSettingsStore, parseLearningSettings } from "./settings";
 
-export type { LearningManagement };
+export type { LearningManagement, LearningModelUnavailable };
+export { learningModelUnavailable } from "./review";
 
 /** The longest the settings page waits for an automatic check before answering without it. */
 const AUTO_ASSIGN_WAIT_MS = 3_000;
@@ -41,6 +44,11 @@ export type LearningAdminDependencies = {
   inspect?: (input: InspectorLearningRequest) => Promise<InspectorLearning>;
   /** Review and publish here, which an Intelligence with no dashboard of its own needs. */
   manage?: LearningManagement;
+  /**
+   * Why OpenBot Desktop could not give its local Intelligence's Learning agent a model, from
+   * `OPENBOT_LEARNING_MODEL_UNAVAILABLE`. See `learningModelUnavailable`.
+   */
+  modelUnavailable?: LearningModelUnavailable;
   /** What admins decided about skills people learned, kept by OpenBot. */
   approvals?: SkillApprovalStore;
   /** The people whose recordings are learned from, each with their own Learning space. */
@@ -415,6 +423,10 @@ export function createLearningRoutes(
     const scope = await targetFor(context);
     if (!scope.ok) return context.json({ error: "Invalid Bot ID." }, 400);
     const { agentId, target } = scope;
+    // Said before anyone presses Learn now: automatic Learning runs on the same model.
+    const modelProblem = dependencies.modelUnavailable
+      ? { modelProblem: noLearningModel(dependencies.modelUnavailable) }
+      : {};
     try {
       if (dependencies.inspect) {
         try {
@@ -423,7 +435,9 @@ export function createLearningRoutes(
             ...(agentId ? { agentId } : {}),
             ...(target ? { runtimeContainerId: target.containerId } : {}),
           });
-          return context.json({ overview: overview(snapshot) });
+          return context.json({
+            overview: { ...overview(snapshot), ...modelProblem },
+          });
         } catch (error) {
           // No Inspector panel: an older Intelligence with no dashboard, or Learning off. The
           // project key's own routes answer the first and name the second.
@@ -433,10 +447,13 @@ export function createLearningRoutes(
       }
       if (!dependencies.manage) throw new Error("No Learning management.");
       return context.json({
-        overview: await managedOverview(dependencies.manage, target),
+        overview: {
+          ...(await managedOverview(dependencies.manage, target)),
+          ...modelProblem,
+        },
       });
     } catch (error) {
-      const failure = learningFailure(error);
+      const failure = learningFailure(error, dependencies.modelUnavailable);
       return context.json(
         {
           error:
@@ -467,7 +484,7 @@ export function createLearningRoutes(
         proposals: await readProposals(manage, containerId),
       });
     } catch (error) {
-      const failure = learningFailure(error);
+      const failure = learningFailure(error, dependencies.modelUnavailable);
       return context.json({ error: failure.error }, failure.status);
     }
   });
@@ -492,7 +509,7 @@ export function createLearningRoutes(
         proposal: await readProposal(manage, containerId, candidateId),
       });
     } catch (error) {
-      const failure = learningFailure(error);
+      const failure = learningFailure(error, dependencies.modelUnavailable);
       return context.json({ error: failure.error }, failure.status);
     }
   });
@@ -555,7 +572,7 @@ export function createLearningRoutes(
         ),
       });
     } catch (error) {
-      const failure = learningFailure(error);
+      const failure = learningFailure(error, dependencies.modelUnavailable);
       return context.json({ error: failure.error }, failure.status);
     }
   });
@@ -774,7 +791,7 @@ export function createLearningRoutes(
               by: actor.email,
             },
           });
-          const failure = learningFailure(error);
+          const failure = learningFailure(error, dependencies.modelUnavailable);
           return context.json({ error: failure.error }, failure.status);
         }
       },
@@ -837,7 +854,7 @@ export function createLearningRoutes(
           proposal: { id: candidateId, status: review.status },
         });
       } catch (error) {
-        const failure = learningFailure(error);
+        const failure = learningFailure(error, dependencies.modelUnavailable);
         await recordSettled({
           eventType: "configuration.changed",
           targetType: "learning_skill",
@@ -870,9 +887,12 @@ export function createLearningRoutes(
     const containerId = scope.target.containerId;
     try {
       const runs = await manage.listLearningRuns({ containerId });
-      return context.json({ containerId, runs: runs.map(runSummary) });
+      return context.json({
+        containerId,
+        runs: runs.map((run) => runSummary(run)),
+      });
     } catch (error) {
-      const failure = learningFailure(error);
+      const failure = learningFailure(error, dependencies.modelUnavailable);
       return context.json({ error: failure.error }, failure.status);
     }
   });
@@ -910,7 +930,7 @@ export function createLearningRoutes(
         });
       return context.json({ run: { id: run.id, status: run.status } });
     } catch (error) {
-      const failure = learningFailure(error);
+      const failure = learningFailure(error, dependencies.modelUnavailable);
       return context.json({ error: failure.error }, failure.status);
     }
   });
