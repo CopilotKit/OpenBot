@@ -9,6 +9,7 @@ import {
   type RunFinishedEvent,
   type ToolCall,
 } from "@ag-ui/client";
+import { RUN_ENDED_EARLY } from "@openbot/toolkit/headless-tools";
 import { map, Observable, type Subscription } from "rxjs";
 import type { AcquireLearnedSkills, LearnedSkillInvocation } from "./runtime";
 
@@ -168,8 +169,7 @@ export class RemoteLearnedSkillsMiddleware extends Middleware {
               });
           });
           if (subscriber.closed || failed) return;
-          if (!terminal)
-            throw new Error("Remote agent ended without a terminal event.");
+          if (!terminal) throw new Error(RUN_ENDED_EARLY);
           const answered = new Set(
             messages.flatMap((message) =>
               message.role === "tool" ? [message.toolCallId] : [],

@@ -163,7 +163,12 @@ export function useStartChannel() {
       },
     });
 
-  const startGroup = (agentIds: string[], text: string) =>
+  const startGroup = (
+    agentIds: string[],
+    text: string,
+    /** The one Bot the first message is addressed to with `@`, or null for every Bot in turn. */
+    agentId: string | null = null,
+  ) =>
     startGroupWith({
       agentIds,
       text,
@@ -178,7 +183,7 @@ export function useStartChannel() {
         new MutationObserver(
           queryClient,
           sendGroupMessageMutationOptions(queryClient, channelId),
-        ).mutate({ id: newId(), text: message, agentId: null }),
+        ).mutate({ id: newId(), text: message, agentId }),
       discard: async (channelId) => {
         await deleteChannel.mutateAsync(channelId);
       },
