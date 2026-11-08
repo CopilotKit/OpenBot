@@ -36,8 +36,13 @@ const sha = (bytes: Uint8Array | string) =>
  * linux/amd64 and a linux/arm64 manifest and their attestation, each manifest a config and layers.
  * The index is indented, so rewriting it in any way changes its bytes and its digest.
  */
-function push(fake: FakeDownloads, repo: string, tag: string) {
-  const at = join(fake.env.FAKE_STATE as string, "registry", "ghcr.io", repo);
+function push(
+  fake: FakeDownloads,
+  repo: string,
+  tag: string,
+  registry = "ghcr.io",
+) {
+  const at = join(fake.env.FAKE_STATE as string, "registry", registry, repo);
   const store = (
     kind: "manifests" | "blobs",
     name: string,
@@ -246,14 +251,20 @@ test("a release's images are copied under the registry's paths, byte for byte an
   cleanups.push(fake.cleanup);
   const server = push(fake, "copilotkit/openbot-server", "v0.3.4");
   const api = push(fake, "copilotkit/intelligence/app-api", "0.16.0-rc.9");
+  // Docker Hub's, named as Compose and the CLI name them: with no registry, and as docker.io/.
+  const pgvector = push(fake, "pgvector/pgvector", "pg17", "docker.io");
+  const busybox = push(fake, "library/busybox", "1.37", "docker.io");
+  const k3s = push(fake, "rancher/k3s", "v1.32.5-k3s1", "docker.io");
   const list = {
     openbot: "v0.3.4",
     intelligence: "0.16.0-rc.9",
     images: [
-      "docker.io/rancher/mirrored-pause@sha256:74c4244427b7312c5b901fe0f67cbc53683d06f4f24c6faee65d4182bf0fa893",
+      "busybox:1.37",
+      `docker.io/rancher/k3s@${k3s.digest}`,
       "ghcr.io/copilotkit/intelligence/app-api:0.16.0-rc.9",
       `ghcr.io/copilotkit/openbot-server@${server.digest}`,
       "pgvector/pgvector:pg17",
+      "quay.io/someone/else:1",
     ],
   };
   fake.release("v0.3.4", {
@@ -282,9 +293,21 @@ test("a release's images are copied under the registry's paths, byte for byte an
     ...manifests("copilotkit/openbot-server", server),
     ...manifests("copilotkit/intelligence/app-api", api),
     "v2/copilotkit/intelligence/app-api/manifests/0.16.0-rc.9",
+    // Docker Hub's under docker.io/, an official image under library/.
+    ...manifests("docker.io/pgvector/pgvector", pgvector),
+    "v2/docker.io/pgvector/pgvector/manifests/pg17",
+    ...manifests("docker.io/library/busybox", busybox),
+    "v2/docker.io/library/busybox/manifests/1.37",
+    ...manifests("docker.io/rancher/k3s", k3s),
   ]) {
     expect(Object.keys(bucket)).toContain(key);
   }
+  expect(bucket["v2/docker.io/library/busybox/manifests/1.37"]).toEqual({
+    content: busybox.index,
+    contentType: INDEX,
+    cacheControl: TAG,
+    sha256: true,
+  });
   expect(
     Object.keys(bucket).some((key) =>
       key.includes(server.platforms.unknown as string),
@@ -292,11 +315,11 @@ test("a release's images are copied under the registry's paths, byte for byte an
   ).toBe(false);
   expect(
     Object.keys(bucket).filter((key) => key.includes("/manifests/")),
-  ).toHaveLength(7);
+  ).toHaveLength(18);
   // Two configs and four layers an image.
   expect(
     Object.keys(bucket).filter((key) => key.includes("/blobs/")),
-  ).toHaveLength(12);
+  ).toHaveLength(30);
   expect(bucket["v2/"]).toEqual({
     content: "{}",
     contentType: "application/json",
@@ -354,20 +377,26 @@ test("a release's images are copied under the registry's paths, byte for byte an
   expect(
     bucket["tools/compose/v5.5.1/docker-compose-darwin-aarch64"]?.content,
   ).toBe("compose arm64");
-  // Only ghcr.io is copied.
+  // Only ghcr.io and Docker Hub are copied.
   expect(
-    fake
-      .calls()
-      .some((call) => call.startsWith("crane") && /pause|pgvector/.test(call)),
+    fake.calls().some((call) => call.startsWith("crane") && /quay/.test(call)),
   ).toBe(false);
   expect(first.out).toContain(
-    "pgvector/pgvector:pg17 is not on ghcr.io; it is left to its own registry.",
+    "quay.io/someone/else:1 is not on ghcr.io or Docker Hub; it is left to its own registry.",
   );
-  // The tag and the ping are invalidated, after the last upload, and every new object fetched once
-  // through the address.
-  expect(fake.invalidations()).toEqual([
-    `${DISTRIBUTION} /v2/copilotkit/intelligence/app-api/manifests/0.16.0-rc.9 /v2/`,
-  ]);
+  // The tags and the ping are invalidated together, after the last upload, and every new object
+  // fetched once through the address.
+  const [invalidation, ...more] = fake.invalidations();
+  expect(more).toEqual([]);
+  expect(invalidation?.split(" ").sort()).toEqual(
+    [
+      DISTRIBUTION,
+      "/v2/",
+      "/v2/copilotkit/intelligence/app-api/manifests/0.16.0-rc.9",
+      "/v2/docker.io/library/busybox/manifests/1.37",
+      "/v2/docker.io/pgvector/pgvector/manifests/pg17",
+    ].sort(),
+  );
   expect(edge.requests.sort()).toEqual(
     Object.keys(bucket)
       .map((key) => `200 ${key}`)
@@ -389,7 +418,8 @@ test("a release's images are copied under the registry's paths, byte for byte an
     ).status,
   ).toBe(403);
 
-  // Again: nothing is read from ghcr.io but the manifests, nothing uploaded, nothing invalidated.
+  // Again: only the tags are read from the registries, since an image named by digest whose
+  // manifest S3 holds is whole; nothing uploaded, nothing invalidated.
   const before = fake.calls().length;
   const second = await run(fake, env);
   expect(second.code).toBe(0);
@@ -401,5 +431,29 @@ test("a release's images are copied under the registry's paths, byte for byte an
     false,
   );
   expect(again.some((call) => call.startsWith("crane blob"))).toBe(false);
+  expect(
+    again.filter((call) => call.startsWith("crane manifest")).sort(),
+  ).toEqual(
+    [
+      "crane manifest docker.io/library/busybox:1.37",
+      "crane manifest docker.io/pgvector/pgvector:pg17",
+      "crane manifest ghcr.io/copilotkit/intelligence/app-api:0.16.0-rc.9",
+      ...[
+        "docker.io/library/busybox",
+        "docker.io/pgvector/pgvector",
+        "ghcr.io/copilotkit/intelligence/app-api",
+      ].flatMap((repo) => {
+        const image = {
+          "docker.io/library/busybox": busybox,
+          "docker.io/pgvector/pgvector": pgvector,
+          "ghcr.io/copilotkit/intelligence/app-api": api,
+        }[repo] as ReturnType<typeof push>;
+        return [
+          `crane manifest ${repo}@${image.platforms.amd64}`,
+          `crane manifest ${repo}@${image.platforms.arm64}`,
+        ];
+      }),
+    ].sort(),
+  );
   expect(fake.invalidations()).toHaveLength(1);
 }, 30_000);
