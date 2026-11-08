@@ -520,7 +520,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
        */}
       {step === "about" && builtInAvailable && (
         <div className="flex items-center gap-3 bg-muted/40 px-6 py-2.5">
-          <span className="shrink-0 font-medium text-[0.7rem] text-muted-foreground uppercase tracking-wide">
+          <span className={cn("shrink-0 font-medium", SECTION_LABEL)}>
             Or use
           </span>
           <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -724,7 +724,9 @@ function AboutStep({
   return (
     <FieldGroup className="gap-7">
       <Field>
-        <FieldLabel htmlFor="new-bot-name">Name</FieldLabel>
+        <FieldLabel className={SECTION_LABEL} htmlFor="new-bot-name">
+          Name
+        </FieldLabel>
         <Input
           autoComplete="off"
           autoFocus
@@ -747,9 +749,11 @@ function AboutStep({
         )}
       </Field>
       <Field>
-        <FieldLabel htmlFor="new-bot-instructions">
+        <FieldLabel className={SECTION_LABEL} htmlFor="new-bot-instructions">
           Instructions
-          <span className="font-normal text-muted-foreground">Optional</span>
+          <span className="font-normal normal-case tracking-normal">
+            Optional
+          </span>
         </FieldLabel>
         <Textarea
           autoComplete="off"
@@ -807,10 +811,10 @@ function AboutStep({
           <FieldDescription>
             It always uses the account of whoever is asking.
           </FieldDescription>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-x-4 sm:grid-cols-2">
             {apps.map((app) => (
               <label
-                className="flex items-center gap-3 rounded-lg bg-muted/50 p-3 text-sm"
+                className="flex items-center gap-3 py-1.5 text-sm"
                 htmlFor={`new-bot-app-${app.key}`}
                 key={app.key}
               >
@@ -856,10 +860,13 @@ function EveryAppList({ turnedOn }: { turnedOn: UseQueryResult<PluginsPage> }) {
           Couldn't load your apps.
         </p>
       ) : servers.length > 0 ? (
-        <ul aria-label="Apps it can use" className="grid gap-2 sm:grid-cols-2">
+        <ul
+          aria-label="Apps it can use"
+          className="grid gap-x-4 sm:grid-cols-2"
+        >
           {servers.map((server) => (
             <li
-              className="flex items-center gap-3 rounded-lg bg-muted/50 p-3 text-sm"
+              className="flex items-center gap-3 py-1.5 text-sm"
               key={server.id}
             >
               <PluginLogo logo={server.logo} />
@@ -915,7 +922,7 @@ function IsolatedOption({
       <FieldLegend className={SECTION_LABEL} variant="label">
         Its computer
       </FieldLegend>
-      <div className="flex items-start gap-3 rounded-lg bg-muted/50 p-3">
+      <div className="flex items-start gap-3">
         <Checkbox
           aria-describedby="new-bot-isolated-summary"
           checked={checked && reason === null}
@@ -971,7 +978,7 @@ function IsolatedOption({
  * are told apart by space. The same voice as the custom-agent strip above the footer.
  */
 const SECTION_LABEL =
-  "text-muted-foreground uppercase tracking-wider data-[variant=label]:text-[0.7rem]";
+  "text-[0.7rem] text-muted-foreground uppercase tracking-wider data-[variant=label]:text-[0.7rem]";
 
 /**
  * Filled rather than outlined, so the list reads as a set of things to pick and not as a stack of
