@@ -31,6 +31,7 @@ import {
   useClearBrowserData,
   useOpenedTab,
 } from "./browser-bar";
+import { useFittedWidth } from "./fitted-window";
 import { NarrationNotice, NarrationSwitch } from "./narration";
 import { NarrationChoiceDialog, useNarrationChoice } from "./narration-choice";
 import {
@@ -87,6 +88,9 @@ export function ScreenBrowser({
   const newTab = useOpenedTab(active?.id);
   const ids = useId();
   const screen = useRef<LiveScreenHandle>(null);
+  const desk = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLDivElement>(null);
+  const width = useFittedWidth(desk, frame, SCREEN_ASPECT_RATIO);
   // The refusal of whatever the person asked last: an older one (a tab that would not close) never hides a newer one
   // (Record refused) in the one line there is for them.
   const failure = latest([
@@ -108,9 +112,16 @@ export function ScreenBrowser({
    * the narration switch in Record's popover already says whether it is on, so the bar would only repeat it. The page's
    * name is for screen readers: the sidebar already says where you are, and a browser's window has no title row of its
    * own.
+   *
+   * The window is sized to its page (`useFittedWidth`): the browser behind it has a fixed shape, so a window that took
+   * the whole pane left a blank band under the page. It sits centred on the pane instead, as a window on a desk, and at
+   * the top on a phone, where a page starts at the top.
    */
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-background">
+    <div
+      ref={desk}
+      className="flex min-h-0 flex-1 items-start justify-center bg-muted/40 p-3 sm:items-center"
+    >
       <h1 className="sr-only">Browser</h1>
       <NarrationChoiceDialog {...recording.question} />
       <ClearBrowserDialog
@@ -118,94 +129,96 @@ export function ScreenBrowser({
         open={clearing.asking}
         onOpenChange={clearing.setAsking}
       />
-      <TabStrip
-        ids={ids}
-        tabs={state.tabs}
-        disabled={!state.open}
-        onActivate={(tabId) => tabs.mutate({ action: "activate", tabId })}
-        onClose={(tabId, closed) =>
-          tabs.mutate(
-            { action: "close", tabId },
-            closed ? { onSuccess: closed } : undefined,
-          )
-        }
-        onNew={() =>
-          tabs.mutate({ action: "new" }, { onSuccess: newTab.opened })
-        }
-        start={<SidebarToggle />}
-      />
-      <TabPanel
-        active={active}
-        className="flex min-h-0 flex-1 flex-col"
-        ids={ids}
+      <div
+        ref={frame}
+        className="flex w-full flex-col overflow-clip rounded-xl border bg-background shadow-sm"
+        style={width === undefined ? undefined : { width }}
       >
-        <div className="flex flex-wrap items-center gap-x-2 border-border border-b bg-background pr-3">
-          <AddressBar
-            // A new tab, or switching to one, starts the bar again from that tab's own address.
-            key={active?.id ?? "none"}
-            className="min-w-64 flex-1 border-b-0"
-            address={shownAddress(active)}
-            disabled={!state.open || !active}
-            focus={newTab.focus}
-            onFocused={newTab.onFocused}
-            onGo={go}
-            onMove={(action) => navigate.mutate({ action })}
-            // Open or closed, or not answering (often why it is cleared), its data is there to wipe. A recording that is
-            // starting or stopping is let finish first; one that is running is ended by the clear itself.
-            clear={{
-              disabled: recording.starting || recording.stopping,
-              ask: clearing.ask,
-            }}
-          />
-          <div className="ml-auto py-1.5 pl-2">
-            <RecordingBar recording={recording}>
-              <NarrationSwitch
-                narration={narration}
-                recording={recording.phase !== "idle"}
-                onChange={(on) => {
-                  narration.setOn(on);
-                  choice.choose(on);
-                }}
-              />
-            </RecordingBar>
+        <TabStrip
+          ids={ids}
+          tabs={state.tabs}
+          disabled={!state.open}
+          onActivate={(tabId) => tabs.mutate({ action: "activate", tabId })}
+          onClose={(tabId, closed) =>
+            tabs.mutate(
+              { action: "close", tabId },
+              closed ? { onSuccess: closed } : undefined,
+            )
+          }
+          onNew={() =>
+            tabs.mutate({ action: "new" }, { onSuccess: newTab.opened })
+          }
+          start={<SidebarToggle />}
+        />
+        <TabPanel active={active} className="flex flex-col" ids={ids}>
+          <div className="flex flex-wrap items-center gap-x-2 border-border border-b bg-background pr-3">
+            <AddressBar
+              // A new tab, or switching to one, starts the bar again from that tab's own address.
+              key={active?.id ?? "none"}
+              className="min-w-64 flex-1 border-b-0"
+              address={shownAddress(active)}
+              disabled={!state.open || !active}
+              focus={newTab.focus}
+              onFocused={newTab.onFocused}
+              onGo={go}
+              onMove={(action) => navigate.mutate({ action })}
+              // Open or closed, or not answering (often why it is cleared), its data is there to wipe. A recording that is
+              // starting or stopping is let finish first; one that is running is ended by the clear itself.
+              clear={{
+                disabled: recording.starting || recording.stopping,
+                ask: clearing.ask,
+              }}
+            />
+            <div className="ml-auto py-1.5 pl-2">
+              <RecordingBar recording={recording}>
+                <NarrationSwitch
+                  narration={narration}
+                  recording={recording.phase !== "idle"}
+                  onChange={(on) => {
+                    narration.setOn(on);
+                    choice.choose(on);
+                  }}
+                />
+              </RecordingBar>
+            </div>
           </div>
-        </div>
-        {recording.stopped ? (
-          <StoppedNotice stopped={recording.stopped} />
-        ) : null}
-        {failure ? (
-          <p
-            className="border-b border-border bg-background px-3 py-2 text-destructive text-sm"
-            role="alert"
-          >
-            {failure.message}
-          </p>
-        ) : null}
-        <Screen
-          blank={!shownAddress(active)}
-          computerId={computerId}
-          notAnswering={state.problem}
-          onGo={go}
-          open={state.open}
-          reopen={reopen}
-          reopening={reopening}
-          screen={screen}
-        />
-      </TabPanel>
-      {recording.phase === "idle" ? null : (
-        <NarrationNotice
-          className="border-t border-b-0 bg-transparent px-3 py-1.5 text-xs"
-          narration={narration}
-          language={language}
-        />
-      )}
+          {recording.stopped ? (
+            <StoppedNotice stopped={recording.stopped} />
+          ) : null}
+          {failure ? (
+            <p
+              className="border-b border-border bg-background px-3 py-2 text-destructive text-sm"
+              role="alert"
+            >
+              {failure.message}
+            </p>
+          ) : null}
+          <Screen
+            blank={!shownAddress(active)}
+            computerId={computerId}
+            notAnswering={state.problem}
+            onGo={go}
+            open={state.open}
+            reopen={reopen}
+            reopening={reopening}
+            screen={screen}
+          />
+        </TabPanel>
+        {recording.phase === "idle" ? null : (
+          <NarrationNotice
+            className="border-t border-b-0 bg-transparent px-3 py-1.5 text-xs"
+            narration={narration}
+            language={language}
+          />
+        )}
+      </div>
     </div>
   );
 }
 
 /**
- * The live screen, as large as the pane allows at the browser's own shape. Sized against the pane with container
- * units rather than a measured width, so it fits both ways as the window or the sidebar changes.
+ * The live screen, the full width of the window at the browser's own shape. The window is sized to fit it
+ * (`useFittedWidth`), so the page fills the window with nothing blank under or beside it.
  */
 function Screen({
   blank,
@@ -231,66 +244,54 @@ function Screen({
 }) {
   const [problem, setProblem] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
-  // The page sits flush under the toolbar, at the browser's own shape, as wide as the window allows.
+  // The page sits flush under the toolbar, at the browser's own shape, as wide as the window.
   return (
     <div
-      className="flex min-h-0 flex-1 items-start justify-center"
-      style={{ containerType: "size" }}
+      className="relative w-full overflow-hidden bg-background"
+      style={{ aspectRatio: SCREEN_ASPECT_RATIO }}
     >
-      <div
-        className="overflow-hidden bg-background"
-        style={{
-          width: `min(100cqw, calc(100cqh * ${SCREEN_ASPECT_RATIO}))`,
-        }}
-      >
-        <div
-          className="relative w-full"
-          style={{ aspectRatio: SCREEN_ASPECT_RATIO }}
-        >
-          {open ? (
-            <LiveScreen
-              computerId={computerId}
-              driving
-              label="Your browser. Click it to type into it, and press Escape to leave it."
-              onProblem={setProblem}
-              ref={screen}
-              retryKey={retryKey}
-            />
-          ) : null}
-          {notAnswering ? (
-            // Not "closed", and nothing to press: opening it again would wait on the same browser. It comes back here
-            // by itself once it answers, since the page asks every second.
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center text-sm">
-              <span className="text-destructive" role="alert">
-                {notAnswering}
-              </span>
-            </div>
-          ) : !open ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center text-muted-foreground text-sm">
-              <span>Your browser is closed.</span>
-              <Button disabled={reopening} onClick={reopen} size="sm">
-                {reopening ? "Opening…" : "Open it again"}
-              </Button>
-            </div>
-          ) : problem ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/85 p-4 text-center text-muted-foreground text-sm">
-              <span>{problem}</span>
-              <Button
-                onClick={() => {
-                  setProblem(null);
-                  setRetryKey((value) => value + 1);
-                }}
-                size="sm"
-                variant="outline"
-              >
-                Try again
-              </Button>
-            </div>
-          ) : blank ? (
-            <StartPage onGo={onGo} />
-          ) : null}
+      {open ? (
+        <LiveScreen
+          computerId={computerId}
+          driving
+          label="Your browser. Click it to type into it, and press Escape to leave it."
+          onProblem={setProblem}
+          ref={screen}
+          retryKey={retryKey}
+        />
+      ) : null}
+      {notAnswering ? (
+        // Not "closed", and nothing to press: opening it again would wait on the same browser. It comes back here
+        // by itself once it answers, since the page asks every second.
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center text-sm">
+          <span className="text-destructive" role="alert">
+            {notAnswering}
+          </span>
         </div>
-      </div>
+      ) : !open ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center text-muted-foreground text-sm">
+          <span>Your browser is closed.</span>
+          <Button disabled={reopening} onClick={reopen} size="sm">
+            {reopening ? "Opening…" : "Open it again"}
+          </Button>
+        </div>
+      ) : problem ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/85 p-4 text-center text-muted-foreground text-sm">
+          <span>{problem}</span>
+          <Button
+            onClick={() => {
+              setProblem(null);
+              setRetryKey((value) => value + 1);
+            }}
+            size="sm"
+            variant="outline"
+          >
+            Try again
+          </Button>
+        </div>
+      ) : blank ? (
+        <StartPage onGo={onGo} />
+      ) : null}
     </div>
   );
 }

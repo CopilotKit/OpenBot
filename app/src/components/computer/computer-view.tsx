@@ -3,6 +3,7 @@ import { IconLock, IconWorld, IconX } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useFittedWidth } from "@/components/browser/fitted-window";
 import {
   botBrowserKeys,
   botBrowserStateQueryOptions,
@@ -240,13 +241,15 @@ function NothingToSee({
  * The Bot's browser as a window, in the live full-size view: its bar (tabs, the address, back, forward and reload) over
  * its page, framed as one, the page as large as the space left allows at the browser's own shape. The Browser page
  * draws the person's own browser the same way (`components/browser/browser-screen.tsx`), the page inside the tabs'
- * panel with the address. Sized against the space with container units rather than a measured width, so it fits both
- * ways as the window changes. A turn that is over is a picture rather than a browser, and is drawn as it always was.
+ * panel with the address. The window is sized to its page (`useFittedWidth`), centred in the space, so the page fills
+ * the window with no blank band under or beside it whatever the window's shape. A turn that is over is a picture rather
+ * than a browser, and is drawn as it always was.
  */
 function BrowserWindow({
   live,
   botId,
   bar,
+  aspectRatio,
   onNavigated,
   children,
 }: {
@@ -254,23 +257,34 @@ function BrowserWindow({
   botId: string;
   /** The Bot's browser as this person sees it; undefined until it first answers, when the page is drawn barless. */
   bar: BotBrowserApiState | undefined;
+  /** The page's shape, width over height: the browser behind it has a fixed one. */
+  aspectRatio: number;
   /** An address typed in the bar went: the keyboard goes back to the page. */
   onNavigated: () => void;
   children: ReactNode;
 }) {
+  const space = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLDivElement>(null);
+  const width = useFittedWidth(space, frame, aspectRatio, live);
   if (!live) return children;
   return (
-    // Clipped rather than hidden: a hidden overflow would let this shrink below the screen's own floor.
-    <div className="flex min-w-0 flex-1 flex-col overflow-clip rounded-xl border border-border">
-      <BotBrowserBar botId={botId} state={bar} onNavigated={onNavigated}>
-        {/* The page flush under the bar, as in the person's own browser (browser-screen.tsx). */}
-        <div
-          className="flex min-h-80 flex-1 items-start justify-center bg-background"
-          style={{ containerType: "size" }}
-        >
-          {children}
-        </div>
-      </BotBrowserBar>
+    // Never less than a screen a person can work in: in a short window the card grows past it and the view scrolls.
+    // Top-aligned, as the wheel's column beside it is.
+    <div
+      ref={space}
+      className="flex min-h-80 min-w-0 flex-1 items-start justify-center"
+    >
+      {/* Clipped rather than hidden: a hidden overflow would let this shrink below the screen's own floor. */}
+      <div
+        ref={frame}
+        className="flex w-full min-w-0 flex-col overflow-clip rounded-xl border border-border"
+        style={width === undefined ? undefined : { width }}
+      >
+        <BotBrowserBar botId={botId} state={bar} onNavigated={onNavigated}>
+          {/* The page flush under the bar, as in the person's own browser (browser-screen.tsx). */}
+          <div className="bg-background">{children}</div>
+        </BotBrowserBar>
+      </div>
     </div>
   );
 }
@@ -1007,6 +1021,7 @@ export function ComputerView({
                   live={!settled}
                   botId={computerId}
                   bar={barState}
+                  aspectRatio={aspectRatio}
                   onNavigated={() => screen.current?.focus()}
                 >
                   {/*
@@ -1015,14 +1030,7 @@ export function ComputerView({
                   wheel below is the reason this view opens at all in that state.
                 */}
                   <div
-                    className={`relative min-h-0 ${settled ? "max-h-[75vh] overflow-auto rounded-xl bg-muted" : "overflow-hidden"} ${showLiveScreen ? "bg-black" : settled ? "" : "bg-background"}`}
-                    style={
-                      settled
-                        ? undefined
-                        : {
-                            width: `min(100cqw, calc(100cqh * ${aspectRatio}))`,
-                          }
-                    }
+                    className={`relative min-h-0 ${settled ? "max-h-[75vh] overflow-auto rounded-xl bg-muted" : "w-full overflow-hidden"} ${showLiveScreen ? "bg-black" : settled ? "" : "bg-background"}`}
                   >
                     {settled && drawn ? (
                       /*
