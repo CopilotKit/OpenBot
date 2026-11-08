@@ -10,6 +10,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **An update the mirror cannot send comes from GitHub.** When downloading the new version from
+  downloads.copilotkit.ai fails, OpenBot reads GitHub's update feed and downloads the same signed
+  version from there once, instead of failing until the mirror is fixed. The log says which one it
+  came from.
 - **A back end setup that stops says why.** OpenBot's log now records how every back end setup,
   start, update and stop ended: how long it took, its exit code, what its report says went wrong
   and the end of its error output. A setup that stopped used to leave nothing in the log. The card
