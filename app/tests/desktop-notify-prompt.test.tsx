@@ -79,7 +79,7 @@ test("OpenBot Desktop never offers notifications: not on opening, not on coming 
  * The sidebar's badge, with Expenses asking nothing, then asking one question: what the page
  * notices as a Bot starting to need the person.
  */
-async function aBotStartsNeedingThePerson() {
+async function aBotStartsNeedingThePerson(waitingIn: string | null = null) {
   let questions = 0;
   globalThis.fetch = (async () =>
     Response.json({
@@ -95,6 +95,7 @@ async function aBotStartsNeedingThePerson() {
           notify: "all",
           items: 0,
           tasks: { needsInput: 0, ready: 0, failed: 0 },
+          waitingIn: questions > 0 ? waitingIn : null,
         },
       ],
       lastPingId: null,
@@ -144,6 +145,31 @@ test("in OpenBot Desktop a Bot that starts needing the person is shown by the de
       (call) => call.command === "plugin:notification|notify",
     ),
   ).toEqual([]);
+});
+
+test("in OpenBot Desktop a notice about a Bot waiting in a conversation opens that conversation", async () => {
+  const desktop = launch();
+
+  await aBotStartsNeedingThePerson("channel-plan");
+
+  await waitFor(() =>
+    expect(desktop.shown()).toEqual([
+      { ...EXPENSES_NEEDS_YOU, path: "/channel/channel-plan" },
+    ]),
+  );
+});
+
+test("a desktop app without its own notify opens the waiting conversation too", async () => {
+  const desktop = launchDesktop({ plugin: true, notifyCommand: false });
+  refreshNotificationPermission();
+
+  await aBotStartsNeedingThePerson("channel-plan");
+
+  await waitFor(() =>
+    expect(desktop.shown()).toEqual([
+      { ...EXPENSES_NEEDS_YOU, path: "/channel/channel-plan" },
+    ]),
+  );
 });
 
 test("a desktop app without its own notify shows the notice through the notification plugin", async () => {

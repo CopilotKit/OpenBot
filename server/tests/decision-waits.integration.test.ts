@@ -241,14 +241,12 @@ beforeAll(async () => {
     { id: owner, email: `${owner}@example.test` },
     { id: other, email: `${other}@example.test` },
   ]);
-  await database
-    .insert(agents)
-    .values({
-      id: bot,
-      name: "Asking Bot",
-      type: "built_in",
-      configuration: {},
-    });
+  await database.insert(agents).values({
+    id: bot,
+    name: "Asking Bot",
+    type: "built_in",
+    configuration: {},
+  });
   await database.insert(channels).values(
     [conversation, deleted, othersConversation].map((id) => ({
       id,
