@@ -8,6 +8,10 @@ import {
 } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
 import * as React from "react";
+import {
+  ALWAYS_ASKS,
+  HANDED_TO_YOU,
+} from "@/components/approvals/ask-first-copy";
 import { SELF_HOST_URL } from "@/components/layout/self-host-banner";
 import { AskFirstSwitch } from "@/components/onboarding/ask-first-switch";
 import { IntroReel } from "@/components/onboarding/demos/intro-reel";
@@ -94,6 +98,9 @@ export const Route = createFileRoute("/_authed/onboarding")({
  * The welcome step: one animation of what OpenBot does, and beside it the one choice worth making
  * before the first task, whether a Bot asks before it changes anything.
  *
+ * What always asks is said above the switch, so nobody reads turning it off as turning those off
+ * too. The switch only adds routine changes on top (reported on 0.3.3).
+ *
  * The animation is a picture and the switch is real, so they never share a pane: the switch sits
  * with the words, and the picture stays a picture.
  */
@@ -116,16 +123,17 @@ function welcomeStep(computer: boolean): OnboardingStep {
                 Set up your permissions
               </h2>
               <p className="text-pretty text-muted-foreground">
-                Turn this on to review changes before a Bot makes them.
+                {ALWAYS_ASKS} {HANDED_TO_YOU}
               </p>
             </div>
             <AskFirstSwitch />
-            <p className="text-sm text-pretty text-muted-foreground">
-              Paying, changing account security, and deleting, sending, sharing
-              or posting in your apps and on websites always wait for you. A
-              Bot's own computer is its scratch space. You can change this later
-              in Settings.
-            </p>
+            <div className="flex flex-col gap-1 text-sm text-pretty text-muted-foreground">
+              <p>
+                Bots can create, edit, and delete files in their own workspace
+                without asking, unless this is on.
+              </p>
+              <p>You can change this setting anytime in Settings.</p>
+            </div>
           </section>
         }
       >

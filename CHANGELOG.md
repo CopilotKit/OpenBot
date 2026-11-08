@@ -8,6 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Onboarding's Welcome says what always asks (deleting, sending, sharing, posting) above the approvals switch, which is now "Always ask before making changes" there and in Settings, Approvals, with the same words in both.
 - OpenBot Personal's Settings, Browsers says recordings go to your own Learning space, with no organization.
 - OpenBot Personal's New Bot sheet lists every app the new Bot gets, not only Routines.
 - A Bot's question in a conversation with several Bots now waits in that conversation and is answered there, as in a conversation with one Bot.
