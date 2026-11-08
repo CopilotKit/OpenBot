@@ -298,6 +298,36 @@ describe("createRecordings", () => {
     ]);
   });
 
+  test("recordings are listed by when they were made, not by when OpenBot first heard of them", async () => {
+    // OpenBot Desktop, 2026-11-07: three recordings held by the Recorder reached OpenBot together minutes later, and
+    // Teach a Bot listed them 8:46, 8:49, 8:41, in the order of those late bindings.
+    const at = (minute: number) =>
+      `2026-11-07T04:${String(minute).padStart(2, "0")}:00.000Z`;
+    const late = new Date("2026-11-07T04:57:46.062Z");
+    const made = [
+      { trajectoryId: "t-46", minute: 46 },
+      { trajectoryId: "t-49", minute: 49 },
+      { trajectoryId: "t-41", minute: 41 },
+    ];
+    const { recordings } = build(
+      made.map(({ trajectoryId }) => ({ trajectoryId, createdAt: late })),
+      {
+        items: made.map(({ trajectoryId, minute }) => ({
+          ...summary,
+          trajectoryId,
+          createdAt: at(minute),
+          firstEventAt: at(minute),
+        })),
+      },
+    );
+    const page = await recordings.list("u-1", null);
+    expect(page.recordings.map((row) => row.recordedAt)).toEqual([
+      at(49),
+      at(46),
+      at(41),
+    ]);
+  });
+
   test("a discarded recording is left out", async () => {
     const { recordings } = build([bound], {
       items: [

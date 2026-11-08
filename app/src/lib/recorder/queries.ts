@@ -127,9 +127,11 @@ export const RECORDINGS_POLL_MS = 10_000;
  * more retries it), which a flat list of rows would lose.
  *
  * Asked again every {@link RECORDINGS_POLL_MS} while any loaded row is still sending, so it turns into its final state,
- * and when the person comes back to the tab, which is how a recording finished elsewhere shows up.
+ * and while `waiting` (a stopped recording that has no row yet because it has not reached the back end, such as one the
+ * Recorder holds and sends again later), so it shows up when it lands. Also when the person comes back to the tab,
+ * which is how a recording finished elsewhere shows up.
  */
-export const recordingsQueryOptions = () =>
+export const recordingsQueryOptions = (options?: { waiting?: boolean }) =>
   infiniteQueryOptions({
     queryKey: recorderKeys.recordings(),
     initialPageParam: "",
@@ -145,6 +147,7 @@ export const recordingsQueryOptions = () =>
     getNextPageParam: (page: RecordingsPage) => page.nextCursor ?? undefined,
     staleTime: 10_000,
     refetchInterval: (query) =>
+      options?.waiting ||
       query.state.data?.pages.some((page) =>
         page.recordings.some((row) => row.ended === "sending"),
       )

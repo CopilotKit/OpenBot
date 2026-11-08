@@ -291,6 +291,19 @@ test("the list asks again every few seconds while a recording is still sending, 
   expect(interval("succeeded")).toBe(false);
 });
 
+test("the list asks again every few seconds while a stopped recording has not reached the back end yet", () => {
+  // A recording the Recorder holds and sends later has no row until it lands (OpenBot Desktop, 2026-11-07).
+  const refetchInterval = recordingsQueryOptions({ waiting: true })
+    .refetchInterval as (query: unknown) => number | false;
+  expect(
+    refetchInterval({
+      state: {
+        data: { pages: [{ recordings: [row({})], nextCursor: null }] },
+      },
+    }),
+  ).toBe(RECORDINGS_POLL_MS);
+});
+
 test("starting or stopping a recording from OpenBot refreshes the list", async () => {
   const invalidated: unknown[] = [];
   const invalidate = queryClient.invalidateQueries.bind(queryClient);

@@ -213,10 +213,20 @@ export function createRecordings(deps: {
         result.items.map((item) => [item.trajectoryId, item]),
       );
       const at = now();
-      const recordings = ids.flatMap((binding) => {
-        const row = toRow(binding, byId.get(binding.trajectoryId), at);
-        return row ? [row] : [];
-      });
+      const recordings = ids
+        .flatMap((binding) => {
+          const row = toRow(binding, byId.get(binding.trajectoryId), at);
+          return row ? [row] : [];
+        })
+        /*
+         * By when each was made. The page is cut by when OpenBot first heard of each recording (its binding), which for
+         * one the Recorder held and sent later is minutes after it was made, so a page of bindings is not in that order.
+         */
+        .sort(
+          (a, b) =>
+            Date.parse(b.recordedAt) - Date.parse(a.recordedAt) ||
+            (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
+        );
       return { recordings, nextCursor };
     },
 

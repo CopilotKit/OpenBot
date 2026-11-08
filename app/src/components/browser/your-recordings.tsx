@@ -1,3 +1,4 @@
+import type { LauncherState } from "@openbot/shared/openbot-browser";
 import type { RecordingRow } from "@openbot/shared/recorder-api";
 import { IconVideo } from "@tabler/icons-react";
 import { useInfiniteQuery } from "@tanstack/react-query";
@@ -39,17 +40,34 @@ function endedLabel(row: RecordingRow): string | null {
 }
 
 /**
+ * Whether the recording Stop ended last has not reached the back end yet: still on its way, or kept in the browser and
+ * sent again later. Until it lands it has no row, so the list asks again meanwhile (`waiting`).
+ */
+export function recordingOnItsWay(
+  lastStopped: LauncherState["lastStopped"] | undefined,
+): boolean {
+  return (
+    !!lastStopped &&
+    !lastStopped.discarded &&
+    (lastStopped.sending === true || lastStopped.kept !== undefined)
+  );
+}
+
+/**
  * The browser section's list of the person's own recordings, with how each one ended.
  *
  * `variant="pane"` frames it as a strip of its own under a browser that fills the page: capped, scrolling, and drawn
- * only once there is something to show, so no empty strip appears while the list loads.
+ * only once there is something to show, so no empty strip appears while the list loads. `waiting` while a stopped
+ * recording has not reached the back end yet (`recordingOnItsWay`): the list asks again until it lands.
  */
 export function YourRecordings({
   variant = "page",
+  waiting = false,
 }: {
   variant?: "page" | "pane";
+  waiting?: boolean;
 }) {
-  const recordings = useInfiniteQuery(recordingsQueryOptions());
+  const recordings = useInfiniteQuery(recordingsQueryOptions({ waiting }));
   if (recordings.isPending) return null;
   const unavailable = recordings.data?.pages.at(-1)?.unavailable;
   const rows = recordings.data?.pages.flatMap((page) => page.recordings) ?? [];

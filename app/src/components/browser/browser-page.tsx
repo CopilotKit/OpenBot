@@ -15,7 +15,7 @@ import { queryClient } from "@/query-client";
 import { TEACH_A_BOT } from "./browser-nav-item";
 import { ScreenBrowser } from "./browser-screen";
 import { TeachSteps } from "./teach-steps";
-import { YourRecordings } from "./your-recordings";
+import { recordingOnItsWay, YourRecordings } from "./your-recordings";
 
 const TITLE = TEACH_A_BOT;
 const DESCRIPTION =
@@ -38,6 +38,15 @@ export function BrowserPage() {
     if ((was === "recording" || was === "stopping") && phase === "idle")
       queryClient.invalidateQueries({ queryKey: recorderKeys.recordings() });
   }, [phase]);
+  // A stopped recording still on its way, or kept in the browser to be sent again, lands later: a new row then.
+  const waiting = recordingOnItsWay(state.data?.recorder?.lastStopped);
+  const wasWaiting = useRef(waiting);
+  useEffect(() => {
+    const was = wasWaiting.current;
+    wasWaiting.current = waiting;
+    if (was && !waiting)
+      queryClient.invalidateQueries({ queryKey: recorderKeys.recordings() });
+  }, [waiting]);
   if (state.isPending) return null;
   // Branched on the data rather than the error: a poll that fails after the page has opened keeps the browser on
   // screen, where tearing it down would open it all over again.
@@ -116,7 +125,9 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
             ) : null}
           </div>
         ) : null}
-        <YourRecordings />
+        <YourRecordings
+          waiting={recordingOnItsWay(state.recorder?.lastStopped)}
+        />
       </PageShell>
     );
   }
@@ -131,7 +142,10 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
           reopen={() => reopen.mutate()}
           reopening={reopen.isPending}
         />
-        <YourRecordings variant="pane" />
+        <YourRecordings
+          variant="pane"
+          waiting={recordingOnItsWay(state.recorder?.lastStopped)}
+        />
       </>
     );
   }
@@ -149,7 +163,9 @@ function NativeBrowser({ state }: { state: BrowserApiState }) {
   return (
     <PageShell title={TITLE}>
       <TeachSteps state={state} />
-      <YourRecordings />
+      <YourRecordings
+        waiting={recordingOnItsWay(state.recorder?.lastStopped)}
+      />
     </PageShell>
   );
 }
