@@ -36,6 +36,7 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   answerPersonQuestionMutationOptions,
   approvalInboxOptions,
+  carryingOnAfterApproval,
 } from "@/lib/approvals";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import {
@@ -780,6 +781,28 @@ export function ChannelChat({
   }, []);
   const [runsInFlight, setRunsInFlight] = useState(0);
 
+  /*
+   * THE THIRD FACT: THE SERVER HAS THE TURN. When the person answers an approval, the run that asked
+   * has already ended here (it stopped on the interrupt), and the server runs the action and carries
+   * the conversation on in a turn no browser streams. Neither counter above sees it and neither does
+   * `agent.isRunning`, so the conversation sat idle, with no "Thinking" and no Stop, for as long as
+   * the Bot went on working: found on the Mac, after Allow once on a Google Maps step.
+   *
+   * Read from the approval itself, which the server marks `completed` only once that turn has ended,
+   * so it is the same record whichever tab or device decided it. Polled faster while it is going, so
+   * the conversation stops saying it is working soon after it is done. Stop reaches it the way it
+   * reaches any run on this thread: with no run of this tab's to name, the stop is the thread's.
+   */
+  const carryingOn =
+    useQuery({
+      ...approvalInboxOptions(),
+      select: (inbox) => carryingOnAfterApproval(inbox, channel.threadId),
+      refetchInterval: (query) =>
+        carryingOnAfterApproval(query.state.data, channel.threadId)
+          ? 2_000
+          : 10_000,
+    }).data === true;
+
   /**
    * Tell the roster what was just said. Failures here must not block the conversation.
    */
@@ -1258,6 +1281,7 @@ export function ChannelChat({
                     historyLoading ||
                     agent.isRunning ||
                     turnsInFlight > 0 ||
+                    carryingOn ||
                     Boolean(question) ||
                     call.active ||
                     runModel.saving
@@ -1279,7 +1303,7 @@ export function ChannelChat({
              * and `agent.isRunning` alone leaves that gap unmarked — which is the one moment the
              * "Thinking" line exists for. Same value as `pending`, deliberately.
              */
-            busy={agent.isRunning || turnsInFlight > 0}
+            busy={agent.isRunning || turnsInFlight > 0 || carryingOn}
             // The `/` menu exposes only skills granted to this Bot.
             commands={skillCommands}
             modelPicker={
@@ -1397,7 +1421,7 @@ export function ChannelChat({
              * middle of an answer: a second turn racing the first on one thread, with a fabricated
              * result stitched over a tool call that is still executing.
              */
-            pending={agent.isRunning || turnsInFlight > 0}
+            pending={agent.isRunning || turnsInFlight > 0 || carryingOn}
             /*
              * A channel outlives its turns, so it is the screen where waiting is worth offering. A
              * correction typed mid-answer is held here, in this tab, and runs as one follow-up turn the
@@ -1411,7 +1435,7 @@ export function ChannelChat({
              * controller does not exist until `say` has finished waiting for the runtime agent — so
              * this is the one place the narrower fact is the honest one to draw a button from.
              */
-            stoppable={agent.isRunning || runsInFlight > 0}
+            stoppable={agent.isRunning || runsInFlight > 0 || carryingOn}
             /*
              * At the END OF THE TRANSCRIPT rather than above the composer, which is where this used to
              * be. A turn that ends without an answer leaves a gap exactly where the reply was going to
