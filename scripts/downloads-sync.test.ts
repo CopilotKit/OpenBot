@@ -84,10 +84,19 @@ test("the first sync copies every signed installer and latest.json, and invalida
     "latest/OpenBot-mac-x64.dmg",
     "latest/OpenBot-windows-x64-setup.exe",
     "latest/latest.json",
+    "releases/v0.3.0/OpenBot-darwin-aarch64.app.tar.gz",
     "releases/v0.3.0/OpenBot_0.3.0_aarch64.dmg",
     "releases/v0.3.0/OpenBot_0.3.0_x64-setup.exe",
     "releases/v0.3.0/OpenBot_0.3.0_x64.dmg",
+    "releases/v0.3.0/container-images.json",
   ]);
+  // What the app fetches from the release besides installers, never changing.
+  expect(bucket["releases/v0.3.0/container-images.json"]).toEqual({
+    content: "{}",
+    cacheControl: IMMUTABLE,
+    contentType: "application/json",
+    sha256: true,
+  });
   expect(bucket["latest/OpenBot-mac-arm64.dmg"]).toEqual({
     content: "signed arm64 0.3.0",
     cacheControl: LATEST,
@@ -372,9 +381,11 @@ test("a tag mirrors that stable release's releases/<tag>/ only, and leaves lates
   const result = run(fake, { DOWNLOADS_TAG: "v0.2.0" });
   expect(result.code).toBe(0);
   expect(Object.keys(fake.bucket()).sort()).toEqual([
+    "releases/v0.2.0/OpenBot-darwin-aarch64.app.tar.gz",
     "releases/v0.2.0/OpenBot_0.2.0_aarch64.dmg",
     "releases/v0.2.0/OpenBot_0.2.0_x64-setup.exe",
     "releases/v0.2.0/OpenBot_0.2.0_x64.dmg",
+    "releases/v0.2.0/container-images.json",
   ]);
   expect(fake.invalidations()).toEqual([]);
 });
@@ -505,7 +516,10 @@ test("the sync workflow runs on main only, one at a time, with the role and noth
   expect(login?.with?.["role-to-assume"]).toBe(
     "arn:aws:iam::604598162673:role/openbot-release-downloads",
   );
-  expect(job.steps?.at(-1)?.run).toBe("scripts/downloads-sync.sh");
+  const runs = job.steps?.map((step) => step.run).filter(Boolean);
+  // The images first: a failed copy stops the job before latest/ names the release.
+  expect(runs?.at(-2)).toBe("bun scripts/downloads-images.ts");
+  expect(runs?.at(-1)).toBe("scripts/downloads-sync.sh");
 
   // Both attach jobs may be the one that makes the release Latest, so both may start the sync.
   for (const path of [
