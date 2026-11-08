@@ -46,9 +46,19 @@ export function ChannelItemContent({
           >
             {name}
           </span>
-          <span className="shrink-0 whitespace-nowrap text-[12px] leading-4 text-muted-foreground/70">
-            {lastMessageAt}
-          </span>
+          {/*
+           * While a Bot works on it, the row says so where its time goes, in the one colour that means a Bot is acting
+           * right now: said as well as shown by the orb, and the time is news only once the work is done.
+           */}
+          {busy ? (
+            <span className="shrink-0 whitespace-nowrap font-medium text-[12px] text-indigo-600 leading-4 dark:text-indigo-300">
+              Working
+            </span>
+          ) : (
+            <span className="shrink-0 whitespace-nowrap text-[12px] leading-4 text-muted-foreground/70">
+              {lastMessageAt}
+            </span>
+          )}
           {unread ? (
             <span className="size-2 shrink-0 rounded-full bg-primary" />
           ) : null}

@@ -182,7 +182,7 @@ const routeTree = rootRoute.addChildren([
   ]),
 ]);
 
-/** The personal edition, where a new conversation starts with its default Bot in To:. */
+/** The personal edition. A new conversation starts with nobody in To:, so each test picks its Bots. */
 function renderNewConversation(agents: AgentProfile[]) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -243,10 +243,7 @@ async function namesOfferedByAt(view: View): Promise<string[]> {
 
 test("@ in a new conversation with two Bots in To: offers both, and the first message goes to the one picked", async () => {
   const view = renderNewConversation([CLAUDE, ASSISTANT]);
-  await view.findByRole("button", {
-    hidden: true,
-    name: "Remove Personal Assistant",
-  });
+  await addToTo(view, "Personal Assistant");
   await addToTo(view, "Claude Agent SDK");
 
   const offered = await namesOfferedByAt(view);
@@ -285,6 +282,7 @@ test("@ in a new conversation with two Bots in To: offers both, and the first me
 
 test("a first message to a new group with no @ still goes to every Bot", async () => {
   const view = renderNewConversation([CLAUDE, ASSISTANT]);
+  await addToTo(view, "Personal Assistant");
   await addToTo(view, "Claude Agent SDK");
   const editor = await view.findByRole("textbox", {
     hidden: true,
@@ -300,6 +298,7 @@ test("a first message to a new group with no @ still goes to every Bot", async (
 
 test("a Bot taken out of To: is no longer offered by @", async () => {
   const view = renderNewConversation([CLAUDE, ASSISTANT]);
+  await addToTo(view, "Personal Assistant");
   await addToTo(view, "Claude Agent SDK");
   fireEvent.click(
     view.getByRole("button", {
@@ -320,12 +319,9 @@ test("a Bot taken out of To: is no longer offered by @", async () => {
   expect(offered).toEqual([expect.stringContaining("Claude Agent SDK")]);
 });
 
-test("a new conversation with one Bot offers that Bot to @ and starts with it", async () => {
+test("a new conversation with its one Bot picked offers that Bot to @, and sends to it alone", async () => {
   const view = renderNewConversation([CLAUDE]);
-  await view.findByRole("button", {
-    hidden: true,
-    name: "Remove Claude Agent SDK",
-  });
+  await addToTo(view, "Claude Agent SDK");
 
   const offered = await namesOfferedByAt(view);
   expect(offered).toEqual([expect.stringContaining("Claude Agent SDK")]);

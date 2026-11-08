@@ -1,0 +1,109 @@
+/*
+ * THE FRAME: GLASS, WHERE SOMETHING FLOATS.
+ *
+ * OpenBot's mark is an iridescent glass orb, so the frame around the page takes its colours: a soft wash of the orb's
+ * cyan, lilac and pink behind everything, the sidebar as a frosted panel floating on it, and the page as a crisp sheet
+ * beside it. Glass is kept to the sidebar, over a wash that holds still: the page, the cards on it and what floats over
+ * it stay solid, so text is never read through a blur and no blur is redrawn as a live screen or a conversation moves
+ * behind it.
+ *
+ * NOT A THEME TOKEN. The default look is theme.css's shadcn tokens, and everything here is drawn from them (the frame
+ * is `--sidebar`, the glass is `--card` let through), except the wash itself, which is the orb's own colours: OpenBot's
+ * mark rather than a palette a deployment picks. A deployment with its own palette removes the import in styles.css
+ * and gets the solid frame theme.css draws. The app's stylesheet only: the Recorder extension imports theme.css alone.
+ *
+ * OpenBot's own look only (a skin draws its own frame), and off where the person asked for less transparency. WebKit
+ * (Safari, and OpenBot Desktop's window on a Mac) can't tell that setting, so more contrast turns it off too: macOS
+ * turns transparency down whenever Increase contrast is on, and WebKit does tell that one.
+ */
+
+:root:not([data-skin])
+[data-slot="sidebar-wrapper"]:has(> [data-variant="inset"]) {
+  --frame-glass: color-mix(in oklab, var(--card) 45%, transparent);
+  --frame-glass-border: color-mix(in oklab, var(--card) 75%, transparent);
+  --frame-glass-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--card) 70%, transparent),
+    0 10px 30px -12px oklch(0.35 0.08 290 / 0.18);
+  --frame-sheet-shadow:
+    0 1px 2px oklch(0.3 0.05 290 / 0.06),
+    0 12px 40px -18px oklch(0.3 0.08 290 / 0.22);
+  background:
+    radial-gradient(
+      70rem 45rem at -15% -20%,
+      oklch(0.86 0.1 205 / 0.8),
+      transparent 62%
+    ),
+    radial-gradient(
+      55rem 45rem at 0% 115%,
+      oklch(0.88 0.09 335 / 0.65),
+      transparent 60%
+    ),
+    radial-gradient(
+      70rem 55rem at 115% -10%,
+      oklch(0.86 0.08 295 / 0.75),
+      transparent 60%
+    ),
+    var(--sidebar);
+}
+
+/* The same wash at night: deeper and quieter, on the dark frame. */
+:root.dark:not([data-skin])
+[data-slot="sidebar-wrapper"]:has(> [data-variant="inset"]) {
+  --frame-glass: color-mix(in oklab, var(--card) 50%, transparent);
+  --frame-glass-border: color-mix(in oklab, var(--foreground) 8%, transparent);
+  --frame-glass-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--foreground) 6%, transparent),
+    0 10px 30px -12px oklch(0 0 0 / 0.5);
+  --frame-sheet-shadow:
+    0 1px 2px oklch(0 0 0 / 0.3), 0 12px 40px -18px oklch(0 0 0 / 0.6);
+  background:
+    radial-gradient(
+      70rem 45rem at -15% -20%,
+      oklch(0.45 0.09 210 / 0.55),
+      transparent 62%
+    ),
+    radial-gradient(
+      55rem 45rem at 0% 115%,
+      oklch(0.45 0.12 340 / 0.4),
+      transparent 60%
+    ),
+    radial-gradient(
+      70rem 55rem at 115% -10%,
+      oklch(0.42 0.11 295 / 0.6),
+      transparent 60%
+    ),
+    var(--sidebar);
+}
+
+/* The sidebar: a frosted panel on the wash, inset as far from the window's edge as the page is. */
+:root:not([data-skin]) [data-variant="inset"] [data-slot="sidebar-inner"] {
+  background: var(--frame-glass);
+  border: 1px solid var(--frame-glass-border);
+  border-radius: calc(var(--radius) * 1.6);
+  box-shadow: var(--frame-glass-shadow);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+}
+
+/* The page: a solid sheet, rounded to match, lifted off the wash by a soft shadow rather than a grey border. */
+:root:not([data-skin])
+  [data-slot="sidebar-wrapper"]:has(> [data-variant="inset"])
+  > [data-slot="sidebar-inset"] {
+  border-color: var(--frame-glass-border);
+  border-radius: calc(var(--radius) * 1.6);
+  box-shadow: var(--frame-sheet-shadow);
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root:not([data-skin])
+    [data-slot="sidebar-wrapper"]:has(> [data-variant="inset"]) {
+    background: var(--sidebar);
+  }
+  :root:not([data-skin]) [data-variant="inset"] [data-slot="sidebar-inner"] {
+    background: var(--sidebar);
+    border-color: transparent;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}

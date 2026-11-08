@@ -8,6 +8,7 @@ import type { VisibleChatItem } from "../src/components/channels/chat-messages";
 import {
   dropRepeatedAppCards,
   groupToolSteps,
+  type StepDetails,
   stepDetails,
   summarise,
   ToolActivity,
@@ -99,6 +100,34 @@ test("a subtask folds into the same line as the searches beside it, even though 
   expect(
     summarise([steps[0], steps[0]].filter((step) => step !== undefined)),
   ).toBe("Ran 2 subtasks");
+});
+
+test("browsing one site names the site; pages on several sites are counted", () => {
+  const page = (id: string, href?: string): StepDetails => ({
+    id,
+    kind: "browser",
+    label: "Opened a page",
+    ...(href ? { href } : {}),
+    pending: false,
+    failed: false,
+    refused: false,
+    pages: 1,
+    inputs: [],
+  });
+  expect(summarise([page("a", "https://www.example.com/")])).toBe(
+    "Browsed example.com",
+  );
+  expect(
+    summarise([page("a", "https://gov.uk/a"), page("b", "https://gov.uk/b")]),
+  ).toBe("Browsed 2 pages on gov.uk");
+  expect(
+    summarise([
+      page("a", "https://a.example/"),
+      page("b", "https://b.example/"),
+    ]),
+  ).toBe("Browsed 2 pages");
+  // A page with no address on record is still counted.
+  expect(summarise([page("a")])).toBe("Browsed 1 page");
 });
 
 test("one connector call keeps its own line, and anything the app draws stays where it is", () => {

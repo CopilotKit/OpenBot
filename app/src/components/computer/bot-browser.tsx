@@ -353,7 +353,10 @@ function RecordPanel({
       <h2 className="font-semibold text-sm">Record a task</h2>
       <p className="mt-1 text-pretty text-muted-foreground text-sm">
         Do the task in the Bot's browser while you have control. Only what you
-        do is recorded, and it goes to your own Learning space.{" "}
+        do is recorded, and it goes to your own Learning space.
+      </p>
+      {/* What the Recorder keeps, said before Record, quieter than what to do. */}
+      <p className="mt-2 text-pretty text-muted-foreground text-xs leading-relaxed">
         {RECORDER_COLLECTS_SHORT}
       </p>
       <PageRows className="mt-3">

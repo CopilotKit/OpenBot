@@ -6,8 +6,8 @@ import { UpdateRoutingSection } from "@/components/settings/update-routing";
 import { settleReactWork } from "./settle-react-work";
 
 /**
- * Settings → Notifications only shows a channel as on when this deployment has set it up. A channel
- * that is not configured is off, disabled and says so, whatever the stored preference says.
+ * Settings → Notifications only offers a channel this deployment has set up. A channel that is not
+ * configured has no switch at all, whatever the stored preference says; one that is shows it.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -71,16 +71,16 @@ const disabled = (element: HTMLElement) =>
   element.hasAttribute("data-disabled") ||
   element.hasAttribute("disabled");
 
-test("channels the deployment has not set up are off, disabled and say so", async () => {
+test("channels the deployment has not set up have no switch; one that is set up shows the choice", async () => {
   serving({ slack: false, teams: false, sms: false, push: true });
   const view = draw();
-  const slack = await view.findByRole("switch", { name: "Progress by Slack" });
-  expect(checked(slack)).toBe(false);
-  expect(disabled(slack)).toBe(true);
-  expect(view.getAllByText("Not set up").length).toBe(12);
-  const push = view.getByRole("switch", { name: "Progress by Push" });
+  const push = await view.findByRole("switch", { name: "Progress by Push" });
   expect(checked(push)).toBe(true);
   expect(disabled(push)).toBe(false);
+  expect(view.queryByRole("switch", { name: "Progress by Slack" })).toBeNull();
+  // One switch per kind of update, for Push alone.
+  expect(view.getAllByRole("switch")).toHaveLength(4);
+  expect(view.queryByText("Not set up")).toBeNull();
 });
 
 test("a configured channel shows the person's preference", async () => {

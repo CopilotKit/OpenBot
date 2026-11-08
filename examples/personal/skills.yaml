@@ -61,7 +61,7 @@ skills:
 
   - slug: skill-creator
     title: Write a skill
-    summary: Interview me about a skill I want, write it, and save it as a new `/` command.
+    summary: Interview me about a skill I want, then write it and save it as a new skill.
     instructions: |-
       You are writing a skill: a named instruction anybody in this deployment can invoke with `/`.
       Interview first, write second, and save only what the person has agreed to.
@@ -158,8 +158,8 @@ skills:
   # browser, and offered to whichever Bot holds this slug. `tools:` here is intersected with a Bot's
   # MCP GRANTS, so naming them would name nothing. The grant of this skill is the whole gate.
   - slug: bot-creator
-    title: Make a coworker
-    summary: Work out what a new coworker should be, then put it in front of you to create.
+    title: Make a Bot
+    summary: Work out what a new Bot should be, then put it in front of you to create.
     instructions: >-
       You are working out what a new coworker should be, and the interview matters more than the
       speed: what you write becomes standing instructions handed to a model on every turn in every

@@ -579,6 +579,18 @@ function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
 }
 
+/** The site a page is on, as people say it: the host without `www.`. Empty when the address is not one. */
+function siteOf(href: string | undefined): string {
+  if (!href) return "";
+  try {
+    const { hostname, protocol } = new URL(href);
+    if (protocol !== "http:" && protocol !== "https:") return "";
+    return hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
 /**
  * What a group of steps did, as one phrase: "Searched the web and read 2 pages".
  *
@@ -603,7 +615,20 @@ export function summarise(steps: readonly StepDetails[]): string {
   if (read) phrases.push(`read ${plural(read, "page", "pages")}`);
   const browser = of("browser");
   const browsed = browser.reduce((sum, step) => sum + step.pages, 0);
-  if (browsed) phrases.push(`browsed ${plural(browsed, "page", "pages")}`);
+  // One site is named, as a person would say where they went: "Browsed example.com", "Browsed 3 pages on gov.uk".
+  const sites = [
+    ...new Set(
+      browser.filter((step) => step.pages > 0).map((step) => siteOf(step.href)),
+    ),
+  ];
+  const site = sites.length === 1 ? sites[0] : undefined;
+  if (browsed && site)
+    phrases.push(
+      browsed === 1
+        ? `browsed ${site}`
+        : `browsed ${plural(browsed, "page", "pages")} on ${site}`,
+    );
+  else if (browsed) phrases.push(`browsed ${plural(browsed, "page", "pages")}`);
   else if (browser.length) phrases.push("used the browser");
   const connectors = [
     ...new Set(of("connector").map((step) => step.connector ?? "")),

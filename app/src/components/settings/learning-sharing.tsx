@@ -147,10 +147,12 @@ export function LearningSharing() {
 
   if (personal) {
     // One person, one computer: nobody to share with, so every row simply opens its Skill.
+    const none = data.skills === null || data.skills.length === 0;
     return (
       <PageSection
         title="Your skills"
-        description="Open a skill to read what it does."
+        // Said only over skills to open: above the empty state it would point at nothing.
+        description={none ? undefined : "Open a skill to read what it does."}
       >
         {data.skills === null || data.skills.length === 0 ? (
           <PageEmpty>{emptySentence(data, mode, true)}</PageEmpty>
