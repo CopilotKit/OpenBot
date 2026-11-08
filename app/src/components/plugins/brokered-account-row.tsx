@@ -31,7 +31,9 @@ import {
 } from "@/lib/plugins/mutations";
 import { schemeNeedsKey } from "@/lib/plugins/enablement-notes";
 import {
+  type BrokeredAccountKind,
   brokeredKeyMissing,
+  type Edition,
   type PluginsProvider,
 } from "@/lib/plugins/provider-vocabulary";
 
@@ -59,7 +61,7 @@ import {
  * a row that branched on it would be re-asking the same three-way question at every branch, each
  * copy free to forget a literal the others remembered.
  */
-export type BrokeredAccountKind = "consent" | "fields" | "no-auth";
+export type { BrokeredAccountKind };
 
 /**
  * Which of the three a recorded scheme is.
@@ -717,15 +719,15 @@ function accountSentence(input: {
   disconnectedDescription: string;
   disconnectedReassurance: string | undefined;
   provider: PluginsProvider;
-  /** What OpenBot itself is called on this screen (`managePaths().deploymentName`). */
-  deployment: string;
+  /** Which edition draws this screen (`managePaths().edition`). */
+  edition: Edition;
   /** Who reads the row: see {@link brokeredKeyMissing}. */
   reader: "admin" | "person";
 }): string {
   const {
     account,
     connectedDescription,
-    deployment,
+    edition,
     disconnectedDescription,
     disconnectedReassurance,
     provider,
@@ -734,7 +736,7 @@ function accountSentence(input: {
   } = input;
 
   if (!account.configured) {
-    return brokeredKeyMissing(provider, deployment, reader);
+    return brokeredKeyMissing(provider, edition, reader);
   }
 
   if (account.kind === "no-auth") {
@@ -888,7 +890,7 @@ function KeyGuideNote({
 export function BrokeredAccountRow({
   account,
   connectedDescription,
-  deployment = "this deployment",
+  edition = "team",
   disconnectedDescription,
   disconnectedReassurance,
   heading,
@@ -897,8 +899,11 @@ export function BrokeredAccountRow({
   reader = "admin",
   title,
 }: {
-  /** What OpenBot itself is called on this screen (`managePaths().deploymentName`). */
-  deployment?: string;
+  /**
+   * Which edition draws this screen (`managePaths().edition`). The personal edition's one person is
+   * told to set connecting apps up themselves, never to ask an admin.
+   */
+  edition?: Edition;
   /**
    * Who reads the row. A person's own Connections page passes `person`, so a missing broker key is
    * said without the variable an admin sets.
@@ -985,7 +990,7 @@ export function BrokeredAccountRow({
             {accountSentence({
               account,
               connectedDescription,
-              deployment,
+              edition,
               disconnectedDescription,
               disconnectedReassurance,
               provider,
