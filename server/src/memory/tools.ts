@@ -7,6 +7,7 @@ import {
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { defer, from, type Observable, switchMap } from "rxjs";
 import { z } from "zod";
+import { type Edition, editionHasMemory } from "../edition";
 import { MEMORY_TOOLS_SERVER } from "../plugins/plugin-store/model";
 import type { MemoryIngestion } from "./ingestion";
 import type { MemoryStore } from "./store";
@@ -69,12 +70,27 @@ export class PersonalMemoryMiddleware extends Middleware {
     );
   }
 }
-export function memoryTools(options: {
+type MemoryToolOptions = {
   store: MemoryStore;
   ingestion: MemoryIngestion;
   ownerUserId: string;
   agentId: string;
-}): GrantedTool[] {
+};
+
+/**
+ * The memory tools a Bot is offered in this edition: none in the personal edition. OpenBot Desktop
+ * runs a local Intelligence whose licence leaves memory out, and the personal edition's screens show
+ * no memory, so a Bot offering to remember something would promise what the person can never see
+ * or change. Every place a Bot's tools are listed or called asks this, not `memoryTools`.
+ */
+export function offeredMemoryTools(
+  edition: Edition,
+  options: MemoryToolOptions,
+): GrantedTool[] {
+  return editionHasMemory(edition) ? memoryTools(options) : [];
+}
+
+export function memoryTools(options: MemoryToolOptions): GrantedTool[] {
   function tool<T>(
     name: string,
     description: string,

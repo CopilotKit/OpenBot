@@ -93,7 +93,7 @@ test("each part shows its state and memory, and the back end its CLI readiness",
     "Background jobs",
     "Database",
   ]);
-  expect(rows(intelligence)).toEqual(["Conversations, memory and learning"]);
+  expect(rows(intelligence)).toEqual(["Conversations and learning"]);
   expect(view.container.textContent).not.toMatch(/openbot-desktop-|k3d-/);
   expect(
     invokeCalls.find((call) => call.command === "run_local_eval")?.args,
