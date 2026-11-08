@@ -75,13 +75,9 @@ export function BrowserPage() {
     if (was && !waiting)
       queryClient.invalidateQueries({ queryKey: recorderKeys.recordings() });
   }, [waiting]);
-  // While the browser's state is first read, the page as it will be (`OpeningBrowser`), not a blank pane.
-  if (state.isPending)
-    return (
-      <OpeningBrowser heading={<TeachHeading />}>
-        <YourRecordings action={<LearnedLink />} variant="pane" />
-      </OpeningBrowser>
-    );
+  // Nothing while the browser's state is first read, which is quick: until it is, the page can't know whether its
+  // browser opens in the page or as a window on the desktop, so any frame drawn now could be for nothing.
+  if (state.isPending) return null;
   // Branched on the data rather than the error: a poll that fails after the page has opened keeps the browser on
   // screen, where tearing it down would open it all over again.
   if (state.data === undefined) {

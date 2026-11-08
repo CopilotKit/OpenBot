@@ -265,7 +265,7 @@ function BrowserWindow({
 }) {
   const space = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLDivElement>(null);
-  const width = useFittedWidth(space, frame, aspectRatio, live);
+  const width = useFittedWidth(space, frame, aspectRatio, { shown: live });
   if (!live) return children;
   return (
     // Never less than a screen a person can work in: in a short window the card grows past it and the view scrolls.

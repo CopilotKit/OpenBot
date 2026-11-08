@@ -224,10 +224,11 @@ export function ScreenBrowser({
  * and `children` under it, all as wide as the window.
  *
  * The column is sized to the page (`useFittedWidth`): the browser behind the window has a fixed shape, so a window that
- * took the whole pane left a blank band under the page. The heading, the window and what is under it are as wide as the
- * page lets them be while all three fit the pane, centred on it as a window on a desk, and at the top on a phone, where a
- * page starts at the top. In a pane too short for that at a usable width (`MIN_COLUMN_WIDTH`), the pane scrolls; auto
- * margins rather than centring, so a column taller than the pane starts at its top and is never cut.
+ * took the whole pane left a blank band under the page. The heading and the window are as wide as the page lets them be
+ * while they fit the pane with the least room `children` needs (its `min-h-24`: a heading and a row), and `children`
+ * takes all the height left under the window, scrolling inside it. So a longer list under the browser never makes the
+ * browser smaller, and its first rows are always on screen. In a pane too short for that at a usable width
+ * (`MIN_COLUMN_WIDTH`), the pane scrolls.
  */
 export function BrowserDesk({
   heading,
@@ -240,28 +241,40 @@ export function BrowserDesk({
 }) {
   const desk = useRef<HTMLDivElement>(null);
   const column = useRef<HTMLDivElement>(null);
-  const width = useFittedWidth(
-    desk,
-    column,
-    SCREEN_ASPECT_RATIO,
-    true,
-    MIN_COLUMN_WIDTH,
-  );
+  const frame = useRef<HTMLDivElement>(null);
+  const under = useRef<HTMLDivElement>(null);
+  const width = useFittedWidth(desk, column, SCREEN_ASPECT_RATIO, {
+    minWidth: MIN_COLUMN_WIDTH,
+    page: frame,
+    below: under,
+  });
   return (
     <div
       ref={desk}
-      className="flex min-h-0 flex-1 overflow-y-auto bg-muted/40 p-3 sm:p-5"
+      className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-muted/40 p-3 sm:p-5"
     >
+      {/* As tall as the desk, so what is under the window takes the height left; past it, the desk scrolls. */}
       <div
         ref={column}
-        className="mx-auto flex h-fit w-full min-w-0 shrink-0 flex-col gap-4 sm:my-auto"
+        className="mx-auto flex min-h-0 w-full min-w-0 flex-1 flex-col gap-4"
         style={width === undefined ? undefined : { width }}
       >
         {heading ?? <h1 className="sr-only">Browser</h1>}
-        <div className="flex flex-col overflow-clip rounded-xl border bg-background shadow-sm">
+        <div
+          ref={frame}
+          className="flex shrink-0 flex-col overflow-clip rounded-xl border bg-background shadow-sm"
+        >
           {browserWindow}
         </div>
-        {children}
+        {children ? (
+          <div
+            ref={under}
+            className="flex min-h-24 flex-1 flex-col"
+            data-slot="under-browser"
+          >
+            {children}
+          </div>
+        ) : null}
       </div>
     </div>
   );

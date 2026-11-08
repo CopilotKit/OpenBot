@@ -152,10 +152,10 @@ export function YourRecordings({
     </PageSection>
   );
   if (variant === "page") return section;
-  // Under the browser, in its column: capped and scrolling on its own, so many rows never shrink the browser above.
+  // Under the browser, in its column: the height left under the window (`BrowserDesk`), scrolling on its own.
   return (
     <div
-      className="max-h-44 shrink-0 overflow-y-auto [&>section]:mt-0"
+      className="min-h-0 flex-1 overflow-y-auto [&>section]:mt-0"
       data-slot="recordings-strip"
     >
       {section}

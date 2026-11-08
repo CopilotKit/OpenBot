@@ -72,6 +72,8 @@ const writes: Write[] = [];
 let state: BrowserApiState;
 let openAnswer: BrowserOpenResponse;
 let stateFails = false;
+/** Holds the browser's state until a case lets it through. */
+let stateHeld: Promise<void> | null = null;
 /** Requests the server refuses, by path, with the sentence it answers: as it passes on the Recorder's own (409). */
 let refusals: Partial<Record<string, string>> = {};
 /** The person's actions the Recorder counts by the read after Record. */
@@ -189,6 +191,7 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
     return Response.json({ recordings: recordingRows, nextCursor: null });
   }
   if (path === browserApiPaths.state && method === "GET") {
+    await stateHeld;
     if (stateFails)
       return Response.json({ error: "Unavailable" }, { status: 500 });
     return Response.json(state);
@@ -363,6 +366,7 @@ beforeEach(() => {
   queryClient.clear();
   writes.length = 0;
   stateFails = false;
+  stateHeld = null;
   refusals = {};
   actionsAfterStart = 7;
   phrasesHeard = 0;
@@ -508,7 +512,7 @@ test("your recordings show under a browser shown in the page", async () => {
     await view.findByRole("heading", { name: "Teach a Bot" }),
   ).toBeTruthy();
   const recordings = await view.findByText("Your recordings");
-  // Its own scrolling strip, capped so many rows can't squeeze the browser, rather than bare in the pane.
+  // Its own scrolling strip in the room under the browser, so many rows never make the browser smaller.
   expect(
     recordings.closest('[data-slot="recordings-strip"]')?.className,
   ).toContain("overflow-y-auto");
@@ -2072,6 +2076,25 @@ test("while a browser in the page opens on arrival, the page is laid out as it w
   launched();
   expect(await view.findByLabelText(SCREEN)).toBeTruthy();
   expect(view.queryByText("Opening your browser…")).toBeNull();
+});
+
+test("while the browser's state is first read, the page draws nothing, so a browser that is a window on the desktop never flashes one opening in the page", async () => {
+  // The data-access rule for the quick read: no placeholder. Only a browser known to open in the page says it is opening.
+  state = nativeState();
+  let read = () => {};
+  stateHeld = new Promise<void>((resolve) => {
+    read = resolve;
+  });
+  const view = draw(<BrowserPage />);
+  await settleReactWork();
+  expect(view.queryByText("Opening your browser…")).toBeNull();
+  expect(view.queryByRole("heading", { name: "Teach a Bot" })).toBeNull();
+  read();
+  expect(
+    await view.findByRole("heading", { name: "Teach a Bot" }),
+  ).toBeTruthy();
+  expect(view.queryByText("Opening your browser…")).toBeNull();
+  expect(opens()).toBe(0);
 });
 
 test("where OpenBot cannot run a browser for the person, the page says so and opens nothing", async () => {
