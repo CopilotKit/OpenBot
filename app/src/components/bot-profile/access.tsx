@@ -232,14 +232,22 @@ function YourApps({ agent }: { agent: AgentProfile }) {
 /**
  * Your own skills, one switch each. Only on your own Bot: the server lets a person put their own
  * skill on a Bot they own, and neither half alone is enough.
+ *
+ * WHICH SKILLS ARE YOURS COMES FROM THE SKILLS PAGE; WHETHER THIS BOT CARRIES ONE, FROM THE BOT'S OWN
+ * GRANTS (`GET /api/plugins/for/:agentId`, the read "What it can use" draws from too). That read is
+ * where the personal edition gives a Bot every skill the first time it is listed, so it is what
+ * gives a Bot made a moment ago its skills. The skills page, read alongside it or earlier, still said
+ * the Bot had none, and every switch was drawn off until the page was opened again.
  */
 function YourSkills({ agentId }: { agentId: string }) {
   const me = useQuery(currentUserQueryOptions()).data;
   const page = useQuery(pluginsPageQueryOptions());
+  const held = useQuery(agentPluginsQueryOptions(agentId));
   const grant = useMutation(setPluginGrantMutationOptions(queryClient));
   const skills = (page.data?.skills ?? []).filter(
     (skill) => me && skill.ownerUserId === me.id,
   );
+  const carried = new Set((held.data?.skills ?? []).map((skill) => skill.slug));
   return (
     <PageSection
       description="Turn on a skill to use it with this Bot. Type / in a conversation to run it."
@@ -250,7 +258,7 @@ function YourSkills({ agentId }: { agentId: string }) {
           {grant.error.message}
         </p>
       ) : null}
-      {page.isPending ? null : page.error ? (
+      {page.isPending || held.isPending ? null : page.error || held.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           Couldn't load your skills. Reload the page.
         </p>
@@ -287,7 +295,7 @@ function YourSkills({ agentId }: { agentId: string }) {
                 <ItemActions>
                   <Switch
                     aria-label={skill.slug}
-                    checked={skill.grantedTo.includes(agentId)}
+                    checked={carried.has(skill.slug)}
                     disabled={grant.isPending}
                     onCheckedChange={(granted) =>
                       grant.mutate({
