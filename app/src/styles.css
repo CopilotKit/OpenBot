@@ -7,6 +7,8 @@
 @import "./theme.css";
 /* OpenBot's own frame: the orb's colours behind a frosted sidebar. Remove for the solid frame theme.css draws. */
 @import "./frame.css";
+/* OpenBot's own typeface, the one open.bot is set in. Remove for theme.css's Inter. */
+@import "./typeface.css";
 @import "./skins/skins.css";
 
 /*
