@@ -230,32 +230,36 @@ export const PROVENANCE_GUIDANCE = asParagraphs(PROVENANCE_GUIDANCE_LINES);
 /**
  * When to answer with a component rather than prose.
  *
- * Every Bot is offered the gallery (charts, tables, record cards, checklists, choices), sandboxed UI
- * in the browser, and the display half of the gallery on a background turn. Nothing said when to use
- * any of it, so each tool's own description decided alone: a comparison of figures got a chart, but
- * a first-week plan came back as headed lists and a landmark's key facts as bullets, from a Bot
- * holding a checklist and a record card.
+ * Every Bot is offered the gallery and generated UI. Preferring a component whenever an answer had
+ * structure made ordinary answers into cards: even a short list of emails became a notice. Markdown
+ * is the default; a component needs a concrete benefit or an explicit request.
  *
  * It names kinds of answer and never a tool, because the tools on a turn differ: by Bot, by grant,
  * and between a person's own turn and a background one, where nothing that waits on a person is
  * offered. A list of names would promise a component somebody's turn does not hold.
  *
- * It goes straight after `PROVENANCE_GUIDANCE` in every prompt, which is what "the rules above" in
- * its last line points at: a chart drawn because this said to is still a chart whose figures have to
+ * It goes straight after `PROVENANCE_GUIDANCE` in every prompt, which is what "the rules above"
+ * points at: a chart drawn because this said to is still a chart whose figures have to
  * say where they came from.
  */
 const COMPONENT_GUIDANCE_LINES = [
-  "When an answer has structure, answer with a component from your tools rather than in prose.",
-  "Numbers or a comparison: a chart or headline figures. Rows that share the same fields: a table.",
-  "Tasks or steps of a piece of work, with which are finished: a checklist. A list of points, findings",
-  "or recommendations: text or a notice, never a checklist, whose ticks would mark the answer done.",
-  "The details of one thing, such as a person, an order or an account: a record card. A choice",
-  "the person has to make: a card they choose from. Use whichever of the tools you hold on this turn",
-  "fits, and put a sentence or two of text around it saying what it shows or what comes next, without",
-  "repeating what it already shows.",
+  "Answer directly in Markdown by default. Simple questions, explanations, summaries, recommendations",
+  "and short lists belong in your reply, including a list of the top emails and why they matter.",
+  "Headings, bullets, links, numbers or several paragraphs are not by themselves a reason to draw a",
+  "component or generate an interface. When in doubt, answer in Markdown.",
   "",
-  "Answer in plain text only for a short conversational reply, or when none of your tools fits the",
-  "answer. A chart or figures you draw still follow the rules above about where figures come from.",
+  "Use a component from the tools you hold when the person explicitly asks for it, or when its visual",
+  "or interactive behavior makes the answer materially easier to understand or use than Markdown.",
+  "A chart can reveal a trend; a table can help compare many rows; a checklist can track tasks and",
+  "which are finished; a record card can organize a record's fields; a choice card lets the person",
+  "choose. Findings or recommendations belong in Markdown, never a checklist, whose ticks would mark",
+  "the answer done. A chart or figures you draw still follow the rules above about where figures come from.",
+  "",
+  "Reserve a notice card for a distinct actionable alert that needs the person's attention, such as",
+  "a failed scheduled task needing intervention or a new issue blocking their work, or for an explicit",
+  "request for a notice card. An ordinary answer about risks, deadlines or important emails is still",
+  "an answer: give it in Markdown. Importance or a caveat alone does not call for a notice.",
+  "Do not wrap a routine answer in a notice or repeat the same answer in both text and a card.",
   "",
   "Draw a component once, when you have the result it shows. Do not draw a draft and then a second",
   "one that replaces it: everything you draw stays in front of the person.",

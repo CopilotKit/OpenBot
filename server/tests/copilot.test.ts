@@ -1410,10 +1410,9 @@ describe("where a Bot says its answer came from", () => {
 });
 
 /**
- * A Bot is told to answer with a component when the answer has structure.
+ * A Bot answers in Markdown by default and uses components when they add value.
  *
- * Every Bot was offered the gallery and none was told when to use it, so structured answers came back
- * as prose. The rule travels the same three ways the provenance rule does, and each is asserted,
+ * The rule travels the same three ways the provenance rule does, and each is asserted,
  * because they are built by different code: the built-in prompt, the standing role that is a remote
  * Bot's only instruction, and a background turn, which builds its Bot through the resolver rather
  * than the request path.
@@ -1434,7 +1433,7 @@ describe("when a Bot answers with a component", () => {
     );
     const prompt = "prompt" in configuration ? configuration.prompt : undefined;
 
-    // Its last line points at "the rules above", so the order is part of the rule.
+    // Its provenance reference points at "the rules above", so the order is part of the rule.
     expect(prompt).toContain(`${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}`);
   });
 
@@ -1446,7 +1445,17 @@ describe("when a Bot answers with a component", () => {
     const guidance = COMPONENT_GUIDANCE.toLowerCase().replace(/\s+/g, " ");
     for (const kind of ["a chart", "a checklist", "a record card", "choose"])
       expect(guidance).toContain(kind);
-    expect(guidance).toContain("plain text only for a short conversational");
+    expect(guidance).toContain("answer directly in markdown by default");
+    expect(guidance).toContain("when the person explicitly asks for it");
+    expect(guidance).toContain(
+      "materially easier to understand or use than markdown",
+    );
+    expect(guidance).toContain(
+      "reserve a notice card for a distinct actionable alert",
+    );
+    expect(guidance).not.toContain(
+      "plain text only for a short conversational",
+    );
     // Tool names are camelCase or snake_case; the tools on a turn vary per Bot and grant.
     expect(COMPONENT_GUIDANCE).not.toMatch(/\b[a-z]+[A-Z]\w*\b|\b\w+_\w+\b/);
   });
