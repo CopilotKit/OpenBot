@@ -1,4 +1,4 @@
-import { IconLogout, IconPlus, IconSearch } from "@tabler/icons-react";
+import { IconEdit, IconLogout, IconSearch } from "@tabler/icons-react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, type LinkOptions, useParams } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -229,7 +229,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     <Sidebar variant="inset" {...props}>
       <SidebarHeader className="h-12 p-2">
         <SidebarMenu>
-          <SidebarMenuItem className="flex flex-row gap-1.5">
+          <SidebarMenuItem className="flex flex-row items-center gap-1.5">
             <SidebarMenuButton
               className="font-semibold text-[14px] tracking-tighter h-full leading-tight"
               render={(props) => (
@@ -239,20 +239,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               )}
             />
             <Button
-              aria-label="New conversation"
-              size="icon"
               variant="ghost"
-              render={(props) => (
-                <Link
-                  {...props}
-                  to="/channel/new"
-                  activeProps={{
-                    className: "bg-foreground/5",
-                  }}
-                />
-              )}
+              size="sm"
+              className="shrink-0 gap-1.5 px-2 text-[13px] font-normal text-muted-foreground hover:text-foreground"
+              render={(props) => <Link {...props} to="/channel/new" />}
             >
-              <IconPlus />
+              <IconEdit className="size-4" />
+              <span>New thread</span>
             </Button>
           </SidebarMenuItem>
         </SidebarMenu>

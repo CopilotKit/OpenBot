@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Bots answer ordinary questions, summaries and short lists directly in Markdown by default.
+  Notice cards are reserved for distinct actionable alerts or an explicit request; other components
+  are used when their visual or interactive behavior makes the answer easier to use. Existing
+  deployments keep their published component descriptions; administrators can update the Notice
+  and Checklist descriptions to match the new defaults.
+- Notice cards render Markdown in their explanation and supporting points, including links,
+  formatting and code, using the same renderer as conversation replies.
+- The sidebar's new-conversation action is labelled "New thread" beside a compose icon.
+
 - OpenBot Desktop updates and sets up its local back end on a slow connection. Before the back
   end's update (a new one, or the next Start's retry of one that did not finish) or a setup that
   resumes, it downloads the back end's images itself, one at a time and with no fixed time limit,
