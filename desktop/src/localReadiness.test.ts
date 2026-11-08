@@ -164,7 +164,15 @@ test("specific wording and actions", () => {
     said: "The back end took too long to start, so OpenBot stopped waiting. What it already downloaded is kept, so trying again picks up from there.",
     action: "restart-intelligence",
   });
-  expect(said("unexpected-exit").said).toBe("The back end could not start.");
+  expect(said("unexpected-exit").said).toBe(
+    "The back end's software quit without saying why. OpenBot's log has the details.",
+  );
+  // A setup the CLI itself failed says so, not only that the back end could not start.
+  expect(
+    said(report({ outcome: "failed", reason: "local-command-failed" })).said,
+  ).toBe(
+    "The back end stopped with an error partway through. OpenBot's log has the details.",
+  );
   expect(said("unavailable").action).toBeUndefined();
   expect(said("unverified").action).toBe("repair");
   expect(said("invalid-json")).toEqual({
@@ -340,7 +348,7 @@ test("types: the failure and reason inputs are the upstream ones", () => {
   const failure: LocalFailure = "spawn";
   expect(
     localReadiness({ ...base, intelligence: failure }).intelligence.said,
-  ).toBe("The back end could not start.");
+  ).toBe("OpenBot could not run the back end's software.");
 });
 
 test("each readiness state of a valid licence has its own row", () => {

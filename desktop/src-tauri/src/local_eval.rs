@@ -16,7 +16,10 @@
 //!   separate arguments with no shell. The CLI's `resumeCommand` strings
 //!   are text for a terminal user; they are dropped here and never executed.
 //! - **Only allowlisted facts leave.** Raw stdout, stderr, error messages and recovery text never
-//!   cross IPC or reach a log. Failures are static categories with no payload. The account
+//!   cross IPC. Failures are static categories with no payload. The one place CLI words go is the
+//!   log, scrubbed, when a call that sets up, starts, updates or stops the stack ends: its exit,
+//!   its report's error and the end of its stderr (`ending_entry`), so a setup that stops can be
+//!   told apart from one OpenBot stopped. The account
 //!   sign-in's approval page and code are the one CLI-printed text the window shows, checked
 //!   first (`sign_in_page`).
 //!
@@ -2029,23 +2032,173 @@ type Watch<'a> = &'a mut dyn FnMut(&[u8]);
 
 /// `execute`, with `watch` given the stdout written so far each time it grows while the CLI runs.
 /// What `watch` reads stays inside this module: only what it chooses to keep leaves.
+///
+/// How a call that sets up, starts, updates or stops the stack ended goes to the log
+/// (`ending_entry`), so a setup that stops is never a blank in it.
 fn execute_watching(
     cli: &PinnedCli,
     arguments: &[&str],
     folder: Option<&std::path::Path>,
     limits: Limits,
     cancel: &Cancel,
+    watch: Option<Watch>,
+) -> Result<(i32, Vec<u8>), Failure> {
+    let started = Instant::now();
+    let logged = logs_its_ending(arguments);
+    // Kept only for a call whose ending is logged, and only its tail is read.
+    let errors = logged.then(|| Output::create().ok()).flatten();
+    let mut status = None;
+    let result = execute_child(
+        cli,
+        arguments,
+        folder,
+        limits,
+        cancel,
+        watch,
+        errors.as_ref(),
+        &mut status,
+    );
+    if logged {
+        let stderr = errors
+            .as_ref()
+            .and_then(|errors| errors.tail(ERROR_TAIL))
+            .unwrap_or_default();
+        let (level, entry) = ending_entry(arguments, started.elapsed(), status, &result, &stderr);
+        log::log!(level, "{entry}");
+        #[cfg(test)]
+        LAST_ENDING.with(|last| *last.borrow_mut() = Some(entry));
+    }
+    result
+}
+
+/// How much of the end of a failed call's stderr goes to the log.
+const ERROR_TAIL: usize = 2048;
+
+#[cfg(test)]
+thread_local! {
+    /// The last ending this thread logged, for the tests.
+    static LAST_ENDING: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The calls whose ending is logged: the ones that change the stack. `status`, `list` and the
+/// account, connection and apps calls are not, since their stdout can carry a sign-in code or a key
+/// and a polled `status` would fill the log.
+fn logs_its_ending(arguments: &[&str]) -> bool {
+    matches!(
+        arguments,
+        ["local", "setup" | "start" | "update" | "stop", ..]
+    )
+}
+
+/**
+The log entry for how a call ended: `[local setup] finished in 88.1s`, or that it failed, after how
+long, with its exit code, what its JSON report says went wrong (`error.code`, `error.message`,
+`nextAction.reason`) and the end of its stderr. The log scrubs every entry (`logging::line`).
+*/
+fn ending_entry(
+    arguments: &[&str],
+    took: Duration,
+    status: Option<std::process::ExitStatus>,
+    result: &Result<(i32, Vec<u8>), Failure>,
+    stderr: &str,
+) -> (log::Level, String) {
+    let command = arguments
+        .iter()
+        .take_while(|argument| !argument.starts_with('-'))
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let took = took.as_secs_f32();
+    let mut entry = match result {
+        Ok((0, _)) => {
+            return (
+                log::Level::Info,
+                format!("[{command}] finished in {took:.1}s"),
+            )
+        }
+        Ok((code, _)) => format!("[{command}] failed after {took:.1}s: exit {code}"),
+        Err(failure) => {
+            let ended = match (status, failure) {
+                (Some(status), _) => format!(", {}", exit_described(status)),
+                (None, Failure::Timeout | Failure::Cancelled | Failure::OutputLimit) => {
+                    ", stopped by OpenBot".to_owned()
+                }
+                (None, _) => String::new(),
+            };
+            format!("[{command}] failed after {took:.1}s: {failure:?}{ended}")
+        }
+    };
+    if let Ok((_, stdout)) = result {
+        if let Ok(Value::Object(wire)) = serde_json::from_slice::<Value>(stdout) {
+            let said = |value: Option<&Value>| value.and_then(Value::as_str).map(str::to_owned);
+            let error = wire.get("error");
+            let next = wire.get("nextAction");
+            for (name, value) in [
+                ("status", said(wire.get("status"))),
+                ("error", said(error.and_then(|error| error.get("code")))),
+                ("reason", said(next.and_then(|next| next.get("reason")))),
+                (
+                    "message",
+                    said(error.and_then(|error| error.get("message"))),
+                ),
+            ] {
+                if let Some(value) = value {
+                    entry.push_str(&format!(", {name} {value:?}"));
+                }
+            }
+        } else {
+            entry.push_str(", no JSON report");
+        }
+    }
+    let stderr = stderr.trim();
+    if !stderr.is_empty() {
+        entry.push_str(&format!("\nstderr ends: {stderr}"));
+    }
+    (log::Level::Error, entry)
+}
+
+/// `exit 1`, or the signal or Windows status that ended a process with no exit code of its own.
+fn exit_described(status: std::process::ExitStatus) -> String {
+    if let Some(code) = status.code() {
+        return format!("exit {code}");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(signal) = status.signal() {
+            return format!("ended by signal {signal}");
+        }
+    }
+    "no exit code".to_owned()
+}
+
+/// `execute_watching`'s process: the CLI's stderr goes to `errors`, when there is one, and how it
+/// exited to `status`.
+#[allow(clippy::too_many_arguments)]
+fn execute_child(
+    cli: &PinnedCli,
+    arguments: &[&str],
+    folder: Option<&std::path::Path>,
+    limits: Limits,
+    cancel: &Cancel,
     mut watch: Option<Watch>,
+    errors: Option<&Output>,
+    status: &mut Option<std::process::ExitStatus>,
 ) -> Result<(i32, Vec<u8>), Failure> {
     let engine = recorded_engine();
     refuse_rootless(arguments, engine.as_ref())?;
     let output = Output::create()?;
     let mut command = command_for(cli, arguments, folder, engine.as_ref());
+    // stderr can carry anything a dependency prints. It is read only for the log, and only for a
+    // call that changes the stack (`logs_its_ending`).
+    let stderr = match errors.and_then(|errors| errors.file.try_clone().ok()) {
+        Some(file) => Stdio::from(file),
+        None => Stdio::null(),
+    };
     command
         .stdin(Stdio::null())
         .stdout(output.file.try_clone().map_err(|_| Failure::Spawn)?)
-        // stderr can carry anything a dependency prints. It is never read, so it is not kept.
-        .stderr(Stdio::null());
+        .stderr(stderr);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -2061,7 +2214,9 @@ fn execute_watching(
     let mut watched = 0;
     loop {
         if exited(&mut child)? {
-            let code = child.wait().map_err(|_| Failure::Spawn)?.code();
+            let exit = child.wait().map_err(|_| Failure::Spawn)?;
+            *status = Some(exit);
+            let code = exit.code();
             let bytes = output.read(limits.output)?;
             // A signal-terminated CLI has no code and no report.
             return Ok((code.ok_or(Failure::UnexpectedExit)?, bytes));
@@ -2127,6 +2282,17 @@ impl Output {
             .read_to_end(&mut bytes)
             .ok()?;
         Some(bytes)
+    }
+
+    /// The last `cap` bytes the process wrote, as text.
+    fn tail(&self, cap: usize) -> Option<String> {
+        let mut file = std::fs::File::open(&self.path).ok()?;
+        let length = file.metadata().ok()?.len();
+        file.seek(std::io::SeekFrom::Start(length.saturating_sub(cap as u64)))
+            .ok()?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).ok()?;
+        Some(String::from_utf8_lossy(&bytes).into_owned())
     }
 
     fn read(&self, cap: usize) -> Result<Vec<u8>, Failure> {
@@ -3494,6 +3660,116 @@ mod tests {
             "local\nsetup\n--defer-model\n--json"
         );
         assert_eq!(fixture.cwd(), installation.canonicalize().unwrap());
+    }
+
+    /// The ending `execute_watching` logged on this thread, taken.
+    fn last_ending() -> Option<String> {
+        LAST_ENDING.with(|last| last.borrow_mut().take())
+    }
+
+    /// A first setup on Windows stopped after `runtime-inspect` and the log said nothing: the CLI
+    /// exited 1 with its own failed report, and none of it was kept. The log now says how it ended,
+    /// what its report says and the end of its stderr.
+    #[test]
+    fn a_setup_that_fails_logs_its_exit_its_report_and_its_stderr() {
+        let failed = json!({
+            "version": 1,
+            "command": "local setup",
+            "status": "failed",
+            "error": {
+                "code": "LOCAL_COMMAND_FAILED",
+                "message": "The local command did not finish."
+            },
+            "nextAction": { "reason": "local_command_failed", "resumeCommand": null },
+            "diagnostics": []
+        });
+        let fixture = Fixture::new("local-eval-setup-failed-logged", &format!("1\n{failed}"));
+        std::fs::write(
+            fixture.root.join("stderr"),
+            "Error: This demo requires CLI-managed k3d inside Docker. The node does not match \
+             the saved installation.\n",
+        )
+        .unwrap();
+        let installation = fixture.root.join("installation");
+        std::fs::create_dir_all(&installation).unwrap();
+        last_ending();
+        let report = setup(
+            &fixture.cli(),
+            &installation,
+            None,
+            Limits::for_setup(),
+            &Cancel::default(),
+        )
+        .unwrap();
+        assert_eq!(report.outcome, Outcome::Failed);
+        assert_eq!(report.reason, Some(Reason::LocalCommandFailed));
+        let entry = last_ending().expect("the setup's ending was logged");
+        assert!(entry.starts_with("[local setup] failed after "), "{entry}");
+        for said in [
+            "exit 1",
+            "\"LOCAL_COMMAND_FAILED\"",
+            "\"local_command_failed\"",
+            "The local command did not finish.",
+            "stderr ends: Error: This demo requires CLI-managed k3d inside Docker.",
+            "The node does not match the saved installation.",
+        ] {
+            assert!(entry.contains(said), "{said:?} is not in {entry}");
+        }
+    }
+
+    /// A setup OpenBot stopped says so, and a finished one says how long it took.
+    #[test]
+    fn a_setup_logs_that_openbot_stopped_it_or_that_it_finished() {
+        let fixture = Fixture::new("local-eval-setup-stopped-logged", "sleep");
+        let installation = fixture.root.join("installation");
+        std::fs::create_dir_all(&installation).unwrap();
+        let cancel = Cancel::default();
+        cancel.cancel();
+        last_ending();
+        let stopped = setup(
+            &fixture.cli(),
+            &installation,
+            None,
+            Limits::for_setup(),
+            &cancel,
+        );
+        assert_eq!(stopped.unwrap_err(), Failure::Cancelled);
+        let entry = last_ending().expect("the stopped setup's ending was logged");
+        assert!(
+            entry.starts_with("[local setup] failed after ")
+                && entry.ends_with("Cancelled, stopped by OpenBot"),
+            "{entry}"
+        );
+
+        let mut done = envelope();
+        done["command"] = json!("local setup");
+        std::fs::write(fixture.root.join("scenario"), format!("0\n{done}")).unwrap();
+        setup(
+            &fixture.cli(),
+            &installation,
+            None,
+            Limits::for_setup(),
+            &Cancel::default(),
+        )
+        .unwrap();
+        let entry = last_ending().expect("the finished setup's ending was logged");
+        assert!(entry.starts_with("[local setup] finished in "), "{entry}");
+    }
+
+    /// `status` is polled and the account calls print sign-in codes: their endings are not logged.
+    #[test]
+    fn a_status_call_logs_nothing() {
+        let fixture = Fixture::new(
+            "local-eval-status-not-logged",
+            &format!("1\n{}", envelope()),
+        );
+        last_ending();
+        let _ = fixture.run(
+            Action::Status,
+            Limits::for_action(Action::Status),
+            &Cancel::default(),
+        );
+        assert_eq!(last_ending(), None);
     }
 
     /// The Learning agent's model goes to `local setup` on the stack the installation already has:
@@ -4900,7 +5176,11 @@ fn main() {
             }
         }
         code => {
-            eprint!("synthetic-secret-marker");
+            // What the real CLI's runtime prints when it fails, when the test gave one.
+            match std::fs::read_to_string(dir.join("stderr")) {
+                Ok(said) => eprint!("{said}"),
+                Err(_) => eprint!("synthetic-secret-marker"),
+            }
             print!("{body}");
             std::io::stdout().flush().unwrap();
             std::process::exit(code.parse().unwrap());
