@@ -22,7 +22,13 @@
 #                                   latest/ alone (default: the Latest release, both)
 #   DOWNLOADS_PREFIX                put every key under this prefix, such as `smoketest/`, to try
 #                                   the sync against the real bucket without changing what it serves
+#   DOWNLOADS_URL                   the address the mirrored latest.json names its downloads at
+#                                   (default https://downloads.copilotkit.ai)
+#   DOWNLOADS_VERIFY_DELAY          seconds between checks of a download the feed names (default 10)
 #   and AWS credentials that may read and write the bucket and invalidate the distribution.
+#
+# latest/latest.json is the release's feed with each platform's download moved here, where this run
+# put it (releases/<tag>/<file>); see the comment where it is written.
 #
 # Running it again changes nothing. Each object's SHA-256, as S3 computed it on upload, is compared
 # with the digest GitHub reports for the asset, and only an object that is missing, differs, or has
@@ -47,6 +53,8 @@ tag="${DOWNLOADS_TAG:-}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 latest_cache='public, max-age=300'
 release_cache='public, max-age=31536000, immutable'
+downloads_url="${DOWNLOADS_URL:-https://downloads.copilotkit.ai}"
+downloads_url="${downloads_url%/}"
 
 if [ -n "$prefix" ] && [[ ! "$prefix" =~ ^[a-z0-9][a-z0-9-]*/$ ]]; then
   echo "::error::DOWNLOADS_PREFIX must be a single lowercase folder ending in /, such as smoketest/."
@@ -103,9 +111,14 @@ fi
 # The plan: one line per object, "<key> <asset> <sha256> <cache> <type>", tab-separated, in the order
 # they are uploaded. latest.json goes last, after the installers it describes.
 plan="$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/downloads-plan.XXXXXX")"
+work="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/downloads-sync.XXXXXX")"
+mkdir "$work/assets"
+# The files this run puts under releases/<tag>/, by name, for the feed's URLs.
+mirrored=()
 add() {
-  local key="$1" asset="$2" cache="$3" sha type
-  sha="$(digest "$asset")"
+  local key="$1" asset="$2" cache="$3" sha="${4:-}" type
+  if [ -z "$sha" ]; then sha="$(digest "$asset")"; fi
+  if [[ "$key" == "releases/$tag/"* ]]; then mirrored+=("$asset"); fi
   if [ -z "$sha" ]; then
     echo "::error::GitHub reports no SHA-256 digest for $asset on $tag, so it cannot be checked. Nothing was mirrored."
     exit 1
@@ -145,16 +158,57 @@ for asset in container-images.json OpenBot-darwin-aarch64.app.tar.gz OpenBot-dar
     add "releases/$tag/$asset" "$asset" "$release_cache"
   fi
 done
+feed_urls=()
 if [ "$mode" = latest ]; then
   for fixed in "${fixed_names[@]}"; do
     add "latest/$fixed" "$fixed" "$latest_cache"
   done
-  add latest/latest.json latest.json "$latest_cache"
+  # The feed the app updates from, with each platform's download moved to this address: a URL that
+  # is exactly this release's GitHub download of a file this run puts under releases/<tag>/ becomes
+  # that file's address here. Nothing else changes, by a byte: minisign signs each file, not its
+  # URL, so every signature stays as the signing run wrote it. The release's own latest.json is
+  # left as it is. It is compared and uploaded by the SHA-256 of what this run wrote, and last.
+  feed="$work/assets/latest.json"
+  gh release download "$tag" -R "$GITHUB_REPOSITORY" --pattern latest.json --dir "$work/assets"
+  if [ "$(openssl dgst -sha256 -binary "$feed" | od -An -v -tx1 | tr -d ' \n')" != "$(digest latest.json)" ]; then
+    echo "::error::latest.json downloaded from $tag does not match the digest GitHub reports for it. Nothing was mirrored."
+    exit 1
+  fi
+  cp "$feed" "$work/latest.github.json"
+  # Read whole, trailing newlines included, and changed only by replacing whole JSON strings.
+  text="$(cat "$feed"; printf x)"
+  text="${text%x}"
+  github="https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/"
+  while IFS= read -r url; do
+    file="${url#"$github"}"
+    if [ "$file" = "$url" ] || [ -z "$file" ] || [[ "$file" == */* ]]; then continue; fi
+    for name in "${mirrored[@]}"; do
+      if [ "$name" = "$file" ]; then
+        moved="$downloads_url/${prefix}releases/$tag/$file"
+        text="${text//"\"$url\""/"\"$moved\""}"
+        feed_urls+=("$moved")
+        break
+      fi
+    done
+  done < <(jq -r '.platforms // {} | .[] | .url // empty' "$feed")
+  printf '%s' "$text" > "$feed"
+  # Every rewritten URL is in the feed, and every other field reads as it did.
+  for moved in ${feed_urls[@]+"${feed_urls[@]}"}; do
+    if ! jq -e --arg url "$moved" '[.platforms[].url] | index($url)' "$feed" > /dev/null; then
+      echo "::error::latest.json on $tag names its downloads in a form this cannot rewrite. Nothing was mirrored."
+      exit 1
+    fi
+  done
+  if [ "$(jq -S 'del(.platforms[]?.url)' "$feed")" != "$(jq -S 'del(.platforms[]?.url)' "$work/latest.github.json")" ]; then
+    echo "::error::Rewriting latest.json on $tag would change more than its URLs. Nothing was mirrored."
+    exit 1
+  fi
+  add latest/latest.json latest.json "$latest_cache" \
+    "$(openssl dgst -sha256 -binary "$feed" | od -An -v -tx1 | tr -d ' \n')"
 fi
 
 # What S3 holds now. S3 computed ChecksumSHA256 itself when the object was uploaded with one, so an
 # object put there any other way reads as different and is replaced.
-work="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/downloads-sync.XXXXXX")"
 uploads=()
 while IFS=$'\t' read -r key asset sha cache type; do
   if head="$(aws s3api head-object --bucket "$bucket" --key "$key" --checksum-mode ENABLED \
@@ -179,8 +233,7 @@ if [ "${#uploads[@]}" -eq 0 ]; then
 fi
 
 # Every file is downloaded and checked against GitHub's digest before the first upload, so a bad
-# download changes nothing.
-mkdir "$work/assets"
+# download changes nothing. latest.json is the rewritten feed, checked against what this run wrote.
 for key in "${uploads[@]}"; do
   asset="$(awk -F '\t' -v key="$key" '$1 == key { print $2 }' "$plan")"
   sha="$(awk -F '\t' -v key="$key" '$1 == key { print $3 }' "$plan")"
@@ -194,9 +247,30 @@ for key in "${uploads[@]}"; do
   fi
 done
 
+# Each download the feed names here must answer through the address before the feed goes up, so
+# it never names a file that is not there. A miss is asked again, twice, after DOWNLOADS_VERIFY_DELAY
+# seconds (default 10), which outlasts CloudFront's caching of a 403 from before the upload.
+check_feed() {
+  local url code attempt
+  for url in ${feed_urls[@]+"${feed_urls[@]}"}; do
+    for attempt in 1 2 3; do
+      code="$(curl --silent --head --output /dev/null --write-out '%{http_code}' "$url" || true)"
+      if [ "$code" = 200 ]; then break; fi
+      if [ "$attempt" = 3 ]; then
+        echo "::error::$url answers $code, so latest.json, which names it, was not uploaded."
+        exit 1
+      fi
+      sleep "${DOWNLOADS_VERIFY_DELAY:-10}"
+    done
+  done
+}
+
 changed_latest=false
 for key in "${uploads[@]}"; do
   IFS=$'\t' read -r _ asset _ cache type < <(awk -F '\t' -v key="$key" '$1 == key' "$plan")
+  if [ "$key" = "${prefix}latest/latest.json" ]; then
+    check_feed
+  fi
   # S3 refuses the upload unless the bytes it received hash to this checksum.
   aws s3api put-object --bucket "$bucket" --key "$key" --body "$work/assets/$asset" \
     --content-type "$type" --cache-control "$cache" \

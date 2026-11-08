@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop's updates download from downloads.copilotkit.ai too. The update feed there names
+  that address for the Windows installer and the Mac update archives, instead of GitHub; every
+  signature is unchanged, and the feed is only published once each of those files answers there.
 ### OpenBot Desktop
 
 - **A back end setup that stops says why.** OpenBot's log now records how every back end setup,
