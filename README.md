@@ -6,7 +6,7 @@
 
 A Bot can use a browser, work with files, and call the tools you grant it. You can watch it work, take over to sign in, and hand the browser back.
 
-[**Talk to an engineer**](https://copilotkit.ai/talk-to-an-engineer?ref=openbot_readme) · [**Have us build it with you**](https://copilotkit.ai/talk-to-an-engineer?ref=openbot_readme) · [**openbot.co**](https://openbot.co) · [**Quick start**](#quick-start) · [**Docs**](docs/README.md)
+[**Talk to an engineer**](https://open.bot/business) · [**Have us build it with you**](https://open.bot/business) · [**open.bot**](https://open.bot) · [**Quick start**](#quick-start) · [**Docs**](docs/README.md)
 
 [![CI](https://github.com/CopilotKit/openbot/actions/workflows/ci.yml/badge.svg)](https://github.com/CopilotKit/openbot/actions/workflows/ci.yml)
 [![security](https://github.com/CopilotKit/openbot/actions/workflows/security_zizmor.yml/badge.svg)](https://github.com/CopilotKit/openbot/actions/workflows/security_zizmor.yml)
@@ -44,7 +44,7 @@ The team template comes with two Bots. **General Assistant** helps with everyday
 
 To add a Bot, open `/bots` or start from one of the [YAML examples](examples/fintech/catalog/). For example, [Meeting Follow-ups](examples/fintech/catalog/meeting-follow-ups.yaml) reads meeting notes and lists who agreed to do what. Copy its file into `examples/fintech/agents/` and restart OpenBot to try it. You grant tool access separately, so you can let a Bot read a document without giving it permission to edit it.
 
-More at [openbot.co](https://openbot.co).
+More at [open.bot](https://open.bot).
 
 ## Built on AG-UI
 
@@ -455,7 +455,7 @@ Use `bash scripts/start.sh` for the whole stack and `bash scripts/stop.sh` to ta
 
 ## Documentation
 
-- [openbot.co](https://openbot.co)
+- [open.bot](https://open.bot)
 - [docs/README.md](docs/README.md)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/configuration.md](docs/configuration.md)
