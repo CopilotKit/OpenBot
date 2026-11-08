@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop keeps trying when GitHub stops sending the new version during an update. A
+  download that gets nothing for 30 seconds is tried again, six times in all with longer waits
+  between, for about four minutes. Before, three tries in a minute and a half gave up and put the
+  update back, though opening OpenBot again two minutes later downloaded it in seconds. A download
+  that keeps arriving is never cut off, however slow.
 - A skill picked from the `/` menu works for a built-in Bot on a Claude plan. The Bot answered
   "Unknown command: /tide-report" without asking the model, because Claude Code took the message,
   which starts with the skill's command, for a slash command of its own.
