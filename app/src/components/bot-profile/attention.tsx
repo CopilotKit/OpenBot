@@ -149,28 +149,36 @@ export function noticePath(bot: BotAttention): string {
  */
 function useAttentionNotifications(bots: BotAttention[] | undefined) {
   const seen = useRef<Map<string, number> | null>(null);
+  // Asks OpenBot Desktop now, while OpenBot is in front, so its answer is in before anything needs
+  // the person.
+  useEffect(() => {
+    void notificationsAllowed();
+  }, []);
   useEffect(() => {
     if (!bots) return;
     const previous = seen.current;
     seen.current = new Map(bots.map((bot) => [bot.agentId, asksOf(bot)]));
     // The first answer is the state on arrival, not news.
     if (!previous) return;
-    // Someone looking at OpenBot sees the badge and the conversation; a notice is for when they are not.
-    if (!notificationsAllowed() || inSight()) return;
-    for (const bot of bots) {
-      const now = asksOf(bot);
-      if (bot.notify === "none" || now <= (previous.get(bot.agentId) ?? 0))
-        continue;
-      showNotice({
-        title: `${bot.name} needs you`,
-        body: attentionSummary(bot),
-        // The conversation's tag when it waits in one: its reply notice, if any, is replaced by this.
-        tag: bot.waitingIn
-          ? conversationTag(bot.waitingIn)
-          : `openbot-attention-${bot.agentId}`,
-        path: noticePath(bot),
-      });
-    }
+    const rose = bots.filter(
+      (bot) =>
+        bot.notify !== "none" && asksOf(bot) > (previous.get(bot.agentId) ?? 0),
+    );
+    if (rose.length === 0) return;
+    void notificationsAllowed().then((allowed) => {
+      // Someone looking at OpenBot sees the badge and the conversation; a notice is for when they are not.
+      if (!allowed || inSight()) return;
+      for (const bot of rose)
+        showNotice({
+          title: `${bot.name} needs you`,
+          body: attentionSummary(bot),
+          // The conversation's tag when it waits in one: its reply notice, if any, is replaced by this.
+          tag: bot.waitingIn
+            ? conversationTag(bot.waitingIn)
+            : `openbot-attention-${bot.agentId}`,
+          path: noticePath(bot),
+        });
+    });
   }, [bots]);
 }
 
@@ -201,8 +209,10 @@ function usePingNotifications(
     const previous = seen.current;
     seen.current = lastPingId;
     if (previous === undefined || lastPingId === null) return;
-    if (lastPingId === previous || !notificationsAllowed()) return;
-    void refetch().then(({ data }) => {
+    if (lastPingId === previous) return;
+    void (async () => {
+      if (!(await notificationsAllowed())) return;
+      const { data } = await refetch();
       const notice = pingNotice(
         (data ?? []).filter((item) => item.pingId === lastPingId),
         (agentId) =>
@@ -215,7 +225,7 @@ function usePingNotifications(
         tag: `openbot-ping-${lastPingId}`,
         path: "/bots",
       });
-    });
+    })();
   }, [lastPingId, refetch]);
 }
 

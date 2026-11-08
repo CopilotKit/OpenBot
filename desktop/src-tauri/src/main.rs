@@ -7174,6 +7174,9 @@ the page a click opens.
 On Windows a toast of our own, which opens an `openbot://` link by protocol: the only way an app
 installed without a package is brought back from the notification centre (see `notice.rs`). On
 macOS and Linux the notification plugin's, carrying the page in `extra.path` for its click report.
+
+Each one is logged, shown or not, so the log says whether the page asked and what the system
+answered. Never the notice's words or page: they are the person's.
 */
 fn show_notice<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
@@ -7183,16 +7186,16 @@ fn show_notice<R: tauri::Runtime>(
     tag: Option<&str>,
 ) -> Result<(), String> {
     #[cfg(windows)]
-    {
+    let shown = {
         let link = path.map_or_else(|| format!("{}://open", notice::SCHEME), notice::open_link);
         notice::show_toast(
             &app.config().identifier,
             &notice::toast_xml(title, body, &link),
             tag.map(notice::toast_tag).as_deref(),
         )
-    }
+    };
     #[cfg(not(windows))]
-    {
+    let shown = {
         // The plugin has no tag to replace a notice by: the page sends one notice per moment.
         let _ = tag;
         use tauri_plugin_notification::NotificationExt;
@@ -7201,7 +7204,12 @@ fn show_notice<R: tauri::Runtime>(
             builder = builder.extra("path", path);
         }
         builder.show().map_err(|error| error.to_string())
+    };
+    match &shown {
+        Ok(()) => log::info!("[notification] shown"),
+        Err(error) => log::warn!("[notification] not shown: {error}"),
     }
+    shown
 }
 
 /**
