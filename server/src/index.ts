@@ -55,6 +55,7 @@ import {
   wakeUpTools,
 } from "./agents/wake-up";
 import { createApp } from "./app";
+import { createDecisionWaits } from "./approvals/decision-waits";
 import { createApprovedActionExecutor } from "./approvals/execute";
 import { createPersonResponseTick } from "./approvals/person-response-sweep";
 import {
@@ -223,8 +224,8 @@ import {
 } from "./learning/sharing";
 import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
-import { createMemoryRuntime } from "./memory/runtime";
 import { createIntelligenceMemory } from "./memory/intelligence";
+import { createMemoryRuntime } from "./memory/runtime";
 import { createMemoryStore } from "./memory/store";
 import { offeredMemoryTools } from "./memory/tools";
 import { reportModelAvailability } from "./model-availability-check";
@@ -2217,6 +2218,7 @@ const copilotRuntime = mountCopilotRuntime(
   identifyActor,
   {
     productTelemetry,
+    decisionWaits: createDecisionWaits(database),
     onRunBusy: (input) => {
       void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
     },

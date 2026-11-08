@@ -110,12 +110,14 @@ export function createBotLifecycleRoutes(
    */
   routes.get("/attention", requireUser, async (context) => {
     const ownerUserId = context.var.actor.id;
-    const [counts, paused, taskCounts, lastPingId] = await Promise.all([
-      activity.attention(ownerUserId),
-      lifecycle.pausedFor(ownerUserId),
-      tasks?.counts(ownerUserId) ?? Promise.resolve([]),
-      activity.lastPing(ownerUserId),
-    ]);
+    const [counts, paused, taskCounts, lastPingId, waitingIn] =
+      await Promise.all([
+        activity.attention(ownerUserId),
+        lifecycle.pausedFor(ownerUserId),
+        tasks?.counts(ownerUserId) ?? Promise.resolve([]),
+        activity.lastPing(ownerUserId),
+        activity.waitingIn(ownerUserId),
+      ]);
     const ids = [
       ...new Set([
         ...counts.map((row) => row.agentId),
@@ -135,6 +137,11 @@ export function createBotLifecycleRoutes(
       if (!agent) continue;
       const row = byId.get(agentId);
       const task = tasksById.get(agentId);
+      const asks =
+        (row?.questions ?? 0) +
+        (row?.approvals ?? 0) +
+        (row?.handoffs ?? 0) +
+        (task?.needsInput ?? 0);
       bots.push({
         agentId,
         name: agent.name,
@@ -150,6 +157,7 @@ export function createBotLifecycleRoutes(
           ready: task?.ready ?? 0,
           failed: task?.failed ?? 0,
         },
+        waitingIn: asks > 0 ? (waitingIn.get(agentId) ?? null) : null,
       });
     }
     return context.json({ bots, lastPingId } satisfies AttentionResponse);

@@ -29,6 +29,11 @@ export type BotAttention = {
   items: number;
   /** Its tasks that wait on the person: an approval or a question, a reply to read, or a failure. */
   tasks: { needsInput: number; ready: number; failed: number };
+  /**
+   * The conversation of the newest thing it waits on the person for, where a notice about it
+   * opens. Null when it waits on nothing in a conversation; absent from a server older than this app.
+   */
+  waitingIn?: string | null;
 };
 
 /**
@@ -126,6 +131,14 @@ export function botAttentionQueryOptions() {
     ...attentionQuery,
     select: (body): BotAttention[] => body.bots,
   });
+}
+
+/**
+ * The same read, whole, for code outside a component that reads it once rather than watching it:
+ * `ensureQueryData` hands back what the badge's poll already holds.
+ */
+export function botAttentionBodyQueryOptions() {
+  return queryOptions(attentionQuery);
 }
 
 /** The person's newest ping, for the one browser notification each new ping sends. */

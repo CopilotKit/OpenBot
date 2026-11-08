@@ -22,6 +22,11 @@ import {
 } from "drizzle-orm";
 import { HANDOFF_KIND } from "../agents/handoff";
 import { WAKE_UP_KIND, type WakeUpPayload } from "../agents/wake-up";
+import {
+  APPROVAL_CARDS,
+  DECISION_KIND,
+  type DecisionPayload,
+} from "../approvals/decision-waits";
 import { plainLine } from "../channels/text";
 import type { Database } from "../db/client";
 import {
@@ -116,6 +121,20 @@ const inListedTask = (ownerUserId: string, channelId: SQL, threadId: SQL) =>
       and ${listedTask}
       and (${botTasks.channelId} = ${channelId} or ${intelligenceChannelMappings.threadId} = ${threadId})
   )`;
+/** The conversation a waiting card was asked in is still there: a deleted one has nothing to answer. */
+const inOpenConversation = (channelId: SQL) =>
+  sql`exists (
+    select 1 from ${channels}
+    where ${channels.id} = ${channelId} and ${channels.deletedAt} is null
+  )`;
+/** A card still waiting on this person: asked in a conversation of theirs that is still there. */
+const openDecisionFor = (ownerUserId: string) =>
+  and(
+    eq(workItems.kind, DECISION_KIND),
+    isNull(workItems.finishedAt),
+    sql`${workItems.payload}->>'actorId' = ${ownerUserId}`,
+    inOpenConversation(sql`${workItems.payload}->>'channelId'`),
+  );
 /**
  * One line of a row, as plain text. A run's reply and a follow-up's note are written by the Bot, in
  * Markdown, and a row draws text, so `heading.txt` in backticks and **bold** showed their marks.
@@ -478,6 +497,37 @@ export function createActivityStore(database: Database) {
         });
       }
 
+      // Cards this Bot asked with in the conversation and is waiting on.
+      const decisions = await database
+        .select()
+        .from(workItems)
+        .where(
+          and(
+            openDecisionFor(ownerUserId),
+            sql`${workItems.payload}->>'botId' = ${agentId}`,
+          ),
+        )
+        .orderBy(desc(workItems.createdAt))
+        .limit(50);
+      for (const row of decisions) {
+        const decision = row.payload as DecisionPayload;
+        const approval = APPROVAL_CARDS.includes(decision.toolName);
+        activity.inProgress.push({
+          id: `decision:${row.key}`,
+          kind: approval ? "approval" : "question",
+          title:
+            clip(decision.title, 160) ??
+            (approval ? "An approval" : "A question"),
+          detail: null,
+          status: "waiting for you",
+          at: iso(row.createdAt),
+          channelId: decision.channelId,
+          needsYou: true,
+          stoppable: false,
+          cancellable: false,
+        });
+      }
+
       // Follow-ups the Bot scheduled for itself.
       const wakeUps = await database
         .select()
@@ -628,6 +678,34 @@ export function createActivityStore(database: Database) {
       for (const row of approvals)
         if (row.agentId) entry(row.agentId).approvals += row.total;
 
+      // Cards asked in the conversation: the approval card is an approval, the rest are questions.
+      const decisions = await database
+        .select({
+          agentId: sql<string>`${workItems.payload}->>'botId'`,
+          toolName: sql<string>`${workItems.payload}->>'toolName'`,
+          total: sql<number>`count(*)::int`,
+        })
+        .from(workItems)
+        .where(
+          and(
+            openDecisionFor(ownerUserId),
+            sql`not ${inListedTask(
+              ownerUserId,
+              sql`${workItems.payload}->>'channelId'`,
+              sql`${workItems.payload}->>'threadId'`,
+            )}`,
+          ),
+        )
+        .groupBy(
+          sql`${workItems.payload}->>'botId'`,
+          sql`${workItems.payload}->>'toolName'`,
+        );
+      for (const row of decisions)
+        if (row.agentId)
+          entry(row.agentId)[
+            APPROVAL_CARDS.includes(row.toolName) ? "approvals" : "questions"
+          ] += row.total;
+
       // A delegated task that ran out of attempts: the chain stopped and only the person can pick it up.
       const handoffs = await database
         .select({
@@ -696,6 +774,108 @@ export function createActivityStore(database: Database) {
       for (const row of items) entry(row.agentId).items += row.total;
 
       return [...byBot.values()];
+    },
+
+    /**
+     * Per Bot, the conversation of the newest thing it waits on this person for: a question, a card
+     * in the conversation, an approval or a stalled hand-off. A notice about that Bot opens there.
+     *
+     * Read without leaving out what a task waits on, as the counts do: a task needing input waits on
+     * one of these, in the task's own conversation, and that is where its notice should open too.
+     */
+    async waitingIn(ownerUserId: string): Promise<Map<string, string>> {
+      const newest = new Map<string, { channelId: string; at: number }>();
+      const offer = (
+        agentId: string | null,
+        channelId: string | null | undefined,
+        at: Date,
+      ) => {
+        if (!agentId || !channelId) return;
+        const known = newest.get(agentId);
+        if (!known || at.getTime() > known.at)
+          newest.set(agentId, { channelId, at: at.getTime() });
+      };
+      const questionBot = sql<string>`coalesce(${workItems.payload}->>'sourceBotId', ${workItems.payload}->>'botId')`;
+      const approvalBot = sql<string>`${approvalRequests.action}->>'botId'`;
+      const handoffBot = sql<string>`${workItems.payload}->>'fromBotId'`;
+      const decisionBot = sql<string>`${workItems.payload}->>'botId'`;
+      const [questions, decisions, approvals, handoffs] = await Promise.all([
+        database
+          .selectDistinctOn([questionBot], {
+            agentId: questionBot,
+            channelId: sql<string | null>`${workItems.payload}->>'channelId'`,
+            threadId: sql<string | null>`${workItems.payload}->>'threadId'`,
+            at: workItems.createdAt,
+          })
+          .from(workItems)
+          .where(
+            and(
+              eq(workItems.kind, "person.question"),
+              isNull(workItems.finishedAt),
+              sql`${workItems.payload}->>'actorId' = ${ownerUserId}`,
+            ),
+          )
+          .orderBy(questionBot, desc(workItems.createdAt)),
+        database
+          .selectDistinctOn([decisionBot], {
+            agentId: decisionBot,
+            channelId: sql<string>`${workItems.payload}->>'channelId'`,
+            at: workItems.createdAt,
+          })
+          .from(workItems)
+          .where(openDecisionFor(ownerUserId))
+          .orderBy(decisionBot, desc(workItems.createdAt)),
+        database
+          .selectDistinctOn([approvalBot], {
+            agentId: approvalBot,
+            threadId: sql<string>`${approvalRequests.action}->>'threadId'`,
+            at: approvalRequests.createdAt,
+          })
+          .from(approvalRequests)
+          .where(
+            and(
+              eq(approvalRequests.ownerUserId, ownerUserId),
+              eq(approvalRequests.status, "pending"),
+            ),
+          )
+          .orderBy(approvalBot, desc(approvalRequests.createdAt)),
+        database
+          .selectDistinctOn([handoffBot], {
+            agentId: handoffBot,
+            threadId: sql<string | null>`${workItems.payload}->>'threadId'`,
+            at: workItems.updatedAt,
+          })
+          .from(workItems)
+          .where(
+            and(
+              eq(workItems.kind, HANDOFF_KIND),
+              isNull(workItems.finishedAt),
+              gte(workItems.attempts, DEFAULT_MAX_ATTEMPTS),
+              sql`${workItems.payload}->>'actorId' = ${ownerUserId}`,
+              sql`${workItems.payload}->>'answerIn' is null`,
+            ),
+          )
+          .orderBy(handoffBot, desc(workItems.updatedAt)),
+      ]);
+      const threads = await channelsForThreads([
+        ...questions.map((row) => row.threadId ?? ""),
+        ...approvals.map((row) => row.threadId),
+        ...handoffs.map((row) => row.threadId ?? ""),
+      ]);
+      for (const row of questions)
+        offer(
+          row.agentId,
+          row.channelId ?? threads.get(row.threadId ?? ""),
+          row.at,
+        );
+      for (const row of decisions) offer(row.agentId, row.channelId, row.at);
+      for (const row of approvals)
+        offer(row.agentId, threads.get(row.threadId), row.at);
+      for (const row of handoffs)
+        offer(row.agentId, threads.get(row.threadId ?? ""), row.at);
+      return new Map(
+        [...newest].map(([agentId, { channelId }]) => [agentId, channelId]),
+      );
     },
 
     /**
