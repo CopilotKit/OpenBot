@@ -53,7 +53,7 @@ Watch a Bot use its browser and tools, review interactive results, and take over
 </picture>
 
 - **Choose your models.** Use OpenAI, Claude, Gemini, or open models through an OpenAI-compatible endpoint, hosted by a provider or on your own infrastructure. Keep your provider relationships and change models as your needs change.
-- **Bring your agents.** Run built-in Bots in the OpenBot server or connect the agents your engineers already build on any agent execution platform through AG-UI. LangChain, Claude Agent SDK, Google ADK, Mastra, CrewAI, AWS Strands, and more can work in the same workspace.
+- **Bring your agents.** Run built-in Bots in the OpenBot server, or connect your existing agents through AG-UI from any agent execution platform. LangChain, Claude Agent SDK, Google ADK, Mastra, CrewAI, AWS Strands, and more can work in the same workspace.
 - **Make it yours.** Use the MIT-licensed template as-is, white-label it, or customize it deeply. AG-UI connects agents, MCP connects tools, and the frontends and backend can evolve independently.
 - **Govern work across your team.** Company sign-in, roles, tool permissions, approvals, and audit apply across the workspace. Your agents use OpenBot's tools and computers under the same policies.
 - **Get help deploying it.** CopilotKit's engineers can work with your team to deploy OpenBot, connect your systems, and automate parts of specific jobs.
@@ -64,21 +64,15 @@ Watch a Bot use its browser and tools, review interactive results, and take over
 
 OpenBot has three parts. On your laptop, setup runs the backend and Intelligence for you. For a team, the Helm chart deploys both on Kubernetes in your own infrastructure.
 
-```mermaid
-flowchart TB
-    Frontends["OpenBot frontends"] --> Backend["OpenBot backend"]
-    subgraph Cluster["Your Kubernetes cluster"]
-        Backend --> Computers["Computer use · browser · files · shell"]
-        Backend <--> Intelligence["CopilotKit Intelligence"]
-    end
-    Backend <-->|AG-UI| Agents["Your agents"]
-    Backend <-->|MCP| Tools["Your tools"]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-overview-dark.svg">
+  <img src="docs/assets/architecture-overview-light.svg" alt="Desktop, web, iOS, Android, Slack, and Teams connect to the OpenBot backend. Built-in Bots run inside the server; your agents can run on any agent execution platform through AG-UI. The backend manages computer use and MCP tools, and runs alongside CopilotKit Intelligence on your infrastructure." width="100%">
+</picture>
 
 | Part | What it does |
 | --- | --- |
 | **OpenBot frontends** | Desktop, web, iOS, Android, Slack, and Teams connect people to the same workspace. Conversations, interactive results, computer view, and approvals adapt to each surface. [Choose a frontend](#getting-started). |
-| **OpenBot backend** | Runs the workspace API, connects agents and tools, manages Bot computers, and enforces identity, permissions, action policies, and audit. Deploys on Kubernetes with PostgreSQL and persistent storage. |
+| **OpenBot backend** | Runs the workspace API and built-in Bots, connects external agents and tools, manages Bot computers, and enforces identity, permissions, action policies, and audit. Deploys on Kubernetes with PostgreSQL and persistent storage. |
 | **CopilotKit Intelligence** | Durable conversations, memory, Automatic Learning, and enterprise governance services. Separately licensed; runs on Kubernetes alongside OpenBot. |
 
 OpenBot enforces sign-in, tool permissions, action policies, and audit at its API, alongside Intelligence's platform services. Built-in Bots run in the OpenBot server. Your own agents can run alongside OpenBot or on any agent execution platform, connected through AG-UI. Use both in the same workspace.
