@@ -31,6 +31,12 @@ const point = z.object({
     .string()
     .describe("What this point is called, e.g. a month or a team"),
   value: z.number().describe("Its value"),
+  link: z
+    .string()
+    .optional()
+    .describe(
+      "A web address this opens: the record, search or message it came from. Only one you actually have; never make one up",
+    ),
 });
 
 /** Where the figures came from. The same fields, and the same reason, as the app's charts. */
@@ -149,6 +155,12 @@ const MetricsCardProps = z.object({
           .optional()
           .describe("The movement, e.g. '+12% on last month'"),
         changeTone: tone.optional(),
+        link: z
+          .string()
+          .optional()
+          .describe(
+            "A web address this opens: the record, search or message it came from. Only one you actually have; never make one up",
+          ),
       }),
     )
     .max(6)
@@ -298,7 +310,7 @@ export const HEADLESS_COMPONENTS: readonly HeadlessComponentSpec[] = [
     name: "showBarChart",
     title: "Bar chart",
     description:
-      "Show values as a bar chart. Use when comparing a handful of named things, teams, months, categories. Not for a trend over time, which is showLineChart.",
+      "Show values as a bar chart. Use when comparing a handful of named things, teams, months, categories. Not for a trend over time, which is showLineChart. A point may link to the page its figure came from, such as the record or the search, when you have that address; never make one up.",
     parameters: BarChartProps,
     confirmation: saved("bar chart"),
   },
@@ -314,7 +326,7 @@ export const HEADLESS_COMPONENTS: readonly HeadlessComponentSpec[] = [
     name: "showPieChart",
     title: "Donut chart",
     description:
-      "Show how a whole is divided, as a donut with a legend. Use only when the parts sum to something meaningful, and prefer a bar chart above about six slices.",
+      "Show how a whole is divided, as a donut with a legend. Use only when the parts sum to something meaningful, and prefer a bar chart above about six slices. A point may link to the page its figure came from, such as the record or the search, when you have that address; never make one up.",
     parameters: PieChartProps,
     confirmation: saved("donut chart"),
   },
@@ -322,7 +334,7 @@ export const HEADLESS_COMPONENTS: readonly HeadlessComponentSpec[] = [
     name: "showProgress",
     title: "Progress against target",
     description:
-      "Show values against their targets as progress bars. Use for 'are we there yet' questions, budget spent against budget, done against planned.",
+      "Show values against their targets as progress bars. Use for 'are we there yet' questions, budget spent against budget, done against planned. A point may link to the page its figure came from, such as the record or the search, when you have that address; never make one up.",
     parameters: ProgressChartProps,
     confirmation: saved("progress chart"),
   },
@@ -338,7 +350,7 @@ export const HEADLESS_COMPONENTS: readonly HeadlessComponentSpec[] = [
     name: "showMetrics",
     title: "Headline figures",
     description:
-      "Show up to six headline figures, each with an optional movement. Use for figures somebody reads at a glance, not for a written summary.",
+      "Show up to six headline figures, each with an optional movement. Use for figures somebody reads at a glance, not for a written summary. A figure may link to the page it came from, such as the record or the report, when you have that address; never make one up.",
     parameters: MetricsCardProps,
     confirmation:
       "The figures are saved in this conversation and are drawn when the person opens it.",

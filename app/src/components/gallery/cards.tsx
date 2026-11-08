@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
-import { Badge, GalleryFrame, type Tone } from "./frame";
+import { Badge, FigureLink, GalleryFrame, type Tone } from "./frame";
 import { GalleryMarkdown } from "./markdown";
 import { byPosition } from "./positions";
 
@@ -75,6 +75,12 @@ export const MetricsCardProps = z.object({
           .optional()
           .describe("The movement, e.g. '+12% on last month'"),
         changeTone: tone.optional(),
+        link: z
+          .string()
+          .optional()
+          .describe(
+            "A web address this opens: the record, search or message it came from. Only one you actually have; never make one up",
+          ),
       }),
     )
     .max(6)
@@ -91,7 +97,11 @@ export function MetricsCard({
     <GalleryFrame caption={caption} title={title}>
       <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
         {byPosition(metrics).map(({ item: metric, key }) => (
-          <div key={key}>
+          <FigureLink
+            href={metric.link}
+            key={key}
+            name={`${metric.label}: ${metric.value}`}
+          >
             <p className="truncate text-xs text-muted-foreground">
               {metric.label}
             </p>
@@ -103,7 +113,7 @@ export function MetricsCard({
                 <Badge tone={metric.changeTone as Tone}>{metric.change}</Badge>
               </p>
             ) : null}
-          </div>
+          </FigureLink>
         ))}
       </div>
     </GalleryFrame>
@@ -276,7 +286,7 @@ export const GALLERY: GalleryComponent[] = [
     kind: "card",
     summary: "Shows up to six headline figures and how each one has changed.",
     description:
-      "Show up to six headline figures, each with an optional movement. Use for figures somebody reads at a glance, not for a written summary.",
+      "Show up to six headline figures, each with an optional movement. Use for figures somebody reads at a glance, not for a written summary. A figure may link to the page it came from, such as the record or the report, when you have that address; never make one up.",
     parameters: MetricsCardProps,
     Component: MetricsCard as GalleryComponent["Component"],
     preview: {

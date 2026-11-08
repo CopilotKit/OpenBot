@@ -1,15 +1,13 @@
 import {
-  type RefObject,
   useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
-  useRef,
   useState,
 } from "react";
 import { z } from "zod";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
-import { GalleryFrame } from "./frame";
+import { FigureLink, GalleryFrame, isWebAddress } from "./frame";
 import { seriesColour } from "./palette";
 import { byPosition } from "./positions";
 import { GalleryStreamingContext } from "./streaming";
@@ -19,6 +17,12 @@ const point = z.object({
     .string()
     .describe("What this point is called, e.g. a month or a team"),
   value: z.number().describe("Its value"),
+  link: z
+    .string()
+    .optional()
+    .describe(
+      "A web address this opens: the record, search or message it came from. Only one you actually have; never make one up",
+    ),
 });
 
 const source = z.object({
@@ -70,11 +74,6 @@ type Provenance = Partial<{
   sources: { title?: string; url?: string }[];
   asOf: string;
 }>;
-
-/** Only web addresses become links. Anything else the model wrote is shown as text. */
-function isWebAddress(url: unknown): url is string {
-  return typeof url === "string" && /^https?:\/\//i.test(url);
-}
 
 /**
  * The sources worth naming, once each. The arguments are drawn as the model wrote them, unchecked,
@@ -175,15 +174,10 @@ const COMPACT = new Intl.NumberFormat(undefined, {
  * read as one scale, and back again when there is room. Without layout (a test, a server render)
  * nothing overflows and the exact figures stay.
  */
-function useCompactFigures(
-  row: RefObject<HTMLElement | null>,
-  drawn: boolean,
-): boolean {
+function useCompactFigures(row: HTMLElement | null): boolean {
   const [compact, setCompact] = useState(false);
   const measure = useCallback(() => {
-    const figures = row.current?.querySelectorAll<HTMLElement>(
-      "[data-exact-figure]",
-    );
+    const figures = row?.querySelectorAll<HTMLElement>("[data-exact-figure]");
     setCompact(
       [...(figures ?? [])].some(
         // A figure with no width has no layout to overflow: a test, or a chart not on screen.
@@ -195,11 +189,11 @@ function useCompactFigures(
   // Every render: a figure arriving can be the one that no longer fits.
   useLayoutEffect(measure);
   useEffect(() => {
-    if (!drawn || !row.current || typeof ResizeObserver === "undefined") return;
+    if (!row || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
-    observer.observe(row.current);
+    observer.observe(row);
     return () => observer.disconnect();
-  }, [drawn, measure]);
+  }, [row, measure]);
   return compact;
 }
 
@@ -268,8 +262,9 @@ export function BarChartCard({
     ...points.map((entry) => (isValue(entry.value) ? entry.value : 0)),
     0,
   );
-  const row = useRef<HTMLDivElement>(null);
-  const compact = useCompactFigures(row, points.length > 0);
+  // State, not a ref: the row appears only once the first point has, and the measuring follows it.
+  const [row, setRow] = useState<HTMLDivElement | null>(null);
+  const compact = useCompactFigures(row);
   return (
     <GalleryFrame caption={caption} title={title}>
       {points.length === 0 ? (
@@ -278,13 +273,15 @@ export function BarChartCard({
         // Columns stretch to full row height so percentage bar heights use the chart area.
         <div
           className="flex items-stretch gap-2"
-          ref={row}
+          ref={setRow}
           style={{ height: HEIGHT }}
         >
           {byPosition(points).map(({ item: entry, key }, index) => (
-            <div
+            <FigureLink
               className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1.5"
+              href={entry.link}
               key={key}
+              name={`${entry.label}: ${formatNumber(entry.value)}`}
             >
               <span
                 className="relative flex w-full justify-center text-xs tabular-nums text-muted-foreground"
@@ -329,7 +326,7 @@ export function BarChartCard({
               <span className="w-full truncate text-center text-xs text-muted-foreground">
                 {entry.label}
               </span>
-            </div>
+            </FigureLink>
           ))}
         </div>
       )}
@@ -408,16 +405,23 @@ export function PieChartCard({
           <ul className="min-w-0 flex-1 space-y-1.5">
             {byPosition(slices).map(({ item: slice, key }) => (
               <li className="flex items-center gap-2 text-sm" key={key}>
-                <span
-                  className="size-2.5 shrink-0 rounded-[3px]"
-                  style={{ background: slice.colour }}
-                />
-                <span className="min-w-0 flex-1 truncate">{slice.label}</span>
-                <span className="tabular-nums text-muted-foreground">
-                  {isValue(slice.value)
-                    ? `${Math.round((slice.value / total) * 100)}%`
-                    : ""}
-                </span>
+                <FigureLink
+                  className="-mx-1 flex min-w-0 flex-1 items-center gap-2 px-1"
+                  href={slice.link}
+                  name={`${slice.label}: ${isValue(slice.value) ? `${Math.round((slice.value / total) * 100)}%` : ""}`}
+                  wrap={false}
+                >
+                  <span
+                    className="size-2.5 shrink-0 rounded-[3px]"
+                    style={{ background: slice.colour }}
+                  />
+                  <span className="min-w-0 flex-1 truncate">{slice.label}</span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {isValue(slice.value)
+                      ? `${Math.round((slice.value / total) * 100)}%`
+                      : ""}
+                  </span>
+                </FigureLink>
               </li>
             ))}
           </ul>
@@ -612,21 +616,28 @@ export function ProgressChartCard({
                 : 0;
             return (
               <li key={key}>
-                <div className="flex items-baseline justify-between gap-4 text-sm">
-                  <span className="min-w-0 truncate">{entry.label}</span>
-                  <span className="tabular-nums text-muted-foreground">
-                    {formatNumber(entry.value)} / {formatNumber(entry.target)}
-                  </span>
-                </div>
-                <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-foreground/5">
-                  <div
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${share}%`,
-                      background: seriesColour(index),
-                    }}
-                  />
-                </div>
+                <FigureLink
+                  className="-m-1 block p-1"
+                  href={entry.link}
+                  name={`${entry.label}: ${formatNumber(entry.value)} of ${formatNumber(entry.target)}`}
+                  wrap={false}
+                >
+                  <div className="flex items-baseline justify-between gap-4 text-sm">
+                    <span className="min-w-0 truncate">{entry.label}</span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {formatNumber(entry.value)} / {formatNumber(entry.target)}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-foreground/5">
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${share}%`,
+                        background: seriesColour(index),
+                      }}
+                    />
+                  </div>
+                </FigureLink>
               </li>
             );
           })}
@@ -645,7 +656,7 @@ export const GALLERY: GalleryComponent[] = [
     kind: "chart",
     summary: "Compares a few named things, such as teams or months, as bars.",
     description:
-      "Show values as a bar chart. Use when comparing a handful of named things, teams, months, categories. Not for a trend over time, which is showLineChart.",
+      "Show values as a bar chart. Use when comparing a handful of named things, teams, months, categories. Not for a trend over time, which is showLineChart. A point may link to the page its figure came from, such as the record or the search, when you have that address; never make one up.",
     parameters: BarChartProps,
     Component: BarChartCard as GalleryComponent["Component"],
     preview: {
@@ -666,7 +677,7 @@ export const GALLERY: GalleryComponent[] = [
     kind: "chart",
     summary: "Shows how a whole splits into parts, as a donut with a legend.",
     description:
-      "Show how a whole is divided, as a donut with a legend. Use only when the parts sum to something meaningful, and prefer a bar chart above about six slices.",
+      "Show how a whole is divided, as a donut with a legend. Use only when the parts sum to something meaningful, and prefer a bar chart above about six slices. A point may link to the page its figure came from, such as the record or the search, when you have that address; never make one up.",
     parameters: PieChartProps,
     Component: PieChartCard as GalleryComponent["Component"],
     preview: {
@@ -724,7 +735,7 @@ export const GALLERY: GalleryComponent[] = [
     summary:
       "Shows how close each value is to its target, such as budget spent or work done.",
     description:
-      "Show values against their targets as progress bars. Use for 'are we there yet' questions, budget spent against budget, done against planned.",
+      "Show values against their targets as progress bars. Use for 'are we there yet' questions, budget spent against budget, done against planned. A point may link to the page its figure came from, such as the record or the search, when you have that address; never make one up.",
     parameters: ProgressChartProps,
     Component: ProgressChartCard as GalleryComponent["Component"],
     preview: {

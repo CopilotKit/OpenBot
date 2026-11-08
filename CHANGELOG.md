@@ -47,6 +47,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   options) wraps, where it ran under the card's edge and lost its end.
 - A choice card's summary is drawn as Markdown, as an approval's is, where it showed the raw
   markers, such as `**two**`.
+- A Bot can link a bar, a progress row, a headline figure or a donut chart's legend row to where
+  the figure came from, such as the record or the search, when it has that address. Clicking it
+  opens the page in a new tab, as a source under a chart does. Only web addresses become links, and
+  a figure without one draws as before.
 - A chart whose figures are still arriving shimmers with "Drawing the chart…" at its own height,
   where it said "There is no data to chart." until its first figure came in. A chart that was
   stopped, or that finished with no figures, still says there is no data.
