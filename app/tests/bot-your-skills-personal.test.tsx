@@ -264,10 +264,11 @@ test("a skill written on Settings > Skills shows under a new Bot's Your skills, 
   makeBot(BOT.id);
 
   const view = draw(client, BOT);
-  const tide = await view.findByRole("switch", { name: "tide-report" });
+  // By its title, as What it can use names it; never "/tide-report" beside "Tide report".
+  const tide = await view.findByRole("switch", { name: "Tide report" });
   expect(tide.getAttribute("aria-checked")).toBe("true");
-  expect(view.getByText("/tide-report")).toBeTruthy();
+  expect(view.queryByText("/tide-report")).toBeNull();
   expect(view.queryByText("No skills yet")).toBeNull();
   // A skill OpenBot ships is not one the person wrote.
-  expect(view.queryByRole("switch", { name: "find-a-document" })).toBeNull();
+  expect(view.queryByRole("switch", { name: "Find a document" })).toBeNull();
 });
