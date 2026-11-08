@@ -80,6 +80,13 @@ function serving() {
           request("computer", "computer_click", "example.com", {
             ref: "e12",
           }),
+          // Named the way Gmail's page names it, not "settings get imap".
+          request(
+            "settings",
+            "composio-gmail/GMAIL_SETTINGS_GET_IMAP",
+            "composio-gmail",
+            {},
+          ),
         ],
       });
     if (path.startsWith("/api/agents"))
@@ -133,5 +140,8 @@ test("on the Bot's page, the row says what the Bot wants to do, over the app's n
       ?.textContent,
   ).toContain("Gmail");
   expect(view.getByText("General Assistant wants to click")).toBeTruthy();
+  expect(
+    view.getByText("General Assistant wants to get IMAP settings"),
+  ).toBeTruthy();
   expect(view.container.textContent).not.toContain("composio");
 });
