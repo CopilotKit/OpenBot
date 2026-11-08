@@ -208,8 +208,6 @@ moves to `0083_learning_skill_approvals`. Six things change for an existing depl
 - **In a conversation with several Bots, a Bot's question waits above the message box**, as it does
   with one Bot, and what you send next answers it, unless you @ another Bot. The Bot then replies in
   the conversation. The question used to never reach you there.
-- **The sidebar's + opens a new conversation with To: empty** and the Bot menu open, where it
-  picked a Bot for you. A Bot's own Message link still starts with that Bot.
 - In a new conversation, typing @ before the first message lists the Bots in To:, and with two or
   more, a first message addressed to one goes to that Bot only. @ used to say "No Bots in this
   conversation" until something had been sent, and the first message went to every Bot.

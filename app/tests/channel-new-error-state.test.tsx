@@ -633,29 +633,27 @@ test("Enter with no Bot chosen keeps the message, says so, and opens the To: pic
   await expectMessageComposerDisabled(view, false);
 });
 
-/*
- * + asks who the message is for: To: starts empty with the Bot menu open, in either edition and
- * however many Bots there are. A Bot picked on the person's behalf was one they had to notice and
- * remove. FOUND ON WINDOWS: a message typed with nobody in To: once went nowhere; the open menu
- * says from the start that a Bot is needed, and Enter with nobody picked asks again (above).
- */
-test("+ in the personal edition opens To: empty with the Bot menu open, and picks nobody for the person", async () => {
-  const errandHelper = agent({ id: "picked-harness", name: "Errand Helper" });
-  const view = renderChannelNew(
-    queryClientWithEdition([GENERAL_ASSISTANT, errandHelper], "personal"),
+/** What a person sees right after +: who the message is for in To:, and the caret in the message. */
+async function expectStartsWith(
+  view: ReturnType<typeof renderChannelNew>,
+  name: string,
+) {
+  // Not hidden: with nobody left to ask for, the picker stays shut and the page is not inert.
+  await view.findByRole("button", { name: `Remove ${name}` });
+  expect(view.getByRole("combobox").getAttribute("aria-expanded")).toBe(
+    "false",
   );
+  const editor = await view.findByRole("textbox", { name: "Message" });
+  await waitFor(() => expect(document.activeElement).toBe(editor));
+}
 
-  await expectPickerOpenAndFocused(view);
-  expect(
-    view.getByRole("option", { hidden: true, name: /Errand Helper/ }),
-  ).toBeTruthy();
-  expect(
-    view.queryByRole("button", { hidden: true, name: /^Remove / }),
-  ).toBeNull();
-  expect(view.router.state.location.href).toBe("/channel/new");
-});
-
-test("+ with only one Bot still opens the menu with it, and the Bot picked there is the one Enter sends to", async () => {
+/*
+ * FOUND ON WINDOWS: in a fresh personal install with one starter Bot, + opened a conversation with
+ * nobody in To:, and a message typed and sent went nowhere until the person picked the only Bot
+ * there was. A new conversation now starts with the Bot the message is for.
+ */
+test("+ in the personal edition starts with its default Bot picked, and Enter sends to it", async () => {
+  const errandHelper = agent({ id: "picked-harness", name: "Errand Helper" });
   const created: unknown[] = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (
@@ -675,10 +673,10 @@ test("+ with only one Bot still opens the menu with it, and the Bot picked there
       return NativeResponse.json(
         {
           channel: {
-            id: "assistant-channel",
-            name: "General Assistant",
-            agentIds: [GENERAL_ASSISTANT.id],
-            threadId: "assistant-thread",
+            id: "errand-channel",
+            name: "Errand Helper",
+            agentIds: [errandHelper.id],
+            threadId: "errand-thread",
             active: true,
             lastMessageAt: null,
           },
@@ -690,31 +688,62 @@ test("+ with only one Bot still opens the menu with it, and the Bot picked there
   }) as typeof fetch;
   try {
     const view = renderChannelNew(
-      queryClientWithEdition([GENERAL_ASSISTANT], "team"),
+      queryClientWithEdition([GENERAL_ASSISTANT, errandHelper], "personal"),
     );
-    await expectPickerOpenAndFocused(view);
-    expect(
-      view.queryByRole("button", { hidden: true, name: /^Remove / }),
-    ).toBeNull();
+    await expectStartsWith(view, "Errand Helper");
 
-    fireEvent.click(
-      await view.findByRole("option", {
-        hidden: true,
-        name: /General Assistant/,
-      }),
-    );
-    await view.findByRole("button", {
-      hidden: true,
-      name: "Remove General Assistant",
-    });
     await typeDraft("what changed in the latest release?", view);
     await userEvent.setup({ document }).keyboard("{Enter}");
 
     await waitFor(() =>
-      expect(created).toEqual([{ agentIds: [GENERAL_ASSISTANT.id] }]),
+      expect(created).toEqual([{ agentIds: ["picked-harness"] }]),
     );
     expect(view.queryByText("Choose a Bot first.")).toBeNull();
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("+ with only one Bot starts with it picked, in the team edition too", async () => {
+  const view = renderChannelNew(
+    queryClientWithEdition([GENERAL_ASSISTANT], "team"),
+  );
+
+  await expectStartsWith(view, "General Assistant");
+  expect(view.router.state.location.href).toBe("/channel/new");
+});
+
+test("a Bot started with can be removed, and then Enter asks for one", async () => {
+  const view = renderChannelNew(
+    queryClientWithEdition(
+      [
+        agent({ id: "picked-harness", name: "Errand Helper" }),
+        GENERAL_ASSISTANT,
+      ],
+      "personal",
+    ),
+  );
+  await expectStartsWith(view, "Errand Helper");
+
+  fireEvent.click(view.getByRole("button", { name: "Remove Errand Helper" }));
+  await waitFor(() =>
+    expect(
+      view.queryByRole("button", { hidden: true, name: /^Remove / }),
+    ).toBeNull(),
+  );
+  await typeDraft("for whoever", view);
+  await userEvent.setup({ document }).keyboard("{Enter}");
+
+  expect(await view.findByText("Choose a Bot first.")).toBeTruthy();
+  await waitFor(() =>
+    expect(
+      view
+        .getByRole("combobox", { hidden: true })
+        .getAttribute("aria-expanded"),
+    ).toBe("true"),
+  );
+  expect(
+    (await view.findByRole("textbox", { hidden: true, name: "Message" }))
+      .textContent,
+  ).toBe("for whoever");
 });

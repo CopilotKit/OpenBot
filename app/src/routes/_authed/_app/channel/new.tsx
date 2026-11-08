@@ -31,12 +31,14 @@ import {
   ComboboxList,
   useComboboxAnchor,
 } from "@/components/ui/combobox";
+import { newConversationAgent } from "@/lib/agents/default-agent";
 import {
   type AgentProfile,
   agentListQueryOptions,
   agentQueryOptions,
 } from "@/lib/agents/queries";
 import { useStartChannel } from "@/lib/channels/start";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useDraftModel } from "@/lib/models/run-model";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
@@ -148,16 +150,15 @@ function NewConversation({ composition }: { composition: string }) {
     retry: false,
   });
   /*
-   * The URL names a recipient up front (a Bot's own Message link). Without one, To: starts empty
-   * with the Bot menu open, in either edition and however many Bots there are: + is a question,
-   * who is this for, and the menu is the answer to pick from. A Bot picked on the person's behalf
-   * was one they had to notice and remove.
-   *
-   * FOUND ON WINDOWS: a message typed with nobody in To: once went nowhere. The open menu says
-   * from the start that a Bot is needed, and Send with nobody picked says "Choose a Bot first."
-   * and opens it again, keeping the message.
+   * The URL names a recipient up front. Without one, the only Bot there is or the personal
+   * edition's default Bot is picked (`newConversationAgent`); otherwise To: starts empty and open,
+   * since a Bot picked on the person's behalf among several is one they have to notice and remove.
    */
-  const chosen = listed ?? (fetched?.id === agent ? fetched : undefined);
+  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
+  const chosen =
+    listed ??
+    (fetched?.id === agent ? fetched : undefined) ??
+    (agent ? undefined : newConversationAgent(profiles, capabilities?.edition));
   const needsUrlAgentDetail =
     Boolean(agent) && profiles !== undefined && !listed;
   const waitingForUrlAgent =
