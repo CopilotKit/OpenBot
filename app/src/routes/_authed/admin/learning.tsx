@@ -27,6 +27,7 @@ import {
 } from "@/components/layout/page-shell";
 import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
 import { ProposalDialog } from "@/components/learning/proposal-dialog";
+import { skillTitle } from "@/lib/learning/display";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -617,7 +618,9 @@ function ProposedSkills({ agentId }: { agentId?: string }) {
                   <IconSparkles />
                 </ItemMedia>
                 <ItemContent>
-                  <ItemTitle>{proposal.title}</ItemTitle>
+                  <ItemTitle>
+                    {skillTitle(proposal.title, proposal.description)}
+                  </ItemTitle>
                   <ItemDescription>{proposal.description}</ItemDescription>
                 </ItemContent>
                 <ItemActions>
@@ -804,7 +807,9 @@ function PublishedSkills({ agentId }: { agentId?: string }) {
                   <IconSparkles />
                 </ItemMedia>
                 <ItemContent>
-                  <ItemTitle>{skill.name}</ItemTitle>
+                  <ItemTitle>
+                    {skillTitle(skill.name, skill.description)}
+                  </ItemTitle>
                   <ItemDescription>{skill.description}</ItemDescription>
                 </ItemContent>
                 <ItemActions>
@@ -817,6 +822,13 @@ function PublishedSkills({ agentId }: { agentId?: string }) {
       )}
       <LearnedSkillDialog
         name={open}
+        title={(() => {
+          // The title its row showed.
+          const shown = skills.data?.skills.find(
+            (skill) => skill.name === open,
+          );
+          return shown ? skillTitle(shown.name, shown.description) : undefined;
+        })()}
         onClose={() => setOpen(null)}
         source={{ kind: "admin", agentId }}
       />

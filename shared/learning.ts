@@ -255,6 +255,25 @@ export type LearnedSkillContent = {
   files: { path: string; text: string | null }[];
 };
 
+/** A recording of the person's own that a published Skill was learned from. */
+export type LearnedSkillRecording = {
+  /** Intelligence's id for the recording (its trajectory). */
+  id: string;
+  /** The recording's title, or null when it has none or it could not be read. */
+  title: string | null;
+  /** False when Intelligence no longer has the recording. */
+  available: boolean;
+};
+
+/**
+ * One published Skill as Settings, Learning opens it. `recordings` names the person's own recordings it was learned
+ * from, read through the proposals Intelligence published it from; absent where that could not be read or does not
+ * apply (a skill learned from conversations, or an admin's view).
+ */
+export type LearnedSkillDetail = LearnedSkillContent & {
+  recordings?: LearnedSkillRecording[];
+};
+
 /** Where a person's Learning comes from: a container of recordings or of conversations. */
 export type LearningSource = {
   containerId: string;

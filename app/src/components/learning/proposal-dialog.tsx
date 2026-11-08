@@ -18,6 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { skillTitle } from "@/lib/learning/display";
 
 /** What one Insight was learned from: the messages a conversation was cited for, or a recording. */
 function EvidenceList({ evidence }: { evidence: LearningEvidence[] | null }) {
@@ -107,7 +108,11 @@ export function ProposalDialog<TKey extends QueryKey>({
     <Dialog onOpenChange={(next) => (next ? undefined : onClose())} open>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{proposal?.title ?? "Proposed skill"}</DialogTitle>
+          <DialogTitle>
+            {proposal
+              ? skillTitle(proposal.title, proposal.description)
+              : "Proposed skill"}
+          </DialogTitle>
           {proposal && (
             <DialogDescription>{proposal.description}</DialogDescription>
           )}
