@@ -37,3 +37,14 @@ test("draws nothing when nothing was left out", () => {
   const view = render(<SkippedToolsNotice names={[]} />);
   expect(view.container.textContent).toBe("");
 });
+
+test("in the personal edition, says the actions in words rather than as the app lists them", () => {
+  const view = render(
+    <SkippedToolsNotice names={["notion.export"]} serverId="notion" />,
+  );
+  const notice = view.getByRole("status").textContent ?? "";
+  expect(notice).toBe(
+    "Your Bots can't use one action this app lists, because of how it's named: Export.",
+  );
+  expect(notice).not.toContain("notion.export");
+});
