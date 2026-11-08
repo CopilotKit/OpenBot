@@ -50,8 +50,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - A chart whose figures are still arriving shimmers with "Drawing the chart…" at its own height,
   where it said "There is no data to chart." until its first figure came in. A chart that was
   stopped, or that finished with no figures, still says there is no data.
-- A bar chart with many bars on a narrow screen cuts each figure to its bar's width, as it cuts the
-  label, where the figures ran into one another.
+- A bar chart whose figures don't fit their bars, such as ten bars on a phone, writes them
+  compactly ("15K", "3.7K"), where they ran into one another. The exact figure stays in the
+  tooltip and is what a screen reader reads.
 
 ### Personal edition
 

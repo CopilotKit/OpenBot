@@ -1,4 +1,12 @@
-import { useContext } from "react";
+import {
+  type RefObject,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { z } from "zod";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import { GalleryFrame } from "./frame";
@@ -145,12 +153,54 @@ function isValue(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function formatNumber(value: unknown): string {
+function formatNumber(value: unknown, compact = false): string {
   if (!isValue(value)) return "";
+  // "14K", never "14,…": a figure cut short is a wrong number, and a shorter one is still right.
+  if (compact) return COMPACT.format(value);
   if (Math.abs(value) >= 1000) {
     return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
   }
   return String(Math.round(value * 100) / 100);
+}
+
+const COMPACT = new Intl.NumberFormat(undefined, {
+  notation: "compact",
+  maximumSignificantDigits: 2,
+});
+
+/**
+ * Whether any bar's exact figure is wider than its bar, measured from an unseen copy of each one.
+ *
+ * Ten bars on a phone ran their figures into one line. Every bar switches together, so the figures
+ * read as one scale, and back again when there is room. Without layout (a test, a server render)
+ * nothing overflows and the exact figures stay.
+ */
+function useCompactFigures(
+  row: RefObject<HTMLElement | null>,
+  drawn: boolean,
+): boolean {
+  const [compact, setCompact] = useState(false);
+  const measure = useCallback(() => {
+    const figures = row.current?.querySelectorAll<HTMLElement>(
+      "[data-exact-figure]",
+    );
+    setCompact(
+      [...(figures ?? [])].some(
+        // A figure with no width has no layout to overflow: a test, or a chart not on screen.
+        (figure) =>
+          figure.clientWidth > 0 && figure.scrollWidth > figure.clientWidth,
+      ),
+    );
+  }, [row]);
+  // Every render: a figure arriving can be the one that no longer fits.
+  useLayoutEffect(measure);
+  useEffect(() => {
+    if (!drawn || !row.current || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(row.current);
+    return () => observer.disconnect();
+  }, [drawn, measure]);
+  return compact;
 }
 
 /**
@@ -218,21 +268,45 @@ export function BarChartCard({
     ...points.map((entry) => (isValue(entry.value) ? entry.value : 0)),
     0,
   );
+  const row = useRef<HTMLDivElement>(null);
+  const compact = useCompactFigures(row, points.length > 0);
   return (
     <GalleryFrame caption={caption} title={title}>
       {points.length === 0 ? (
         <Empty />
       ) : (
         // Columns stretch to full row height so percentage bar heights use the chart area.
-        <div className="flex items-stretch gap-2" style={{ height: HEIGHT }}>
+        <div
+          className="flex items-stretch gap-2"
+          ref={row}
+          style={{ height: HEIGHT }}
+        >
           {byPosition(points).map(({ item: entry, key }, index) => (
             <div
               className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1.5"
               key={key}
             >
-              {/* Cut to its bar's width as the label is: ten bars on a phone ran their figures together. */}
-              <span className="w-full truncate text-center text-xs tabular-nums text-muted-foreground">
-                {formatNumber(entry.value)}
+              <span
+                className="relative flex w-full justify-center text-xs tabular-nums text-muted-foreground"
+                title={compact ? formatNumber(entry.value) : undefined}
+              >
+                {/* The exact figure at its bar's width, unseen, to tell whether it fits. */}
+                <span
+                  aria-hidden="true"
+                  className="invisible absolute inset-x-0 overflow-hidden whitespace-nowrap"
+                  data-exact-figure=""
+                >
+                  {formatNumber(entry.value)}
+                </span>
+                <span
+                  aria-hidden={compact || undefined}
+                  className="whitespace-nowrap"
+                >
+                  {formatNumber(entry.value, compact)}
+                </span>
+                {compact ? (
+                  <span className="sr-only">{formatNumber(entry.value)}</span>
+                ) : null}
               </span>
               {/* The bar lives in its own flexible box so the number above and the label below keep
                   their natural height and only the bar itself scales. */}
