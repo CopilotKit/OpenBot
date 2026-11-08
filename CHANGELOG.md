@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A conversation shows the Bot is still working through a run of tool calls: the step still running
+  shimmers like the line above it, and once every step has its answer "Thinking" shows under them
+  until the reply starts. Before, a run of finished steps sat still and read as a Bot that had died.
 - OpenBot Desktop opens OpenBot when an update to its local back end does not finish. A back end
   whose update stopped (on a slow connection, at the image download) still runs the release it had,
   with every check passing; the window said it was not healthy and stopped OpenBot. It now says
