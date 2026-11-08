@@ -12,7 +12,7 @@ import {
   type VendorAccountStatus,
   type VendorToolkit,
 } from "../composio-vendor";
-import { type ComposioVendor, madeHere } from "./model";
+import { type ComposioVendor, madeHere, VENDOR_OWN_TOOLKITS } from "./model";
 
 /**
  * What the Composio client's methods share: the vendor it calls, the clock, and the listings every
@@ -309,7 +309,9 @@ export function createClientContext(
      * toolkit measured, so this is a guard against the vendor rather than a routine case. A count
      * that arrives as something other than a number is the different case and is refused.
      */
-    return toolkits.map(appOf);
+    return toolkits
+      .map(appOf)
+      .filter((app) => !VENDOR_OWN_TOOLKITS.has(app.slug));
   };
 
   return {
