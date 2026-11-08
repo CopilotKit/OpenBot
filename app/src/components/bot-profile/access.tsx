@@ -1,4 +1,3 @@
-import { readToolName } from "@openbot/shared/tool-name";
 import {
   IconApps,
   IconBox,
@@ -51,6 +50,7 @@ import {
   type GrantedPlugins,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
+import { toolName } from "@/lib/plugins/tool-words";
 import { queryClient } from "@/query-client";
 
 /**
@@ -70,6 +70,10 @@ function connectorName(key: string): string {
 /**
  * Connector key → the labels of the tools this Bot holds on it.
  *
+ * Named as the app's own page lists them (`toolName`), each as a command: "Create goal", where
+ * Activity says what was done, "Created a goal". A list that said some of each read as a list of
+ * two kinds of thing.
+ *
  * Vendors prefix every tool with their own name — "Notion create pages" — which next to a row
  * already titled Notion reads as a stutter. Stripped only as a leading word, and re-cased, so
  * "Notion search" becomes "Search" while "Search notion pages" is left alone.
@@ -78,7 +82,7 @@ function connectorTools(plugins: GrantedPlugins): Map<string, string[]> {
   const connectors = new Map<string, string[]>();
   for (const tool of plugins.tools) {
     const key = tool.ref.split("/")[0] ?? tool.ref;
-    let label = readToolName(tool.toolName).label;
+    let label = toolName(key, tool.ref.slice(key.length + 1) || tool.ref);
     const prefix = `${key.toLowerCase()} `;
     if (label.toLowerCase().startsWith(prefix)) {
       const rest = label.slice(prefix.length);

@@ -1,12 +1,12 @@
 import { Streamdown } from "streamdown";
+import { readableSkillBody } from "@/lib/learning/display";
 import { markdownComponents } from "@/lib/markdown";
 
-/** SKILL.md without its front matter, whose name and description the screen's header already shows. */
-export function skillBody(markdown: string): string {
-  return markdown.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
-}
-
-/** A learned skill's files: SKILL.md rendered, any other file in a collapsible row. A null text is a binary file. */
+/**
+ * A learned skill's files: SKILL.md rendered as the skill's own content, with no file name over it, and any other file
+ * in a collapsible row. A null text is a binary file. What is rendered is the readable body (`readableSkillBody`); the
+ * text a Bot loads is not changed.
+ */
 export function SkillFiles({
   files,
 }: {
@@ -20,18 +20,13 @@ export function SkillFiles({
   return (
     <>
       {skill?.text != null && (
-        <section className="grid gap-1.5">
-          <h3 className="font-medium text-sm">SKILL.md</h3>
-          <div className="rounded-md border p-3">
-            <Streamdown
-              className="min-w-0 text-sm [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-sm [&_li]:my-0 [&_ol]:my-1 [&_p]:my-1 [&_ul]:my-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-              components={markdownComponents}
-              mode="static"
-            >
-              {skillBody(skill.text)}
-            </Streamdown>
-          </div>
-        </section>
+        <Streamdown
+          className="min-w-0 text-sm [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-sm [&_li]:my-0 [&_ol]:my-1 [&_p]:my-1 [&_ul]:my-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+          components={markdownComponents}
+          mode="static"
+        >
+          {readableSkillBody(skill.text)}
+        </Streamdown>
       )}
       {others.length > 0 && (
         <section className="grid gap-1.5">

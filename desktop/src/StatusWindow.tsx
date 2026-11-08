@@ -337,10 +337,11 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
               <dd>
                 {status.version} · {status.build}
               </dd>
+              {/* Where the back end is, in words. Its stack id is for support, in Copy diagnostics. */}
               {status.intelligenceStack && (
                 <>
                   <dt>Back end</dt>
-                  <dd>{status.intelligenceStack}</dd>
+                  <dd>On this computer</dd>
                 </>
               )}
               {status.logFolder && (

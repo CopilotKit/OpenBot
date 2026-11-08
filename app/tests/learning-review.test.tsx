@@ -146,14 +146,14 @@ test("lists the pending proposals with what each does", async () => {
   const view = draw();
   await view.findByText("Waiting for an admin");
   expect(await view.findByText("New skill")).toBeTruthy();
-  expect(view.getByText("Update to close-ticket")).toBeTruthy();
-  expect(view.getByText("Remove old-skill")).toBeTruthy();
-  expect(view.queryByText("done-skill")).toBeNull();
+  expect(view.getByText("Update to Close ticket")).toBeTruthy();
+  expect(view.getByText("Remove Old skill")).toBeTruthy();
+  expect(view.queryByText("Done skill")).toBeNull();
 });
 
 test("with admins approving, a person's pending proposal opens read-only", async () => {
   const view = draw();
-  fireEvent.click(await view.findByText("refund-order"));
+  fireEvent.click(await view.findByText("Refund order"));
   await view.findByText("Look up the order.");
   expect(view.queryByText("Approve and publish")).toBeNull();
   expect(view.getByText("Done")).toBeTruthy();
@@ -163,7 +163,7 @@ test("with admins approving, a person's pending proposal opens read-only", async
 test("with people approving, a person approves from the dialog", async () => {
   review = body(true);
   const view = draw();
-  fireEvent.click(await view.findByText("refund-order"));
+  fireEvent.click(await view.findByText("Refund order"));
   fireEvent.click(await view.findByText("Approve and publish"));
   await waitFor(() =>
     expect(posts).toEqual([
@@ -331,8 +331,8 @@ test("turning automatic approval off shows proposals from recordings and from co
   const view = draw();
   expect(await view.findByText("From your recordings")).toBeTruthy();
   expect(view.getByText("From your conversations")).toBeTruthy();
-  expect(view.getByText("refund-order")).toBeTruthy();
-  expect(view.getByText("reply-politely")).toBeTruthy();
+  expect(view.getByText("Refund order")).toBeTruthy();
+  expect(view.getByText("Reply politely")).toBeTruthy();
   expect(view.getByText("No run yet.")).toBeTruthy();
   expect(view.getByText("Latest run finished.")).toBeTruthy();
   const buttons = view.getAllByRole("button", { name: "Learn now" });
@@ -358,9 +358,9 @@ test("sources with the same label make one group with one Learn now", async () =
     })),
   };
   const view = draw();
-  expect(await view.findByText("skill-a")).toBeTruthy();
+  expect(await view.findByText("Skill a")).toBeTruthy();
   expect(view.getAllByText("From your conversations")).toHaveLength(1);
-  fireEvent.click(view.getByText("skill-b"));
+  fireEvent.click(view.getByText("Skill b"));
   fireEvent.click(await view.findByText("Approve and publish"));
   await waitFor(() =>
     expect(posts).toEqual([
@@ -440,7 +440,7 @@ test("evidence names the recording by its title", async () => {
     },
   ];
   const view = draw();
-  fireEvent.click(await view.findByText("refund-order"));
+  fireEvent.click(await view.findByText("Refund order"));
   expect(await view.findByText("Refund an order")).toBeTruthy();
   expect(view.getByText("A recording")).toBeTruthy();
   expect(view.getAllByText("Open the order, Click Refund")).toHaveLength(2);
@@ -666,7 +666,7 @@ test("the review is read again every ten seconds only while a run is going", () 
 test("when a refetch finds fewer proposals waiting, Your skills is refreshed", async () => {
   review = body(true);
   const view = draw();
-  await view.findByText("refund-order");
+  await view.findByText("Refund order");
   const invalidated: unknown[] = [];
   const original = queryClient.invalidateQueries.bind(queryClient);
   queryClient.invalidateQueries = ((filters: { queryKey?: unknown }) => {
@@ -711,7 +711,7 @@ test("skills approved while opening refresh Your skills on the first load", asyn
   const unsubscribe = watcher.subscribe(() => {});
   try {
     const view = draw();
-    await view.findByText("refund-order");
+    await view.findByText("Refund order");
     await waitFor(() => expect(skillsReads).toBeGreaterThanOrEqual(2));
   } finally {
     unsubscribe();
@@ -722,7 +722,7 @@ test("a removal proposal says approve removal, then removed", async () => {
   review = body(true);
   detailOperation = "remove";
   const view = draw();
-  fireEvent.click(await view.findByText("old-skill"));
+  fireEvent.click(await view.findByText("Old skill"));
   expect(view.queryByText("Approve and publish")).toBeNull();
   fireEvent.click(await view.findByText("Approve removal"));
   expect(
@@ -752,7 +752,7 @@ test("a recording without named steps says 1 step, then 2 steps", async () => {
   ];
   review = body(false);
   const view = draw();
-  fireEvent.click(await view.findByText("refund-order"));
+  fireEvent.click(await view.findByText("Refund order"));
   expect(await view.findByText("1 step")).toBeTruthy();
   expect(view.getByText("2 steps")).toBeTruthy();
 });
