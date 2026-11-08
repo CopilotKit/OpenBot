@@ -273,6 +273,28 @@ test("with people approving, the latest run shows and Learn now starts one", asy
   expect(view.queryByText(/Learning started/)).toBeNull();
 });
 
+test("a failed run says why, not only that it failed", async () => {
+  review = body(true);
+  const first = review.sources[0];
+  const why =
+    "Learning couldn't reach OpenBot to use your model plan. Quit OpenBot and open it again, then choose Learn now.";
+  if (first)
+    first.latestRun = {
+      id: "run-1",
+      status: "failed",
+      trigger: "manual",
+      proposals: null,
+      insights: null,
+      failureCode: "BatchInsightAgentFailed",
+      failure: why,
+      createdAt: "2026-11-01T00:00:00Z",
+      startedAt: null,
+      completedAt: null,
+    };
+  const view = draw();
+  expect(await view.findByText(`Latest run failed. ${why}`)).toBeTruthy();
+});
+
 const run = (id: string, createdAt: string) => ({
   id,
   status: "succeeded" as const,

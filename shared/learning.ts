@@ -47,6 +47,8 @@ export type LearningOverview = {
     candidates: string | null;
     runs: string | null;
   };
+  /** Why Learning can't run on this machine's model, and what to do. Absent when it can. */
+  modelProblem?: string;
 };
 
 /** A Skill change Intelligence proposed, as Admin → Automatic learning and Settings → Learning list it. */
@@ -239,6 +241,8 @@ export type LearningRunSummary = {
   proposals: number | null;
   insights: number | null;
   failureCode: string | null;
+  /** Why a failed run stopped, said for the person, with what to do. Null or absent unless it failed. */
+  failure?: string | null;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;

@@ -282,7 +282,12 @@ export function LearningReview() {
                   {canReview && (
                     <ItemDescription>
                       {group.latestRun
-                        ? `Latest run ${RUN_STATUS[group.latestRun.status]}.`
+                        ? [
+                            `Latest run ${RUN_STATUS[group.latestRun.status]}.`,
+                            group.latestRun.failure,
+                          ]
+                            .filter(Boolean)
+                            .join(" ")
                         : "No run yet."}
                     </ItemDescription>
                   )}

@@ -1,4 +1,5 @@
 import { cutAtCodeUnits } from "../channels/text";
+import { appsPage } from "../edition";
 import { MAX_RESULT_CHARS, type McpCallResult, type McpTool } from "./mcp";
 
 /**
@@ -525,6 +526,6 @@ export async function callTool(
   }
 
   return failure(
-    `${toolName} is not a tool this connector implements. The stored tool list is out of date; refresh it on the Plugins page.`,
+    `${toolName} is not a tool this connector implements. The stored tool list is out of date; refresh it on the ${appsPage()} page.`,
   );
 }
