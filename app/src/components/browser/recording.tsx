@@ -274,6 +274,8 @@ export function stoppedSentence(stopped: Stopped): string {
     return `Nothing was recorded in “${stopped.title}”. ${WHAT_IT_RECORDS}`;
   if (stopped.kept)
     return `“${stopped.title}” wasn't saved to your Learning space. ${NOT_SAVED[stopped.kept]}`;
+  if (stopped.sending && stopped.retrying)
+    return `“${stopped.title}” wasn't saved to your Learning space yet. ${stopped.retrying}`;
   if (stopped.sending)
     return `Saving “${stopped.title}” to your Learning space: ${heldIn(stopped)}.`;
   return `Saved “${stopped.title}” to your Learning space: ${heldIn(stopped)}.`;
@@ -293,14 +295,14 @@ export function StoppedIcon({
         className={cn("text-muted-foreground", className)}
       />
     );
-  if (stopped.sending && !stopped.empty && !stopped.kept)
+  if (stopped.sending && !stopped.empty && !stopped.kept && !stopped.retrying)
     return (
       <IconLoader2
         aria-hidden="true"
         className={cn("animate-spin text-muted-foreground", className)}
       />
     );
-  return stopped.empty || stopped.kept ? (
+  return stopped.empty || stopped.kept || stopped.retrying ? (
     <IconAlertTriangle
       aria-hidden="true"
       className={cn("text-amber-600 dark:text-amber-400", className)}
@@ -331,9 +333,11 @@ export function StoppedRow({
       ? `Nothing was recorded. ${WHAT_IT_RECORDS}`
       : stopped.kept
         ? `Not saved to your Learning space. ${NOT_SAVED[stopped.kept]}`
-        : stopped.sending
-          ? `Saving to your Learning space: ${heldIn(stopped)}.`
-          : `Saved to your Learning space: ${heldIn(stopped)}.`;
+        : stopped.sending && stopped.retrying
+          ? `Not saved to your Learning space yet. ${stopped.retrying}`
+          : stopped.sending
+            ? `Saving to your Learning space: ${heldIn(stopped)}.`
+            : `Saved to your Learning space: ${heldIn(stopped)}.`;
   return (
     <Item size="sm" role="status">
       <ItemMedia variant="icon">

@@ -34,6 +34,12 @@ import {
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
+import {
+  ALWAYS_ASKS,
+  ASK_FIRST_DESCRIPTION,
+  ASK_FIRST_TITLE,
+  HANDED_TO_YOU,
+} from "./ask-first-copy";
 import { HOST_LABELS, LabelSelect, RuleForm, RuleRow } from "./rules";
 
 /**
@@ -99,16 +105,16 @@ export function ApprovalSettings() {
       <PageSection
         description={
           /*
-           * What asks whatever these settings say (server/src/approvals/policy.ts). A Bot's own
-           * computer is left out on purpose: its workspace is its scratch space, so deleting a file
-           * there is an ordinary change, as the last sentence says.
+           * What asks whatever these settings say (server/src/approvals/policy.ts), in the same words
+           * as onboarding's Welcome (ask-first-copy.ts). A Bot's own workspace is left out of what
+           * always asks on purpose: deleting a file there is an ordinary change, as the last sentence
+           * says.
            */
           <>
-            Payments, passwords and security settings are always handed to you.
-            Deleting, sending, sharing and posting in your apps and on websites
-            always ask first. So does every edit or command in a folder on your
-            own computer. A Bot's own computer is its scratch space, so what it
-            does there asks only when your settings or rules say so.
+            {ALWAYS_ASKS} They also ask before every edit or command in a folder
+            on your own computer. {HANDED_TO_YOU} Bots can create, edit, and
+            delete files in their own workspace without asking, unless your
+            settings or rules say so.
           </>
         }
         title="Before a Bot acts"
@@ -119,14 +125,14 @@ export function ApprovalSettings() {
               <IconHandStop />
             </ItemMedia>
             <ItemContent>
-              <ItemTitle>Ask before making changes</ItemTitle>
-              <ItemDescription>
-                Review a Bot's changes to websites, connected apps, and files.
+              <ItemTitle>{ASK_FIRST_TITLE}</ItemTitle>
+              <ItemDescription className="line-clamp-none">
+                {ASK_FIRST_DESCRIPTION}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
               <Switch
-                aria-label="Ask before making changes"
+                aria-label={ASK_FIRST_TITLE}
                 checked={inbox.data?.enabled ?? false}
                 disabled={inbox.isLoading || preferences.isPending}
                 onCheckedChange={(enabled) => preferences.mutate({ enabled })}

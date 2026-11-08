@@ -262,6 +262,7 @@ export type OffscreenToBackground =
       phrases?: number;
     } // final outcome queued
   | { type: "offscreen.done"; recordingId: string; failed?: string } // every event sent, every trajectory finished; `failed`: none of it could be sent, and why
+  | { type: "offscreen.retrying"; recordingId: string; reason?: string } // why its events are not going out while the document keeps retrying (the streamer's retrying sentence); no `reason` once they go out again
   | {
       type: "offscreen.kept";
       recordingId: string;

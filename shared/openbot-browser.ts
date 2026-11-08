@@ -100,6 +100,12 @@ export type LauncherState = {
      */
     sending?: boolean;
     /**
+     * While `sending`, why none of it is going out right now: the Recorder keeps retrying (OpenBot or its back end is
+     * busy or unreachable) and says so in its own sentence. Absent while it goes out, and once it is kept or sent.
+     * OpenBot then says the recording is not saved yet, and why, rather than that it is being saved.
+     */
+    retrying?: string;
+    /**
      * Some of this recording is not in Intelligence, and is kept in this browser instead:
      * - `refused`: Intelligence turned the recording's capture pass away (a stop (hold) or stop (park) row, such as an
      *   Intelligence with Trajectories turned off), and the Recorder tries again later.

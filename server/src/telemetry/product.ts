@@ -231,6 +231,8 @@ milestones("learning", "setup", "human", {
     "learning.sharing_changed",
     "learning.skill_opened",
     "learning.skill_closed",
+    "learning.sharing_requested",
+    "learning.sharing_decided",
   ],
 });
 export function projectAuditMilestone(

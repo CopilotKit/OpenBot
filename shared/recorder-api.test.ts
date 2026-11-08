@@ -56,6 +56,7 @@ describe("recorder constants and paths", () => {
       connection: recorderPaths.connection("c"),
       currentConnection: recorderPaths.currentConnection,
       me: recorderPaths.me,
+      recordings: recorderPaths.recordings,
       learning: recorderPaths.learning,
       activity: recorderPaths.activity,
       trajectoryConnect: recorderPaths.trajectoryConnect("t"),

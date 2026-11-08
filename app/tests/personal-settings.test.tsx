@@ -98,26 +98,13 @@ describe("the Settings sidebar", () => {
     );
   });
 
-  test("has no Learning page, which is about sharing Skills with other people", async () => {
-    expect(
-      settingsSidebarItems("personal").map((item) => item.title),
-    ).not.toContain("Learning");
-    expect(settingsSidebarItems("team").map((item) => item.title)).toContain(
-      "Learning",
-    );
-    const guard = LearningRoute.options.beforeLoad as unknown as (input: {
-      context: { queryClient: QueryClient };
-    }) => Promise<unknown>;
-    let sentTo: unknown = "open";
-    try {
-      await guard({ context: { queryClient: clientFor("personal") } });
-    } catch (thrown) {
-      sentTo = isRedirect(thrown) ? thrown.options.to : thrown;
+  test("Learning shows in the personal edition's settings", () => {
+    for (const edition of ["personal", "team"] as const) {
+      expect(settingsSidebarItems(edition).map((item) => item.title)).toContain(
+        "Learning",
+      );
     }
-    expect(sentTo).toBe("/settings");
-    await expect(
-      guard({ context: { queryClient: clientFor("team") } }),
-    ).resolves.toBeUndefined();
+    expect(LearningRoute.options.beforeLoad).toBeUndefined();
   });
 
   test("lists none of it in the team edition", () => {
@@ -253,12 +240,15 @@ describe("the Computer page", () => {
   async function renderPage(
     edition: "team" | "personal",
     host: HostAccessStatus = hostAccess,
+    computers: ComputerFleet = fleet,
   ) {
     const client = clientFor(edition);
     client.setDefaultOptions({
       queries: { retry: false, staleTime: Infinity },
     });
-    client.setQueryData(computerKeys.fleet(), fleet);
+    client.setQueryData(computerKeys.fleet(), computers);
+    // No Bot is hidden: a name not on the list is then a Bot that is gone.
+    client.setQueryData(agentKeys.list(true), []);
     client.setQueryData(hostAccessKeys.status(), host);
     client.setQueryData(agentKeys.list(false), [assistant]);
     const router = createRouter({
@@ -300,6 +290,107 @@ describe("the Computer page", () => {
     expect(
       within(browsers).getByRole("button", { name: "Reset" }),
     ).toBeTruthy();
+  });
+
+  /**
+   * Teach a Bot's browser, as GET /api/computers/fleet lists it beside the Bots' browsers on the personal edition's one
+   * computer: a seat named by the person's browser id (`person-` and 32 hex digits), which is no Bot's.
+   */
+  const teachBrowser: ComputerFleet["computers"][number] = {
+    computer: "bot:person-5f0e3c1a9b7d4e2f8a6c0b1d3e5f7a9c",
+    kind: "bot",
+    botId: "person-5f0e3c1a9b7d4e2f8a6c0b1d3e5f7a9c",
+    running: true,
+    startedAt: "2026-11-07T04:15:46.000Z",
+    egress: "network policy filter",
+  };
+
+  /** One row of the browsers section, by its title. */
+  function browserRow(
+    view: Awaited<ReturnType<typeof renderPage>>,
+    title: string,
+  ) {
+    const section = view.getByRole("heading", {
+      name: /^(Your Bots' browsers|Computers in this deployment)$/,
+    }).parentElement?.parentElement as HTMLElement;
+    return within(section)
+      .getByText(title)
+      .closest('[data-slot="item"]') as HTMLElement;
+  }
+
+  // FOUND ON WINDOWS: after Teach a Bot recorded, the person's own browser was listed as "A Bot no longer here", with
+  // a Reset that said it deleted the Bot's browser profile.
+  test("in the personal edition names Teach a Bot's browser as yours, with a clear for it instead of a Bot's Reset", async () => {
+    const view = await renderPage("personal", hostAccess, {
+      ...fleet,
+      computers: [...fleet.computers, teachBrowser],
+    });
+    const browsers = view.getByRole("heading", { name: "Your Bots' browsers" })
+      .parentElement?.parentElement as HTMLElement;
+    await within(browsers).findByText("Your OpenBot browser");
+    expect(browsers.textContent).not.toContain("A Bot no longer here");
+
+    const own = browserRow(view, "Your OpenBot browser");
+    expect(own.textContent).toContain("You record in it with Teach a Bot.");
+    expect(
+      within(own).getByRole("button", { name: "Stop browser" }),
+    ).toBeTruthy();
+    expect(
+      within(own).getByRole("button", { name: "Clear browser data" }),
+    ).toBeTruthy();
+    expect(within(own).queryByRole("button", { name: "Reset" })).toBeNull();
+
+    // The Bot's own row keeps its Reset.
+    const bot = browserRow(view, "Personal Assistant");
+    expect(within(bot).getByRole("button", { name: "Reset" })).toBeTruthy();
+
+    const text = view.container.textContent ?? "";
+    expect(text).not.toContain("closes a Bot's browser");
+    expect(text).toContain(
+      "Clear browser data does the same for your OpenBot browser.",
+    );
+  });
+
+  test("in the personal edition says a stopped OpenBot browser opens when you record", async () => {
+    const view = await renderPage("personal", hostAccess, {
+      ...fleet,
+      computers: [{ ...teachBrowser, running: false, startedAt: null }],
+    });
+    const own = browserRow(view, "Your OpenBot browser");
+    expect(own.textContent).toContain(
+      "No browser running. It opens when you record with Teach a Bot.",
+    );
+    expect(own.textContent).not.toContain("when the Bot next needs it");
+  });
+
+  test("in the team edition names whose OpenBot browser it is, never a Bot that is gone", async () => {
+    const view = await renderPage("team", hostAccess, {
+      isolation: "per-person",
+      computers: [
+        {
+          ...teachBrowser,
+          person: { name: "Ada", email: "ada@acme.test" },
+        },
+        {
+          ...teachBrowser,
+          computer: "bot:person-00000000000000000000000000000000",
+          botId: "person-00000000000000000000000000000000",
+        },
+      ],
+    });
+    const ada = browserRow(view, "Ada's OpenBot browser");
+    expect(ada.textContent).toContain("Their own browser for Teach a Bot");
+    expect(ada.textContent).not.toContain("Isolated");
+    expect(view.getByText("A person's OpenBot browser")).toBeTruthy();
+    expect(view.container.textContent).not.toContain("A Bot no longer here");
+
+    within(ada).getByRole("button", { name: "Reset" }).click();
+    const dialog = await view.findByRole("dialog");
+    expect(dialog.textContent).toContain("Reset Ada's OpenBot browser?");
+    expect(dialog.textContent).toContain(
+      "The person is signed out of every site they signed in to in it.",
+    );
+    expect(dialog.textContent).not.toContain("The Bot is signed out");
   });
 
   /** The section the desktop's folder picker is reached from. */
