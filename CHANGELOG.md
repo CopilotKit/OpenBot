@@ -41,7 +41,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 ### Smaller changes
 
 - **New Bot** names custom agent frameworks on its first screen. A quiet line above the buttons
-  shows Claude Agent SDK, Google ADK, Google Antigravity and LangChain, and pressing one goes
+  shows Claude Agent SDK, LangChain, Google ADK and AWS Strands, and pressing one goes
   straight to its address. "and 9 more" opens the full list, which was behind **Connect a custom
   agent**. Its labels are small and uppercase, and Isolated and apps are plain rows.
 - The sidebar floats as frosted glass over the colours of OpenBot's orb, the orb sits beside

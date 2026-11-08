@@ -122,10 +122,16 @@ const CONNECTION_OPTIONS = [
   ...WEB_HARNESSES.filter((harness) => harness.id !== "byo-url"),
 ];
 type Step = (typeof STEPS)[number];
-/** The frameworks named on the first screen: the web list's leads, so a custom agent is in view. */
-const LEAD_FRAMEWORKS = CONNECTION_OPTIONS.filter(
-  (harness) => harness.id !== "byo-url",
-).slice(0, 4);
+/**
+ * The frameworks named on the first screen, in this order, so a custom agent is in view. Looked up in
+ * the list the sheet offers, so one that stops being offered drops out and the strip still draws.
+ */
+const LEAD_FRAMEWORKS = [
+  "claude-agent-sdk",
+  "langgraph",
+  "google-adk",
+  "strands",
+].flatMap((id) => CONNECTION_OPTIONS.filter((harness) => harness.id === id));
 
 /**
  * Where the Bot runs: on this deployment, or behind a framework somebody hosts.

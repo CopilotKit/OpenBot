@@ -495,6 +495,24 @@ test("a framework on the first screen validates the name, then goes straight to 
   ).toBeTruthy();
 });
 
+test("the first screen names Claude Agent SDK, LangChain, Google ADK and AWS Strands, then the rest", async () => {
+  const { view } = await opened();
+  const names = view
+    .getAllByRole("button")
+    .map((button) => button.textContent?.trim() ?? "");
+  const more = names.findIndex((name) =>
+    name.startsWith("Connect a custom agent"),
+  );
+  expect(names.slice(more - 4, more)).toEqual([
+    "Claude Agent SDK",
+    "LangChain (LangGraph)",
+    "Google ADK",
+    "AWS Strands",
+  ]);
+  // Everything else the list offers, "An agent you already run" included, is behind the link.
+  expect(names[more]).toBe("Connect a custom agent: and 9 more");
+});
+
 test("personal Bot creation hides team visibility and isolation controls and links to Business", async () => {
   const view = draw(
     <NewBotSheet open onClose={() => {}} onCreated={() => {}} />,
