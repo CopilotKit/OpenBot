@@ -1024,6 +1024,9 @@ test("a key app nobody has connected keeps the screen's own reassurance", async 
   expect(
     await view.findByText(/Connect shows where to get one\./),
   ).toBeTruthy();
+  // And the row above it no longer says there is nothing to paste.
+  expect(view.queryByText(/There is no token to paste/)).toBeNull();
+  expect(view.getByText(/with a key from the app/)).toBeTruthy();
   /*
    * And the half of the screen's line that survives it. Replacing the whole line took away the one
    * thing an administrator reading this row needs to know — that the connector is finished whether

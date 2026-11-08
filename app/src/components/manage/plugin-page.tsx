@@ -79,6 +79,7 @@ import {
   botSharedAppsQueryOptions,
   describeApproval,
 } from "@/lib/plugins/shared-use";
+import { schemeNeedsKey } from "@/lib/plugins/enablement-notes";
 import { toolInWords } from "@/lib/plugins/tool-words";
 
 /**
@@ -888,7 +889,13 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                 <ItemContent>
                   <ItemTitle>How this is reached</ItemTitle>
                   <ItemDescription>
-                    {brokeredReach(provider, paths.deploymentName).description}
+                    {
+                      brokeredReach(
+                        provider,
+                        paths.deploymentName,
+                        schemeNeedsKey(server?.authScheme ?? null),
+                      ).description
+                    }
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>

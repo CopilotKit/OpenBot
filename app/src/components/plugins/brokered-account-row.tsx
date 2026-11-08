@@ -1094,7 +1094,8 @@ export function BrokeredAccountRow({
                 </Button>
               </>
             ) : (
-              /* The arrow says this leaves OpenBot for the vendor's consent page. It does. */
+              /* The arrow says this leaves OpenBot for the vendor's consent page. It does, for
+                 every app but a key app. */
               <Button
                 disabled={account.connecting}
                 onClick={() => {
@@ -1115,7 +1116,8 @@ export function BrokeredAccountRow({
                 variant="outline"
               >
                 Connect
-                <IconArrowUpRight />
+                {/* A key app opens a form here and leaves for nowhere, so no arrow. */}
+                {account.kind === "fields" ? null : <IconArrowUpRight />}
               </Button>
             )}
           </ItemActions>

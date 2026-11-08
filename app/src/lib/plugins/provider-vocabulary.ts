@@ -123,17 +123,23 @@ export function brokeredConnectionDescription(
 /**
  * The "How this is reached" row for a brokered app: its sentence and its badge. `deployment` is
  * what OpenBot itself is called on the page (`managePaths().deploymentName`).
+ *
+ * `takesKey` is an app connected with a key from the app itself rather than a sign-in. "There is
+ * no token to paste" was said on those too, right above a Connect that asks for one.
  */
 export function brokeredReach(
   _provider: PluginsProvider,
   deployment = "this deployment",
+  takesKey = false,
 ): {
   description: string;
   badge: string;
 } {
   const holds = deployment.charAt(0).toUpperCase() + deployment.slice(1);
   return {
-    description: `${holds} holds one key for every app like this. Each person connects their own account, and a Bot sees only what that person can see. There is no token to paste.`,
+    description: takesKey
+      ? `${holds} reaches this app for you. Each person connects their own account with a key from the app, and a Bot sees only what that person can see.`
+      : `${holds} holds one key for every app like this. Each person connects their own account, and a Bot sees only what that person can see. There is no token to paste.`,
     badge: "Through OpenBot",
   };
 }
