@@ -2133,8 +2133,12 @@ describe("seats on a person's computer", () => {
         person: { name: "Ada", email: "ada@acme.test" },
       }),
     );
-    expect(listed[1]?.person).toBeUndefined();
-    expect(listed[2]?.person).toBeUndefined();
+    // Nobody is named for a browser whose owner isn't known, nor for a Bot's computer.
+    expect(listed.map((computer) => computer.person ?? null)).toEqual([
+      { name: "Ada", email: "ada@acme.test" },
+      null,
+      null,
+    ]);
   });
 });
 
