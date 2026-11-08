@@ -588,6 +588,24 @@ describe("one app, by key or by name, held or not", () => {
     });
   });
 
+  /*
+   * The personal edition's card reads `connect` to decide whether one press turns the app on AND
+   * opens its sign-in. Answered null for an app nobody turned on, the card offered Turn on alone,
+   * and the sign-in took a second press on the Connect that replaced it.
+   */
+  test("an app only the directory knows says how it connects, from the directory", async () => {
+    const response = await appAs(person).request(
+      `/api/plugins/for/${bot}/apps/Dropbox`,
+    );
+    expect((await json<{ app: AppAccess }>(response)).app).toMatchObject({
+      key: DROPBOX,
+      state: "disabled",
+      unavailable: "absent",
+      connect: "consent",
+      authScheme: null,
+    });
+  });
+
   test("a catalogue entry nobody added is disabled under its key", async () => {
     const response = await appAs(person).request(
       `/api/plugins/for/${bot}/apps/notion`,
