@@ -704,7 +704,25 @@ export function LocalIntelligence({
  * clear themselves (signing in, accepting the agreement) with its action, anything else with Retry.
  */
 export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
-  if (!sequence.stopped) return null;
+  if (!sequence.stopped) {
+    // The back end downloads behind the screen in front: say how far, so the wait is visible.
+    if (!sequence.running || !sequence.download) return null;
+    return (
+      <SetupProgress
+        label="Back end download"
+        showElapsed={false}
+        steps={[
+          {
+            step: "Downloading the back end",
+            ok: true,
+            running: true,
+            detail: "",
+            downloads: sequence.download,
+          },
+        ]}
+      />
+    );
+  }
   const needs = needsPerson(sequence);
   // Stopped at Start: Intelligence got as far as ready and licensed, and OpenBot is what failed.
   const openBot = !needs && sequence.at === "start";

@@ -2608,12 +2608,70 @@ pub(crate) fn setup_with(
                 cancel,
                 images_limits,
             )?,
-            None => false,
+            // A first setup: its node does not exist until the CLI makes it, so its download is
+            // followed while the CLI pulls (`local_images::follow_new_stack`).
+            None => {
+                return setup_followed(
+                    cli,
+                    installation,
+                    accepted,
+                    limits.1,
+                    cancel,
+                    &images,
+                    attempt,
+                    images_limits,
+                )
+            }
         },
         None => false,
     };
     let limits = if downloaded { limits.0 } else { limits.1 };
     setup(cli, installation, accepted, limits, cancel)
+}
+
+/**
+A first `local setup`, with how far its image download has got shown for `attempt` while it runs.
+
+The CLI creates the stack's node and pulls into it itself, so nothing can be downloaded for it first.
+Its pulls are followed instead, from the node's containerd, so the row shows the download a first
+install waits on. An engine that does not say which nodes it has leaves the setup to run as before.
+*/
+#[allow(clippy::too_many_arguments)]
+fn setup_followed(
+    cli: &PinnedCli,
+    installation: &std::path::Path,
+    accepted: Option<&EulaVersion>,
+    limits: Limits,
+    cancel: &Cancel,
+    images: &crate::local_images::CliImages,
+    attempt: &str,
+    images_limits: crate::local_images::Limits,
+) -> Result<Report, Failure> {
+    let engine = recorded_engine();
+    if refuse_rootless(&setup_arguments(accepted), engine.as_ref()).is_err() {
+        return setup(cli, installation, accepted, limits, cancel);
+    }
+    let command = || engine_command(engine.as_ref());
+    let Some(before) = crate::local_images::stack_nodes(&command, images_limits) else {
+        return setup(cli, installation, accepted, limits, cancel);
+    };
+    let finished = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let showing = crate::local_images::Showing::new(attempt);
+            crate::local_images::follow_new_stack(
+                &command,
+                images,
+                &before,
+                images_limits,
+                &|| finished.load(Ordering::SeqCst) || cancel.requested(),
+                &mut |progress| showing.show(progress),
+            );
+        });
+        let report = setup(cli, installation, accepted, limits, cancel);
+        finished.store(true, Ordering::SeqCst);
+        report
+    })
 }
 
 /// The CopilotKit account sign-in against the installed CLI. While it waits, `shown_sign_in_page`

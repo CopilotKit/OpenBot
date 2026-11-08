@@ -208,6 +208,66 @@ test("the whole sequence runs by itself: set up, connect, wait for ready and val
   expect(screen.queryByRole("button", { name: /Connect/ })).toBeNull();
 });
 
+/**
+ * The Windows fresh-install probe: "Setting up OpenBot · In progress" said nothing while ~690 MB of
+ * back-end images came down, and the person waited behind the AI screen with nothing either. A
+ * first setup's download now shows on its row, with the bar Install shows, and on the screen in
+ * front of it while it runs there.
+ */
+test("a first setup shows its download on its row and on the screen in front of it", async () => {
+  const settingUp = deferred<LocalReport>();
+  let arrived: { done: number; total: number } | null = null;
+  invokeHandler = async (command) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return arrived;
+    if (command === "set_up_local_eval") return settingUp.promise;
+    throw new Error(`unexpected ${command}`);
+  };
+  const screen = view({ prepare: true });
+  await waitFor(() =>
+    expect(row(screen, SETUP).textContent).toContain("In progress"),
+  );
+  arrived = { done: 245_000_000, total: 690_000_000 };
+  await waitFor(
+    () =>
+      expect(row(screen, SETUP).textContent).toContain("245.0 MB of 690.0 MB"),
+    { timeout: 3_000 },
+  );
+  const setting = within(row(screen, SETUP));
+  expect(setting.getByText("Downloading the back end.")).toBeTruthy();
+  const bar = setting.getByRole("progressbar", { name: "Download progress" });
+  expect(bar.getAttribute("value")).toBe("245000000");
+  expect(bar.getAttribute("max")).toBe("690000000");
+  // The screen in front (Install, or Connect your AI) shows the same download while it runs.
+  const behind = within(
+    screen.getByRole("list", { name: "Back end download" }),
+  );
+  expect(
+    behind.getByRole("listitem", { name: "Downloading the back end" })
+      .textContent,
+  ).toContain("245.0 MB of 690.0 MB");
+  expect(
+    behind
+      .getByRole("progressbar", { name: "Download progress" })
+      .getAttribute("value"),
+  ).toBe("245000000");
+  // It asked about the setup's own call.
+  const setup = invokeCalls.find(
+    (call) => call.command === "set_up_local_eval",
+  );
+  expect(
+    invokeCalls.find((call) => call.command === "local_eval_download")?.args,
+  ).toEqual({
+    attempt: (setup?.args as { attempt?: string } | undefined)?.attempt,
+  });
+  // Downloaded: both bars go, and the setup carries on.
+  arrived = null;
+  await waitFor(() => expect(screen.queryByRole("progressbar")).toBeNull(), {
+    timeout: 3_000,
+  });
+  expect(screen.queryByRole("list", { name: "Back end download" })).toBeNull();
+});
+
 test("a recorded, connected stack skips straight to waiting", async () => {
   invokeHandler = answers({ run_local_eval: [ready] });
   const started: Startable[] = [];
