@@ -4231,11 +4231,15 @@ enum WindowPage {
 }
 
 /// The main window's guard: from OpenBot's own pages, a site outside OpenBot opens in the person's
-/// default browser and the window stays where it is. See `outside_links`.
+/// default browser and the window stays where it is. The booking calendar a page embeds loads in
+/// its frame. See `outside_links`.
 fn outside_links_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::<R>::new("outside-links")
         .on_navigation(|webview, destination| {
-            if webview.label() != "main" || !outside_links::leaves(destination) {
+            if webview.label() != "main"
+                || !outside_links::leaves(destination)
+                || outside_links::loads_in_a_frame(destination)
+            {
                 return true;
             }
             let from_openbot = webview.url().is_ok_and(|current| {
@@ -4255,6 +4259,37 @@ fn outside_links_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             false
         })
         .build()
+}
+
+/**
+The main window, as `tauri.conf.json` describes it, built here rather than from the configuration so
+it gets a new-window handler, which only a builder can attach: a new window asked for from it (a
+link in the booking calendar's frame, which the page's shim can't reach) opens in the person's
+browser for a site outside OpenBot, and nowhere otherwise. Without one, macOS opened nothing and
+Windows opened a bare browser window of its own. The configuration says `"create": false`.
+*/
+fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
+    let Some(config) = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .cloned()
+    else {
+        return Ok(());
+    };
+    let opener = app.clone();
+    tauri::WebviewWindowBuilder::from_config(app, &config)?
+        .on_new_window(move |destination, _features| {
+            outside_links::new_window(&destination, |to| {
+                use tauri_plugin_opener::OpenerExt;
+                let _ = opener.opener().open_url(to, None::<&str>);
+            });
+            tauri::webview::NewWindowResponse::Deny
+        })
+        .build()?;
+    Ok(())
 }
 
 fn window_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) -> WindowPage {
@@ -7591,6 +7626,7 @@ fn main() {
             _ => {}
         })
         .setup(move |app| {
+            build_main_window(app.handle())?;
             log_launch(app.handle(), local_offset);
             // A signed Mac or Windows build updates itself. The window asks once at launch and
             // installs only if the person says yes; the plugin refuses anything whose minisign
