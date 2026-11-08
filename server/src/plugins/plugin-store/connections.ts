@@ -1832,7 +1832,7 @@ export function connectionMethods(context: StoreContext) {
           outcome: "unreachable",
           probe: null,
           attempted: candidate.name,
-          sentence: `This deployment brokers its apps through ${BROKERED_PROFILE[brokerProvider].vendor}, and the only connection check this deployment knows how to make is Composio's. Nothing was asked about this connection, so nothing is recorded about it.`,
+          sentence: `OpenBot can't check this kind of connection yet. Nothing was asked about it, so nothing is recorded about it.`,
         };
       }
 
@@ -2805,7 +2805,7 @@ export function connectionMethods(context: StoreContext) {
        */
       if (probed.outcome === "unreachable") {
         throw new PluginRefusedError(
-          `${input.toolkit} could not be checked just now: ${probed.sentence} Nothing here changed — your connection is still recorded exactly as the last check left it — so pressing Re-check again when ${BROKERED_PROFILE[brokerProvider].vendor} is answering is the whole of the retry.`,
+          `${input.toolkit} couldn't be checked just now: ${probed.sentence} Nothing changed, and your connection still shows the last check. Press Re-check again in a moment.`,
           null,
         );
       }

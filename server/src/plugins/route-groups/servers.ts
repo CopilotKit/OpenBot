@@ -1,5 +1,6 @@
 import { requireAdmin } from "../../auth/guards";
 import { reasonWithoutStatement } from "../../db/query-failure";
+import { BROKERED_PROFILE } from "../access";
 import { brokerSentence, schemeKind } from "../broker";
 import { CATALOGUE } from "../catalogue";
 import { vendorSentence } from "../composio";
@@ -447,7 +448,7 @@ export function mountServerRoutes({
 
       const refusal = brokerRefusal(
         error,
-        `Removing this app did not finish, and neither this deployment nor ${activeVendor} said why, so the app is still here rather than gone with grants of its own left live at the vendor. Press Remove again: every account is withdrawn at ${activeVendor} before anything here is deleted, so repeating it is safe and asks only for what is left. Check this deployment's ${activeVendor} key if it persists.`,
+        `Couldn't finish removing this app, and no reason was given. It's still here. Press Remove again. It's safe to repeat. Check ${BROKERED_PROFILE[activeProvider].envVar} if it keeps happening.`,
       );
       return context.json({ error: refusal.error }, refusal.status);
     }

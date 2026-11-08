@@ -19,9 +19,12 @@ export function brokeredProvenance(provenance: string): boolean {
   return provenance === "composio" || provenance === "arcade";
 }
 
+/*
+ * NO VENDOR NAME IN ANY OF IT. A person connects their work apps through OpenBot, and the broker
+ * behind it (Composio or Arcade) is never named on a screen, the admin's included. The one vendor
+ * word left is the environment variable an admin sets, because that name is the whole remedy.
+ */
 export type ProviderVocabulary = {
-  /** The vendor's display name. */
-  name: string;
   /** The directory entry's label, as the "More apps" row and the picker title say it. */
   directoryLabel: string;
   /** The environment variable an operator sets to turn the broker on. */
@@ -43,15 +46,13 @@ export type ProviderVocabulary = {
 
 const VOCABULARY: Record<PluginsProvider, ProviderVocabulary> = {
   composio: {
-    name: "Composio",
-    directoryLabel: "Browse Composio",
+    directoryLabel: "Browse apps",
     envVar: "COMPOSIO_API_KEY",
     directoryDescription:
       "A few hundred apps. Each person connects their own account.",
   },
   arcade: {
-    name: "Arcade",
-    directoryLabel: "Browse Arcade",
+    directoryLabel: "Browse apps",
     envVar: "ARCADE_API_KEY",
     directoryDescription:
       "Apps nobody here has reviewed. Each person connects their own account.",
@@ -70,13 +71,13 @@ export function providerVocabulary(
  * ONE SENTENCE FOR BOTH THE QUERY AND THE SCREEN, so the two layers cannot drift: the query layer's
  * fallback once spelled a vendor on its own and printed Composio's name on an Arcade deployment.
  */
-export function directoryReadFailure(provider: PluginsProvider): string {
-  return `Couldn't load ${VOCABULARY[provider].name}'s app directory. Reload the page.`;
+export function directoryReadFailure(_provider: PluginsProvider): string {
+  return "Couldn't load the apps you can connect. Reload the page.";
 }
 
 /** The "More apps" section's own sentence. */
-export function moreAppsSectionDescription(provider: PluginsProvider): string {
-  return `Apps from ${VOCABULARY[provider].name}. Nobody here has reviewed them.`;
+export function moreAppsSectionDescription(_provider: PluginsProvider): string {
+  return "More apps people can connect through OpenBot. Nobody here has reviewed them.";
 }
 
 /**
@@ -97,11 +98,10 @@ export function moreAppsRow(
   provider: PluginsProvider,
   configured: boolean,
 ): MoreAppsRow {
-  const { name, directoryLabel, envVar, directoryDescription } =
-    VOCABULARY[provider];
+  const { directoryLabel, envVar, directoryDescription } = VOCABULARY[provider];
   if (!configured) {
     return {
-      title: name,
+      title: directoryLabel,
       description: `Not set up. Set ${envVar} on this deployment to browse its apps.`,
       linked: false,
     };
@@ -115,9 +115,9 @@ export function moreAppsRow(
 
 /** The Connection card's sentence for a brokered app. */
 export function brokeredConnectionDescription(
-  provider: PluginsProvider,
+  _provider: PluginsProvider,
 ): string {
-  return `Reached through ${VOCABULARY[provider].name}, which holds each person's own account.`;
+  return "Each person connects their own account through OpenBot.";
 }
 
 /**
@@ -125,33 +125,39 @@ export function brokeredConnectionDescription(
  * what OpenBot itself is called on the page (`managePaths().deploymentName`).
  */
 export function brokeredReach(
-  provider: PluginsProvider,
+  _provider: PluginsProvider,
   deployment = "this deployment",
 ): {
   description: string;
   badge: string;
 } {
-  const { name } = VOCABULARY[provider];
-  const sends = deployment.charAt(0).toUpperCase() + deployment.slice(1);
+  const holds = deployment.charAt(0).toUpperCase() + deployment.slice(1);
   return {
-    description: `${name} holds the account. ${sends} sends one key and who is asking. Each person connects their own, and a Bot sees only what that person can see. There is no token to paste.`,
-    badge: `Through ${name}`,
+    description: `${holds} holds one key for every app like this. Each person connects their own account, and a Bot sees only what that person can see. There is no token to paste.`,
+    badge: "Through OpenBot",
   };
 }
 
 /** What disconnecting a brokered account does, said where the button is. */
-export function brokeredDisconnectNote(provider: PluginsProvider): string {
-  return `Disconnecting also ends the account at ${VOCABULARY[provider].name}.`;
+export function brokeredDisconnectNote(_provider: PluginsProvider): string {
+  return "Disconnecting also removes OpenBot's access to your account.";
 }
 
 /**
- * What a person is told where the deployment has no key for the active broker. `deployment` is what
- * OpenBot itself is called on the page (`managePaths().deploymentName`).
+ * What is said where the deployment has no key for the active broker. `deployment` is what OpenBot
+ * itself is called on the page (`managePaths().deploymentName`).
+ *
+ * `reader` is who can act on it. An admin's page names the variable they set; a person's own
+ * Connections page names neither the variable nor the vendor in it, and says who to ask, in the
+ * server's words for the same state (`BrokerUnconfiguredError`'s person sentence).
  */
 export function brokeredKeyMissing(
   provider: PluginsProvider,
   deployment = "this deployment",
+  reader: "admin" | "person" = "admin",
 ): string {
+  if (reader === "person")
+    return "Connecting apps isn't set up yet, so this account can't be connected or disconnected here. Ask an admin to set it up.";
   return `Set ${VOCABULARY[provider].envVar} on ${deployment}. Until then, this account can't be connected or disconnected here. The app stays turned on, and its tool grants still stand.`;
 }
 

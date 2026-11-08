@@ -1320,7 +1320,8 @@ describe("the Composio directory", () => {
 
       expect(response.status).toBe(502);
       const refusal = ((await response.json()) as { error: string }).error;
-      expect(refusal).toContain("Composio said nothing about why");
+      expect(refusal).toContain("no reason was given");
+      expect(refusal).not.toContain("Composio");
       // Never the thrown object's own text: on this path it is as likely to be a stack frame as a
       // sentence, and it is the console line that carries it to an operator.
       expect(refusal).not.toContain("Cannot read properties");
@@ -2350,6 +2351,40 @@ describe("connecting a brokered app", () => {
     expect(refusal).toContain("Linear");
     expect(refusal).not.toContain("socket hang up");
   });
+
+  test("a refusal written for the operator never tells the person who the broker is", async () => {
+    /*
+     * A person connects their apps through OpenBot and is never told which company sits behind
+     * it. The broker layer's own refusals were written for an operator who can open that company's
+     * dashboard, so they name it. Passed through as they were, the person pressing Connect read
+     * "Composio would not mint a connect link" and a remedy in a dashboard they cannot open. They
+     * get the route's own sentence instead, with the same status, and the operator's sentence goes
+     * to the log.
+     */
+    const operatorSentence =
+      "Composio would not mint a connect link for linear. Nobody was sent to a consent screen. Read this app's authorization config in Composio's own dashboard.";
+    const { connect } = brokeredApp(null, AUTHORIZATION_URL, {
+      authorizeThrows: new BrokerRefusalError(operatorSentence),
+    });
+    const said: string[] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => {
+      said.push(args.map(String).join(" "));
+    };
+
+    try {
+      const response = await connect({});
+
+      expect(response.status).toBe(503);
+      const refusal = (await response.json()).error as string;
+      expect(refusal).toBe(
+        "Couldn't start connecting Linear. Try again, or ask an admin if it keeps happening.",
+      );
+    } finally {
+      console.error = realError;
+    }
+    expect(said.some((line) => line.includes(operatorSentence))).toBe(true);
+  });
 });
 
 /**
@@ -2850,6 +2885,30 @@ describe("connecting an app whose secret a person types", () => {
 
     expect(response.status).toBe(400);
     expect((await response.json()).error).toContain("401 unauthorized");
+  });
+
+  test("a refused key whose sentence names the broker is said in the route's own words", async () => {
+    // The same promise as the consent press: what a person reads about their own key never names
+    // the company OpenBot connects through.
+    const { connectFields } = brokeredApp(null, AUTHORIZATION_URL, {
+      storeThrows: new PluginRefusedError(
+        "What you entered for firecrawl did not work, and Composio would not take the account back either.",
+        null,
+      ),
+    });
+    const realError = console.error;
+    console.error = () => {};
+
+    try {
+      const response = await connectFields({ values: { api_key: "wrong" } });
+
+      expect(response.status).toBe(400);
+      const refusal = (await response.json()).error as string;
+      expect(refusal).not.toContain("Composio");
+      expect(refusal).toStartWith("Couldn't connect");
+    } finally {
+      console.error = realError;
+    }
   });
 });
 

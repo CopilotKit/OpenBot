@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Work apps are connected through OpenBot. Connections, an app's page, the app directory, chat
+  connect cards and admin Plugins no longer name the connector provider ("Browse Composio" is now
+  "Browse apps"). Admin pages still name the setting an admin sets, such as `COMPOSIO_API_KEY`.
+  Where a connect, re-check or disconnect fails for a reason only an operator can fix, the person
+  reads the route's own sentence and the operator's detail goes to the server log.
 - In OpenBot Personal every Bot takes part in Automatic Learning, including Bots made later. A Bot
   that settings carried over from a team deployment left out is taken back in at the next start (or
   its first run), with one audit row naming the Bots. Every Bot still gets every skill once, and a

@@ -1,6 +1,9 @@
 // server/tests/store-vendor-vocabulary.test.ts
 /**
- * THE SENTENCES `store.ts` HANDS A PERSON NAME THE BROKER THIS DEPLOYMENT ACTUALLY RUNS.
+ * THE SENTENCES `store.ts` HANDS A PERSON NAME NO BROKER AT ALL.
+ *
+ * They used to name the broker this deployment runs. A person, the admin included, now connects
+ * apps through OpenBot and never reads the provider's name, so each is pinned to name neither.
  *
  * Two of the store's refusals spelled the literal "Composio" into prose a reader acts on: the name
  * collision an administrator meets when they add a server by URL over a brokered row, and the
@@ -123,7 +126,7 @@ afterEach(async () => {
  * standing behind that row, which is the vendor the administrator has to go and remove the app
  * from.
  */
-describe("the brokered-name collision names the active vendor", () => {
+describe("the brokered-name collision names no vendor", () => {
   for (const provider of ["arcade", "composio"] as BrokerProvider[]) {
     test(`on ${provider}`, async () => {
       const toolkit = `Gmail${suite}`;
@@ -142,10 +145,8 @@ describe("the brokered-name collision names the active vendor", () => {
         );
 
       expect(refused).not.toBeNull();
-      expect(refused).toContain(VENDOR[provider]);
-      expect(refused).not.toContain(
-        VENDOR[provider === "arcade" ? "composio" : "arcade"],
-      );
+      expect(refused).toContain("through OpenBot");
+      expect(refused).not.toMatch(/\b(Composio|Arcade)\b/);
     });
   }
 });
@@ -155,7 +156,7 @@ describe("the brokered-name collision names the active vendor", () => {
  * in its own words; what this pins is the RETRY the person is told to make, which is about the
  * vendor this deployment is waiting on and not about the one the probe was written for.
  */
-describe("the re-check retry names the active vendor", () => {
+describe("the re-check retry names no vendor", () => {
   test("on arcade", async () => {
     const toolkit = `Slack${suite}`;
     const id = await brokeredApp("arcade", toolkit);
@@ -191,10 +192,8 @@ describe("the re-check retry names the active vendor", () => {
         (error: Error) => error.message,
       );
 
-    expect(refused).toContain(
-      "pressing Re-check again when Arcade is answering",
-    );
-    expect(refused).not.toContain("when Composio is answering");
+    expect(refused).toContain("Press Re-check again in a moment.");
+    expect(refused).not.toMatch(/\b(Composio|Arcade)\b/);
   });
 });
 
@@ -204,7 +203,7 @@ describe("the re-check retry names the active vendor", () => {
  * It named the wrong vendor on an Arcade deployment, which is the same defect wearing an
  * invariant's clothes.
  */
-describe("the brokered-credential invariant names the active vendor", () => {
+describe("the brokered-credential invariant names no vendor", () => {
   test("on arcade", async () => {
     const id = `held-orphan-${suite}`;
     const botId = `bot-${suite}`;
@@ -253,8 +252,8 @@ describe("the brokered-credential invariant names the active vendor", () => {
         (error: Error) => error.message,
       );
 
-    expect(raised).toContain("Arcade");
-    expect(raised).not.toContain("Composio");
+    expect(raised).toContain("no app in its url");
+    expect(raised).not.toMatch(/\b(Composio|Arcade)\b/);
 
     await database.delete(agents).where(inArray(agents.id, [botId]));
   });

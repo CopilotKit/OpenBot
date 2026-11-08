@@ -1864,7 +1864,7 @@ const PROBE_CONSUMERS: Consumer<BrokeredProbe["outcome"]>[] = [
                 by: person,
               }),
             ),
-          ).toMatch(/could not be checked just now/);
+          ).toMatch(/couldn't be checked just now/);
           expect(await recordedHere()).toEqual([
             `${APP.key.slug}:true:${PROBE_ACTION}`,
           ]);

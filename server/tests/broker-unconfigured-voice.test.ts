@@ -15,10 +15,10 @@ import { BrokerUnconfiguredError } from "../src/plugins/broker";
  * is the behaviour that makes an omission loud rather than a Composio sentence.
  */
 const COMPOSIO_OPERATOR =
-  "Composio is not configured for this deployment, so nothing was asked. Set COMPOSIO_API_KEY to make the brokered apps available; until it is set there is nothing to connect, nothing to grant and no Composio tool for a Bot to call, and the admin Plugins page shows one row under More apps that goes nowhere.";
+  "Connecting apps isn't set up on this deployment, so nothing was asked. Set COMPOSIO_API_KEY to make these apps available. Until it is set there is nothing to connect, nothing to grant and no tool from these apps for a Bot to call.";
 
 describe("BrokerUnconfiguredError", () => {
-  test("a Composio operator reads the exact existing sentence", () => {
+  test("a Composio operator is told the variable, and never the vendor", () => {
     expect(new BrokerUnconfiguredError("composio", "operator").message).toBe(
       COMPOSIO_OPERATOR,
     );
@@ -26,7 +26,7 @@ describe("BrokerUnconfiguredError", () => {
 
   test("an Arcade operator is told Arcade's variable and never Composio's", () => {
     const message = new BrokerUnconfiguredError("arcade", "operator").message;
-    expect(message).toContain("Arcade");
+    expect(message).not.toMatch(/\bArcade\b/);
     expect(message).toContain("ARCADE_API_KEY");
     expect(message).not.toMatch(/composio/i);
     expect(message).not.toContain("COMPOSIO_API_KEY");
