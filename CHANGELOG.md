@@ -16,6 +16,36 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   says whether the back end stopped with an error partway, quit without saying why, or could not
   be run, where all three said "The back end could not start."
 
+### Automatic Learning and Teach a Bot
+
+- **Teach a Bot reads as one page**: its title and how in one sentence, the browser, and your
+  recordings under it, all as wide as the browser. The browser is drawn as a window (tabs on its
+  frame, a pill address bar with a lock, a start page for an empty tab), sized to its page so no
+  blank band sits under it, and the page is laid out while the browser opens. **Record** is one
+  button at the toolbar's end that asks for the task's name and narration in a popover, with an
+  (i) saying what narration is for; the narration bar shows only while recording. Your recordings
+  links to Settings → Learning, where what a recording teaches shows up.
+
+### Conversations
+
+- The Bot's browser beside a conversation is a 360px glimpse with the address it is on and Take
+  control on the picture, and its full-size view fits its window to the page.
+- Home says which Bot is working, with a way to it, and a conversation says "Working" in the
+  sidebar while its Bot works. A Bot's browsing reads "Browsed example.com", where it read "Browsed
+  1 page".
+
+### Personal edition
+
+- Home no longer shows an empty Explore Bots box.
+
+### Smaller changes
+
+- The sidebar floats as frosted glass over the colours of OpenBot's orb, the orb sits beside
+  OpenBot's name, and the app is set in Atkinson Hyperlegible Next. A skin keeps its own faces.
+- Settings → General lists your answers as rows that open a dialog. Settings → Notifications shows
+  a switch only for channels that are set up, and says how to set them up, or that your admin does.
+  In OpenBot Desktop it says those channels need OpenBot running on a server.
+
 ## 0.3.4
 
 **Before upgrading.** One migration: `0083_learning_skill_approvals` creates the table
@@ -130,13 +160,6 @@ moves to `0083_learning_skill_approvals`. Six things change for an existing depl
 - **Your recordings on Teach a Bot.** Teach a Bot lists your recordings, newest first, with how each
   ended, and one the Recorder sends later appears without leaving the page. The Recorder's popup
   links to it. The list needs Intelligence 0.16 with recordings switched on.
-- **Teach a Bot reads as one page**: its title and how in one sentence, the browser, and your
-  recordings under it, all as wide as the browser. The browser is drawn as a window (tabs on its
-  frame, a pill address bar with a lock, a start page for an empty tab), sized to its page so no
-  blank band sits under it, and the page is laid out while the browser opens. **Record** is one
-  button at the toolbar's end that asks for the task's name and narration in a popover, with an
-  (i) saying what narration is for; the narration bar shows only while recording. Your recordings
-  links to Settings → Learning, where what a recording teaches shows up.
 - **The personal edition has Settings → Learning**, with **Learn now** and **Approve new skills
   automatically**, which is on: it approves what OpenBot proposes from your recordings and
   conversations shortly after each start, every 15 minutes, and when you open the page. Turn it off
@@ -238,11 +261,6 @@ moves to `0083_learning_skill_approvals`. Six things change for an existing depl
   Triage my inbox (the two emails from the past 24 hours that most need you, changing nothing, with
   Gmail's connect card first if Gmail isn't connected) and Build a trip budget. Summarize email,
   Find weekend plans, Read a webpage and Try a browser task are gone.
-- The Bot's browser beside a conversation is a 360px glimpse with the address it is on and Take
-  control on the picture, and its full-size view fits its window to the page.
-- Home says which Bot is working, with a way to it, and a conversation says "Working" in the
-  sidebar while its Bot works. A Bot's browsing reads "Browsed example.com", where it read "Browsed
-  1 page".
 
 ### Personal edition
 
@@ -278,7 +296,6 @@ moves to `0083_learning_skill_approvals`. Six things change for an existing depl
 - In Activity, what OpenBot gives the Activity report is one row naming what it reads ("your Bots'
   activity and what was refused"), where it was two identical rows that named neither. A routine a
   Bot creates, changes or deletes shows once, where the Bot's call to Routines was a second row.
-- Home no longer shows an empty Explore Bots box.
 
 ### Smaller changes
 
@@ -302,11 +319,6 @@ moves to `0083_learning_skill_approvals`. Six things change for an existing depl
   conversation above it, and the starter tasks line up with its text, where both ran to the edge.
 - Onboarding's name step leaves room above the orb, so the header with the step dashes no longer
   cuts off its top.
-- The sidebar floats as frosted glass over the colours of OpenBot's orb, the orb sits beside
-  OpenBot's name, and the app is set in Atkinson Hyperlegible Next. A skin keeps its own faces.
-- Settings → General lists your answers as rows that open a dialog. Settings → Notifications shows
-  a switch only for channels that are set up, and says how to set them up, or that your admin does.
-  In OpenBot Desktop it says those channels need OpenBot running on a server.
 
 ## 0.3.3
 
