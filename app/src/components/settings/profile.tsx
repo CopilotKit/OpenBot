@@ -1,8 +1,24 @@
+import { IconChevronRight, IconUserCircle } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
-import { PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
 import { updateProfileNameMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { queryClient } from "@/query-client";
@@ -78,19 +94,50 @@ export function ProfileNameForm({
   );
 }
 
-export function ProfileSettings() {
+/**
+ * The person's name as a row on General: the name itself, and a dialog to change it. A free-text value is a summary
+ * and a dialog on these screens, so the page reads as a list of answers rather than a form.
+ */
+export function NameRow() {
   const { data: user } = useQuery(currentUserQueryOptions());
+  const [open, setOpen] = useState(false);
+  const name = user && !user.needsName ? (user.name ?? "") : "";
   return (
-    <PageSection
-      title="Profile"
-      description="Choose the name OpenBot displays for you."
-    >
-      {user && (
-        <ProfileNameForm
-          key={user.id}
-          initialName={user.needsName ? "" : (user.name ?? "")}
-        />
-      )}
-    </PageSection>
+    <>
+      <Item
+        render={<button onClick={() => setOpen(true)} type="button" />}
+        size="sm"
+      >
+        <ItemMedia variant="icon">
+          <IconUserCircle />
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle>Name</ItemTitle>
+          <ItemDescription>{name || "Not set yet."}</ItemDescription>
+        </ItemContent>
+        <ItemActions>
+          <IconChevronRight className="size-4 text-muted-foreground" />
+        </ItemActions>
+      </Item>
+      <Dialog onOpenChange={setOpen} open={open}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Your name</DialogTitle>
+            <DialogDescription>
+              Choose the name OpenBot shows for you.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody className="mt-4">
+            {user ? (
+              <ProfileNameForm
+                initialName={name}
+                key={user.id}
+                onSaved={() => setOpen(false)}
+              />
+            ) : null}
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

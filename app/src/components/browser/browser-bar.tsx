@@ -3,6 +3,7 @@ import {
   IconArrowLeft,
   IconArrowRight,
   IconEraser,
+  IconLock,
   IconPlus,
   IconReload,
   IconWorld,
@@ -104,6 +105,7 @@ export function TabStrip({
   onActivate,
   onClose,
   onNew,
+  start,
 }: {
   /** From `useId`, shared with the `TabPanel` the tabs control. */
   ids: string;
@@ -116,6 +118,8 @@ export function TabStrip({
     closed?: (answer: { tabs: BrowserTab[] }) => void,
   ) => void;
   onNew: () => void;
+  /** Drawn at the start of the strip, before the tabs: the page's sidebar toggle, where the browser fills the page. */
+  start?: ReactNode;
 }) {
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   const selected = tabs.find((tab) => tab.active) ?? tabs[0];
@@ -163,11 +167,21 @@ export function TabStrip({
     event.preventDefault();
     act();
   };
+  /*
+   * Drawn as a desktop browser's tabs: the strip is the window's frame colour, and the tab that shows is the page's own
+   * colour, open at the bottom into the toolbar beneath it, so the two read as one sheet the tab sits on. The others are
+   * quieter until hovered.
+   */
   return (
-    <div className="flex min-w-0 items-center gap-1 border-b border-border px-2 py-1.5">
+    <div className="flex min-w-0 items-end gap-1 border-border border-b bg-sidebar px-2 pt-1.5">
+      {start ? (
+        <div className="flex shrink-0 items-center self-center pb-1.5">
+          {start}
+        </div>
+      ) : null}
       <div
         aria-label="Tabs"
-        className="flex min-w-0 items-center gap-1 overflow-x-auto"
+        className="-mb-px flex min-w-0 items-end gap-0.5 overflow-x-auto"
         role="tablist"
       >
         {tabs.map((tab, index) => {
@@ -176,15 +190,21 @@ export function TabStrip({
             <div
               key={tab.id}
               className={cn(
-                "flex min-w-0 max-w-56 shrink-0 items-center rounded-lg",
-                tab.active ? "bg-secondary" : "hover:bg-muted",
+                "group/tab flex h-8 w-52 min-w-24 shrink items-center gap-1 rounded-t-[10px] border border-transparent border-b-0 pl-2.5 transition-colors",
+                tab.active
+                  ? "border-border bg-background text-foreground"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
               )}
             >
+              <IconWorld
+                aria-hidden="true"
+                className="size-3.5 shrink-0 opacity-60"
+              />
               <button
                 aria-controls={panelId(ids)}
                 aria-keyshortcuts="Delete"
                 aria-selected={tab.active}
-                className="min-w-0 flex-1 truncate rounded-lg py-1 pr-1 pl-2.5 text-left text-[0.8rem] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                className="min-w-0 flex-1 truncate rounded-md py-1 pr-1 text-left text-[0.8rem] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 disabled={disabled}
                 id={tabId(ids, tab.id)}
                 onClick={() => {
@@ -204,7 +224,12 @@ export function TabStrip({
               </button>
               <Button
                 aria-hidden="true"
-                className="mr-0.5"
+                className={cn(
+                  "mr-1 rounded-full",
+                  // Shown on the tab that shows and the one under the pointer, as a desktop browser does.
+                  !tab.active &&
+                    "opacity-0 group-hover/tab:opacity-100 focus-visible:opacity-100",
+                )}
                 disabled={disabled}
                 onClick={() => onClose(tab.id)}
                 size="icon-xs"
@@ -220,6 +245,7 @@ export function TabStrip({
       </div>
       <Button
         aria-label="New tab"
+        className="mb-1 self-center"
         disabled={disabled}
         onClick={onNew}
         size="icon-sm"
@@ -286,6 +312,7 @@ export function AddressBar({
   onGo,
   onMove,
   clear,
+  className,
 }: {
   address: string;
   disabled: boolean;
@@ -295,6 +322,8 @@ export function AddressBar({
   onGo: (url: string) => void;
   onMove: (action: "back" | "forward" | "reload") => void;
   clear?: { disabled: boolean; ask: () => void };
+  /** Where the bar shares its row with other controls, the row draws the border instead. */
+  className?: string;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -307,7 +336,10 @@ export function AddressBar({
   return (
     <form
       aria-label="Address bar"
-      className="flex items-center gap-1 border-b border-border px-2 py-1.5"
+      className={cn(
+        "flex items-center gap-0.5 border-border border-b bg-background px-2 py-1.5",
+        className,
+      )}
       onSubmit={(event) => {
         event.preventDefault();
         if (still) return;
@@ -358,7 +390,8 @@ export function AddressBar({
           <IconEraser />
         </Button>
       ) : null}
-      <InputGroup className="ml-1 h-8 flex-1 bg-background text-sm">
+      {/* A pill in the window's frame colour, as a desktop browser's address bar is, lit like a field while typed in. */}
+      <InputGroup className="ml-1.5 h-8 min-w-0 flex-1 rounded-full border-transparent bg-muted/70 text-sm shadow-none transition-colors has-[[data-slot=input-group-control]:focus-visible]:bg-background dark:bg-input/40">
         <InputGroupInput
           aria-label="Address"
           ref={input}
@@ -373,8 +406,12 @@ export function AddressBar({
           spellCheck={false}
           value={draft ?? address}
         />
-        <InputGroupAddon>
-          <IconWorld />
+        <InputGroupAddon className="pl-3">
+          {address.startsWith("https://") ? (
+            <IconLock aria-hidden="true" />
+          ) : (
+            <IconWorld />
+          )}
         </InputGroupAddon>
       </InputGroup>
     </form>

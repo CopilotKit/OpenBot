@@ -7,9 +7,12 @@ import { useComputerControl } from "@/lib/computers/use-control";
 export function ComputerControlButton({
   computerId,
   onTakeControl,
+  prominent = false,
 }: {
   computerId: string;
   onTakeControl?: () => void;
+  /** Take control drawn solid rather than outlined: where it is the one action offered, over the Bot's screen. */
+  prominent?: boolean;
 }) {
   const { control, busy, problem, change, someoneElse } =
     useComputerControl(computerId);
@@ -19,7 +22,7 @@ export function ComputerControlButton({
     <div className="flex flex-col items-start gap-1">
       <Button
         size="sm"
-        variant={human ? "default" : "outline"}
+        variant={human || prominent ? "default" : "outline"}
         disabled={busy || !control || control.transitioning || someoneElse}
         aria-busy={busy || control?.transitioning}
         onClick={async () => {

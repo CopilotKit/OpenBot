@@ -10,6 +10,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **An update the mirror cannot send comes from GitHub.** When downloading the new version from
+  downloads.copilotkit.ai fails, OpenBot reads GitHub's update feed and downloads the same signed
+  version from there once, instead of failing until the mirror is fixed. The log says which one it
+  came from.
 - **A back end setup that stops says why.** OpenBot's log now records how every back end setup,
   start, update and stop ended: how long it took, its exit code, what its report says went wrong
   and the end of its error output. A setup that stopped used to leave nothing in the log. The card
@@ -35,11 +39,43 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   microphone found. Narration is off." on a computer with none, keeping your choice for when there
   is one.
 
+### Automatic Learning and Teach a Bot
+
+- **Teach a Bot reads as one page**: its title and how in one sentence, the browser, and your
+  recordings under it, all as wide as the browser. The browser is drawn as a window (tabs on its
+  frame, a pill address bar with a lock, a start page for an empty tab), sized to its page so no
+  blank band sits under it, and the page is laid out while the browser opens. **Record** is one
+  button at the toolbar's end that asks for the task's name and narration in a popover, with an
+  (i) saying what narration is for; the narration bar shows only while recording, or to say there
+  is no microphone. Your recordings links to Settings → Learning, where what a recording teaches
+  shows up.
+
+### Conversations
+
+- **The sidebar's + opens a new conversation with To: empty** and the Bot menu open, where it
+  picked a Bot for you, as do Shift+N and a skin's new conversation link. A Bot's own Message link
+  still starts with that Bot, and a message sent before a Bot is picked stays in the box with
+  "Choose a Bot first."
+- The Bot's browser beside a conversation is a 360px glimpse with the address it is on and Take
+  control on the picture, and its full-size view fits its window to the page.
+- Home says which Bot is working, with a way to it, and a conversation says "Working" in the
+  sidebar while its Bot works. A Bot's browsing reads "Browsed example.com", where it read "Browsed
+  1 page".
+
 ### Personal edition
 
 - In Activity, a Bot's call to an app you haven't connected reads "Not connected" and "Gmail isn't
   connected. Connect it in Connections.", rows already recorded included. It read "The server
   didn't answer" and printed raw `[connect-app]` text, which Admin → Audit no longer shows either.
+- Home no longer shows an empty Explore Bots box.
+
+### Smaller changes
+
+- The sidebar floats as frosted glass over the colours of OpenBot's orb, the orb sits beside
+  OpenBot's name, and the app is set in Atkinson Hyperlegible Next. A skin keeps its own faces.
+- Settings → General lists your answers as rows that open a dialog. Settings → Notifications shows
+  a switch only for channels that are set up, and says how to set them up, or that your admin does.
+  In OpenBot Desktop it says those channels need OpenBot running on a server.
 
 ## 0.3.4
 
