@@ -743,7 +743,7 @@ release commit:
   `CHANGELOG.md` or `release-policy.json`.
 - Otherwise they all run again, as before: when any other path is added, removed, renamed or
   changed, when a version file changes more than its version, or when main's CI on that commit
-  failed, was cancelled, never ran, or was still running after the wait.
+  failed, was cancelled, never ran, could not be read, or was still running after the wait.
 
 The diff is read with renames turned off, so a source file moved onto a release file's name is still
 seen as the source file it removed. Every commit on `main` keeps its own CI run for this (the

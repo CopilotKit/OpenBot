@@ -170,7 +170,18 @@ export function decide(
   }
   const deadline = deps.now() + waitSeconds * 1000;
   for (;;) {
-    const ci = ciOnParent(deps.runs(parent), parent, repository);
+    // An answer the API could not give is not a pass: the full suite runs, which is never wrong.
+    let runs: CiRun[];
+    try {
+      runs = deps.runs(parent);
+    } catch (error) {
+      return {
+        fullChecks: true,
+        parent,
+        reason: `The release commit changes only release files, but main's CI on ${parent} could not be read: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    const ci = ciOnParent(runs, parent, repository);
     if (ci.state === "passed") {
       return {
         fullChecks: false,

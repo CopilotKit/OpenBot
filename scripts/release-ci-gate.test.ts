@@ -340,6 +340,24 @@ test("a run still in progress when the wait runs out means the full checks", () 
   expect(slept).toEqual([30, 30, 30]);
 });
 
+test("main's CI that cannot be read means the full checks, not a pass", () => {
+  const { repo } = mainAt();
+  release(repo);
+  const sha = run(repo, "rev-parse", "HEAD");
+  const decision = decide(sha, REPOSITORY, {
+    parent: (commit) => run(repo, "rev-parse", `${commit}^1`),
+    changes: changesIn(repo),
+    runs: () => {
+      throw new Error("gh: Server Error (HTTP 502)");
+    },
+    sleep: () => {},
+    now: () => 0,
+    log: () => {},
+  });
+  expect(decision.fullChecks).toBe(true);
+  expect(decision.reason).toContain("could not be read: gh: Server Error");
+});
+
 test("the decision is made against the first parent, main as the release PR merged onto it", () => {
   const { repo } = mainAt();
   write(repo, { "server/src/index.ts": "export const answer = 7;\n" });
