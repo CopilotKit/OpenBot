@@ -18,7 +18,7 @@ use tauri::Manager;
 pub const PLUGIN: &str = "openbot-desktop";
 
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 14] = [
+pub const PERMISSIONS: [&str; 15] = [
     "openbot-desktop:allow-appearance",
     "openbot-desktop:allow-status",
     "openbot-desktop:allow-restart",
@@ -33,6 +33,7 @@ pub const PERMISSIONS: [&str; 14] = [
     "openbot-desktop:allow-speech-stop",
     "openbot-desktop:allow-speech-abort",
     "openbot-desktop:allow-open-logs",
+    "openbot-desktop:allow-notify",
 ];
 
 /**
@@ -163,6 +164,18 @@ async fn open_logs(app: tauri::AppHandle) -> Result<(), String> {
     crate::open_log_folder_now(&app)
 }
 
+/// A Bot's notification: shown by the system, and opening OpenBot at `path` when it is clicked,
+/// from the notification centre too. See `notice.rs`.
+#[tauri::command]
+async fn notify(
+    app: tauri::AppHandle,
+    title: String,
+    body: Option<String>,
+    path: Option<String>,
+) -> Result<(), String> {
+    crate::show_notice(&app, &title, body.as_deref().unwrap_or(""), path.as_deref())
+}
+
 pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new(PLUGIN)
         .invoke_handler(tauri::generate_handler![
@@ -179,7 +192,8 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             speech_start,
             speech_stop,
             speech_abort,
-            open_logs
+            open_logs,
+            notify
         ])
         .build()
 }

@@ -123,13 +123,32 @@ async function aBotStartsNeedingThePerson() {
 const EXPENSES_NEEDS_YOU = {
   title: "Expenses needs you",
   body: "1 question",
-  tag: "openbot-attention-expenses",
-  // The page a click opens (`open_from_notification` in the shell).
-  extra: { path: "/bots/expenses" },
+  // The page a click opens (`open_notice_page` in the shell).
+  path: "/bots/expenses",
 };
 
-test("in OpenBot Desktop a Bot that starts needing the person is shown by the system, through the plugin, naming the page a click opens", async () => {
+test("in OpenBot Desktop a Bot that starts needing the person is shown by the desktop app, naming the page a click opens", async () => {
   const desktop = launch();
+
+  await aBotStartsNeedingThePerson();
+
+  // The desktop app's own notice: on Windows the only kind a click in the notification centre
+  // brings OpenBot back from (desktop/src-tauri/src/notice.rs).
+  await waitFor(() =>
+    expect(desktop.toDesktopNotify().map((call) => call.args)).toEqual([
+      EXPENSES_NEEDS_YOU,
+    ]),
+  );
+  expect(
+    desktop.calls.filter(
+      (call) => call.command === "plugin:notification|notify",
+    ),
+  ).toEqual([]);
+});
+
+test("a desktop app without its own notify shows the notice through the notification plugin", async () => {
+  const desktop = launchDesktop({ plugin: true, notifyCommand: false });
+  refreshNotificationPermission();
 
   await aBotStartsNeedingThePerson();
 
