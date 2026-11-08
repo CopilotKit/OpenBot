@@ -715,41 +715,65 @@ export function ComputerView({
             ) : null}
           </figcaption>
         ) : null}
-        {/* Inline preview remains in transcript; click opens a readable full-size view. */}
-        <button
-          type="button"
-          onClick={() => setExpanded(true)}
-          /*
-           * Opens whether or not there is a picture in it. It used to be disabled without one, and
-           * the wheel is down there: a blank browser, a screen that had not arrived yet, or a
-           * computer that could not be reached left a person with no way to take control at all —
-           * the states where they most want it. With nothing to draw the full-size view shows these
-           * same words, and the wheel below them.
-           */
-          className="relative block w-full cursor-pointer bg-muted"
-          style={frameStyle}
-          aria-label="Open the Bot's screen full size"
-        >
-          {polledScreen}
+        {/*
+          The picture, and over its foot, while the Bot holds the wheel, a frosted status with Take control: the one
+          thing a person watching may want to do, on the thing they are watching. A sibling of the picture's button
+          rather than inside it, because a control cannot sit inside another control.
+        */}
+        <div className="relative">
+          {/* Inline preview remains in transcript; click opens a readable full-size view. */}
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            /*
+             * Opens whether or not there is a picture in it. It used to be disabled without one, and
+             * the wheel is down there: a blank browser, a screen that had not arrived yet, or a
+             * computer that could not be reached left a person with no way to take control at all —
+             * the states where they most want it. With nothing to draw the full-size view shows these
+             * same words, and the wheel below them.
+             */
+            className="relative block w-full cursor-pointer bg-muted"
+            style={frameStyle}
+            aria-label="Open the Bot's screen full size"
+          >
+            {polledScreen}
 
-          {/* Whose hands are on it, said on the picture itself. Whose computer it is, the frame above says. */}
-          {wheelHere ? (
-            <span className="absolute right-2 bottom-2 rounded-full bg-white/85 px-2.5 py-1 font-medium text-black text-xs shadow-sm backdrop-blur-sm">
-              You have control
-            </span>
+            {/* Whose hands are on it, said on the picture itself. Whose computer it is, the frame above says. */}
+            {wheelHere ? (
+              <span className="absolute right-2 bottom-2 rounded-full bg-white/85 px-2.5 py-1 font-medium text-black text-xs shadow-sm backdrop-blur-sm">
+                You have control
+              </span>
+            ) : null}
+
+            {showScreen ? null : (
+              <NothingToSee
+                blankBrowser={blankBrowser}
+                owner={owner}
+                page={knownPage}
+                problem={shownProblem}
+                settled={settled}
+                waiting={waiting}
+              />
+            )}
+          </button>
+          {!settled && !(driving && !control?.transitioning) ? (
+            <div className="absolute inset-x-2 bottom-2 flex items-center justify-between gap-2 rounded-xl border border-white/60 bg-white/75 py-1.5 pr-1.5 pl-3 shadow-lg backdrop-blur-md dark:border-white/10 dark:bg-black/55">
+              <span className="min-w-0 text-xs text-muted-foreground">
+                {!control
+                  ? "Checking who has control…"
+                  : control.transitioning
+                    ? "Finishing the current action…"
+                    : someoneElse
+                      ? "Someone else has control."
+                      : "The Bot has control."}
+              </span>
+              <ComputerControlButton
+                computerId={computerId}
+                onTakeControl={() => setExpanded(true)}
+              />
+            </div>
           ) : null}
-
-          {showScreen ? null : (
-            <NothingToSee
-              blankBrowser={blankBrowser}
-              owner={owner}
-              page={knownPage}
-              problem={shownProblem}
-              settled={settled}
-              waiting={waiting}
-            />
-          )}
-        </button>
+        </div>
 
         {/* The request reason appears above the always-available ownership controls. */}
         {!driving && !settled && control?.requested ? (
@@ -855,27 +879,12 @@ export function ComputerView({
           needs you" does: someone who closes the big view and moves on is not left with a Bot
           quietly waiting on them.
         */}
-        {!settled ? (
-          <div
-            className={`flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 ${driving && !control?.transitioning ? "bg-amber-500/10" : ""}`}
-          >
-            {driving && !control?.transitioning ? (
-              <span className="text-sm">
-                <strong className="font-medium">You have control.</strong> The
-                Bot waits until you hand it back. Open the screen to click and
-                type.
-              </span>
-            ) : (
-              <span className="text-xs text-muted-foreground">
-                {!control
-                  ? "Checking who has control…"
-                  : control.transitioning
-                    ? "Finishing the current action…"
-                    : someoneElse
-                      ? "Someone else has control."
-                      : "The Bot has control."}
-              </span>
-            )}
+        {!settled && driving && !control?.transitioning ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-amber-500/10 px-3 py-2">
+            <span className="text-sm">
+              <strong className="font-medium">You have control.</strong> The Bot
+              waits until you hand it back. Open the screen to click and type.
+            </span>
             <ComputerControlButton
               computerId={computerId}
               onTakeControl={() => setExpanded(true)}
