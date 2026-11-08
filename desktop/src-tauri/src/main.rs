@@ -1651,18 +1651,26 @@ async fn prepare_installation_inner(
         let images = preparation::installation_pull_set(&address, &root, &root, harness.as_ref())?;
         // Several pulls run at once. Stop is checked before each pull starts; running pulls finish.
         let pacer = Mutex::new(pull_metrics::Pacer::default());
+        // How big the download is, from each image's registry, while the pulls start.
+        let sizes = {
+            let address = address.clone();
+            pull_metrics::size_images(&images, move |image| {
+                preparation::image_present(&address, image).unwrap_or(false)
+            })
+        };
         pull_metrics::pull_images_limited(
             &images,
             pull_metrics::IMAGE_PULLS_AT_ONCE,
-            |_, image, on_bytes| {
-                pull_metrics::pull_image(&address, image, on_bytes, |metrics| {
+            sizes,
+            |_, image, on_layer| {
+                pull_metrics::pull_image(&address, image, on_layer, |metrics| {
                     desktop_telemetry::pull_completed(&handle, metrics)
                 })
             },
             || attempt.require_current(),
             |downloads| {
-                // `done` counts FINISHED pulls; the bytes are the sum over every pull, running and
-                // finished. Paced to a few reports a second, which also measures the speed.
+                // `done` counts FINISHED pulls; the bytes and the size are over every image.
+                // Paced to a few reports a second, which also measures the speed.
                 let paced = pacer
                     .lock()
                     .unwrap()

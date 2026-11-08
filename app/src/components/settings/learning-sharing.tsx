@@ -30,6 +30,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { skillTitle } from "@/lib/learning/display";
 import {
   requestSkillSharingMutationOptions,
   setLearnedSkillOpenMutationOptions,
@@ -138,6 +139,11 @@ export function LearningSharing() {
   // Shown at once while the save is on its way, as a switch is.
   const mode = (setMode.isPending ? setMode.variables : undefined) ?? data.mode;
   const failure = setMode.error ?? setOpen.error ?? requestShare.error;
+  // The dialog shows the title its row did.
+  const readingSkill = data.skills?.find((skill) => skill.name === reading);
+  const readingTitle = readingSkill
+    ? skillTitle(readingSkill.name, readingSkill.description)
+    : undefined;
 
   if (personal) {
     // One person, one computer: nobody to share with, so every row simply opens its Skill.
@@ -166,7 +172,9 @@ export function LearningSharing() {
                     <IconSparkles />
                   </ItemMedia>
                   <ItemContent>
-                    <ItemTitle>{skill.name}</ItemTitle>
+                    <ItemTitle>
+                      {skillTitle(skill.name, skill.description)}
+                    </ItemTitle>
                     <ItemDescription>{skill.description}</ItemDescription>
                   </ItemContent>
                   <ItemActions>
@@ -179,6 +187,7 @@ export function LearningSharing() {
         )}
         <LearnedSkillDialog
           name={reading}
+          title={readingTitle}
           onClose={() => setReading(null)}
           source={{ kind: "personal" }}
         />
@@ -268,7 +277,9 @@ export function LearningSharing() {
                           <IconSparkles />
                         </ItemMedia>
                         <ItemContent>
-                          <ItemTitle>{skill.name}</ItemTitle>
+                          <ItemTitle>
+                            {skillTitle(skill.name, skill.description)}
+                          </ItemTitle>
                           <ItemDescription>
                             {[
                               needsAdmin ||
@@ -294,7 +305,7 @@ export function LearningSharing() {
                               </span>
                             ) : null}
                             <Switch
-                              aria-label={`Open ${skill.name} to everyone`}
+                              aria-label={`Open ${skillTitle(skill.name, skill.description)} to everyone`}
                               checked={open}
                               // An open Skill can always be closed; opening one waits for an admin.
                               disabled={
@@ -357,7 +368,9 @@ export function LearningSharing() {
                         <IconSparkles />
                       </ItemMedia>
                       <ItemContent>
-                        <ItemTitle>{skill.name}</ItemTitle>
+                        <ItemTitle>
+                          {skillTitle(skill.name, skill.description)}
+                        </ItemTitle>
                         <ItemDescription>{skill.description}</ItemDescription>
                       </ItemContent>
                       <ItemActions>
@@ -372,6 +385,7 @@ export function LearningSharing() {
         )}
         <LearnedSkillDialog
           name={reading}
+          title={readingTitle}
           onClose={() => setReading(null)}
           source={{ kind: "personal" }}
         />

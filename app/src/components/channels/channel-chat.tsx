@@ -409,6 +409,19 @@ export function ChannelChat({
   }
   const joinGatePromise = joinGate.current;
 
+  /**
+   * Opened once the join has replayed the thread, or given up, and before history is read. Every
+   * read of the store waits for it; see `pull` below.
+   */
+  const openJoined = useRef<() => void>(() => {});
+  const joinedGate = useRef<Promise<void> | null>(null);
+  if (joinedGate.current === null) {
+    joinedGate.current = new Promise<void>((resolve) => {
+      openJoined.current = resolve;
+    });
+  }
+  const joinedPromise = joinedGate.current;
+
   /** Promise gate so messages typed before runtime readiness wait instead of being discarded. */
   const openReadyGate = useRef<() => void>(() => {});
   const readyGate = useRef<Promise<void> | null>(null);
@@ -485,6 +498,11 @@ export function ChannelChat({
           ),
           deadline: afterMs(JOIN_DEADLINE_MS),
           detach: () => agent.detachActiveRun(),
+          // A Bot still answering keeps the join, which streams the rest of its reply in.
+          answering: lastRun.running,
+          onAnswering: () => {
+            if (current) setRestoring(false);
+          },
         });
       } catch {
         /*
@@ -494,6 +512,7 @@ export function ChannelChat({
          */
       } finally {
         lastRun.stop();
+        openJoined.current();
       }
       /*
        * The last run failed, so say so again, as the turn did when it failed. Only from a replay
@@ -598,6 +617,17 @@ export function ChannelChat({
       const isCurrent = () =>
         !cancelled && version === historyReadVersion.current;
       void (async () => {
+        /*
+         * NOT BEFORE THE JOIN HAS REPLAYED THE THREAD. The join (above) rebuilds the transcript by
+         * replaying the thread's events onto the messages the agent holds when it starts, and a Bot's
+         * reply is built there by adding each piece of text to the message of its id. A read merged in
+         * first put that reply on the agent whole, so the replay added it again behind itself: "...
+         * I'll wait for your answer.I've asked: ... I'll wait for your answer." in one bubble, until a
+         * reload. The roster can announce a Bot's turn at any moment, the moment the conversation
+         * opens included, so every read waits for the join to be over.
+         */
+        await joinedPromise;
+        if (!isCurrent()) return;
         let sawReady = false;
         for (const delayMs of [0, 750, 1500]) {
           if (delayMs > 0) {
@@ -663,7 +693,13 @@ export function ChannelChat({
       unsubscribe();
       offFinishedAway();
     };
-  }, [channel.id, channel.threadId, joinGatePromise, runtimeAgentId]);
+  }, [
+    channel.id,
+    channel.threadId,
+    joinGatePromise,
+    joinedPromise,
+    runtimeAgentId,
+  ]);
 
   // Tool calls from this conversation act on this coworker's own computer.
   useActiveBot(runtimeAgentId);

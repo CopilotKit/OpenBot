@@ -262,15 +262,6 @@ export async function localEvalDownload(
     : null;
 }
 
-/** "48 of 147 MB": decimal megabytes, one decimal place below ten. */
-export function downloadSaid({ done, total }: LocalDownload): string {
-  const megabytes = (bytes: number) => {
-    const mb = bytes / 1e6;
-    return mb < 10 ? mb.toFixed(1) : Math.round(mb).toString();
-  };
-  return `${megabytes(Math.min(done, total))} of ${megabytes(total)} MB`;
-}
-
 /**
  * Connects this installation's apps with the CopilotKit sign-in the CLI now holds: CopilotKit
  * makes or replays its Composio project, and the native side keeps the key. Resolves once

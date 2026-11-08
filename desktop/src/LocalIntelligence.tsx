@@ -6,7 +6,6 @@ import {
   cancelLocalEval,
   chatGate,
   connectLocalEval,
-  downloadSaid,
   type LocalConnection,
   LocalEvalError,
   type LocalFailure,
@@ -23,7 +22,12 @@ import {
 } from "./localEvalCli";
 import { localReadiness, onInstalledReleaseSaid } from "./localReadiness";
 import { asProblem, Failure, type Problem } from "./Problem";
-import { type Progress, SetupProgress, StatusLine } from "./SetupProgress";
+import {
+  type Downloads,
+  type Progress,
+  SetupProgress,
+  StatusLine,
+} from "./SetupProgress";
 
 type Call<T> = { attempt: string; answer: Promise<T> };
 
@@ -119,6 +123,8 @@ type State = {
   refused: string | null;
   /** What the running row is doing, when it says more than its label. */
   detail: string | null;
+  /** How much of the back end's download has arrived, while OpenBot downloads it. */
+  download: Downloads | null;
   /**
    * The back end could not be updated to the release this app installs. Said, and not a stop: the
    * release it had is still there and still runs.
@@ -134,6 +140,7 @@ const idle: State = {
   problem: null,
   refused: null,
   detail: null,
+  download: null,
   updateFailed: null,
 };
 
@@ -270,10 +277,14 @@ export function useLocalSequence({
             if (!current()) return;
             if (found) {
               shown = true;
-              update({ detail: `${saying}: ${downloadSaid(found)}` });
+              // The row's bar and "48.0 MB of 147.0 MB", as Install shows its own download.
+              update({
+                detail: `${saying}.`,
+                download: { bytes: found.done, size: found.total },
+              });
             } else if (shown) {
               shown = false;
-              update({ detail: after });
+              update({ detail: after, download: null });
             }
           },
           () => {},
@@ -286,7 +297,8 @@ export function useLocalSequence({
     return () => {
       following = false;
       if (next) clearTimeout(next);
-      if (shown && generation.current === token) update({ detail: after });
+      if (shown && generation.current === token)
+        update({ detail: after, download: null });
     };
   }
 
@@ -317,7 +329,7 @@ export function useLocalSequence({
     token: number,
   ): Promise<boolean> {
     const updating = `Updating the back end to ${to}. Its data stays.`;
-    update({ detail: updating });
+    update({ detail: updating, download: null });
     const started = runLocalEval("update", id);
     attempt.current = started.attempt;
     const unfollow = followDownload(
@@ -342,6 +354,7 @@ export function useLocalSequence({
     if (generation.current !== token) return false;
     update({
       detail: null,
+      download: null,
       updateFailed: updated
         ? null
         : stalled
@@ -466,7 +479,13 @@ export function useLocalSequence({
   async function run(from: Phase): Promise<void> {
     halt();
     const token = generation.current;
-    update({ blocked: null, problem: null, detail: null, updateFailed: null });
+    update({
+      blocked: null,
+      problem: null,
+      detail: null,
+      download: null,
+      updateFailed: null,
+    });
     const { root } = latest.current;
     let id = latest.current.stack;
     const stop = (reason?: { said: string; reason?: LocalReason | null }) => {
@@ -645,6 +664,7 @@ export function useLocalSequence({
                 ok: true,
                 running: true,
                 detail: state.detail ?? "",
+                downloads: state.download ?? undefined,
                 startedAt: state.since ?? undefined,
               }
             : stopped
@@ -721,7 +741,25 @@ export function LocalIntelligence({
  * clear themselves (signing in, accepting the agreement) with its action, anything else with Retry.
  */
 export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
-  if (!sequence.stopped) return null;
+  if (!sequence.stopped) {
+    // The back end downloads behind the screen in front: say how far, so the wait is visible.
+    if (!sequence.running || !sequence.download) return null;
+    return (
+      <SetupProgress
+        label="Back end download"
+        showElapsed={false}
+        steps={[
+          {
+            step: "Downloading the back end",
+            ok: true,
+            running: true,
+            detail: "",
+            downloads: sequence.download,
+          },
+        ]}
+      />
+    );
+  }
   const needs = needsPerson(sequence);
   // Stopped at Start: Intelligence got as far as ready and licensed, and OpenBot is what failed.
   const openBot = !needs && sequence.at === "start";
