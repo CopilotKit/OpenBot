@@ -220,8 +220,9 @@ jobs:
               echo "Before merging:"
               echo "- [ ] The notes below describe what this $KIND changes"
               echo
-              echo "Merging runs the full suite against this commit before it builds, so there is"
-              echo "nothing to check about CI here."
+              echo "Merging checks this commit before it builds: the full suite, or, when this PR"
+              echo "changes only the release files, main's passing CI on the commit it merges onto."
+              echo "There is nothing to check about CI here."
               echo
               # A prerelease does not promote the changelog, so these are what is under Unreleased.
               echo '```'
@@ -244,9 +245,10 @@ jobs:
             echo "      pasted in a comment: \`bash scripts/start.sh && bun run test:smoke\`,"
             echo "      with OPENBOT_SMOKE_COOKIE set to a signed-in session (docs/releasing.md)"
             echo
-            echo "Merging runs the full suite against this commit before it builds, so there is"
-            echo "nothing to check about CI here. The journey is the part CI cannot do: it needs a"
-            echo "licence, and a licence belongs to the machine it was issued for."
+            echo "Merging checks this commit before it builds: the full suite, or, when this PR"
+            echo "changes only the release files, main's passing CI on the commit it merges onto."
+            echo "There is nothing to check about CI here. The journey is the part CI cannot do: it"
+            echo "needs a licence, and a licence belongs to the machine it was issued for."
             echo
             # The notes come trimmed, so the blank lines the section had around it go back in.
             echo '```'

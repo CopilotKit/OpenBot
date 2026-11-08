@@ -43,21 +43,22 @@ These checks do not test SmartScreen reputation or exercise the app UI.
 
 ## Sign a release
 
-Every release starts this workflow. After `publish-release.yml` creates the tag and the
-release, it dispatches this workflow on the tag with `signing-mode: keyvault` and
-`release-tag` set to that version. The tag alone would not start it: GitHub starts no
+Every release starts this workflow. As soon as `publish-release.yml` has created the tag and
+the release, right after the images, it dispatches this workflow on the tag with
+`signing-mode: keyvault` and `release-tag` set to that version. The tag alone would not start it: GitHub starts no
 workflow from a push made with `GITHUB_TOKEN`, and this workflow has no tag trigger anyway.
 The run still waits for a `windows-signing` reviewer to approve it.
 
-On a tag, the build carries the plain release version, the same as the unsigned installer
-the release was published with, and is built by
+On a tag, the build carries the plain release version, the same as a candidate's unsigned
+installer, and is built by
 [`desktop/scripts/signed-build.ts`](../desktop/scripts/signed-build.ts), as the signed Mac
 build is. A candidate or beta is pinned to its release's own `container-images.json`, like
 its unsigned installer, and the Intelligence CLI is bundled whenever the tree has
 `tauri.bundled-cli.conf.json`. After the signing job verifies the installer, a separate
 job with permission to write to the repository attaches it to the release with `--clobber`,
-twice: as `OpenBot_<version>_x64-setup.exe`, which replaces the unsigned installer of the
-same name, and as `OpenBot-windows-x64-setup.exe`, the fixed name a web page links to. See
+twice: as `OpenBot_<version>_x64-setup.exe`, replacing a candidate's unsigned installer of
+the same name, and as `OpenBot-windows-x64-setup.exe`, the fixed name a web page links to. A
+stable release has no other Windows installer: this is the only one it carries. See
 [Download links](releasing.md#download-links). The signing job itself never holds that
 permission. A stable release becomes Latest once both this and Mac signing have attached their
 signed installers, in whichever of the two finishes second, so the Windows address never gives the

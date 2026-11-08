@@ -55,7 +55,7 @@ function withoutPolicyVersion(text: string): string {
   return withoutPackageVersion(text);
 }
 
-const VERSION_ONLY_RULES: Record<string, (text: string) => string> = {
+export const VERSION_ONLY_RULES: Record<string, (text: string) => string> = {
   "package.json": withoutPackageVersion,
   "release-policy.json": withoutPolicyVersion,
   "charts/openbot/Chart.yaml": withoutAppVersion,
@@ -96,9 +96,37 @@ function git(...args: string[]): string {
 }
 
 // Reads a file at a revision, or an empty string when it does not exist there.
-function showFile(rev: string, path: string): string {
-  const result = Bun.spawnSync(["git", "show", `${rev}:${path}`]);
+function showFile(rev: string, path: string, cwd?: string): string {
+  const result = Bun.spawnSync(["git", "show", `${rev}:${path}`], { cwd });
   return result.exitCode === 0 ? result.stdout.toString() : "";
+}
+
+/**
+ * Every path that differs between two commits, with what it held on each side, in the repository
+ * at `cwd` (default the working directory). `--no-renames`, because with rename detection (git's
+ * default) a file moved onto an allowed name, say `server/x.ts` renamed to `CHANGELOG.md`, is listed
+ * under its new name alone, and the source file it removed would never be checked.
+ */
+export function changedFiles(
+  before: string,
+  after: string,
+  cwd?: string,
+): Map<string, { before: string; after: string }> {
+  const diff = Bun.spawnSync(
+    ["git", "diff", "--no-renames", "--name-only", "-z", before, after],
+    { cwd },
+  );
+  if (diff.exitCode !== 0) {
+    throw new Error(`git diff ${before} ${after}: ${diff.stderr.toString()}`);
+  }
+  const files = new Map<string, { before: string; after: string }>();
+  for (const path of diff.stdout.toString().split("\0").filter(Boolean)) {
+    files.set(path, {
+      before: showFile(before, path, cwd),
+      after: showFile(after, path, cwd),
+    });
+  }
+  return files;
 }
 
 if (import.meta.main) {
@@ -118,16 +146,7 @@ if (import.meta.main) {
     );
     process.exit(1);
   }
-  const files = new Map<string, { before: string; after: string }>();
-  for (const path of git("diff", "--name-only", parent, sha)
-    .split("\n")
-    .filter(Boolean)) {
-    files.set(path, {
-      before: showFile(parent, path),
-      after: showFile(sha, path),
-    });
-  }
-  const violations = allowedDiff(files);
+  const violations = allowedDiff(changedFiles(parent, sha));
   if (violations.length > 0) {
     console.error(violations.join("\n"));
     process.exit(1);
