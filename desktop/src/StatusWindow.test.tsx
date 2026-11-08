@@ -168,6 +168,31 @@ test("a desktop app without a log offers no Open log folder", async () => {
   expect(view.queryByRole("button", { name: "Open log folder" })).toBeNull();
 });
 
+test("the back end is named in words on screen, and its stack id goes only to Copy diagnostics", async () => {
+  invokeHandler = answers({
+    desktop_status: { ...running, intelligenceStack: "local-08ff56ec9469e95e" },
+  });
+  let copied = "";
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: {
+      writeText: async (text: string) => {
+        copied = text;
+      },
+    },
+  });
+  const view = render(<StatusWindow readEveryMs={60_000} />);
+  await view.findByRole("region", { name: "Back end" });
+  expect(
+    view.container.querySelector(".status-details")?.textContent,
+  ).toContain("Back endOn this computer");
+  expect(view.container.textContent).not.toContain("local-08ff56ec9469e95e");
+  await userEvent.click(view.getByRole("button", { name: "Copy diagnostics" }));
+  await waitFor(() =>
+    expect(copied).toContain("Back end: local-08ff56ec9469e95e"),
+  );
+});
+
 test("diagnostics carry versions, places and memory, and nothing secret", () => {
   const text = diagnostics(running, "ready");
   expect(text).toContain("OpenBot Desktop 0.2.0");
