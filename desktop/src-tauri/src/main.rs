@@ -2664,10 +2664,16 @@ async fn start_stack_inner<R: tauri::Runtime>(
             );
         }
         let ours = stack::ports_we_already_publish(&found, &root);
+        // The last run's own ports are waited for before anything moves off them (`for_start`).
+        let own = openbot_env::Ports::recorded(&root).map_err(|error| {
+            Problem::with("OpenBot could not read its local ports.", error.to_string())
+        })?;
         let ports = previous_ports
-            .available(
+            .for_start(
+                &own,
                 &ours,
                 picked.as_ref().and_then(|picked| picked.installed_port()),
+                openbot_env::OWN_PORTS_PATIENCE,
             )
             .map_err(|error| {
                 Problem::with(
