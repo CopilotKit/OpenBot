@@ -15,6 +15,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   and the end of its error output. A setup that stopped used to leave nothing in the log. The card
   says whether the back end stopped with an error partway, quit without saying why, or could not
   be run, where all three said "The back end could not start."
+- The first Bot to need you after OpenBot Desktop starts raises its notification. It used to raise
+  nothing while the app was still checking that notifications were on, so the first question after
+  each launch, asked while OpenBot was minimised or behind another window, went unannounced.
+
+- **CopilotKit Intelligence 0.16.0-rc.10.** OpenBot Desktop's back end and the Helm chart move to
+  Intelligence 0.16.0-rc.10 (CLI `copilotkit@647a03b`). A first back end setup now downloads its
+  images through downloads.copilotkit.ai too, because the CLI's own pulls read the cluster's
+  mirrors, and a setup step that fails now reports its own error instead of only that the command
+  did not finish.
 
 ### Automatic Learning and Teach a Bot
 

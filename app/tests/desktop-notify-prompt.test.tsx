@@ -8,7 +8,7 @@ import {
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { NotifyPrompt } from "@/components/notifications/notify-prompt";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
@@ -153,6 +153,34 @@ test("in OpenBot Desktop a Bot that starts needing the person is shown by the de
       (call) => call.command === "plugin:notification|notify",
     ),
   ).toEqual([]);
+});
+
+test("the first question after OpenBot Desktop starts raises its notice, though the desktop app had not said yet that notices are on", async () => {
+  // As on Windows right after a launch: the page has not heard back from the desktop app when the
+  // first question arrives, and its yes comes back over IPC a moment later. That notice was dropped.
+  const desktop = launchDesktop({
+    plugin: true,
+    windows: true,
+    answersLate: true,
+  });
+  // A fresh page: its first read goes out now and is not answered yet.
+  refreshNotificationPermission();
+
+  await aBotStartsNeedingThePerson();
+  // The badge shows the question before the desktop app has answered.
+  await within(document.body).findByRole("img", { name: "1 thing needs you" });
+  await act(settleReactWork);
+  expect(desktop.toDesktopNotify()).toEqual([]);
+  desktop.answer();
+
+  await waitFor(() =>
+    expect(desktop.toDesktopNotify().map((call) => call.args)).toEqual([
+      EXPENSES_NEEDS_YOU,
+    ]),
+  );
+  // Exactly one: waiting for the answer raises nothing twice.
+  await act(settleReactWork);
+  expect(desktop.shown()).toEqual([EXPENSES_NEEDS_YOU]);
 });
 
 test("in OpenBot Desktop a notice about a Bot waiting in a conversation opens that conversation", async () => {
