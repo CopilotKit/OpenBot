@@ -13,18 +13,28 @@ import {
   type LocalReport,
   type LocalTerms,
   localEvalTerms,
+  onInstalledRelease,
   runLocalEval,
   setUpLocalEval,
   signInToCopilotKit,
 } from "./localEvalCli";
-import { localReadiness } from "./localReadiness";
+import { localReadiness, onInstalledReleaseSaid } from "./localReadiness";
 import { asProblem, Failure, type Problem } from "./Problem";
 import { type Progress, SetupProgress, StatusLine } from "./SetupProgress";
 
 type Call<T> = { attempt: string; answer: Promise<T> };
 
-/** What Start OpenBot is given for a local stack: its addresses. The key is in the vault. */
-export type LocalStartable = { apiUrl: string; gatewayWsUrl: string };
+/**
+ * What Start OpenBot is given for a local stack: its addresses. The key is in the vault.
+ *
+ * `notice` when the back end is ready on the release it had and an update did not finish: said on
+ * the running screen, and the person opens OpenBot from there.
+ */
+export type LocalStartable = {
+  apiUrl: string;
+  gatewayWsUrl: string;
+  notice?: string;
+};
 
 /**
  * What became of one Start OpenBot.
@@ -76,6 +86,7 @@ function connectionSaid(answered: LocalConnection): string {
     readiness: "unknown",
     licence: "unknown",
     licenceExpiresAt: null,
+    checksPassed: false,
   });
 }
 
@@ -293,9 +304,14 @@ export function useLocalSequence({
     };
     let startedIntelligence = false;
     let updatedIntelligence = false;
+    // The update ran on a stack found stopped. It starts the cluster itself, so the release the
+    // stack had comes back up after a failed one, and is waited on like a stack that is starting.
+    let woken = false;
     for (let tries = 0; ; tries += 1) {
       const found = await report("status");
       if (!found) return null;
+      const unfinished = found.stack?.unfinishedUpdate ?? null;
+      const kept = onInstalledRelease(found);
       /*
        * A stack an older app set up runs an older release than this app installs: updated once,
        * before OpenBot starts on it, so OpenBot runs on the release it was built with.
@@ -305,14 +321,21 @@ export function useLocalSequence({
        * there is nothing running to roll, the wait ran out, and the update failed every time; on the
        * same stack started first it finished in 86 seconds. So a stopped stack is started below as
        * usual, and the update runs on the next answer, when it reports ready.
+       *
+       * AN UPDATE THAT DID NOT FINISH is tried again the same way, on a stack ready on the release
+       * it had. On a stopped one too: there the CLI refuses `start` while the update is on record,
+       * and `local update` is the only call that starts the stack.
        */
       if (
         found.updateTo &&
         found.stack &&
         !updatedIntelligence &&
-        found.readiness === "ready"
+        (found.readiness === "ready" ||
+          kept !== null ||
+          (found.readiness === "stopped" && unfinished !== null))
       ) {
         updatedIntelligence = true;
+        woken = found.readiness === "stopped";
         const going = await updateIntelligence(
           id,
           found.updateTo,
@@ -330,6 +353,7 @@ export function useLocalSequence({
         return {
           apiUrl: found.stack.urls.api,
           gatewayWsUrl: found.stack.urls.gateway,
+          ...(kept ? { notice: onInstalledReleaseSaid(kept) } : {}),
         };
       }
       const row = localReadiness({
@@ -338,14 +362,24 @@ export function useLocalSequence({
         openBot: "unknown",
         provider: "unvalidated",
       }).intelligence;
-      if (row.action === "start-intelligence" && !startedIntelligence) {
+      // Not with an update on record: the CLI refuses `start` then (see above).
+      if (
+        row.action === "start-intelligence" &&
+        !startedIntelligence &&
+        unfinished === null
+      ) {
         startedIntelligence = true;
         const started = await report("start");
         if (!started) return null;
         if (started.outcome !== "completed") return stuck(started);
         continue;
       }
-      if (found.readiness !== "starting" || row.state === "blocked") {
+      const waking =
+        woken && found.readiness === "degraded" && unfinished !== null;
+      if (
+        !waking &&
+        (found.readiness !== "starting" || row.state === "blocked")
+      ) {
         return stuck(found);
       }
       if (tries >= pollDelays.length) {

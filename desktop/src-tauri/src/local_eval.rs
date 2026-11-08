@@ -220,9 +220,17 @@ pub struct Report {
     pub licence: Licence,
     /// When the licence expires, as a strict ISO-8601 instant, so the window can warn ahead of it.
     pub licence_expires_at: Option<String>,
-    /// On `status`: the release this app's CLI installs, when the stack runs an older one. The window
-    /// runs `update` once, before it starts OpenBot on that stack (see `update_due`).
+    /// On `status`: the release this app's CLI installs, when the stack runs an older one, or the
+    /// release an update the CLI did not finish was moving to. The window runs `update` once,
+    /// before it starts OpenBot on that stack (see `update_due`).
     pub update_to: Option<String>,
+    /// Every check the CLI made from this computer passed: the back end's API, its gateway and its
+    /// dashboard each answered (`readiness.checks`). Only the result is kept.
+    ///
+    /// Not readiness. The CLI says `degraded` for as long as it keeps an update it did not finish
+    /// on record, however well the release it has answers. This is how the window tells that apart
+    /// from a back end that is down (see `UnfinishedUpdate`).
+    pub checks_passed: bool,
 }
 
 /// What `local connect` answered. The settings it wrote stay in the installation's `.env`; their
@@ -255,7 +263,33 @@ pub struct Stack {
     pub urls: Urls,
     pub has_failed_step: bool,
     pub update_in_progress: bool,
+    /// The update the CLI keeps on record because it did not finish, when its record names it.
+    pub unfinished_update: Option<UnfinishedUpdate>,
     pub observed: Option<Observed>,
+}
+
+/**
+An update `local update` started and did not finish, as `local status` reports its record.
+
+Found on a slow connection: the CLI stopped downloading one of 0.16.0-rc.9's images at its own
+ten-minute limit and recorded `failedStep: "image-download"`, with the update still `prepared`.
+Nothing in the cluster had changed and every check passed, yet the CLI reports `degraded` for as
+long as the record stays, and the window said the back end was not healthy and stopped.
+
+Only facts the window turns into its own sentences: the release (an identifier, like
+`installedRelease`), whether the update was still `prepared`, and whether it stopped downloading.
+The recovery command and the schema are not kept.
+*/
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnfinishedUpdate {
+    /// The release the update was moving to.
+    pub to: String,
+    /// The CLI's update state is still `prepared`: no migration has started, so the release that
+    /// answers is the one installed (`installedRelease`).
+    pub prepared: bool,
+    /// The step that failed was one of the image downloads.
+    pub stopped_downloading: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -534,6 +568,8 @@ fn report(command: &str, exit_code: i32, stdout: &[u8]) -> Result<Report, Failur
     } else {
         (Readiness::Unknown, (Licence::Unknown, None))
     };
+    // Believed with the readiness they came with: a malformed `readiness` carries no checks either.
+    let checks_passed = readiness != Readiness::Unknown && checks_passed(wire.get("readiness"));
     Ok(Report {
         outcome,
         stack: reported_stack(outcome, wire)?,
@@ -542,6 +578,7 @@ fn report(command: &str, exit_code: i32, stdout: &[u8]) -> Result<Report, Failur
         licence,
         licence_expires_at,
         update_to: None,
+        checks_passed,
     })
 }
 
@@ -813,6 +850,24 @@ fn readiness(value: Option<&Value>) -> Readiness {
 }
 
 /**
+Whether `readiness.checks` names the CLI's three checks, `api`, `gateway` and `dashboard`, and every
+check it lists passed. Anything else is false, an empty list, a missing check or one in another
+shape included, and the rest of the report still stands: an older CLI publishes no checks at all.
+*/
+fn checks_passed(value: Option<&Value>) -> bool {
+    let Some(Value::Array(checks)) = value.and_then(|readiness| readiness.get("checks")) else {
+        return false;
+    };
+    let passed = |check: &Value| check.get("ok") == Some(&Value::Bool(true));
+    let listed = |name: &str| {
+        checks
+            .iter()
+            .any(|check| check.get("name").and_then(Value::as_str) == Some(name))
+    };
+    checks.iter().all(passed) && ["api", "gateway", "dashboard"].into_iter().all(listed)
+}
+
+/**
 `license.state` and `license.expiresAt`, by the same rule. `expiresAt` must be present, as `null`
 or a strict instant; anything else makes the whole licence `Unknown`, so a valid state never
 travels with an expiry nobody could read. The organization and renewal fields are not kept.
@@ -1023,6 +1078,22 @@ fn stack(value: &Value) -> Result<Stack, Failure> {
             true
         }
     };
+    let unfinished_update = match saved.get("update") {
+        Some(Value::Object(update))
+            if update.get("attemptedRelease").is_some_and(Value::is_string) =>
+        {
+            Some(UnfinishedUpdate {
+                to: text(update.get("attemptedRelease"))?,
+                prepared: update.get("state").and_then(Value::as_str) == Some("prepared"),
+                // The steps the CLI's own progress calls downloading the release's images.
+                stopped_downloading: matches!(
+                    saved.get("failedStep").and_then(Value::as_str),
+                    Some("image-download" | "system-image-download" | "system-image-tag")
+                ),
+            })
+        }
+        _ => None,
+    };
     Ok(Stack {
         id: id.0,
         installed_release: text(saved.get("installedRelease"))?,
@@ -1034,6 +1105,7 @@ fn stack(value: &Value) -> Result<Stack, Failure> {
         },
         has_failed_step,
         update_in_progress,
+        unfinished_update,
         observed: observation(saved.get("observed"))?,
     })
 }
@@ -1319,18 +1391,29 @@ app's CLI installs, does not.
 
 THE RULE. Due when the stack's installed release is older, by semantic version, than `target`, the
 release this app's CLI installs (`bundled_release`). Never when it is the same or newer: a stack is
-not moved back. Never when either version cannot be read, or a saved update is already under way
-(the CLI resumes that itself on `start`). The CLI's own `local update` does the work, keeping the
-stack's data and app connections, and leaves the stack as it was when it fails.
+not moved back. Never when either version cannot be read. The CLI's own `local update` does the
+work, keeping the stack's data and app connections, and leaves the stack as it was when it fails.
+
+AN UPDATE THAT DID NOT FINISH is due again, to the release it was moving to: `local update` with no
+candidate resumes the one on record. The window promises that retry ("OpenBot tries again the next
+time it starts") and nothing else makes it. The window opens OpenBot on a running stack without
+calling `start`, and on a stopped one the CLI refuses `start` while a `prepared` update is on record
+(`update_recovery_required`, naming `local update`). A record that does not name its release is
+left alone.
 */
 pub fn update_due(report: &Report, target: Option<&str>) -> Option<String> {
     let target = target?;
     let stack = report.stack.as_ref()?;
-    if report.outcome != Outcome::Completed || stack.update_in_progress {
+    if report.outcome != Outcome::Completed {
         return None;
     }
     let version = |text: &str| semver::Version::parse(text.trim().trim_start_matches('v')).ok();
-    (version(target)? > version(&stack.installed_release)?).then(|| target.to_owned())
+    let to = if stack.update_in_progress {
+        &stack.unfinished_update.as_ref()?.to
+    } else {
+        target
+    };
+    (version(to)? > version(&stack.installed_release)?).then(|| to.to_owned())
 }
 
 pub fn installed() -> Result<PinnedCli, Failure> {
@@ -2509,11 +2592,29 @@ mod tests {
         // Not known: a CLI with no pinned release, or a version that does not read.
         assert_eq!(update_due(&on_release("0.16.0-rc.8"), None), None);
         assert_eq!(update_due(&on_release("latest"), target), None);
-        // A saved update is the CLI's own to resume, on `start`.
+        // An update that did not finish is due again, to the release on record, as the CLI 48a3863
+        // reports it, whatever release this app's CLI would choose now: `local update` resumes it.
         let mut resuming = envelope();
-        resuming["stack"]["installedRelease"] = json!("0.16.0-rc.8");
-        resuming["stack"]["update"] = json!({ "attemptedRelease": { "version": "0.16.0-rc.9" } });
-        assert_eq!(update_due(&status(&resuming).unwrap(), target), None);
+        resuming["stack"]["installedRelease"] = json!("0.16.0-rc.5");
+        resuming["stack"]["failedStep"] = json!("image-download");
+        resuming["stack"]["update"] = json!({
+            "attemptedRelease": "0.16.0-rc.9",
+            "state": "prepared",
+            "observedSchema": null,
+            "recoveryCommand": "copilotkit local update --stack local-abc123"
+        });
+        let resuming = status(&resuming).unwrap();
+        for target in [Some("0.16.0-rc.9"), Some("0.16.0-rc.10")] {
+            assert_eq!(
+                update_due(&resuming, target).as_deref(),
+                Some("0.16.0-rc.9")
+            );
+        }
+        // A record that does not name its release is left alone.
+        let mut unnamed = envelope();
+        unnamed["stack"]["installedRelease"] = json!("0.16.0-rc.8");
+        unnamed["stack"]["update"] = json!({ "state": "migrated" });
+        assert_eq!(update_due(&status(&unnamed).unwrap(), target), None);
         // A report that is not a completed status says nothing about the stack's release.
         let mut blocked = on_release("0.16.0-rc.8");
         blocked.outcome = Outcome::Blocked;

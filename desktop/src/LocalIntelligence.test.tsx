@@ -48,12 +48,14 @@ function report(overrides: Partial<LocalReport> = {}): LocalReport {
       },
       hasFailedStep: false,
       updateInProgress: false,
+      unfinishedUpdate: null,
       observed: null,
     },
     reason: null,
     readiness: "unknown",
     licence: "unknown",
     licenceExpiresAt: null,
+    checksPassed: false,
     ...overrides,
   };
 }
@@ -92,7 +94,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-type Startable = { apiUrl: string; gatewayWsUrl: string };
+type Startable = { apiUrl: string; gatewayWsUrl: string; notice?: string };
 
 type Props = {
   stack?: string | null;
@@ -371,6 +373,67 @@ test("an update that fails says so and starts OpenBot on the release the back en
     cleanup();
     invokeCalls = [];
   }
+});
+
+/** `run_local_eval` answers from the CLI this app pins: see `local_eval_ipc_tests.rs`. */
+const pinnedCli = JSON.parse(
+  readFileSync(
+    join(
+      import.meta.dir,
+      "../src-tauri/test-fixtures/local-eval/update-did-not-finish.json",
+    ),
+    "utf8",
+  ),
+);
+
+/**
+ * Quit stopped the back end with an update on record. The CLI refuses `start` then, and `update`
+ * starts the stack itself. When the update stops again, the release the stack had is still coming
+ * up: its checks fail for a while, and it is waited on, not called not healthy.
+ */
+test("after Quit, the unfinished update starts the stack, and the release it had is waited on", async () => {
+  const statuses = [
+    pinnedCli.stoppedByQuit,
+    pinnedCli.apiCheckFails,
+    pinnedCli.updateDidNotFinish,
+  ];
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update")
+      return report({
+        outcome: "failed",
+        stack: null,
+        reason: "local-command-failed",
+      });
+    if (action !== "status") throw new Error(`unexpected ${action}`);
+    return statuses.length > 1 ? statuses.shift() : statuses[0];
+  };
+  const started: Startable[] = [];
+  view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await waitFor(() =>
+    expect(started).toEqual([
+      {
+        apiUrl: "http://localhost:18082",
+        gatewayWsUrl: "ws://localhost:14401",
+        notice:
+          "The back end is running 0.16.0-rc.5. Downloading 0.16.0-rc.9 did not finish, so OpenBot tries again the next time it starts.",
+      },
+    ]),
+  );
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:update",
+    "run_local_eval:status",
+    "run_local_eval:status",
+  ]);
 });
 
 const blockedOnSignIn = report({

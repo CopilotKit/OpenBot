@@ -15,7 +15,23 @@ import {
   type LocalLicence,
   type LocalReason,
   licenceExpiresSoon,
+  onInstalledRelease,
 } from "./localEvalCli";
+
+/**
+ * A back end ready on the release it has, with an update it did not finish: what it runs, what did
+ * not finish, and that the next Start tries again. Only what the CLI recorded: a download that did
+ * not finish is said as one, and no cause is guessed.
+ */
+export function onInstalledReleaseSaid({
+  release,
+  update,
+}: NonNullable<ReturnType<typeof onInstalledRelease>>): string {
+  const unfinished = update.stoppedDownloading
+    ? `Downloading ${update.to} did not finish`
+    : `The update to ${update.to} did not finish`;
+  return `The back end is running ${release}. ${unfinished}, so OpenBot tries again the next time it starts.`;
+}
 
 export type ReadinessState = "ready" | "blocked" | "unknown";
 export type ReadinessAction =
@@ -178,6 +194,8 @@ function intelligenceRow(
     provider: "validated",
   }).open;
   if (good) {
+    const kept = onInstalledRelease(intelligence);
+    if (kept) return { state: "ready", said: onInstalledReleaseSaid(kept) };
     return {
       state: "ready",
       said: licenceExpiresSoon(intelligence, now)
