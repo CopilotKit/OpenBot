@@ -332,25 +332,34 @@ test("a Bot the attention list does not name is named from the Bots list, and sa
   );
 });
 
-test("in OpenBot Desktop the system shows it, through the plugin, naming the conversation a click opens", async () => {
+const DESKTOP_REPLY = {
+  title: "Expenses replied",
+  body: "Categorized three expenses.",
+  // The page a click opens, from the notification centre too.
+  path: "/channel/march-receipts",
+};
+
+test("in OpenBot Desktop the desktop app shows it, naming the conversation a click opens", async () => {
   const desktop = launchDesktop({ plugin: true });
   refreshNotificationPermission();
   await settle();
   const { socket } = await openPage({});
-  const event = reply();
 
-  act(() => socket.say(event));
+  act(() => socket.say(reply()));
 
-  await waitFor(() =>
-    expect(desktop.shown()).toEqual([
-      {
-        title: "Expenses replied",
-        body: "Categorized three expenses.",
-        tag: `openbot-reply-march-receipts-${event.lastMessageAt}`,
-        extra: { path: "/channel/march-receipts" },
-      },
-    ]),
-  );
+  await waitFor(() => expect(desktop.shown()).toEqual([DESKTOP_REPLY]));
+  expect(desktop.toDesktopNotify()).toHaveLength(1);
+});
+
+test("in a desktop app from before its own notify, the plugin shows it, with the same conversation", async () => {
+  const desktop = launchDesktop({ plugin: true, notifyCommand: false });
+  refreshNotificationPermission();
+  await settle();
+  const { socket } = await openPage({});
+
+  act(() => socket.say(reply()));
+
+  await waitFor(() => expect(desktop.shown()).toEqual([DESKTOP_REPLY]));
 });
 
 test("in OpenBot Desktop no notice while the person is looking at it", async () => {

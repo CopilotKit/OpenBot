@@ -5,8 +5,8 @@ import {
   botAttentionBodyQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
 import type { ChannelActivityEvent } from "@/lib/channels/use-channel-events";
-import { noticeOptions } from "./notice";
 import { notificationsAllowed } from "./permission";
+import { type Notice, showNotice } from "./show";
 
 /**
  * A notification when a Bot replies while OpenBot is out of sight: what the offer to turn them on
@@ -29,14 +29,8 @@ export function isBotReply(activity: ChannelActivityEvent): boolean {
   );
 }
 
-export type ReplyNotice = {
-  title: string;
-  body: string;
-  /** One per reply, so two open tabs show one notice between them. */
-  tag: string;
-  /** The conversation a click opens. */
-  path: string;
-};
+/** The tag is one per reply, so two open tabs show one notice; the path is the conversation. */
+export type ReplyNotice = Omit<Notice, "onClick">;
 
 /**
  * What one reply's notice says, or null when there is none to show: not a Bot's reply, or a Bot the
@@ -81,7 +75,7 @@ const ANNOUNCED_KEPT = 200;
 /**
  * Show a reply's notice, if OpenBot is out of sight, notifications are allowed and the Bot may say
  * this much. `open` takes a browser to the conversation when the notice is clicked; OpenBot Desktop
- * opens the notice's own `extra.path` instead.
+ * opens the notice's own `path` instead.
  */
 export async function announceReply(
   activity: ChannelActivityEvent,
@@ -112,21 +106,5 @@ export async function announceReply(
   );
   // Looked at again: the person may have come back while the list loaded.
   if (!notice || inSight()) return;
-  try {
-    const shown = new Notification(
-      notice.title,
-      noticeOptions({ body: notice.body, tag: notice.tag }, notice.path),
-    );
-    shown.onclick = () => {
-      window.focus();
-      try {
-        shown.close();
-      } catch {
-        // Already gone.
-      }
-      open(activity.channelId);
-    };
-  } catch {
-    // A browser that refuses the constructor still has the reply in the conversation.
-  }
+  showNotice({ ...notice, onClick: () => open(activity.channelId) });
 }

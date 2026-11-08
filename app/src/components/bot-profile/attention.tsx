@@ -5,8 +5,6 @@ import {
   botAttentionQueryOptions,
   lastPingQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
-// The page a notification is about, which OpenBot Desktop opens on a click.
-import { noticeOptions } from "@/lib/notifications/notice";
 // Whether this browser, or OpenBot Desktop, lets OpenBot interrupt: the same answer the offer to
 // turn notifications on reads, so the two cannot disagree.
 import { notificationsAllowed } from "@/lib/notifications/permission";
