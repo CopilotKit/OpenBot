@@ -19,7 +19,7 @@ import { YourRecordings } from "./your-recordings";
 
 const TITLE = TEACH_A_BOT;
 const DESCRIPTION =
-  "Show your Bots how to do a task. Name it, press Start recording, and do it in the browser that opens.";
+  "Show your Bots how to do a task. Name it, press Record, and do it in the browser that opens.";
 
 /**
  * The Browser page: the signed-in person's own browser, opened when they arrive, and Record and Stop for it.

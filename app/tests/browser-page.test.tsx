@@ -885,6 +885,25 @@ test("Record is offered while the Recorder is disconnected: the server connects 
   );
 });
 
+test("while the browser opens, the page's description names the button the page then shows: Record", async () => {
+  state = screenState();
+  openAnswer = answerFor("screen");
+  let opened = () => {};
+  opening = new Promise<void>((resolve) => {
+    opened = resolve;
+  });
+  const view = draw(<BrowserPage />);
+  // The Desktop's run of 2026-11-08 read "press Start recording" here, above a button that says Record.
+  expect(
+    await view.findByText(
+      "Show your Bots how to do a task. Name it, press Record, and do it in the browser that opens.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText(/Start recording/)).toBeNull();
+  opened();
+  expect(await view.findByRole("button", { name: "Record" })).toBeTruthy();
+});
+
 test("on hosted OpenBot the page is the browser: its tabs, its address and its live screen, driven at once", async () => {
   state = screenState();
   openAnswer = answerFor("screen");
