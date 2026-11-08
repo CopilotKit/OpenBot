@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot's "What it can do" (Skills and access) page draws each of your skills' switches from the
+  Bot's own grants. A Bot made a moment ago in OpenBot Personal is given every skill the first time
+  it is listed, and its switches showed off until the page was opened again.
+
 ## 0.3.3
 
 **Before upgrading.** Five migrations add columns: `0078_routine_title` adds a nullable
