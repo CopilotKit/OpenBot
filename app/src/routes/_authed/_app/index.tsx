@@ -12,6 +12,7 @@ import {
   type ComposerDraft,
   toAgentOptions,
 } from "@/components/channels/composer";
+import { WorkingNow } from "@/components/channels/working-now";
 import { BusinessLink } from "@/components/edition/business-link";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
@@ -326,6 +327,8 @@ function RouteComponent() {
           )}
         </div>
       </div>
+      {/* A Bot already working somewhere, and the way to it. Nothing while every Bot is idle. */}
+      <WorkingNow channels={channels.data} />
     </>
   );
 }
