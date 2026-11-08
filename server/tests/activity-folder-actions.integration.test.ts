@@ -111,6 +111,13 @@ async function rows(eventType: string) {
   }));
 }
 
+/** Rows compared as a set. */
+function inAnyOrder<T>(list: T[]): T[] {
+  return [...list].sort((a, b) =>
+    JSON.stringify(a).localeCompare(JSON.stringify(b)),
+  );
+}
+
 describe("a Bot's folder actions", () => {
   test("are computer actions, a person's Deny is under Blocked, and nothing is a setting", async () => {
     const broker = connectedBroker();
@@ -161,12 +168,11 @@ describe("a Bot's folder actions", () => {
       file: undefined,
       command: "dir",
     };
-    expect(await rows(COMPUTER_ACTIONS)).toEqual([
-      read,
-      write,
-      refusedWrite,
-      command,
-    ]);
+    // As a set: rows written in the same millisecond come back in either order (the reader breaks a
+    // tie on a random id), and CI's runner was fast enough to write two of them in one.
+    expect(inAnyOrder(await rows(COMPUTER_ACTIONS))).toEqual(
+      inAnyOrder([read, write, refusedWrite, command]),
+    );
     expect(await rows(BLOCKED)).toEqual([refusedWrite]);
     expect(await rows("configuration.changed")).toEqual([]);
 
