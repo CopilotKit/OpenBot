@@ -105,20 +105,36 @@ function replaceVersion(text: string, releaseVersion: string, lock: boolean) {
 }
 
 /**
- * An internal build's version: `X.Y.Z-internal.<commits>.g<commit>`.
+ * An internal build's version, ordered after the release package.json names and before the next:
+ * `X.Y.(Z+1)-internal.<commits>.g<commit>` after the release `X.Y.Z`, and
+ * `X.Y.Z-rc.N.internal.<commits>.g<commit>` after the candidate `X.Y.Z-rc.N` (or `-beta.N`).
  *
- * Installers and the app order versions by semver, and semver compares a prerelease identifier
- * that is a number as a number and any other as text. Named after the commit alone, two internal
- * builds ordered by their hashes, so a later build could read as older than the one installed
- * (`g4400ba…` sorts before `gd298de…`) and the Windows installer warned against installing it.
- * The number of commits before the hash orders a later commit after an earlier one.
+ * Installers and the app order versions by semver (https://semver.org/#spec-item-11), where a
+ * prerelease orders before its own release. package.json names the last release, so every build
+ * from the tree comes after it, yet `0.3.3-internal.860.g…`, built after 0.3.3 was released, read
+ * as older than 0.3.3 and the Windows installer offered to uninstall the "newer" 0.3.3 first. A
+ * prerelease of the next patch orders after X.Y.Z and before X.Y.(Z+1) and every later release.
+ * More identifiers after a candidate's order after rc.N, and `N` still orders it before rc.(N+1).
+ *
+ * semver compares a prerelease identifier that is a number as a number and any other as text.
+ * Named after the commit alone, two internal builds ordered by their hashes (`g4400ba…` before
+ * `gd298de…`), so the number of commits before the hash orders a later commit after an earlier one.
  */
 function internalVersion(
   releaseVersion: string,
   commits: number,
   sourceSha: string,
 ) {
-  return `${releaseVersion}-internal.${commits}.g${sourceSha.slice(0, 12)}`;
+  const build = `internal.${commits}.g${sourceSha.slice(0, 12)}`;
+  const release = parseVersion(releaseVersion);
+  if (release.pre) return `${releaseVersion}.${build}`;
+  // Windows keeps each part of the numeric version in 16 bits (see `version`).
+  if (release.patch >= 65535) {
+    throw new Error(
+      `${releaseVersion}: the next patch does not fit a Windows version field`,
+    );
+  }
+  return `${formatVersion({ ...release, patch: release.patch + 1 })}-${build}`;
 }
 
 /** The commits in HEAD's history. A shallow checkout has only some of them, so it is refused. */
@@ -189,8 +205,9 @@ function main(command: string | undefined) {
   };
   // Tauri copies semver into both Apple keys unchanged. Keep those numeric while
   // retaining the complete internal identity in custom plist keys and app metadata.
-  const { major, minor, patch } = parseVersion(releaseVersion);
-  const numeric = formatVersion({ major, minor, patch });
+  // They are the build version's major.minor.patch, the same numbers Tauri puts in
+  // the Windows fixed version fields, so neither platform's numbers go backwards.
+  const numeric = buildVersion.split("-")[0];
   const fields = {
     CFBundleShortVersionString: numeric,
     CFBundleVersion: numeric,

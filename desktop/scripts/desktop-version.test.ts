@@ -210,9 +210,11 @@ test.each(["internal", "release"])(
   (channel) => {
     const f = fixture();
     const sourceSha = firstCommit(f.root);
+    // An internal build comes after the release package.json names, so it is the next patch's.
+    const numeric = channel === "internal" ? "0.0.11" : "0.0.10";
     const version =
       channel === "internal"
-        ? `0.0.10-internal.1.g${sourceSha.slice(0, 12)}`
+        ? `0.0.11-internal.1.g${sourceSha.slice(0, 12)}`
         : "0.0.10";
     expect(f.run(channel).code).toBe(0);
     expect(JSON.parse(f.read("desktop/build-version.json"))).toEqual({
@@ -229,8 +231,8 @@ test.each(["internal", "release"])(
     });
     const plist = f.read("desktop/src-tauri/build-version.plist");
     for (const [key, value] of Object.entries({
-      CFBundleShortVersionString: "0.0.10",
-      CFBundleVersion: "0.0.10",
+      CFBundleShortVersionString: numeric,
+      CFBundleVersion: numeric,
       OpenBotBuildVersion: version,
       OpenBotSourceRevision: sourceSha,
     })) {
@@ -253,8 +255,9 @@ test("a release candidate syncs whole and keeps macOS metadata numeric", () => {
   );
   const sourceSha = firstCommit(f.root);
   expect(f.run("internal").code).toBe(0);
+  const version = `0.3.0-rc.1.internal.1.g${sourceSha.slice(0, 12)}`;
   expect(JSON.parse(f.read("desktop/build-version.json"))).toEqual({
-    version: `0.3.0-rc.1-internal.1.g${sourceSha.slice(0, 12)}`,
+    version,
     releaseVersion: "0.3.0-rc.1",
     sourceSha,
     channel: "internal",
@@ -263,6 +266,63 @@ test("a release candidate syncs whole and keeps macOS metadata numeric", () => {
   for (const key of ["CFBundleShortVersionString", "CFBundleVersion"]) {
     expect(plist).toContain(`<key>${key}</key><string>0.3.0</string>`);
   }
+  // After the candidate it was built from, and before the next candidate and the release.
+  // `0.3.0-rc.1-internal.…` ordered after rc.2 as well, because `1-internal` is text.
+  expect(Bun.semver.order(version, "0.3.0-rc.1")).toBe(1);
+  expect(Bun.semver.order(version, "0.3.0-rc.2")).toBe(-1);
+  expect(Bun.semver.order(version, "0.3.0-rc.10")).toBe(-1);
+  expect(Bun.semver.order(version, "0.3.0")).toBe(-1);
+});
+
+/*
+ * Installed over the released 0.3.3, the internal build 0.3.3-internal.860.g3b400d2c…, made from
+ * main after the release, was a prerelease of 0.3.3 and so ordered before it: the Windows installer
+ * said a newer version was already installed and chose "Uninstall before installing". package.json
+ * names the last release, so an internal build is a prerelease of the next patch instead.
+ */
+test("an internal build made after a release orders after it and before the next release", () => {
+  const f = fixture();
+  f.write("package.json", '{"version":"0.3.3"}');
+  expect(f.run("sync").code).toBe(0);
+  const sourceSha = firstCommit(f.root);
+  expect(f.run("internal").code).toBe(0);
+  const version = JSON.parse(f.read("desktop/build-version.json")).version;
+  expect(version).toBe(`0.3.4-internal.1.g${sourceSha.slice(0, 12)}`);
+  expect(Bun.semver.order(version, "0.3.3")).toBe(1);
+  expect(Bun.semver.order("0.3.3", version)).toBe(-1);
+  // Before whichever release comes next, so that release still installs over it as an upgrade.
+  for (const next of ["0.3.4", "0.4.0", "1.0.0"]) {
+    expect(Bun.semver.order(version, next)).toBe(-1);
+  }
+  // The numeric fields move forward with it on macOS, as Tauri's Windows fields (0.3.4.0) do.
+  const plist = f.read("desktop/src-tauri/build-version.plist");
+  for (const key of ["CFBundleShortVersionString", "CFBundleVersion"]) {
+    expect(plist).toContain(`<key>${key}</key><string>0.3.4</string>`);
+  }
+  // The release build of the same tree is still the plain release version.
+  expect(f.run("release").code).toBe(0);
+  expect(JSON.parse(f.read("desktop/build-version.json")).version).toBe(
+    "0.3.3",
+  );
+});
+
+/*
+ * The orders above use Bun.semver.order. The Windows installer's SemverCompare (nsis_tauri_utils)
+ * and the app's updater compare with the `semver` crate, which follows semver precedence; so does
+ * Bun, shown by the precedence example semver.org gives.
+ */
+test("the comparison these tests use is semver precedence", () => {
+  const precedence = [
+    "1.0.0-alpha",
+    "1.0.0-alpha.1",
+    "1.0.0-alpha.beta",
+    "1.0.0-beta",
+    "1.0.0-beta.2",
+    "1.0.0-beta.11",
+    "1.0.0-rc.1",
+    "1.0.0",
+  ];
+  expect([...precedence].reverse().sort(Bun.semver.order)).toEqual(precedence);
 });
 
 /*
@@ -297,10 +357,13 @@ test("a later internal build orders after an earlier one whatever their hashes",
   const second = JSON.parse(f.read("desktop/build-version.json")).version;
   expect(Bun.semver.order(first, second)).toBe(-1);
   expect(Bun.semver.order(second, first)).toBe(1);
-  expect(first).toBe(`0.0.10-internal.1.g${earlier.slice(0, 12)}`);
-  expect(second).toBe(`0.0.10-internal.2.g${later.slice(0, 12)}`);
-  // The release itself still orders after every internal build of it.
-  expect(Bun.semver.order(second, "0.0.10")).toBe(-1);
+  expect(first).toBe(`0.0.11-internal.1.g${earlier.slice(0, 12)}`);
+  expect(second).toBe(`0.0.11-internal.2.g${later.slice(0, 12)}`);
+  // Both order after the release package.json names, and before the next one.
+  for (const build of [first, second]) {
+    expect(Bun.semver.order(build, "0.0.10")).toBe(1);
+    expect(Bun.semver.order(build, "0.0.11")).toBe(-1);
+  }
 });
 
 test("an internal build refuses a shallow checkout, whose commit count is wrong", () => {
