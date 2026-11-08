@@ -38,8 +38,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   other components for when a chart, table or card makes the answer easier to use. A Bot asked for
   its top emails used to wrap the list in a notice.
 - A component description nobody has edited now follows OpenBot's own when you upgrade, so the new
-  Notice, Checklist, Record, Headline figures and Data table descriptions reach an existing
-  deployment. A description an admin has saved, or a component an admin has published or
+  Notice, Checklist, Record, Headline figures, Data table, Bar chart, Donut chart and Progress
+  against target descriptions reach an existing deployment. The text comes from OpenBot itself,
+  never from a browser. A description an admin has saved, or a component an admin has published or
   unpublished, keeps what they chose. Each update is one row in Admin → Audit, started by OpenBot.
 - A notice card's supporting point that is itself a list is drawn as that list, without a stray dot
   and an extra indent beside it.
