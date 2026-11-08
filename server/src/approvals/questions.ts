@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { questionPartSchema } from "../agents/escalation";
+import { groupSourceForRun, submitGroupTurn } from "../channels/group";
 import type { Database } from "../db/client";
 import { workItems } from "../db/schema/work";
 import { ApprovalNotFoundError, ApprovalRefusedError } from "./types";
@@ -113,6 +114,11 @@ export function createApprovalQuestions(
      * conversation (`inConversation`) and that conversation's next turn is where it belongs
      * (`questionContinuesInConversation`): then the question is closed and the conversation runs
      * the answer as its own turn, which `continueHere` in the result tells it to.
+     *
+     * A question a Bot asked in a group conversation is answered in that group, wherever the answer
+     * was given: the person's words go into the shared transcript, and that Bot answers them in its
+     * next group turn, told what they answer. Resumed here instead, the Bot's reply went to its own
+     * thread and never reached the group the question was asked in.
      */
     async respond(
       owner: string,
@@ -135,6 +141,11 @@ export function createApprovalQuestions(
           "This question has no completed conversation to continue.",
         );
       await authorise(parsed.data);
+      const group = await groupSourceForRun(database, {
+        threadId: parsed.data.threadId,
+        actorId: owner,
+        botId: questionConversationBot(parsed.data),
+      });
       return database.transaction(async (tx) => {
         const [row] = await tx
           .select()
@@ -145,6 +156,21 @@ export function createApprovalQuestions(
         if (!row) throw new ApprovalNotFoundError();
         if (row.finishedAt)
           throw new ApprovalRefusedError("You already answered this question.");
+        if (group) {
+          await tx
+            .update(workItems)
+            .set({ finishedAt: sql`now()`, updatedAt: sql`now()` })
+            .where(owned(owner, id));
+          await submitGroupTurn(tx, {
+            ownerUserId: owner,
+            channelId: group.channelId,
+            messageId: `person-response:${id}`,
+            agentIds: [group.botId],
+            text: answer,
+            inResponseTo: parsed.data.question,
+          });
+          return { id, queued: true as const };
+        }
         if (inConversation && questionContinuesInConversation(parsed.data)) {
           await tx
             .update(workItems)

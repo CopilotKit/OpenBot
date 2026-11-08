@@ -278,6 +278,15 @@ describe("classifyGrantError, one assertion per pass row of the table", () => {
     ).toEqual({ kind: "signed-out", reason: "revoked" });
   });
 
+  test("row 23b: a proxy's 407 is a few quick passes, not the five-minute hold of an unknown answer", () => {
+    // What the computer's egress filter answers a browser that does not hold its credentials yet.
+    expect(classifyGrantError(407, null)).toEqual({
+      kind: "proxy",
+      hint: "Learning capture is paused: this browser's network proxy has not let the capture pass through yet (407).",
+    });
+    expect(classifyGrantError(407, { code: "ANYTHING" }).kind).toBe("proxy");
+  });
+
   test("row 23: the gateway-policy sentence is fixed for the streamer's check", () => {
     expect(PASS_HINTS.GATEWAY_NOT_ALLOWED).toBe(
       "Learning capture is off: the capture pass pointed at a back end address your organization does not allow.",
@@ -395,6 +404,19 @@ describe("fetchGrant", () => {
       kind: "retry",
       retryAfterMs: 2000,
     });
+  });
+
+  test("the egress filter's own 407 is the proxy row (23b)", async () => {
+    // As agent-computer's filter answers it (egress.ts), with no body.
+    respond = () =>
+      new Response(null, {
+        status: 407,
+        headers: {
+          "proxy-authenticate": 'Basic realm="OpenBot"',
+          "content-type": "text/plain",
+        },
+      });
+    expect((await failure()).kind).toBe("proxy");
   });
 
   test("a 200 that is not a grant is held (row 23a)", async () => {

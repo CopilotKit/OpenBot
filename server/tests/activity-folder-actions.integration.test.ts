@@ -104,10 +104,18 @@ async function rows(eventType: string) {
     action: event.payload.action,
     bot: event.payload.bot,
     file: event.payload.file,
+    folder: event.payload.folder,
     command: event.payload.command,
     refusal: event.payload.refusal,
     attempt: typeof event.payload.attempt === "string",
   }));
+}
+
+/** Rows compared as a set. */
+function inAnyOrder<T>(list: T[]): T[] {
+  return [...list].sort((a, b) =>
+    JSON.stringify(a).localeCompare(JSON.stringify(b)),
+  );
 }
 
 describe("a Bot's folder actions", () => {
@@ -139,6 +147,8 @@ describe("a Bot's folder actions", () => {
       action: "host/read_file",
       bot: BOT,
       file: "todo.txt",
+      // The folder by its name, never only the grant's id (seen on the Mac: "host-grant-…").
+      folder: "Notes",
       command: undefined,
       refusal: undefined,
       attempt: true,
@@ -158,12 +168,11 @@ describe("a Bot's folder actions", () => {
       file: undefined,
       command: "dir",
     };
-    expect(await rows(COMPUTER_ACTIONS)).toEqual([
-      read,
-      write,
-      refusedWrite,
-      command,
-    ]);
+    // As a set: rows written in the same millisecond come back in either order (the reader breaks a
+    // tie on a random id), and CI's runner was fast enough to write two of them in one.
+    expect(inAnyOrder(await rows(COMPUTER_ACTIONS))).toEqual(
+      inAnyOrder([read, write, refusedWrite, command]),
+    );
     expect(await rows(BLOCKED)).toEqual([refusedWrite]);
     expect(await rows("configuration.changed")).toEqual([]);
 

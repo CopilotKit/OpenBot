@@ -83,6 +83,7 @@ import { seatIdsIn } from "./profile-listing";
 import { findRecorder, isRecorderPage, type Recorder } from "./recorder";
 import {
   fitWindowsToViewport,
+  holdFilterCredentials,
   keepRecorderCurrent,
   reachRecorder,
 } from "./recorder-in-browser";
@@ -991,6 +992,8 @@ export function createProfiles(
         context.on("page", (opened) => {
           void attachPageNetwork(context, opened, network);
         });
+        // Before the browser is handed back, so before Record can be pressed in it.
+        await holdFilterCredentials(page, botId);
       }
     } catch (error) {
       // Not left running unrecorded: a browser that never made it into the map is closed here.
@@ -1206,6 +1209,8 @@ export function createProfiles(
           await attachBrowserNetwork(context, network);
           await attachPageNetwork(context, page, network);
         }
+        // A Recorder behind the filter asks it nothing before the browser holds its credentials.
+        if (recorder && proxy) await holdFilterCredentials(page, botId);
         /*
          * The tab a person holding the wheel put in front with the bar. It stays the Bot's page until another tab
          * opens (a browser brings a new tab to the front) or it closes, so the Bot carries on in the tab the person
