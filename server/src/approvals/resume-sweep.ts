@@ -1,3 +1,4 @@
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import type { TurnRunner } from "@openbot/toolkit/run-turn";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -145,20 +146,37 @@ export function createApprovalResumeTick(deps: {
                 continuation: { snapshot, result, messageId },
                 ...(signal ? { signal } : {}),
               });
-            // A group turn's approval also writes the resumed reply into the shared transcript.
-            const outcome = await groupConversations.continueWaiting(
-              approvalId,
-              () =>
-                carryOn(stoppedBy).catch((error: unknown) => {
-                  /*
-                   * Stopped by the person: what it said before the Stop stays in the thread, and
-                   * there is no reply to announce. The request is finished, not tried again, which
-                   * would carry the conversation on a second time.
-                   */
-                  if (stoppedBy?.aborted) return { replyText: "" };
-                  throw error;
-                }),
-            );
+            /*
+             * ASKING AGAIN IS WHERE THE TURN STOPS, NOT A FAILURE. A carried-on turn that reaches
+             * another action needing the person opens its own request and stops on it, nothing
+             * done, exactly as a run in the browser does. Thrown on from here, the resume loop
+             * took it for a failure: it released this decision and carried the conversation on
+             * again, from the same place, until its tries ran out, while the new request sat
+             * pending where nobody was shown it. Now this decision is finished, the conversation
+             * says what it waits on, and the new request carries it on when it is answered.
+             */
+            let waitingOn: string | undefined;
+            let outcome: { replyText: string };
+            try {
+              // A group turn's approval also writes the resumed reply into the shared transcript.
+              outcome = await groupConversations.continueWaiting(
+                approvalId,
+                () =>
+                  carryOn(stoppedBy).catch((error: unknown) => {
+                    /*
+                     * Stopped by the person: what it said before the Stop stays in the thread, and
+                     * there is no reply to announce. The request is finished, not tried again,
+                     * which would carry the conversation on a second time.
+                     */
+                    if (stoppedBy?.aborted) return { replyText: "" };
+                    throw error;
+                  }),
+              );
+            } catch (error) {
+              if (!(error instanceof HeadlessToolSuspension)) throw error;
+              waitingOn = error.message;
+              outcome = { replyText: "" };
+            }
             if (outcome.replyText)
               await deps.transcriptHolds?.({
                 ownerUserId: input.ownerUserId,
@@ -185,6 +203,18 @@ export function createApprovalResumeTick(deps: {
                   at: new Date(),
                 },
                 { id: messageId },
+              );
+            // The conversation's last line says what it waits on, and its card is read with it.
+            if (source && waitingOn)
+              await channelStore.recordActivity(
+                await actorFor(input.ownerUserId),
+                source.channelId,
+                {
+                  text: waitingOn,
+                  agentId: request.action.botId,
+                  at: new Date(),
+                },
+                { id: `${messageId}:waiting` },
               );
             // A decision made in Slack, SMS or the phone gets its result back there too.
             if (source && outcome.replyText)

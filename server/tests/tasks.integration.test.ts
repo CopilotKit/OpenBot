@@ -1245,6 +1245,75 @@ describe("carried on after the person decides", () => {
   });
 
   /*
+   * Found on the Mac: after Allow once, the turn that carried the conversation on reached a second
+   * action that needed the person. Its request was opened and left pending, the conversation never
+   * showed it, and the Bot answered anyway. The suspension was thrown out of the resume loop as a
+   * failure, so the first decision was released and carried on again from the same place.
+   */
+  test("a carried-on turn that reaches another action needing the person stops there and asks, and the first decision is finished, not tried again", async () => {
+    const { owner, task, request, threadId } = await waitingOnApproval(
+      "I sent your reply to Sam.",
+    );
+    // Once the first send is answered, the Bot goes on to a second, which needs its own approval.
+    script = (input) =>
+      input.messages.filter((message) => message.role === "tool").length === 1
+        ? callTool(
+            input,
+            "send_message",
+            { to: "ana@example.test", body: "The spec is attached." },
+            "call-second",
+          )
+        : reply(input, "I sent both replies.");
+    const before = sent.length;
+
+    await approvalService.decide(owner.id, request.id, "allow_once");
+    await resumeApproval();
+
+    // The first send happened; the second did not, and the Bot did not go on past it.
+    expect(sent.length).toBe(before + 1);
+    expect((await approvalStore.get(owner.id, request.id)).status).toBe(
+      "completed",
+    );
+    const [resume] = await database
+      .select()
+      .from(workItems)
+      .where(
+        and(
+          eq(workItems.kind, "approval.resume"),
+          eq(workItems.key, request.id),
+        ),
+      );
+    expect(resume?.finishedAt).not.toBeNull();
+    // The second action waits on the person, in this conversation, where its card is drawn.
+    const waiting = await database
+      .select()
+      .from(approvalRequests)
+      .where(
+        and(
+          eq(approvalRequests.ownerUserId, owner.id),
+          eq(approvalRequests.status, "pending"),
+        ),
+      );
+    expect(waiting).toHaveLength(1);
+    expect(waiting[0]?.action.threadId).toBe(threadId);
+    expect(waiting[0]?.action.toolCallId).toBe("call-second");
+    expect(await conversation(task.channelId)).toMatchObject({
+      lastMessage: "This action is waiting for your approval.",
+    });
+    // The Bot was never run past the second send: no run of it was handed an answer to it.
+    expect(
+      asked.some(
+        (input) =>
+          input.threadId === threadId &&
+          input.messages.some(
+            (message) =>
+              message.role === "tool" && message.toolCallId === "call-second",
+          ),
+      ),
+    ).toBe(false);
+  });
+
+  /*
    * Found on the Mac: in a folder conversation the reply after Allow once read "...shared with" until
    * the conversation was opened again. The conversation reads its history when the channel says the
    * Bot replied, the platform's read of a thread can trail the run that wrote it, and a message the
