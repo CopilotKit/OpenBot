@@ -54,9 +54,6 @@ export const Route = createFileRoute("/_authed/_app/")({
 });
 
 function RouteComponent() {
-  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
-  // One person on their own computer: nobody else can share a Bot with them, so there is nothing to explore.
-  const personal = capabilities?.edition === "personal";
   const { data: user } = useQuery(currentUserQueryOptions());
   const channels = useInfiniteQuery(channelListQueryOptions());
   const {
@@ -65,6 +62,13 @@ function RouteComponent() {
     isError: failed,
   } = useQuery(agentListQueryOptions());
   const explore = agents?.filter(isSharedWithYou);
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
+  /*
+   * The personal edition has nobody to share a Bot with. Its Explore lists the Bots included with
+   * OpenBot, and when there are none it shows nothing: "Nobody has shared a Bot with you yet" was
+   * not true of it. A Bots list that fails to load is said under the composer already.
+   */
+  const personal = capabilities.data?.edition === "personal";
   const { start, startChosen, pending } = useStartChannel();
   const router = useRouter();
   const navigate = useNavigate();
@@ -254,8 +258,8 @@ function RouteComponent() {
          * somebody shared another Bot, so the rest are one "All Bots" away. Every state below
          * reserves the same two rows, so the composer above it does not move when the list settles.
          */}
-        <div className={personal ? "hidden" : "mt-10 w-full max-w-2xl"}>
-          {personal ? null : loading ? (
+        <div className="mt-10 w-full max-w-2xl">
+          {loading || capabilities.isPending ? (
             <>
               <h2 className="font-semibold text-base">Explore Bots</h2>
               <Skeleton className="mt-4 h-[140px]" />
@@ -291,7 +295,7 @@ function RouteComponent() {
                 ))}
               </ul>
             </section>
-          ) : failed && agents === undefined ? (
+          ) : personal ? null : failed && agents === undefined ? (
             // `agents === undefined` narrows this to "the query has never once returned
             // successfully" — not merely "the last request errored". `?.length` alone can't
             // tell that apart from a slice that loaded and is genuinely empty: TanStack Query

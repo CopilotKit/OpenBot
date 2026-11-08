@@ -15,6 +15,21 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   and the end of its error output. A setup that stopped used to leave nothing in the log. The card
   says whether the back end stopped with an error partway, quit without saying why, or could not
   be run, where all three said "The back end could not start."
+- The first Bot to need you after OpenBot Desktop starts raises its notification. It used to raise
+  nothing while the app was still checking that notifications were on, so the first question after
+  each launch, asked while OpenBot was minimised or behind another window, went unannounced.
+
+- **CopilotKit Intelligence 0.16.0-rc.10.** OpenBot Desktop's back end and the Helm chart move to
+  Intelligence 0.16.0-rc.10 (CLI `copilotkit@647a03b`). A first back end setup now downloads its
+  images through downloads.copilotkit.ai too, because the CLI's own pulls read the cluster's
+  mirrors, and a setup step that fails now reports its own error instead of only that the command
+  did not finish.
+- **Setup and Home say what is true.** "OpenBot is running" no longer flashes Start's own steps, and
+  points to the system tray on Windows instead of the menu bar; after Accept the account step says
+  it is setting up your apps; a relaunch says "Starting the engine machine." while it does; the
+  personal edition's Home no longer says nobody has shared a Bot; and Teach a Bot says "No
+  microphone found. Narration is off." on a computer with none, keeping your choice for when there
+  is one.
 
 ### Automatic Learning and Teach a Bot
 
@@ -23,11 +38,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   frame, a pill address bar with a lock, a start page for an empty tab), sized to its page so no
   blank band sits under it, and the page is laid out while the browser opens. **Record** is one
   button at the toolbar's end that asks for the task's name and narration in a popover, with an
-  (i) saying what narration is for; the narration bar shows only while recording. Your recordings
-  links to Settings → Learning, where what a recording teaches shows up.
+  (i) saying what narration is for; the narration bar shows only while recording, or to say there
+  is no microphone. Your recordings links to Settings → Learning, where what a recording teaches
+  shows up.
 
 ### Conversations
 
+- **The sidebar's + opens a new conversation with To: empty** and the Bot menu open, where it
+  picked a Bot for you, as do Shift+N and a skin's new conversation link. A Bot's own Message link
+  still starts with that Bot, and a message sent before a Bot is picked stays in the box with
+  "Choose a Bot first."
 - The Bot's browser beside a conversation is a 360px glimpse with the address it is on and Take
   control on the picture, and its full-size view fits its window to the page.
 - Home says which Bot is working, with a way to it, and a conversation says "Working" in the
@@ -55,6 +75,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Personal edition
 
+- In Activity, a Bot's call to an app you haven't connected reads "Not connected" and "Gmail isn't
+  connected. Connect it in Connections.", rows already recorded included. It read "The server
+  didn't answer" and printed raw `[connect-app]` text, which Admin → Audit no longer shows either.
 - Home no longer shows an empty Explore Bots box.
 
 ### Smaller changes
