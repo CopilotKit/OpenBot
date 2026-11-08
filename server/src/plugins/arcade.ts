@@ -1,3 +1,4 @@
+import { appsPage } from "../edition";
 /**
  * The Arcade transport's vendor-free half. Imports no vendor package and nothing from
  * `arcade-adapter.ts`: the adapter imports this module, never the reverse (see `./broker`, which
@@ -392,7 +393,7 @@ export async function listTools(connection: {
   const toolkit = toolkitOf(connection.url);
   if (!toolkit) {
     throw new Error(
-      `${connection.url} does not name an Arcade toolkit, so nothing was asked what it offers. The url has to be arcade:// followed by a toolkit name; correct it on the Plugins page.`,
+      `${connection.url} does not name an Arcade toolkit, so nothing was asked what it offers. The url has to be arcade:// followed by a toolkit name; correct it on the ${appsPage()} page.`,
     );
   }
   if (!installed) {

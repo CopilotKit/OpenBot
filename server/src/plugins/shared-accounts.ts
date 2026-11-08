@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { currentEdition, itsAppPage } from "../edition";
 import { brokeredProvenance } from "./access";
 import { type Decides, type SchemeKind, schemeKind } from "./broker";
 
@@ -152,7 +153,7 @@ export function accountFor(
   if (mode === "shared") return { kind: "deployment" };
   return {
     kind: "ambiguous",
-    message: `${row.title} wasn't called because nobody has chosen whether it uses each person's account or a shared one. An admin can choose on its Plugins page.`,
+    message: `${row.title} wasn't called because nobody has chosen whether it uses each person's account or a shared one. ${currentEdition() === "personal" ? "You" : "An admin"} can choose on ${itsAppPage()}.`,
   };
 }
 
