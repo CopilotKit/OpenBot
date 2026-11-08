@@ -339,7 +339,8 @@ test("Desktop macOS signing builds through signed-build.ts", () => {
   const build = workflow.jobs.sign.steps.find(
     (step) => step.name === "Build, sign and notarize",
   );
-  expect(build?.run?.trim()).toBe(
+  // Beside the xcrun that staples Tauri's .app through the retry (staple-with-retry.test.ts).
+  expect(build?.run?.split("\n").map((line) => line.trim())).toContain(
     'bun desktop/scripts/signed-build.ts darwin "$ARCH" src-tauri/tauri.macos-signing.conf.json',
   );
   const others = workflow.jobs.sign.steps.filter((step) => step !== build);

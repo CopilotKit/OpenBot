@@ -111,8 +111,9 @@ jobs:
       # the Intelligence CLI, its Mac binaries signed for notarization: an app without it cannot set
       # up Intelligence, and the updater would put it on every Mac. And each Mac app, the Intel one
       # built on this Apple silicon runner included, is its own architecture all the way down. And
-      # stapling and validating the ticket try a dropped connection to Apple again, which failed
-      # v0.3.3's signing run three times, and fail at once on a file with no ticket.
+      # stapling and validating the ticket, Tauri's own staple of the .app included, try a dropped
+      # connection to Apple again, which failed v0.3.3's signing run three times, and fail at once
+      # on a file with no ticket.
       - name: Signed release regressions
         env:
           OPENBOT_REQUIRE_MINISIGN: "1"
@@ -340,10 +341,26 @@ jobs:
           OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID }}
           OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
           OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT }}
-        run: bun desktop/scripts/signed-build.ts darwin "$ARCH" src-tauri/tauri.macos-signing.conf.json
-      # Tauri notarizes and staples the .app. The disk image is assembled afterwards, so it is
-      # submitted here rather than assumed: a stapled image is the one that installs on a machine
-      # that is offline or behind a proxy Apple's notary service cannot be reached through.
+        # Tauri staples the .app with xcrun, ignores a failure, and builds the disk image and the
+        # updater archive from it straight after. The xcrun first on PATH here staples through
+        # staple-with-retry.sh, so a dropped connection is tried again before either is built, and
+        # passes every other call to the real xcrun (desktop/scripts/xcrun-staple-retry/xcrun).
+        run: |
+          set -euo pipefail
+          export PATH="$PWD/desktop/scripts/xcrun-staple-retry:$PATH"
+          export STAPLE_LOG="$RUNNER_TEMP/tauri-staple.log"
+          : > "$STAPLE_LOG"
+          bun desktop/scripts/signed-build.ts darwin "$ARCH" src-tauri/tauri.macos-signing.conf.json
+          if [ -s "$STAPLE_LOG" ]; then
+            echo "Tauri's staple of the .app, which it does not print:"
+            cat "$STAPLE_LOG"
+          else
+            echo "::warning::Tauri did not staple the .app through xcrun-staple-retry, so a dropped connection there is not tried again."
+          fi
+      # Tauri notarizes and staples the .app (through the retry above). The disk image is assembled
+      # afterwards, so it is submitted here rather than assumed: a stapled image is the one that
+      # installs on a machine that is offline or behind a proxy Apple's notary service cannot be
+      # reached through.
       - name: Notarize and staple the disk image
         env:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
