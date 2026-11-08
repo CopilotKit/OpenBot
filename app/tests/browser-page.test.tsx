@@ -29,6 +29,7 @@ import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type ReactNode, StrictMode } from "react";
 import { BrowserPage } from "@/components/browser/browser-page";
+import { NARRATION_EXPLAINED } from "@/components/browser/narration";
 import {
   INTRODUCED_KEY,
   OPEN_AND_RECORD,
@@ -1030,6 +1031,28 @@ test("while the browser opens, the page's description names the button the page 
   expect(view.queryByText(/Start recording/)).toBeNull();
   opened();
   expect(await view.findByRole("button", { name: "Record" })).toBeTruthy();
+});
+
+test("on hosted OpenBot Record's (i) beside Narration says what narration is for, and pressing it records nothing", async () => {
+  state = screenState();
+  openAnswer = answerFor("screen");
+  installChrome();
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  await user.type(await taskField(view, user), "Refund an order");
+  const about = view.getByRole("button", { name: "About narration" });
+  await user.hover(about);
+  expect(
+    await view.findByText(NARRATION_EXPLAINED, {}, { timeout: 3_000 }),
+  ).toBeTruthy();
+  // In Record's form, so it must not submit it: pressing it starts no recording.
+  expect(about.getAttribute("type")).toBe("button");
+  await user.click(about);
+  await settleReactWork();
+  expect(writes.some((write) => write.path === browserApiPaths.recording)).toBe(
+    false,
+  );
+  expect(view.getByRole("textbox", { name: "Task name" })).toBeTruthy();
 });
 
 test("on hosted OpenBot the toolbar holds one Record button, which asks for the task's name in a popover", async () => {

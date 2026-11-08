@@ -1,5 +1,9 @@
 import type { LauncherState } from "@openbot/shared/openbot-browser";
-import { IconMicrophone, IconMicrophoneOff } from "@tabler/icons-react";
+import {
+  IconInfoCircle,
+  IconMicrophone,
+  IconMicrophoneOff,
+} from "@tabler/icons-react";
 import { useId } from "react";
 import {
   Item,
@@ -10,6 +14,11 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { NarrationProblem } from "@/lib/browser/narration";
 import { cn } from "@/lib/utils";
 import type { NarrationChoice } from "./narration-choice";
@@ -24,6 +33,9 @@ export const NARRATION_CAPTURING =
   "Narration is on. We're capturing your voice.";
 export const NARRATION_ON = "Narration is on.";
 export const NARRATION_OFF = "Narration is off.";
+/** What narration is for, beside its switch in Record's popover. */
+export const NARRATION_EXPLAINED =
+  "Talk out loud while you do the task to explain your thinking. What you say becomes part of what your Bots learn.";
 
 /** Narration that cannot hear the person is simply off. */
 export function narrationProblemSentence(
@@ -162,6 +174,29 @@ export function NarrationSwitch({
       <label htmlFor={id} id={labelId} className="text-muted-foreground">
         Narration
       </label>
+      {/*
+        What narration is for, on hover or focus, where the choice is made (Record's popover). Not while recording:
+        the choice is made by then, and the bar has no room. A button of type "button": in Record's form any other
+        would submit it and start the recording.
+      */}
+      {recording ? null : (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                aria-label="About narration"
+                className="-ml-1 flex size-5 items-center justify-center rounded-full text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                type="button"
+              />
+            }
+          >
+            <IconInfoCircle aria-hidden="true" className="size-4" />
+          </TooltipTrigger>
+          <TooltipContent className="max-w-60" side="top">
+            {NARRATION_EXPLAINED}
+          </TooltipContent>
+        </Tooltip>
+      )}
       {/* Named by the label's id as well: the switch is a span with role="switch", which `htmlFor` cannot name. */}
       <Switch
         aria-labelledby={labelId}
