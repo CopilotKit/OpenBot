@@ -6,6 +6,7 @@ import {
   PageRows,
   PageSection,
 } from "@/components/layout/page-shell";
+import { buttonVariants } from "@/components/ui/button";
 import {
   Item,
   ItemContent,
@@ -16,6 +17,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { setUpdateRoutingMutationOptions } from "@/lib/bot-lifecycle/mutations";
 import {
   type UpdateKind,
@@ -23,7 +25,18 @@ import {
   updateRoutingQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
 import { deliveryQueryOptions } from "@/lib/delivery";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { mayOpenSetup } from "@/lib/setup/queries";
+import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
+
+/**
+ * How each channel is turned on: Slack and Teams through an OpenTag pairing, text messages through Twilio, push through
+ * the OpenBot phone app. Each is a setting where OpenBot runs, read at start-up, so the docs say what to set; the two
+ * sections sit together there. The setup checklist links the same page for Slack and Teams.
+ */
+export const CHANNEL_SETUP_DOCS =
+  "https://github.com/CopilotKit/openbot/blob/main/docs/configuration.md#slack-and-microsoft-teams-opentag-pairing";
 
 const KIND_LABEL: Record<UpdateKind, { title: string; description: string }> = {
   progress: {
@@ -61,6 +74,13 @@ export function UpdateRoutingSection() {
   const reach = useQuery(deliveryQueryOptions());
   const save = useMutation(setUpdateRoutingMutationOptions(queryClient));
   /*
+   * Who can turn a channel on: an admin, or the one person running OpenBot themselves (the same rule as Settings,
+   * Setup). They get the way to; anyone else is told it's their admin's to do.
+   */
+  const user = useQuery(currentUserQueryOptions());
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
+  const setsUp = mayOpenSetup(user.data, capabilities.data);
+  /*
    * A channel this deployment has not set up can carry nothing, so its switch is off and disabled
    * whatever the stored preference says, rather than on beside a channel that delivers nothing. The
    * preference itself is left alone: an administrator who configures Slack later finds it as the
@@ -85,8 +105,28 @@ export function UpdateRoutingSection() {
           Couldn't load where your updates go. Reload the page.
         </p>
       ) : shown.length === 0 ? (
-        <PageEmpty icon={IconRoute} title="Updates stay in OpenBot">
-          Push, Slack, Microsoft Teams and SMS show up here once they're set up.
+        <PageEmpty
+          action={
+            setsUp ? (
+              // An anchor rather than Button: Base UI gives a rendered anchor role="button", and this is a link.
+              <a
+                className={cn(
+                  buttonVariants({ size: "sm", variant: "outline" }),
+                )}
+                href={CHANNEL_SETUP_DOCS}
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                How to set them up
+              </a>
+            ) : undefined
+          }
+          icon={IconRoute}
+          title="Updates stay in OpenBot"
+        >
+          {setsUp
+            ? "Push, Slack, Microsoft Teams and SMS show up here once they're set up where OpenBot runs."
+            : "Push, Slack, Microsoft Teams and SMS show up here once your admin sets them up."}
         </PageEmpty>
       ) : (
         <PageRows>

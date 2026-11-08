@@ -2,7 +2,12 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { UpdateRoutingSection } from "@/components/settings/update-routing";
+import {
+  CHANNEL_SETUP_DOCS,
+  UpdateRoutingSection,
+} from "@/components/settings/update-routing";
+import { authKeys } from "@/lib/auth/queries";
+import { deploymentKeys } from "@/lib/deployment/queries";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -22,6 +27,7 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
+const ADMIN = { role: "admin", localEvaluation: false };
 const writes: { request: string; body: unknown }[] = [];
 const everyKind = {
   progress: ["push"],
@@ -105,9 +111,17 @@ test("pings get their own row, Something needs you", async () => {
   });
 });
 
-function draw() {
+/** Who is looking: an admin, or someone running OpenBot themselves, can set channels up; anyone else can't. */
+function draw(who: { role: string; localEvaluation: boolean } = ADMIN) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
+  });
+  client.setQueryData(authKeys.currentUser(), { role: who.role });
+  client.setQueryData(deploymentKeys.capabilities(), {
+    generativeUi: true,
+    selfHostBanner: false,
+    localEvaluation: who.localEvaluation,
+    edition: "team",
   });
   return render(
     <QueryClientProvider client={client}>
@@ -134,10 +148,39 @@ test("only channels that are set up get a switch, and a save keeps the others as
   });
 });
 
-test("with no channel set up, one sentence says updates stay in OpenBot", async () => {
+test("with no channel set up, it says updates stay in OpenBot, and whoever can set them up gets the way to", async () => {
   available = { slack: false, teams: false, sms: false, push: false };
   serving();
-  const view = draw();
+  const view = draw(ADMIN);
   expect(await view.findByText("Updates stay in OpenBot")).toBeTruthy();
   expect(view.queryAllByRole("switch")).toHaveLength(0);
+  expect(
+    view.getByText(
+      "Push, Slack, Microsoft Teams and SMS show up here once they're set up where OpenBot runs.",
+    ),
+  ).toBeTruthy();
+  const how = view.getByRole("link", { name: "How to set them up" });
+  expect(how.getAttribute("href")).toBe(CHANNEL_SETUP_DOCS);
+  expect(how.getAttribute("target")).toBe("_blank");
+});
+
+test("someone running OpenBot on their own computer gets the way to set channels up too", async () => {
+  available = { slack: false, teams: false, sms: false, push: false };
+  serving();
+  const view = draw({ role: "member", localEvaluation: true });
+  expect(
+    await view.findByRole("link", { name: "How to set them up" }),
+  ).toBeTruthy();
+});
+
+test("a member who can't set channels up is told their admin does, with no link", async () => {
+  available = { slack: false, teams: false, sms: false, push: false };
+  serving();
+  const view = draw({ role: "member", localEvaluation: false });
+  expect(
+    await view.findByText(
+      "Push, Slack, Microsoft Teams and SMS show up here once your admin sets them up.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByRole("link", { name: "How to set them up" })).toBeNull();
 });
