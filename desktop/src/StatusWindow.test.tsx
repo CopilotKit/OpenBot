@@ -57,6 +57,7 @@ function answers(overrides: Partial<Record<string, unknown>> = {}): Invoke {
         readiness: "ready",
         licence: "valid",
         licenceExpiresAt: null,
+        checksPassed: false,
       };
     return null;
   };

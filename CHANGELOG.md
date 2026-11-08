@@ -8,6 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Desktop opens OpenBot when an update to its local back end does not finish. A back end
+  whose update stopped (on a slow connection, at the image download) still runs the release it had,
+  with every check passing; the window said it was not healthy and stopped OpenBot. It now says
+  which release the back end runs and that the update did not finish, and the person opens OpenBot
+  from there. The next Start tries the update again, including after Quit, where the back end used
+  to refuse to start until the update was resumed by hand. A back end whose checks fail is still
+  not healthy.
 - Windows lists OpenBot Desktop's publisher as CopilotKit in Settings > Apps and in Programs and
   Features, where it said "copilotkit".
 - OpenBot Personal's Settings, Browsers says recordings go to your own Learning space, with no organization.

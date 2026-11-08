@@ -123,6 +123,8 @@ function Setup() {
   const [showing, setShowing] = useState(false);
   // Start could not move the deployment to this app's release, and started the one it had.
   const [releaseNotice, setReleaseNotice] = useState<Problem | null>(null);
+  // The back end is ready on the release it had, and its update did not finish.
+  const [backEndNotice, setBackEndNotice] = useState<string | null>(null);
   const [step, setStep] = useState<SetupStep>("welcome");
   const [steps, setSteps] = useState<Progress[]>([]);
   const [busy, setBusy] = useState(false);
@@ -516,6 +518,7 @@ function Setup() {
     setBusy(true);
     setFailure(null);
     setReleaseNotice(null);
+    setBackEndNotice(null);
     setSteps([]);
     try {
       const startWith = {
@@ -552,10 +555,12 @@ function Setup() {
       setStep("connect");
       setRefreshIntelligence(false);
       // An upgrade that did not happen is said on the running screen first; Show OpenBot hands over.
-      if (outcome?.notice) {
+      // So is a back end that runs the release it had because its own update did not finish.
+      if (outcome?.notice || intelligence.notice) {
         // The notice says what the rows would: it is the one thing on the screen.
         setSteps([]);
-        setReleaseNotice(outcome.notice);
+        setReleaseNotice(outcome?.notice ?? null);
+        setBackEndNotice(intelligence.notice ?? null);
         return "started";
       }
       await invoke("show_openbot");
@@ -1018,7 +1023,7 @@ function Setup() {
           back here, and a heading that still says everything is running while the box underneath
           names the process that stopped is a screen arguing with itself. */}
         <h1>{displayedFailure ? "OpenBot stopped" : "OpenBot is running"}</h1>
-        {!displayedFailure && !releaseNotice && (
+        {!displayedFailure && !releaseNotice && !backEndNotice && (
           <p className="lede">
             OpenBot is open in this window. You can also show it or stop it from
             the menu bar.
@@ -1027,6 +1032,9 @@ function Setup() {
         {/* Start went back to the version this installation had. Said before handing over. */}
         {!displayedFailure && releaseNotice && (
           <InlineFailure problem={releaseNotice} />
+        )}
+        {!displayedFailure && backEndNotice && (
+          <InlineFailure problem={{ said: backEndNotice }} />
         )}
         <SetupProgress steps={steps} />
         {displayedFailure && <Failure problem={displayedFailure} />}
