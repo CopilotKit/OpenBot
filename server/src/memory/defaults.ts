@@ -27,10 +27,13 @@
  *
  * Off for the whole deployment with OPENBOT_MEMORY_SOURCE_DEFAULTS=false and
  * OPENBOT_PROACTIVE_DEFAULTS=false. Either switch stops new defaults; neither touches existing rows.
+ * Memory sources are never adopted in an edition without memory (`editionHasMemory`), whatever the
+ * switch says; background research still is.
  */
 import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
+import { type Edition, editionHasMemory } from "../edition";
 import { type DefaultFeature, defaultOptOuts } from "../db/schema/defaults";
 import { memorySources } from "../db/schema/memory";
 import { proactiveSettings } from "../db/schema/proactive";
@@ -127,6 +130,8 @@ export function createMemoryDefaults(options: {
   ingestion: Pick<MemoryIngestion, "defaultSourceCandidates" | "sync">;
   /** OPENBOT_MEMORY_SOURCE_DEFAULTS, on unless switched off. */
   sources: boolean;
+  /** Without memory (`editionHasMemory`), no source is adopted whatever `sources` says. */
+  edition: Edition;
   /** OPENBOT_PROACTIVE_DEFAULTS, on unless switched off. */
   research: boolean;
   /** The Bots in this person's conversation, or null when it is not theirs. */
@@ -149,6 +154,7 @@ export function createMemoryDefaults(options: {
 }) {
   const now = options.now ?? Date.now;
   const minIntervalMs = options.minIntervalMs ?? MIN_INTERVAL_MS;
+  const sources = options.sources && editionHasMemory(options.edition);
   const log = options.log ?? ((entry) => console.warn(JSON.stringify(entry)));
   const lastRun = new Map<string, number>();
 
@@ -178,7 +184,7 @@ export function createMemoryDefaults(options: {
     ownerUserId: string,
     agentId: string,
   ): Promise<string[]> {
-    if (!options.sources) return [];
+    if (!sources) return [];
     if (await options.publishedByAnother?.(ownerUserId, agentId)) return [];
     const candidates = await options.ingestion.defaultSourceCandidates(
       ownerUserId,
@@ -310,7 +316,7 @@ export function createMemoryDefaults(options: {
      * Bot, switch on that Bot's defaults. Never waits and never throws.
      */
     personSpoke(ownerUserId: string, channelId: string) {
-      if (!options.sources && !options.research) return;
+      if (!sources && !options.research) return;
       if (!due(`channel:${ownerUserId}:${channelId}`)) return;
       void (async () => {
         const bots = await options.channelBots(ownerUserId, channelId);
@@ -326,7 +332,7 @@ export function createMemoryDefaults(options: {
     },
     /** A turn by this Bot for this person is starting: pick up apps connected since. Never waits. */
     botTurn(ownerUserId: string, agentId: string) {
-      if (!options.sources) return;
+      if (!sources) return;
       if (!due(`bot:${ownerUserId}:${agentId}`)) return;
       void adoptSources(ownerUserId, agentId).catch(failed("sources"));
     },

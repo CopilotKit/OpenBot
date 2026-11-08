@@ -26,7 +26,7 @@ const BOTS: [RegExp, string][] = [
 
 /** The back end runs as one k3d node, which holds all of its services. */
 const BACK_END: [RegExp, string][] = [
-  [/^k3d-.+-server-\d+$/, "Conversations, memory and learning"],
+  [/^k3d-.+-server-\d+$/, "Conversations and learning"],
 ];
 
 export function partLabel(name: string, group: PartGroup): string {

@@ -1,9 +1,4 @@
-import {
-  IconBook,
-  IconBrain,
-  IconChevronRight,
-  IconPlus,
-} from "@tabler/icons-react";
+import { IconBook, IconChevronRight, IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
@@ -23,7 +18,6 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import { Separator } from "@/components/ui/separator";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 /** Just longer than the sheet's 200ms exit, so it has finished sliding away before the page changes. */
@@ -90,7 +84,8 @@ function BotsPage() {
 
 /**
  * Capabilities, in the personal edition, where it is not a page of its own: what a person's Bots
- * know how to do and what they know about them, beneath the Bots themselves.
+ * know how to do, beneath the Bots themselves. No Memory row: the personal edition has no memory
+ * (see `offersMemory`).
  */
 function WhatYourBotsKnow() {
   return (
@@ -104,21 +99,6 @@ function WhatYourBotsKnow() {
             <ItemTitle>Skills</ItemTitle>
             <ItemDescription>
               Step-by-step instructions you wrote or your Bots learned.
-            </ItemDescription>
-          </ItemContent>
-          <ItemActions>
-            <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
-          </ItemActions>
-        </Item>
-        <Separator />
-        <Item render={<Link to="/capabilities/memory" />} size="sm">
-          <ItemMedia variant="icon">
-            <IconBrain />
-          </ItemMedia>
-          <ItemContent>
-            <ItemTitle>Memory</ItemTitle>
-            <ItemDescription>
-              What your Bots remember about you.
             </ItemDescription>
           </ItemContent>
           <ItemActions>

@@ -8,7 +8,8 @@ import {
 } from "../src/memory/ingestion";
 import { createMemoryRoutes } from "../src/memory/routes";
 import type { MemoryStore } from "../src/memory/store";
-import { memoryTools } from "../src/memory/tools";
+import { createMemoryRuntime } from "../src/memory/runtime";
+import { memoryTools, offeredMemoryTools } from "../src/memory/tools";
 import {
   parseMemoryInput,
   parseMemoryPatch,
@@ -141,6 +142,58 @@ test("every memory tool can be offered to a remote Bot as JSON Schema", async ()
       sourceRef: null,
     },
   ]);
+});
+
+test("a Bot in the personal edition is offered no memory tools, and in the team edition all four", () => {
+  // OpenBot Desktop's local Intelligence isn't licensed for memory, and its screens show none.
+  const options = {
+    store: {} as MemoryStore,
+    ingestion: {} as MemoryIngestion,
+    ownerUserId: "u1",
+    agentId: "bot",
+  };
+  expect(offeredMemoryTools("personal", options)).toEqual([]);
+  expect(offeredMemoryTools("team", options).map((tool) => tool.name)).toEqual([
+    "recall_personal_memory",
+    "remember_personal_fact",
+    "save_observed_memory",
+    "forget_personal_memory",
+  ]);
+});
+
+test("the personal edition puts no memory in a Bot's turn and its sweep reads no source", async () => {
+  const calls: string[] = [];
+  const parts = {
+    defaults: {
+      botTurn: (owner: string, bot: string) => {
+        calls.push(`adopt ${owner} ${bot}`);
+      },
+    },
+    ingestion: {
+      contextFor: async () => {
+        calls.push("context");
+        return "Prefers mornings";
+      },
+      syncDue: async () => {
+        calls.push("sync");
+      },
+    },
+    store: {
+      mirrorPending: async () => {
+        calls.push("mirror");
+      },
+    },
+  } as unknown as Omit<Parameters<typeof createMemoryRuntime>[0], "edition">;
+
+  const personal = createMemoryRuntime({ edition: "personal", ...parts });
+  expect(personal.loadForActor).toBeUndefined();
+  await personal.sweep();
+  expect(calls).toEqual([]);
+
+  const team = createMemoryRuntime({ edition: "team", ...parts });
+  expect(await team.loadForActor?.("u1")("bot")).toBe("Prefers mornings");
+  await team.sweep();
+  expect(calls).toEqual(["adopt u1 bot", "context", "sync", "mirror"]);
 });
 
 test("a source sync a connector's policy refuses answers 400 with the reason, not 503", async () => {
