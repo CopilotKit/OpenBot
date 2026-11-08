@@ -195,6 +195,8 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "learning.sharing_changed": "Change what is shared for learning",
   "learning.skill_opened": "Open a skill for review",
   "learning.skill_closed": "Close a skill review",
+  "learning.sharing_requested": "Ask to share a learned skill",
+  "learning.sharing_decided": "Answer a request to share a learned skill",
 };
 
 /**
