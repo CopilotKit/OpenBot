@@ -43,9 +43,10 @@ pub const DISMISSED_FILE: &str = "app-update.json";
 
 /// The version this build is offered newer ones against, or `None` when it is offered none.
 ///
-/// The builds the updater serves: a stable release that is not pinned. Internal builds
-/// (`0.3.1-internal.<commits>.g…`) and candidates (`-rc.N`, `-beta.N`) are pinned to the release they were
-/// made from and carry no updater, so an offer there could never be installed.
+/// The builds the updater serves: a stable release that is not pinned. Candidates (`-rc.N`,
+/// `-beta.N`) are pinned to the release they were made from and carry no updater, so an offer there
+/// could never be installed. Internal builds (`0.3.4-internal.<commits>.g…` after 0.3.3) are made from
+/// any branch, so no release is sure to contain what one runs; the next internal build replaces it.
 pub fn offered_against(version: &Version, pinned: bool) -> Option<Version> {
     (!pinned && version.pre.is_empty()).then(|| version.clone())
 }
@@ -673,7 +674,12 @@ mod tests {
     fn internal_candidate_and_pinned_builds_are_never_offered_anything() {
         assert_eq!(offered_against(&v("0.3.1"), false), Some(v("0.3.1")));
         assert_eq!(offered_against(&v("0.3.1"), true), None);
-        for build in ["0.3.1-internal.729.g14212047", "0.3.2-rc.1", "0.3.2-beta.1"] {
+        for build in [
+            "0.3.1-internal.729.g14212047",
+            "0.3.4-internal.860.g3b400d2c1abc",
+            "0.3.2-rc.1",
+            "0.3.2-beta.1",
+        ] {
             assert_eq!(offered_against(&v(build), false), None, "{build}");
         }
     }
@@ -681,18 +687,37 @@ mod tests {
     /// The Windows installer's SemverCompare and this app order versions with this same `semver`
     /// crate. Two internal builds named only after their commits ordered by hash, so the later
     /// 4400ba02 read as older than d298debe and the installer warned against installing it. With
-    /// the commit count `desktop-version.ts` puts first, the later commit is the newer build, and
-    /// the release still orders after every internal build of it.
+    /// the commit count `desktop-version.ts` puts first, the later commit is the newer build.
     #[test]
     fn internal_builds_order_by_their_commit_count_not_their_hash() {
-        let earlier = v("0.3.1-internal.729.gd298debe26f2");
-        let later = v("0.3.1-internal.730.g4400ba023e0c");
+        let earlier = v("0.3.2-internal.729.gd298debe26f2");
+        let later = v("0.3.2-internal.730.g4400ba023e0c");
         assert!(later > earlier);
-        assert!(v("0.3.1-internal.1000.g0123456789ab") > later);
-        assert!(v("0.3.1") > later);
+        assert!(v("0.3.2-internal.1000.g0123456789ab") > later);
         assert!(
-            v("0.3.0-rc.1-internal.730.g4400ba023e0c") > v("0.3.0-rc.1-internal.729.gd298debe26f2")
+            v("0.3.0-rc.1.internal.730.g4400ba023e0c") > v("0.3.0-rc.1.internal.729.gd298debe26f2")
         );
+    }
+
+    /// Built from main after 0.3.3 was released, `0.3.3-internal.860.g3b400d2c…` was a prerelease of
+    /// 0.3.3 and ordered before it, so the Windows installer took the released 0.3.3 for the newer
+    /// one. `desktop-version.ts` now makes it a prerelease of the next patch, which orders after the
+    /// release it was built from and before every later one, here and in the installer alike.
+    #[test]
+    fn an_internal_build_orders_after_the_release_it_was_built_from() {
+        assert!(v("0.3.3-internal.860.g3b400d2c1abc") < v("0.3.3"));
+        let internal = v("0.3.4-internal.860.g3b400d2c1abc");
+        assert!(internal > v("0.3.3"));
+        assert!(internal > v("0.3.3-internal.860.g3b400d2c1abc"));
+        for next in ["0.3.4", "0.4.0", "1.0.0"] {
+            assert!(internal < v(next), "{next}");
+        }
+        // A candidate's internal build orders after it and before the next candidate.
+        let candidate = v("0.3.0-rc.1.internal.731.gabc123456789");
+        assert!(candidate > v("0.3.0-rc.1"));
+        for next in ["0.3.0-rc.2", "0.3.0-rc.10", "0.3.0"] {
+            assert!(candidate < v(next), "{next}");
+        }
     }
 
     #[test]
