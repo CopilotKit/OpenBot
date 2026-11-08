@@ -8,6 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- OpenBot Personal's Settings, Browsers says recordings go to your own Learning space, with no organization.
 - OpenBot Personal's New Bot sheet lists every app the new Bot gets, not only Routines.
 - A Bot's question in a conversation with several Bots now waits in that conversation and is answered there, as in a conversation with one Bot.
 - Teach a Bot: narration that can't hear you (no microphone) stays off after Stop until you turn it on, and "We're capturing your voice" shows only while a recording is hearing you.
