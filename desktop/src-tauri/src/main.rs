@@ -4443,8 +4443,9 @@ fn show_window_title<R: tauri::Runtime>(window: &tauri::Window<R>, shown: bool) 
 /**
 Marks OpenBot's page for the overlay title bar: its styles pad the sidebar's header for the window
 buttons, and the header becomes the drag handle, as does the strip the main column keeps above
-itself while the sidebar is hidden. The sidebar renders after the page loads and again
-on navigation, so new headers are marked as they appear, at most once a frame.
+itself while the sidebar is hidden, and onboarding's header, which has no sidebar beside it. The
+sidebar renders after the page loads and again on navigation, so new headers are marked as they
+appear, at most once a frame. Run on macOS only: Windows has its own title bar to drag.
 */
 const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
   document.documentElement.dataset.desktopTitlebar = "overlay";
@@ -4452,6 +4453,11 @@ const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
   const mark = () => {
     // Bare attributes: only a press on the element itself drags, never on its contents.
     for (const header of document.querySelectorAll(`[data-slot="sidebar-header"]:not([${DRAG}])`)) {
+      header.setAttribute(DRAG, "");
+    }
+    // Onboarding has no sidebar. Its header starts below the window's buttons, and that strip is
+    // the header's own, so it drags while Back and the steps inside it stay buttons.
+    for (const header of document.querySelectorAll(`[data-onboarding-frame] > header:not([${DRAG}])`)) {
       header.setAttribute(DRAG, "");
     }
     // The main column only while the sidebar is hidden, when its top strip is the one handle left.
