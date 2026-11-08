@@ -2038,11 +2038,21 @@ export function ChatTranscript({
    *
    * So: the turn is in flight AND the last thing in the conversation is still the person's own
    * message. A tool call that is running shimmers on its own line and needs nothing from here.
+   *
+   * OR the last thing is a tool row whose every call has its answer. The tools are done and the
+   * model is reading what they returned, which with five emails in hand can take a while, and a
+   * finished line does not shimmer. Seen on the Desktop: "Used Gmail" and its five steps sat still
+   * with nothing under them, and the person took the Bot for dead while it was still writing.
    */
   const lastItem = items.at(-1);
-  const waitingOnFirstToken =
+  const toolsAllAnswered =
+    lastItem?.kind === "tools"
+      ? lastItem.steps.every((step) => step.result !== undefined)
+      : lastItem?.kind === "tool" && lastItem.result !== undefined;
+  const waitingOnTheModel =
     busy &&
-    ((lastItem?.kind === "text" && lastItem.role === "user") ||
+    (toolsAllAnswered ||
+      (lastItem?.kind === "text" && lastItem.role === "user") ||
       /*
        * A screenshot pasted with no caption is still a person sending something, and they are
        * watching the same spot under it for the Bot's answer as they would under a typed question.
@@ -2058,7 +2068,7 @@ export function ChatTranscript({
       (item) =>
         (item.kind === "text" && isPersonSentMessage(item.role, item.text)) ||
         /*
-         * Same reasoning as `waitingOnFirstToken` above: an attachment is always the person's own,
+         * Same reasoning as `waitingOnTheModel` above: an attachment is always the person's own,
          * so a turn that is only a file still counts as them sending something. This id decides
          * nothing but whether the viewport scrolls smoothly for a beat; where it lands is
          * `anchoredTurns` below.
@@ -2496,7 +2506,7 @@ export function ChatTranscript({
                 <div className="contents [&>*]:order-1">
                   {stopped ? (
                     <Stopped reason={stopped} />
-                  ) : waitingOnFirstToken ? (
+                  ) : waitingOnTheModel ? (
                     <Thinking />
                   ) : null}
                   {working}
