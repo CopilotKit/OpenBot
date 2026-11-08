@@ -24,6 +24,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   images through downloads.copilotkit.ai too, because the CLI's own pulls read the cluster's
   mirrors, and a setup step that fails now reports its own error instead of only that the command
   did not finish.
+- **Setup and Home say what is true.** "OpenBot is running" no longer flashes Start's own steps, and
+  points to the system tray on Windows instead of the menu bar; after Accept the account step says
+  it is setting up your apps; a relaunch says "Starting the engine machine." while it does; the
+  personal edition's Home no longer says nobody has shared a Bot; and Teach a Bot says "No
+  microphone found. Narration is off." on a computer with none, keeping your choice for when there
+  is one.
 
 ## 0.3.4
 
