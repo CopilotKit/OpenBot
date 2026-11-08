@@ -25,6 +25,7 @@ import {
   mintCallbackToken,
   sameToken,
 } from "./callback-token";
+import { frameworkOf } from "./framework";
 import { mayIsolate } from "./isolation";
 import { canManageAgent } from "./profile-policy";
 import type {
@@ -275,7 +276,17 @@ function mapProfile(
     // wipe one by saving an unrelated edit; showing the value would put a secret in a screenshot.
     hasAuth: authFromConfiguration(row.configuration) !== null,
     instructions: starterInstructionsOf(row),
+    ...frameworkField(row),
   };
+}
+
+/** What runs it, by name, when OpenBot knows. See `AgentProfile.framework`. */
+function frameworkField(row: {
+  type: "built_in" | "remote_ag_ui" | "remote_mastra";
+  configuration: unknown;
+}): { framework?: string } {
+  const framework = frameworkOf(row);
+  return framework ? { framework } : {};
 }
 
 /**

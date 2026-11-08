@@ -1,5 +1,5 @@
 import type {
-  LearnedSkillContent,
+  LearnedSkillDetail,
   LearningAutoAssignState,
   LearningDeliveryStatus,
   LearningOverview,
@@ -212,7 +212,7 @@ function learnedSkillPath(source: LearnedSkillSource, name: string) {
   }
 }
 
-/** One published skill with every file it contains. */
+/** One published skill with every file it contains and, from your own space, the recordings it was learned from. */
 export function learnedSkillQueryOptions(
   source: LearnedSkillSource,
   name: string,
@@ -220,7 +220,7 @@ export function learnedSkillQueryOptions(
   return queryOptions({
     queryKey: learningKeys.skill(source, name),
     retry: false,
-    queryFn: (): Promise<LearnedSkillContent> =>
+    queryFn: (): Promise<LearnedSkillDetail> =>
       client(learnedSkillPath(source, name), "skill", {
         fallback: "Couldn't load this skill. Try again.",
       }),

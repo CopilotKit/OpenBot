@@ -207,3 +207,67 @@ test("Reset still names what a Bot remembers for you in the team edition", async
     view.getByText("Memories you told a Bot yourself are kept."),
   ).toBeTruthy();
 });
+
+/*
+ * The personal edition has one person. Nobody else has a Bots list for "only your list" to set
+ * apart, and nobody else for "everyone" to mean. Its Delete says what's true for them: the Bot goes,
+ * and its conversations stay readable (channel-chat.tsx: "You can still read this conversation").
+ */
+test("the personal edition's rows say nothing about other people", async () => {
+  const view = draw(BOT, {}, "personal");
+  const text = () => document.body.textContent ?? "";
+  expect(view.getByText("Keep it at the top of your Bots list.")).toBeTruthy();
+  expect(view.getByText("Take it off your Bots list.")).toBeTruthy();
+  const remove = view.getByRole("button", { name: /^Delete/ });
+  expect(remove.textContent).toContain(
+    "Deletes it. You can still read your conversations with it. You can't undo this.",
+  );
+  expect(text()).not.toMatch(/only your list|for everyone/i);
+  fireEvent.click(remove);
+  expect(
+    await view.findByText(
+      "You can still read your conversations with it, but it can't reply. You can't undo this.",
+    ),
+  ).toBeTruthy();
+  expect(text()).not.toMatch(/for everyone|other people/i);
+});
+
+test("the personal edition's Reset notice doesn't mention other people's data", async () => {
+  servingResetPlan();
+  const view = draw(BOT, {}, "personal");
+  fireEvent.click(view.getByRole("button", { name: /^Reset/ }));
+  expect(
+    await view.findByText(
+      "This deletes what Expenses has with you. You can't undo this.",
+    ),
+  ).toBeTruthy();
+  expect(document.body.textContent).not.toMatch(/other people/i);
+});
+
+test("a hidden or pinned Bot in the personal edition says where it is, and no more", () => {
+  const view = draw({ ...BOT, hidden: true, pinned: true }, {}, "personal");
+  expect(view.getByText("At the top of your Bots list.")).toBeTruthy();
+  expect(view.getByText("Under Hidden on your Bots list.")).toBeTruthy();
+});
+
+test("a team deployment keeps saying whose list changes and who a delete reaches", async () => {
+  servingResetPlan();
+  const view = draw(BOT, {}, "team");
+  expect(
+    view.getByText(
+      "Keep it at the top of your Bots list. Only your list changes.",
+    ),
+  ).toBeTruthy();
+  expect(
+    view.getByText("Take it off your Bots list. Only your list changes."),
+  ).toBeTruthy();
+  expect(view.getByRole("button", { name: /^Delete/ }).textContent).toContain(
+    "Deletes it for everyone. You can't undo this.",
+  );
+  fireEvent.click(view.getByRole("button", { name: /^Reset/ }));
+  expect(
+    await view.findByText(
+      "This deletes what Expenses has with you. Other people's conversations and data stay. You can't undo this.",
+    ),
+  ).toBeTruthy();
+});

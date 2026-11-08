@@ -53,6 +53,8 @@ export function managePaths(edition: "team" | "personal") {
        * Mid-sentence; `atStart` capitalises it where it opens one.
        */
       deploymentName: "OpenBot",
+      /** Which edition these paths are for, for the sentences that differ beyond a name. */
+      edition: "personal" as const,
     };
   }
   return {
@@ -85,6 +87,7 @@ export function managePaths(edition: "team" | "personal") {
     auditLabel: "Audit",
     audit: () => linkOptions({ to: "/admin/audit" }),
     deploymentName: "this deployment",
+    edition: "team" as const,
   };
 }
 

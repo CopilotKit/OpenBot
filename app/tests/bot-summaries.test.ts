@@ -49,6 +49,37 @@ test("setup names where it runs", () => {
   expect(setupSummary({ builtIn: false, endpoint: null })).toBe("Built in");
 });
 
+/*
+ * The personal edition's starter runs on the harness its one person picked at setup, at the address
+ * of the container OpenBot started for it ("agent-harness:4206" on Windows). That address means
+ * nothing to them; the framework does. A team deployment still shows the address.
+ */
+test("the personal edition names what runs a Bot instead of its address", () => {
+  const harness = {
+    builtIn: false,
+    endpoint: "http://agent-harness:4206/ag-ui",
+    framework: "LangChain (LangGraph)",
+  };
+  expect(setupSummary(harness, "personal")).toBe(
+    "Runs on LangChain (LangGraph)",
+  );
+  expect(setupSummary(harness, "team")).toBe("agent-harness:4206");
+  expect(setupSummary(harness)).toBe("agent-harness:4206");
+  // An agent connected by address with no framework named: the address is all there is.
+  expect(
+    setupSummary(
+      { builtIn: false, endpoint: "http://127.0.0.1:8000/ag-ui" },
+      "personal",
+    ),
+  ).toBe("127.0.0.1:8000");
+  expect(
+    setupSummary(
+      { builtIn: true, endpoint: null, framework: "OpenBot" },
+      "personal",
+    ),
+  ).toBe("Built in");
+});
+
 test("a public Bot nobody published is still open to everyone, not 'Not shared'", () => {
   expect(sharingSummary(undefined, "public")).toBe("Everyone (public)");
 });

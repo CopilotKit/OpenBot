@@ -313,6 +313,58 @@ export async function readProposal(
   return proposalDetail(candidate, insights);
 }
 
+/** The most approved proposals of one Skill whose evidence is read for the recordings it was learned from. */
+export const MAX_SOURCE_PROPOSALS = 3;
+
+/**
+ * The recordings a published Skill was learned from, as trajectory ids in the order its evidence cites them, each with
+ * whether Intelligence still has it.
+ *
+ * A published Skill carries no word of where it came from: Intelligence's snapshot has only its name, description and
+ * files. The proposal that published it does, and Intelligence keeps reviewed proposals in the list, so the Skill's
+ * sources are read from its approved proposals: the ones whose title is the Skill's name (Intelligence holds a
+ * proposal's title to its SKILL.md name), newest first, back to the last approved removal of that name, since a Skill
+ * removed and learned again starts over. The same for a Skill approved by hand and one approved automatically.
+ */
+export async function readSkillRecordings(
+  manage: LearningManagement,
+  containerId: string,
+  skillName: string,
+): Promise<{ id: string; available: boolean }[]> {
+  const candidates = await manage.listLearningCandidates({ containerId });
+  const published: Candidate[] = [];
+  for (const candidate of candidates) {
+    if (candidate.status !== "approved" || candidate.title !== skillName)
+      continue;
+    if (candidate.operation === "remove") break;
+    published.push(candidate);
+    if (published.length === MAX_SOURCE_PROPOSALS) break;
+  }
+  const recordings = new Map<string, boolean>();
+  for (const candidate of published) {
+    const detail = await manage.getLearningCandidate({
+      containerId,
+      candidateId: candidate.id,
+    });
+    const cited = await Promise.all(
+      detail.supportingInsights.slice(0, MAX_INSIGHTS).map((insight) =>
+        manage
+          .getLearningInsightEvidence({ containerId, insightId: insight.id })
+          .then((entries) => entries.map(evidence))
+          // One Insight's evidence that can't be read hides only its own recordings.
+          .catch(() => []),
+      ),
+    );
+    for (const item of cited.flat())
+      if (item.kind === "recording")
+        recordings.set(
+          item.id,
+          (recordings.get(item.id) ?? false) || item.available,
+        );
+  }
+  return [...recordings].map(([id, available]) => ({ id, available }));
+}
+
 /** Logs a failure while taking OpenBot's own record back, or while finishing it. */
 function logRecordFailure(type: string, candidateId: string, error: unknown) {
   console.error(

@@ -504,46 +504,83 @@ fn fetch_images(root: &Path, version: &str, get: Download) -> Result<(), String>
 }
 
 /**
-Fetch a URL into memory, trying again when the connection fails.
+Fetch a URL into memory, trying again when the connection fails or the download stalls.
 
 Shared with `install.rs`, which fetches the engine's installers through it and then checks their
-digests. One client, one user agent, one set of TLS defaults.
+digests, and with the release lookup. One client, one user agent, one set of TLS defaults, one way
+to download.
 
-TRIED UP TO THREE TIMES. One connection cut part-way through Bun's download used to fail the whole
-Start ("the download did not finish: error decoding response body"), though the same download
-finished in under three seconds a minute later. So a failure that says nothing about the file is
-tried again after a short wait: the server could not be reached, the body did not all arrive, or the
-server answered 5xx or 429. Any other answer, a 404 in particular, means the file is not there, and
-is reported at once: the release lookups depend on seeing that promptly. A second attempt downloads
-the whole file again, and `install.rs` still checks the digest of the copy that is kept.
+NO LIMIT ON THE WHOLE DOWNLOAD, ONLY ON SILENCE. A download that keeps arriving is never cut off,
+however slow the line. One that stops is: connecting may take `CONNECT_TIMEOUT`, and after that
+nothing may go `STALL_TIMEOUT` without a byte arriving, whether that is the server's answer or the
+next piece of the body. Without that, a download GitHub stops sending would wait forever.
+
+TRIED AGAIN, WAITING LONGER EACH TIME. One connection cut part-way through Bun's download used to
+fail the whole Start, though the same download finished in under three seconds a minute later. And
+on 2026-11-08 the Desktop's first update after an install asked GitHub for the commit's archive and
+got no answer for 30 seconds, three times running; it gave up after its third attempt, about a
+minute and a half in, and the update was put back. Opening OpenBot again two minutes later
+downloaded the same archive in two seconds. So a failure that says nothing about the file is tried
+again, `RETRY_DELAYS` apart, for about four minutes at worst: the server could not be reached, sent
+nothing for the stall window, did not send the whole body, or answered 5xx or 429. Any other
+answer, a 404 in particular, means the file is not there, and is reported at once: the release
+lookups depend on seeing that promptly.
+
+A later attempt downloads the whole file again. GitHub answers a byte range of a commit's archive
+with the whole archive (200, no Accept-Ranges), so there is nothing to resume from, and `install.rs`
+still checks the digest of the copy that is kept.
 */
 pub fn get(url: &str) -> Result<Vec<u8>, String> {
-    get_with(url, IDLE_TIMEOUT, &RETRY_DELAYS)
+    get_with(url, STALL_TIMEOUT, WAITS)
 }
 
-/// How long a download may go without receiving anything before it is given up.
-const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// The waits `get` makes between attempts: `RETRY_DELAYS`, and in this crate's tests the same
+/// number of attempts with no wait, since a test that downloads from an address nobody answers on
+/// would otherwise sit through a minute of them.
+#[cfg(not(test))]
+const WAITS: &[std::time::Duration] = &RETRY_DELAYS;
+#[cfg(test)]
+const WAITS: &[std::time::Duration] = &[std::time::Duration::ZERO; RETRY_DELAYS.len()];
 
-/// The waits before the second and third attempts.
-const RETRY_DELAYS: [std::time::Duration; 2] = [
-    std::time::Duration::from_secs(1),
-    std::time::Duration::from_secs(3),
+/// How long connecting to the server may take, before anything is asked of it.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// How long a download may go without receiving anything, its answer included, before this attempt
+/// is given up.
+const STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The waits before each attempt after the first, doubling: six attempts in all. A server that
+/// never answers is given up after 6 x 30 s of silence and 62 s of waiting, a little over four
+/// minutes. On 2026-11-08 the download that worked came 3 minutes 38 seconds after the first
+/// attempt; these attempts reach past that.
+const RETRY_DELAYS: [std::time::Duration; 5] = [
+    std::time::Duration::from_secs(2),
+    std::time::Duration::from_secs(4),
+    std::time::Duration::from_secs(8),
+    std::time::Duration::from_secs(16),
+    std::time::Duration::from_secs(32),
 ];
 
 /// `get`, with one attempt more than there are `delays`, waiting each delay in turn before trying
-/// again. The last error says how many attempts were made, so Technical details shows it tried again.
+/// again. Each retry is written to the log, and the last error says how many attempts were made,
+/// so Technical details shows it tried again.
 fn get_with(
     url: &str,
-    idle: std::time::Duration,
+    stall: std::time::Duration,
     delays: &[std::time::Duration],
 ) -> Result<Vec<u8>, String> {
     let mut attempts = 1;
     loop {
-        match get_waiting(url, idle) {
+        match get_waiting(url, stall) {
             Ok(body) => return Ok(body),
             Err(Failed::ForGood(error)) => return Err(error),
             Err(Failed::ForNow(error)) => match delays.get(attempts - 1) {
                 Some(delay) => {
+                    log::warn!(
+                        "[download] attempt {attempts} of {}: {error}; trying again in {}",
+                        delays.len() + 1,
+                        said(*delay)
+                    );
                     std::thread::sleep(*delay);
                     attempts += 1;
                 }
@@ -562,24 +599,68 @@ enum Failed {
     ForGood(String),
 }
 
-/**
-One attempt at `get`, giving up only when nothing arrives for `idle`.
+/// A duration as Technical details says it: "30 s", "300 ms".
+fn said(duration: std::time::Duration) -> String {
+    if duration.as_millis().is_multiple_of(1000) {
+        format!("{} s", duration.as_secs())
+    } else {
+        format!("{} ms", duration.as_millis())
+    }
+}
 
-READ AS A STREAM, NOT WITH `bytes()`. The blocking client's timeout (30 s by default) bounds each
-read on a stream, but `bytes()` waits for the whole body within it, and reports running out of time
-as "error decoding response body". So any download that took longer than 30 seconds failed, however
-steadily it was arriving: Bun's 30 MB on a connection under about 1 MB/s, every time.
+/// Whether an error from the client is its timeout, said or carried inside an `io::Error`.
+fn timed_out(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut source = Some(error);
+    while let Some(error) = source {
+        if error
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(reqwest::Error::is_timeout)
+        {
+            return true;
+        }
+        // An `io::Error`'s `source()` skips the error it carries, so that one is looked at here.
+        if let Some(error) = error.downcast_ref::<std::io::Error>() {
+            if error.kind() == std::io::ErrorKind::TimedOut {
+                return true;
+            }
+            if let Some(inner) = error.get_ref() {
+                if timed_out(inner) {
+                    return true;
+                }
+            }
+        }
+        source = error.source();
+    }
+    false
+}
+
+/**
+One attempt at `get`, giving up when connecting takes longer than `CONNECT_TIMEOUT` or nothing
+arrives for `stall`.
+
+READ AS A STREAM, NOT WITH `bytes()`. The blocking client's timeout bounds waiting for the answer and
+each read on a stream, but `bytes()` waits for the whole body within it, and reports running out of
+time as "error decoding response body". So any download that took longer than 30 seconds failed,
+however steadily it was arriving: Bun's 30 MB on a connection under about 1 MB/s, every time. Read
+as a stream, the timeout is the stall window and nothing else.
 */
-fn get_waiting(url: &str, idle: std::time::Duration) -> Result<Vec<u8>, Failed> {
+fn get_waiting(url: &str, stall: std::time::Duration) -> Result<Vec<u8>, Failed> {
     use std::io::Read;
     let mut response = reqwest::blocking::Client::builder()
         .user_agent("openbot-desktop")
-        .timeout(idle)
+        .connect_timeout(CONNECT_TIMEOUT.min(stall))
+        .timeout(stall)
         .build()
         .map_err(|error| Failed::ForGood(format!("could not prepare the download: {error}")))?
         .get(url)
         .send()
-        .map_err(|error| Failed::ForNow(format!("could not reach {url}: {error}")))?;
+        .map_err(|error| {
+            Failed::ForNow(if timed_out(&error) && !error.is_connect() {
+                format!("{url} sent nothing for {}", said(stall))
+            } else {
+                format!("could not reach {url}: {error}")
+            })
+        })?;
     let status = response.status();
     if !status.is_success() {
         let error = format!("{url} answered {status}");
@@ -592,9 +673,17 @@ fn get_waiting(url: &str, idle: std::time::Duration) -> Result<Vec<u8>, Failed> 
         );
     }
     let mut body = Vec::new();
-    response
-        .read_to_end(&mut body)
-        .map_err(|error| Failed::ForNow(format!("the download did not finish: {error}")))?;
+    response.read_to_end(&mut body).map_err(|error| {
+        Failed::ForNow(if timed_out(&error) {
+            format!(
+                "the download did not finish: nothing arrived for {} after {} bytes",
+                said(stall),
+                body.len()
+            )
+        } else {
+            format!("the download did not finish: {error}")
+        })
+    })?;
     Ok(body)
 }
 
@@ -658,6 +747,12 @@ mod tests {
         Cut,
         /// This status and nothing else.
         Status(u16),
+        /// The headers and half the body, then nothing more, with the connection left open: a
+        /// download that stops arriving.
+        StallPartWay,
+        /// Nothing at all, not even the headers, with the connection left open: GitHub's archive
+        /// for a commit when it does not answer.
+        StallBeforeAnswering,
     }
 
     /// A server that answers its connections with `replies` in order, repeating the last one, and
@@ -670,6 +765,8 @@ mod tests {
         let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let counted = count.clone();
         std::thread::spawn(move || {
+            // Stalled connections are kept open here, so the client sees silence and not a close.
+            let mut stalled = Vec::new();
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { return };
                 let index = counted.fetch_add(1, Ordering::SeqCst);
@@ -678,8 +775,12 @@ mod tests {
                 let _ = stream.read(&mut request);
                 let (status, sent) = match reply {
                     Reply::Whole => (200, &b"datadata"[..]),
-                    Reply::Cut => (200, &b"data"[..]),
+                    Reply::Cut | Reply::StallPartWay => (200, &b"data"[..]),
                     Reply::Status(code) => (code, &b"datadata"[..]),
+                    Reply::StallBeforeAnswering => {
+                        stalled.push(stream);
+                        continue;
+                    }
                 };
                 let _ = stream.write_all(
                     format!(
@@ -689,6 +790,9 @@ mod tests {
                 );
                 let _ = stream.write_all(sent);
                 let _ = stream.flush();
+                if matches!(reply, Reply::StallPartWay) {
+                    stalled.push(stream);
+                }
             }
         });
         (url, count)
@@ -712,12 +816,84 @@ mod tests {
     }
 
     #[test]
-    fn a_download_cut_off_every_time_is_given_up_after_three_attempts() {
+    fn a_download_cut_off_every_time_is_given_up_after_every_attempt() {
         let (url, count) = scripted(vec![Reply::Cut]);
-        let error = get_quickly(&url).unwrap_err();
+        let error = get_patiently(&url, std::time::Duration::from_secs(5)).unwrap_err();
+        let attempts = RETRY_DELAYS.len() + 1;
         assert!(error.starts_with("the download did not finish"), "{error}");
-        assert!(error.ends_with("(3 attempts)"), "{error}");
-        assert_eq!(connections(&count), 3);
+        assert!(
+            error.ends_with(&format!("({attempts} attempts)")),
+            "{error}"
+        );
+        assert_eq!(connections(&count), attempts);
+    }
+
+    /// `get` with every wait between attempts cut to nothing, but as many attempts as it makes for
+    /// real, and `stall` as the time it waits for the next byte.
+    fn get_patiently(url: &str, stall: std::time::Duration) -> Result<Vec<u8>, String> {
+        get_with(url, stall, &[std::time::Duration::ZERO; RETRY_DELAYS.len()])
+    }
+
+    /// The Desktop's first update after an install, 2026-11-08: GitHub sent nothing for the
+    /// commit's archive for 30 seconds three times running, the download gave up after its third
+    /// attempt, and the update was put back. Opening OpenBot again two minutes later downloaded it
+    /// in two seconds. A download that stalls is given up after the stall window and tried again,
+    /// for long enough to outlast that.
+    #[test]
+    fn a_download_that_stalls_part_way_is_tried_again_until_it_arrives() {
+        let stall = std::time::Duration::from_millis(300);
+        let (url, count) = scripted(vec![
+            Reply::StallPartWay,
+            Reply::StallPartWay,
+            Reply::StallPartWay,
+            Reply::Whole,
+        ]);
+        let started = std::time::Instant::now();
+        assert_eq!(get_patiently(&url, stall).unwrap(), b"datadata");
+        assert_eq!(connections(&count), 4);
+        // Each stalled attempt was given up after the stall window, not left hanging.
+        let took = started.elapsed();
+        assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+    }
+
+    #[test]
+    fn a_server_that_sends_nothing_is_tried_again_until_it_answers() {
+        let (url, count) = scripted(vec![
+            Reply::StallBeforeAnswering,
+            Reply::StallBeforeAnswering,
+            Reply::StallBeforeAnswering,
+            Reply::Whole,
+        ]);
+        let body = get_patiently(&url, std::time::Duration::from_millis(300)).unwrap();
+        assert_eq!(body, b"datadata");
+        assert_eq!(connections(&count), 4);
+    }
+
+    #[test]
+    fn a_server_that_never_answers_is_given_up_with_what_happened() {
+        let (url, count) = scripted(vec![Reply::StallBeforeAnswering]);
+        let error = get_patiently(&url, std::time::Duration::from_millis(200)).unwrap_err();
+        let attempts = RETRY_DELAYS.len() + 1;
+        assert_eq!(
+            error,
+            format!("{url} sent nothing for 200 ms ({attempts} attempts)")
+        );
+        assert_eq!(connections(&count), attempts);
+    }
+
+    #[test]
+    fn a_download_that_stalls_every_time_is_given_up() {
+        let (url, count) = scripted(vec![Reply::StallPartWay]);
+        let error = get_patiently(&url, std::time::Duration::from_millis(200)).unwrap_err();
+        let attempts = RETRY_DELAYS.len() + 1;
+        assert_eq!(
+            error,
+            format!(
+                "the download did not finish: nothing arrived for 200 ms after 4 bytes \
+                 ({attempts} attempts)"
+            )
+        );
+        assert_eq!(connections(&count), attempts);
     }
 
     #[test]
