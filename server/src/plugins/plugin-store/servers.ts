@@ -299,10 +299,10 @@ export function serverMethods(context: StoreContext) {
        * whether or not this deployment brokers through it today, and a reservation spelled twice is
        * the one that gets added to once. Each refusal still names the id it refused.
        */
-      for (const [screen, { vendor }] of BROKERED_SCREEN_NAMES) {
+      for (const [screen] of BROKERED_SCREEN_NAMES) {
         if (input.id === screen) {
           throw new CustomServerRefusedError(
-            `${screen} is the name of this deployment's own ${vendor} screen, so a server added there could never be opened. Choose another.`,
+            `${screen} is the name of one of OpenBot's own screens, so a server added there could never be opened. Choose another.`,
           );
         }
       }
@@ -331,10 +331,10 @@ export function serverMethods(context: StoreContext) {
        * and a policy rule are written against, so a row shadowing another path's namespace inherits
        * rules that were written about something else.
        */
-      for (const { idPrefix, vendor } of BROKERED_ID_PREFIXES) {
+      for (const { idPrefix } of BROKERED_ID_PREFIXES) {
         if (input.id.startsWith(idPrefix)) {
           throw new CustomServerRefusedError(
-            `Names beginning ${idPrefix} belong to the ${vendor} apps this deployment enables, so ${input.id} is not a name a server added by URL can take. Choose another.`,
+            `Names beginning ${idPrefix} are kept for the apps people connect through OpenBot, so ${input.id} can't be used for a server added by URL. Choose another.`,
           );
         }
       }
@@ -604,7 +604,7 @@ export function serverMethods(context: StoreContext) {
       const rowId = `${profile.idPrefix}${input.slug}`;
       if (toolkitOfFor(brokerProvider, url) !== input.slug) {
         throw new CustomServerRefusedError(
-          `${input.slug} is not a name ${brokerProvider === "arcade" ? "an" : "a"} ${profile.vendor} app can have. An app is named in letters, numbers, underscores and hyphens, because that name is read back out of this row's url to decide which app a call is against.`,
+          `${input.slug} isn't a name an app can have. An app is named in letters, numbers, underscores and hyphens.`,
         );
       }
 

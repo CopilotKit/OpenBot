@@ -181,11 +181,11 @@ test("the same page in Admin keeps its word", async () => {
 test("a brokered app's sentences name OpenBot where the page does", () => {
   const personal = managePaths("personal").deploymentName;
   expect(brokeredReach("composio", personal).description).toContain(
-    "OpenBot sends one key",
+    "OpenBot holds one key",
   );
   expect(brokeredKeyMissing("composio", personal)).toContain("on OpenBot.");
   expect(brokeredReach("composio").description).toContain(
-    "This deployment sends one key",
+    "This deployment holds one key",
   );
   expect(brokeredKeyMissing("composio")).toContain("on this deployment.");
 });

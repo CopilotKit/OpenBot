@@ -38,10 +38,7 @@ import { useStartChannel } from "@/lib/channels/start";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useDraftModel } from "@/lib/models/run-model";
-import {
-  skillInstructionsFor,
-  useSkillCommands,
-} from "@/lib/plugins/skill-commands";
+import { useSkillCommands } from "@/lib/plugins/skill-commands";
 import { searchTextEntry } from "@/lib/search-text";
 import { newId } from "../../../../lib/new-id";
 
@@ -229,14 +226,9 @@ function NewConversation({ composition }: { composition: string }) {
     try {
       // Recorded, then started: a coworker picked here is as much a choice as an `@` on the
       // home screen, and the trail has to say so for both.
-      // With its `/` skills, which the conversation puts in front of it as it does for every
-      // later message; handing over only the text sent the chip and dropped the skill.
-      await startChosen(
-        recipient.id,
-        draft.text,
-        skillInstructionsFor(draft.commandIds, skillCommands),
-        draftModel.requested,
-      );
+      // A `/` skill stays at the start of the words, where the server finds it, as it does for
+      // every later message.
+      await startChosen(recipient.id, draft.text, draftModel.requested);
     } catch (caught) {
       // Preserve the unsent draft when channel creation fails.
       setSent(null);

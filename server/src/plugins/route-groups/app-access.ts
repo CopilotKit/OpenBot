@@ -80,11 +80,8 @@ function unavailableSentence(
   switch (reason) {
     case "absent":
       return `${title} can't be turned on from here.`;
-    case "composio_unconfigured": {
-      const { vendor, envVar } = BROKERED_PROFILE[provider];
-      const article = /^[aeiou]/i.test(vendor) ? "an" : "a";
-      return `${title} is ${article} ${vendor} app, and ${envVar} isn't set. Set it, then ${again}.`;
-    }
+    case "composio_unconfigured":
+      return `${title} can't be connected until ${BROKERED_PROFILE[provider].envVar} is set. Set it, then ${again}.`;
     case "scheme_unreadable":
       return `${title} is turned on, but OpenBot can't read how it connects. Remove it and turn it on again under Plugins, then ${again}.`;
     case "oauth_client_missing":

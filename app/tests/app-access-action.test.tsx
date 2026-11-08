@@ -572,7 +572,7 @@ test("in the personal edition, an app that isn't set up says what is missing, no
       undefined,
       "personal",
     ),
-  ).toBe("Gmail isn't set up yet. It needs your Composio key first.");
+  ).toBe("Gmail isn't set up yet. Set it up to connect it.");
   expect(
     appAccessSentence(
       appAccess({ state: "disabled", unavailable: "token_missing" }),

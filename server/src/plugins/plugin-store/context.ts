@@ -622,7 +622,7 @@ export function createStoreContext(options: PluginStoreOptions) {
        */
       if (!access.toolkit) {
         throw new PluginInvariantError(
-          `${row.id} resolves to a brokered credential with no ${BROKERED_PROFILE[brokerProvider].vendor} app in its url.`,
+          `${row.id} resolves to a brokered credential with no app in its url.`,
         );
       }
 
@@ -1765,7 +1765,7 @@ export function createStoreContext(options: PluginStoreOptions) {
     if (!existing) return;
     if (accessFor(existing, null).credential !== "brokered") return;
     throw new CustomServerRefusedError(
-      `${serverId} is ${brokerProvider === "arcade" ? "an" : "a"} ${BROKERED_PROFILE[brokerProvider].vendor} app this deployment has enabled, and people may have connected their accounts to it. Remove the app first — which ends those accounts at ${BROKERED_PROFILE[brokerProvider].vendor} — and the name is then free.`,
+      `${serverId} is an app people connect through OpenBot, and people may have connected their accounts to it. Remove the app first, which ends those accounts, and the name is then free.`,
     );
   }
 

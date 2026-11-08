@@ -107,7 +107,7 @@ function disabledSentence(
   // beside the sentence goes to where it is fixed.
   if (edition === "personal")
     return access.unavailable === "composio_unconfigured"
-      ? `${name} isn't set up yet. It needs your ${access.provider === "arcade" ? "Arcade" : "Composio"} key first.`
+      ? `${name} isn't set up yet. Set it up to connect it.`
       : `${name} isn't fully set up yet. Set it up to finish.`;
   switch (access.unavailable) {
     case "composio_unconfigured":

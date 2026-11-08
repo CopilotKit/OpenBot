@@ -36,16 +36,16 @@ import {
   UnavailableAgent,
 } from "@openbot/toolkit/copilotkit/agents";
 import { createIntelligenceThreadLock } from "@openbot/toolkit/copilotkit/thread-lock";
-import {
-  observeDetachedRun,
-  type PlatformRun,
-  stopRecorder,
-} from "@openbot/toolkit/run-stop";
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { parametersFor } from "@openbot/toolkit/granted-tool";
 import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
 import { sanitizeSeededHistory } from "@openbot/toolkit/history-sanitize";
 import { executeNativeApprovalTool } from "@openbot/toolkit/native-approval";
+import {
+  observeDetachedRun,
+  type PlatformRun,
+  stopRecorder,
+} from "@openbot/toolkit/run-stop";
 import { historyOrEmpty } from "@openbot/toolkit/thread-history";
 import { defer, from, switchMap } from "rxjs";
 import { z } from "zod";
@@ -55,13 +55,17 @@ import {
 } from "./agents/agent-resolver";
 import { attributeBotAnswers } from "./agents/bot-answers";
 import { frameworkOf } from "./agents/framework";
+import { takesModelChoice } from "./agents/harness-model";
 import {
   PlanModel,
   type PlanModelConfig,
   planModelForEnvironment,
 } from "./agents/plan-model";
-import { takesModelChoice } from "./agents/harness-model";
 import type { AgentActor } from "./agents/profile-types";
+import {
+  type RefusingProvider,
+  sayingProviderRefusals,
+} from "./agents/provider-refusal";
 import {
   OPENBOT_TOOL_LIMIT,
   toolLimitFor,
@@ -76,6 +80,7 @@ import {
   searchToolsTool,
   withToolSearch,
 } from "./agents/tool-search";
+import { sayingWhenUnreachable } from "./agents/unreachable";
 import type { AuditInitiator } from "./audit";
 import {
   attachmentIdsIn,
@@ -84,11 +89,6 @@ import {
   type StoredAttachment,
 } from "./channels/attachment-parts";
 import type { AgentFetch, StallGuard } from "./channels/stall-guard";
-import {
-  type RefusingProvider,
-  sayingProviderRefusals,
-} from "./agents/provider-refusal";
-import { sayingWhenUnreachable } from "./agents/unreachable";
 import type { DeploymentConfig } from "./config";
 import { observeModelConnection } from "./desktop-connection-failure";
 import { desktopTelemetryProperties } from "./desktop-telemetry";
@@ -111,19 +111,20 @@ import {
   type LoadPersonalMemory,
   PersonalMemoryMiddleware,
 } from "./memory/tools";
+import { providerName } from "./model-billing";
+import { modelSourceFor, type RunChoice } from "./model-catalogue";
+import { pickedSkillGuidance } from "./plugins/picked-skill";
+import { refFromToolName } from "./plugins/plugin-store/model";
 import type { SelectableSkill, Selection } from "./plugins/selection";
 import {
   latestUserText,
   SELECTION_FLOOR,
   selectTools,
 } from "./plugins/selection";
-import { refFromToolName } from "./plugins/plugin-store/model";
 import { grantedToolGuidance, holdsWebSearch } from "./plugins/tools";
 import { corsOrigin } from "./request-trust";
 import type { ProductTelemetry } from "./telemetry/product";
 import { productRuntimeHook } from "./telemetry/product-boundaries";
-import { providerName } from "./model-billing";
-import { modelSourceFor, type RunChoice } from "./model-catalogue";
 import { inlineToolImages } from "./tool-images";
 import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
 
@@ -667,6 +668,11 @@ export function builtInAgentConfiguration(
    * date is given in UTC, and said to be.
    */
   timeZone?: string,
+  /**
+   * The instructions of the skill the person picked for this message, from this deployment's own
+   * store (`picked-skill.ts`). Absent when they picked none.
+   */
+  pickedSkill?: string,
 ): BuiltInAgentConfiguration {
   if (!apiKey && !planModel) {
     return {
@@ -769,6 +775,12 @@ export function builtInAgentConfiguration(
       ...(model.label ? [modelGuidance(model.label)] : []),
       // Last, so everything above stays one prefix a provider can cache. See `todayGuidance`.
       todayGuidance(now, timeZone),
+      /*
+       * After the date, because it changes with the message: the skill the person picked for this
+       * one. Here, in the prompt this deployment writes, because a system row the browser sent is
+       * dropped before the model (`forwardSystemMessages` is never set). See `picked-skill.ts`.
+       */
+      ...(pickedSkill ? [pickedSkill] : []),
     ].join("\n\n"),
     ...(planModel ? {} : { apiKey: apiKey ?? undefined }),
     // The run's thinking effort, when the person picked one the model takes. A plan's harness is
@@ -1270,6 +1282,13 @@ async function buildAgent(
       });
     }
   }
+  /*
+   * The skill this run's message picked, among the ones this Bot holds, as the Bot is told it. Read
+   * from the same grants narrowing reads, fresh per request. See `picked-skill.ts`.
+   */
+  const pickedSkillFor = (input: RunAgentInput) =>
+    pickedSkillGuidance(input, skills);
+  const holdsInstructions = skills.some((skill) => skill.instructions);
   const narrowing =
     selection &&
     skills.some((skill) => skill.tools.length > 0) &&
@@ -1414,6 +1433,7 @@ async function buildAgent(
             )
         : undefined,
       refusingProvider(model),
+      holdsInstructions ? pickedSkillFor : undefined,
     );
   }
 
@@ -1484,6 +1504,8 @@ async function buildAgent(
     runModel: RuntimeModel = model,
     /** The person's time zone this run carries, for the date its prompt ends with. */
     timeZone?: string,
+    /** What the Bot is told for the skill this run's message picked. See `picked-skill.ts`. */
+    pickedSkill?: string,
   ) => {
     /*
      * What waits behind a search, decided where the run's tools are final. The count includes what
@@ -1519,6 +1541,7 @@ async function buildAgent(
       waiting,
       undefined,
       timeZone,
+      pickedSkill,
     );
     // What really waits: nothing, when the model could not be wrapped and is sent every tool.
     const held = searchesTools(
@@ -1573,6 +1596,7 @@ async function buildAgent(
     !model.plan &&
     !acquireLearnedSkills &&
     !holdsTools &&
+    !holdsInstructions &&
     !granted.some((tool) => tool.searchable)
   )
     return whole;
@@ -1607,6 +1631,7 @@ async function buildAgent(
           runModel,
           timeZone,
         );
+      const pickedSkill = pickedSkillFor(input);
       const learnedSkills = await acquireLearnedSkills?.(agent.id, signal);
       signal.throwIfAborted();
       if (
@@ -1643,7 +1668,8 @@ async function buildAgent(
         passing.length === 0 &&
         pinned.size === 0 &&
         input.tools.length === 0 &&
-        !timeZone
+        !timeZone &&
+        !pickedSkill
         ? whole
         : withTools(
             tools,
@@ -1653,6 +1679,7 @@ async function buildAgent(
             pinned,
             runModel,
             timeZone,
+            pickedSkill,
           );
     },
   );
@@ -1909,9 +1936,9 @@ const CONVERSATION_ROW_LABEL =
  * `@ag-ui/mastra` converts user, assistant, developer and tool messages and drops every `system`
  * row. The server's own two, the standing role and the granted-tools summary, reach a Mastra Bot as
  * context instead (`mastraOpenBotContext`), where its harness makes them its instructions, so those
- * are left for the bridge to drop. Every other system row is conversation, not instruction: a
- * skill's instructions the browser inserts ahead of a message, the personal-memory records the
- * server quotes as untrusted data. Each now goes where it sat, labelled and quoted as JSON the way
+ * are left for the bridge to drop. Every other system row is conversation, not instruction: one a
+ * browser inserted (a picked skill's instructions reach the Bot in its standing role instead, see
+ * `picked-skill.ts`), the personal-memory records the server quotes as untrusted data. Each now goes where it sat, labelled and quoted as JSON the way
  * agent-claude-sdk/src/replay.py replays one, and never as a `developer` message, which the bridge
  * would turn into a system message.
  */
@@ -2060,6 +2087,13 @@ function remoteAgentWithStandingRole(
    * may be on any provider, so its refusals name the provider only when its own words do.
    */
   ourProvider?: RefusingProvider,
+  /**
+   * What the Bot is told for the skill a run's message picked, among the ones it holds. Put in the
+   * standing role, the one message every harness reads as this deployment's instructions: a system
+   * row the browser sent is read there as conversation data. Absent when the Bot holds no skill.
+   * See `picked-skill.ts`.
+   */
+  pickedSkillFor?: (input: RunAgentInput) => string | undefined,
 ) {
   const holds = (input: RunAgentInput) => !holdsTools || holdsTools(input);
   /*
@@ -2242,12 +2276,18 @@ function remoteAgentWithStandingRole(
          * line names the framework ("Powered by ..."), and the Bot is told its model the way a
          * built-in one is (`modelGuidance`). A Bot that picks its own model is told none.
          */
+        /*
+         * And after the date, because it changes with the message, the skill the person picked for
+         * this one. Not for a run the runtime makes for itself, which holds nothing of the Bot's.
+         */
+        const pickedSkill = held ? pickedSkillFor?.(input) : undefined;
         const standingMessage = {
           ...agent.standingMessage,
           content: [
             agent.standingMessage.content,
             ...(label ? [modelGuidance(label)] : []),
             todayGuidance(new Date(), runTimeZone(input.forwardedProps)),
+            ...(pickedSkill ? [pickedSkill] : []),
           ].join("\n\n"),
         };
         const prepared: RunAgentInput = {

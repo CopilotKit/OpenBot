@@ -44,6 +44,7 @@ import {
 } from "../db/schema/core";
 import { groupBotThreads, groupMessages } from "../db/schema/group";
 import { workItems } from "../db/schema/work";
+import { leadingSkillCommand } from "../plugins/picked-skill";
 import type { CheckPrivateShare } from "../proactive/private-share";
 import type { WorkQueue } from "../work/queue";
 
@@ -809,6 +810,13 @@ export function createGroupConversations(deps: {
         : [],
     );
     const runId = runIdFor(id);
+    /*
+     * The skill the person picked, when their message starts with its command: under the group's
+     * framing above, the message this Bot is sent no longer starts with it, so it is stated for the
+     * run. Only a person's own turn; a peer's reply that starts with one picks nothing. Which skill
+     * that is, and whether this Bot holds it, the server decides (`picked-skill.ts`).
+     */
+    const skill = turn.fromAgentId ? undefined : leadingSkillCommand(turn.text);
     const consents = deps.listenForConsent?.(turn.ownerUserId, agentId);
     // Partial text, written at most this often, so the transcript shows the reply as it arrives.
     let latest: string | null = null;
@@ -851,6 +859,7 @@ export function createGroupConversations(deps: {
         agentId,
         threadId,
         instruction,
+        ...(skill ? { skill } : {}),
         userMessage: groupTurnMessage(
           `group-user:${id}`,
           instruction,

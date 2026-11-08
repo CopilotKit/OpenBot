@@ -55,11 +55,10 @@ describe("seedMessage", () => {
 });
 
 describe("the first-message stash", () => {
-  test("hands the message to the channel that was just created", () => {
-    stashFirstMessage("channel_a", "hello", ["Reply as a tally card."]);
+  test("hands the message to the channel that was just created, a `/` skill still at its start", () => {
+    stashFirstMessage("channel_a", "/tally-card hello");
     expect(takeFirstMessage("channel_a")).toEqual({
-      text: "hello",
-      skillInstructions: ["Reply as a tally card."],
+      text: "/tally-card hello",
     });
   });
 

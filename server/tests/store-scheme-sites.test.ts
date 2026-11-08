@@ -206,7 +206,7 @@ test("the probe refuses on Arcade rather than dialling Composio", async () => {
     probe: null,
     attempted: "GMAIL_GET_ME",
     sentence:
-      "This deployment brokers its apps through Arcade, and the only connection check this deployment knows how to make is Composio's. Nothing was asked about this connection, so nothing is recorded about it.",
+      "OpenBot can't check this kind of connection yet. Nothing was asked about it, so nothing is recorded about it.",
   });
 });
 
@@ -222,10 +222,7 @@ test("the probe on Composio still reaches the Composio transport", async () => {
 });
 
 /* (d) Both brokers' screen names are reserved, each refused in its own sentence. */
-for (const [id, vendor] of [
-  ["composio", "Composio"],
-  ["arcade", "Arcade"],
-] as const) {
+for (const id of ["composio", "arcade"] as const) {
   for (const provider of ["composio", "arcade"] as const) {
     test(`a ${provider} store refuses a server hand-typed as ${id}`, async () => {
       await expect(
@@ -237,7 +234,7 @@ for (const [id, vendor] of [
         }),
       ).rejects.toThrow(
         new CustomServerRefusedError(
-          `${id} is the name of this deployment's own ${vendor} screen, so a server added there could never be opened. Choose another.`,
+          `${id} is the name of one of OpenBot's own screens, so a server added there could never be opened. Choose another.`,
         ).message,
       );
       const [found] = await database
@@ -259,7 +256,7 @@ test("the brokered id-prefix refusal is untouched by the screen-name one", async
       by: "admin@example.com",
     }),
   ).rejects.toThrow(
-    "Names beginning arcade- belong to the Arcade apps this deployment enables",
+    "Names beginning arcade- are kept for the apps people connect through OpenBot",
   );
 });
 

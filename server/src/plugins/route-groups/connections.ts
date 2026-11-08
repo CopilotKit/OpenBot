@@ -38,9 +38,10 @@ import {
 } from "../store";
 import {
   type AuthorizationRefusal,
-  brokerRefusal,
+  forPerson,
   logReturnUrlRefusal,
   type PluginRouteContext,
+  personRefusal,
   STATUS_CALL_TIMEOUT_MS,
   sameAccount,
   settledStatus,
@@ -399,7 +400,7 @@ export function mountConnectionRoutes({
             }),
           );
         } catch (error) {
-          const refusal = brokerRefusal(
+          const refusal = personRefusal(
             error,
             `Couldn't find out what ${row.title} needs to connect. Try again, or ask an admin if it keeps happening.`,
           );
@@ -659,13 +660,14 @@ export function mountConnectionRoutes({
            * reason the skills route gives its own refusal one: it is something the person who made
            * the request can fix, and the message says what to fix.
            */
+          const generic = `Couldn't connect ${row.title} with what you entered. Try again, or ask an admin if it keeps happening.`;
           if (error instanceof PluginRefusedError) {
-            return context.json({ error: error.message }, 400);
+            return context.json(
+              { error: forPerson(error.message, generic) },
+              400,
+            );
           }
-          const refusal = brokerRefusal(
-            error,
-            `Couldn't connect ${row.title} with what you entered. Try again, or ask an admin if it keeps happening.`,
-          );
+          const refusal = personRefusal(error, generic);
           return context.json({ error: refusal.error }, refusal.status);
         }
       }
@@ -806,7 +808,7 @@ export function mountConnectionRoutes({
             pressed: "connect",
           });
         } catch (confirmFailure) {
-          const refusal = brokerRefusal(
+          const refusal = personRefusal(
             confirmFailure,
             `Couldn't check whether ${row.title} is already connected. Try again, or ask an admin if it keeps happening.`,
           );
@@ -874,7 +876,7 @@ export function mountConnectionRoutes({
       } catch (error) {
         // See `adoptHeld` above.
         if (error instanceof BrokerAccountHeldError) return adoptHeld();
-        const refusal = brokerRefusal(
+        const refusal = personRefusal(
           error,
           `Couldn't start connecting ${row.title}. Try again, or ask an admin if it keeps happening.`,
         );
@@ -1227,7 +1229,7 @@ export function mountConnectionRoutes({
          * no. So the page is told the ask failed, and what it goes on showing is the last answer
          * Composio gave rather than a guess about this one.
          */
-        const refusal = brokerRefusal(
+        const refusal = personRefusal(
           error,
           "Couldn't check whether this account is connected. This shows the last answer. Try again, or ask an admin if it keeps happening.",
         );
@@ -1307,18 +1309,20 @@ export function mountConnectionRoutes({
          * send them to an administrator about this deployment's key. 400 because it is theirs to
          * fix and the message says what to fix.
          */
+        const generic =
+          "Couldn't check whether this connection still works. This shows the last check. Press Re-check again, or ask an admin if it keeps happening.";
         if (error instanceof PluginRefusedError) {
-          return context.json({ error: error.message }, 400);
+          return context.json(
+            { error: forPerson(error.message, generic) },
+            400,
+          );
         }
         /*
          * And a failure this deployment cannot explain says what is on the screen instead of
          * guessing. Nothing was written on the way out of the store here, so the row still carries
          * the last answer anybody earned rather than a verdict invented by a call that failed.
          */
-        const refusal = brokerRefusal(
-          error,
-          "Couldn't check whether this connection still works. This shows the last check. Press Re-check again, or ask an admin if it keeps happening.",
-        );
+        const refusal = personRefusal(error, generic);
         return context.json({ error: refusal.error }, refusal.status);
       }
     },
@@ -1382,7 +1386,7 @@ export function mountConnectionRoutes({
        * one thing a person needs is the button to press, not this deployment's theory of where it
        * stopped.
        */
-      const refusal = brokerRefusal(
+      const refusal = personRefusal(
         error,
         "Couldn't disconnect this account. Press Disconnect again. It's safe to repeat. Ask an admin if it keeps happening.",
       );
@@ -1427,7 +1431,7 @@ export function mountConnectionRoutes({
           }),
         );
       } catch (error) {
-        const refusal = brokerRefusal(
+        const refusal = personRefusal(
           error,
           "Couldn't work out which other apps share this connection. Try again.",
         );
@@ -1460,7 +1464,7 @@ export function mountConnectionRoutes({
     serverId: string,
     returnTo: ConnectOrigin,
     refused: string,
-  ): { returnUrl: string } | { refusal: ReturnType<typeof brokerRefusal> } => {
+  ): { returnUrl: string } | { refusal: ReturnType<typeof personRefusal> } => {
     try {
       return {
         returnUrl: brokerReturnUrl(
@@ -1470,7 +1474,7 @@ export function mountConnectionRoutes({
       };
     } catch (error) {
       logReturnUrlRefusal(error, serverId);
-      return { refusal: brokerRefusal(error, refused) };
+      return { refusal: personRefusal(error, refused) };
     }
   };
 
@@ -1634,7 +1638,7 @@ export function mountConnectionRoutes({
           );
           freed = false;
         }
-        const refusal = brokerRefusal(
+        const refusal = personRefusal(
           error,
           "The app refused to start that authorization. Try again in a moment.",
         );

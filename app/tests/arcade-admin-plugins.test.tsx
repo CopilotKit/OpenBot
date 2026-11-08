@@ -13,74 +13,75 @@ import {
 import type { PluginsPage } from "@/lib/plugins/queries";
 
 /**
- * The admin Plugins screens carry the ACTIVE provider's vocabulary only (spec D11). Everything here
- * is a pure function, so nothing renders.
+ * The Plugins screens name no broker at all: a person, the admin included, connects apps through
+ * OpenBot. The only vendor word left is the ACTIVE provider's environment variable, where an admin
+ * has to set it. Everything here is a pure function, so nothing renders.
  */
 
 const page = (provider?: "composio" | "arcade") =>
   ({ provider }) as PluginsPage;
 
-test("an Arcade deployment names Arcade and carries nothing Composio-specific", () => {
-  const everything = JSON.stringify([
-    providerVocabulary("arcade"),
-    moreAppsRow("arcade", true),
-    moreAppsRow("arcade", false),
-    moreAppsSectionDescription("arcade"),
-    brokeredConnectionDescription("arcade"),
-    brokeredReach("arcade"),
-    brokeredDisconnectNote("arcade"),
+const everythingSaid = (provider: "composio" | "arcade") =>
+  JSON.stringify([
+    providerVocabulary(provider).directoryLabel,
+    providerVocabulary(provider).directoryDescription,
+    moreAppsRow(provider, true),
+    moreAppsRow(provider, false).title,
+    moreAppsSectionDescription(provider),
+    brokeredConnectionDescription(provider),
+    brokeredReach(provider),
+    brokeredDisconnectNote(provider),
   ]);
-  expect(everything).not.toMatch(/composio/i);
-  expect(providerVocabulary("arcade").envVar).toBe("ARCADE_API_KEY");
+
+test("no sentence names either broker", () => {
+  for (const provider of ["composio", "arcade"] as const) {
+    expect(everythingSaid(provider)).not.toMatch(/composio|arcade/i);
+  }
   expect(managePaths("team").brokerDirectory("arcade").to).toBe(
     "/admin/plugins/arcade",
   );
   expect(brokeredProvenance("arcade")).toBe(true);
 });
 
-test("a Composio deployment keeps today's exact wording", () => {
+test("a Composio deployment's words are OpenBot's", () => {
   expect(providerVocabulary("composio")).toEqual({
-    name: "Composio",
-    directoryLabel: "Browse Composio",
+    directoryLabel: "Browse apps",
     envVar: "COMPOSIO_API_KEY",
-    // Composio's configured-branch sentence, verbatim: it used to be a literal inside a
-    // `provider === "composio"` branch in `moreAppsRow`, and moving it here is what let that
-    // branch go.
     directoryDescription:
       "A few hundred apps. Each person connects their own account.",
   });
   expect(moreAppsSectionDescription("composio")).toBe(
-    "Apps from Composio. Nobody here has reviewed them.",
+    "More apps people can connect through OpenBot. Nobody here has reviewed them.",
   );
   expect(moreAppsRow("composio", true)).toEqual({
-    title: "Browse Composio",
+    title: "Browse apps",
     description: "A few hundred apps. Each person connects their own account.",
     linked: true,
   });
   expect(moreAppsRow("composio", false)).toEqual({
-    title: "Composio",
+    title: "Browse apps",
     description:
       "Not set up. Set COMPOSIO_API_KEY on this deployment to browse its apps.",
     linked: false,
   });
   expect(brokeredConnectionDescription("composio")).toBe(
-    "Reached through Composio, which holds each person's own account.",
+    "Each person connects their own account through OpenBot.",
   );
   expect(brokeredReach("composio")).toEqual({
     description:
-      "Composio holds the account. This deployment sends one key and who is asking. Each person connects their own, and a Bot sees only what that person can see. There is no token to paste.",
-    badge: "Through Composio",
+      "This deployment holds one key for every app like this. Each person connects their own account, and a Bot sees only what that person can see. There is no token to paste.",
+    badge: "Through OpenBot",
   });
   expect(brokeredDisconnectNote("composio")).toBe(
-    "Disconnecting also ends the account at Composio.",
+    "Disconnecting also removes OpenBot's access to your account.",
   );
 });
 
-test("the vocabulary follows the provider rather than being hard-coded", () => {
-  expect(moreAppsRow("arcade", false).title).toBe("Arcade");
+test("the variable an admin sets follows the provider rather than being hard-coded", () => {
   expect(moreAppsRow("arcade", false).description).toContain("ARCADE_API_KEY");
-  expect(brokeredReach("arcade").badge).toBe("Through Arcade");
-  expect(brokeredDisconnectNote("arcade")).toContain("Arcade");
+  expect(moreAppsRow("composio", false).description).toContain(
+    "COMPOSIO_API_KEY",
+  );
 });
 
 /*
@@ -91,7 +92,7 @@ test("the vocabulary follows the provider rather than being hard-coded", () => {
  */
 test("a configured deployment links to its own directory, whichever provider it is", () => {
   expect(moreAppsRow("arcade", true)).toEqual({
-    title: "Browse Arcade",
+    title: "Browse apps",
     // Arcade's own sentence: it claims no app count, because nobody here has counted Arcade's.
     description:
       "Apps nobody here has reviewed. Each person connects their own account.",

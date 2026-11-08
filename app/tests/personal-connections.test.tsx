@@ -315,7 +315,8 @@ test("with a broker set up, the last tile browses its directory of more apps", a
   composio = true;
   const { view } = draw("personal");
   const browse = await view.findByTestId("account-browse");
-  expect(within(browse).getByText("Browse Composio")).toBeTruthy();
+  expect(within(browse).getByText("Browse apps")).toBeTruthy();
+  expect(browse.textContent).not.toMatch(/composio/i);
   expect(browse.getAttribute("href")).toBe("/connections/browse/composio");
 });
 
