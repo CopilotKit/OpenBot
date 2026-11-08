@@ -47,13 +47,30 @@ The root `package.json` is the release version source. CI rejects drift in the d
 manifest or lockfile. The release workflow updates those files automatically; after a manual
 root version change, run `bun desktop/scripts/desktop-version.ts sync`.
 
-Internal desktop artifacts use `X.Y.Z-internal.<commits>.g<commit>`, for example
-`0.3.1-internal.730.g4400ba023e0c`, so testers can identify the source revision. `<commits>` is
-the number of commits in the build's history. Installers and the app compare versions by semver,
-which compares a number as a number and the hash as text, so the count is what orders a later
-build after an earlier one; without it, the Windows installer took a newer internal build for an
-older one. Counting needs the whole history, so the workflows that prepare this version check out
-with `fetch-depth: 0`, and `desktop-version.ts internal` refuses a shallow checkout.
+Internal desktop artifacts are numbered after the release the root `package.json` names, which is
+the last one published. After the release `X.Y.Z` they use `X.Y.(Z+1)-internal.<commits>.g<commit>`,
+for example `0.3.4-internal.863.gb5d03d1f4e43` after 0.3.3, so testers can identify the source
+revision. After a candidate or beta, `X.Y.Z-rc.N`, they use `X.Y.Z-rc.N.internal.<commits>.g<commit>`.
+
+The Windows installer and the app compare versions by
+[semver precedence](https://semver.org/#spec-item-11), with the same `semver` crate. A prerelease
+orders before its own release, so an internal build named `0.3.3-internal.…`, built after 0.3.3 was
+released, read as older than 0.3.3, and the installer said a newer version was already installed and
+chose **Uninstall before installing**. As a prerelease of the next patch, an internal build orders
+after the release it was built from and before the next release, whether that is `X.Y.(Z+1)` or a
+minor or major one, so the next release still installs over it as an upgrade. A candidate's internal
+build orders after `rc.N` and before `rc.(N+1)`. The release PR's own build is the one exception: its
+`package.json` already names the release it is about to publish, so its build is numbered after it.
+
+`<commits>` is the number of commits in the build's history. Semver compares a number as a number
+and the hash as text, so the count is what orders a later build after an earlier one; without it,
+the Windows installer took a newer internal build for an older one. Counting needs the whole history,
+so the workflows that prepare this version check out with `fetch-depth: 0`, and
+`desktop-version.ts internal` refuses a shallow checkout.
+
+The in-app updater never offers anything to an internal build, whatever the feed holds: an internal
+build can be made from any branch, so no release is sure to contain what it runs. A tester moves on by
+installing the next internal build, or a release, by hand.
 
 Both desktop CI and protected Windows signing prepare this version before compilation and
 packaging. A signing run on a release tag, and the release's own build, use the plain release
@@ -68,10 +85,14 @@ APPLE_SIGNING_IDENTITY=- bun run tauri build --config src-tauri/tauri.build-vers
 ```
 
 Use `release` instead of `internal` to prepare the plain release version. This only builds an
-artifact; it does not publish a release. macOS keeps numeric system version fields and stores
-the full internal identifier in `OpenBotBuildVersion` inside the app's `Info.plist`. Windows
-retains the full identifier in `ProductVersion` and `FileVersion`; its fixed numeric fields
-contain the release number. The protected signing job checks both embedded string versions.
+artifact; it does not publish a release. macOS keeps numeric system version fields
+(`CFBundleShortVersionString` and `CFBundleVersion`) and stores the full internal identifier in
+`OpenBotBuildVersion` inside the app's `Info.plist`. Windows retains the full identifier in
+`ProductVersion` and `FileVersion`; Tauri fills its fixed numeric fields from the same version's
+`major.minor.patch`, with `0` for the fourth part. Both platforms' numbers are the build version's
+`major.minor.patch`: `0.3.4` (Windows `0.3.4.0`) for an internal build after 0.3.3, the same as the
+0.3.4 release, so neither goes backwards from one build to the next. The protected signing job checks
+both embedded string versions.
 
 Ad-hoc signed Mac builds require the first-open exception described in
 [Apple's instructions](https://support.apple.com/en-us/102445). They are for internal testing
