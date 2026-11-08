@@ -4,6 +4,7 @@ import {
   auditActionWords,
   auditChangeWords,
   auditEventWords,
+  dataWords,
 } from "@openbot/shared/audit-words";
 import { isOpenBotActor } from "@openbot/shared/openbot-actor";
 import { connectorName, humanise } from "@openbot/shared/tool-name";
@@ -258,7 +259,13 @@ function subjectWords(event: AuditEvent): string | undefined {
   if (app !== undefined) return app;
   const payload = event.payload ?? {};
   const target = event.targetId;
-  if (event.targetType === "component" && target) return componentName(target);
+  if (event.targetType === "component" && target) {
+    // With the data it was given or read: "Activity report · your Bots' activity".
+    const functions = functionsOf(payload);
+    return functions
+      ? `${componentName(target)} · ${dataWords(functions)}`
+      : componentName(target);
+  }
   if (event.targetType === "skill" && target) return humanise(target);
   if (event.targetType === "credential") {
     if (typeof payload.server === "string")
@@ -269,6 +276,22 @@ function subjectWords(event: AuditEvent): string | undefined {
     return named.join(" · ");
   }
   return undefined;
+}
+
+/**
+ * The data functions a component row names: one it read or was refused (`function`), or every one
+ * OpenBot Personal gave it in one row (`functions`).
+ */
+function functionsOf(
+  payload: Record<string, unknown>,
+): readonly string[] | undefined {
+  if (typeof payload.function === "string") return [payload.function];
+  const functions = payload.functions;
+  return Array.isArray(functions) &&
+    functions.length > 0 &&
+    functions.every((name) => typeof name === "string")
+    ? functions
+    : undefined;
 }
 
 /** A component by its name in the Components gallery, or its stored name in words. */
@@ -299,10 +322,12 @@ export function subjectText(event: AuditEvent, storedNames = true): string {
     const refs = refsOf(event);
     if (refs) return refs.join(", ");
   }
-  if (NAMED_TARGETS.has(event.targetType) && event.targetId)
-    return typeof payload.function === "string"
-      ? `${event.targetId} · ${payload.function}`
+  if (NAMED_TARGETS.has(event.targetType) && event.targetId) {
+    const functions = functionsOf(payload);
+    return functions
+      ? `${event.targetId} · ${functions.join(", ")}`
       : event.targetId;
+  }
   if (typeof payload.file === "string") return payload.file;
   if (typeof payload.command === "string") return payload.command;
   const folders = foldersOf(payload);
@@ -358,6 +383,12 @@ export function botIdOf(event: AuditEvent): string | null {
     typeof event.payload?.botId === "string"
   )
     return event.payload.botId;
+  // A routine is its Bot's, whether the Bot or a person made it.
+  if (
+    event.targetType === "routine" &&
+    typeof event.payload?.agentId === "string"
+  )
+    return event.payload.agentId;
   return event.targetType === "agent" && event.targetId ? event.targetId : null;
 }
 

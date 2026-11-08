@@ -109,6 +109,7 @@ export const COMPUTER_ACTION_EVENT_TYPES = [
  * action once. Shared with the server, whose Activity report counts what this page shows.
  */
 export {
+  CALLS_RECORDED_AS_CHANGES,
   OPENBOT_WORKING_EVENT_TYPES,
   oneRowPerAction,
 } from "@openbot/shared/activity-rows";

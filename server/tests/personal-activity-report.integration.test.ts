@@ -102,7 +102,7 @@ async function rows(eventType: string) {
     )
     .orderBy(auditEvents.createdAt);
   return found.map((row) => ({
-    function: (row.payload as Record<string, unknown>).function,
+    functions: (row.payload as Record<string, unknown>).functions,
     initiatorKind: row.initiatorKind,
   }));
 }
@@ -155,11 +155,27 @@ describe("the Activity report in OpenBot Personal", () => {
       actions: 400,
     });
 
-    // Given by OpenBot, once, whatever page loads follow.
+    /*
+     * Given by OpenBot, once, whatever page loads follow, in one row naming both. Seen on Windows: a
+     * row per function drew two identical "Let a component read data / Activity report" rows.
+     */
     await pageLoad();
     expect(await rows("component.function_granted")).toEqual([
-      { function: "botActivity", initiatorKind: "deployment" },
-      { function: "recentRefusals", initiatorKind: "deployment" },
+      {
+        functions: ["botActivity", "recentRefusals"],
+        initiatorKind: "deployment",
+      },
+    ]);
+  });
+
+  test("two page loads announcing at once give the data once, in one row", async () => {
+    setEdition("personal");
+    await Promise.all([pageLoad(), pageLoad(), pageLoad()]);
+    expect(await rows("component.function_granted")).toEqual([
+      {
+        functions: ["botActivity", "recentRefusals"],
+        initiatorKind: "deployment",
+      },
     ]);
   });
 

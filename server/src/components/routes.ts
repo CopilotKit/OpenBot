@@ -192,20 +192,27 @@ export function createComponentRoutes(
      */
     if (currentEdition() === "personal") {
       for (const { name } of valid) {
-        for (const functionName of COMPONENT_DATA_FUNCTIONS.get(name) ?? []) {
-          if (await store.mayCall(name, functionName)) continue;
-          await store.grantFunction(name, functionName, PERSONAL_GRANTED_BY);
+        const given = await store.grantFunctions(
+          name,
+          COMPONENT_DATA_FUNCTIONS.get(name) ?? [],
+          PERSONAL_GRANTED_BY,
+        );
+        /*
+         * One row per component naming everything it was given, as giving a Bot an app's tools does.
+         * A row per function drew two identical "Let a component read data / Activity report" rows.
+         * One statement gives them all, so two page loads announcing at once write one row, not two.
+         */
+        if (given.length > 0)
           await audit(
             context,
             "component.function_granted",
             name,
             {
-              function: functionName,
+              functions: given,
               note: "Given by OpenBot Personal, where everything it reads is yours.",
             },
             DEPLOYMENT_INITIATOR,
           );
-        }
       }
     }
     return context.json({ added });
