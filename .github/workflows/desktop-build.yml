@@ -234,7 +234,7 @@ jobs:
           app = pathlib.Path(os.environ['OPENBOT_VERIFY_APP'])
           info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
           # A prerelease version keeps numeric Apple fields: only its major.minor.patch goes there.
-          apple = build['releaseVersion'].split('-')[0]
+          apple = build['version'].split('-')[0]
           for key, expected in {
               'CFBundleShortVersionString': apple,
               'CFBundleVersion': apple,
