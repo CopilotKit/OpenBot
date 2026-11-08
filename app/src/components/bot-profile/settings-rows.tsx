@@ -34,7 +34,10 @@ import type { AgentProfile } from "@/lib/agents/queries";
 import { approvalInboxOptions, ruleCoversBot } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deliveryQueryOptions } from "@/lib/delivery";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import {
+  deploymentCapabilitiesQueryOptions,
+  useOffersMemory,
+} from "@/lib/deployment/queries";
 import { memorySourcesQueryOptions } from "@/lib/memory";
 import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
@@ -72,13 +75,14 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
   // The personal edition has one person and nobody to share with.
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  const memory = useOffersMemory();
   const canShare =
     !personal &&
     (agent.mine || me?.role === "admin" || published !== undefined);
 
   const goals = useQuery(responsibilitiesQueryOptions());
   const reach = useQuery(deliveryQueryOptions());
-  const sources = useQuery(memorySourcesQueryOptions());
+  const sources = useQuery({ ...memorySourcesQueryOptions(), enabled: memory });
   const research = useQuery(proactiveSettingsQueryOptions());
   const approvals = useQuery(approvalInboxOptions());
 
@@ -112,21 +116,27 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
           )
         : "",
     },
-    {
-      to: "/bots/$agentId/memory",
-      title: "Memory",
-      icon: IconBrain,
-      summary:
-        sources.data && research.data
-          ? memorySummary(
-              sources.data.filter((source) => source.agentId === agent.id)
-                .length,
-              research.data.some(
-                (setting) => setting.agentId === agent.id && setting.enabled,
-              ),
-            )
-          : "",
-    },
+    // Not where memory isn't offered: there this Bot's check-ins are on What it can do.
+    ...(memory
+      ? [
+          {
+            to: "/bots/$agentId/memory" as const,
+            title: "Memory",
+            icon: IconBrain,
+            summary:
+              sources.data && research.data
+                ? memorySummary(
+                    sources.data.filter((source) => source.agentId === agent.id)
+                      .length,
+                    research.data.some(
+                      (setting) =>
+                        setting.agentId === agent.id && setting.enabled,
+                    ),
+                  )
+                : "",
+          },
+        ]
+      : []),
     {
       to: "/bots/$agentId/approvals",
       title: "Approval rules",
@@ -188,9 +198,10 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
     },
   ];
   /*
-   * FOUR ROWS IN THE PERSONAL EDITION. Approval rules and Responsibilities are sections of the
-   * access page there, renamed What it can do, so one page answers what a Bot can do. Reaching you
-   * is Slack, Teams and text, which the personal edition doesn't have.
+   * THREE ROWS IN THE PERSONAL EDITION. Approval rules, Responsibilities and check-ins are sections
+   * of the access page there, renamed What it can do, so one page answers what a Bot can do. Reaching
+   * you is Slack, Teams and text, and Memory is what its local Intelligence isn't licensed for: the
+   * personal edition has neither.
    */
   const rows = personal
     ? allRows.flatMap((row): Row[] =>

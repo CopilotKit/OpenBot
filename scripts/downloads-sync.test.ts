@@ -4,7 +4,7 @@
  * pretend `gh` and `aws` (scripts/downloads-fakes.ts). The website links to this address, so it
  * must only ever serve signed installers, and change only when a stable release becomes Latest.
  */
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -18,6 +18,11 @@ import { type FakeRepo, fakeRepo, feedFor, runScript } from "./release-fakes";
 const root = join(import.meta.dir, "..");
 const sync = join(root, "scripts/downloads-sync.sh");
 const makeLatest = join(root, "scripts/release-make-latest.sh");
+
+// Each sync is a real bash run that starts a few hundred short processes (jq, openssl, awk and the
+// fakes). On the macOS runner that is about 2.4 seconds a sync, and most tests here sync twice, so
+// the 5-second default timed out the ones that did. Nothing in a sync waits on a timer or a network.
+setDefaultTimeout(15_000);
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {

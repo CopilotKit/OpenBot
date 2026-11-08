@@ -20,11 +20,7 @@ const NAMES: [string, "bots" | "back-end", string][] = [
   ["openbot-agent-langgraph-1", "bots", "Bot"],
   ["openbot-spire-server-1", "bots", "Other part"],
   ["something-new-1", "bots", "Other part"],
-  [
-    "k3d-local-abc123-server-0",
-    "back-end",
-    "Conversations, memory and learning",
-  ],
+  ["k3d-local-abc123-server-0", "back-end", "Conversations and learning"],
   ["k3d-local-abc123-tools", "back-end", "Other part"],
 ];
 

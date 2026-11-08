@@ -145,3 +145,31 @@ test("in a folded run, a folder step declined on the card is Blocked, named for 
   });
   expect(stepDetails(item).output).toBe("You declined it.");
 });
+
+/*
+ * FOUND ON THE MAC: an opened folder step in a folded run listed its raw arguments, the grant's
+ * internal id first ("grantId  host-grant-74138-1794115092137885000"). What a person reads leaves
+ * it out; the path and the content stay.
+ */
+test("an opened folder step never lists the grant's internal id", () => {
+  const item: Extract<VisibleChatItem, { kind: "tool" }> = {
+    kind: "tool",
+    id: "s",
+    toolCall: {
+      id: "s",
+      type: "function",
+      function: {
+        name: "host_write_file",
+        arguments: JSON.stringify({
+          grantId: "host-grant-74138-1794115092137885000",
+          path: "notes.txt",
+          content: "FOLDER-EDITED-45",
+        }),
+      },
+    },
+    result: JSON.stringify({ ok: true }),
+  };
+  const { inputs } = stepDetails(item);
+  expect(inputs.map(([key]) => key)).toEqual(["path", "content"]);
+  expect(JSON.stringify(inputs)).not.toContain("host-grant");
+});

@@ -85,6 +85,14 @@ async function askRecorderHere(
 
 /** Record, from OpenBot, in the browser it is open in: the Recorder starts on this tab and follows every tab the person
  * uses. Then the Recorder is asked again, so the red dot and the popover read what it is doing now. */
+/** A recording that starts or stops changes the list of recordings (a new "Still sending" row, a final state). */
+function invalidateRecorderHere(queryClient: QueryClient) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: recorderKeys.here() }),
+    queryClient.invalidateQueries({ queryKey: recorderKeys.recordings() }),
+  ]);
+}
+
 export function recordHereMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (variables: { id: string; title: string; narrate?: boolean }) =>
@@ -96,8 +104,7 @@ export function recordHereMutationOptions(queryClient: QueryClient) {
           ? { narrate: variables.narrate }
           : {}),
       }),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: recorderKeys.here() }),
+    onSuccess: () => invalidateRecorderHere(queryClient),
   });
 }
 
@@ -105,7 +112,6 @@ export function stopHereMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (id: string) =>
       askRecorderHere(id, { type: RECORDER_PAGE_MESSAGES.stop }),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: recorderKeys.here() }),
+    onSuccess: () => invalidateRecorderHere(queryClient),
   });
 }

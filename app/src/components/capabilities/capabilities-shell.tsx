@@ -62,8 +62,9 @@ export function CapabilitiesShell({ children }: { children: React.ReactNode }) {
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   /*
-   * The personal edition has no Capabilities page: Skills and Memory open from the Bots page, so
-   * each is titled for itself and goes back there, with no tabs to a page that isn't in the menu.
+   * The personal edition has no Capabilities page: Skills opens from the Bots page, so it is titled
+   * for itself and goes back there, with no tabs to a page that isn't in the menu. It has no Memory
+   * either; that route sends it to the Bots page before this draws (see `offersMemory`).
    */
   if (personal) {
     const tab =

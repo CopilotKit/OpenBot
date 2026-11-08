@@ -356,11 +356,25 @@ function inputValue(value: unknown): string {
   return text.length > 200 ? `${text.slice(0, 199)}…` : text;
 }
 
+/**
+ * The arguments a step lists when it is opened, as a person reads them.
+ *
+ * A folder step's `grantId` is the id OpenBot gave the folder grant ("host-grant-74138-…"), written
+ * for the model; the line already names the file, and Settings > Computer the folder. Listed, an
+ * opened "Save a file" read "grantId  host-grant-74138-1794115092137885000" above the file's path.
+ */
+function readableInputs(
+  name: string,
+  args: Record<string, unknown>,
+): [string, string][] {
+  return Object.entries(args)
+    .filter(([key]) => !(name.startsWith("host_") && key === "grantId"))
+    .map(([key, value]) => [key, inputValue(value)] as [string, string]);
+}
+
 export function stepDetails(step: ToolItem): StepDetails {
   const args = objectOf(step.toolCall.function.arguments);
-  const inputs = Object.entries(args).map(
-    ([key, value]) => [key, inputValue(value)] as [string, string],
-  );
+  const inputs = readableInputs(step.toolCall.function.name, args);
   if (isBrowserStep(step)) {
     const browser = browserStepDetails(step);
     return {
