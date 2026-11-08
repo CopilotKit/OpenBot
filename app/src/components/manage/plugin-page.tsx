@@ -475,6 +475,13 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
      */
     checkable: accountRow?.checkable ?? false,
   });
+  /*
+   * The app the brokered sentences name in the personal edition, where the one person reading is
+   * spoken to as "you". Undefined in the team edition, whose sentences are about each person.
+   */
+  const brokeredApp = personal
+    ? { title, kind: brokeredAccount.kind }
+    : undefined;
 
   /** Adding is two writes when a token was typed: the credential, then the record pointing at it. */
   const add = async () => {
@@ -820,16 +827,21 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
       {server ? (
         <PageSection
           description={
+            /* The personal edition has one person, so each sentence speaks to them and names nobody else. */
             auth === "user-oauth"
-              ? `This vendor answers as whoever is asking. ${personal ? "OpenBot" : "The deployment"} registers an OAuth client, and each person connects their own account. A Bot only sees what that person can see.`
+              ? personal
+                ? `Connect your ${title} account through OpenBot. OpenBot registers an OAuth client, and your Bots see only what you can see.`
+                : "This vendor answers as whoever is asking. The deployment registers an OAuth client, and each person connects their own account. A Bot only sees what that person can see."
               : auth === "builtin"
-                ? `Built into ${paths.deploymentName}. There is no vendor to reach and no credential to keep. A call runs as whoever asked.`
+                ? `Built into ${paths.deploymentName}. There is no vendor to reach and no credential to keep. ${personal ? "A call runs as you." : "A call runs as whoever asked."}`
                 : auth === "brokered"
                   ? /* The row below says how, at length. This says whose account it is, which is the part that decides what an admin has to do here — which is nothing. */
-                    brokeredConnectionDescription(provider)
+                    brokeredConnectionDescription(provider, brokeredApp)
                   : auth === "person-entra"
                     ? "This server answers as whoever is asking. Each call carries a token Microsoft Entra issues for that person, so a Bot only sees what they can see."
-                    : `What ${paths.deploymentName} sends to the vendor. One credential for everybody.`
+                    : personal
+                      ? `What OpenBot sends to ${title}. Your Bots all use it.`
+                      : `What ${paths.deploymentName} sends to the vendor. One credential for everybody.`
           }
           title="Connection"
         >
@@ -888,12 +900,12 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                 <ItemContent>
                   <ItemTitle>How this is reached</ItemTitle>
                   <ItemDescription>
-                    {brokeredReach(provider, paths.deploymentName).description}
+                    {brokeredReach(provider, brokeredApp).description}
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
                   <span className="text-muted-foreground text-xs">
-                    {brokeredReach(provider, paths.deploymentName).badge}
+                    {brokeredReach(provider, brokeredApp).badge}
                   </span>
                 </ItemActions>
               </Item>
@@ -1043,7 +1055,7 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                 ) : shared ? (
                   <BrokeredAccountRow
                     account={brokeredAccount}
-                    deployment={paths.deploymentName}
+                    edition={paths.edition}
                     connectedDescription={`Connected${sharedConnection?.displayName ? ` as ${sharedConnection.displayName}` : ""}${sharedConnection?.connectedBy ? ` by ${sharedConnection.connectedBy}` : ""}. Every Bot with these tools acts as this account.`}
                     disconnectedDescription="No team account is connected. Bots with these tools are refused."
                     heading="Team account"
@@ -1054,11 +1066,16 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                 ) : (
                   <BrokeredAccountRow
                     account={brokeredAccount}
-                    deployment={paths.deploymentName}
+                    edition={paths.edition}
                     /* Said beside the button rather than after it: disconnecting ends the account
                        at Composio, so what it undoes is not the row here but the grant on this
-                       person's mailbox, and connecting again is a fresh consent. */
-                    connectedDescription={`Connected. A Bot with these tools uses your ${title} as you. ${brokeredDisconnectNote(provider)}`}
+                       person's mailbox, and connecting again is a fresh consent. Every Bot has
+                       every tool in the personal edition, as the OAuth row below says. */
+                    connectedDescription={
+                      personal
+                        ? `Connected. Your Bots use your ${title} as you. ${brokeredDisconnectNote(provider)}`
+                        : `Connected. A Bot with these tools uses your ${title} as you. ${brokeredDisconnectNote(provider)}`
+                    }
                     /* One person: connecting is what lets their Bots use it, as the OAuth row
                        below says, and there is no setup it could be beside. */
                     disconnectedDescription={
@@ -1207,8 +1224,9 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
               )}
               {!plugins.data?.redirectUri ? (
                 <p className="mt-3 text-destructive text-sm" role="alert">
-                  {atStart(paths.deploymentName)} has no public URL, so nobody
-                  can finish connecting. Set OPENBOT_PUBLIC_URL.
+                  {atStart(paths.deploymentName)} has no public URL, so{" "}
+                  {personal ? "you can't" : "nobody can"} finish connecting. Set
+                  OPENBOT_PUBLIC_URL.
                 </p>
               ) : server?.dynamicClient ? null : (
                 /* Selectable and monospaced: it is copied by hand into somebody else's console. */
