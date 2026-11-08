@@ -177,8 +177,11 @@ jobs:
             OPENBOT_BUILD_DISTRIBUTION_ID=${{ env.OPENBOT_DISTRIBUTION_ID }}
             OPENBOT_BUILD_REPOSITORY=${{ github.repository }}
             OPENBOT_BUILD_CHANNEL=${{ env.OPENBOT_RELEASE_CHANNEL }}
+          # The cache only ever saves time, so it never fails a build. A cache that cannot be read
+          # is a miss: BuildKit logs the import error and builds every layer. One that cannot be
+          # written fails the build unless `ignore-error=true` says to warn and carry on.
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
           provenance: true
           sbom: true
       # BuildKit's own attestations above travel inside the image. This one is the record GitHub
@@ -263,7 +266,7 @@ jobs:
           # Scoped per image and per architecture. One shared scope would have ten builds
           # overwriting each other's cache and none of them reading their own.
           cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.platform.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,ignore-error=true,scope=${{ matrix.image }}-${{ matrix.platform.arch }}
           provenance: true
           sbom: true
       # A matrix job's outputs are not addressable by the jobs that consume them, so the digest
