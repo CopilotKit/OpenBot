@@ -3,15 +3,18 @@
  *
  * OpenBot's mark is an iridescent glass orb, so the frame around the page takes its colours: a soft wash of the orb's
  * cyan, lilac and pink behind everything, the sidebar as a frosted panel floating on it, and the page as a crisp sheet
- * beside it. Glass is kept to what floats (the sidebar here; the Bot's status over its screen and menus elsewhere): the
- * page and the cards on it stay solid, so text is never read through a blur.
+ * beside it. Glass is kept to the sidebar, over a wash that holds still: the page, the cards on it and what floats over
+ * it stay solid, so text is never read through a blur and no blur is redrawn as a live screen or a conversation moves
+ * behind it.
  *
  * NOT A THEME TOKEN. The default look is theme.css's shadcn tokens, and everything here is drawn from them (the frame
  * is `--sidebar`, the glass is `--card` let through), except the wash itself, which is the orb's own colours: OpenBot's
  * mark rather than a palette a deployment picks. A deployment with its own palette removes the import in styles.css
  * and gets the solid frame theme.css draws. The app's stylesheet only: the Recorder extension imports theme.css alone.
  *
- * OpenBot's own look only (a skin draws its own frame), and off where the person asked for less transparency.
+ * OpenBot's own look only (a skin draws its own frame), and off where the person asked for less transparency. WebKit
+ * (Safari, and OpenBot Desktop's window on a Mac) can't tell that setting, so more contrast turns it off too: macOS
+ * turns transparency down whenever Increase contrast is on, and WebKit does tell that one.
  */
 
 :root:not([data-skin])
@@ -91,7 +94,7 @@
   box-shadow: var(--frame-sheet-shadow);
 }
 
-@media (prefers-reduced-transparency: reduce) {
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   :root:not([data-skin])
     [data-slot="sidebar-wrapper"]:has(> [data-variant="inset"]) {
     background: var(--sidebar);

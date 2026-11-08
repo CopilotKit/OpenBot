@@ -767,7 +767,7 @@ export function ComputerView({
           </figcaption>
         ) : null}
         {/*
-          The picture, and over its foot, while the Bot holds the wheel, a frosted status with Take control: the one
+          The picture, and over its foot, while the Bot holds the wheel, a status with Take control: the one
           thing a person watching may want to do, on the thing they are watching. A sibling of the picture's button
           rather than inside it, because a control cannot sit inside another control.
         */}
@@ -791,7 +791,7 @@ export function ComputerView({
 
             {/* Whose hands are on it, said on the picture itself. Whose computer it is, the frame above says. */}
             {wheelHere ? (
-              <span className="absolute right-2 bottom-2 rounded-full bg-white/85 px-2.5 py-1 font-medium text-black text-xs shadow-sm backdrop-blur-sm">
+              <span className="absolute right-2 bottom-2 rounded-full border bg-popover px-2.5 py-1 font-medium text-popover-foreground text-xs shadow-sm">
                 You have control
               </span>
             ) : null}
@@ -808,7 +808,11 @@ export function ComputerView({
             )}
           </button>
           {!settled && !(driving && !control?.transitioning) ? (
-            <div className="absolute inset-x-2 bottom-2 flex items-center justify-between gap-2 rounded-xl border border-white/60 bg-white/75 py-1.5 pr-1.5 pl-3 shadow-lg backdrop-blur-md dark:border-white/10 dark:bg-black/55">
+            // Solid, not frosted: a blur over a screen that keeps changing is redrawn with every frame of it.
+            <div
+              className="absolute inset-x-2 bottom-2 flex items-center justify-between gap-2 rounded-xl border bg-popover py-1.5 pr-1.5 pl-3 text-popover-foreground shadow-lg"
+              data-slot="control-strip"
+            >
               <span className="flex min-w-0 items-center gap-2 text-xs @sm:text-sm">
                 {control && !control.transitioning && !someoneElse ? (
                   <span className="hidden shrink-0 @sm:flex">
@@ -980,8 +984,7 @@ export function ComputerView({
                 onClick={() => !wheelHere && setExpanded(false)}
                 aria-hidden
                 tabIndex={-1}
-                // Frosted rather than blacked out: the conversation stays faintly there behind the Bot's window.
-                className={`fixed inset-0 bg-black/35 backdrop-blur-md dark:bg-black/55 ${wheelHere ? "cursor-default" : "cursor-zoom-out"}`}
+                className={`fixed inset-0 bg-black/80 ${wheelHere ? "cursor-default" : "cursor-zoom-out"}`}
               />
               {/*
                 A card holding the screen, with who and the wheel beneath it. A turn that is over is
