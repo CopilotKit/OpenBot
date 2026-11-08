@@ -79,6 +79,7 @@ import {
   botSharedAppsQueryOptions,
   describeApproval,
 } from "@/lib/plugins/shared-use";
+import { toolInWords } from "@/lib/plugins/tool-words";
 
 /**
  * One vendor: what it needs from this deployment, and which Bots hold its tools.
@@ -140,6 +141,26 @@ function BotApprovalText({
     <span className="text-muted-foreground text-xs">
       {app.approval ? describeApproval(app.approval) : "Not approved"}
     </span>
+  );
+}
+
+/**
+ * One tool's row content in the personal edition: its words, as Activity names the same tool, and
+ * the first sentence of what it does. Admin keeps the stored name. See `toolInWords`.
+ */
+function ToolInWords({
+  serverId,
+  tool,
+}: {
+  serverId: string;
+  tool: { name: string; description: string };
+}) {
+  const { label, summary } = toolInWords(serverId, tool);
+  return (
+    <>
+      <ItemTitle>{label}</ItemTitle>
+      {summary ? <ItemDescription>{summary}</ItemDescription> : null}
+    </>
   );
 }
 
@@ -395,8 +416,9 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
 
   /* Bound once because the brokered row below is told it twice — once inside the whole
      disconnected sentence and once on its own — and two copies of it would drift. */
-  const reassurance =
-    "Setup is complete without it, and it reaches your documents only.";
+  /* It names this app's own account. It said "your documents" on every app, Gmail included,
+     because it was written for Google Drive. */
+  const reassurance = `Setup is complete without it, and it reaches only your own ${title} account.`;
 
   /*
    * A SHARED APP'S ROW IS THE TEAM ACCOUNT, NOT THIS ADMINISTRATOR'S.
@@ -1037,13 +1059,19 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                        at Composio, so what it undoes is not the row here but the grant on this
                        person's mailbox, and connecting again is a fresh consent. */
                     connectedDescription={`Connected. A Bot with these tools uses your ${title} as you. ${brokeredDisconnectNote(provider)}`}
-                    disconnectedDescription={`Connect your own account to try this connector. ${reassurance}`}
+                    /* One person: connecting is what lets their Bots use it, as the OAuth row
+                       below says, and there is no setup it could be beside. */
+                    disconnectedDescription={
+                      personal
+                        ? `Connect your ${title} account so your Bots can use it.`
+                        : `Connect your own account to try this connector. ${reassurance}`
+                    }
                     /* The half of the line above that is true whichever way this app connects.
                        An app whose key somebody types gets a different first sentence from the
                        row — pressing Connect opens a form rather than leaving for a consent
                        screen — and an administrator still has to be told they are not the step
                        that finishes the connector. */
-                    disconnectedReassurance={reassurance}
+                    disconnectedReassurance={personal ? undefined : reassurance}
                     provider={provider}
                     title={title}
                   />
@@ -1068,7 +1096,7 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                             : `Connect your ${title} account so your Bots can use it.`
                           : youConnected
                             ? `Connected. A Bot with these tools uses your ${title} as you. Everybody else connects their own.`
-                            : "Connect your own account to try this connector. Setup is complete without it, and it reaches your documents only."}
+                            : `Connect your own account to try this connector. ${reassurance}`}
                       </ItemDescription>
                     </ItemContent>
                     <ItemActions>
@@ -1240,7 +1268,10 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
           }
           title="Tools"
         >
-          <SkippedToolsNotice names={server.skippedTools ?? []} />
+          <SkippedToolsNotice
+            names={server.skippedTools ?? []}
+            serverId={personal ? key : undefined}
+          />
           {server.tools.length === 0 ? (
             <PageEmpty icon={IconTool} title="No tools listed">
               {server.lastError ?? "Refresh tools to check again."}
@@ -1260,10 +1291,16 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                     size="sm"
                   >
                     <ItemContent>
-                      <ItemTitle className="font-mono text-xs">
-                        {tool.name}
-                      </ItemTitle>
-                      <ItemDescription>{tool.description}</ItemDescription>
+                      {personal ? (
+                        <ToolInWords serverId={key} tool={tool} />
+                      ) : (
+                        <>
+                          <ItemTitle className="font-mono text-xs">
+                            {tool.name}
+                          </ItemTitle>
+                          <ItemDescription>{tool.description}</ItemDescription>
+                        </>
+                      )}
                     </ItemContent>
                     <ItemActions>
                       {/*

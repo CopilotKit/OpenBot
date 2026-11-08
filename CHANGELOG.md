@@ -8,6 +8,38 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A skill picked from the `/` menu works for a built-in Bot on a Claude plan. The Bot answered
+  "Unknown command: /tide-report" without asking the model, because Claude Code took the message,
+  which starts with the skill's command, for a slash command of its own.
+- In the personal edition, the sentence under each tool on an app's page reads as a person would say it: no leading "Tool to", no words in capitals ("Permanently deletes", not "Permanently DELETES"), and no "by its ID" where the tool finds a thing by an ID nobody has to hand.
+- In the personal edition, an app's page names each tool in words, as Activity does ("Add label to email", not GMAIL_ADD_LABEL_TO_EMAIL), with the first sentence of what it does, and says "Connect your Gmail account so your Bots can use it" instead of a sentence about your documents; team Admin names the app's own account there too.
+- In a new conversation with two or more Bots in To:, typing @ before the first message lists those Bots, and a first message addressed to one goes to that Bot only. Before, @ said "No Bots in this conversation" until something had been sent.
+- In OpenBot Personal, a Bot's "What it can do" lists every skill you wrote on Settings, Skills under Your skills, with its switch. They were stored as nobody's, so the section read "No skills yet"; skills written before this become yours the next time OpenBot starts.
+- In the personal edition, Settings, Setup no longer mentions memory or an admin: the Back end row reads "Keeps your conversations and skills", More apps compares with the apps OpenBot comes with, and its links name Keys and Computer.
+- Settings, Computer lists the Teach a Bot browser as your OpenBot browser, with Clear browser data, not as "A Bot no longer here"; Admin, Computers names whose OpenBot browser each one is.
+- Onboarding's Welcome says what always asks (deleting, sending, sharing, posting) above the approvals switch, which is now "Always ask before making changes" there and in Settings, Approvals, with the same words in both.
+- A conversation shows the Bot is still working through a run of tool calls: the step still running
+  shimmers like the line above it, and once every step has its answer "Thinking" shows under them
+  until the reply starts. Before, a run of finished steps sat still and read as a Bot that had died.
+- OpenBot Desktop updates and sets up its local back end on a slow connection. Before the back
+  end's update (a new one, or the next Start's retry of one that did not finish) or a setup that
+  resumes, it downloads the back end's images itself, one at a time and with no fixed time limit,
+  and the row says how much has arrived ("Downloading the back end update: 48 of 147 MB"). A
+  download stops only after three minutes with no new bytes, and Retry, or the next Start,
+  continues where it left off.
+- OpenBot Desktop opens OpenBot when an update to its local back end does not finish. A back end
+  whose update stopped (on a slow connection, at the image download) still runs the release it had,
+  with every check passing; the window said it was not healthy and stopped OpenBot. It now says
+  which release the back end runs and that the update did not finish, and the person opens OpenBot
+  from there. The next Start tries the update again, including after Quit, where the back end used
+  to refuse to start until the update was resumed by hand. A back end whose checks fail is still
+  not healthy.
+- Windows lists OpenBot Desktop's publisher as CopilotKit in Settings > Apps and in Programs and
+  Features, where it said "copilotkit".
+- OpenBot Personal's Settings, Browsers says recordings go to your own Learning space, with no organization.
+- OpenBot Personal's New Bot sheet lists every app the new Bot gets, not only Routines.
+- A Bot's question in a conversation with several Bots now waits in that conversation and is answered there, as in a conversation with one Bot.
+- Teach a Bot: narration that can't hear you (no microphone) stays off after Stop until you turn it on, and "We're capturing your voice" shows only while a recording is hearing you.
 - Work apps are connected through OpenBot. Connections, an app's page, the app directory, chat
   connect cards and admin Plugins no longer name the connector provider ("Browse Composio" is now
   "Browse apps"). Admin pages still name the setting an admin sets, such as `COMPOSIO_API_KEY`.
@@ -17,6 +49,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   that settings carried over from a team deployment left out is taken back in at the next start (or
   its first run), with one audit row naming the Bots. Every Bot still gets every skill once, and a
   skill switched off for one Bot stays off. The team edition is unchanged.
+- A Bot's "What it can do" (Skills and access) page draws each of your skills' switches from the
+  Bot's own grants. A Bot made a moment ago in OpenBot Personal is given every skill the first time
+  it is listed, and its switches showed off until the page was opened again.
+- Skills learned from a person's recordings can be reviewed in OpenBot. An admin chooses who approves
+  them under Admin → Automatic learning: admins, or each person for their own Bots, and a skill a
+  person approves reaches only their own Bots until an admin approves sharing it. Settings → Learning
+  shows what is waiting for review, and Teach a Bot lists your recordings, which needs the back end
+  at 0.16 with recordings switched on. In the personal edition, Settings → Learning is now there, and
+  it approves new skills automatically until you turn that off. See [Automatic Learning](docs/automatic-learning.md#reviewing-learned-skills).
+- A recording the Recorder cannot send yet no longer reads "Saving" on Teach a Bot for the half hour it
+  retries: the page says it wasn't saved yet, and why. Your recordings are listed by when you made them,
+  and one the Recorder sends later shows up in the list when it lands, without leaving the page.
 
 ## 0.3.3
 

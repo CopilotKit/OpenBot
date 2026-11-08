@@ -26,6 +26,7 @@ import { BrowserSections } from "@/components/settings/browsers/browser-sections
 import { ConnectedBrowsers } from "@/components/settings/browsers/connected-browsers";
 import { ThisBrowser } from "@/components/settings/browsers/this-browser";
 import { Toaster } from "@/components/ui/toast";
+import { deploymentKeys } from "@/lib/deployment/queries";
 import { CONNECTIONS_POLL_MS } from "@/lib/recorder/queries";
 import { queryClient } from "@/query-client";
 import { setBrowserBrands } from "./recorder-page.fixture";
@@ -644,6 +645,43 @@ test("Settings, Browsers says everything the Recorder collects before the first 
     view.getByText(/the request it sent and the answer that came back/),
   ).toBeTruthy();
   expect(view.getByText(/including the messages you send/)).toBeTruthy();
+});
+
+/** Settings, Browsers as the given edition draws it, once This browser has offered Connect. */
+async function browsersPage(edition: "team" | "personal") {
+  recorder = {
+    ping: { ok: true },
+    connect: { ok: true, installId: THIS_COPY, awaitingConfirmation: true },
+  };
+  queryClient.setQueryData(deploymentKeys.capabilities(), { edition });
+  const view = draw(<BrowserSections />);
+  await view.findByRole("button", { name: "Connect this browser" });
+  return view;
+}
+
+test("in the personal edition Settings, Browsers says a recording goes to your own Learning space, with no organization in it", async () => {
+  const view = await browsersPage("personal");
+  const page = view.container.textContent ?? "";
+  expect(page).toContain(
+    "What you record goes straight from your browser to your own Learning space in OpenBot's back end",
+  );
+  expect(page).toContain(
+    "Your recordings are used only for your own Skills, evaluations and insights.",
+  );
+  expect(page).not.toMatch(/organi[sz]ation/i);
+  // Everything else the Recorder collects is said as fully as in the team edition.
+  for (const { title, description } of RECORDER_COLLECTS) {
+    expect(view.getByText(title)).toBeTruthy();
+    expect(view.getByText(description)).toBeTruthy();
+  }
+});
+
+test("in the team edition Settings, Browsers still says a recording goes to your organization's OpenBot", async () => {
+  const view = await browsersPage("team");
+  expect(view.getByText(RECORDER_DISCLOSURE)).toBeTruthy();
+  expect(view.container.textContent).toContain(
+    "the learning part of your organization's OpenBot back end",
+  );
 });
 
 test("when the connections cannot be loaded This browser says it cannot tell, and is not empty", async () => {

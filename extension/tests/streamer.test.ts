@@ -576,6 +576,52 @@ describe("streamer", () => {
     expect(h.last().events.dropped).toBe(1);
   });
 
+  /*
+   * A recording a computer restart interrupted is sent again as the browser starts, and its capture pass can go before
+   * the browser holds the egress filter's credentials (agent-computer's `holdFilterCredentials`), which it does a moment
+   * later. The 407 was held as an answer the Recorder does not know, for five minutes.
+   */
+  test("a proxy's 407 on the pass is passed again within seconds, and sends once the proxy lets it through", async () => {
+    const h = await setup();
+    const proxyPass = () => classifyGrantError(407, null);
+    h.passScript = [proxyPass(), proxyPass()];
+    const s = await h.start();
+    for (let i = 0; i < 3; i++) s.push(click(i));
+    await until(() => h.grants.length === 2, "a second pass at once");
+    await h.clock.advance(2_000);
+    await until(
+      () => h.stored(h.trajectoryId).length === 5,
+      "everything sent within seconds",
+    );
+    expect(clicks(h.stored(h.trajectoryId))).toEqual(range(3));
+    expect(h.grants).toHaveLength(3);
+    expect(h.statuses.map((entry) => entry.status.intelligence)).not.toContain(
+      "held",
+    );
+    expect(h.kept).toHaveLength(0);
+  });
+
+  test("a proxy that keeps answering 407 holds the recording after five passes, keeping every event", async () => {
+    const h = await setup();
+    h.passScript = Array.from({ length: 5 }, () =>
+      classifyGrantError(407, null),
+    );
+    const s = await h.start();
+    s.push(click(0));
+    await until(() => h.grants.length === 2, "a second pass at once");
+    for (const ms of [2_000, 4_000, 8_000]) await h.clock.advance(ms);
+    await until(() => h.last().intelligence === "held", "held");
+    expect(h.grants).toHaveLength(5);
+    expect(h.last().reason).toBe(PASS_HINTS.PROXY_AUTHENTICATION);
+    await until(async () => (await h.pending(h.trajectoryId)) === 3, "kept");
+    // The hold's own retry, five minutes on, goes through.
+    await h.clock.advance(5 * MINUTE);
+    await until(
+      () => h.stored(h.trajectoryId).length === 3,
+      "sent after the hold",
+    );
+  });
+
   test("a refusal Intelligence also answers for a failed entitlement lookup keeps every event and retries", async () => {
     const h = await setup();
     h.passScript = [notEnabledPass(), notEnabledPass()];

@@ -119,7 +119,7 @@ Learning: a Bot those settings left out is taken back in at the next start, or i
 | --- | --- |
 | Use Bots, cloud browser, network and computer, local computer access (folders, in OpenBot Desktop), custom rules, password manager, apps a Bot uses as you, check-ins | On |
 | Slack and Teams, Team Bots, Isolated Bots | Off |
-| Ask before making changes | Off for anybody who has not chosen otherwise. Paying, and deleting, sending, sharing or posting in your apps and on websites, ask anyway, as does every edit or command in a folder on this computer. A Bot's own computer is its scratch space. See [Approvals](approvals.md) |
+| Always ask before making changes | Off for anybody who has not chosen otherwise. Paying, and deleting, sending, sharing or posting in your apps and on websites, ask anyway, as does every edit or command in a folder on this computer. A Bot's own computer is its scratch space. See [Approvals](approvals.md) |
 | Stop idle computers | Never: there is one |
 | Check-ins per Bot per day | 24, as in the team edition |
 | SSO, action recording, model and MCP allowlists, skill sharing | Off |
@@ -199,10 +199,23 @@ opens its page under Connections. The Bot is told which button the card shows, s
 four settings: Routines, Memory, **What it can do** (the apps and skills it has, what it asks before
 doing, and its goals) and Setup.
 
-**Settings** holds Saved logins, Keys, Skills for every Bot, Computer and Activity (the audit trail).
+**Settings** holds Saved logins, Keys, Skills for every Bot, Learning, Computer and Activity (the audit trail).
 Where Admin was, **OpenBot for Business** opens a list of what the team edition adds. An old
-`/admin/...` or `/settings/plugins/...` address opens the same page where it is now. There is no Learning page, Sharing, Visibility, Isolated, or Reaching you, which are
+`/admin/...` or `/settings/plugins/...` address opens the same page where it is now. There is no Sharing, Visibility, Isolated, or Reaching you, which are
 all about other people, other computers or Slack and Teams.
+
+**Settings → Learning** is where the skills OpenBot learns from your recordings and conversations
+wait for your review. You approve or reject them yourself, under **Waiting for your review**, and
+**Learn now** starts a run on demand. **Your skills** lists the skills learned from your recordings and conversations,
+and a row opens one to read. A skill from your recordings reaches every Bot. A skill from
+conversations reaches the Bots that share its Learning container, which is every Bot unless one
+has a container of its own. There is no one to share with, so **Ask to share** is not offered here.
+
+**Approve new skills automatically** is on from the start, so you don't have to review each one. It
+approves what OpenBot proposes from your recordings and conversations. It runs when Learning opens,
+every 15 minutes, and when you switch it on. Turn it off in Settings → Learning to review each skill
+yourself. **Your recordings** on Teach a Bot lists what you have recorded, which needs Intelligence
+0.16 with recordings switched on. Recordings can't be deleted from OpenBot.
 
 The server answers `404` for the API behind the team-only screens: people, identity providers,
 enterprise controls (except `/api/admin/enterprise/me`, which any page may ask), the admin learning

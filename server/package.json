@@ -51,6 +51,7 @@
   },
   "devDependencies": {
     "@copilotkit/aimock": "1.43.0",
+    "@earendil-works/pi-ai": "1.4.0",
     "drizzle-kit": "^0.31.10"
   }
 }

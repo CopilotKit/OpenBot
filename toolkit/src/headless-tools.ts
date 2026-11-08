@@ -14,6 +14,16 @@ import { Observable, type Subscription } from "rxjs";
 import { withApprovalContext } from "./continuation";
 import type { AuditInitiator } from "./initiator";
 
+/**
+ * What a person reads when a Bot's stream ends with neither an answer nor an error.
+ *
+ * It used to read "Remote agent ended without a terminal event.", in red under the message: seen on
+ * OpenBot Desktop when the LangGraph harness died on a provider's refusal it did not catch. The
+ * harness now ends every run with an error of its own, so this is for a Bot that still does not.
+ */
+export const RUN_ENDED_EARLY =
+  "The Bot stopped before it finished answering. Try again.";
+
 /** Client tools supplied by OpenBot when the caller has no browser. */
 export type HeadlessTool = {
   definition: Tool;
@@ -150,10 +160,7 @@ export class HeadlessToolsMiddleware extends Middleware {
             });
           });
           if (subscriber.closed || failed) return;
-          if (!terminal)
-            throw new Error(
-              "The headless agent ended without a terminal event.",
-            );
+          if (!terminal) throw new Error(RUN_ENDED_EARLY);
           const answered = new Set(
             messages.flatMap((message) =>
               message.role === "tool" ? [message.toolCallId] : [],

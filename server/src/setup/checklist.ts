@@ -175,6 +175,13 @@ export function setupRows(
 ): SetupRow[] {
   const { productName: product, audience } = options;
   const admin = audience === "admin";
+  /*
+   * THE PERSONAL EDITION HAS NO MEMORY AND NO ADMIN. Its one person is told what the back end keeps
+   * there (conversations and skills, as This computer and the Desktop status window say), what
+   * "more apps" adds to the apps OpenBot comes with, and the Settings pages it calls Keys and
+   * Computer. A team deployment's rows are unchanged.
+   */
+  const personal = options.edition === "personal";
 
   /**
    * A row as its reader should see it. A member is told it works, that it is not checked yet, or
@@ -213,13 +220,13 @@ export function setupRows(
       id: "intelligence",
       title: "Back end",
       required: true,
-      ...intelligenceRow(facts.intelligence, product),
+      ...intelligenceRow(facts.intelligence, product, personal),
     }),
     deployment({
       id: "model",
       title: "AI model",
       required: true,
-      ...modelRow(facts.model, product),
+      ...modelRow(facts.model, product, personal),
     }),
     deployment({
       id: "computer",
@@ -229,6 +236,7 @@ export function setupRows(
         facts.computer
           ? (facts.computerStatus ?? "not_checked")
           : "needs_setup",
+        personal,
       ),
     }),
     deployment({
@@ -236,8 +244,12 @@ export function setupRows(
       title: "More apps",
       required: false,
       status: facts.apps.configured ? "ready" : "needs_setup",
-      readyDetail: "People can connect more apps than the ones an admin adds.",
-      gapDetail: "Without it, people can connect only the apps an admin adds.",
+      readyDetail: personal
+        ? `You can connect more apps than the ones ${product} comes with.`
+        : "People can connect more apps than the ones an admin adds.",
+      gapDetail: personal
+        ? `Without it, you can connect only the apps ${product} comes with.`
+        : "Without it, people can connect only the apps an admin adds.",
       fix: { kind: "env", names: [broker.key], docsUrl: broker.docs },
     }),
     deployment({
@@ -276,8 +288,14 @@ const INTELLIGENCE_VARIABLES = [
  * sentence the boot log prints (see {@link entitlementAdvice}), which names the licence and where it
  * goes.
  */
-function intelligenceRow(fact: IntelligenceFact, product: string) {
-  const readyDetail = `Keeps your conversations and what ${product} remembers.`;
+function intelligenceRow(
+  fact: IntelligenceFact,
+  product: string,
+  personal: boolean,
+) {
+  const readyDetail = personal
+    ? "Keeps your conversations and skills."
+    : `Keeps your conversations and what ${product} remembers.`;
   if (fact.state === "ready")
     return {
       status: "ready" as const,
@@ -309,18 +327,24 @@ function intelligenceRow(fact: IntelligenceFact, product: string) {
  * when a Bot first needs one, and until then none is running to ask. Its fix is the page where
  * computers show up, because the variables are already set.
  */
-function computerRow(status: SetupStatus) {
+function computerRow(status: SetupStatus, personal: boolean) {
   const readyDetail = "Bots can browse the web and work with files.";
   if (status === "not_checked")
     return {
       status,
       readyDetail,
       gapDetail: "It's set up. A computer starts when a Bot first needs one.",
-      fix: {
-        kind: "page" as const,
-        label: "Computers",
-        path: "/admin/computers",
-      },
+      fix: personal
+        ? {
+            kind: "page" as const,
+            label: "Computer",
+            path: "/settings/computer",
+          }
+        : {
+            kind: "page" as const,
+            label: "Computers",
+            path: "/admin/computers",
+          },
     };
   return {
     status,
@@ -335,13 +359,19 @@ function computerRow(status: SetupStatus) {
 }
 
 /** The model row, from where its key comes from and what the provider last said about that key. */
-function modelRow(model: SetupFacts["model"], product: string) {
+function modelRow(
+  model: SetupFacts["model"],
+  product: string,
+  personal: boolean,
+) {
   const provider = PROVIDER_NAME[model.provider];
   const fix: SetupFix = {
     kind: "env",
     names: [KEY_NAME[model.provider]],
     docsUrl: QUICK_START,
-    page: { label: "Credentials", path: "/admin/credentials" },
+    page: personal
+      ? { label: "Keys", path: "/settings/credentials" }
+      : { label: "Credentials", path: "/admin/credentials" },
   };
   const readyDetail = `Lets ${product} answer you.`;
   if (model.source === null)
@@ -394,11 +424,12 @@ function modelRow(model: SetupFacts["model"], product: string) {
  */
 export function intelligenceFact(
   answer: RuntimeEntitlementResponse | Error,
+  edition?: Edition,
 ): IntelligenceFact {
   if (answer instanceof Error) return { state: "unreachable" };
   const warning = entitlementWarning(answer);
   return warning
-    ? { state: "refused", advice: entitlementAdvice(warning) }
+    ? { state: "refused", advice: entitlementAdvice(warning, edition) }
     : { state: "ready" };
 }
 
@@ -407,10 +438,13 @@ export function intelligenceFact(
  * boot log keeps its longer sentence (`entitlementWarning`), which names the Helm keys; the screen
  * names only the variable, which is enough to search the docs with.
  */
-export function entitlementAdvice(warning: {
-  status: string;
-  code?: string;
-}): string {
+export function entitlementAdvice(
+  warning: {
+    status: string;
+    code?: string;
+  },
+  edition?: Edition,
+): string {
   switch (warning.code) {
     case "RUNTIME_ENTITLEMENTS_SELF_HOSTED_MISCONFIGURED":
       return "The back end has no valid licence. Set COPILOTKIT_LICENSE_TOKEN on the back end's own deployment.";
@@ -420,7 +454,10 @@ export function entitlementAdvice(warning: {
       return "The back end couldn't confirm this project's licence. Check again in a few minutes.";
   }
   if (warning.status === "inactive")
-    return "The back end says this deployment's licence isn't active. Memory stays off until it is.";
+    // The personal edition has no memory to keep off, so it is told only what the back end said.
+    return edition === "personal"
+      ? "The back end says this deployment's licence isn't active."
+      : "The back end says this deployment's licence isn't active. Memory stays off until it is.";
   return "The back end didn't confirm this deployment's licence. Check again in a few minutes.";
 }
 
@@ -558,8 +595,8 @@ export function createSetupSources(input: {
     environment: input.environment,
   };
   const askIntelligence = () =>
-    withinTime(input.entitlements(), INTELLIGENCE_TIMEOUT_MS).then(
-      intelligenceFact,
+    withinTime(input.entitlements(), INTELLIGENCE_TIMEOUT_MS).then((answer) =>
+      intelligenceFact(answer, input.config.edition),
     );
 
   const askComputer = async (): Promise<SetupStatus> => {

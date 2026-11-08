@@ -5,6 +5,10 @@ export type LearningSettings = {
   defaultTarget: LearningTarget | null;
   /** Missing inherits the default; null explicitly excludes this Bot. */
   agents: Record<string, LearningTarget | null>;
+  /** Who reviews what a person's own Learning space proposes. Missing means "admins". */
+  personalReview?: LearningPersonalReview;
+  /** Whether proposals are approved without a review. Only the personal edition reads it; there, missing means true. */
+  autoApprove?: boolean;
 };
 
 export type LearningDeliveryStatus = {
@@ -43,9 +47,11 @@ export type LearningOverview = {
     candidates: string | null;
     runs: string | null;
   };
+  /** Why Learning can't run on this machine's model, and what to do. Absent when it can. */
+  modelProblem?: string;
 };
 
-/** A Skill change Intelligence proposed, as Admin → Automatic learning lists it. */
+/** A Skill change Intelligence proposed, as Admin → Automatic learning and Settings → Learning list it. */
 export type LearningProposal = {
   id: string;
   title: string;
@@ -77,6 +83,8 @@ export type LearningEvidence =
       kind: "recording";
       /** Intelligence's id for the recording. */
       id: string;
+      /** The recording's title, or null when it has none or could not be read. */
+      title: string | null;
       available: boolean;
       eventCount: number;
       /** The names of the cited events, in order. */
@@ -133,7 +141,7 @@ export type LearningAutoAssignState =
       containerId: string;
       /** Exactly what an operator runs to create it, for the Intelligence this deployment uses. */
       instructions?: string;
-      /** Whether this deployment holds a credential that can create it (Admin's "Create it now"). */
+      /** Whether this deployment holds a credential that can create it (Admin's Create the <id> container button). */
       canCreate?: boolean;
       /** Why the last attempt with that credential failed. */
       createError?: string;
@@ -163,7 +171,19 @@ export function isLearningSharingMode(
   );
 }
 
-/** A learned Skill's name as Intelligence publishes it: 1 to 200 characters, no slash and no control characters. */
+/** Who reviews what a person's own Learning space proposes: the administrators, or the people themselves. */
+export const LEARNING_PERSONAL_REVIEW = ["admins", "people"] as const;
+export type LearningPersonalReview = (typeof LEARNING_PERSONAL_REVIEW)[number];
+export function isLearningPersonalReview(
+  value: unknown,
+): value is LearningPersonalReview {
+  return (
+    typeof value === "string" &&
+    (LEARNING_PERSONAL_REVIEW as readonly string[]).includes(value)
+  );
+}
+
+/** A learned Skill's name as Intelligence publishes it, a safe single path segment: 1 to 200 UTF-16 units, no slash or backslash, no control characters, not "." or "..", and no leading or trailing whitespace. */
 export function isLearnedSkillName(value: unknown): value is string {
   return (
     typeof value === "string" &&
@@ -186,6 +206,10 @@ export type PersonalLearnedSkill = {
   name: string;
   description: string;
   open: boolean;
+  /** Who approved it into the space; null when no approval is on record, which counts as an administrator's; also always null for skills from a Bot's conversations, which keep no record. */
+  approvedBy: "person" | "admin" | null;
+  /** Where the person's request to share it with every Bot stands; "none" when there is no record. */
+  sharing: "none" | "requested" | "approved" | "declined";
 };
 
 /** Settings, Learning: the person's sharing choice and the Skills in their own space. */
@@ -200,4 +224,75 @@ export type PersonalLearningSharing = {
   /** `off`: Automatic Learning is off in this OpenBot. `unavailable`: Intelligence did not deliver them (its Learning
    * delivery is off, the space does not exist yet, or it could not be reached). */
   unavailable?: "off" | "unavailable";
+};
+
+/** One run of Learning over a container, as the Learning screens list it. */
+export type LearningRunSummary = {
+  id: string;
+  status:
+    | "queued"
+    | "freezing"
+    | "batching"
+    | "reducing"
+    | "finalizing"
+    | "succeeded"
+    | "failed";
+  trigger: "automatic" | "manual";
+  proposals: number | null;
+  insights: number | null;
+  failureCode: string | null;
+  /** Why a failed run stopped, said for the person, with what to do. Null or absent unless it failed. */
+  failure?: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+};
+
+/** A learned Skill's files. SKILL.md first; `text` is null for a binary file. */
+export type LearnedSkillContent = {
+  name: string;
+  description: string;
+  files: { path: string; text: string | null }[];
+};
+
+/** Where a person's Learning comes from: a container of recordings or of conversations. */
+export type LearningSource = {
+  containerId: string;
+  kind: "recordings" | "conversations";
+  label: string;
+};
+
+/** The person's own review of what their sources proposed. `proposals` and `latestRun` are null when they could not be read. */
+export type PersonalReview = {
+  canReview: boolean;
+  /** Null outside the personal edition, where there is no automatic approval. */
+  autoApprove: boolean | null;
+  /**
+   * How many proposals opening the page approved automatically; 0 when no sweep ran, as in the team edition. The server
+   * always sends it; optional so a reader written before it still type-checks.
+   */
+  approved?: number;
+  sources: (LearningSource & {
+    proposals: LearningProposal[] | null;
+    latestRun: LearningRunSummary | null;
+    /** Set when Learning is switched off in Intelligence (or, for now, not in its licence), so there is nothing to read. */
+    unavailable?: "learning-off";
+  })[];
+};
+
+/** What an administrator reviews for each person, where people's Learning is reviewed by admins. */
+export type PeopleProposals = {
+  people: {
+    userId: string;
+    name: string;
+    proposals: LearningProposal[] | null;
+  }[];
+};
+
+/** A person's request to open a learned Skill to every Bot. */
+export type SharingRequest = {
+  userId: string;
+  name: string;
+  skillName: string;
+  requestedAt: string;
 };

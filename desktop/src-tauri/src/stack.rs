@@ -2709,6 +2709,29 @@ the developer half of that failure would be empty.
 An engine that cannot be asked returns nothing rather than failing. This is only ever called to
 explain a failure that has already happened, and a second failure on top of it helps nobody.
 */
+/**
+This machine's IPv4 address as the engine gives it to containers: what `host.docker.internal`
+resolves to inside OpenBot's own `server` container, which `docker-compose.yml` maps to the
+engine's host gateway (or `OPENBOT_HOST_GATEWAY`). The same address the Bots reach this machine at.
+None when the server is not running or answers nothing usable. See `learning_model` for why the
+local cluster is given this rather than a name.
+*/
+pub fn host_gateway_ipv4(engine: &Address, root: &Path) -> Option<std::net::Ipv4Addr> {
+    let out = compose_command(engine, root, &Secrets::new())
+        .args([
+            "exec",
+            "-T",
+            "server",
+            "getent",
+            "ahostsv4",
+            crate::env::CONTAINER_HOST,
+        ])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())?;
+    crate::learning_model::host_gateway_in(&String::from_utf8_lossy(&out.stdout))
+}
+
 pub fn service_log(engine: &Address, root: &Path, service: &str, lines: u16) -> String {
     compose_command(engine, root, &Secrets::new())
         .args(["logs", "--tail", &lines.to_string(), service])

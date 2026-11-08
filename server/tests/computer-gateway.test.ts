@@ -2093,6 +2093,53 @@ describe("seats on a person's computer", () => {
       }),
     ]);
   });
+
+  // Teach a Bot's browser is a computer named by a hash of its person's id, which no Bot has. Settings > Computer
+  // listed it as "A Bot no longer here"; the list now says whose browser it is.
+  test("the admin list says whose OpenBot browser a person's browser is", async () => {
+    const browser = `person-${"a".repeat(32)}`;
+    const stranger = `person-${"b".repeat(32)}`;
+    const computer = fakeComputer({
+      locations: [
+        { key: { kind: "bot", botId: browser }, status: "running" },
+        { key: { kind: "bot", botId: stranger }, status: "stopped" },
+        { key: { kind: "bot", botId: "sales" }, status: "stopped" },
+      ],
+    });
+    const asked: string[][] = [];
+    const gateway = createComputerGateway({
+      provider: computer.provider,
+      fetchImpl: computer.fetchImpl,
+      auditStore: fakeAudit().store,
+      policy: () => PERMISSIVE,
+      browserOwners: async (ids) => {
+        asked.push(ids);
+        return new Map([[browser, "ada"]]);
+      },
+      people: async (ids) =>
+        new Map(
+          ids.includes("ada")
+            ? [["ada", { name: "Ada", email: "ada@acme.test" }]]
+            : [],
+        ),
+    });
+
+    const listed = (await gateway.computers()).computers;
+    expect(asked).toEqual([[browser, stranger]]);
+    expect(listed[0]).toEqual(
+      expect.objectContaining({
+        computer: `bot:${browser}`,
+        botId: browser,
+        person: { name: "Ada", email: "ada@acme.test" },
+      }),
+    );
+    // Nobody is named for a browser whose owner isn't known, nor for a Bot's computer.
+    expect(listed.map((computer) => computer.person ?? null)).toEqual([
+      { name: "Ada", email: "ada@acme.test" },
+      null,
+      null,
+    ]);
+  });
 });
 
 /**

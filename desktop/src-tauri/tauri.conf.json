@@ -62,6 +62,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "publisher": "CopilotKit",
     "copyright": "CopilotKit",
     "category": "DeveloperTool",
     "shortDescription": "Run OpenBot on your own machine",

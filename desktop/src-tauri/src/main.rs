@@ -2664,10 +2664,16 @@ async fn start_stack_inner<R: tauri::Runtime>(
             );
         }
         let ours = stack::ports_we_already_publish(&found, &root);
+        // The last run's own ports are waited for before anything moves off them (`for_start`).
+        let own = openbot_env::Ports::recorded(&root).map_err(|error| {
+            Problem::with("OpenBot could not read its local ports.", error.to_string())
+        })?;
         let ports = previous_ports
-            .available(
+            .for_start(
+                &own,
                 &ours,
                 picked.as_ref().and_then(|picked| picked.installed_port()),
+                openbot_env::OWN_PORTS_PATIENCE,
             )
             .map_err(|error| {
                 Problem::with(
@@ -2903,10 +2909,57 @@ async fn start_stack_inner<R: tauri::Runtime>(
         )
     })?;
     preparation::save_selected_root(&config, &root)?;
+    give_learning_its_model(
+        root.clone(),
+        found.clone(),
+        credential,
+        ports.server,
+        secrets
+            .get(openbot_desktop_lib::learning_model::TOKEN)
+            .cloned()
+            .unwrap_or_default(),
+    );
     watch_connections(app.clone(), root, host_token, generation, ports.server);
 
     report(&app, "answering", true, "OpenBot is ready.");
     Ok(())
+}
+
+/**
+Give local Intelligence's Learning agent the model the person signed in to, once OpenBot answers.
+See `learning_model`.
+
+In the background, on its own thread. Learning is not what Start waits on, and a CLI call that
+fails here leaves OpenBot running, Settings saying why Learning can't run, and the next Start trying
+again. The CLI takes its turn with the window's own calls (`local_eval::one_at_a_time`).
+*/
+fn give_learning_its_model(
+    root: PathBuf,
+    engine: engine::Address,
+    credential: openbot_env::ModelCredential,
+    server_port: u16,
+    token: String,
+) {
+    use openbot_desktop_lib::learning_model;
+    std::thread::spawn(move || {
+        let attempt = format!("learning-model-{:016x}", rand::random::<u64>());
+        let given = learning_model::apply(
+            &root,
+            &credential,
+            server_port,
+            &token,
+            || stack::host_gateway_ipv4(&engine, &root),
+            |stack| local_eval::run_installed(&attempt, local_eval::Action::Status, stack),
+            |file| local_eval::configure_learning_model_installed(&attempt, &root, file),
+        );
+        match given {
+            learning_model::Given::Nothing => {}
+            learning_model::Given::Given => {
+                log::info!("[learning] the Learning agent has the model this sign-in gives it")
+            }
+            other => log::warn!("[learning] the Learning agent's model was not changed: {other:?}"),
+        }
+    });
 }
 
 /// Local folder access for the deployment at `root`, answering to its server with the per-run
@@ -4472,8 +4525,9 @@ fn show_window_title<R: tauri::Runtime>(window: &tauri::Window<R>, shown: bool) 
 /**
 Marks OpenBot's page for the overlay title bar: its styles pad the sidebar's header for the window
 buttons, and the header becomes the drag handle, as does the strip the main column keeps above
-itself while the sidebar is hidden. The sidebar renders after the page loads and again
-on navigation, so new headers are marked as they appear, at most once a frame.
+itself while the sidebar is hidden, and onboarding's header, which has no sidebar beside it. The
+sidebar renders after the page loads and again on navigation, so new headers are marked as they
+appear, at most once a frame. Run on macOS only: Windows has its own title bar to drag.
 */
 const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
   document.documentElement.dataset.desktopTitlebar = "overlay";
@@ -4481,6 +4535,11 @@ const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
   const mark = () => {
     // Bare attributes: only a press on the element itself drags, never on its contents.
     for (const header of document.querySelectorAll(`[data-slot="sidebar-header"]:not([${DRAG}])`)) {
+      header.setAttribute(DRAG, "");
+    }
+    // Onboarding has no sidebar. Its header starts below the window's buttons, and that strip is
+    // the header's own, so it drags while Back and the steps inside it stay buttons.
+    for (const header of document.querySelectorAll(`[data-onboarding-frame] > header:not([${DRAG}])`)) {
       header.setAttribute(DRAG, "");
     }
     // The main column only while the sidebar is hidden, when its top strip is the one handle left.
@@ -5769,15 +5828,26 @@ async fn run_local_eval(
         let selected = shell.selected_root.lock().unwrap().clone();
         selected.unwrap_or_else(stack::default_root)
     };
-    let mut report = tauri::async_runtime::spawn_blocking(move || {
-        know_cli_engine(&root);
-        local_eval::run_installed(&attempt, action, &stack)
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        local_eval_answer(&root, &attempt, action, &stack)
     })
     .await
     .map_err(|_| local_eval::Failure::Spawn)??;
     learn_dashboards(&app, report.stack.iter());
-    // An Intelligence an older app installed, behind the release this app's CLI installs: the
-    // window updates it before it starts OpenBot on it.
+    Ok(report)
+}
+
+/// What `run_local_eval` answers the window for one CLI call, from the installed CLI.
+fn local_eval_answer(
+    root: &Path,
+    attempt: &str,
+    action: local_eval::Action,
+    stack: &local_eval::StackId,
+) -> Result<local_eval::Report, local_eval::Failure> {
+    know_cli_engine(root);
+    let mut report = local_eval::run_installed(attempt, action, stack)?;
+    // An Intelligence an older app installed, behind the release this app's CLI installs, or one
+    // whose update did not finish: the window updates it before it starts OpenBot on it.
     if action == local_eval::Action::Status {
         report.update_to =
             local_eval::update_due(&report, local_eval::bundled_release().as_deref());
@@ -5891,6 +5961,13 @@ async fn sign_in_to_copilotkit(
 #[tauri::command]
 fn copilotkit_sign_in_page(attempt: String) -> Option<local_eval::SignInPage> {
     local_eval::shown_sign_in_page(&attempt)
+}
+
+/// How much of the back end's download the setup or update `attempt` has, of how much,
+/// while it downloads, so its row can show a slow line moving. Bytes only.
+#[tauri::command]
+fn local_eval_download(attempt: String) -> Option<openbot_desktop_lib::local_images::Download> {
+    local_eval::downloading(&attempt)
 }
 
 /// The evaluation agreement local setup needs accepted, for the window to show before Accept.
@@ -7563,6 +7640,7 @@ fn main() {
             set_up_local_eval,
             sign_in_to_copilotkit,
             copilotkit_sign_in_page,
+            local_eval_download,
             local_eval_terms,
             connect_copilotkit_apps,
             connect_local_eval,
@@ -8029,6 +8107,7 @@ mod tests {
 
     include!("stop_ipc_tests.rs");
     include!("composio_ipc_tests.rs");
+    include!("local_eval_ipc_tests.rs");
     include!("logging_file_tests.rs");
 
     // The release half (it starts the install thread) is the app's own launch; a test runs a debug build.
@@ -10729,6 +10808,7 @@ mod tests {
             licence: local_eval::Licence::Unknown,
             licence_expires_at: None,
             update_to: None,
+            checks_passed: false,
         }
     }
 
@@ -10915,6 +10995,7 @@ mod tests {
             },
             has_failed_step: false,
             update_in_progress: false,
+            unfinished_update: None,
             observed: None,
         }
     }

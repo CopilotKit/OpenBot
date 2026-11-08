@@ -21,6 +21,7 @@ import {
   learningSkillSharing,
 } from "../src/db/schema/learning";
 import { skills } from "../src/db/schema/plugins";
+import { createSkillApprovalStore } from "../src/learning/approvals";
 import { createLearningSettingsStore } from "../src/learning/settings";
 import { createLearningSharingStore } from "../src/learning/sharing";
 import { createRecorderExtension } from "../src/recorder/wiring";
@@ -123,13 +124,17 @@ args[2] = roleRepository;
 args[6] = runtime.handler;
 args[9] = agentProfileStore;
 args[12] = auditStore;
+const skillApprovals = createSkillApprovalStore(database);
 args[34] = {
   recorder,
   personalLearning: {
     store: createLearningSharingStore(database),
+    approvals: skillApprovals,
     skillsOf: async () => ({ skills: [] }),
     invalidate: () => {},
     sharingAllowed: async () => true,
+    settings: learningSettings,
+    scopesFor: async () => [],
   },
   approvals: {} as never,
 };

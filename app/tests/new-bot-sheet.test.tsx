@@ -82,6 +82,9 @@ let giveable: {
   account: string;
 }[] = [];
 let given: string[] = [];
+/** Every app that is turned on, as `GET /api/plugins` lists them, and every path the sheet asked for. */
+let servers: { id: string; title: string; logo: null }[] = [];
+let requested: string[] = [];
 
 beforeEach(() => {
   builtInAvailable = true;
@@ -92,9 +95,12 @@ beforeEach(() => {
   dialled = [];
   giveable = [];
   given = [];
+  servers = [];
+  requested = [];
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      requested.push(String(path));
       if (path === "/api/agents/capabilities") {
         return Response.json({
           capabilities: { builtInAvailable, isolationAvailable },
@@ -117,6 +123,8 @@ beforeEach(() => {
       }
       if (path === "/api/plugins/giveable")
         return Response.json({ apps: giveable });
+      if (path === "/api/plugins")
+        return Response.json({ catalogue: [], servers, skills: [] });
       if (String(path).endsWith("/give") && init?.method === "POST") {
         given.push(String(path));
         return Response.json({ granted: [] });
@@ -489,6 +497,56 @@ test("personal Bot creation hides team visibility and isolation controls and lin
   await view.findByText("Personal Research is ready");
   expect(creates).toHaveLength(1);
   expect(creates[0]).toMatchObject({ visibility: "private", isolated: false });
+});
+
+/**
+ * What the Windows personal install showed: Gmail turned on but not connected, Parallel Search on
+ * from the start, and Routines. Only Routines is the person's to give, so the sheet listed only
+ * Routines, and the Bot it made came out with all three.
+ */
+const TURNED_ON = [
+  { id: "composio-gmail", title: "Gmail", logo: null },
+  { id: "parallel-search", title: "Parallel Search", logo: null },
+  { id: "routines", title: "Routines", logo: null },
+];
+const ROUTINES_ONLY = [
+  {
+    key: "routines",
+    displayName: "Routines",
+    logo: null,
+    account: "deployment",
+  },
+];
+
+test("personal: the sheet lists every app that is turned on, with nothing to untick", async () => {
+  servers = TURNED_ON;
+  giveable = ROUTINES_ONLY;
+  const view = draw(
+    <NewBotSheet open onClose={() => {}} onCreated={() => {}} />,
+    "personal",
+  );
+  const list = await view.findByRole("list", { name: "Apps it can use" });
+  expect(
+    Array.from(list.querySelectorAll("li")).map((item) => item.textContent),
+  ).toEqual(["Gmail", "Parallel Search", "Routines"]);
+  expect(
+    view.getByText("Every Bot can use every app you turn on in Connections."),
+  ).toBeTruthy();
+  expect(view.queryAllByRole("checkbox")).toHaveLength(0);
+});
+
+test("team: the sheet offers only the apps the person can give, ticked", async () => {
+  servers = TURNED_ON;
+  giveable = ROUTINES_ONLY;
+  const { view } = await opened();
+  const routines = await view.findByRole("checkbox", { name: "Routines" });
+  expect(routines.getAttribute("aria-checked")).toBe("true");
+  expect(view.queryByText("Gmail")).toBeNull();
+  expect(view.queryByText("Parallel Search")).toBeNull();
+  expect(
+    view.getByText("It always uses the account of whoever is asking."),
+  ).toBeTruthy();
+  expect(requested).not.toContain("/api/plugins");
 });
 
 test("LangGraph is offered under LangChain's name, the one people know it by", async () => {

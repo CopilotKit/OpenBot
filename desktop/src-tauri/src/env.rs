@@ -66,21 +66,85 @@ impl Default for Ports {
     }
 }
 
+/// The `.env` keys a deployment's host ports are kept under.
+const PORT_KEYS: [&str; 8] = [
+    "APP_PORT",
+    "SERVER_PORT",
+    "POSTGRES_PORT",
+    "COMPUTER_PORT",
+    "BOT_PORT",
+    "LANGGRAPH_PORT",
+    "SUPERVISOR_PORT",
+    "PICKED_HARNESS_HOST_PORT",
+];
+
+/**
+How long Start waits for the ports its own last run left behind before it moves off them
+([`Ports::for_start`]).
+
+Thirty seconds because that is the longest a closed TCP connection keeps its port on macOS
+(`TIME_WAIT`, twice `net.inet.tcp.msl`, which is 15 s), and a port is not bindable without
+`SO_REUSEADDR` (see `bind_exclusive`) until it has passed. Paid only while one of those ports is
+still held, so a normal Start waits for none of it.
+*/
+pub const OWN_PORTS_PATIENCE: std::time::Duration = std::time::Duration::from_secs(30);
+
 impl Ports {
+    /// The ports this deployment's `.env` records, which an earlier Start chose and its containers
+    /// published. A fresh install records none.
+    pub fn recorded(root: &Path) -> std::io::Result<std::collections::HashSet<u16>> {
+        let values = read_already_set(&root.join(".env"), &PORT_KEYS)?;
+        Ok(values
+            .iter()
+            .filter_map(|(key, value)| parse_port(key, value).ok())
+            .collect())
+    }
+
+    /**
+    The ports this Start runs on: [`Ports::available`], once the ports this deployment's own
+    previous run left behind (`own`, from [`Ports::recorded`]) are free again, for at most
+    `patience`.
+
+    WHY. Quitting OpenBot takes its containers down, and the engine's port forwarder lets their
+    host ports go a moment later, not at once. OpenBot opened again in that moment found its own
+    app port held, took it for somebody else's, and moved the app off it: 3010 became 49381 on a
+    plain quit and reopen, with nothing else on the machine using 3010 (Docker Desktop, macOS,
+    2026-11-08). Everything that dials the app
+    then had to learn a new address, and the app's origin, with what the browser keeps for it,
+    changed. A port this deployment recorded and its running containers do not publish (`ours`)
+    is most likely the last run's, still letting go, so Start waits for it to be bindable before
+    deciding. A port somebody else holds is still moved, after the wait; it is recorded as the new
+    one, so the wait is paid once. A port this deployment never recorded is not waited for.
+    */
+    pub fn for_start(
+        self,
+        own: &std::collections::HashSet<u16>,
+        ours: &std::collections::HashSet<u16>,
+        harness: Option<u16>,
+        patience: std::time::Duration,
+    ) -> std::io::Result<Self> {
+        let mut waiting: Vec<u16> = self
+            .settings()
+            .values()
+            .filter_map(|value| value.parse::<u16>().ok())
+            .filter(|port| own.contains(port) && !ours.contains(port))
+            .collect();
+        waiting.sort_unstable();
+        waiting.dedup();
+        let deadline = std::time::Instant::now() + patience;
+        loop {
+            // A bind, as `available` decides, so a port in TIME_WAIT counts as held too.
+            waiting.retain(|port| bind_loopbacks(*port).is_err());
+            if waiting.is_empty() || std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+        self.available(ours, harness)
+    }
+
     pub fn read(root: &Path) -> std::io::Result<Self> {
-        let values = read_already_set(
-            &root.join(".env"),
-            &[
-                "APP_PORT",
-                "SERVER_PORT",
-                "POSTGRES_PORT",
-                "COMPUTER_PORT",
-                "BOT_PORT",
-                "LANGGRAPH_PORT",
-                "SUPERVISOR_PORT",
-                "PICKED_HARNESS_HOST_PORT",
-            ],
-        )?;
+        let values = read_already_set(&root.join(".env"), &PORT_KEYS)?;
         let mut ports = Self::default();
         for (key, port) in [
             ("APP_PORT", &mut ports.app),
@@ -489,6 +553,104 @@ mod port_tests {
         assert_ne!(moved.server, preferred.server);
     }
 
+    /// What the engine's port forwarder does after a quit: holds the port a moment, then lets go.
+    fn held_for(port: u16, ms: u64) -> std::thread::JoinHandle<()> {
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).unwrap();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(ms));
+            drop(listener);
+        })
+    }
+
+    #[test]
+    fn a_quit_and_reopen_keeps_the_app_port_its_last_run_is_still_letting_go_of() {
+        // 2026-11-08: OpenBot quit and opened again at once moved its app from 3010 to 49381,
+        // because the last run's port was still held when Start chose.
+        let _ports = crate::test_support::hold_ports();
+        let port = TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let preferred = Ports {
+            app: port,
+            ..Ports::default()
+        };
+        let letting_go = held_for(port, 800);
+        let chosen = preferred
+            .for_start(
+                &HashSet::from([port]),
+                &HashSet::new(),
+                None,
+                std::time::Duration::from_secs(10),
+            )
+            .unwrap();
+        letting_go.join().unwrap();
+        assert_eq!(chosen.app, port);
+    }
+
+    #[test]
+    fn a_port_somebody_else_keeps_still_moves_once_the_wait_is_over() {
+        let _ports = crate::test_support::hold_ports();
+        let stranger = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = stranger.local_addr().unwrap().port();
+        let preferred = Ports {
+            app: port,
+            ..Ports::default()
+        };
+        let started = std::time::Instant::now();
+        let chosen = preferred
+            .for_start(
+                &HashSet::from([port]),
+                &HashSet::new(),
+                None,
+                std::time::Duration::from_millis(600),
+            )
+            .unwrap();
+        assert_ne!(chosen.app, port);
+        assert!(started.elapsed() >= std::time::Duration::from_millis(600));
+        assert!(TcpStream::connect(stranger.local_addr().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn a_port_this_deployment_never_recorded_is_not_waited_for() {
+        let _ports = crate::test_support::hold_ports();
+        let stranger = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = stranger.local_addr().unwrap().port();
+        let preferred = Ports {
+            app: port,
+            ..Ports::default()
+        };
+        let started = std::time::Instant::now();
+        let chosen = preferred
+            .for_start(
+                &HashSet::new(),
+                &HashSet::new(),
+                None,
+                std::time::Duration::from_secs(10),
+            )
+            .unwrap();
+        assert_ne!(chosen.app, port);
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    #[test]
+    fn recorded_ports_are_the_ones_the_env_names() {
+        let root = crate::test_support::temp_root("recorded-local-ports");
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(Ports::recorded(&root).unwrap().is_empty());
+        std::fs::write(
+            root.join(".env"),
+            "APP_PORT=3010\nSERVER_PORT=61246\nCUSTOM=1\n",
+        )
+        .unwrap();
+        assert_eq!(
+            Ports::recorded(&root).unwrap(),
+            HashSet::from([3010, 61246])
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn invalid_saved_ports_fail_instead_of_probing_an_unrelated_default() {
         let root = crate::test_support::temp_root("invalid-local-ports");
@@ -709,6 +871,15 @@ pub fn compose(
              */
             insert_if_given(&mut env, "AGENT_BOT_MODEL", name);
         }
+    }
+
+    /*
+     * Why Learning has no model, for Settings to say, or empty when it has one. Written with the
+     * model's own keys, and left alone when nothing was chosen, for the same reasons. See
+     * `learning_model`.
+     */
+    if let Some(why) = crate::learning_model::unavailable_setting(&model.credential) {
+        env.insert(crate::learning_model::UNAVAILABLE.into(), why.into());
     }
 
     // Trimmed, the way the model key beside it already is. All four values come from the same
@@ -1151,10 +1322,13 @@ pub const NO_KEY_NEEDED: &str = "no-key-needed";
 const BANNER: &str = "# Written by OpenBot Desktop. Anything else in this file is left alone.";
 
 /// The secrets this deployment mints for itself, once.
-pub const MINTED: [&str; 6] = [
+pub const MINTED: [&str; 7] = [
     "AGENT_TOOL_TOKEN",
     "COMPUTER_TOKEN",
     "KEY_ENCRYPTION_KEY",
+    // What local Intelligence's Learning agent proves itself to the server with when it thinks on
+    // the person's plan. See `learning_model`.
+    crate::learning_model::TOKEN,
     "MANAGED_AGENT_TOKEN",
     "SUPERVISOR_TOKEN",
     "WORKER_SHARED_SECRET",
@@ -3015,6 +3189,46 @@ mod model_tests {
         );
         assert_eq!(env.get("OPENAI_API_KEY"), Some(&String::new()));
         assert_eq!(env.get("OPENAI_BASE_URL"), Some(&String::new()));
+    }
+
+    /// The server is told why Learning has no model, empty when it has one, and a Start that chose
+    /// nothing leaves the setting as it was. Learning's secret is minted like the other tokens.
+    #[test]
+    fn the_server_hears_whether_learning_has_a_model_and_gets_its_secret() {
+        let written = |credential: ModelCredential| {
+            compose(
+                &intelligence(),
+                &Model { credential },
+                &engine(),
+                &Ports::default(),
+                &pinned(),
+                None,
+                &BTreeMap::new(),
+            )
+        };
+        let plan = written(ModelCredential::ClaudePlan { token: "t".into() });
+        assert_eq!(
+            plan.get(crate::learning_model::UNAVAILABLE),
+            Some(&String::new())
+        );
+        assert!(plan
+            .get(crate::learning_model::TOKEN)
+            .is_some_and(|secret| secret.len() >= 32));
+        assert_eq!(
+            written(ModelCredential::ProviderOAuth {
+                provider: "google".into(),
+                path: "/x".into(),
+                proxy_token: "p".into(),
+                model: "m".into(),
+            })
+            .get(crate::learning_model::UNAVAILABLE),
+            Some(&"unsupported".to_string())
+        );
+        assert_eq!(
+            written(ModelCredential::None).get(crate::learning_model::UNAVAILABLE),
+            None
+        );
+        assert!(crate::vault::is_secret(crate::learning_model::TOKEN));
     }
 
     #[test]

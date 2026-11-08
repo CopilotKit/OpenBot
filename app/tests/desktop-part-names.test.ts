@@ -18,25 +18,42 @@ const NAMES: [string, "bots" | "back-end", string][] = [
   ["openbot-supervisor-1", "bots", "Bot computer manager"],
   ["openbot-computer-person-me", "bots", "Bot computer"],
   ["openbot-agent-langgraph-1", "bots", "Bot"],
-  ["openbot-spire-server-1", "bots", "Other part"],
-  ["something-new-1", "bots", "Other part"],
+  ["openbot-spire-server-1", "bots", "Bot computer identity"],
+  // The local Intelligence, as `docker ps` lists a running one: its one node and k3d's tools.
   [
-    "k3d-local-abc123-server-0",
+    "k3d-local-e0cf90debea88453ad454b93-server-0",
     "back-end",
-    "Conversations, memory and learning",
+    "Conversations and learning",
   ],
-  ["k3d-local-abc123-tools", "back-end", "Other part"],
+  ["k3d-local-e0cf90debea88453ad454b93-tools", "back-end", "Setup helper"],
 ];
 
-test.each(NAMES)("%s under %s reads %s", (name, group, label) => {
-  expect(partLabel(name, group)).toBe(label);
-  expect(statusWindowLabel(name, group)).toBe(label);
+/** Containers the table doesn't know: each still says which side of OpenBot it's on. */
+const UNKNOWN: [string, "bots" | "back-end", string][] = [
+  ["something-new-1", "bots", "OpenBot service"],
+  ["k3d-local-abc123-serverlb", "back-end", "Back-end service"],
+];
+
+test.each([...NAMES, ...UNKNOWN])(
+  "%s under %s reads %s",
+  (name, group, label) => {
+    expect(partLabel(name, group)).toBe(label);
+    expect(statusWindowLabel(name, group)).toBe(label);
+  },
+);
+
+test("every container OpenBot and its back end run has its own name", () => {
+  const fallbacks = new Set(UNKNOWN.map(([, , label]) => label));
+  for (const [name, group] of NAMES) {
+    expect(fallbacks.has(partLabel(name, group))).toBe(false);
+    expect(partLabel(name, group)).not.toBe("Other part");
+  }
 });
 
 test("no name a person reads is Docker's or Intelligence's", () => {
-  for (const [name, group] of NAMES) {
+  for (const [name, group] of [...NAMES, ...UNKNOWN]) {
     const label = partLabel(name, group);
-    expect(label).not.toMatch(/openbot-|k3d|cpki|Intelligence/);
+    expect(label).not.toMatch(/openbot-|k3d|cpki|Intelligence|Other part/);
     expect(label).not.toBe(name);
   }
 });

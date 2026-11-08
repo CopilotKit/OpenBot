@@ -13,7 +13,7 @@ export type PartGroup = "bots" | "back-end";
 
 const BOTS: [RegExp, string][] = [
   // Identity for the Bots' computers in an earlier team install. Before `server`, which it ends with.
-  [/(^|-)spire-/, "Other part"],
+  [/(^|-)spire-/, "Bot computer identity"],
   [/(^|-)server-\d+$/, "Front end and Bots"],
   [/(^|-)worker-\d+$/, "Background jobs"],
   [/(^|-)postgres-\d+$/, "Database"],
@@ -24,13 +24,24 @@ const BOTS: [RegExp, string][] = [
   [/(^|-)agent-[a-z0-9-]+-\d+$/, "Bot"],
 ];
 
-/** The back end runs as one k3d node, which holds all of its services. */
+/**
+ * The back end is the local Intelligence: a k3d cluster with one node and no load balancer
+ * (`--servers 1 --agents 0 --no-lb`). The node holds every one of its services. Beside it k3d keeps
+ * its tools container, which loads the back end's software into the node when it's set up or updated.
+ */
 const BACK_END: [RegExp, string][] = [
-  [/^k3d-.+-server-\d+$/, "Conversations, memory and learning"],
+  [/^k3d-.+-server-\d+$/, "Conversations and learning"],
+  [/^k3d-.+-tools$/, "Setup helper"],
 ];
+
+/** A container OpenBot runs that the table doesn't know yet still says which side it's on. */
+const UNKNOWN: Record<PartGroup, string> = {
+  bots: "OpenBot service",
+  "back-end": "Back-end service",
+};
 
 export function partLabel(name: string, group: PartGroup): string {
   for (const [pattern, label] of group === "bots" ? BOTS : BACK_END)
     if (pattern.test(name)) return label;
-  return "Other part";
+  return UNKNOWN[group];
 }

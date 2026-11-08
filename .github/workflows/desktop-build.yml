@@ -142,6 +142,18 @@ jobs:
           manifest="$RUNNER_TEMP/pinned/container-images.json"
           test -f "$manifest"
           echo "path=$manifest" >> "$GITHUB_OUTPUT"
+      # Tauri downloads its bundling tools from GitHub the first time it bundles, once each, with no
+      # retry: NSIS on Windows, AppRun and linuxdeploy on Linux. A 504 there fails the build. This
+      # puts the same pinned, checksummed files where Tauri looks, through the REST API with retries,
+      # so `tauri build` downloads nothing. The token is the job's own read-only one, sent to the
+      # API alone, for the API's higher rate limit.
+      - name: Fetch Tauri's bundling tools
+        if: matrix.platform == 'windows' || matrix.platform == 'linux'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLATFORM: ${{ matrix.platform }}
+        run: desktop/scripts/prefetch-tauri-tools.sh "$PLATFORM"
       # `tauri build`, not `cargo build --release`. tauri-build emits `cargo:rustc-cfg=dev`
       # for anything the Tauri CLI did not build, so a plain cargo release binary still points
       # at the dev server and shows "Could not connect to localhost" when it is run. That
@@ -234,7 +246,7 @@ jobs:
           app = pathlib.Path(os.environ['OPENBOT_VERIFY_APP'])
           info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
           # A prerelease version keeps numeric Apple fields: only its major.minor.patch goes there.
-          apple = build['releaseVersion'].split('-')[0]
+          apple = build['version'].split('-')[0]
           for key, expected in {
               'CFBundleShortVersionString': apple,
               'CFBundleVersion': apple,
@@ -247,9 +259,17 @@ jobs:
           print(f"Verified packaged Mac version: {build['version']}")
           PY
       # Frontend assets and platform dependencies are ready after the packaged build.
-      # Include main.rs regressions as well as lib.rs; ignored live tests remain opt-in.
+      # Include main.rs regressions as well as lib.rs; ignored live tests remain opt-in, apart from
+      # the image download's on Linux, below.
       - name: Rust regression tests
         run: cargo test --locked --lib --bins
+        working-directory: desktop/src-tauri
+      # The back end's image download against a real containerd: the k3s node the CLI creates, a
+      # registry and a throttling proxy, on the runner's Docker. Linux runners have Docker; the
+      # others do not.
+      - name: Back end image download regression tests
+        if: matrix.platform == 'linux'
+        run: cargo test --locked --lib local_images::live -- --ignored --test-threads=1
         working-directory: desktop/src-tauri
       # The binary run as the Recorder's browsers run it: the native messaging host Chrome starts, and
       # the install that writes its manifests. The host name and extension id come from

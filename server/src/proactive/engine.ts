@@ -104,7 +104,11 @@ export type ProactiveScope = {
 
 export type ProactiveEngineDeps = {
   store: ProactiveStore;
-  memory: Pick<MemoryStore, "formMemory">;
+  /**
+   * Where a check-in's `form_memory` writes. Absent in an edition without memory
+   * (`editionHasMemory`), and then a check-in is offered no `form_memory` and told nothing about it.
+   */
+  memory?: Pick<MemoryStore, "formMemory">;
   queue: WorkQueue;
   owner: string;
   runTurn: TurnRunner;
@@ -348,6 +352,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       },
     });
     let memories = 0;
+    const memory = deps.memory;
     return [
       tool(
         "suggest_next_step",
@@ -405,35 +410,40 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
           return { cleared: cleared.id };
         },
       ),
-      tool(
-        "form_memory",
-        "Remember a durable fact about the person or their work that you read in this run. Provenance is recorded from the read itself and the person reviews it.",
-        proactiveMemoryInputSchema,
-        async (input) => {
-          if (memories >= MAX_MEMORIES_PER_RUN)
-            throw new ProactiveRefusedError(
-              `This run already formed ${MAX_MEMORIES_PER_RUN} memories.`,
-            );
-          const read = readMatching(
-            await deps.store.readsFor(runId),
-            input.sourceTool,
-          );
-          if (!read)
-            throw new ProactiveRefusedError(
-              "A memory needs a source: name a tool you successfully read with in this run.",
-            );
-          const server = await serverFor(catalogue, read.ref);
-          memories += 1;
-          return deps.memory.formMemory(setting.ownerUserId, {
-            agentId: setting.agentId,
-            content: input.content,
-            sourceApp: server?.title ?? read.ref.split("/")[0] ?? read.ref,
-            sourceRef: read.ref,
-            ...(input.sourceLink ? { sourceLink: input.sourceLink } : {}),
-            observedAt: read.at,
-          });
-        },
-      ),
+      ...(memory
+        ? [
+            tool(
+              "form_memory",
+              "Remember a durable fact about the person or their work that you read in this run. Provenance is recorded from the read itself and the person reviews it.",
+              proactiveMemoryInputSchema,
+              async (input) => {
+                if (memories >= MAX_MEMORIES_PER_RUN)
+                  throw new ProactiveRefusedError(
+                    `This run already formed ${MAX_MEMORIES_PER_RUN} memories.`,
+                  );
+                const read = readMatching(
+                  await deps.store.readsFor(runId),
+                  input.sourceTool,
+                );
+                if (!read)
+                  throw new ProactiveRefusedError(
+                    "A memory needs a source: name a tool you successfully read with in this run.",
+                  );
+                const server = await serverFor(catalogue, read.ref);
+                memories += 1;
+                return memory.formMemory(setting.ownerUserId, {
+                  agentId: setting.agentId,
+                  content: input.content,
+                  sourceApp:
+                    server?.title ?? read.ref.split("/")[0] ?? read.ref,
+                  sourceRef: read.ref,
+                  ...(input.sourceLink ? { sourceLink: input.sourceLink } : {}),
+                  observedAt: read.at,
+                });
+              },
+            ),
+          ]
+        : []),
     ];
   }
 
@@ -591,6 +601,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
         contextOf(prior, setting.agentId),
         trigger,
         gate.apps.map((app) => app.title),
+        deps.memory !== undefined,
       );
       let thrown: unknown = null;
       try {

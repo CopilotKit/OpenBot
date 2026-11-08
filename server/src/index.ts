@@ -94,6 +94,7 @@ import {
   personBrowserPlace,
   withPersonBrowsers,
 } from "./browser/host";
+import { personBrowserId, personBrowserInstallId } from "./browser/person";
 import {
   loadAttachmentForTurn,
   markAttachmentsSent,
@@ -161,17 +162,16 @@ import {
   channelMemberships,
   channels,
   intelligenceChannelMappings,
+  recorderConnections,
   users,
 } from "./db/schema";
 import { createDeliveryRouter, DELIVERY_WORK_KINDS } from "./delivery/router";
-import {
-  configuredDeliveryProviders,
-  type DeliveryScopeResolver,
-} from "./delivery/routes";
+import { configuredDeliveryProviders } from "./delivery/routes";
+import { createDeliveryScopes } from "./delivery/scope";
 import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
-import { setEdition } from "./edition";
+import { currentEdition, editionHasMemory, setEdition } from "./edition";
 import {
   createHostAccessBroker,
   HostAccessRefusedError,
@@ -187,6 +187,8 @@ import {
   observeIntelligenceAuthentication,
 } from "./intelligence-client";
 import { reportIntelligenceEntitlement } from "./intelligence-entitlement-check";
+import { createSkillApprovalStore } from "./learning/approvals";
+import { createAutoApprover } from "./learning/auto-approve";
 import {
   createLearningAutoAssign,
   probeLearningContainer,
@@ -203,10 +205,17 @@ import {
 } from "./learning/ensure-container";
 import { createInspectorLearningReader } from "./learning/inspector";
 import {
+  createLearningModelCalls,
+  learningModelEndpointFor,
+} from "./learning/model-endpoint";
+import { learningModelUnavailable } from "./learning/routes";
+import { createLearningPeople } from "./learning/people";
+import {
   createPersonalLearningSpaces,
   createPersonSpaceStore,
 } from "./learning/personal-space";
 import { clearLearningRevisionFallback } from "./learning/runtime";
+import { learningScopes } from "./learning/scopes";
 import { createLearningSettingsStore } from "./learning/settings";
 import {
   createLearningSharingStore,
@@ -214,9 +223,10 @@ import {
 } from "./learning/sharing";
 import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
+import { createMemoryRuntime } from "./memory/runtime";
 import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
-import { memoryTools } from "./memory/tools";
+import { offeredMemoryTools } from "./memory/tools";
 import { reportModelAvailability } from "./model-availability-check";
 import { createModelCatalogue } from "./model-catalogue";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
@@ -240,6 +250,7 @@ import {
   ensureAlwaysOnApp,
   ensurePersonalLearning,
   ensurePersonalSkills,
+  ensurePersonalSkillsOwned,
   personalDefaultAppsMemory,
   personalDefaultsDeps,
   startPersonalDefaultApps,
@@ -432,6 +443,7 @@ const personalLearningSpaces = createPersonalLearningSpaces({
         .limit(1)
     ).map((row) => row.name?.trim() || null)[0] ?? null,
 });
+const skillApprovalStore = createSkillApprovalStore(database);
 const learningSharingStore = createLearningSharingStore(database);
 /** What everyone opened to every Bot, in memory: runs read this, never each person's space or the table. */
 const openSkillIndex = createOpenSkillIndex({
@@ -774,6 +786,15 @@ const storedApprovals = createApprovalStore(database);
 // Before anything reads the model environment: blank base URLs removed, Anthropic given its `/v1`.
 normalizeModelBaseUrls();
 const runtimeModel = runtimeModelForEnvironment(tenantPackage.model);
+/**
+ * Where local Intelligence's Learning thinks on the person's plan, with a record of what became of
+ * each call so Settings can say why a run failed. Absent off a plan or without Desktop's secret.
+ */
+const learningModelEndpoint = learningModelEndpointFor(
+  runtimeModel.plan,
+  process.env.OPENBOT_LEARNING_MODEL_TOKEN,
+  createLearningModelCalls(),
+);
 // And before any Bot's model is resolved: behind a gateway, the API that model takes tools on (chooseOpenAIApi).
 if (chooseOpenAIApi(runtimeModel) === "responses")
   console.info(
@@ -909,6 +930,27 @@ const computerGateway = computerProvider
               .where(inArray(users.id, ids))
           ).map((row) => [row.id, { name: row.name, email: row.email }]),
         ),
+      // Whose OpenBot browser each one is: the server minted its Recorder connection under the browser's own install id.
+      browserOwners: async (computerIds) => {
+        const rows = await database
+          .selectDistinct({ userId: recorderConnections.userId })
+          .from(recorderConnections)
+          .where(
+            and(
+              eq(recorderConnections.via, "openbot-browser"),
+              inArray(
+                recorderConnections.installId,
+                computerIds.map(personBrowserInstallId),
+              ),
+            ),
+          );
+        const wanted = new Set(computerIds);
+        return new Map(
+          rows
+            .map((row) => [personBrowserId(row.userId), row.userId] as const)
+            .filter(([computerId]) => wanted.has(computerId)),
+        );
+      },
       auditStore: bootAuditStore,
       approvalGate: approvalService.gate,
       policy: () => policyStore.get(),
@@ -1191,6 +1233,18 @@ await ensurePersonalSkills(pluginStore, personalDefaultsDeps(database)).catch(
   (error: unknown) => {
     console.warn(
       `Couldn't give every Bot its skills at startup; each Bot gets them the first time it runs. ${error instanceof Error ? error.message : String(error)}`,
+    );
+  },
+);
+/*
+ * The personal edition's skills the person wrote on Settings > Skills before the route gave them an
+ * owner become theirs, so a Bot's "Your skills" lists them. A failure is a warning, and the next
+ * start tries again. Does nothing in the team edition.
+ */
+await ensurePersonalSkillsOwned(database, DEV_ACTOR, bootAuditStore).catch(
+  (error: unknown) => {
+    console.warn(
+      `Couldn't mark the skills you wrote as yours at startup; the next start tries again. ${error instanceof Error ? error.message : String(error)}`,
     );
   },
 );
@@ -1580,6 +1634,46 @@ const recorderExpirySweep = repeatAfterEach(async () => {
     );
   }
 }, 60_000);
+/*
+ * The personal edition has one reviewer, who is DEV_ACTOR (it requires single-user mode, which admits every request as
+ * DEV_ACTOR), so what its Bots learn is approved for them while automatic approval is on: once shortly after boot, so
+ * what waited while the app was closed doesn't wait another 15 minutes, then every 15 minutes.
+ */
+const autoApprover = createAutoApprover({
+  manage: learningProbeIntelligence.experimental.learning,
+  enabled: async () =>
+    currentEdition() === "personal" &&
+    ((await learningSettings.read()).autoApprove ?? true),
+  sources: async () =>
+    learningScopes({
+      edition: "personal",
+      userId: DEV_ACTOR.id,
+      settings: await learningSettings.read(),
+    }),
+  approvals: skillApprovalStore,
+  userId: DEV_ACTOR.id,
+  audit: bootAuditStore,
+});
+const sweepAutoApprovals = () =>
+  void autoApprover.sweep().catch((error) =>
+    console.error(
+      JSON.stringify({
+        type: "learning-auto-approve-sweep-error",
+        error: error instanceof Error ? error.name : "UnknownError",
+        timestamp: new Date().toISOString(),
+      }),
+    ),
+  );
+const firstAutoApproveSweep =
+  currentEdition() === "personal"
+    ? setTimeout(sweepAutoApprovals, 10_000)
+    : undefined;
+firstAutoApproveSweep?.unref();
+const autoApproveTimer =
+  currentEdition() === "personal"
+    ? setInterval(sweepAutoApprovals, 15 * 60_000)
+    : undefined;
+autoApproveTimer?.unref();
 const memoryIngestion = createMemoryIngestion({
   store: personalMemoryStore,
   plugins: pluginStore,
@@ -1610,22 +1704,18 @@ const checkInScope = createCheckInScope({
   unaskedOwnAccount: (ownerUserId, agentId) =>
     teamBots.unaskedOwnAccount(ownerUserId, agentId),
 });
-const deliveryScopeFor: DeliveryScopeResolver = async (
-  ownerUserId,
-  channelId,
-  agentId,
-) => {
-  const person = await peopleStore.find(ownerUserId);
-  if (!person || person.revoked) return null;
-  const actor = await actorFor(ownerUserId);
-  const [channel, bot] = await Promise.all([
-    channelStore.get(actor, channelId),
-    agentProfileStore.get(actor, agentId),
-  ]);
-  return channel?.active && bot && channel.agentIds.includes(agentId)
-    ? { ownerUserId, channelId, agentId, threadId: channel.threadId }
-    : null;
-};
+/*
+ * The person's conversation with a Bot, as delivery addresses it, and whether a scope still names one
+ * they can reach: the channel's own thread, or that Bot's own thread in a group. See delivery/scope.ts.
+ */
+const { scopeFor: deliveryScopeFor, authorise: authoriseDeliveryScope } =
+  createDeliveryScopes({
+    database,
+    people: peopleStore,
+    actorFor,
+    channels: channelStore,
+    bots: agentProfileStore,
+  });
 
 /*
  * Memory sources and background research, on by default for each person and Bot, and never switched
@@ -1636,6 +1726,7 @@ const memoryDefaults = createMemoryDefaults({
   ingestion: memoryIngestion,
   sources: config.memoryDefaults.sources,
   research: config.memoryDefaults.research,
+  edition: config.edition,
   channelBots: async (ownerUserId, channelId) =>
     (await channelStore.get(await actorFor(ownerUserId), channelId))
       ?.agentIds ?? null,
@@ -1648,39 +1739,14 @@ const memoryDefaults = createMemoryDefaults({
     teamBots.publishedByAnother(ownerUserId, agentId),
 });
 personSpoke = memoryDefaults.personSpoke;
-const loadPersonalMemoryForActor = (ownerUserId: string) => (botId: string) => {
-  // Apps connected since this Bot's last turn become its memory sources. Never waits.
-  memoryDefaults.botTurn(ownerUserId, botId);
-  return memoryIngestion.contextFor(ownerUserId, botId);
-};
-const memorySweep = repeatAfterEach(async () => {
-  try {
-    await memoryIngestion.syncDue();
-  } catch (error) {
-    console.error(
-      JSON.stringify({
-        type: "memory-sweep-error",
-        error: error instanceof Error ? error.name : "UnknownError",
-        context: { operation: "syncDue" },
-        timestamp: new Date().toISOString(),
-      }),
-    );
-  }
-  // Mirror to Intelligence what is out of step: the backfill on the first passes after a deployment
-  // becomes entitled, and afterwards whatever an outage left behind. A no-op without Intelligence.
-  try {
-    await personalMemoryStore.mirrorPending();
-  } catch (error) {
-    console.error(
-      JSON.stringify({
-        type: "memory-sweep-error",
-        error: error instanceof Error ? error.name : "UnknownError",
-        context: { operation: "mirrorPending" },
-        timestamp: new Date().toISOString(),
-      }),
-    );
-  }
-}, 60_000);
+// Nothing of it in the personal edition: no memory in a turn, no sync. See memory/runtime.ts.
+const memoryRuntime = createMemoryRuntime({
+  edition: config.edition,
+  defaults: memoryDefaults,
+  ingestion: memoryIngestion,
+  store: personalMemoryStore,
+});
+const memorySweep = repeatAfterEach(memoryRuntime.sweep, 60_000);
 // Follow-ups a Bot schedules for itself, on the shared work queue. See agents/wake-up.ts.
 const wakeUpStore = createWakeUpStore(database, { auditStore: bootAuditStore });
 
@@ -1693,7 +1759,7 @@ const loadToolsForActor =
       agentId: botId,
       initiator,
     }),
-    ...memoryTools({
+    ...offeredMemoryTools(config.edition, {
       store: personalMemoryStore,
       ingestion: memoryIngestion,
       ownerUserId: actorId,
@@ -2138,7 +2204,9 @@ const actorAgentResolver = createActorAgentResolver({
   get acquireLearnedSkills() {
     return copilotRuntime.learning?.acquire;
   },
-  loadPersonalMemoryForActor,
+  ...(memoryRuntime.loadForActor
+    ? { loadPersonalMemoryForActor: memoryRuntime.loadForActor }
+    : {}),
   recordToolLimitRefusalForActor: toolLimitRecorder(bootAuditStore),
 });
 
@@ -2156,11 +2224,22 @@ const copilotRuntime = mountCopilotRuntime(
     personalSkills: {
       containerFor: personalLearningSpaces.containerFor,
       openSkills: () => openSkillIndex.sources(),
+      // Read on every run, never from the index: an approval made on another replica counts at once.
+      withheld: (userIds) => skillApprovalStore.withheld(userIds),
       sharingAllowed: skillSharingInSnapshot,
     },
     trajectoryCapture: recorderExtension.trajectoryCapture,
   },
 );
+
+/** Reads one named skill from a container; throws when the runtime or the read is unavailable, null when absent. */
+const skillIn = async (containerId: string, name: string) => {
+  const read = await copilotRuntime.learning?.containerSkills(containerId);
+  if (!read || "unavailable" in read) {
+    throw new Error("Skills are unavailable.");
+  }
+  return read.skills.find((skill) => skill.name === name) ?? null;
+};
 
 const responsibilityEngine = createServerResponsibilityEngine({
   productTelemetry,
@@ -2398,9 +2477,6 @@ useSlackChannelMembership((input) =>
     ? deliveryProviders.slack.isMember(input)
     : Promise.resolve(false),
 );
-const authoriseDeliveryScope = async (scope: DeliveryScope) =>
-  (await deliveryScopeFor(scope.ownerUserId, scope.channelId, scope.agentId))
-    ?.threadId === scope.threadId;
 const deliveryRouter = createDeliveryRouter({
   store: deliveryStore,
   queue: createWorkQueue(database),
@@ -2513,7 +2589,8 @@ const taskSweep = repeatAfterEach(async () => {
  */
 const proactiveEngine = createProactiveEngine({
   store: proactiveStore,
-  memory: personalMemoryStore,
+  // A check-in forms memories only where there is memory.
+  ...(editionHasMemory(config.edition) ? { memory: personalMemoryStore } : {}),
   queue: createWorkQueue(database),
   owner: workOwner("proactive"),
   runTurn: createTurnRunner({
@@ -2936,7 +3013,7 @@ const app = createApp(
       return { text, isError: text.startsWith(REFUSAL_MARKER) };
     }
     const { name, args, botId, actorId, initiator } = input;
-    const memory = memoryTools({
+    const memory = offeredMemoryTools(config.edition, {
       store: personalMemoryStore,
       ingestion: memoryIngestion,
       ownerUserId: actorId,
@@ -2988,6 +3065,14 @@ const app = createApp(
       ? createInspectorLearningReader(config.runtime.intelligence)
       : undefined,
     manage: learningProbeIntelligence.experimental.learning,
+    modelUnavailable: learningModelUnavailable(process.env),
+    skills: copilotRuntime.learning?.containerSkills,
+    approvals: skillApprovalStore,
+    people: createLearningPeople(database),
+    personSkill: (userId, name) =>
+      skillIn(personalLearningSpaces.containerFor(userId), name),
+    invalidate: () => openSkillIndex.invalidate(),
+    recordingTitles: recorderExtension.recordingTitles,
   },
   {
     productTelemetry,
@@ -3058,13 +3143,33 @@ const app = createApp(
           },
         }
       : {}),
+    learningModel: learningModelEndpoint,
     personalLearning: {
       store: learningSharingStore,
+      ...(learningModelEndpoint?.calls
+        ? { modelCalls: learningModelEndpoint.calls }
+        : {}),
+      approvals: skillApprovalStore,
+      autoApprover,
       skillsOf: (userId) =>
         copilotRuntime.learning?.personalSkills(userId) ??
         Promise.resolve({ unavailable: "unavailable" as const }),
+      skillOf: (userId, name) =>
+        skillIn(personalLearningSpaces.containerFor(userId), name),
+      containerSkills: (id) =>
+        copilotRuntime.learning?.containerSkills(id) ??
+        Promise.resolve({ unavailable: "unavailable" as const }),
       invalidate: () => openSkillIndex.invalidate(),
       sharingAllowed: skillSharingAllowed,
+      manage: learningProbeIntelligence.experimental.learning,
+      recordingTitles: recorderExtension.recordingTitles,
+      settings: learningSettings,
+      scopesFor: async (actor) =>
+        learningScopes({
+          edition: currentEdition(),
+          userId: actor.id,
+          settings: await learningSettings.read(),
+        }),
     },
     delivery: {
       authenticated: {
@@ -3189,6 +3294,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     personResponseSweep.stop();
     groupSweep.stop();
     recorderExpirySweep.stop();
+    if (firstAutoApproveSweep) clearTimeout(firstAutoApproveSweep);
+    if (autoApproveTimer) clearInterval(autoApproveTimer);
     for (const sweep of deliverySweeps) sweep.stop();
     void Promise.allSettled([
       productTelemetry.flush(),

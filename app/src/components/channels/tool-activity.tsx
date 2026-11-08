@@ -1,4 +1,5 @@
 import { CopilotKitContext } from "@copilotkit/react-core/v2/context";
+import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import {
   readConnectPrompt,
   SHOW_APP_ACCESS_TOOL,
@@ -44,6 +45,7 @@ import {
   asText,
   forDisplay,
   REFUSAL_MARKER,
+  refusalOf,
   toolResultFailed,
   UNOFFERED_TOOL_SENTENCE,
   unofferedTool,
@@ -354,11 +356,25 @@ function inputValue(value: unknown): string {
   return text.length > 200 ? `${text.slice(0, 199)}…` : text;
 }
 
+/**
+ * The arguments a step lists when it is opened, as a person reads them.
+ *
+ * A folder step's `grantId` is the id OpenBot gave the folder grant ("host-grant-74138-…"), written
+ * for the model; the line already names the file, and Settings > Computer the folder. Listed, an
+ * opened "Save a file" read "grantId  host-grant-74138-1794115092137885000" above the file's path.
+ */
+function readableInputs(
+  name: string,
+  args: Record<string, unknown>,
+): [string, string][] {
+  return Object.entries(args)
+    .filter(([key]) => !(name.startsWith("host_") && key === "grantId"))
+    .map(([key, value]) => [key, inputValue(value)] as [string, string]);
+}
+
 export function stepDetails(step: ToolItem): StepDetails {
   const args = objectOf(step.toolCall.function.arguments);
-  const inputs = Object.entries(args).map(
-    ([key, value]) => [key, inputValue(value)] as [string, string],
-  );
+  const inputs = readableInputs(step.toolCall.function.name, args);
   if (isBrowserStep(step)) {
     const browser = browserStepDetails(step);
     return {
@@ -398,8 +414,11 @@ export function stepDetails(step: ToolItem): StepDetails {
     };
   }
   const answer = step.result === undefined ? undefined : asText(step.result);
-  const refused = answer?.startsWith(REFUSAL_MARKER) ?? false;
-  const body = refused ? answer?.slice(REFUSAL_MARKER.length).trim() : answer;
+  // Behind the marker, or a step the person declined on the conversation's card. See `refusalOf`.
+  const reason = refusalOf(answer);
+  const refused = reason !== undefined;
+  // A refusal is said in the person's words, never in the sentence written for the Bot.
+  const body = refused ? outcomeForPerson(reason) : answer;
   // A tool whose answer is for the model, not the person; see `ServerToolLine`.
   const own = answersTheModel(name);
   // A tool the Bot was never offered: the runtime's answer lists every tool it has, for the model.
@@ -660,10 +679,18 @@ export function StepRow({
 }) {
   if (step.kind === "subtask")
     return <SubtaskStep active={active} step={step} />;
+  /*
+   * The step still working shimmers, as the group's own line does while it runs. "In progress" in
+   * muted text beside a label drawn exactly like the finished steps above it read as one more static
+   * row: a person watching four "Fetch emails" lines and a fifth with no result took the Bot for dead.
+   */
+  const running = active && step.pending;
   const line = (
     <span className="flex min-w-0 items-center gap-2">
       <StepIcon kind={step.kind} />
-      <span className="shrink-0">{step.label}</span>
+      <span className={running ? "shrink-0 tool-line-running" : "shrink-0"}>
+        {step.label}
+      </span>
       {step.href ? (
         <a
           href={step.href}
