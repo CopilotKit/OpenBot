@@ -55,7 +55,6 @@ jobs:
           role-to-assume: arn:aws:iam::604598162673:role/openbot-release-downloads
           role-session-name: openbot-downloads-sync
           aws-region: us-east-1
-      - run: scripts/downloads-sync.sh
       # crane (go-containerregistry) reads the images from ghcr.io: a pinned release, checked
       # against its published SHA-256 before it runs.
       - name: Install crane
@@ -75,5 +74,8 @@ jobs:
           bun-version: 1.4.3
           no-cache: true
       # Everything else the app downloads for the release: its container images, its source
-      # archive and the engine installers it pins (scripts/downloads-images.ts).
+      # archive and the engine installers it pins (scripts/downloads-images.ts). First, and it
+      # fails unless every image answers through the address, so latest/ below never names a
+      # release whose images are not there.
       - run: bun scripts/downloads-images.ts
+      - run: scripts/downloads-sync.sh

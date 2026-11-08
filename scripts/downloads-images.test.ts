@@ -192,11 +192,14 @@ function cloudfront(fake: FakeDownloads, hub: ReturnType<typeof github>) {
     fake.env.DOWNLOADS_BUCKET as string,
   );
   const requests: string[] = [];
+  /** Keys this edge answers 403 for whatever the bucket holds, as a stale cached error would. */
+  const refused = new Set<string>();
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch(request) {
       const path = new URL(request.url).pathname;
+      if (request.method === "HEAD") requests.push(`HEAD ${path.slice(1)}`);
       if (path.startsWith("/github/")) {
         const wanted = path.slice("/github".length);
         if (wanted === hub.path) return new Response(readFileSync(hub.archive));
@@ -210,15 +213,15 @@ function cloudfront(fake: FakeDownloads, hub: ReturnType<typeof github>) {
         bucket,
         key.endsWith("/") ? `${key}.slash-object` : key,
       );
-      if (!existsSync(file)) {
-        requests.push(`403 ${key}`);
+      if (!existsSync(file) || refused.has(key)) {
+        if (request.method !== "HEAD") requests.push(`403 ${key}`);
         return new Response("<Error><Code>AccessDenied</Code></Error>", {
           status: 403,
           headers: { "content-type": "application/xml" },
         });
       }
       const meta = JSON.parse(readFileSync(join(metas, `${key}.json`), "utf8"));
-      requests.push(`200 ${key}`);
+      if (request.method !== "HEAD") requests.push(`200 ${key}`);
       return new Response(readFileSync(file), {
         headers: {
           "content-type": meta.ContentType,
@@ -228,7 +231,7 @@ function cloudfront(fake: FakeDownloads, hub: ReturnType<typeof github>) {
     },
   });
   cleanups.push(() => server.stop(true));
-  return { url: `http://127.0.0.1:${server.port}`, requests };
+  return { url: `http://127.0.0.1:${server.port}`, requests, refused };
 }
 
 async function run(fake: FakeDownloads, env: Record<string, string>) {
@@ -267,7 +270,21 @@ test("a release's images are copied under the registry's paths, byte for byte an
       "quay.io/someone/else:1",
     ],
   };
+  // Every image the release pins is copied, listed in desktop-images.json or not.
+  const supervisor = push(fake, "copilotkit/openbot-supervisor", "v0.3.4");
+  const pins = {
+    version: "v0.3.4",
+    images: {
+      server: {
+        reference: `ghcr.io/copilotkit/openbot-server@${server.digest}`,
+      },
+      supervisor: {
+        reference: `ghcr.io/copilotkit/openbot-supervisor@${supervisor.digest}`,
+      },
+    },
+  };
   fake.release("v0.3.4", {
+    "container-images.json": JSON.stringify(pins),
     "desktop-images.json": JSON.stringify(list),
     "latest.json": "{}",
   });
@@ -277,10 +294,21 @@ test("a release's images are copied under the registry's paths, byte for byte an
   const env = {
     DOWNLOADS_URL: edge.url,
     DOWNLOADS_GITHUB_URL: `${edge.url}/github`,
+    DOWNLOADS_VERIFY_DELAY: "0",
   };
 
   const first = await run(fake, env);
   expect(first.code).toBe(0);
+  // Each image's top manifest is asked for through the address before the run succeeds.
+  expect(first.out).toContain(
+    `All 6 images for v0.3.4 answer through ${edge.url}.`,
+  );
+  expect(edge.requests).toContain(
+    `HEAD v2/copilotkit/openbot-supervisor/manifests/${supervisor.digest}`,
+  );
+  expect(edge.requests).toContain(
+    "HEAD v2/docker.io/library/busybox/manifests/1.37",
+  );
   const bucket = fake.bucket();
   const manifests = (repo: string, image: ReturnType<typeof push>) => [
     `v2/${repo}/manifests/${image.digest}`,
@@ -299,6 +327,8 @@ test("a release's images are copied under the registry's paths, byte for byte an
     ...manifests("docker.io/library/busybox", busybox),
     "v2/docker.io/library/busybox/manifests/1.37",
     ...manifests("docker.io/rancher/k3s", k3s),
+    // Named only by container-images.json.
+    ...manifests("copilotkit/openbot-supervisor", supervisor),
   ]) {
     expect(Object.keys(bucket)).toContain(key);
   }
@@ -315,11 +345,11 @@ test("a release's images are copied under the registry's paths, byte for byte an
   ).toBe(false);
   expect(
     Object.keys(bucket).filter((key) => key.includes("/manifests/")),
-  ).toHaveLength(18);
+  ).toHaveLength(21);
   // Two configs and four layers an image.
   expect(
     Object.keys(bucket).filter((key) => key.includes("/blobs/")),
-  ).toHaveLength(30);
+  ).toHaveLength(36);
   expect(bucket["v2/"]).toEqual({
     content: "{}",
     contentType: "application/json",
@@ -397,7 +427,9 @@ test("a release's images are copied under the registry's paths, byte for byte an
       "/v2/docker.io/pgvector/pgvector/manifests/pg17",
     ].sort(),
   );
-  expect(edge.requests.sort()).toEqual(
+  expect(
+    edge.requests.filter((line) => !line.startsWith("HEAD ")).sort(),
+  ).toEqual(
     Object.keys(bucket)
       .map((key) => `200 ${key}`)
       .sort(),
@@ -456,4 +488,36 @@ test("a release's images are copied under the registry's paths, byte for byte an
     ].sort(),
   );
   expect(fake.invalidations()).toHaveLength(1);
+
+  // An image that does not answer through the address fails the run, named, so the job stops
+  // before downloads-sync.sh moves latest/ to this release.
+  const stale = `v2/copilotkit/openbot-supervisor/manifests/${supervisor.digest}`;
+  edge.refused.add(stale);
+  const refused = await run(fake, env);
+  expect(refused.code).toBe(1);
+  expect(refused.out).toContain(
+    `::error::1 of 6 images for v0.3.4 do not answer through ${edge.url}: ${edge.url}/${stale} (403)`,
+  );
+  // The check alone, as a person runs it after a release: no AWS, no registry.
+  const checked = (bucketless: Record<string, string>) =>
+    run(fake, {
+      ...env,
+      DOWNLOADS_VERIFY_ONLY: "1",
+      DOWNLOADS_BUCKET: "",
+      DOWNLOADS_DISTRIBUTION_ID: "",
+      ...bucketless,
+    });
+  const awsBefore = fake
+    .calls()
+    .filter((call) => /^(aws|crane) /.test(call)).length;
+  expect((await checked({})).code).toBe(1);
+  edge.refused.clear();
+  const whole = await checked({});
+  expect(whole.code).toBe(0);
+  expect(whole.out).toContain(
+    `All 6 images for v0.3.4 answer through ${edge.url}.`,
+  );
+  expect(fake.calls().filter((call) => /^(aws|crane) /.test(call)).length).toBe(
+    awsBefore,
+  );
 }, 30_000);

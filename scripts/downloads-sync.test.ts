@@ -517,8 +517,9 @@ test("the sync workflow runs on main only, one at a time, with the role and noth
     "arn:aws:iam::604598162673:role/openbot-release-downloads",
   );
   const runs = job.steps?.map((step) => step.run).filter(Boolean);
-  expect(runs?.[0]).toBe("scripts/downloads-sync.sh");
-  expect(runs?.at(-1)).toBe("bun scripts/downloads-images.ts");
+  // The images first: a failed copy stops the job before latest/ names the release.
+  expect(runs?.at(-2)).toBe("bun scripts/downloads-images.ts");
+  expect(runs?.at(-1)).toBe("scripts/downloads-sync.sh");
 
   // Both attach jobs may be the one that makes the release Latest, so both may start the sync.
   for (const path of [

@@ -56,6 +56,7 @@ import { join } from "node:path";
 export const TAG_CACHE = "public, max-age=300";
 export const IMMUTABLE = "public, max-age=31536000, immutable";
 export const LIST = "desktop-images.json";
+export const PINS = "container-images.json";
 
 const INDEX_TYPES = new Set([
   "application/vnd.oci.image.index.v1+json",
@@ -221,11 +222,18 @@ async function pool<T>(
 type Env = Record<string, string | undefined>;
 
 export async function main(env: Env = process.env): Promise<number> {
+  // Only checks that every image answers through the address: no AWS, no registry.
+  const verifyOnly = env.DOWNLOADS_VERIFY_ONLY === "1";
   const bucket =
-    env.DOWNLOADS_BUCKET || fail("DOWNLOADS_BUCKET must name the bucket.");
+    env.DOWNLOADS_BUCKET ||
+    (verifyOnly ? "" : fail("DOWNLOADS_BUCKET must name the bucket."));
   const distribution =
     env.DOWNLOADS_DISTRIBUTION_ID ||
-    fail("DOWNLOADS_DISTRIBUTION_ID must name the CloudFront distribution.");
+    (verifyOnly
+      ? ""
+      : fail(
+          "DOWNLOADS_DISTRIBUTION_ID must name the CloudFront distribution.",
+        ));
   const prefix = env.DOWNLOADS_PREFIX ?? "";
   if (prefix && !/^[a-z0-9][a-z0-9-]*\/$/.test(prefix)) {
     fail(
@@ -250,6 +258,18 @@ export async function main(env: Env = process.env): Promise<number> {
   );
   try {
     const listed = await readList(env, work);
+    if (verifyOnly) {
+      const refs = listed.images.flatMap(
+        (image) => imageRef(image, source) ?? [],
+      );
+      return await verify(refs, {
+        address,
+        prefix,
+        parallel,
+        env,
+        label: listed.label,
+      });
+    }
     const files = await releaseFiles(listed.tag, env, github, work, prefix);
     return await copy({
       ...listed,
@@ -402,55 +422,138 @@ async function readList(
       `${tag} is a prerelease, a draft or a candidate, not a stable release. No image was copied.`,
     );
   }
-  if (env.DOWNLOADS_IMAGES_FILE) {
-    const from = env.DOWNLOADS_IMAGES_FILE;
-    return {
-      tag,
-      label: tag,
-      images: parseList(await Bun.file(from).text(), from),
-    };
-  }
-  const asset = release.assets.find((found) => found.name === LIST);
-  if (!asset) {
-    if (asked)
-      fail(`${tag} has no ${LIST}, so there is no list of its images to copy.`);
-    console.log(
-      `::notice::${tag} has no ${LIST}: it was published before releases listed their images. No image to copy.`,
-    );
-    return { tag, label: tag, images: [] };
-  }
-  const expected = /^sha256:([0-9a-f]{64})$/.exec(asset.digest ?? "")?.[1];
-  if (!expected)
-    fail(
-      `GitHub reports no SHA-256 digest for ${LIST} on ${tag}, so it cannot be checked.`,
-    );
   const dir = join(work, "release");
   mkdirSync(dir);
-  const downloaded = await run([
-    "gh",
-    "release",
-    "download",
-    tag,
-    "-R",
-    repository,
-    "--pattern",
-    LIST,
-    "--dir",
-    dir,
-  ]);
-  if (downloaded.code !== 0)
-    fail(`Could not download ${LIST} from ${tag}: ${downloaded.stderr.trim()}`);
-  const bytes = await Bun.file(join(dir, LIST)).bytes();
-  if (sha256Hex(bytes) !== expected) {
-    fail(
-      `${LIST} downloaded from ${tag} does not match the digest GitHub reports for it.`,
-    );
-  }
-  return {
-    tag,
-    label: tag,
-    images: parseList(new TextDecoder().decode(bytes), `${LIST} on ${tag}`),
+  /** A release asset's text, checked against the digest GitHub reports, or `undefined`. */
+  const asset = async (name: string) => {
+    const found = release.assets.find((candidate) => candidate.name === name);
+    if (!found) return undefined;
+    const expected = /^sha256:([0-9a-f]{64})$/.exec(found.digest ?? "")?.[1];
+    if (!expected)
+      fail(
+        `GitHub reports no SHA-256 digest for ${name} on ${tag}, so it cannot be checked.`,
+      );
+    const downloaded = await run([
+      "gh",
+      "release",
+      "download",
+      tag,
+      "-R",
+      repository,
+      "--pattern",
+      name,
+      "--dir",
+      dir,
+    ]);
+    if (downloaded.code !== 0)
+      fail(
+        `Could not download ${name} from ${tag}: ${downloaded.stderr.trim()}`,
+      );
+    const bytes = await Bun.file(join(dir, name)).bytes();
+    if (sha256Hex(bytes) !== expected) {
+      fail(
+        `${name} downloaded from ${tag} does not match the digest GitHub reports for it.`,
+      );
+    }
+    return new TextDecoder().decode(bytes);
   };
+  // Every image the release pins, whichever of them this app runs: a pinned reference is what
+  // the app pulls, and a copy of one it does not is only space.
+  const pins = await asset(PINS);
+  const pinned =
+    pins === undefined ? [] : pinnedImages(pins, `${PINS} on ${tag}`);
+  if (pins === undefined) console.log(`::notice::${tag} has no ${PINS}.`);
+  // And the back end's, the Kubernetes system images and the cluster's, which only the app's own
+  // code can list (desktop-images.json).
+  let listed: string[] = [];
+  if (env.DOWNLOADS_IMAGES_FILE) {
+    const from = env.DOWNLOADS_IMAGES_FILE;
+    listed = parseList(await Bun.file(from).text(), from);
+  } else {
+    const text = await asset(LIST);
+    if (text === undefined) {
+      console.log(
+        `::notice::${tag} has no ${LIST}: it was published before releases listed their images, so only the images ${PINS} names are copied.`,
+      );
+    } else {
+      listed = parseList(text, `${LIST} on ${tag}`);
+    }
+  }
+  return { tag, label: tag, images: [...new Set([...pinned, ...listed])] };
+}
+
+/**
+ * Asks the address for every image's top manifest, as a client's first request for it does, and
+ * fails naming each one that does not answer 200. A miss is asked again, twice, after
+ * DOWNLOADS_VERIFY_DELAY seconds (default 10), which outlasts CloudFront's caching of a 403 from
+ * before the upload.
+ */
+async function verify(
+  refs: Ref[],
+  options: {
+    address: string;
+    prefix: string;
+    parallel: number;
+    env: Env;
+    label: string;
+  },
+): Promise<number> {
+  const delay = Number(options.env.DOWNLOADS_VERIFY_DELAY ?? "10") * 1000;
+  const urls = [
+    ...new Set(
+      refs.map(
+        (ref) =>
+          `${options.address}/${options.prefix}v2/${ref.path}/manifests/${ref.digest ?? ref.tag}`,
+      ),
+    ),
+  ];
+  let missing = urls;
+  for (let attempt = 1; attempt <= 3 && missing.length > 0; attempt++) {
+    if (attempt > 1) await Bun.sleep(delay);
+    const failed: string[] = [];
+    await pool(missing, options.parallel, async (url) => {
+      try {
+        const answer = await fetch(url, { method: "HEAD" });
+        if (answer.status !== 200) failed.push(`${url} (${answer.status})`);
+      } catch (error) {
+        failed.push(
+          `${url} (${error instanceof Error ? error.message : error})`,
+        );
+      }
+    });
+    missing = failed.map((line) => line.slice(0, line.lastIndexOf(" (")));
+    if (attempt === 3 && failed.length > 0) {
+      fail(
+        `${failed.length} of ${urls.length} images for ${options.label} do not answer through ${options.address}: ${failed.sort().join(", ")}`,
+      );
+    }
+  }
+  console.log(
+    `All ${urls.length} images for ${options.label} answer through ${options.address}.`,
+  );
+  return 0;
+}
+
+function pinnedImages(text: string, from: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    fail(`${from} is not JSON.`);
+  }
+  const images = (
+    parsed as { images?: Record<string, { reference?: unknown }> }
+  ).images;
+  const references = Object.values(images ?? {}).map(
+    (image) => image?.reference,
+  );
+  if (
+    references.length === 0 ||
+    references.some((reference) => typeof reference !== "string")
+  ) {
+    fail(`${from} names no image references.`);
+  }
+  return references as string[];
 }
 
 function parseList(text: string, from: string): string[] {
@@ -746,7 +849,7 @@ async function copy(options: Copy): Promise<number> {
     console.log(
       `downloads.copilotkit.ai already serves every image and file for ${options.label}. Nothing to upload.`,
     );
-    return 0;
+    return await verify(copied, options);
   }
 
   mkdirSync(join(work, "objects"));
@@ -885,7 +988,7 @@ async function copy(options: Copy): Promise<number> {
       `${(await summary.exists()) ? await summary.text() : ""}${lines.join("\n")}\n`,
     );
   }
-  return 0;
+  return await verify(copied, options);
 }
 
 if (import.meta.main) {
