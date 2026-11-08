@@ -75,6 +75,7 @@ import {
   pluginsPageQueryOptions,
   pluginsProvider,
 } from "@/lib/plugins/queries";
+import { toolsListError } from "@/lib/plugins/tools-error";
 import {
   botSharedAppsQueryOptions,
   describeApproval,
@@ -1292,7 +1293,8 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
           />
           {server.tools.length === 0 ? (
             <PageEmpty icon={IconTool} title="No tools listed">
-              {server.lastError ?? "Refresh tools to check again."}
+              {toolsListError(server.lastError, { title, personal }) ??
+                "Refresh tools to check again."}
             </PageEmpty>
           ) : (
             <PageRows>
