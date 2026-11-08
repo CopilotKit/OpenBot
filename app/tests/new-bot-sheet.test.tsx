@@ -465,12 +465,34 @@ test("custom-agent selection validates the name before advancing", async () => {
     "Name is required.",
   );
   expect(document.activeElement).toBe(view.getByLabelText("Name"));
-  expect(view.queryByRole("button", { name: /LangChain/ })).toBeNull();
+  expect(
+    view.queryByRole("heading", { name: "Connect a custom agent" }),
+  ).toBeNull();
   await user.type(view.getByLabelText("Name"), "My Bot");
   await user.click(
     view.getByRole("button", { name: /^Connect a custom agent/ }),
   );
-  expect(await view.findByRole("button", { name: /LangChain/ })).toBeTruthy();
+  expect(
+    await view.findByRole("heading", { name: "Connect a custom agent" }),
+  ).toBeTruthy();
+});
+
+test("a framework on the first screen validates the name, then goes straight to its address", async () => {
+  const { view, user } = await opened();
+  await user.click(view.getByRole("button", { name: /LangChain/ }));
+  expect((await view.findByRole("alert")).textContent).toBe(
+    "Name is required.",
+  );
+  expect(document.activeElement).toBe(view.getByLabelText("Name"));
+  expect(view.queryByLabelText("Agent address")).toBeNull();
+  await user.type(view.getByLabelText("Name"), "My Bot");
+  await user.click(view.getByRole("button", { name: /LangChain/ }));
+  expect(await view.findByLabelText("Agent address")).toBeTruthy();
+  expect(view.getByText("LangChain (LangGraph)")).toBeTruthy();
+  await user.click(view.getByRole("button", { name: "Back" }));
+  expect(
+    await view.findByRole("heading", { name: "Connect a custom agent" }),
+  ).toBeTruthy();
 });
 
 test("personal Bot creation hides team visibility and isolation controls and links to Business", async () => {

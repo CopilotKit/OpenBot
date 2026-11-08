@@ -7,7 +7,6 @@ import {
   IconCheck,
   IconInfoCircle,
   IconLock,
-  IconPlugConnected,
   IconUsers,
 } from "@tabler/icons-react";
 import {
@@ -123,6 +122,10 @@ const CONNECTION_OPTIONS = [
   ...WEB_HARNESSES.filter((harness) => harness.id !== "byo-url"),
 ];
 type Step = (typeof STEPS)[number];
+/** The frameworks named on the first screen: the web list's leads, so a custom agent is in view. */
+const LEAD_FRAMEWORKS = CONNECTION_OPTIONS.filter(
+  (harness) => harness.id !== "byo-url",
+).slice(0, 4);
 
 /**
  * Where the Bot runs: on this deployment, or behind a framework somebody hosts.
@@ -331,6 +334,23 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       return custom ? go("runtime") : create({ kind: "builtin" });
   };
 
+  /**
+   * From the first screen to a custom agent: the whole list, or one framework picked from the strip
+   * above the footer. The name is checked first, since the next screens never show it.
+   */
+  const connectCustom = (chosen?: Runtime) => {
+    const parsed = agentFormSchema.shape.name.safeParse(name);
+    if (!parsed.success) {
+      setNameError(parsed.error.issues[0]?.message);
+      document.getElementById("new-bot-name")?.focus();
+      return;
+    }
+    setNameError(undefined);
+    if (!chosen) return go("runtime");
+    setRuntime(chosen);
+    go("endpoint");
+  };
+
   /** Back returns to the previous screen without resetting any answers. */
   const previous = (): Step => (step === "endpoint" ? "runtime" : "about");
 
@@ -494,7 +514,54 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         ) : null}
       </div>
 
-      <SheetFooter className="flex-row flex-wrap items-center justify-between border-t border-border">
+      {/*
+       * Outside the scrolling body, so a custom agent is in view wherever the form is scrolled to.
+       * One quiet line: the simple path is the form above and Create Bot below.
+       */}
+      {step === "about" && builtInAvailable && (
+        <div className="flex items-center gap-3 bg-muted/40 px-6 py-2.5">
+          <span className="shrink-0 font-medium text-[0.7rem] text-muted-foreground uppercase tracking-wide">
+            Or use
+          </span>
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            {LEAD_FRAMEWORKS.map((harness) => (
+              <button
+                className="group flex min-w-0 items-center gap-1 rounded-md text-[0.7rem] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                disabled={busy}
+                key={harness.id}
+                onClick={() =>
+                  connectCustom({ kind: "managed", harness: harness.id })
+                }
+                type="button"
+              >
+                <HarnessMark
+                  className="size-3.5 opacity-60 grayscale transition group-hover:opacity-100 group-hover:grayscale-0 group-focus-visible:opacity-100 group-focus-visible:grayscale-0"
+                  id={harness.mark}
+                  name={harness.name}
+                />
+                <span className="truncate max-md:sr-only">{harness.name}</span>
+              </button>
+            ))}
+          </div>
+          <Button
+            className="h-auto shrink-0 px-0 text-[0.7rem] text-muted-foreground underline hover:text-foreground"
+            disabled={busy}
+            onClick={() => connectCustom()}
+            type="button"
+            variant="link"
+          >
+            <span className="sr-only">Connect a custom agent: </span>
+            and {CONNECTION_OPTIONS.length - LEAD_FRAMEWORKS.length} more
+          </Button>
+        </div>
+      )}
+
+      <SheetFooter
+        className={cn(
+          "flex-row flex-wrap items-center justify-between",
+          !(step === "about" && builtInAvailable) && "border-t border-border",
+        )}
+      >
         {step === "about" ? (
           <SheetClose
             render={<Button className="px-4" size="lg" variant="ghost" />}
@@ -514,27 +581,6 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
           </Button>
         )}
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-          {step === "about" && builtInAvailable && (
-            <Button
-              type="button"
-              variant="outline"
-              size="lg"
-              disabled={busy}
-              onClick={() => {
-                const parsed = agentFormSchema.shape.name.safeParse(name);
-                if (!parsed.success) {
-                  setNameError(parsed.error.issues[0]?.message);
-                  document.getElementById("new-bot-name")?.focus();
-                  return;
-                }
-                setNameError(undefined);
-                go("runtime");
-              }}
-            >
-              <IconPlugConnected className="size-4" />
-              Connect a custom agent
-            </Button>
-          )}
           {step !== "runtime" && (
             <Button
               className="px-4"
@@ -676,7 +722,7 @@ function AboutStep({
   personal: boolean;
 }) {
   return (
-    <FieldGroup>
+    <FieldGroup className="gap-7">
       <Field>
         <FieldLabel htmlFor="new-bot-name">Name</FieldLabel>
         <Input
@@ -720,7 +766,9 @@ function AboutStep({
       ) : (
         <>
           <FieldSet>
-            <FieldLegend variant="label">Who can see it</FieldLegend>
+            <FieldLegend className={SECTION_LABEL} variant="label">
+              Who can see it
+            </FieldLegend>
             <div className="grid gap-2 sm:grid-cols-2">
               {VISIBILITY_OPTIONS.map((option) => {
                 const Icon = option.icon;
@@ -753,7 +801,9 @@ function AboutStep({
         <EveryAppList turnedOn={turnedOn} />
       ) : apps.length > 0 ? (
         <FieldSet>
-          <FieldLegend variant="label">Apps it can use</FieldLegend>
+          <FieldLegend className={SECTION_LABEL} variant="label">
+            Apps it can use
+          </FieldLegend>
           <FieldDescription>
             It always uses the account of whoever is asking.
           </FieldDescription>
@@ -795,7 +845,9 @@ function EveryAppList({ turnedOn }: { turnedOn: UseQueryResult<PluginsPage> }) {
   const servers = turnedOn.data?.servers ?? [];
   return (
     <FieldSet>
-      <FieldLegend variant="label">Apps it can use</FieldLegend>
+      <FieldLegend className={SECTION_LABEL} variant="label">
+        Apps it can use
+      </FieldLegend>
       <FieldDescription>
         Every Bot can use every app you turn on in Connections.
       </FieldDescription>
@@ -860,7 +912,9 @@ function IsolatedOption({
       : null;
   return (
     <FieldSet>
-      <FieldLegend variant="label">Its computer</FieldLegend>
+      <FieldLegend className={SECTION_LABEL} variant="label">
+        Its computer
+      </FieldLegend>
       <div className="flex items-start gap-3 rounded-lg bg-muted/50 p-3">
         <Checkbox
           aria-describedby="new-bot-isolated-summary"
@@ -911,6 +965,13 @@ function IsolatedOption({
     </FieldSet>
   );
 }
+
+/**
+ * The first screen's section names: small, uppercase and grey, so the fields lead and the sections
+ * are told apart by space. The same voice as the custom-agent strip above the footer.
+ */
+const SECTION_LABEL =
+  "text-muted-foreground uppercase tracking-wider data-[variant=label]:text-[0.7rem]";
 
 /**
  * Filled rather than outlined, so the list reads as a set of things to pick and not as a stack of
