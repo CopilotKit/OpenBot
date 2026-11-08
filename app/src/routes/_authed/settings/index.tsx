@@ -1,3 +1,4 @@
+import { IconMoon } from "@tabler/icons-react";
 import { createFileRoute } from "@tanstack/react-router";
 import React from "react";
 import {
@@ -14,6 +15,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
@@ -55,6 +57,9 @@ function RouteComponent() {
       <PageSection title="Appearance">
         <PageRows>
           <Item size="sm">
+            <ItemMedia variant="icon">
+              <IconMoon />
+            </ItemMedia>
             <ItemContent>
               <ItemTitle>Dark theme</ItemTitle>
               <ItemDescription>
