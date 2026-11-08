@@ -239,6 +239,51 @@ describe("group conversations in PostgreSQL", () => {
     expect(calls).toHaveLength(3);
   });
 
+  test("a person's message that starts with a skill's command states it for each Bot's turn, and a peer's never does", async () => {
+    const owner = await person();
+    const named = new Map([
+      [await bot(owner, "Ada"), "Ada"],
+      [await bot(owner, "Grace"), "Grace"],
+    ]);
+    const [ada = "", grace = ""] = [...named.keys()].sort();
+    const G = named.get(grace) ?? "";
+    const channel = await channelStore.create(owner, [ada, grace]);
+    createdChannels.push(channel.id);
+    const { conversations, calls } = service({
+      replies: {
+        // A peer reply that starts with a command and hands on: the hop it starts picks nothing.
+        [ada]: () => `/pirate-haiku @${G} your turn`,
+        [grace]: () => "Arrr.",
+      },
+    });
+
+    await conversations.send(owner.id, channel.id, {
+      id: `${prefix}-skill`,
+      text: "/pirate-haiku write about my morning coffee",
+    });
+    await drain(conversations);
+
+    // The Bot's message starts with the group's framing, so the command is stated beside it. Which
+    // skill it is, and whether the Bot holds it, the server's runtime decides (picked-skill.ts).
+    expect(String(calls[0]?.userMessage?.content)).toStartWith("You are ");
+    expect(calls.map((call) => [call.agentId, call.skill])).toEqual([
+      [ada, "pirate-haiku"],
+      [grace, "pirate-haiku"],
+      [grace, undefined],
+    ]);
+
+    await conversations.send(owner.id, channel.id, {
+      id: `${prefix}-no-skill`,
+      text: "please /pirate-haiku about tea",
+    });
+    await drain(conversations);
+    expect(calls.slice(3).map((call) => call.skill)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
   test("another person cannot read, post into, or borrow the group's threads", async () => {
     const owner = await person();
     const stranger = await person();

@@ -37,26 +37,17 @@ export function seedMessage(text: string, id: string): Message {
  * is in the thread and arrives through the normal replay.
  */
 export type FirstMessage = {
-  text: string;
   /**
-   * The instructions of the `/` skills the message was sent with, which the channel screen puts in
-   * front of it exactly as it does for a message typed there. Without them the first message of a
-   * new conversation showed its chip and reached the Bot with no skill at all.
+   * The words, with a `/` skill still at their start as `/<command>`: the server finds the skill
+   * there and gives the Bot its instructions, for the first message as for every later one.
    */
-  skillInstructions: string[];
+  text: string;
 };
 
 const firstMessages = new Map<string, FirstMessage>();
 
-export function stashFirstMessage(
-  channelId: string,
-  text: string,
-  skillInstructions: readonly string[] = [],
-): void {
-  firstMessages.set(channelId, {
-    text,
-    skillInstructions: [...skillInstructions],
-  });
+export function stashFirstMessage(channelId: string, text: string): void {
+  firstMessages.set(channelId, { text });
 }
 
 /** Read the pending first message and forget it. Null for a channel opened any other way. */

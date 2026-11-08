@@ -7,23 +7,6 @@ import {
   type GrantedPlugins,
 } from "@/lib/plugins/queries";
 
-/**
- * The instructions behind a draft's `/` chips, in the order they were typed.
- *
- * Resolved against the same list the menu was built from, so a chip left over from a skill that has
- * since been revoked resolves to nothing rather than to a stale instruction. Shared by the two places
- * a message is first sent from, a conversation and `/channel/new`, so a skill means the same thing
- * on the first message as on every one after it.
- */
-export function skillInstructionsFor(
-  commandIds: readonly string[],
-  commands: readonly CommandOption[],
-): string[] {
-  return commandIds
-    .map((id) => commands.find((command) => command.id === id)?.prompt)
-    .filter((instruction): instruction is string => Boolean(instruction));
-}
-
 /** One granted skill as a `/` menu command. */
 function toCommand(skill: GrantedPlugins["skills"][number]): CommandOption {
   return {
@@ -36,18 +19,13 @@ function toCommand(skill: GrantedPlugins["skills"][number]): CommandOption {
      * box, which meant a person watched a paragraph they did not write appear over the message
      * they were typing, and had to scroll past it to reach their own words.
      *
-     * The chip stays, one token wide, and `channel-chat` reads `draft.commandIds` on send and
-     * puts the instruction in front of the run. Nothing is hidden by this that was not already:
-     * the instruction is the skill's own text, visible on the skills page, and a skill is an
-     * instruction rather than a capability — it can only ask for tools the Bot already holds.
+     * The chip stays, one token wide, and is sent as `/<command>` at the start of the message. The
+     * server finds it there and gives the Bot the skill's stored instructions, only for a skill
+     * that Bot holds (server/src/plugins/picked-skill.ts). Nothing is hidden by this that was not
+     * already: the instruction is the skill's own text, visible on the skills page, and a skill is
+     * an instruction rather than a capability — it can only ask for tools the Bot already holds.
      */
     kind: "chip",
-    /*
-     * Carried on the option rather than looked up again at send time. `applyCommandChips` only
-     * substitutes `prompt` for `kind: "prompt"`, so on a chip this is inert payload, and the
-     * alternative is a second query racing the first for the same rows.
-     */
-    prompt: skill.instructions,
   };
 }
 
