@@ -43,6 +43,9 @@
 # versioned installer must be the same file as its fixed-name copy, so releases/<tag>/ gets the
 # signed build too.
 set -euo pipefail
+# bash 5.2+ reads an unquoted & in a ${var//pattern/replacement} as the match; the feed rewrite
+# needs it literal (bash 3.2, macOS's, has no such option).
+shopt -u patsub_replacement 2>/dev/null || true
 
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must name the repository}"
 : "${DOWNLOADS_BUCKET:?DOWNLOADS_BUCKET must name the bucket}"
@@ -185,7 +188,12 @@ if [ "$mode" = latest ]; then
     for name in "${mirrored[@]}"; do
       if [ "$name" = "$file" ]; then
         moved="$downloads_url/${prefix}releases/$tag/$file"
-        text="${text//"\"$url\""/"\"$moved\""}"
+        # Quoted pattern, unquoted replacement, and patsub_replacement off (above): the one form
+        # that replaces literally in both macOS's bash 3.2 and bash 5.2+, where a quoted
+        # replacement keeps its quotes and an unquoted & stands for the match.
+        from="\"$url\""
+        to="\"$moved\""
+        text="${text//"$from"/$to}"
         feed_urls+=("$moved")
         break
       fi
