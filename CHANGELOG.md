@@ -8,6 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- In the personal edition, Settings, Setup no longer mentions memory or an admin: the Back end row reads "Keeps your conversations and skills", More apps compares with the apps OpenBot comes with, and its links name Keys and Computer.
 - Settings, Computer lists the Teach a Bot browser as your OpenBot browser, with Clear browser data, not as "A Bot no longer here"; Admin, Computers names whose OpenBot browser each one is.
 - Onboarding's Welcome says what always asks (deleting, sending, sharing, posting) above the approvals switch, which is now "Always ask before making changes" there and in Settings, Approvals, with the same words in both.
 - A conversation shows the Bot is still working through a run of tool calls: the step still running
