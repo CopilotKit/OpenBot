@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### OpenBot Desktop
+
+- **A back end setup that stops says why.** OpenBot's log now records how every back end setup,
+  start, update and stop ended: how long it took, its exit code, what its report says went wrong
+  and the end of its error output. A setup that stopped used to leave nothing in the log. The card
+  says whether the back end stopped with an error partway, quit without saying why, or could not
+  be run, where all three said "The back end could not start."
+
 ## 0.3.4
 
 **Before upgrading.** One migration: `0083_learning_skill_approvals` creates the table
