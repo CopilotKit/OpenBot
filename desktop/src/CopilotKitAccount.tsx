@@ -194,7 +194,9 @@ export function CopilotKitAccount({
   }
 
   const agreement = seen.at === "agreement" ? seen.terms : null;
-  // Signed in already: what is left to say is about the apps.
+  // Signed in and agreed already: what is left to say is about the apps. Said while they connect
+  // too, a few seconds after Accept, which flashed "Sign in to CopilotKit" and its sign-in lede.
+  const connecting = seen.at === "apps";
   const appsFailed = seen.at === "apps-failed";
   return (
     <div className="sheet">
@@ -205,18 +207,20 @@ export function CopilotKitAccount({
       <h1>
         {agreement
           ? "Accept the license agreement"
-          : appsFailed
-            ? "Connect your apps"
-            : "Sign in to CopilotKit"}
+          : connecting
+            ? "Setting up your apps"
+            : appsFailed
+              ? "Connect your apps"
+              : "Sign in to CopilotKit"}
       </h1>
       <p className="lede">
         {agreement
           ? `To run OpenBot on this computer, accept the CopilotKit license agreement for ${agreement.organizationName}.`
-          : appsFailed
+          : connecting || appsFailed
             ? "OpenBot uses your CopilotKit account to set up apps like Gmail and Slack."
             : "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the license agreement."}
       </p>
-      {!agreement && !appsFailed && (
+      {!agreement && !connecting && !appsFailed && (
         <p className="footnote">
           Your conversations and files are stored on this computer. Signing in
           does not send them to CopilotKit.

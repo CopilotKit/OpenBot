@@ -1446,6 +1446,67 @@ test("in the OpenBot Desktop window on a computer with no microphone, narration 
   expect(view.queryByText(/^Narration is/)).toBeNull();
 });
 
+/**
+ * The window's devices as WebView2 lists them to a page that has not used any: one of each kind the computer has, with
+ * no names, and a `devicechange` when one comes or goes.
+ */
+function installDevices(kinds: MediaDeviceKind[]) {
+  const devices = Object.assign(new EventTarget(), {
+    kinds,
+    enumerateDevices: async () =>
+      devices.kinds.map((kind) => ({
+        deviceId: "",
+        groupId: "",
+        kind,
+        label: "",
+      })),
+  });
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: devices,
+  });
+  return devices;
+}
+
+test("in the OpenBot Desktop window on a computer with no microphone, narration says so and reads off after a relaunch, and the choice is kept", async () => {
+  // Windows with no microphone, OpenBot relaunched after a recording fell back to off: the page read "Narration is on."
+  // with its switch on, and nothing said there was no microphone.
+  state = screenState();
+  openAnswer = answerFor("screen");
+  installChrome(null);
+  installDesktopShell({ fails: "audio-capture" });
+  const devices = installDevices(["audiooutput"]);
+  const user = userEvent.setup({ document });
+  try {
+    const view = draw(<BrowserPage />);
+    // Said on the page before any recording, although the switch is in Record's popover until one runs.
+    expect(
+      await view.findByText("No microphone found. Narration is off."),
+    ).toBeTruthy();
+    const toggle = await narrationSwitch(view, user);
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(view.queryByText("Narration is on.")).toBeNull();
+    // The person's choice stays on, for when there is a microphone: nothing is written.
+    expect(preferenceWrites()).toEqual([]);
+
+    // A microphone plugged in: narration is on again, as they chose, and nothing says otherwise.
+    devices.kinds = ["audioinput", "audiooutput"];
+    await act(async () => {
+      devices.dispatchEvent(new Event("devicechange"));
+    });
+    await waitFor(() =>
+      expect(
+        view
+          .getByRole("switch", { name: "Narration" })
+          .getAttribute("aria-checked"),
+      ).toBe("true"),
+    );
+    expect(view.queryByText(/No microphone found/)).toBeNull();
+  } finally {
+    delete (navigator as { mediaDevices?: unknown }).mediaDevices;
+  }
+});
+
 test("on hosted OpenBot a narration the Recorder refused says why, beside the narration switch", async () => {
   state = screenState();
   openAnswer = answerFor("screen");

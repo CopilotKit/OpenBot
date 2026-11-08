@@ -232,26 +232,32 @@ test("a failed REFETCH on / with explore empty shows it as empty, not broken", a
   ).toBeNull();
 });
 
-test("the personal edition's / has no Explore section: nobody else is there to share a Bot", async () => {
+/*
+ * The personal edition is one person on their own computer, and nobody can share a Bot with them.
+ * Its Home said "Nobody has shared a Bot with you yet." under Explore Bots all the same. With
+ * nothing to explore there, the section is not shown; the team edition keeps its sentence (above).
+ */
+test("on the personal edition, an empty Explore Bots says nothing about sharing", async () => {
   const mine = agent({ id: "mine-1", name: "Mine Agent", mine: true });
   const queryClient = staleQueryClient([mine]);
   queryClient.setQueryData(deploymentKeys.capabilities(), {
-    generativeUi: true,
-    selfHostBanner: false,
-    localEvaluation: true,
     edition: "personal",
   });
 
   const view = renderHome(queryClient);
   await waitForFailedRefetch(queryClient);
 
+  // The composer has a Bot to send to: Home has drawn with the roster loaded.
   expect(
     await view.findByText(
-      "OpenBot picks the right Bot. Type",
+      "OpenBot picks the right Bot.",
       { exact: false },
       HOME_FIND_TIMEOUT,
     ),
   ).toBeTruthy();
-  expect(view.queryByText("Explore Bots")).toBeNull();
   expect(view.queryByText("Nobody has shared a Bot with you yet.")).toBeNull();
+  expect(
+    view.queryByText("Couldn't load the Bots shared with you."),
+  ).toBeNull();
+  expect(view.queryByRole("heading", { name: "Explore Bots" })).toBeNull();
 });
