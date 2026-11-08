@@ -1,4 +1,5 @@
 import { appToolName, connectorName, humanise } from "./tool-name";
+import { lowerFirst } from "./tool-name-words";
 
 /**
  * What an Activity or Audit row is about, in words: the What column, where the trail's own names
@@ -302,9 +303,7 @@ export function appToolsWords(refs: readonly string[]): string {
     .slice(0, refs.length > TOOLS_NAMED + 1 ? TOOLS_NAMED : refs.length)
     .map((ref, index) => {
       const words = auditActionWords(ref);
-      return index === 0
-        ? words
-        : words.charAt(0).toLowerCase() + words.slice(1);
+      return index === 0 ? words : lowerFirst(words);
     });
   const more = refs.length - named.length;
   const list =
