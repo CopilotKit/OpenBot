@@ -1465,7 +1465,7 @@ fn main() {
             match rest {
                 ["ctr", "images", "ls", "-q"] => {}
                 ["uname", "-m"] => out(b"aarch64\n"),
-                ["ctr", "content", "fetch-object", reference] => {
+                ["ctr", "content", "fetch-object", "--hosts-dir", _, reference] => {
                     if reference.ends_with(&String::from_utf8(read("manifest-digest")).unwrap().trim().to_owned()) {
                         out(&read("manifest"));
                     } else {
@@ -1519,6 +1519,7 @@ fn main() {
             fixed: (0..11)
                 .map(|n| format!("docker.io/example/fixed-{n}@{index_digest}"))
                 .collect(),
+            engine: Vec::new(),
         };
         let engine = || crate::quiet::command(&engine_binary);
         let limits = Limits {
