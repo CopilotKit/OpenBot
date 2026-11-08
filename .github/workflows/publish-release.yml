@@ -328,8 +328,9 @@ jobs:
   #
   # A stable release builds none here. Its installers are the signing runs' own builds, the only ones
   # a stable release ever carries, so building another pair first only delayed them. The Desktop
-  # workflow still builds and tests the app on the release commit's push to main, as on every change
-  # to package.json.
+  # workflow still builds and tests the app on a stable release commit's push to main, as on every
+  # change to package.json, and a final ships its candidate's tree, which this job built and tested
+  # when the candidate was published.
   desktop:
     name: desktop
     needs: [metadata, verify, images]
