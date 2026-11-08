@@ -22,8 +22,43 @@ export const RECORDER_DISCLOSURE_TITLE = "What the Recorder collects";
 export const RECORDER_DESTINATION =
   "What you record goes straight from your browser to the learning part of your organization's OpenBot back end, with a pass from the part of OpenBot that runs your Bots. That part is told that you are recording, the task's name, when it started and how many steps it has, and when you record in a browser shown inside OpenBot, your narration passes through it to the Recorder without being stored.";
 
+/**
+ * {@link RECORDER_DESTINATION} in the personal edition, where OpenBot is one person's and there is no organization:
+ * the recording goes to that person's own Learning space (docs/personal-edition.md, Teach a Bot). It says OpenBot's
+ * back end and not "this computer": OpenBot Desktop runs its back end on the person's machine, but a personal edition
+ * started with scripts/start.sh may use one that runs somewhere else.
+ */
+export const RECORDER_DESTINATION_PERSONAL =
+  "What you record goes straight from your browser to your own Learning space in OpenBot's back end, with a pass from the part of OpenBot that runs your Bots. That part is told that you are recording, the task's name, when it started and how many steps it has, and when you record in a browser shown inside OpenBot, your narration passes through it to the Recorder without being stored.";
+
+/** The disclosure's lead, from where a recording goes and what it is used for. */
+function disclosure(destination: string, use: string): string {
+  return `When you press Record, the Recorder records what you do in every tab you use until you stop, and each tab it records shows that it is. ${destination} ${use}`;
+}
+
 /** The disclosure's lead: when it records, where it goes, and what for. */
-export const RECORDER_DISCLOSURE = `When you press Record, the Recorder records what you do in every tab you use until you stop, and each tab it records shows that it is. ${RECORDER_DESTINATION} Your recordings are used only for your organization's Skills, evaluations and insights.`;
+export const RECORDER_DISCLOSURE = disclosure(
+  RECORDER_DESTINATION,
+  "Your recordings are used only for your organization's Skills, evaluations and insights.",
+);
+
+/** {@link RECORDER_DISCLOSURE} in the personal edition: the person's own Learning space, and their own Skills. */
+export const RECORDER_DISCLOSURE_PERSONAL = disclosure(
+  RECORDER_DESTINATION_PERSONAL,
+  "Your recordings are used only for your own Skills, evaluations and insights.",
+);
+
+/**
+ * The lead for the edition OpenBot runs as, for a page of OpenBot's that knows it. The Recorder's own pages don't, and
+ * say the team edition's.
+ */
+export function recorderDisclosureFor(
+  edition: "team" | "personal" | undefined,
+): string {
+  return edition === "personal"
+    ? RECORDER_DISCLOSURE_PERSONAL
+    : RECORDER_DISCLOSURE;
+}
 
 export type RecorderCollectedKind =
   | "steps"

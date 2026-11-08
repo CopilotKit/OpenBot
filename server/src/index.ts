@@ -164,10 +164,8 @@ import {
   users,
 } from "./db/schema";
 import { createDeliveryRouter, DELIVERY_WORK_KINDS } from "./delivery/router";
-import {
-  configuredDeliveryProviders,
-  type DeliveryScopeResolver,
-} from "./delivery/routes";
+import { configuredDeliveryProviders } from "./delivery/routes";
+import { createDeliveryScopes } from "./delivery/scope";
 import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
 import { DeliveryRefusedError } from "./delivery/types";
@@ -1655,22 +1653,18 @@ const checkInScope = createCheckInScope({
   unaskedOwnAccount: (ownerUserId, agentId) =>
     teamBots.unaskedOwnAccount(ownerUserId, agentId),
 });
-const deliveryScopeFor: DeliveryScopeResolver = async (
-  ownerUserId,
-  channelId,
-  agentId,
-) => {
-  const person = await peopleStore.find(ownerUserId);
-  if (!person || person.revoked) return null;
-  const actor = await actorFor(ownerUserId);
-  const [channel, bot] = await Promise.all([
-    channelStore.get(actor, channelId),
-    agentProfileStore.get(actor, agentId),
-  ]);
-  return channel?.active && bot && channel.agentIds.includes(agentId)
-    ? { ownerUserId, channelId, agentId, threadId: channel.threadId }
-    : null;
-};
+/*
+ * The person's conversation with a Bot, as delivery addresses it, and whether a scope still names one
+ * they can reach: the channel's own thread, or that Bot's own thread in a group. See delivery/scope.ts.
+ */
+const { scopeFor: deliveryScopeFor, authorise: authoriseDeliveryScope } =
+  createDeliveryScopes({
+    database,
+    people: peopleStore,
+    actorFor,
+    channels: channelStore,
+    bots: agentProfileStore,
+  });
 
 /*
  * Memory sources and background research, on by default for each person and Bot, and never switched
@@ -2454,9 +2448,6 @@ useSlackChannelMembership((input) =>
     ? deliveryProviders.slack.isMember(input)
     : Promise.resolve(false),
 );
-const authoriseDeliveryScope = async (scope: DeliveryScope) =>
-  (await deliveryScopeFor(scope.ownerUserId, scope.channelId, scope.agentId))
-    ?.threadId === scope.threadId;
 const deliveryRouter = createDeliveryRouter({
   store: deliveryStore,
   queue: createWorkQueue(database),

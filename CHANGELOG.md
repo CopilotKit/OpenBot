@@ -17,6 +17,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - A recording the Recorder cannot send yet no longer reads "Saving" on Teach a Bot for the half hour it
   retries: the page says it wasn't saved yet, and why. Your recordings are listed by when you made them,
   and one the Recorder sends later shows up in the list when it lands, without leaving the page.
+- OpenBot Personal's Settings, Browsers says recordings go to your own Learning space, with no organization.
+- OpenBot Personal's New Bot sheet lists every app the new Bot gets, not only Routines.
+- A Bot's question in a conversation with several Bots now waits in that conversation and is answered there, as in a conversation with one Bot.
 - Teach a Bot: narration that can't hear you (no microphone) stays off after Stop until you turn it on, and "We're capturing your voice" shows only while a recording is hearing you.
 - Work apps are connected through OpenBot. Connections, an app's page, the app directory, chat
   connect cards and admin Plugins no longer name the connector provider ("Browse Composio" is now
