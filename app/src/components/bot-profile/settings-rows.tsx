@@ -194,7 +194,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
       to: "/bots/$agentId/setup",
       title: "Setup",
       icon: IconSettings,
-      summary: setupSummary(agent),
+      summary: setupSummary(agent, personal ? "personal" : "team"),
     },
   ];
   /*

@@ -12,8 +12,14 @@ import type { SetupStatus } from "./checklist";
  *
  * Ready means every running computer took the network policy of each Bot it carries, which is the
  * authenticated round trip every action starts with (a computer refuses connections until it has
- * one). A person's computer is asked which Bots those are, as the policy push asks it. None running
- * is "not checked": a computer that has not started yet is not a broken one.
+ * one). A person's computer is asked which Bots those are, as the policy push asks it.
+ *
+ * None running is "not checked" where a provider makes computers: one that has not started yet is
+ * not a broken one, and asking would wake it. The one shared computer is different, and is the
+ * personal edition's only computer. It is always running: what starts and stops on it is each Bot's
+ * browser, which closes after sitting idle. Its list is that computer answering, with the token
+ * every action carries, so it is Ready with no browser open. Before, a Bot that had just used it, or
+ * whose browser had closed since, left the row saying no computer had started yet.
  *
  * Only running computers, without waking any. Each list, ask, policy read and push has five seconds;
  * a healthy fleet's total time scales with its size. Serial delivery bounds the active work to one.
@@ -22,7 +28,8 @@ import type { SetupStatus } from "./checklist";
 export const RELEASE_AFTER_MS = 60_000;
 
 export function createComputerCheck(input: {
-  provider?: Pick<ComputerProvider, "list">;
+  provider?: Pick<ComputerProvider, "list"> &
+    Partial<Pick<ComputerProvider, "isolation">>;
   controls: () =>
     | { policyForBot: (botId: string) => Promise<EgressPolicy> }
     | undefined;
@@ -52,7 +59,8 @@ export function createComputerCheck(input: {
     const running = computers.filter(
       (computer) => computer.status === "running" && computer.url,
     );
-    if (running.length === 0) return "not_checked";
+    if (running.length === 0)
+      return input.provider.isolation === "shared" ? "ready" : "not_checked";
     const controls = input.controls();
     if (!controls) return "not_checked";
     for (const computer of running) {
