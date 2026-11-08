@@ -100,7 +100,6 @@ const WHOLE =
 /** The reply the server's turn wrote, as much of it as the platform's read holds. */
 const said = (content: string) =>
   ({ id: "reply-maps", role: "assistant", content }) satisfies Message;
-let stops: string[] = [];
 let originalFetch: typeof fetch;
 
 /** Requests the server's turn opened after the first, as the inbox lists them. */
@@ -184,10 +183,8 @@ beforeAll(() => {
           version: "fixture",
           agents: { "maps-bot": { description: "Fixture", capabilities: {} } },
           /*
-           * Intelligence mode, as a deployment runs: the core then stops a run over the agent's own
-           * channel, for a run this tab started, and sends nothing for a turn it did not. In SSE mode
-           * its Stop happened to post the thread's stop itself, which hid that this tab never did.
-           * Nothing answers on the socket, so the conversation is restored from its history.
+           * Intelligence mode, as a deployment runs. Nothing answers on the socket, so the
+           * conversation is restored from its history.
            */
           mode: "intelligence",
           intelligence: { wsUrl: "ws://127.0.0.1:9/client" },
@@ -199,14 +196,6 @@ beforeAll(() => {
        */
       if (url.pathname.endsWith("/connect"))
         return new NativeResponse(null, { status: 204 });
-      // Stop, with no run of this tab's to name: the thread's, which reaches the server's turn.
-      if (
-        /\/agent\/[^/]+\/stop\/[^/]+$/.test(url.pathname) &&
-        method === "POST"
-      ) {
-        stops.push(url.pathname);
-        return NativeResponse.json({ stopped: true });
-      }
       if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
         return new NativeResponse(null, { status: 204 });
       if (url.pathname === "/api/voice/sessions")
@@ -240,7 +229,6 @@ function mounting() {
   later = [];
   stored = [ask, geocode, geocoded, search];
   decisions = [];
-  stops = [];
   queryClient.setQueryData(channelKeys.list(), {
     pages: [
       {
@@ -272,51 +260,41 @@ function mounting() {
 const STOP = '[data-testid="composer-stop"]';
 const WORKING = ".tool-line-running";
 
-test("after Allow once, the conversation shows the Bot working and offers Stop until the server's turn ends", async () => {
+test("after Allow once, the conversation shows the Bot working until the server's turn ends", async () => {
   const view = mounting();
   const user = userEvent.setup({ document: view.container.ownerDocument });
 
   // Waiting on the person: nothing is running, so nothing says it is.
   const allow = await view.findByRole("button", { name: "Allow once" });
-  expect(view.container.querySelector(STOP)).toBeNull();
   expect(view.container.querySelector(WORKING)).toBeNull();
 
   await user.click(allow);
   expect(decisions).toEqual(["allow_once"]);
 
-  // The server has the turn: the step it is running shimmers, and Stop is there, as in a fresh run.
-  await waitFor(() => {
-    expect(view.container.querySelector(STOP)).not.toBeNull();
-    expect(view.container.querySelector(WORKING)).not.toBeNull();
-  });
+  // The server has the turn: the step it is running shimmers.
+  await waitFor(() =>
+    expect(view.container.querySelector(WORKING)).not.toBeNull(),
+  );
 
   // Still going once the action has started.
   status = "consumed";
   await act(() => queryClient.invalidateQueries({ queryKey: ["approvals"] }));
-  expect(view.container.querySelector(STOP)).not.toBeNull();
-
-  // Stop reaches the conversation's thread, which is where the server's turn runs.
-  const stop = view.container.querySelector(STOP);
-  if (!(stop instanceof HTMLElement)) throw new Error("No Stop button.");
-  await user.click(stop);
-  await waitFor(() =>
-    expect(stops).toEqual([
-      `/api/copilotkit/agent/maps-bot/stop/${channel.threadId}`,
-    ]),
-  );
+  expect(view.container.querySelector(WORKING)).not.toBeNull();
+  /*
+   * No Stop: this tab has no run of its own to stop, and the server's turn cannot be reached from
+   * here yet. A Stop that does nothing is worse than none.
+   */
+  expect(view.container.querySelector(STOP)).toBeNull();
 
   // The server's turn ends: nothing says the Bot is working any more.
   status = "completed";
   await act(() => queryClient.invalidateQueries({ queryKey: ["approvals"] }));
-  await waitFor(() => {
-    expect(view.container.querySelector(STOP)).toBeNull();
-    expect(view.container.querySelector(WORKING)).toBeNull();
-  });
+  await waitFor(() => expect(view.container.querySelector(WORKING)).toBeNull());
 });
 
 /*
  * A request the resume loop is still retrying, or gave up on without finishing, is not a turn the
- * conversation is in. Counted for good, it would leave "Thinking" and Stop up, and park every message
+ * conversation is in. Counted for good, it would leave "Thinking" up, and park every message
  * behind them, for as long as the row stayed that way.
  */
 test("a decision older than the server's longest carried-on turn no longer counts as working", () => {
@@ -355,12 +333,12 @@ async function carriedOnThenEnded(
   }
   await user.click(allow);
   await waitFor(() =>
-    expect(view.container.querySelector(STOP)).not.toBeNull(),
+    expect(view.container.querySelector(WORKING)).not.toBeNull(),
   );
   stored = history;
   status = "completed";
   await act(() => queryClient.invalidateQueries({ queryKey: ["approvals"] }));
-  await waitFor(() => expect(view.container.querySelector(STOP)).toBeNull());
+  await waitFor(() => expect(view.container.querySelector(WORKING)).toBeNull());
 }
 
 /*
@@ -479,5 +457,5 @@ test("a second approval the server's turn stops on is asked in the conversation"
     await view.findByRole("region", { name: "Waiting for your approval" }),
   ).toBeTruthy();
   expect(view.getByRole("button", { name: "Allow once" })).toBeTruthy();
-  expect(view.container.querySelector(STOP)).toBeNull();
+  expect(view.container.querySelector(WORKING)).toBeNull();
 }, 20_000);

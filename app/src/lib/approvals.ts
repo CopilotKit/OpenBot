@@ -215,26 +215,6 @@ export const answerPersonQuestion = async (
       fallback: "Your answer could not be saved.",
     },
   )) === true;
-/**
- * Stop the turn the server carries a conversation on in after one of its approvals.
- *
- * The runtime's own stop route, for the whole thread and naming no run, which is what the server
- * offers to that turn (server/src/approvals/carried-on.ts). Sent from here rather than through
- * `copilotkit.stopAgent`, because in Intelligence mode that stops only a run this tab started: it
- * sends `stop_run` on the agent's own channel for its own run, or tidies up locally when it has none,
- * and never reaches this route. So the Stop button stayed on screen and the Bot answered anyway.
- */
-export const stopCarriedOnTurn = ({
-  agentId,
-  threadId,
-}: {
-  agentId: string;
-  threadId: string;
-}) =>
-  client(
-    `/api/copilotkit/agent/${encodeURIComponent(agentId)}/stop/${encodeURIComponent(threadId)}`,
-    { method: "POST", fallback: "Couldn't stop the Bot." },
-  );
 export const dismissPersonQuestion = (id: string) =>
   client(`/api/approvals/questions/${encodeURIComponent(id)}/dismiss`, {
     method: "POST",
@@ -317,12 +297,6 @@ export const decideApprovalMutationOptions = (queryClient: QueryClient) =>
     mutationFn: ({ id, choice }: { id: string; choice: ApprovalDecision }) =>
       decideApproval(id, choice),
     onSuccess: settle(queryClient),
-  });
-/** Stop the server's carried-on turn; the conversation stops showing it once its approval is done. */
-export const stopCarriedOnMutationOptions = (queryClient: QueryClient) =>
-  mutationOptions({
-    mutationFn: stopCarriedOnTurn,
-    onSettled: settle(queryClient),
   });
 /** Answer a question a Bot asked mid-run; the run resumes with the answer. */
 export const answerPersonQuestionMutationOptions = (queryClient: QueryClient) =>

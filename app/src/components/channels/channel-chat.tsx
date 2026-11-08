@@ -37,7 +37,6 @@ import {
   answerPersonQuestionMutationOptions,
   approvalInboxOptions,
   carryingOnAfterApproval,
-  stopCarriedOnMutationOptions,
 } from "@/lib/approvals";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import {
@@ -820,8 +819,7 @@ export function ChannelChat({
    *
    * Read from the approval itself, which the server marks `completed` only once that turn has ended,
    * so it is the same record whichever tab or device decided it. Polled faster while it is going, so
-   * the conversation stops saying it is working soon after it is done. Stop reaches it the way it
-   * reaches any run on this thread: with no run of this tab's to name, the stop is the thread's.
+   * the conversation stops saying it is working soon after it is done.
    */
   const carryingOn =
     useQuery({
@@ -1233,22 +1231,9 @@ export function ChannelChat({
       return answer;
     },
   });
-  const stopCarriedOn = useMutation(stopCarriedOnMutationOptions(queryClient));
   const stopTask = () => {
     awaitingReply.current = false;
     stopEpoch.current++;
-    /*
-     * The server's turn, when it is the only one going: this tab has no run of its own for the core
-     * to stop, and in Intelligence mode the core's Stop never leaves the tab without one. So the
-     * thread's stop is sent here, to the route the server's turn listens on.
-     */
-    if (carryingOn && !agent.isRunning && runsInFlight === 0) {
-      stopCarriedOn.mutate({
-        agentId: runtimeAgentId,
-        threadId: channel.threadId,
-      });
-      return;
-    }
     copilotkit.stopAgent({ agent });
   };
 
@@ -1488,7 +1473,11 @@ export function ChannelChat({
              * controller does not exist until `say` has finished waiting for the runtime agent — so
              * this is the one place the narrower fact is the honest one to draw a button from.
              */
-            stoppable={agent.isRunning || runsInFlight > 0 || carryingOn}
+            /*
+             * Not while the server carries the conversation on after an approval: this tab has no
+             * run of its own for Stop to reach then, and a Stop that does nothing is worse than none.
+             */
+            stoppable={agent.isRunning || runsInFlight > 0}
             /*
              * At the END OF THE TRANSCRIPT rather than above the composer, which is where this used to
              * be. A turn that ends without an answer leaves a gap exactly where the reply was going to

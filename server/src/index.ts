@@ -61,13 +61,7 @@ import {
   type PersonQuestion,
   questionConversationBot,
 } from "./approvals/questions";
-import {
-  announceCarriedOnStop,
-  carryingOnInThread,
-  createCarriedOnTurns,
-  startCarriedOnStopListener,
-  waitForReplyInTranscript,
-} from "./approvals/carried-on";
+import { waitForReplyInTranscript } from "./approvals/reply-in-transcript";
 import { createApprovalResumeTick } from "./approvals/resume-sweep";
 import { createApprovalStore } from "./approvals/store";
 import { ApprovalRefusedError } from "./approvals/types";
@@ -516,19 +510,6 @@ const componentStore = createComponentStore(database);
 const channelActivityListener = await startChannelActivityListener(
   config.databaseUrl,
   channelEvents,
-);
-/*
- * The turns the server carries a conversation on in after an approval, each stoppable by its thread
- * from any replica: a person's Stop arrives at whichever replica answered it, and is announced so the
- * one running the turn stops it. See approvals/carried-on.ts.
- */
-const carriedOnTurns = createCarriedOnTurns({
-  announce: announceCarriedOnStop(database),
-  carryingOn: carryingOnInThread(database),
-});
-const carriedOnStopListener = await startCarriedOnStopListener(
-  config.databaseUrl,
-  carriedOnTurns,
 );
 const roleRepository = createRoleRepository(database);
 const loadAgentsForActor = createRuntimeAgentLoader(
@@ -2240,8 +2221,6 @@ const copilotRuntime = mountCopilotRuntime(
     onRunBusy: (input) => {
       void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
     },
-    // A Stop on a conversation carried on after an approval, which this runtime's runner does not hold.
-    stopCarriedOn: (threadId) => carriedOnTurns.stop(threadId),
     learningSettings,
     personalSkills: {
       containerFor: personalLearningSpaces.containerFor,
@@ -2487,7 +2466,6 @@ const approvalSweep = repeatAfterEach(
     actorFor,
     // Assigned further down, once delivery is wired.
     notify: (scope, input) => deliveryNotifications(scope, input),
-    carriedOn: carriedOnTurns,
     transcriptHolds: waitForReplyInTranscript({
       read: async ({ ownerUserId, threadId }) =>
         (
@@ -3332,7 +3310,6 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     void Promise.allSettled([
       productTelemetry.flush(),
       channelActivityListener.stop(),
-      carriedOnStopListener.stop(),
       policyListener.stop(),
       // Started only where handing work between Bots is switched on, so it is often not there.
       workOfferedListener?.stop() ?? Promise.resolve(),
