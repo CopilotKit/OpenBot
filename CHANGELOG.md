@@ -107,6 +107,9 @@ moves to `0083_learning_skill_approvals`. Six things change for an existing depl
   Features, where it said "copilotkit". Ctrl+Q in the window quits OpenBot, as the tray menu's Quit
   says, where it did nothing.
 - On a Mac, onboarding keeps Back below the window's buttons, and its top strip moves the window.
+- The first Bot to need you after OpenBot Desktop starts raises its notification. It used to raise
+  nothing while the app was still checking that notifications were on, so the first question after
+  each launch, asked while OpenBot was minimised or behind another window, went unannounced.
 
 ### Automatic Learning and Teach a Bot
 
