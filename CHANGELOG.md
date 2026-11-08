@@ -33,6 +33,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Home says which Bot is working, with a way to it, and a conversation says "Working" in the
   sidebar while its Bot works. A Bot's browsing reads "Browsed example.com", where it read "Browsed
   1 page".
+- Bots answer ordinary questions, summaries and short lists directly in Markdown by default. A
+  notice card is kept for a distinct alert that needs you to act, or for when you ask for one, and
+  other components for when a chart, table or card makes the answer easier to use. A Bot asked for
+  its top emails used to wrap the list in a notice. An existing deployment keeps the Notice and
+  Checklist descriptions it already published; an admin can bring them up to date on Admin → UI
+  components, from the new text in `app/src/components/gallery/cards.tsx`.
 
 ### Personal edition
 
