@@ -594,6 +594,76 @@ by hand. Each run:
 - compares each file's SHA-256 with what the bucket holds, uploads only what differs, and
   invalidates `/latest/*` only when something under `latest/` changed.
 
+It also copies everything else the Desktop app downloads for that release, so the app can fetch it
+all from this address and go to GitHub only when it does not answer
+([`scripts/downloads-images.ts`](../scripts/downloads-images.ts), a second step of the same job):
+
+| Key | What | Cache-Control |
+|---|---|---|
+| `releases/<tag>/container-images.json`, `releases/<tag>/OpenBot-darwin-*.app.tar.gz` | the release's image pins and Mac updater archives (in `downloads-sync.sh`) | a year, immutable |
+| `releases/<tag>/<tag>.tar.gz` | the source archive a deployment is laid out from, as `github.com/CopilotKit/OpenBot/archive/refs/tags/<tag>.tar.gz` serves it | a year, immutable |
+| `tools/podman/v<version>/<file>`, `tools/compose/v<version>/<file>` | every Podman installer and Compose binary the release's `desktop/src-tauri/src/install.rs` pins, under the upstream file name, checked against those pins | a year, immutable |
+| `v2/` | `{}` (`application/json`), so a registry client's first request answers | five minutes |
+| `v2/<repo>/manifests/<tag>` | the bytes ghcr.io serves for the tag, typed by their `mediaType`; invalidated whenever it changes | five minutes |
+| `v2/<repo>/manifests/sha256:<hex>` | each index, and its `linux/amd64` and `linux/arm64` manifests, byte for byte | a year, immutable |
+| `v2/<repo>/blobs/sha256:<hex>` | each config and layer of those (`application/octet-stream`) | a year, immutable |
+
+The `v2/` tree is a read-only copy of the OCI Distribution API, at ghcr.io's own paths: `<repo>` is
+the ghcr.io path unchanged, such as `copilotkit/openbot-server`, so Docker and containerd pull
+`downloads.copilotkit.ai/<repo>@<digest>` (or use it as a mirror for `ghcr.io`) exactly as they
+pull from ghcr.io. Indexes are copied byte for byte, so every digest stays the same; attestations
+and other platforms are not copied. S3 cannot send `Docker-Content-Digest`, and clients do not need
+it: they hash what they receive. A key that is not there answers 403, not 404 (CloudFront has no
+`ListBucket`), and containerd moves on to its next host, ghcr.io, on any 4xx.
+
+Docker Hub's images are copied the same way under `v2/docker.io/<repo>/`, official images under
+`library/` (`v2/docker.io/library/busybox`), so a client uses `downloads.copilotkit.ai/docker.io` as
+the mirror for `docker.io`. Images on any other registry are left where they are.
+
+Which images: every image the release's `container-images.json` pins, all of them, and every image
+`desktop-images.json` on the release names. The `image list` job of the publish workflow writes that
+list with the app's own code (`desktop/src-tauri/src/release_images.rs`, run as
+`cargo run --example release_images`), and `tag and release` waits for it and attaches it with
+`container-images.json`, so a release is never published without it: the images Compose names for
+every Bot the app can install (`pgvector` included), the two sign-in images, the bundled CLI's back
+end images (its runtime images at its release's tag, its pinned ones and the Kubernetes system
+images), and the cluster's own images that the host's engine pulls when k3d creates the cluster (the
+k3s node image and k3d's proxy and tools, at the digests the CLI gives k3d). A release published
+before this carries no list, and only its `container-images.json` images are copied;
+`DOWNLOADS_IMAGES_FILE` names a list to use instead. Images
+are read with [crane](https://github.com/google/go-containerregistry) (a pinned release, checked by
+SHA-256). An image named by digest whose manifest the bucket already holds is not read again, which
+keeps the scheduled run inside Docker Hub's pull limits; tags are read on every run.
+
+The images are copied first, before `downloads-sync.sh` writes `latest/`, and the step ends by
+asking `https://downloads.copilotkit.ai` for every image's top manifest (`HEAD`, asked again twice
+after ten seconds). Any that does not answer 200 fails the job, named, so `latest/` never moves to a
+release whose images are not there. To check a release's images by hand, with no AWS credentials:
+
+```sh
+GITHUB_REPOSITORY=CopilotKit/OpenBot DOWNLOADS_VERIFY_ONLY=1 bun scripts/downloads-images.ts
+GITHUB_REPOSITORY=CopilotKit/OpenBot DOWNLOADS_VERIFY_ONLY=1 DOWNLOADS_TAG=v0.3.4 bun scripts/downloads-images.ts
+```
+Each object is compared with what S3 holds by SHA-256, Content-Type and Cache-Control, and only what
+is missing or differs is read and uploaded: blobs first, then manifests, then tags, so nothing is
+served before what it names. Every new object is then fetched once through the address, so the
+distribution's Origin Shield (us-east-1) holds it before anyone installs.
+
+To copy the images of a release published before it listed them, generate the list and pass it,
+from a checkout with admin credentials for the account:
+
+```sh
+git show v0.3.3:docker-compose.yml > /tmp/compose.yml
+gh release download v0.3.3 -p container-images.json -O /tmp/container-images.json
+npm pack "$(git show v0.3.3:desktop/intelligence-cli.json | jq -r .cli)" --pack-destination /tmp
+tar -xzf /tmp/copilotkit-*.tgz -C /tmp package/index.js
+cargo run --manifest-path desktop/src-tauri/Cargo.toml --example release_images -- \
+  /tmp/compose.yml /tmp/container-images.json /tmp/package/index.js > /tmp/desktop-images.json
+GITHUB_REPOSITORY=CopilotKit/OpenBot DOWNLOADS_BUCKET=copilotkit-openbot-downloads \
+  DOWNLOADS_DISTRIBUTION_ID=EQ4EH8L79LPGX DOWNLOADS_TAG=v0.3.3 \
+  DOWNLOADS_IMAGES_FILE=/tmp/desktop-images.json bun scripts/downloads-images.ts
+```
+
 When the Latest release lacks some of those files, the run fails and changes nothing, so the
 addresses keep serving the previous signed installers. A Latest release with none of them was
 published before signing attached any, as v0.2.0 was: that is not drift, so the run succeeds with
@@ -610,7 +680,10 @@ gh workflow run downloads-sync.yml --ref main -f tag=v0.3.0  # releases/v0.3.0/ 
 Behind the address, in AWS account `604598162673`: a private, versioned S3 bucket
 `copilotkit-openbot-downloads` (us-east-1), read only by CloudFront distribution `EQ4EH8L79LPGX`
 through an origin access control, with an ACM certificate for `downloads.copilotkit.ai` and alias
-records in the `copilotkit.ai` zone. The workflow signs in as the role `openbot-release-downloads`
+records in the `copilotkit.ai` zone. The distribution is `PriceClass_All` with HTTP/3, IPv6 and
+Origin Shield in us-east-1, and uses the managed CachingOptimized policy, which honours each object's
+Cache-Control and leaves query strings out of the cache key. All of it is managed by hand in the
+console, not by infrastructure as code. The workflow signs in as the role `openbot-release-downloads`
 with GitHub's OIDC token, so there is no stored key. The role trusts only `downloads-sync.yml` on
 `main`, and may only read and write the bucket's objects and invalidate that distribution. The role
 ARN, bucket and distribution are written in the workflow; none is a secret.

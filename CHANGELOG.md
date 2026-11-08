@@ -26,6 +26,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   OpenBot's name, and the app is set in Atkinson Hyperlegible Next. A skin keeps its own faces.
 - Settings, General lists your answers as rows that open a dialog. Settings, Notifications shows a
   switch only for channels that are set up, and says how to set them up (or that your admin does).
+- OpenBot Desktop downloads everything from downloads.copilotkit.ai first, and from GitHub or
+  Docker Hub only when that fails: OpenBot's images and the back end's images (named as their
+  ghcr.io or Docker Hub images, so nothing downloads them again), the release's source and image
+  list, the latest release, and the Podman and Compose builds it installs.
+- downloads.copilotkit.ai now serves everything OpenBot Desktop downloads for the Latest release,
+  not only its installers: every container image the app pulls (its own and the bundled back
+  end's and its k3s cluster's, copied from GitHub's registry and Docker Hub under their own
+  paths), the release's `container-images.json`, Mac updater archives and source archive, and the
+  Podman and Compose installers the app pins. Each release lists its images in
+  `desktop-images.json`, written by the app's own code.
 - A Bot asked to read a day of Gmail reads all of it. Listing emails used to bring back each
   message's raw MIME, tens of thousands of characters per email, so the answer was cut inside the
   first message, the Bot could not page on, and a large page failed at Composio as too large. A

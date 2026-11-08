@@ -390,7 +390,7 @@ describe("the release workflow", () => {
       'gh release upload "$VERSION" "$artifact" --clobber',
     );
     expect(publish).toContain(
-      'gh release create "$VERSION" container-images.json release-assets/*',
+      'gh release create "$VERSION" container-images.json desktop-images.json release-assets/*',
     );
   });
 });

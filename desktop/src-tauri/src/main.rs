@@ -8357,6 +8357,10 @@ fn main() {
             // credential helper (see `docker_config`). Before anything runs a container command.
             if let Ok(data) = app.path().app_local_data_dir() {
                 docker_config::lives_in(data.join("docker-config"));
+                // The registry mirror k3d writes into a new back end node (`local_images::Mirror`).
+                openbot_desktop_lib::local_images::registries_file_lives_at(
+                    data.join("registries.yaml"),
+                );
             }
 
             remember_setup_url(app.handle())?;
