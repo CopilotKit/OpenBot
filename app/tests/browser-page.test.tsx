@@ -1295,12 +1295,12 @@ test("in the OpenBot Desktop window on a computer with no microphone, narration 
       }),
     );
 
-  // Before the first Record narration is on, as the person chose, and nothing is captured yet.
+  // Before the first Record narration is on, as the person chose, and nothing is captured yet: no status bar while
+  // nothing records, since the switch says it.
   await waitFor(async () =>
     expect((await toggle()).getAttribute("aria-checked")).toBe("true"),
   );
-  expect(await view.findByText("Narration is on.")).toBeTruthy();
-  expect(view.queryByText(/capturing your voice/)).toBeNull();
+  expect(view.queryByText(/^Narration is/)).toBeNull();
 
   await user.type(await taskField(view, user), "Submit an expense report");
   await pressRecord(view, user);
@@ -1312,18 +1312,16 @@ test("in the OpenBot Desktop window on a computer with no microphone, narration 
   await stopped();
   await view.findByRole("button", { name: "Record" });
   await settleReactWork();
-  // Still off once nothing records: the switch does not turn itself back on.
+  // Still off once nothing records: the switch does not turn itself back on, and the status bar went with the recording.
   expect((await toggle()).getAttribute("aria-checked")).toBe("false");
-  expect(view.getByText("Narration is off.")).toBeTruthy();
-  expect(view.queryByText(/capturing your voice/)).toBeNull();
+  expect(view.queryByText(/^Narration is/)).toBeNull();
 
   // The person turns it on: on, and still nothing captured while nothing records.
   await user.click(await toggle());
   await waitFor(async () =>
     expect((await toggle()).getAttribute("aria-checked")).toBe("true"),
   );
-  expect(await view.findByText("Narration is on.")).toBeTruthy();
-  expect(view.queryByText(/capturing your voice/)).toBeNull();
+  expect(view.queryByText(/^Narration is/)).toBeNull();
 
   // The next Record tries again, and the missing microphone turns narration off again.
   await user.type(await taskField(view, user), "Submit the taxi receipt");
@@ -1347,8 +1345,7 @@ test("in the OpenBot Desktop window on a computer with no microphone, narration 
   await view.findByRole("button", { name: "Record" });
   await settleReactWork();
   expect((await toggle()).getAttribute("aria-checked")).toBe("true");
-  expect(view.getByText("Narration is on.")).toBeTruthy();
-  expect(view.queryByText(/capturing your voice/)).toBeNull();
+  expect(view.queryByText(/^Narration is/)).toBeNull();
 });
 
 test("on hosted OpenBot a narration the Recorder refused says why, beside the narration switch", async () => {
@@ -1531,12 +1528,13 @@ test("on hosted OpenBot in a browser with no speech recognition, the page says n
   state = screenState();
   openAnswer = answerFor("screen");
   const view = draw(<BrowserPage />);
-  expect(await view.findByText("Narration is off.")).toBeTruthy();
   const user = userEvent.setup({ document });
   await user.type(await taskField(view, user), "Refund an order");
   // Record's popover asks for the task's name and offers no narration to turn on.
   expect(view.queryByRole("switch", { name: "Narration" })).toBeNull();
   await pressRecord(view, user);
+  // While it records, the status bar says narration is off.
+  expect(await view.findByText("Narration is off.")).toBeTruthy();
   await waitFor(() =>
     expect(writes).toContainEqual(
       expect.objectContaining({

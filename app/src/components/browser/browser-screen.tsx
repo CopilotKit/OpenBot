@@ -104,8 +104,10 @@ export function ScreenBrowser({
   /*
    * Laid out as a desktop browser's window, top to bottom: the tabs on the window's frame, the toolbar (back, forward,
    * reload, the address, and Record at its end, where a browser keeps its own actions), what a recording or a request
-   * just did, the page, and a status bar that says whether narration is heard. The page's name is for screen readers:
-   * the sidebar already says where you are, and a browser's window has no title row of its own.
+   * just did, the page, and, while a recording runs, a status bar that says whether narration is heard. Before Record
+   * the narration switch in Record's popover already says whether it is on, so the bar would only repeat it. The page's
+   * name is for screen readers: the sidebar already says where you are, and a browser's window has no title row of its
+   * own.
    */
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
@@ -190,11 +192,13 @@ export function ScreenBrowser({
           screen={screen}
         />
       </TabPanel>
-      <NarrationNotice
-        className="border-t border-b-0 bg-transparent px-3 py-1.5 text-xs"
-        narration={narration}
-        language={language}
-      />
+      {recording.phase === "idle" ? null : (
+        <NarrationNotice
+          className="border-t border-b-0 bg-transparent px-3 py-1.5 text-xs"
+          narration={narration}
+          language={language}
+        />
+      )}
     </div>
   );
 }
