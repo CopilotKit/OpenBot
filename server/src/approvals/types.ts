@@ -304,15 +304,38 @@ export class ApprovalNotFoundError extends Error {
 export function targetSubject(target: unknown): {
   file?: string;
   page?: string;
+  command?: string;
+  folder?: string;
 } {
   if (!target || typeof target !== "object") return {};
-  const { filePath, pageUrl } = target as {
-    filePath?: unknown;
-    pageUrl?: unknown;
-  };
+  const { filePath, pageUrl, grantId, displayName, relativePath, command } =
+    target as {
+      filePath?: unknown;
+      pageUrl?: unknown;
+      grantId?: unknown;
+      displayName?: unknown;
+      relativePath?: unknown;
+      command?: unknown;
+    };
+  /*
+   * A folder on the person's computer (`host-access/broker.ts`): the file in it, the command, and
+   * the folder by its name. Without them the row named only its scope, the grant's id, and Activity
+   * read "Save a file  host-grant-15407-1794112361547002000".
+   */
+  const folder = typeof grantId === "string";
   return {
     ...(typeof filePath === "string" && filePath ? { file: filePath } : {}),
+    ...(folder &&
+    typeof relativePath === "string" &&
+    relativePath &&
+    relativePath !== "."
+      ? { file: relativePath }
+      : {}),
     ...(typeof pageUrl === "string" && pageUrl ? { page: pageUrl } : {}),
+    ...(folder && typeof command === "string" && command ? { command } : {}),
+    ...(folder && typeof displayName === "string" && displayName
+      ? { folder: displayName }
+      : {}),
   };
 }
 export function parseApprovalResult(value: unknown): {

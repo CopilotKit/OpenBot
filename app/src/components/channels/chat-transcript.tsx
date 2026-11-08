@@ -5,6 +5,7 @@ import {
   useRenderActivityMessage,
   useRenderToolCall,
 } from "@copilotkit/react-core/v2";
+import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import {
   readConnectPrompt,
   SHOW_APP_ACCESS_TOOL,
@@ -81,18 +82,18 @@ import {
 } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import {
-  asText,
-  forDisplay,
-  REFUSAL_MARKER,
-  toolResultFailed,
-  UNOFFERED_TOOL_SENTENCE,
-  unofferedTool,
-} from "@/lib/plugins/tool-result";
-import {
   RESEARCH_RESULTS_LABELS,
   readResearchSources,
   researchRoleOfCall,
 } from "@/lib/plugins/research-results";
+import {
+  asText,
+  forDisplay,
+  refusalOf,
+  toolResultFailed,
+  UNOFFERED_TOOL_SENTENCE,
+  unofferedTool,
+} from "@/lib/plugins/tool-result";
 import { useResultVisibility } from "@/lib/product-telemetry";
 import { readTeamBotConsent } from "@/lib/team-bots";
 import { cn } from "@/lib/utils";
@@ -1702,7 +1703,9 @@ export function ServerToolLine({
    * any guess made here. See REFUSAL_MARKER in server/src/plugins/tools.ts.
    */
   const answer = result === undefined ? undefined : asText(result);
-  const refused = answer?.startsWith(REFUSAL_MARKER) ?? false;
+  // Behind the marker, or a step the person declined on the conversation's card. See `refusalOf`.
+  const reason = refusalOf(answer);
+  const refused = reason !== undefined;
   // Asked for a tool it was never offered: it didn't work, and what the runtime said was for the model.
   const unoffered = unofferedTool(result);
   const failed = !refused && (unoffered || toolResultFailed(result));
@@ -1712,7 +1715,7 @@ export function ServerToolLine({
    * times over by the end of the sentence. Stripped here rather than on the server, because the
    * server's copy is what the model is told and "Refused." in front of a reason is right for it.
    */
-  const body = refused ? answer?.slice(REFUSAL_MARKER.length).trim() : answer;
+  const body = refused ? reason : answer;
   // A Team Bot asking to use this person's own account draws its consent card, not the sentence.
   const consent = refused ? readTeamBotConsent(body) : null;
   if (consent) return <TeamBotConsentCard {...consent} />;
@@ -1734,12 +1737,23 @@ export function ServerToolLine({
    * person looks like the Bot being told off in front of them. The line still says the check
    * happened; the Bot's own reply says what it found.
    */
+  /*
+   * A folder step that did not happen says which file and why on its line, as a step on the Bot's
+   * own computer does ("Blocked: Save a file  notes.txt · You declined it."), and the reason is said
+   * in the person's words, not the sentence written for the Bot.
+   */
+  const folderRefusal =
+    refused && name.startsWith("host_")
+      ? [detail, outcomeForPerson(reason ?? "")].filter(Boolean).join(" · ")
+      : undefined;
   const shown =
-    name === SHOW_APP_ACCESS_TOOL
+    name === SHOW_APP_ACCESS_TOOL || folderRefusal !== undefined
       ? undefined
       : unoffered
         ? UNOFFERED_TOOL_SENTENCE
-        : body;
+        : refused && body
+          ? outcomeForPerson(body)
+          : body;
   /*
    * A web search or a page read opens to the pages it found, not to the provider's JSON. The list
    * bounds itself (a few results, each cut to a few lines), so the line does not scroll around it.
@@ -1763,7 +1777,9 @@ export function ServerToolLine({
     );
   return (
     <ToolLine
-      {...(detail ? { detail } : {})}
+      {...((folderRefusal ?? detail)
+        ? { detail: folderRefusal ?? detail }
+        : {})}
       // A blocked step did not happen: "Blocked: Save a file", never "Blocked: Saved a file".
       {...(refused ? { attempted: ownToolAttempt(name) ?? undefined } : {})}
       label={label}

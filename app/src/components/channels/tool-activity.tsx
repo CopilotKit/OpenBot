@@ -1,4 +1,5 @@
 import { CopilotKitContext } from "@copilotkit/react-core/v2/context";
+import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import {
   readConnectPrompt,
   SHOW_APP_ACCESS_TOOL,
@@ -44,6 +45,7 @@ import {
   asText,
   forDisplay,
   REFUSAL_MARKER,
+  refusalOf,
   toolResultFailed,
   UNOFFERED_TOOL_SENTENCE,
   unofferedTool,
@@ -398,8 +400,11 @@ export function stepDetails(step: ToolItem): StepDetails {
     };
   }
   const answer = step.result === undefined ? undefined : asText(step.result);
-  const refused = answer?.startsWith(REFUSAL_MARKER) ?? false;
-  const body = refused ? answer?.slice(REFUSAL_MARKER.length).trim() : answer;
+  // Behind the marker, or a step the person declined on the conversation's card. See `refusalOf`.
+  const reason = refusalOf(answer);
+  const refused = reason !== undefined;
+  // A refusal is said in the person's words, never in the sentence written for the Bot.
+  const body = refused ? outcomeForPerson(reason) : answer;
   // A tool whose answer is for the model, not the person; see `ServerToolLine`.
   const own = answersTheModel(name);
   // A tool the Bot was never offered: the runtime's answer lists every tool it has, for the model.
