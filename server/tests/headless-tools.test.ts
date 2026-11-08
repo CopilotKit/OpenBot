@@ -653,6 +653,53 @@ test("a computer tool the caller offers is left to the caller when OpenBot adds 
   expect(events.at(-1)?.type).toBe(EventType.RUN_FINISHED);
 });
 
+test("a Bot whose stream stops after it starts is told in words, not as a missing event", async () => {
+  // What the LangGraph harness did on a provider refusal it did not catch: RUN_STARTED, then the
+  // stream ended. The person read "Remote agent ended without a terminal event." in red.
+  const remote = remoteTurn((input) => [
+    {
+      type: EventType.RUN_STARTED,
+      threadId: input.threadId,
+      runId: input.runId,
+    },
+  ]);
+  const middleware = new HeadlessToolsMiddleware([
+    {
+      definition: {
+        name: "web_search",
+        description: "Search the public web",
+        parameters: { type: "object", properties: {} },
+      },
+      execute: async () => "Results",
+    },
+  ]);
+  const events: BaseEvent[] = [];
+  await new Promise<void>((resolve, reject) =>
+    middleware
+      .run(
+        {
+          threadId: "thread",
+          runId: "run",
+          messages: [],
+          state: {},
+          context: [],
+          forwardedProps: {},
+          tools: [],
+        },
+        remote.agent,
+      )
+      .subscribe({
+        next: (event) => events.push(event),
+        error: reject,
+        complete: resolve,
+      }),
+  );
+  expect(events.at(-1)).toMatchObject({
+    type: EventType.RUN_ERROR,
+    message: "The Bot stopped before it finished answering. Try again.",
+  });
+});
+
 test("unknown computer tool calls become error results rather than commands", async () => {
   const remote = remoteTurn((input, index) =>
     lifecycle(
