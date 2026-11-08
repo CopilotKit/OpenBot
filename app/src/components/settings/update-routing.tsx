@@ -1,7 +1,11 @@
 import { IconRoute } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment } from "react";
-import { PageRows, PageSection } from "@/components/layout/page-shell";
+import {
+  PageEmpty,
+  PageRows,
+  PageSection,
+} from "@/components/layout/page-shell";
 import {
   Item,
   ItemContent,
@@ -65,6 +69,12 @@ export function UpdateRoutingSection() {
    */
   const configured = (transport: UpdateTransport) =>
     reach.data ? reach.data.available[transport] : true;
+  /*
+   * Only the channels that can carry something get a switch. A channel that is not set up has nothing to choose, and
+   * four rows of switches nobody can turn on said less than one sentence does. Its stored preference is kept as it is
+   * and shows again once the channel is set up.
+   */
+  const shown = TRANSPORTS.filter((transport) => configured(transport.id));
   return (
     <PageSection
       description="Choose where to receive each type of update when you’re away. All updates remain available in the web app."
@@ -74,6 +84,10 @@ export function UpdateRoutingSection() {
         <p className="mt-4 text-destructive text-sm" role="alert">
           Couldn't load where your updates go. Reload the page.
         </p>
+      ) : shown.length === 0 ? (
+        <PageEmpty icon={IconRoute} title="Updates stay in OpenBot">
+          Push, Slack, Microsoft Teams and SMS show up here once they're set up.
+        </PageEmpty>
       ) : (
         <PageRows>
           {(Object.keys(KIND_LABEL) as UpdateKind[]).map((kind, index) => {
@@ -94,7 +108,7 @@ export function UpdateRoutingSection() {
                     </ItemDescription>
                   </ItemContent>
                   <ItemFooter className="flex-wrap justify-start gap-x-6 gap-y-3 pl-8">
-                    {TRANSPORTS.map((transport) => (
+                    {shown.map((transport) => (
                       <div
                         className="flex items-center gap-2 text-sm"
                         key={transport.id}
@@ -120,13 +134,8 @@ export function UpdateRoutingSection() {
                           }}
                           size="sm"
                         />
-                        <span className="flex flex-col leading-tight whitespace-nowrap">
+                        <span className="leading-tight whitespace-nowrap">
                           {transport.label}
-                          {configured(transport.id) ? null : (
-                            <span className="text-muted-foreground text-xs">
-                              Not set up
-                            </span>
-                          )}
                         </span>
                       </div>
                     ))}

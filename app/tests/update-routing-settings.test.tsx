@@ -29,9 +29,12 @@ const everyKind = {
   question: "all",
   attention: "all",
 };
+const everyChannel = { slack: true, teams: true, sms: true, push: true };
 let routing: Record<string, unknown> = everyKind;
+let available: Record<string, boolean> = everyChannel;
 afterEach(() => {
   routing = everyKind;
+  available = everyChannel;
 });
 function serving() {
   writes.length = 0;
@@ -44,13 +47,13 @@ function serving() {
       });
       return Response.json({ ok: true });
     }
-    // A deployment with every channel set up, so each switch reflects the person's preference.
+    // Every channel set up unless a case says otherwise, so each switch reflects the person's preference.
     if (String(input).endsWith("/api/delivery")) {
       return Response.json({
         bindings: [],
         devices: [],
         deliveries: [],
-        available: { slack: true, teams: true, sms: true, push: true },
+        available,
       });
     }
     return Response.json({ routing });
@@ -100,4 +103,41 @@ test("pings get their own row, Something needs you", async () => {
     request: "PUT /api/bots/routing/attention",
     body: { transports: ["push", "slack", "sms"] },
   });
+});
+
+function draw() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <UpdateRoutingSection />
+    </QueryClientProvider>,
+  );
+}
+
+test("only channels that are set up get a switch, and a save keeps the others as they were", async () => {
+  available = { slack: true, teams: false, sms: false, push: true };
+  routing = { ...everyKind, progress: ["push", "sms"] };
+  serving();
+  const view = draw();
+  const slack = await view.findByRole("switch", { name: "Progress by Slack" });
+  expect(view.queryByRole("switch", { name: "Progress by SMS" })).toBeNull();
+  expect(view.queryByText("Microsoft Teams")).toBeNull();
+  expect(view.queryByText("Not set up")).toBeNull();
+  fireEvent.click(slack);
+  await waitFor(() => expect(writes).toHaveLength(1));
+  // SMS is not set up and has no switch, but the person's choice for it is still saved as it was.
+  expect(writes[0]).toEqual({
+    request: "PUT /api/bots/routing/progress",
+    body: { transports: ["push", "slack", "sms"] },
+  });
+});
+
+test("with no channel set up, one sentence says updates stay in OpenBot", async () => {
+  available = { slack: false, teams: false, sms: false, push: false };
+  serving();
+  const view = draw();
+  expect(await view.findByText("Updates stay in OpenBot")).toBeTruthy();
+  expect(view.queryAllByRole("switch")).toHaveLength(0);
 });
