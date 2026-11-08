@@ -280,14 +280,20 @@ describe("a routine a Bot makes to run one of its goals", () => {
       recurring: true,
     });
     expect(goal.isError).toBe(false);
-    return setup;
+    const [made] = await database
+      .select({ id: responsibilities.id })
+      .from(responsibilities)
+      .where(eq(responsibilities.ownerUserId, setup.owner.id));
+    if (!made) throw new Error("The goal was not made.");
+    return { ...setup, goalId: made.id };
   }
 
   test("carries the goal's title, on the Routines page and under Scheduled", async () => {
-    const { owner, agentId, connection } = await withGoal();
+    const { owner, agentId, connection, goalId } = await withGoal();
 
     const result = await callTool(connection, "create_routine", {
       instruction,
+      goalId,
       cron: "0 8 * * *",
       timezone: "UTC",
     });
@@ -306,11 +312,12 @@ describe("a routine a Bot makes to run one of its goals", () => {
   });
 
   test("keeps the title the person gave it", async () => {
-    const { owner, connection } = await withGoal();
+    const { owner, connection, goalId } = await withGoal();
 
     await callTool(connection, "create_routine", {
       title: "Morning release check",
       instruction,
+      goalId,
       cron: "0 8 * * *",
       timezone: "UTC",
     });

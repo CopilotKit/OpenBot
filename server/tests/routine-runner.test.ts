@@ -83,6 +83,7 @@ function harness(options: {
   const routineStore: RoutineStore = {
     create: () => unreachable("create"),
     conversationFor: () => unreachable("conversationFor"),
+    linkGoal: () => unreachable("linkGoal"),
     startManualRun: () => unreachable("startManualRun"),
     listRuns: () => unreachable("listRuns"),
     routineForFiring: () => unreachable("routineForFiring"),

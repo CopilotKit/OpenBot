@@ -8,11 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Four migrations each add one column: `0078_routine_title` adds a nullable
+**Before upgrading.** Five migrations add columns: `0078_routine_title` adds a nullable
 `routines.title`, `0079_tool_unclassified` adds `mcp_tools.unclassified`, false on every existing
-row, `0080_listing_revision` adds `mcp_servers.listing_revision`, 0 on every existing row, and
-`0081_goal_recurring` adds `responsibilities.recurring`, false on every existing row. The database
-moves to `0081_goal_recurring`. Eight things change for an existing deployment:
+row, `0080_listing_revision` adds `mcp_servers.listing_revision`, 0 on every existing row,
+`0081_goal_recurring` adds `responsibilities.recurring`, false on every existing row, and
+`0082_routine_goal` adds `routines.goal_id`, empty on every existing row, and
+`routines.goal_by_title`, true on every existing row. The database moves to `0082_routine_goal`. Eight things change for an existing deployment:
 - A goal's tools are named for goals. `create_responsibility`, `list_responsibilities`,
   `update_responsibility`, `report_responsibility_progress`, `run_responsibility`,
   `pause_responsibility`, `resume_responsibility` and `complete_responsibility` are now
@@ -33,7 +34,8 @@ moves to `0081_goal_recurring`. Eight things change for an existing deployment:
   If the broker can't be reached, an app keeps its actions, which ask as before, and OpenBot keeps
   trying every few minutes and at the next start.
 - Existing goals keep their state, but a goal that one of its Bot's routines runs, or that an event
-  wakes, now counts as repeating, so its runs no longer complete it (below). A goal a run already
+  wakes, now counts as repeating, so its runs no longer complete it (below). An existing routine
+  runs a goal when its instruction names the goal's id, or the goal's whole title in quotes. A goal a run already
   completed stays completed, and its routine now says so each time it fires.
 - The audit trail records a person's denial as the action's own refusal (`computer.action_refused`
   or `mcp.call_rejected`), and an approved computer action as one `computer.action_allowed`, where
@@ -96,6 +98,11 @@ moves to `0081_goal_recurring`. Eight things change for an existing deployment:
   Its first run could complete it, which left the routine nothing to run. A routine that runs a goal
   you completed or paused now says so, where it ran nothing and said nothing. Editing a goal, on its
   card or by asking a Bot, no longer clears the events that wake it.
+- **A routine records the goal it runs.** A Bot making a routine for one of your goals passes the
+  goal, and a routine whose firing runs a goal is linked to it then. That link, not the routine's
+  wording, makes the goal repeat, lists it under Scheduled and gives the routine its title. A goal
+  titled "Email" was taken as run by any routine that mentioned email, so its runs could never
+  complete it.
 - **A goal's run waits for a busy conversation.** A run that starts while its conversation is in
   use, such as **Run now** while the Bot is still answering there, waits and then runs. After about
   9 minutes it gives up with "This goal's conversation was busy for about 9 minutes, so the run

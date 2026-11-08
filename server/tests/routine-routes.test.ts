@@ -51,6 +51,9 @@ function fakeStore(
     async conversationFor() {
       throw new Error("not used by these tests");
     },
+    async linkGoal() {
+      throw new Error("not used by these tests");
+    },
     async startManualRun() {
       throw new Error("not used by these tests");
     },

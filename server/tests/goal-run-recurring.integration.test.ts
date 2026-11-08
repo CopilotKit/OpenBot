@@ -8,9 +8,11 @@ import {
   type RunAgentInput,
 } from "@ag-ui/client";
 import { readResponsibilityTurn } from "@openbot/shared/responsibility-turn";
+import { withApprovalContext } from "@openbot/toolkit/continuation";
 import type { RunnerLike } from "@openbot/toolkit/run-turn";
 import { and, eq, inArray } from "drizzle-orm";
 import { Observable } from "rxjs";
+import { createActivityStore } from "../src/activity/activity";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import {
@@ -421,6 +423,7 @@ beforeEach(async () => {
     store: goalStore,
     engine,
     conversationFor: routineStore.conversationFor,
+    linkRoutine: routineStore.linkGoal,
   });
 });
 
@@ -477,26 +480,6 @@ describe("a run of a goal that repeats", () => {
       "succeeded",
       "succeeded",
     ]);
-    expect((await goalStore.get(OWNER, goal.id)).status).toBe("active");
-  });
-
-  test("a routine that names the goal by its title counts, as a Bot wrote one live", async () => {
-    const goal = await askedInTheConversation();
-    expect(
-      (
-        await call("create_routine", {
-          instruction: `Run the goal "${goal.title}" and tell me what changed.`,
-          cron: "0 8 * * *",
-          timezone: "UTC",
-        })
-      ).isError,
-    ).toBe(false);
-    expect((await call("run_goal", { id: goal.id })).isError).toBe(false);
-
-    expect((await sweep()).succeeded).toHaveLength(1);
-    expect(turnText(requests[0])).toContain(
-      "This goal repeats because a routine runs it.",
-    );
     expect((await goalStore.get(OWNER, goal.id)).status).toBe("active");
   });
 
@@ -596,5 +579,185 @@ describe("ending a goal that repeats", () => {
       recurring: true,
       subscriptions: [{ source: "github", eventType: "release.published" }],
     });
+  });
+});
+
+/*
+ * FOUND BEFORE 0.3.3: a routine was taken to run any goal whose title its instruction contained, so a
+ * goal titled "Email" was run by every routine that mentioned email. Its runs could then never
+ * complete it, and Activity listed it under Scheduled with that routine's schedule. A routine made
+ * for a goal now records the goal's id; an older routine is read only by the goal's id or its whole
+ * title in quotes.
+ */
+describe("which goal a routine runs", () => {
+  const activity = createActivityStore(database);
+
+  async function goalTitled(title: string) {
+    const made = await call("create_goal", {
+      title,
+      instruction: "Tell the person how many unread messages they have.",
+      successCriteria: "The person is told the count.",
+    });
+    expect(made.isError).toBe(false);
+    const [goal] = (await goals()).filter((each) => each.title === title);
+    if (!goal) throw new Error("The goal was not made.");
+    return goal;
+  }
+
+  async function routineRow(routineId: string) {
+    const [row] = await database
+      .select()
+      .from(routines)
+      .where(eq(routines.id, routineId));
+    return row;
+  }
+
+  /** A routine as rows made before routines recorded their goal still are. */
+  async function olderRoutine(instruction: string) {
+    const id = `routine_${randomUUID()}`;
+    await database.insert(routines).values({
+      id,
+      ownerUserId: OWNER,
+      agentId: BOT,
+      channelId: CONVERSATION.id,
+      instruction,
+      cron: "0 8 * * *",
+      timezone: "UTC",
+      nextRunAt: new Date(Date.now() + 3_600_000),
+      goalByTitle: true,
+    });
+    return id;
+  }
+
+  async function scheduledIds() {
+    return (await activity.forBot(OWNER, BOT)).scheduled.map((item) => item.id);
+  }
+
+  test("a goal titled Email stays one-off beside a routine that mentions email, and its run completes it", async () => {
+    const goal = await goalTitled("Email");
+    expect(
+      (
+        await call("create_routine", {
+          instruction: "Summarise my unread email and post it here.",
+          cron: "0 8 * * *",
+          timezone: "UTC",
+        })
+      ).isError,
+    ).toBe(false);
+    await olderRoutine("Archive the newsletters in my email.");
+
+    expect(await goalStore.repeats(OWNER, goal.id)).toBeNull();
+    expect(await scheduledIds()).not.toContain(`responsibility:${goal.id}`);
+
+    expect((await call("run_goal", { id: goal.id })).isError).toBe(false);
+    expect((await sweep()).succeeded).toHaveLength(1);
+    expect(turnText(requests[0])).not.toContain("This goal repeats");
+    expect((await goalStore.get(OWNER, goal.id)).status).toBe("completed");
+  });
+
+  test("a routine made for a goal records it by id, carries its title, and the goal repeats", async () => {
+    const goal = await askedInTheConversation();
+    const made = await call("create_routine", {
+      instruction: "Check the latest release and report what changed.",
+      goalId: goal.id,
+      cron: "0 8 * * *",
+      timezone: "UTC",
+    });
+    expect(made.isError).toBe(false);
+    const [routine] = await database
+      .select()
+      .from(routines)
+      .where(eq(routines.ownerUserId, OWNER));
+    expect(routine).toMatchObject({
+      goalId: goal.id,
+      title: "Morning OpenBot release check",
+      goalByTitle: false,
+    });
+
+    expect(await goalStore.repeats(OWNER, goal.id)).toBe("routine");
+    expect(await scheduledIds()).toContain(`responsibility:${goal.id}`);
+    expect((await call("run_goal", { id: goal.id })).isError).toBe(false);
+    expect((await sweep()).succeeded).toHaveLength(1);
+    expect(turnText(requests[0])).toContain(
+      "This goal repeats because a routine runs it.",
+    );
+    expect((await goalStore.get(OWNER, goal.id)).status).toBe("active");
+  });
+
+  test("a goal it may not run is refused by name", async () => {
+    const goal = await askedInTheConversation();
+    expect((await call("complete_goal", { id: goal.id })).isError).toBe(false);
+    const made = await call("create_routine", {
+      instruction: "Check the latest release.",
+      goalId: goal.id,
+      cron: "0 8 * * *",
+      timezone: "UTC",
+    });
+    expect(made.isError).toBe(true);
+    expect(made.text).toContain(
+      '"Morning OpenBot release check" is complete, so a routine can\'t run it.',
+    );
+    const unknown = await call("create_routine", {
+      instruction: "Check the latest release.",
+      goalId: randomUUID(),
+      cron: "0 8 * * *",
+      timezone: "UTC",
+    });
+    expect(unknown.isError).toBe(true);
+    expect(unknown.text).toContain("There is no goal of yours with that id");
+  });
+
+  test("a routine whose firing runs a goal is linked to it then", async () => {
+    const goal = await askedInTheConversation();
+    expect(
+      (
+        await call("create_routine", {
+          instruction: "Run my morning release check goal.",
+          cron: "0 8 * * *",
+          timezone: "UTC",
+        })
+      ).isError,
+    ).toBe(false);
+    const [routine] = await database
+      .select()
+      .from(routines)
+      .where(eq(routines.ownerUserId, OWNER));
+    if (!routine) throw new Error("The routine was not made.");
+    expect(routine.goalId).toBeNull();
+    expect(await goalStore.repeats(OWNER, goal.id)).toBeNull();
+
+    // The routine's turn runs the goal, as its firing would.
+    const fired = await withApprovalContext(
+      {
+        runId: randomUUID(),
+        threadId: CONVERSATION.threadId,
+        toolCallId: "run-goal",
+        toolName: "run_goal",
+        args: { id: goal.id },
+        messages: [],
+        state: {},
+        context: [],
+        forwardedProps: {},
+        initiator: { kind: "routine", id: routine.id },
+      },
+      () => call("run_goal", { id: goal.id }),
+    );
+    expect(fired.isError).toBe(false);
+    expect((await routineRow(routine.id))?.goalId).toBe(goal.id);
+    expect(await goalStore.repeats(OWNER, goal.id)).toBe("routine");
+  });
+
+  test("an older routine still runs the goal it names by its exact title in quotes, and no other", async () => {
+    const goal = await askedInTheConversation();
+    const email = await goalTitled("Email");
+    await olderRoutine(
+      `Run the goal \u201c${goal.title}\u201d and tell me what changed in my email.`,
+    );
+
+    expect(await goalStore.repeats(OWNER, goal.id)).toBe("routine");
+    expect(await goalStore.repeats(OWNER, email.id)).toBeNull();
+    const scheduled = await scheduledIds();
+    expect(scheduled).toContain(`responsibility:${goal.id}`);
+    expect(scheduled).not.toContain(`responsibility:${email.id}`);
   });
 });

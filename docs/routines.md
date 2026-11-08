@@ -27,10 +27,16 @@ its own: it runs when asked, or when an event wakes it. A goal's own run is not 
 because it already holds the goal's own tools. See `server/src/responsibilities/chat-tools.ts`.
 
 A goal that repeats is never completed by one of its runs. It repeats when it was made `recurring`,
-when an enabled routine of its Bot names it by id or title, or when an event wakes it. Its run is
-told so, records its result with `report_goal_progress`, and is refused `complete_goal`; only the
-person ends it. Asked to run a completed or paused goal, `run_goal` says so instead of running
-nothing. See `GoalRepeats` in `server/src/responsibilities/types.ts`.
+when an enabled routine of its Bot runs it, or when an event wakes it. Its run is told so, records
+its result with `report_goal_progress`, and is refused `complete_goal`; only the person ends it.
+Asked to run a completed or paused goal, `run_goal` says so instead of running nothing. See
+`GoalRepeats` in `server/src/responsibilities/types.ts`.
+
+A routine records the goal it runs (`routines.goal_id`): the `goalId` a Bot passes to
+`create_routine` or `update_routine`, else the goal whose id its instruction names, else the goal
+its firing first runs with `run_goal`. Never a goal its instruction only mentions. A routine made
+before 0.3.3 (`goal_by_title`) is read from its instruction, by the goal's id or its whole title in
+quotes. See `routineRunsGoal`.
 
 Its tools are OpenBot's own code, so the server brings the saved list up to date with the running
 release at every start, before it gives them out: a tool a release renames, rewords or adds reaches an

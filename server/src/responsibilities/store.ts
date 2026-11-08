@@ -67,8 +67,8 @@ export function createResponsibilityStore(
   /**
    * Why this goal runs again and again (`GoalRepeats`), read where it already lives: its own flag,
    * its subscriptions, its enabled triggers, and the enabled routines of its Bot that run it
-   * (`routineRunsGoal`). A routine that only mentions the title counts too: the run then can't end
-   * the goal, and the person still can.
+   * (`routineRunsGoal`: the goal a routine records, or for an older routine its id or whole quoted
+   * title).
    */
   async function repeatsOf(
     connection: Connection,
@@ -80,7 +80,11 @@ export function createResponsibilityStore(
     if (goal.recurring) return "recurring";
     // A person keeps at most 20 routines switched on (`MAX_ENABLED_ROUTINES`), so this read is small.
     const enabled = await connection
-      .select({ instruction: routines.instruction })
+      .select({
+        goalId: routines.goalId,
+        goalByTitle: routines.goalByTitle,
+        instruction: routines.instruction,
+      })
       .from(routines)
       .where(
         and(
@@ -89,7 +93,7 @@ export function createResponsibilityStore(
           eq(routines.enabled, true),
         ),
       );
-    if (enabled.some(({ instruction }) => routineRunsGoal(instruction, goal)))
+    if (enabled.some((routine) => routineRunsGoal(routine, goal)))
       return "routine";
     if (goal.subscriptions.length > 0) return "event";
     const [trigger] = await connection

@@ -153,19 +153,49 @@ export type ResponsibilityContinuation = {
  */
 export type GoalRepeats = "recurring" | "routine" | "event";
 
+/** The quotes a Bot puts round a goal's title when it names one: straight, curly, angled, backticks. */
+const TITLE_QUOTES = [
+  ['"', '"'],
+  ["\u201c", "\u201d"],
+  ["'", "'"],
+  ["\u2018", "\u2019"],
+  ["\u00ab", "\u00bb"],
+  ["`", "`"],
+] as const;
+
+/** The routine fields that say which goal it runs. */
+export type RoutineGoalLink = {
+  /** The goal it was made for, or whose `run_goal` its firing called. */
+  goalId: string | null;
+  /** Made before routines recorded their goal: read its instruction instead. */
+  goalByTitle: boolean;
+  instruction: string;
+};
+
 /**
- * Whether a routine's instruction runs this goal: it names the goal by id, which `run_goal` takes,
- * or by title. FOUND LIVE: Bots wrote `Run the goal "Daily CopilotKit/OpenBot release check"` into
- * the routine they made for a goal. One rule, read by the goal store (`GoalRepeats`) and by a Bot's
- * Activity, so a goal a run is told repeats is the goal Activity lists with its routine's schedule.
+ * Whether this routine runs this goal. One rule, read by the goal store (`GoalRepeats`), by a Bot's
+ * Activity, and by the routine store when it names an untitled routine for its goal.
+ *
+ * BY THE GOAL IT RECORDS. A routine made for a goal records its id, and runs that goal and no other.
+ *
+ * FOUND BEFORE 0.3.3: the rule was "the instruction contains the goal's title anywhere", so a goal
+ * titled "Email" was run by any routine that mentioned email. Its runs could then never complete it,
+ * and Activity listed it with somebody else's schedule. A routine made before routines recorded their
+ * goal (`goalByTitle`) is still read from its instruction, but only by the goal's id or its whole
+ * title, exactly, between quotes: `Run the goal "Track OpenBot releases"`, never a word inside a
+ * sentence.
  */
 export function routineRunsGoal(
-  instruction: string,
+  routine: RoutineGoalLink,
   goal: { id: string; title: string },
 ): boolean {
+  if (routine.goalId) return routine.goalId === goal.id;
+  if (!routine.goalByTitle) return false;
   return (
-    instruction.includes(goal.id) ||
-    instruction.toLowerCase().includes(goal.title.toLowerCase())
+    routine.instruction.includes(goal.id) ||
+    TITLE_QUOTES.some(([open, close]) =>
+      routine.instruction.includes(`${open}${goal.title}${close}`),
+    )
   );
 }
 

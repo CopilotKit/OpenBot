@@ -41,6 +41,7 @@ const ROUTINE: Routine = {
   channelId: "channel_1",
   instruction: "Post the standup summary.",
   title: null,
+  goalId: null,
   cron: "0 9 * * 1-5",
   timezone: "Europe/Madrid",
   enabled: true,

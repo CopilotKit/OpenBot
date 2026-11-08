@@ -14,6 +14,7 @@
  * held to the same rules. Not `report_goal_progress`: progress is recorded by the run working on a
  * goal, against that run.
  */
+import { currentApprovalContext } from "@openbot/toolkit/continuation";
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import type { AuditInitiator } from "../audit";
 import type { ResponsibilityEngine } from "./engine";
@@ -39,6 +40,16 @@ export type GoalToolDeps = {
     agentId: string,
     wanted: { channelId?: string; threadId?: string },
   ): Promise<string>;
+  /**
+   * Record that a routine runs this goal, when the routine's firing ran it and it records none yet
+   * (`RoutineStore.linkGoal`). Absent, nothing is recorded.
+   */
+  linkRoutine?(
+    ownerUserId: string,
+    agentId: string,
+    routineId: string,
+    goalId: string,
+  ): Promise<boolean>;
 };
 
 let installed: GoalToolDeps | null = null;
@@ -253,6 +264,19 @@ export async function callGoalTool(
   if (!tool || name === "report_goal_progress")
     return `Refused. ${name} is not a goal tool here.`;
   const answer = String(await tool.execute(input));
+  /*
+   * A routine's firing that runs a goal is that goal's routine. One made before routines recorded
+   * their goal, or made without `goalId`, is linked here the first time it runs one.
+   */
+  const initiator = currentApprovalContext()?.initiator;
+  if (
+    name === "run_goal" &&
+    !answer.startsWith("Refused.") &&
+    initiator?.kind === "routine" &&
+    initiator.id &&
+    typeof input.id === "string"
+  )
+    await deps.linkRoutine?.(ownerUserId, agentId, initiator.id, input.id);
   if (name !== "create_goal" || answer.startsWith("Refused.")) return answer;
   return `That goal is set. It runs when asked, or when an event wakes it; it has no schedule of its own.\n${answer}`;
 }

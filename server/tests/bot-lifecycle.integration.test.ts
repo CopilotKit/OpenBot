@@ -353,7 +353,8 @@ describe("Activity and attention", () => {
       ownerUserId: owner,
       agentId: bot,
       channelId: direct,
-      // As a Bot wrote it live: the goal named by its title.
+      // Made for the goal, which it records, with the instruction a Bot wrote live.
+      goalId: `${prefix}-goal-${owner}`,
       instruction:
         "Find and run the active goal \u201cKeep the build green\u201d and report what changed.",
       cron: "0 8 * * *",
