@@ -244,8 +244,9 @@ function BrowserWindow({
     // Clipped rather than hidden: a hidden overflow would let this shrink below the screen's own floor.
     <div className="flex min-w-0 flex-1 flex-col overflow-clip rounded-xl border border-border">
       <BotBrowserBar botId={botId} state={bar} onNavigated={onNavigated}>
+        {/* The page flush under the bar, as in the person's own browser (browser-screen.tsx). */}
         <div
-          className="flex min-h-80 flex-1 items-center justify-center bg-muted/40 p-2"
+          className="flex min-h-80 flex-1 items-start justify-center bg-background"
           style={{ containerType: "size" }}
         >
           {children}
@@ -677,9 +678,43 @@ export function ComputerView({
     />
   ) : null;
 
+  /** Where the browser in the picture is, by host: the page drawn now, or the page a finished turn left it on. */
+  const pageUrl = showScreen
+    ? drawn?.url
+    : settled
+      ? knownPage?.url
+      : undefined;
+  const pageHost = pageUrl ? hostOf(pageUrl) : "";
+
   return (
     <>
-      <figure ref={previewRef} className="overflow-hidden rounded-2xl border">
+      <figure
+        ref={previewRef}
+        className="overflow-hidden rounded-2xl border bg-background"
+      >
+        {/*
+          The card read as a window: whose browser it is and where it is, on the frame above the page, with a dot
+          while the picture is of the browser as it is now rather than of a turn that is over.
+        */}
+        {name || pageHost ? (
+          <figcaption className="flex h-8 items-center gap-2 border-b bg-sidebar px-3 text-xs">
+            {name ? (
+              <span className="flex min-w-0 shrink-0 items-center gap-1.5 font-medium">
+                <ChannelAvatar participantIds={[computerId]} size={14} />
+                {name}
+              </span>
+            ) : null}
+            <span className="min-w-0 flex-1 truncate text-right text-muted-foreground">
+              {pageHost}
+            </span>
+            {showScreen && !settled ? (
+              <span
+                aria-hidden="true"
+                className="size-1.5 shrink-0 rounded-full bg-emerald-500 motion-safe:animate-pulse"
+              />
+            ) : null}
+          </figcaption>
+        ) : null}
         {/* Inline preview remains in transcript; click opens a readable full-size view. */}
         <button
           type="button"
@@ -697,20 +732,10 @@ export function ComputerView({
         >
           {polledScreen}
 
-          {/* Whose computer this is — and whose hands are on it — said on the picture itself. */}
-          {name || wheelHere ? (
-            <span className="absolute right-2 bottom-2 flex items-center gap-1.5">
-              {name ? (
-                <span className="flex items-center gap-1.5 rounded-full bg-black/60 py-1 pr-2.5 pl-1.5 font-medium text-white text-xs backdrop-blur-sm">
-                  <ChannelAvatar participantIds={[computerId]} size={16} />
-                  {name}
-                </span>
-              ) : null}
-              {wheelHere ? (
-                <span className="rounded-full bg-white px-2.5 py-1 font-medium text-black text-xs shadow-sm">
-                  You have control
-                </span>
-              ) : null}
+          {/* Whose hands are on it, said on the picture itself. Whose computer it is, the frame above says. */}
+          {wheelHere ? (
+            <span className="absolute right-2 bottom-2 rounded-full bg-white/85 px-2.5 py-1 font-medium text-black text-xs shadow-sm backdrop-blur-sm">
+              You have control
             </span>
           ) : null}
 
@@ -886,7 +911,8 @@ export function ComputerView({
                 onClick={() => !wheelHere && setExpanded(false)}
                 aria-hidden
                 tabIndex={-1}
-                className={`fixed inset-0 bg-black/80 ${wheelHere ? "cursor-default" : "cursor-zoom-out"}`}
+                // Frosted rather than blacked out: the conversation stays faintly there behind the Bot's window.
+                className={`fixed inset-0 bg-black/35 backdrop-blur-md dark:bg-black/55 ${wheelHere ? "cursor-default" : "cursor-zoom-out"}`}
               />
               {/*
                 A card holding the screen, with who and the wheel beneath it. A turn that is over is
@@ -899,7 +925,7 @@ export function ComputerView({
                 past it and the view scrolls, so Record is always reachable.
               */}
               <div
-                className={`relative m-auto flex w-full min-w-0 shrink-0 flex-col rounded-2xl bg-background shadow-2xl ${settled ? "max-w-[70vw] p-4" : "min-h-[calc(100svh-1rem)] gap-4 p-3 sm:min-h-[calc(100svh-2rem)] lg:h-[calc(100svh-2rem)] lg:flex-row"}`}
+                className={`relative m-auto flex w-full min-w-0 shrink-0 flex-col rounded-2xl bg-background shadow-2xl ring-1 ring-black/5 dark:ring-white/10 ${settled ? "max-w-[70vw] p-4" : "min-h-[calc(100svh-1rem)] gap-4 p-3 sm:min-h-[calc(100svh-2rem)] lg:h-[calc(100svh-2rem)] lg:flex-row"}`}
               >
                 {/*
                   The way back to the conversation. A live view fills the window, so the backdrop
@@ -934,7 +960,7 @@ export function ComputerView({
                   wheel below is the reason this view opens at all in that state.
                 */}
                   <div
-                    className={`relative min-h-0 ${settled ? "max-h-[75vh] overflow-auto rounded-xl" : "overflow-hidden rounded-lg border border-border"} ${showLiveScreen ? "bg-black" : "bg-muted"}`}
+                    className={`relative min-h-0 ${settled ? "max-h-[75vh] overflow-auto rounded-xl bg-muted" : "overflow-hidden"} ${showLiveScreen ? "bg-black" : settled ? "" : "bg-background"}`}
                     style={
                       settled
                         ? undefined

@@ -531,7 +531,10 @@ export function RecordingBar({
       />
       {children}
       <Button disabled={!recording.canRecord} size="sm" type="submit">
-        <IconPlayerRecordFilled data-icon="inline-start" />
+        <IconPlayerRecordFilled
+          className="text-red-500"
+          data-icon="inline-start"
+        />
         {recording.starting ? "Starting…" : "Record"}
       </Button>
     </form>

@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/item";
 import { Switch } from "@/components/ui/switch";
 import type { NarrationProblem } from "@/lib/browser/narration";
+import { cn } from "@/lib/utils";
 import type { NarrationChoice } from "./narration-choice";
 import type { NarrationControls } from "./use-narration";
 
@@ -175,15 +176,21 @@ export function NarrationSwitch({
 export function NarrationNotice({
   narration,
   language,
+  className,
 }: {
   narration: NarrationControls;
   language: string;
+  /** Where it is drawn as the browser window's status bar rather than a row under its bar. */
+  className?: string;
 }) {
   const sentence = narrationNoticeSentence(narration, language);
   if (!sentence) return null;
   return (
     <p
-      className="border-b border-border bg-muted/40 px-3 py-2 text-muted-foreground text-sm"
+      className={cn(
+        "border-b border-border bg-muted/40 px-3 py-2 text-muted-foreground text-sm",
+        className,
+      )}
       role="status"
     >
       {sentence}

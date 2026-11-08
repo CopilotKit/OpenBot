@@ -1,13 +1,20 @@
 import type { BrowserApiState } from "@openbot/shared/openbot-browser";
-import { IconBrowser } from "@tabler/icons-react";
+import { IconSearch } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
 import { type RefObject, useId, useRef, useState } from "react";
 import {
   LiveScreen,
   type LiveScreenHandle,
 } from "@/components/computer/live-screen";
+import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group";
+import { addressFrom } from "@/lib/browser/address";
 import {
   browserTabsMutationOptions,
   clearBrowserMutationOptions,
@@ -88,44 +95,27 @@ export function ScreenBrowser({
     { error: recording.error, at: recording.failedAt },
   ]);
 
+  const go = (url: string) => {
+    navigate.mutate({ url });
+    // Away to the page, as Chrome's address bar does: the next keys are for the page that opens.
+    screen.current?.focus();
+  };
+
+  /*
+   * Laid out as a desktop browser's window, top to bottom: the tabs on the window's frame, the toolbar (back, forward,
+   * reload, the address, and Record at its end, where a browser keeps its own actions), what a recording or a request
+   * just did, the page, and a status bar that says whether narration is heard. The page's name is for screen readers:
+   * the sidebar already says where you are, and a browser's window has no title row of its own.
+   */
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-12 flex-row flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <SidebarToggle />
-          <IconBrowser
-            aria-hidden="true"
-            className="size-4.5 shrink-0 text-muted-foreground"
-          />
-          <h1 className="truncate text-sm tracking-tight">Browser</h1>
-        </div>
-        <RecordingBar recording={recording}>
-          <NarrationSwitch
-            narration={narration}
-            recording={recording.phase !== "idle"}
-            onChange={(on) => {
-              narration.setOn(on);
-              choice.choose(on);
-            }}
-          />
-        </RecordingBar>
-      </div>
-      <NarrationNotice narration={narration} language={language} />
+    <div className="flex min-h-0 flex-1 flex-col bg-background">
+      <h1 className="sr-only">Browser</h1>
       <NarrationChoiceDialog {...recording.question} />
       <ClearBrowserDialog
         clear={clear}
         open={clearing.asking}
         onOpenChange={clearing.setAsking}
       />
-      {recording.stopped ? <StoppedNotice stopped={recording.stopped} /> : null}
-      {failure ? (
-        <p
-          className="border-b border-border px-3 py-2 text-destructive text-sm"
-          role="alert"
-        >
-          {failure.message}
-        </p>
-      ) : null}
       <TabStrip
         ids={ids}
         tabs={state.tabs}
@@ -140,41 +130,71 @@ export function ScreenBrowser({
         onNew={() =>
           tabs.mutate({ action: "new" }, { onSuccess: newTab.opened })
         }
+        start={<SidebarToggle />}
       />
       <TabPanel
         active={active}
         className="flex min-h-0 flex-1 flex-col"
         ids={ids}
       >
-        <AddressBar
-          // A new tab, or switching to one, starts the bar again from that tab's own address.
-          key={active?.id ?? "none"}
-          address={shownAddress(active)}
-          disabled={!state.open || !active}
-          focus={newTab.focus}
-          onFocused={newTab.onFocused}
-          onGo={(url) => {
-            navigate.mutate({ url });
-            // Away to the page, as Chrome's address bar does: the next keys are for the page that opens.
-            screen.current?.focus();
-          }}
-          onMove={(action) => navigate.mutate({ action })}
-          // Open or closed, or not answering (often why it is cleared), its data is there to wipe. A recording that is
-          // starting or stopping is let finish first; one that is running is ended by the clear itself.
-          clear={{
-            disabled: recording.starting || recording.stopping,
-            ask: clearing.ask,
-          }}
-        />
+        <div className="flex flex-wrap items-center gap-x-2 border-border border-b bg-background pr-3">
+          <AddressBar
+            // A new tab, or switching to one, starts the bar again from that tab's own address.
+            key={active?.id ?? "none"}
+            className="min-w-64 flex-1 border-b-0"
+            address={shownAddress(active)}
+            disabled={!state.open || !active}
+            focus={newTab.focus}
+            onFocused={newTab.onFocused}
+            onGo={go}
+            onMove={(action) => navigate.mutate({ action })}
+            // Open or closed, or not answering (often why it is cleared), its data is there to wipe. A recording that is
+            // starting or stopping is let finish first; one that is running is ended by the clear itself.
+            clear={{
+              disabled: recording.starting || recording.stopping,
+              ask: clearing.ask,
+            }}
+          />
+          <div className="ml-auto py-1.5 pl-2">
+            <RecordingBar recording={recording}>
+              <NarrationSwitch
+                narration={narration}
+                recording={recording.phase !== "idle"}
+                onChange={(on) => {
+                  narration.setOn(on);
+                  choice.choose(on);
+                }}
+              />
+            </RecordingBar>
+          </div>
+        </div>
+        {recording.stopped ? (
+          <StoppedNotice stopped={recording.stopped} />
+        ) : null}
+        {failure ? (
+          <p
+            className="border-b border-border bg-background px-3 py-2 text-destructive text-sm"
+            role="alert"
+          >
+            {failure.message}
+          </p>
+        ) : null}
         <Screen
+          blank={!shownAddress(active)}
           computerId={computerId}
           notAnswering={state.problem}
+          onGo={go}
           open={state.open}
           reopen={reopen}
           reopening={reopening}
           screen={screen}
         />
       </TabPanel>
+      <NarrationNotice
+        className="border-t border-b-0 bg-transparent px-3 py-1.5 text-xs"
+        narration={narration}
+        language={language}
+      />
     </div>
   );
 }
@@ -184,16 +204,22 @@ export function ScreenBrowser({
  * units rather than a measured width, so it fits both ways as the window or the sidebar changes.
  */
 function Screen({
+  blank,
   computerId,
   notAnswering,
+  onGo,
   open,
   reopen,
   reopening,
   screen,
 }: {
+  /** The tab that shows is empty: the page offers somewhere to go rather than a white rectangle. */
+  blank: boolean;
   computerId: string;
   /** Why there is nothing to show: the browser is there and not answering (`BrowserApiState.problem`). */
   notAnswering?: string;
+  /** Where the start page sends what is typed into it, as the address bar does. */
+  onGo: (url: string) => void;
   open: boolean;
   reopen: () => void;
   reopening: boolean;
@@ -201,13 +227,14 @@ function Screen({
 }) {
   const [problem, setProblem] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
+  // The page sits flush under the toolbar, at the browser's own shape, as wide as the window allows.
   return (
     <div
-      className="flex min-h-0 flex-1 items-start justify-center bg-muted/40 p-3"
+      className="flex min-h-0 flex-1 items-start justify-center"
       style={{ containerType: "size" }}
     >
       <div
-        className="overflow-hidden rounded-lg border border-border bg-background"
+        className="overflow-hidden bg-background"
         style={{
           width: `min(100cqw, calc(100cqh * ${SCREEN_ASPECT_RATIO}))`,
         }}
@@ -255,9 +282,48 @@ function Screen({
                 Try again
               </Button>
             </div>
+          ) : blank ? (
+            <StartPage onGo={onGo} />
           ) : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * What an empty tab shows: the OpenBot orb and one field to search or go to a site, as a browser's new tab page does,
+ * over the empty page the browser itself would draw white. It goes where the address bar would.
+ */
+function StartPage({ onGo }: { onGo: (url: string) => void }) {
+  const [typed, setTyped] = useState("");
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-background px-6">
+      <OpenBotLogo className="size-14 drop-shadow-[0_8px_24px_rgb(120_100_220/0.35)]" />
+      <form
+        aria-label="Search or go to a site"
+        className="w-full max-w-lg"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const url = addressFrom(typed);
+          if (!url) return;
+          setTyped("");
+          onGo(url);
+        }}
+      >
+        <InputGroup className="h-11 rounded-full bg-muted/50 shadow-xs dark:bg-input/40">
+          <InputGroupInput
+            aria-label="Search or go to a site"
+            onChange={(event) => setTyped(event.target.value)}
+            placeholder="Search or type an address"
+            spellCheck={false}
+            value={typed}
+          />
+          <InputGroupAddon className="pl-4">
+            <IconSearch />
+          </InputGroupAddon>
+        </InputGroup>
+      </form>
     </div>
   );
 }
