@@ -207,6 +207,14 @@ export type PolicyDecision = {
   mode: PolicyMode;
   /** Which expression decided it, so the audit row can say why and an operator can find the rule. */
   matched: string | null;
+  /**
+   * What the Boundaries page calls that expression, where somebody named it.
+   *
+   * A rule written from a sentence is a CEL expression of a thousand characters, and an audit row
+   * that can only quote it names nothing a person would recognise. The name is read from the policy
+   * that decided, at the moment it decided, so a later rename does not rewrite what the trail says.
+   */
+  ruleName?: string;
   /** Which list that expression came from. `default` means nothing matched and the floor applied. */
   source: "deny" | "allow" | "default";
   /** True when the action should actually be carried out. False for a refusal in `enforce`. */
@@ -363,6 +371,7 @@ export function evaluateActionPolicy(
         allowed: false,
         mode,
         matched: expression,
+        ...nameOf(policy, expression),
         source: "deny",
         // dry-run records the refusal and lets the work continue, which is what makes it safe to
         // switch on against live traffic.
@@ -378,6 +387,7 @@ export function evaluateActionPolicy(
         allowed: true,
         mode,
         matched: expression,
+        ...nameOf(policy, expression),
         source: "allow",
         forward: true,
         reason: "Permitted by policy.",
@@ -395,6 +405,20 @@ export function evaluateActionPolicy(
       "No rule in this deployment's policy permits that action, so it was refused. " +
       "An administrator can add one.",
   };
+}
+
+/** The deciding rule's name, spread into a decision, or nothing for a rule nobody named. */
+function nameOf(
+  policy: ActionPolicy | null | undefined,
+  expression: string,
+): { ruleName?: string } {
+  // Own keys only: the labels are keyed by rule text, and a rule reading `constructor` must not
+  // find a name on the object's prototype.
+  const label =
+    policy?.labels && Object.hasOwn(policy.labels, expression)
+      ? policy.labels[expression]
+      : undefined;
+  return label?.name ? { ruleName: label.name } : {};
 }
 
 /** A refusal a person can act on: what was refused, and on what. */

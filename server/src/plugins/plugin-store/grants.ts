@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { recordAuditEvent } from "../../audit";
 import { mcpTools, pluginGrants, skills } from "../../db/schema";
+import { catalogueEntry, classifyTool } from "../catalogue";
 import type { StoreContext } from "./context";
 import {
   type GrantedPlugins,
@@ -241,6 +242,14 @@ export function grantMethods(context: StoreContext) {
             description: row.description,
             inputSchema: row.inputSchema as Record<string, unknown>,
             destructive: row.destructive,
+            // The same answer `callTool` gates the call on, so a read here is a read there.
+            read:
+              classifyTool(
+                catalogueEntry(row.serverId),
+                row.name,
+                true,
+                row.effect,
+              ) === "read",
           };
         });
 

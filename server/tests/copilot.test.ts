@@ -1527,6 +1527,11 @@ describe("where each app stands, as the Bot's page says it", () => {
       expect(guidance).toContain(
         "never say you lack it or that it has to be granted",
       );
+      // FOUND IN 1.0.0: a personal Bot sent the one person to "an administrator" to add a Gmail
+      // action it already held. Said in as many words, since leaving the word out did not stop it.
+      expect(guidance).toContain(
+        "never say one has to be added or granted, or that anybody else has to do it",
+      );
       expect(guidance.toLowerCase()).not.toContain("administrator");
       expect(guidance).not.toContain("missing grant");
     } finally {

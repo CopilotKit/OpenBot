@@ -109,6 +109,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Conversations
 
+- **A Bot that runs its own agent reads your Gmail and finds your Slack channels again.** Such a
+  Bot, like the personal starter Bot, can be sent only some of an app's actions in one request, and
+  they were picked by matching the words of your message. With Gmail connected it could be sent
+  sending and settings actions and nothing that fetches a message, so it said it could not read your
+  mail and that an administrator had to add a tool. On Slack it could read a conversation it had the
+  id of but not find a channel or a DM by name. Each app's actions that read now come first,
+  alongside the ones your message asks for, so a Bot can search, list and read messages, threads,
+  channels and people. Sending and deleting still ask you first. In OpenBot Personal a Bot is also
+  told plainly that every action an app offers is already its own.
 - **A Bot calls you "you".** Its instructions call the user "the person", and a Bot said that back,
   such as "which the person didn't ask for". Every Bot is now told to write "you".
 - **A Claude plan has a model picker in the conversation again.** Signed in with a Claude plan,
@@ -117,6 +126,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   (`{"type":"model-list-unreadable","source":"claude","status":401}` in the server log), and only
   the default model was known. The list is now asked for with the plan's own token, and the
   harness token is never sent anywhere but the harness.
+- **A Claude plan, or Grok signed in from the Desktop, has a model picker even when the provider
+  won't list models for it.** Anthropic documents its model list for API keys, not for a Claude
+  plan's sign-in, and xAI the same for the Grok sign-in. When either refused, only one model was
+  known and the picker stayed hidden. A Claude plan now offers Claude Opus 5.5, Sonnet 5.5 and
+  Haiku 5.5, on Sonnet 5.5 by default as with an Anthropic key, and runs the one picked; Grok
+  offers Grok 4.7 and Grok 4.3, on the model the Desktop set up. The server log says
+  `{"type":"model-list-fallback","source":"claude"}` when this applies. A refused list no longer
+  tells OpenBot Desktop that the Grok or Google sign-in has lapsed.
 - **A message that couldn't reach the back end says so in plain words.** The conversation showed
   the raw request failure in red, such as `REST run request failed: {"error":"Failed to resolve
   Learning Container"}`. It now says "OpenBot couldn't reach its back end, so your message wasn't

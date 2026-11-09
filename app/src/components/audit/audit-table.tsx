@@ -214,6 +214,11 @@ export function AuditTable({
                         // Room for a Bot's name and "Started by a person" on a line each; a longer
                         // name wraps. Without it the column gave way to Decision's longer lines.
                         cell.column.id === "bot" && "min-w-40",
+                        // Room for a reason line such as "Stopped by: Bots may not visit social
+                        // media sites" on a line or two. Without it the column got what What, whose
+                        // longest rows never wrap, left over: about 150px at 1280, and the rule's
+                        // name ran to three lines.
+                        cell.column.id === "decision" && "min-w-64",
                       )}
                       data-column={cell.column.id}
                       key={cell.id}

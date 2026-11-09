@@ -293,7 +293,7 @@ export function modelSourceFor(
   if (host === hostOf(OPENAI_API)) return "openai";
   if (host === "generativelanguage.googleapis.com") return "google";
   if (host === "api.x.ai") return "xai";
-  if (/\/api\/model-provider\/v1\/?$/.test(configured)) {
+  if (signedInThroughProxy(environment)) {
     const vendor = modelVendor(environment.BOT_MODEL?.trim() ?? "");
     if (vendor === "google" || vendor === "xai") return vendor;
   }
@@ -388,6 +388,101 @@ function listingRequest(
         : url,
     headers: key ? { authorization: `Bearer ${key}` } : {},
   };
+}
+
+/** OpenBot's own sign-in proxy for Google and xAI, which the Desktop points `OPENAI_BASE_URL` at. */
+function signedInThroughProxy(
+  environment: Record<string, string | undefined>,
+): boolean {
+  return /\/api\/model-provider\/v1\/?$/.test(
+    environment.OPENAI_BASE_URL?.trim() ?? "",
+  );
+}
+
+const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+
+/**
+ * THE MODELS A SIGN-IN CAN USE WHEN NOTHING WILL LIST THEM. A sign-in whose credential may not be
+ * allowed to read the provider's listing still runs on the provider's models, and the person still
+ * picks among them. Without these, a listing that could not be read left one model and no picker.
+ *
+ * A Claude plan: Claude Code's own `/model` picker is a set of built-in rows, not a listing (Opus,
+ * Sonnet, Haiku, and Fable billed to usage credits; code.claude.com/docs/en/model-config), and
+ * Anthropic documents `/v1/models` with an API key: with a plan's OAuth token it is asked, and may
+ * refuse. The three every plan includes are offered, as Anthropic's own listing names and describes
+ * them. Fable is left out: it is never a
+ * plan's default, and on many plans it draws on usage credits rather than the plan.
+ *
+ * xAI through OpenBot's sign-in: xAI documents `/v1/language-models` for API keys, not for the
+ * Grok sign-in's token. The Desktop's own model for that sign-in, and the model third-party Grok
+ * sign-ins default to.
+ *
+ * Used only while nothing better has been read: the first listing that answers replaces them, and a
+ * refresh that fails afterwards keeps that listing. The deployment's own model of the same vendor is
+ * always among them, so the model somebody named stays theirs.
+ */
+function signInFallback(
+  source: ModelSource,
+  environment: Record<string, string | undefined>,
+): Entry[] | undefined {
+  if (source === "claude")
+    return [
+      {
+        id: "claude-haiku-5-5",
+        label: "Claude Haiku 5.5",
+        created: seconds("2026-10-07T18:00:00Z"),
+        family: "claude-haiku",
+        price: 0.1,
+        efforts: CLAUDE_EFFORTS,
+      },
+      {
+        id: "claude-sonnet-5-5",
+        label: "Claude Sonnet 5.5",
+        created: seconds("2026-09-28T00:00:00Z"),
+        family: "claude-sonnet",
+        price: 2,
+        efforts: CLAUDE_EFFORTS,
+      },
+      {
+        id: "claude-opus-5-5",
+        label: "Claude Opus 5.5",
+        created: seconds("2026-09-21T16:24:00Z"),
+        family: "claude-opus",
+        price: 4,
+        efforts: CLAUDE_EFFORTS,
+      },
+    ];
+  if (source === "xai" && signedInThroughProxy(environment)) {
+    const entries: Entry[] = [
+      {
+        id: "grok-4.7",
+        label: "Grok 4.7",
+        created: seconds("2026-09-21T00:00:00Z"),
+        family: "grok",
+        price: 2,
+        efforts: ["low", "medium", "high", "xhigh"],
+        defaultEffort: "high",
+      },
+      {
+        id: "grok-4.3",
+        label: "Grok 4.3",
+        created: seconds("2026-04-17T00:00:00Z"),
+        family: "grok",
+        price: 1.25,
+        efforts: ["none", "low", "medium", "high", "xhigh"],
+        defaultEffort: "low",
+      },
+    ];
+    const named = environment.BOT_MODEL?.trim();
+    if (
+      named &&
+      modelVendor(named) === "xai" &&
+      !entries.some((entry) => entry.id === named)
+    )
+      entries.unshift({ id: named, created: 0, family: "grok" });
+    return entries;
+  }
+  return undefined;
 }
 
 /**
@@ -665,6 +760,7 @@ export function createModelCatalogue(options: {
   const { provider, defaultModel } = options.model;
   const source = modelSourceFor(options.model, environment);
   const vendor = sourceVendor(source);
+  const fallback = signInFallback(source, environment);
   const capabilitiesUrl = (() => {
     const configured =
       options.capabilitiesUrl === undefined
@@ -760,6 +856,12 @@ export function createModelCatalogue(options: {
       attemptedAt = now();
       const [entries] = await Promise.all([readListing(), readCapabilities()]);
       if (entries) snapshot = { entries, at: now() };
+      else if (!snapshot && fallback) {
+        // Nothing listed yet, and this sign-in may never be allowed to: its own models stand in,
+        // and the listing is asked again on the schedule.
+        snapshot = { entries: fallback, at: now() };
+        log(JSON.stringify({ type: "model-list-fallback", source }));
+      }
     })().finally(() => {
       inFlight = undefined;
     });
