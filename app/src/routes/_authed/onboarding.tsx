@@ -138,7 +138,7 @@ function welcomeStep(computer: boolean): OnboardingStep {
           </section>
         }
       >
-        <p>Hand work to Bots in plain words. They tell you when it's done.</p>
+        <p>Give work to Bots in plain words. They tell you when it's done.</p>
       </StepIntro>
     ),
     demo: () => <IntroReel computer={computer} />,
