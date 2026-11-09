@@ -51,6 +51,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   from GitHub, and every signature is unchanged. If that download fails, OpenBot Desktop reads
   GitHub's update feed and downloads the same signed version from there, where the update failed.
   The log says where it came from.
+- **A release candidate's images are on downloads.copilotkit.ai too.** A fresh install of a
+  candidate got 403 there for every image, because only the Latest stable release was copied.
+  Downloads sync now copies a prerelease asked for by tag (its images and its own files, never
+  `latest/`), and each scheduled run copies the images of every prerelease newer than Latest from
+  the last 30 days. Drafts are never copied.
 - **A Bot with no folders says so in plain words**, as every Bot does after OpenBot restarts: "This
   Bot has no folders it can read right now. Folder access ends when you stop OpenBot. To give it a
   folder, use Choose folder in Settings → Computer." It said "No host folders are granted to this

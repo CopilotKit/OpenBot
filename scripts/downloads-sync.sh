@@ -18,8 +18,10 @@
 #   GITHUB_REPOSITORY and GH_TOKEN  for `gh`
 #   DOWNLOADS_BUCKET                the bucket behind the distribution
 #   DOWNLOADS_DISTRIBUTION_ID       the CloudFront distribution
-#   DOWNLOADS_TAG                   mirror this stable release's releases/<tag>/ only, and leave
-#                                   latest/ alone (default: the Latest release, both)
+#   DOWNLOADS_TAG                   mirror this release's releases/<tag>/ only, a candidate or beta
+#                                   included (cached for five minutes, as its signing may replace
+#                                   an installer), and leave latest/ alone (default: the Latest
+#                                   release, both)
 #   DOWNLOADS_PREFIX                put every key under this prefix, such as `smoketest/`, to try
 #                                   the sync against the real bucket without changing what it serves
 #   DOWNLOADS_URL                   the address the mirrored latest.json names its downloads at
@@ -77,7 +79,20 @@ else
 fi
 
 release="$(gh release view "$tag" -R "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease,assets)"
-if [ "$(jq -r '.isDraft or .isPrerelease' <<<"$release")" != false ] ||
+if [ "$(jq -r '.isDraft' <<<"$release")" != false ]; then
+  echo "::error::$tag is a draft, not a published release. Nothing was mirrored."
+  exit 1
+elif [ "$(jq -r '.isPrerelease' <<<"$release")" = true ] &&
+  [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+$ ]]; then
+  # A candidate or a beta, asked for by tag: its releases/<tag>/ only. latest/ is the Latest stable
+  # release's, always. Its signing runs may still replace an installer, so its files are cached for
+  # five minutes rather than a year.
+  if [ "$mode" = latest ]; then
+    echo "::error::The Latest release $tag is a prerelease. Nothing was mirrored."
+    exit 1
+  fi
+  release_cache="$latest_cache"
+elif [ "$(jq -r '.isPrerelease' <<<"$release")" != false ] ||
   [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "::error::$tag is a prerelease, a draft or a candidate, not a stable release. Nothing was mirrored."
   exit 1

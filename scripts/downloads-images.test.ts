@@ -180,7 +180,11 @@ pub fn compose_download() -> Result<Download, Problem> {
 }
 
 /** CloudFront in front of the pretend bucket, as it answers: stored type, 403 for a missing key. */
-function cloudfront(fake: FakeDownloads, hub: ReturnType<typeof github>) {
+function cloudfront(
+  fake: FakeDownloads,
+  hub: ReturnType<typeof github>,
+  ...more: ReturnType<typeof github>[]
+) {
   const bucket = join(
     fake.env.FAKE_STATE as string,
     "s3",
@@ -202,11 +206,13 @@ function cloudfront(fake: FakeDownloads, hub: ReturnType<typeof github>) {
       if (request.method === "HEAD") requests.push(`HEAD ${path.slice(1)}`);
       if (path.startsWith("/github/")) {
         const wanted = path.slice("/github".length);
-        if (wanted === hub.path) return new Response(readFileSync(hub.archive));
-        const file = hub.files[wanted];
-        return file === undefined
-          ? new Response("Not Found", { status: 404 })
-          : new Response(file);
+        for (const release of [hub, ...more]) {
+          if (wanted === release.path)
+            return new Response(readFileSync(release.archive));
+          const file = release.files[wanted];
+          if (file !== undefined) return new Response(file);
+        }
+        return new Response("Not Found", { status: 404 });
       }
       const key = decodeURIComponent(path.slice(1));
       const file = join(
@@ -520,4 +526,124 @@ test("a release's images are copied under the registry's paths, byte for byte an
   expect(fake.calls().filter((call) => /^(aws|crane) /.test(call)).length).toBe(
     awsBefore,
   );
+}, 30_000);
+
+// A release candidate's installs pull its images too, so they are copied as soon as it is published:
+// asked for by tag, or found by the scheduled run beside the Latest release. A draft is not.
+test("a prerelease's images are copied, by tag or beside Latest; old ones and drafts are not", async () => {
+  const fake = fakeDownloads();
+  cleanups.push(fake.cleanup);
+  const pin = (tag: string, image: ReturnType<typeof push>, repo: string) =>
+    JSON.stringify({
+      version: tag,
+      images: { server: { reference: `ghcr.io/${repo}@${image.digest}` } },
+    });
+  const stable = push(fake, "copilotkit/openbot-server", "v0.3.4");
+  const candidate = push(fake, "copilotkit/openbot-server", "v1.0.0-rc.1");
+  push(fake, "copilotkit/intelligence/app-api", "0.17.0");
+  const stale = push(fake, "copilotkit/openbot-stale", "v0.9.0-rc.1");
+  const older = push(fake, "copilotkit/openbot-older", "v0.3.4-rc.1");
+  const drafted = push(fake, "copilotkit/openbot-draft", "v1.0.0-rc.2");
+  const day = 24 * 60 * 60 * 1000;
+  fake.release("v0.3.4", {
+    "container-images.json": pin("v0.3.4", stable, "copilotkit/openbot-server"),
+  });
+  fake.release(
+    "v1.0.0-rc.1",
+    {
+      "container-images.json": pin(
+        "v1.0.0-rc.1",
+        candidate,
+        "copilotkit/openbot-server",
+      ),
+      "desktop-images.json": JSON.stringify({
+        images: ["ghcr.io/copilotkit/intelligence/app-api:0.17.0"],
+      }),
+    },
+    { prerelease: true },
+  );
+  fake.release(
+    "v0.9.0-rc.1",
+    {
+      "container-images.json": pin(
+        "v0.9.0-rc.1",
+        stale,
+        "copilotkit/openbot-stale",
+      ),
+    },
+    {
+      prerelease: true,
+      createdAt: new Date(Date.now() - 40 * day).toISOString(),
+    },
+  );
+  fake.release(
+    "v0.3.4-rc.1",
+    {
+      "container-images.json": pin(
+        "v0.3.4-rc.1",
+        older,
+        "copilotkit/openbot-older",
+      ),
+    },
+    { prerelease: true },
+  );
+  fake.release(
+    "v1.0.0-rc.2",
+    {
+      "container-images.json": pin(
+        "v1.0.0-rc.2",
+        drafted,
+        "copilotkit/openbot-draft",
+      ),
+    },
+    { prerelease: true, draft: true },
+  );
+  fake.setLatest("v0.3.4");
+  const edge = cloudfront(
+    fake,
+    github(fake, "v0.3.4"),
+    github(fake, "v1.0.0-rc.1"),
+  );
+  const env = {
+    DOWNLOADS_URL: edge.url,
+    DOWNLOADS_GITHUB_URL: `${edge.url}/github`,
+    DOWNLOADS_VERIFY_DELAY: "0",
+  };
+
+  // The scheduled run: Latest, and the candidate newer than it from this month.
+  const scheduled = await run(fake, env);
+  expect(scheduled.code).toBe(0);
+  const keys = Object.keys(fake.bucket());
+  for (const key of [
+    `v2/copilotkit/openbot-server/manifests/${stable.digest}`,
+    `v2/copilotkit/openbot-server/manifests/${candidate.digest}`,
+    `v2/copilotkit/openbot-server/manifests/${candidate.platforms.arm64}`,
+    "v2/copilotkit/intelligence/app-api/manifests/0.17.0",
+    "releases/v1.0.0-rc.1/v1.0.0-rc.1.tar.gz",
+  ]) {
+    expect(keys).toContain(key);
+  }
+  expect(scheduled.out).toContain(
+    `All 2 images for v1.0.0-rc.1 answer through ${edge.url}.`,
+  );
+  // Not one older than Latest, one over 30 days old, or a draft; and never latest/.
+  for (const repo of ["openbot-stale", "openbot-older", "openbot-draft"]) {
+    expect(keys.some((key) => key.includes(repo))).toBe(false);
+  }
+  expect(keys.some((key) => key.startsWith("latest/"))).toBe(false);
+
+  // Asked for by tag, the candidate is copied (it is whole already), and the draft is refused.
+  const asked = await run(fake, { ...env, DOWNLOADS_TAG: "v1.0.0-rc.1" });
+  expect(asked.code).toBe(0);
+  expect(asked.out).toContain(
+    "already serves every image and file for v1.0.0-rc.1",
+  );
+  const draft = await run(fake, { ...env, DOWNLOADS_TAG: "v1.0.0-rc.2" });
+  expect(draft.code).toBe(1);
+  expect(draft.out).toContain(
+    "::error::v1.0.0-rc.2 is a draft or not a release version. No image was copied.",
+  );
+  expect(
+    Object.keys(fake.bucket()).some((key) => key.includes("openbot-draft")),
+  ).toBe(false);
 }, 30_000);
