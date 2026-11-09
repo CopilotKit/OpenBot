@@ -126,6 +126,7 @@ afterAll(async () => {
   await database.delete(agentProfiles).where(eq(agentProfiles.agentId, bot));
   await database.delete(agents).where(eq(agents.id, bot));
   await database.delete(users).where(eq(users.id, owner));
+  await database.$client.close();
 });
 
 test("a Bot with Gmail connected holds every action, and its reads are marked as reads", async () => {
@@ -144,16 +145,20 @@ test("a Bot with Gmail connected holds every action, and its reads are marked as
   const gmail = held.filter((tool) => tool.ref.startsWith(`${serverId}/`));
   expect(gmail).toHaveLength(captured.gmail.length);
 
-  const named = (action: string) =>
-    gmail.find((tool) => tool.ref === `${serverId}/${action}`);
-  for (const action of READS) expect(named(action)?.reads).toBe(true);
-  // A write is never marked a read, so it still asks before it runs.
-  for (const action of [
+  const action = (tool: (typeof gmail)[number]) =>
+    tool.ref.slice(serverId.length + 1);
+  const all = gmail.map(action);
+  const reads = gmail.filter((tool) => tool.reads === true).map(action);
+  for (const name of READS) expect(reads).toContain(name);
+  // A write is held, and never marked a read, so it still asks before it runs.
+  for (const name of [
     "GMAIL_SEND_EMAIL",
     "GMAIL_DELETE_MESSAGE",
     "GMAIL_UPDATE_POP_SETTINGS",
-  ])
-    expect(named(action)?.reads).toBeUndefined();
+  ]) {
+    expect(all).toContain(name);
+    expect(reads).not.toContain(name);
+  }
 });
 
 test("cut to what a crowded request has room for, the Bot is still sent the actions that read its mail", async () => {
