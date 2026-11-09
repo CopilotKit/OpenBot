@@ -25,6 +25,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - The first Bot to need you after OpenBot Desktop starts raises its notification. It used to raise
   nothing while the app was still checking that notifications were on, so the first question after
   each launch, asked while OpenBot was minimised or behind another window, went unannounced.
+- A Bot with no folders, as every Bot has after OpenBot restarts, now says so in plain words: it
+  has no folders it can read, access ends when you stop OpenBot, and Choose folder in Settings →
+  Computer gives it one. It said "No host folders are granted to this Bot.", and the Bot told you
+  an administrator could restore it.
 
 - **CopilotKit Intelligence 0.16.0-rc.10.** OpenBot Desktop's back end and the Helm chart move to
   Intelligence 0.16.0-rc.10 (CLI `copilotkit@647a03b`). A first back end setup now downloads its
