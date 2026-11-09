@@ -77,8 +77,9 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "mcp.call_rejected": "Use an app",
   "mcp.call_failed": "Use an app",
   "mcp.callback_refused": "Use an app",
-  "mcp.oauth_client_registered": "Register an OAuth client",
-  "mcp.oauth_client_read_failed": "Read an OAuth client",
+  // Said as what it is for: an app's sign-in, set up or read back. Admin hovers for the stored name.
+  "mcp.oauth_client_registered": "Set up an app's sign-in",
+  "mcp.oauth_client_read_failed": "Check an app's sign-in",
   "mcp.connection_verified": "Check a connection",
   "mcp.account_connected": "Connect an account",
   "mcp.authorization_unreconciled": "Finish connecting an account",

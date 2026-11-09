@@ -69,6 +69,21 @@ pub fn endpoints(updater: Option<&Value>) -> Option<Vec<reqwest::Url>> {
     (!found.is_empty()).then_some(found)
 }
 
+/// The feed to download an update from again when the download from `failed` did not finish: the
+/// next feed in `endpoints` after the one on `failed`'s host, on another host. The first feed,
+/// downloads.copilotkit.ai, names its own copy of the archive, and the updater moves on to the next
+/// feed only when reading a feed fails, never when a download does; so a download from the mirror
+/// that fails is tried once more from GitHub's feed. A download from GitHub, the last feed, is not.
+pub fn feed_after(failed: &reqwest::Url, endpoints: &[reqwest::Url]) -> Option<reqwest::Url> {
+    let from = endpoints
+        .iter()
+        .position(|feed| feed.origin() == failed.origin())?;
+    endpoints[from + 1..]
+        .iter()
+        .find(|feed| feed.origin() != failed.origin())
+        .cloned()
+}
+
 /// The `platforms` key the updater looks for on this machine, `{os}-{arch}`, spelled its way
 /// (`darwin-aarch64`, `windows-x86_64`). A bundle may also be listed as `{os}-{arch}-{installer}`.
 pub fn platform() -> Option<String> {
@@ -717,6 +732,29 @@ mod tests {
         assert!(candidate > v("0.3.0-rc.1"));
         for next in ["0.3.0-rc.2", "0.3.0-rc.10", "0.3.0"] {
             assert!(candidate < v(next), "{next}");
+        }
+    }
+
+    #[test]
+    fn a_download_from_the_mirror_that_fails_is_tried_from_githubs_feed_and_githubs_is_not() {
+        let signed: Value = serde_json::from_str(include_str!("../tauri.macos-signing.conf.json"))
+            .expect("the signing overlay is JSON");
+        let feeds = endpoints(Some(&signed["plugins"]["updater"])).unwrap();
+        let url = |address: &str| reqwest::Url::parse(address).unwrap();
+        assert_eq!(
+            feed_after(
+                &url("https://downloads.copilotkit.ai/releases/v1.0.0/OpenBot.app.tar.gz"),
+                &feeds
+            ),
+            Some(url(
+                "https://github.com/CopilotKit/OpenBot/releases/latest/download/latest.json"
+            ))
+        );
+        for failed in [
+            "https://github.com/CopilotKit/OpenBot/releases/download/v1.0.0/OpenBot.app.tar.gz",
+            "https://example.com/OpenBot.app.tar.gz",
+        ] {
+            assert_eq!(feed_after(&url(failed), &feeds), None, "{failed}");
         }
     }
 

@@ -164,6 +164,29 @@ export function approvalWords(action: {
   action: string;
   place: string;
 } {
+  const { action: words, place } = approvalParts(action);
+  return { action: words, place };
+}
+
+/**
+ * What an approval waits on as one phrase, for a card's title and a task's waiting line: "send
+ * email on Gmail", "click on example.com", and a file as its step and its Activity row name it,
+ * "save a file todo.txt in share". A step on a whole folder is "in" it.
+ */
+export function approvalPhrase(action: {
+  toolRef: string;
+  scope: string;
+  target?: unknown;
+}): string {
+  const { action: words, place, joiner } = approvalParts(action);
+  return joiner ? `${words} ${joiner} ${place}` : `${words} ${place}`;
+}
+
+function approvalParts(action: {
+  toolRef: string;
+  scope: string;
+  target?: unknown;
+}): { action: string; place: string; joiner: "on" | "in" | "" } {
   const slash = action.toolRef.indexOf("/");
   const app = action.toolRef.slice(0, slash);
   if (slash > 0 && app === action.scope) {
@@ -171,25 +194,45 @@ export function approvalWords(action: {
     return {
       action: lowerFirst(label),
       place: connectorName(app),
+      joiner: "on",
     };
   }
-  return {
-    action: action.toolRef
-      .replace(/^computer_|^host\//, "")
-      .replaceAll("_", " "),
-    /*
-     * A folder on the person's computer by the name Settings > Computer shows. Its scope is the id
-     * OpenBot gave the grant, which kept a rule saved from the card on that grant, and read on the
-     * card as "write file on host-grant-15407-1794112361547002000".
-     */
-    place:
-      (action.toolRef.startsWith("host/") &&
-        // "write file on todo.txt in share"; a command or a listing is on the folder itself.
-        (folderFile(action.target)
-          ? inFolder(folderFile(action.target), folderName(action.target))
-          : folderName(action.target))) ||
-      action.scope,
-  };
+  /*
+   * A computer's or a folder's own action in the words its step and its Activity row use. The card
+   * said "write file on todo.txt in share" above a step that read "Save a file todo.txt in share".
+   */
+  const own = ownToolAttempt(action.toolRef.replace(/^host\//, "host_"));
+  const words = own
+    ? lowerFirst(own)
+    : action.toolRef.replace(/^computer_|^host\//, "").replaceAll("_", " ");
+  /*
+   * A folder on the person's computer by the name Settings > Computer shows. Its scope is the id
+   * OpenBot gave the grant, which kept a rule saved from the card on that grant, and read on the
+   * card as "write file on host-grant-15407-1794112361547002000".
+   */
+  if (action.toolRef.startsWith("host/")) {
+    const file = folderFile(action.target);
+    const folder = folderName(action.target);
+    // "save a file todo.txt in share"; a command or a listing is in the folder itself.
+    if (file)
+      return {
+        action: words,
+        place: inFolder(file, folder) ?? file,
+        joiner: "",
+      };
+    if (folder) return { action: words, place: folder, joiner: "in" };
+  }
+  // A file on the Bot's own computer by its path, as its step names it, not the folder it is in.
+  const path = computerFile(action.target);
+  if (path) return { action: words, place: path, joiner: "" };
+  return { action: words, place: action.scope, joiner: "on" };
+}
+
+/** The path a file action on the Bot's own computer names (`target.filePath`), or undefined. */
+function computerFile(target: unknown): string | undefined {
+  if (!target || typeof target !== "object") return undefined;
+  const { filePath } = target as { filePath?: unknown };
+  return typeof filePath === "string" && filePath.trim() ? filePath : undefined;
 }
 
 /**
