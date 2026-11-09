@@ -3385,6 +3385,9 @@ const SHUTTING_DOWN_FRAGMENT: &str = "shutting-down";
 /// A row on the Shutting down screen. Fixed ids and fixed words: nothing the CLI said reaches it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum QuitStep {
+    /// A back end update past the point it can stop safely, let finish first
+    /// (`local_eval::close_for_quit_reporting`).
+    FinishUpdate,
     /// Host processes, Compose down, and on Linux the Podman API.
     OpenBot,
     /// The local Intelligence stack OpenBot created.
@@ -3394,8 +3397,19 @@ enum QuitStep {
 impl QuitStep {
     fn id(self) -> &'static str {
         match self {
+            QuitStep::FinishUpdate => "finish-update",
             QuitStep::OpenBot => "stop-openbot",
             QuitStep::Intelligence => "stop-intelligence",
+        }
+    }
+
+    /// What the row says while it runs.
+    fn running_detail(self) -> &'static str {
+        match self {
+            QuitStep::FinishUpdate => {
+                "Finishing the back end update, so the back end is not left half updated."
+            }
+            QuitStep::OpenBot | QuitStep::Intelligence => "",
         }
     }
 }
@@ -3438,7 +3452,11 @@ impl QuitStatus {
         let row = Progress {
             step: step.id().into(),
             ok: state != QuitStepState::Failed,
-            detail: String::new(),
+            detail: if state == QuitStepState::Running {
+                step.running_detail().into()
+            } else {
+                String::new()
+            },
             running: state == QuitStepState::Running,
             download_bytes: None,
             downloads: None,
@@ -4138,7 +4156,13 @@ where
     I: FnOnce(&Path) -> Result<(), String>,
     P: FnMut(QuitStep, QuitStepState),
 {
-    local_eval::close_for_quit();
+    // A back end update that has begun changing the release is let finish, and its row says so:
+    // stopping it there left a back end no later update could get past.
+    if local_eval::close_for_quit_reporting(|| {
+        progress(QuitStep::FinishUpdate, QuitStepState::Running)
+    }) {
+        progress(QuitStep::FinishUpdate, QuitStepState::Complete);
+    }
     progress(QuitStep::OpenBot, QuitStepState::Running);
     shell
         .start_generation
@@ -6597,6 +6621,15 @@ fn local_eval_download(attempt: String) -> Option<openbot_desktop_lib::local_ima
     local_eval::downloading(&attempt)
 }
 
+/// The step the back end update `attempt` is in and for how long, once it is in one that waits,
+/// so a step that takes minutes is never a silent row. A fixed step name and seconds only.
+#[tauri::command]
+fn local_eval_update_step(
+    attempt: String,
+) -> Option<openbot_desktop_lib::local_update::UpdateStep> {
+    local_eval::update_step(&attempt)
+}
+
 /// The evaluation agreement local setup needs accepted, for the window to show before Accept.
 #[tauri::command]
 async fn local_eval_terms(
@@ -8630,6 +8663,7 @@ fn main() {
             sign_in_to_copilotkit,
             copilotkit_sign_in_page,
             local_eval_download,
+            local_eval_update_step,
             local_eval_terms,
             connect_copilotkit_apps,
             connect_local_eval,

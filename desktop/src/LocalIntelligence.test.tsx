@@ -14,12 +14,20 @@ let invokeCalls: Array<{ command: string; args?: unknown }> = [];
 let invokeHandler: Invoke = async () => {
   throw new Error("invoke handler was not installed");
 };
+/** What `local_eval_update_step` answers for the update running now, and who asked. */
+let updateStep: unknown = null;
+let updateStepAsked: unknown[] = [];
 
 mock.module("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => {
     // The engine already answers here: these tests are about the CLI calls after it. Waking a
     // stopped engine is App.test.tsx's "relaunch with Docker Desktop quit".
     if (command === "wake_engine") return Promise.resolve(null);
+    // Asking which step an update is in is not a step of the sequence either.
+    if (command === "local_eval_update_step") {
+      updateStepAsked.push(args);
+      return Promise.resolve(updateStep);
+    }
     invokeCalls.push({ command, args });
     return invokeHandler(command, args);
   },
@@ -34,6 +42,8 @@ afterEach(() => {
   // Unmounting cancels a running step, so clear the record after it.
   cleanup();
   invokeCalls = [];
+  updateStep = null;
+  updateStepAsked = [];
 });
 afterAll(() => GlobalRegistrator.unregister());
 
@@ -434,12 +444,132 @@ test("an update that fails says so and starts OpenBot on the release the back en
       "run_local_eval:status",
     ]);
     expect(row(screen, "Updating the back end").textContent).toContain(
-      "The back end could not be updated to 0.16.0-rc.9, so it stays on 0.16.0-rc.8. OpenBot tries again the next time it starts.",
+      "The back end could not be updated to 0.16.0-rc.9. Your data is kept, and OpenBot tries again the next time it starts.",
     );
     expect(calls).toBe(2);
     cleanup();
     invokeCalls = [];
   }
+});
+
+/**
+ * Found on OpenBot Desktop, 0.16.0-rc.9 to rc.10: every Start after an interrupted update failed
+ * with the same generic line, while the CLI had recorded exactly where it stopped. The row now
+ * names that step from the record, in the CLI's own words, and says the data is kept.
+ */
+test("an update that fails says the step it stopped at and that the data is kept", async () => {
+  const stoppedAt = {
+    ...onRelease("0.16.0-rc.9", "0.16.0-rc.10"),
+    readiness: "degraded" as const,
+  };
+  const recorded = {
+    ...stoppedAt,
+    stack: stoppedAt.stack && {
+      ...stoppedAt.stack,
+      updateInProgress: true,
+      unfinishedUpdate: {
+        to: "0.16.0-rc.10",
+        prepared: false,
+        stoppedDownloading: false,
+        failedStep: "update-quiesce",
+      },
+    },
+  };
+  let calls = 0;
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update")
+      return report({
+        outcome: "failed",
+        stack: null,
+        reason: "local-command-failed",
+      });
+    calls += 1;
+    return calls === 1 ? onRelease("0.16.0-rc.9", "0.16.0-rc.10") : recorded;
+  };
+  const screen = view({ stack: "local-abc123", connected: true });
+  await waitFor(() =>
+    expect(row(screen, "Updating the back end").textContent).toContain(
+      `The back end could not be updated to 0.16.0-rc.10. It stopped at "Stopping the back end's services" (update-quiesce). Your data is kept, and OpenBot tries again the next time it starts.`,
+    ),
+  );
+});
+
+/**
+ * Found on OpenBot Desktop: an update sat on "Updating the back end" for minutes with nothing
+ * else on the row, while the CLI waited on its databases and Jobs (up to ten minutes each) and
+ * logged nothing until each ended. The row now says which step it is in, and for how long.
+ */
+test("a running update says which step it is waiting on, and for how long", async () => {
+  const updating = deferred<LocalReport>();
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update") return updating.promise;
+    return invokeCalls.some(
+      (call) => (call.args as { action?: string })?.action === "update",
+    )
+      ? onRelease("0.16.0-rc.10", null)
+      : onRelease("0.16.0-rc.9", "0.16.0-rc.10");
+  };
+  const screen = view({ stack: "local-abc123", connected: true });
+  await waitFor(() =>
+    expect(row(screen, WAIT).textContent).toContain(
+      "Updating the back end to 0.16.0-rc.10. Its data stays.",
+    ),
+  );
+  updateStep = { step: "dependencies-wait", seconds: 130 };
+  await waitFor(
+    () =>
+      expect(row(screen, WAIT).textContent).toContain(
+        "Updating the back end to 0.16.0-rc.10. Its data stays. Waiting for databases and storage, 2m 10s.",
+      ),
+    { timeout: 3_000 },
+  );
+  // In the chart's Jobs: the one it waits on, and a failed one at once, not ten minutes later.
+  updateStep = {
+    step: "jobs",
+    seconds: 5,
+    job: "cpki-bootstrap-ef56ab78",
+  };
+  await waitFor(
+    () =>
+      expect(row(screen, WAIT).textContent).toContain(
+        "Running the database jobs (cpki-bootstrap-ef56ab78), 5s.",
+      ),
+    { timeout: 3_000 },
+  );
+  updateStep = {
+    step: "jobs",
+    seconds: 40,
+    job: null,
+    failedJob: "cpki-bootstrap-ef56ab78",
+  };
+  await waitFor(
+    () =>
+      expect(row(screen, WAIT).textContent).toContain(
+        "Running the database jobs, 40s. The back end's job cpki-bootstrap-ef56ab78 failed, so this update will stop. The back end's tool waits up to 10 minutes for it first. Your data is kept.",
+      ),
+    { timeout: 3_000 },
+  );
+  // It asked about the update's own call.
+  const update = invokeCalls.find(
+    (call) => (call.args as { action?: string })?.action === "update",
+  );
+  expect(updateStepAsked[0]).toEqual({
+    attempt: (update?.args as { attempt?: string } | undefined)?.attempt,
+  });
+  // A step this window does not know is not shown.
+  updateStep = { step: "rm -rf", seconds: 1 };
+  updating.resolve(onRelease("0.16.0-rc.10", null));
+  await waitFor(() =>
+    expect(row(screen, WAIT).textContent).not.toContain(
+      "Waiting for databases",
+    ),
+  );
 });
 
 /** `run_local_eval` answers from the CLI this app pins: see `local_eval_ipc_tests.rs`. */

@@ -29,6 +29,10 @@
 //! fixed limit that a slow line cannot meet, so OpenBot downloads the same images into the same
 //! node first (`local_images`, `run_with`, `setup_installed`) and the CLI finds them there.
 //!
+//! And one more: a `local update` stopped partway leaves a stack no later update can get past, so
+//! Cancel and Quit let an update finish once it has begun changing the release with Helm, and a
+//! failed update is repaired and tried once more (`local_update`, `update_repairing`).
+//!
 //! A command that *completed* is not Intelligence that is ready or licensed. Those two facts come
 //! only from the additive v1 `readiness` and `license` fields of `local status`, read by exact
 //! value. A CLI that does not publish them, or publishes something else, reads as `unknown`, and
@@ -363,6 +367,10 @@ pub struct UnfinishedUpdate {
     pub prepared: bool,
     /// The step that failed was one of the image downloads.
     pub stopped_downloading: bool,
+    /// The step the CLI recorded as failed (`failedStep`), an identifier such as `update-quiesce`,
+    /// so the window can say where the update stopped. Absent when none is recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed_step: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -1901,6 +1909,7 @@ fn stack(value: &Value) -> Result<Stack, Failure> {
                     saved.get("failedStep").and_then(Value::as_str),
                     Some("image-download" | "system-image-download" | "system-image-tag")
                 ),
+                failed_step: text(saved.get("failedStep")).ok(),
             })
         }
         _ => None,
@@ -2699,7 +2708,15 @@ pub fn account_sign_in(
             shown(page);
         }
     };
-    let (code, bytes) = execute_watching(cli, &arguments, None, limits, cancel, Some(&mut watch))?;
+    let (code, bytes) = execute_watching(
+        cli,
+        &arguments,
+        None,
+        limits,
+        cancel,
+        Some(&mut watch),
+        None,
+    )?;
     normalize_account_sign_in(code, &bytes)
 }
 
@@ -2809,7 +2826,7 @@ fn execute(
     limits: Limits,
     cancel: &Cancel,
 ) -> Result<(i32, Vec<u8>), Failure> {
-    execute_watching(cli, arguments, folder, limits, cancel, None)
+    execute_watching(cli, arguments, folder, limits, cancel, None, None)
 }
 
 /// Hears the stdout a running CLI has written so far. See `execute_watching`.
@@ -2820,6 +2837,8 @@ type Watch<'a> = &'a mut dyn FnMut(&[u8]);
 ///
 /// How a call that sets up, starts, updates or stops the stack ended goes to the log
 /// (`ending_entry`), so a setup that stops is never a blank in it.
+///
+/// `update` follows a `local update` through the CLI's log (`UpdateWatch`).
 fn execute_watching(
     cli: &PinnedCli,
     arguments: &[&str],
@@ -2827,6 +2846,7 @@ fn execute_watching(
     limits: Limits,
     cancel: &Cancel,
     watch: Option<Watch>,
+    update: Option<&mut UpdateWatch>,
 ) -> Result<(i32, Vec<u8>), Failure> {
     let started = Instant::now();
     let logged = logs_its_ending(arguments);
@@ -2840,6 +2860,7 @@ fn execute_watching(
         limits,
         cancel,
         watch,
+        update,
         errors.as_ref(),
         &mut status,
     );
@@ -2959,6 +2980,10 @@ fn exit_described(status: std::process::ExitStatus) -> String {
 
 /// `execute_watching`'s process: the CLI's stderr goes to `errors`, when there is one, and how it
 /// exited to `status`.
+///
+/// A cancel stops the process tree, except an update's once it has begun changing the release with
+/// Helm (`UpdateWatch::committed`): stopping it there is what leaves a stack no later update can
+/// get past (`local_update`), so it is let finish, within its deadline.
 #[allow(clippy::too_many_arguments)]
 fn execute_child(
     cli: &PinnedCli,
@@ -2967,6 +2992,7 @@ fn execute_child(
     limits: Limits,
     cancel: &Cancel,
     mut watch: Option<Watch>,
+    mut update: Option<&mut UpdateWatch>,
     errors: Option<&Output>,
     status: &mut Option<std::process::ExitStatus>,
 ) -> Result<(i32, Vec<u8>), Failure> {
@@ -2997,7 +3023,11 @@ fn execute_child(
 
     let deadline = Instant::now() + limits.timeout;
     let mut watched = 0;
+    let mut letting_finish = false;
     loop {
+        if let Some(update) = update.as_deref_mut() {
+            update.poll_now_and_then();
+        }
         if exited(&mut child)? {
             let exit = child.wait().map_err(|_| Failure::Spawn)?;
             *status = Some(exit);
@@ -3017,13 +3047,223 @@ fn execute_child(
             }
         }
         if cancel.requested() {
-            return Err(stop_tree(&mut child, limits.grace, Failure::Cancelled));
+            let committed = update.as_deref_mut().is_some_and(|update| {
+                update.poll();
+                update.committed()
+            });
+            if !committed {
+                return Err(stop_tree(&mut child, limits.grace, Failure::Cancelled));
+            }
+            if !letting_finish {
+                letting_finish = true;
+                log::warn!(
+                    "[local update] asked to stop after it began changing the back end with Helm: \
+                     letting it finish, since stopping it there leaves the back end half updated"
+                );
+            }
         }
         if Instant::now() >= deadline {
             return Err(stop_tree(&mut child, limits.grace, Failure::Timeout));
         }
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+/**
+A running `local update`, followed through the CLI's log (`local_update::StepLog`).
+
+While it runs, `update_step` answers for its attempt with the step it is in, and each step it ends
+is logged. Once it has begun changing the release with Helm (`committed`), it counts as finishing
+(`Finishing`): Cancel and Quit let it end on its own rather than stop it there.
+*/
+struct UpdateWatch {
+    attempt: String,
+    stack: StackId,
+    engine: Option<CliEngine>,
+    log: crate::local_update::StepLog,
+    finishing: Option<Finishing>,
+    read: Option<Instant>,
+    /// The Jobs in the cluster when the update began changing the release: an earlier attempt's.
+    jobs_before: Option<Vec<String>>,
+    /// What the update's own Jobs were doing when last asked, while it is in them.
+    jobs: Option<crate::local_update::Jobs>,
+    jobs_read: Option<Instant>,
+    node_read: Option<Instant>,
+}
+
+impl UpdateWatch {
+    /// None when there is no home to find the CLI's log in: the update then runs as before.
+    fn new(attempt: &str, stack: &StackId) -> Option<Self> {
+        let path = crate::local_update::cli_log()?;
+        Some(Self {
+            attempt: attempt.to_owned(),
+            stack: stack.clone(),
+            engine: recorded_engine(),
+            log: crate::local_update::StepLog::at_end_of(path),
+            finishing: None,
+            read: None,
+            jobs_before: None,
+            jobs: None,
+            jobs_read: None,
+            node_read: None,
+        })
+    }
+
+    /// From the first Helm step on, every few seconds: a cordoned node, uncordoned
+    /// (`local_update::uncordon_if_cordoned`). The CLI starts a stopped node itself, inside the
+    /// update, and the databases it then waits on cannot be scheduled on a cordoned one.
+    fn watch_node(&mut self) {
+        let due = self
+            .node_read
+            .is_none_or(|read| read.elapsed() >= Duration::from_secs(5));
+        if !self.log.committed() || !due {
+            return;
+        }
+        self.node_read = Some(Instant::now());
+        if let Err(why) = crate::local_update::uncordon_if_cordoned(
+            || engine_command(self.engine.as_ref()),
+            self.stack.as_str(),
+        ) {
+            log::info!("[local update] node not checked: {why}");
+        }
+    }
+
+    /// The cluster's Jobs, as `kubectl get jobs -o json` in the stack's node answers.
+    fn cluster_jobs(&self) -> Option<String> {
+        crate::local_update::cluster_jobs(engine_command(self.engine.as_ref()), self.stack.as_str())
+    }
+
+    /**
+    While the update waits on the chart's Jobs, what they are doing, every few seconds: which one
+    it waits on, and a failed one as soon as it fails. The CLI waits a failed Job's full ten
+    minutes (`kubectl wait --for=condition=complete`) and says nothing until then.
+    */
+    fn watch_jobs(&mut self) {
+        if self.log.committed() && self.jobs_before.is_none() {
+            self.jobs_before = self
+                .cluster_jobs()
+                .and_then(|answer| crate::local_update::job_names(&answer));
+        }
+        let due = self
+            .jobs_read
+            .is_none_or(|read| read.elapsed() >= Duration::from_secs(3));
+        if !self.log.in_jobs() || !due {
+            return;
+        }
+        let Some(before) = self.jobs_before.as_ref() else {
+            return;
+        };
+        self.jobs_read = Some(Instant::now());
+        let Some(jobs) = self
+            .cluster_jobs()
+            .and_then(|answer| crate::local_update::jobs(&answer, before))
+        else {
+            return;
+        };
+        if jobs.failed.is_some()
+            && jobs.failed != self.jobs.as_ref().and_then(|seen| seen.failed.clone())
+        {
+            log::error!(
+                "[local update] Job {} failed; the CLI waits up to ten minutes for it before the update stops",
+                jobs.failed.as_deref().unwrap_or_default()
+            );
+        }
+        if jobs.running.is_some()
+            && jobs.running != self.jobs.as_ref().and_then(|seen| seen.running.clone())
+        {
+            log::info!(
+                "[local update] waiting on Job {}",
+                jobs.running.as_deref().unwrap_or_default()
+            );
+        }
+        self.log.saw_jobs(&jobs);
+        self.jobs = Some(jobs);
+    }
+
+    /// `poll`, at most four times a second.
+    fn poll_now_and_then(&mut self) {
+        if self
+            .read
+            .is_none_or(|read| read.elapsed() >= Duration::from_millis(250))
+        {
+            self.poll();
+        }
+    }
+
+    fn poll(&mut self) {
+        self.read = Some(Instant::now());
+        for step in self.log.poll() {
+            log::info!("[local update] {step} finished");
+        }
+        if self.log.committed() && self.finishing.is_none() {
+            log::info!(
+                "[local update] it is changing the back end with Helm now; Cancel and Quit let it finish"
+            );
+            self.finishing = Some(Finishing::begin());
+        }
+        self.watch_node();
+        self.watch_jobs();
+        let jobs = self.jobs.as_ref().filter(|_| self.log.in_jobs());
+        let mut steps = update_steps();
+        steps.retain(|(attempt, _)| attempt != &self.attempt);
+        if let Some(now) = self.log.now(jobs) {
+            steps.push((self.attempt.clone(), now));
+        }
+    }
+
+    fn committed(&self) -> bool {
+        self.log.committed()
+    }
+}
+
+impl Drop for UpdateWatch {
+    fn drop(&mut self) {
+        update_steps().retain(|(attempt, _)| attempt != &self.attempt);
+    }
+}
+
+type ShownStep = (String, crate::local_update::UpdateStep);
+
+/// The step each running update is in, by attempt id. See `update_step`.
+static UPDATE_STEPS: std::sync::Mutex<Vec<ShownStep>> = std::sync::Mutex::new(Vec::new());
+
+fn update_steps() -> std::sync::MutexGuard<'static, Vec<ShownStep>> {
+    UPDATE_STEPS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The step the update `attempt` is in, once it is in one that waits: so a step that takes minutes
+/// shows which one it is, and for how long, rather than nothing.
+pub fn update_step(attempt: &str) -> Option<crate::local_update::UpdateStep> {
+    update_steps()
+        .iter()
+        .find(|(id, _)| id == attempt)
+        .map(|(_, step)| step.clone())
+}
+
+/// Updates, and repairs of one, that must not be stopped partway. See `close_for_quit_reporting`.
+static FINISHING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Counts one update or repair as finishing for as long as it is held.
+struct Finishing;
+
+impl Finishing {
+    fn begin() -> Self {
+        FINISHING.fetch_add(1, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for Finishing {
+    fn drop(&mut self) {
+        FINISHING.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Whether an update past the point it can safely stop, or a repair of one, is running now.
+pub fn update_finishing() -> bool {
+    FINISHING.load(Ordering::SeqCst) > 0
 }
 
 /// The owner-only file the CLI writes its report to, removed when the call ends.
@@ -3227,12 +3467,43 @@ pub fn closing_for_stop() -> Closing {
 /// As `closing_for_stop`, for good. Quitting also cancels a Stop's own stop, so Quit never waits
 /// behind it; Quit runs its own.
 pub fn close_for_quit() {
+    close_for_quit_reporting(|| {});
+}
+
+/**
+`close_for_quit`, telling `finishing` once when it waits for a back end update to finish.
+
+Cancelling only asks: each call stops its CLI's process tree on its own thread, and the CLI forwards
+SIGTERM to its children rather than exiting, so the tree goes at SIGKILL, after the grace. An app
+that exits before then leaves it running with nobody to stop it. So this waits, up to ten seconds,
+until no CLI is running.
+
+Except an update that has begun changing the release with Helm, or a repair of one
+(`update_finishing`). Stopping either partway is what left stacks no later update could get past
+(`local_update`), so Quit waits for it to end on its own, within its own deadline, and says so.
+True when it waited for one.
+*/
+pub fn close_for_quit_reporting(finishing: impl FnOnce()) -> bool {
     QUITTING.store(true, Ordering::SeqCst);
     cancel_all();
-    // Cancelling only asks: each call stops its CLI's process tree on its own thread, and the CLI
-    // forwards SIGTERM to its children rather than exiting, so the tree goes at SIGKILL, after the
-    // grace. An app that exits before then leaves it running with nobody to stop it.
-    wait_until_stopped(Duration::from_secs(10));
+    let mut finishing = Some(finishing);
+    let until = Instant::now() + Duration::from_secs(10);
+    loop {
+        if update_finishing() {
+            if let Some(say) = finishing.take() {
+                log::info!("[quit] letting the back end update finish before OpenBot quits");
+                say();
+            }
+        } else if RUNNING.load(Ordering::SeqCst) == 0 || Instant::now() >= until {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let waited = finishing.is_none();
+    if waited {
+        log::info!("[quit] the back end update ended");
+    }
+    waited
 }
 
 /// CLI process trees started and not yet stopped or finished, across every call.
@@ -3252,18 +3523,6 @@ impl Drop for Running {
     fn drop(&mut self) {
         RUNNING.fetch_sub(1, Ordering::SeqCst);
     }
-}
-
-/// Waits, at most `patience`, until no CLI process tree is running. True when none is.
-fn wait_until_stopped(patience: Duration) -> bool {
-    let until = Instant::now() + patience;
-    while RUNNING.load(Ordering::SeqCst) > 0 {
-        if Instant::now() >= until {
-            return false;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    true
 }
 
 /// An attempt's place in `IN_FLIGHT`, removed however the call ends.
@@ -3457,9 +3716,10 @@ pub(crate) fn run_with(
     let call = || run_downloading(cli, attempt, action, stack, limits, cancel, images_limits);
     match action {
         // The calls that start the back end: the engine is checked around them.
-        Action::Start | Action::Update => {
-            checked_call(&format!("local {}", action.as_str()), Some(stack), call)
-        }
+        Action::Start => checked_call("local start", Some(stack), call),
+        Action::Update => checked_call("local update", Some(stack), || {
+            update_repairing(stack, cancel, call)
+        }),
         Action::Status => call().map(|report| checked_when_unhealthy(report, stack)),
         Action::Stop => call(),
     }
@@ -3493,6 +3753,98 @@ fn checked_when_unhealthy(mut report: Report, stack: &StackId) -> Report {
     report
 }
 
+/**
+`local update`, and once more after repairing the stack when it failed on something a repair puts
+right (`local_update`): an update stopped partway earlier, which every later one fails on at once.
+
+Only after a failure the CLI reported. Not after one OpenBot stopped, or while closing: the next
+Start repairs then (`repaired_before`), and Quit is not held behind a second update.
+*/
+fn update_repairing(
+    stack: &StackId,
+    cancel: &Cancel,
+    update: impl Fn() -> Result<Report, Failure>,
+) -> Result<Report, Failure> {
+    uncordoned(stack, "before the update");
+    let first = update();
+    let failed = match &first {
+        Ok(report) => report.outcome == Outcome::Failed,
+        Err(failure) => *failure == Failure::UnexpectedExit,
+    };
+    if !failed || cancel.requested() || closed() {
+        return first;
+    }
+    log::warn!(
+        "[local update] failed; checking whether an update stopped earlier left the back end needing repair"
+    );
+    match repair_stack(stack) {
+        Ok(repaired) if repaired.changed() => {
+            log::info!("[local update] repaired ({repaired:?}); trying the update once more");
+            uncordoned(stack, "before the retry");
+            update()
+        }
+        Ok(_) => {
+            log::info!("[update repair] nothing to repair");
+            first
+        }
+        Err(why) => {
+            log::warn!("[update repair] not repaired: {why}");
+            first
+        }
+    }
+}
+
+/// `local_update::uncordon_if_cordoned` on `stack`'s node, when it is running. A node that does
+/// not answer is stopped, and the CLI starts it; the update's own watch looks again then
+/// (`UpdateWatch::watch_node`).
+fn uncordoned(stack: &StackId, when: &str) {
+    let engine = recorded_engine();
+    match crate::local_update::uncordon_if_cordoned(
+        || engine_command(engine.as_ref()),
+        stack.as_str(),
+    ) {
+        Ok(true) => log::info!("[local update] uncordoned the back end's node {when}"),
+        Ok(false) => {}
+        Err(why) => log::info!("[local update] node not checked {when}: {why}"),
+    }
+}
+
+/// `local_update::repair` on `stack`, with the CLI's Helm and folder and the environment and
+/// engine every CLI call gets. Counts as finishing (`update_finishing`) while it runs.
+fn repair_stack(stack: &StackId) -> Result<crate::local_update::Repaired, String> {
+    let directory = crate::local_update::stack_dir(stack.as_str())
+        .ok_or("no home folder to find the CLI's files in")?;
+    let tools = directory
+        .parent()
+        .map(|parent| parent.join("tools"))
+        .ok_or("no tools folder")?;
+    let helm =
+        crate::local_update::cli_helm(&tools).ok_or("the CLI has not downloaded its Helm")?;
+    let engine = recorded_engine();
+    let command = |program: &std::ffi::OsStr| tool_command(program, engine.as_ref());
+    let engine_command = || engine_command(engine.as_ref());
+    let _finishing = Finishing::begin();
+    crate::local_update::repair(&crate::local_update::Reach {
+        stack: stack.as_str(),
+        directory,
+        helm,
+        command: &command,
+        engine: &engine_command,
+    })
+}
+
+/// A program the CLI runs (its Helm), with the environment the CLI itself gets.
+fn tool_command(program: &std::ffi::OsStr, engine: Option<&CliEngine>) -> std::process::Command {
+    let mut command = crate::quiet::command(program);
+    cli_environment(
+        &mut command,
+        engine,
+        |name| std::env::var_os(name),
+        crate::docker_config::owned(),
+    );
+    command
+}
+
 /// `run_with`, without the engine check.
 fn run_downloading(
     cli: &PinnedCli,
@@ -3520,7 +3872,31 @@ fn run_downloading(
         _ => false,
     };
     let limits = if downloaded { limits.0 } else { limits.1 };
+    if action == Action::Update {
+        return run_update(cli, attempt, stack, limits, cancel);
+    }
     run(cli, action, stack, limits, cancel)
+}
+
+/// `run` for `local update`, followed through the CLI's log while it runs (`UpdateWatch`).
+fn run_update(
+    cli: &PinnedCli,
+    attempt: &str,
+    stack: &StackId,
+    limits: Limits,
+    cancel: &Cancel,
+) -> Result<Report, Failure> {
+    let mut watch = UpdateWatch::new(attempt, stack);
+    let (code, bytes) = execute_watching(
+        cli,
+        &arguments(Action::Update, stack),
+        None,
+        limits,
+        cancel,
+        None,
+        watch.as_mut(),
+    )?;
+    normalize(Action::Update, code, &bytes)
 }
 
 /// What `cli` pulls, read from its own bytes (`local_images::cli_images`): the script a runtime
@@ -3598,16 +3974,46 @@ fn update_resumes(
             outcome: Outcome::Completed,
             stack: Some(saved),
             ..
-        }) => Ok(match saved.unfinished_update {
-            Some(unfinished) => Some(Some(unfinished.to)),
-            // An update on record that does not name its release is the CLI's own business.
-            None if saved.update_in_progress => None,
-            None => Some(None),
-        }),
+        }) => {
+            let saved = repaired_before(stack, saved);
+            Ok(match saved.unfinished_update {
+                Some(unfinished) => Some(Some(unfinished.to)),
+                // An update on record that does not name its release is the CLI's own business.
+                None if saved.update_in_progress => None,
+                None => Some(None),
+            })
+        }
         Err(Failure::Cancelled) => Err(Failure::Cancelled),
         // The update itself says what is wrong; this was only a look.
         _ => Ok(None),
     }
+}
+
+/**
+An update on record that got past its first step, on a running stack, is repaired before it resumes
+(`local_update`), so a stack an earlier update left half done does not fail it at once. A stopped
+stack is left to the CLI, which starts it; if the update then fails on it, `update_repairing`
+repairs it and tries once more.
+*/
+fn repaired_before(stack: &StackId, saved: Stack) -> Stack {
+    let past_first_step = saved
+        .unfinished_update
+        .as_ref()
+        .is_some_and(|update| !update.prepared);
+    let running = saved
+        .observed
+        .as_ref()
+        .is_some_and(|observed| observed.running);
+    if past_first_step && running {
+        log::info!(
+            "[update repair] an update is on record past its first step; checking the back end before it resumes"
+        );
+        match repair_stack(stack) {
+            Ok(repaired) => log::info!("[update repair] {repaired:?}"),
+            Err(why) => log::warn!("[update repair] not repaired: {why}"),
+        }
+    }
+    saved
 }
 
 /**
@@ -5639,6 +6045,484 @@ mod tests {
             "the CLI's child outlived close_for_quit"
         );
         assert_eq!(call.join().unwrap(), Err(Failure::Cancelled));
+        drop(attempt);
+    }
+
+    /**
+    A back end like the one an interrupted `local update` leaves, with stand-ins for the programs
+    the CLI and the repair run, all keeping their state in files:
+
+    - `helm`, in the CLI's tool folder under its digest, as `cli_helm` finds it. `upgrade` with
+      `stopped.yaml` deletes the Learning Deployments and without it puts them back, as the chart
+      does; any upgrade of a release left `pending-upgrade` fails as Helm does; `rollback` deploys.
+    - `docker`, whose `exec <node> kubectl` answers `get deployment` and refuses to `scale` a
+      Deployment that is not there, with the NotFound the real one prints.
+    - the CLI, whose `local update` runs the update's steps in the CLI's order, against those two,
+      logging each to `cli.log` as the CLI does, and failing where the CLI fails.
+
+    Unix only: the stand-ins are shell scripts.
+    */
+    #[cfg(unix)]
+    struct UpdateWorld {
+        root: PathBuf,
+        state: PathBuf,
+        stack_dir: PathBuf,
+        cli: PinnedCli,
+    }
+
+    #[cfg(unix)]
+    impl UpdateWorld {
+        const STACK: &'static str = "local-abc123";
+
+        /// Sets this process's HOME and PATH: run only in an isolated test process.
+        fn new(label: &str) -> Self {
+            use std::os::unix::fs::PermissionsExt;
+            let root = temp_root(label);
+            let home = root.join("home");
+            let bin = root.join("bin");
+            let state = root.join("state");
+            for dir in [&home, &bin, &state] {
+                std::fs::create_dir_all(dir).unwrap();
+            }
+            std::env::set_var("HOME", &home);
+            std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
+            std::env::set_var(
+                "PATH",
+                std::env::join_paths(
+                    std::iter::once(bin.clone())
+                        .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+                )
+                .unwrap(),
+            );
+            use_engine(&crate::engine::Address::new(
+                crate::engine::Engine::Docker,
+                None,
+            ));
+            let stack_dir = crate::local_update::stack_dir(Self::STACK).unwrap();
+            std::fs::create_dir_all(&stack_dir).unwrap();
+            for file in [
+                "kubeconfig",
+                "values.yaml",
+                "values-local-evaluation.yaml",
+                "intelligence-0.16.0-rc.10.tgz",
+                "stopped.yaml",
+            ] {
+                std::fs::write(stack_dir.join(file), file).unwrap();
+            }
+            // What the CLI records for the update it runs. The licence is not read.
+            std::fs::write(
+                stack_dir.join("install.json"),
+                json!({
+                    "licenseToken": SECRET,
+                    "chart": stack_dir.join("intelligence-0.16.0-rc.10.tgz"),
+                    "profile": stack_dir.join("values-local-evaluation.yaml"),
+                    "directory": stack_dir,
+                })
+                .to_string(),
+            )
+            .unwrap();
+            let (os, arch) = crate::local_update::platform();
+            let download = b"helm-archive";
+            let tools = stack_dir.parent().unwrap().join("tools").join(format!(
+                "helm-3.17.3-{os}-{arch}-{}",
+                Sha256::digest(download)
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            ));
+            std::fs::create_dir_all(&tools).unwrap();
+            std::fs::write(tools.join("download"), download).unwrap();
+            let s = state.display();
+            let script = |path: &Path, body: String| {
+                std::fs::write(path, format!("#!/bin/sh\nS='{s}'\n{body}")).unwrap();
+                std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            };
+            script(
+                &tools.join("helm"),
+                r#"echo "helm $*" >> "$S/calls"
+case "$1" in
+  list)
+    printf '[{"name":"cpki","namespace":"default","revision":"5","status":"%s","chart":"intelligence-0.16.0-rc.10"}]\n' "$(cat "$S/status")" ;;
+  history)
+    printf '[{"revision":3,"status":"superseded"},{"revision":4,"status":"deployed"},{"revision":5,"status":"%s"}]\n' "$(cat "$S/status")" ;;
+  rollback)
+    echo deployed > "$S/status" ;;
+  upgrade)
+    case "$(cat "$S/status")" in
+      pending-*) echo "Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress" >&2; exit 1 ;;
+    esac
+    case "$*" in
+      *stopped.yaml*) echo cpki-app-api > "$S/deployments" ;;
+      *) printf 'cpki-app-api\ncpki-learning-reconciler\ncpki-learning-agent\n' > "$S/deployments" ;;
+    esac
+    echo deployed > "$S/status" ;;
+  *) exit 1 ;;
+esac
+"#
+                .to_owned(),
+            );
+            script(
+                &bin.join("docker"),
+                r#"echo "docker $*" >> "$S/calls"
+[ "$1" = exec ] || exit 1
+shift
+[ "$1" = -i ] && shift
+shift
+[ "$1" = kubectl ] || exit 1
+shift
+case "$1 $2" in
+  "get node")
+    cat "$S/unschedulable" 2>/dev/null || printf false
+    exit 0 ;;
+  "uncordon "*)
+    printf false > "$S/unschedulable"
+    echo "node/$2 uncordoned"
+    exit 0 ;;
+  "get jobs")
+    echo '{"items":[]}'
+    exit 0 ;;
+esac
+case "$1" in
+  get)
+    for name in cpki-learning-reconciler cpki-learning-agent; do
+      grep -qx "$name" "$S/deployments" && echo "deployment.apps/$name"
+    done
+    exit 0 ;;
+  scale)
+    for argument in "$@"; do
+      case "$argument" in
+        deployment/*)
+          name="${argument#deployment/}"
+          grep -qx "$name" "$S/deployments" || { echo "Error from server (NotFound): deployments.apps \"$name\" not found" >&2; exit 1; } ;;
+      esac
+    done
+    exit 0 ;;
+esac
+exit 1
+"#
+                .to_owned(),
+            );
+            let completed = {
+                let mut updated = envelope();
+                updated["command"] = json!("local update");
+                updated["stack"]["installedRelease"] = json!("0.16.0-rc.10");
+                updated.to_string()
+            };
+            let helm = tools.join("helm");
+            let chart = stack_dir.join("intelligence-0.16.0-rc.10.tgz");
+            let stopped = stack_dir.join("stopped.yaml");
+            let node = format!("k3d-{}-server-0", Self::STACK);
+            let program = root.join("copilotkit");
+            script(
+                &program,
+                format!(
+                    r#"echo "cli $*" >> "$S/calls"
+[ "$2" = update ] || exit 3
+mkdir -p "$HOME/.copilotkit"
+step() {{ printf '{{"level":30,"event":"local.step","step":"%s","outcome":"succeeded"}}\n' "$1" >> "$HOME/.copilotkit/cli.log"; }}
+fail() {{
+  printf '{{"level":50,"event":"local.step","step":"%s","outcome":"failed"}}\n' "$1" >> "$HOME/.copilotkit/cli.log"
+  printf '{{"version":1,"command":"local update","status":"failed","stack":null,"nextAction":null,"error":{{"code":"LOCAL_COMMAND_FAILED","message":"Local %s failed (exit 1)."}},"diagnostics":[]}}' "$1"
+  exit 1
+}}
+[ -e "$S/cordon-on-start" ] && printf true > "$S/unschedulable"
+step secrets-apply
+sleep "$(cat "$S/quiesce-seconds" 2>/dev/null || echo 0)"
+docker exec -i {node} kubectl scale deployment/cpki-app-api deployment/cpki-learning-reconciler --replicas=0 || fail update-quiesce
+step update-quiesce
+docker exec -i {node} kubectl scale deployment/cpki-learning-agent --replicas=0 || fail update-agent-stop
+step update-agent-stop
+step update-agent-wait
+'{helm}' upgrade --install cpki '{chart}' -f '{stopped}' --no-hooks || fail dependencies-install
+step dependencies-install
+sleep "$(cat "$S/wait-seconds" 2>/dev/null || echo 0)"
+# The databases' rollout: nothing schedules on a cordoned node. The real wait is ten minutes.
+tries=0
+while [ "$(cat "$S/unschedulable" 2>/dev/null)" = true ]; do
+  tries=$((tries + 1))
+  [ "$tries" -gt 100 ] && fail dependencies-wait
+  sleep 0.2
+done
+step dependencies-wait
+'{helm}' upgrade cpki '{chart}' --no-hooks || fail services-start
+step services-start
+touch "$S/finished"
+printf '%s' '{completed}'
+"#,
+                    helm = helm.display(),
+                    chart = chart.display(),
+                    stopped = stopped.display(),
+                ),
+            );
+            let cli = PinnedCli::verify(
+                &Pin {
+                    path: program.clone(),
+                    sha256: sha256(&program),
+                },
+                None,
+            )
+            .unwrap();
+            let world = Self {
+                root,
+                state,
+                stack_dir,
+                cli,
+            };
+            world.set("status", "deployed");
+            world.set(
+                "deployments",
+                "cpki-app-api\ncpki-learning-reconciler\ncpki-learning-agent\n",
+            );
+            world
+        }
+
+        fn set(&self, name: &str, value: &str) {
+            std::fs::write(self.state.join(name), value).unwrap();
+        }
+
+        fn calls(&self) -> Vec<String> {
+            std::fs::read_to_string(self.state.join("calls"))
+                .unwrap_or_default()
+                .lines()
+                .map(str::to_owned)
+                .collect()
+        }
+
+        fn finished(&self) -> bool {
+            self.state.join("finished").exists()
+        }
+
+        /// `local update` as the window runs it, through `run_with`.
+        fn update(&self, attempt: &str, cancel: &Cancel) -> Result<Report, Failure> {
+            let limits = short(Duration::from_secs(120));
+            run_with(
+                &self.cli,
+                attempt,
+                Action::Update,
+                &StackId::parse(Self::STACK).unwrap(),
+                (limits, limits),
+                cancel,
+                crate::local_images::Limits::standard(),
+            )
+        }
+
+        fn cli_log_has(&self, step: &str) -> bool {
+            std::fs::read_to_string(crate::local_update::cli_log().unwrap())
+                .unwrap_or_default()
+                .contains(&format!("\"step\":\"{step}\",\"outcome\":\"succeeded\""))
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for UpdateWorld {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /**
+    AN UPDATE QUIT STOPPED PARTWAY IS REPAIRED, AND THE NEXT ONE FINISHES.
+
+    Found on OpenBot Desktop, 0.16.0-rc.9 to rc.10: Quit stopped `local update` after its first
+    `helm upgrade`, which had deleted the Learning Deployments. Every Start after that failed in
+    under a second with "Local update-quiesce failed (exit 1)", the CLI scaling a Deployment that
+    was gone. Here the update fails exactly so, the repair applies the update's chart without hooks,
+    which puts them back, and the one retry runs to the end.
+    */
+    #[test]
+    #[cfg(unix)]
+    fn an_update_stopped_partway_is_repaired_and_the_retry_finishes() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::an_update_stopped_partway_is_repaired_and_the_retry_finishes",
+        ) {
+            return;
+        }
+        let world = UpdateWorld::new("update-repaired");
+        // As the stopped update left it: its stopped.yaml upgrade done, Learning deleted.
+        world.set("deployments", "cpki-app-api\n");
+
+        let report = world.update("repaired-update", &Cancel::default()).unwrap();
+
+        assert_eq!(report.outcome, Outcome::Completed, "{:?}", world.calls());
+        assert!(world.finished());
+        let calls = world.calls();
+        let updates = calls
+            .iter()
+            .filter(|call| call.starts_with("cli local update"))
+            .count();
+        assert_eq!(updates, 2, "one failed update, one retry: {calls:?}");
+        let repair = calls
+            .iter()
+            .find(|call| call.starts_with("helm upgrade cpki ") && call.contains("--no-hooks"))
+            .unwrap_or_else(|| panic!("no repair upgrade: {calls:?}"));
+        let chart = world.stack_dir.join("intelligence-0.16.0-rc.10.tgz");
+        assert!(
+            repair.contains(&chart.canonicalize().unwrap().display().to_string()),
+            "the update's own chart: {repair}"
+        );
+        assert!(repair.contains("values.yaml") && !repair.contains("stopped.yaml"));
+        assert!(repair.contains(&format!(
+            "--kubeconfig {}",
+            world.stack_dir.join("kubeconfig").display()
+        )));
+        assert!(
+            !calls.iter().any(|call| call.starts_with("helm rollback")),
+            "a deployed release is not rolled back: {calls:?}"
+        );
+    }
+
+    /**
+    A RELEASE QUIT LEFT `pending-upgrade` IS ROLLED BACK, AND THE NEXT UPDATE FINISHES.
+
+    Quit that stops Helm itself leaves the release pending, and every later `helm upgrade` refuses
+    with "another operation (install/upgrade/rollback) is in progress". The repair rolls it back
+    to its last deployed revision, and the one retry runs to the end.
+    */
+    #[test]
+    #[cfg(unix)]
+    fn a_release_left_pending_is_rolled_back_and_the_retry_finishes() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_release_left_pending_is_rolled_back_and_the_retry_finishes",
+        ) {
+            return;
+        }
+        let world = UpdateWorld::new("update-pending");
+        world.set("status", "pending-upgrade");
+
+        let report = world.update("pending-update", &Cancel::default()).unwrap();
+
+        assert_eq!(report.outcome, Outcome::Completed, "{:?}", world.calls());
+        assert!(world.finished());
+        let calls = world.calls();
+        let rollback = calls
+            .iter()
+            .position(|call| call.starts_with("helm rollback cpki 4 --no-hooks"))
+            .unwrap_or_else(|| panic!("not rolled back to the deployed revision: {calls:?}"));
+        let retry = calls
+            .iter()
+            .rposition(|call| call.starts_with("cli local update"))
+            .unwrap();
+        assert!(rollback < retry, "rolled back before the retry: {calls:?}");
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|call| call.starts_with("cli local update"))
+                .count(),
+            2
+        );
+    }
+
+    /**
+    A NODE LEFT CORDONED IS UNCORDONED, SO THE UPDATE'S DATABASES CAN START.
+
+    Found on a Mac: the update hung for minutes in `dependencies-wait`, the database, Redis and
+    object storage pods in `FailedScheduling: 0/1 nodes are available: 1 node(s) were
+    unschedulable`. k3s marks its node unschedulable as `local stop` stops it, and the CLI starts
+    the node again inside `local update`. Here the node comes up cordoned once the update has
+    started, as it did there, and the update's watch uncordons it while the CLI waits.
+    */
+    #[test]
+    #[cfg(unix)]
+    fn a_node_left_cordoned_is_uncordoned_while_the_update_waits_on_it() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_node_left_cordoned_is_uncordoned_while_the_update_waits_on_it",
+        ) {
+            return;
+        }
+        let world = UpdateWorld::new("update-cordoned");
+        world.set("unschedulable", "true");
+        world.set("cordon-on-start", "");
+
+        let report = world.update("cordoned-update", &Cancel::default()).unwrap();
+
+        assert_eq!(report.outcome, Outcome::Completed, "{:?}", world.calls());
+        let calls = world.calls();
+        let started = calls
+            .iter()
+            .position(|call| call.starts_with("cli local update"))
+            .unwrap();
+        let uncordons: Vec<usize> = calls
+            .iter()
+            .enumerate()
+            .filter(|(_, call)| call.contains("kubectl uncordon k3d-local-abc123-server-0"))
+            .map(|(index, _)| index)
+            .collect();
+        assert!(
+            uncordons.first().is_some_and(|first| *first < started),
+            "a cordoned node is uncordoned before the update: {calls:?}"
+        );
+        assert!(
+            uncordons.iter().any(|index| *index > started),
+            "and again while the update waits on it: {calls:?}"
+        );
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|call| call.starts_with("cli local update"))
+                .count(),
+            1,
+            "no retry was needed: {calls:?}"
+        );
+    }
+
+    /**
+    QUIT LETS AN UPDATE THAT HAS BEGUN CHANGING THE RELEASE FINISH.
+
+    Quit used to stop `local update` wherever it was: SIGTERM, then SIGKILL five seconds later,
+    mid-Helm. That is what left the stacks above. Before its first `helm upgrade` an update is
+    still stopped (here by Cancel, which takes the same path); from `update-agent-wait` on, Quit
+    waits for it, says so once, and the update runs to its end.
+    */
+    #[test]
+    #[cfg(unix)]
+    fn quit_lets_an_update_past_its_first_helm_step_finish() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::quit_lets_an_update_past_its_first_helm_step_finish",
+        ) {
+            return;
+        }
+        let world = UpdateWorld::new("update-quit");
+        let wait_for = |what: &str, done: &dyn Fn() -> bool| {
+            let until = Instant::now() + Duration::from_secs(30);
+            while !done() {
+                assert!(Instant::now() < until, "never saw {what}");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        };
+
+        // Before Helm: stopped.
+        world.set("quiesce-seconds", "30");
+        let early = Attempt::register("update-before-helm");
+        let started = Instant::now();
+        let stopped = std::thread::scope(|scope| {
+            let call = scope.spawn(|| world.update("update-before-helm", &early.0));
+            wait_for("secrets-apply", &|| world.cli_log_has("secrets-apply"));
+            assert!(!update_finishing());
+            cancel("update-before-helm");
+            call.join().unwrap()
+        });
+        assert_eq!(stopped, Err(Failure::Cancelled));
+        assert!(started.elapsed() < Duration::from_secs(20));
+        assert!(!world.finished());
+        drop(early);
+
+        // Past its first Helm step: Quit waits for it.
+        world.set("quiesce-seconds", "0");
+        world.set("wait-seconds", "3");
+        let attempt = Attempt::register("update-during-quit");
+        let (finished, said, waited) = std::thread::scope(|scope| {
+            let call = scope.spawn(|| world.update("update-during-quit", &attempt.0));
+            wait_for("the update past update-agent-wait", &|| update_finishing());
+            assert!(!world.finished(), "still running when Quit comes");
+            let mut said = 0;
+            let waited = close_for_quit_reporting(|| said += 1);
+            (call.join().unwrap(), said, waited)
+        });
+        assert!(waited, "Quit waited for the update");
+        assert_eq!(said, 1, "and said so once");
+        assert!(world.finished(), "the update ran to its end");
+        assert_eq!(finished.unwrap().outcome, Outcome::Completed);
+        assert!(!update_finishing());
         drop(attempt);
     }
 
