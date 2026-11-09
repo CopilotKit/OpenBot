@@ -228,7 +228,7 @@ describe("a Bot at an address", () => {
   test.each([
     [
       "ghcr.io/copilotkit/openbot-agent-langgraph-agui@sha256:0123",
-      "LangChain (LangGraph)",
+      "LangChain",
       { provider: "openai", defaultModel: "gpt-5.5" },
       "GPT-6.1 Terra",
     ],
