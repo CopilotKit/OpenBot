@@ -81,8 +81,30 @@ export type DesktopAppUpdateCheck =
   /** This build never updates itself: an internal or candidate build. */
   | { found: "notOffered"; current: string };
 
+/**
+ * Which AI provider and sign-in OpenBot starts with, as the desktop app last saved it. Never a key
+ * or a token: the setup window holds those, and changing the connection happens there.
+ */
+export type DesktopAiConnection = {
+  /** The connection chosen in setup; null before one was. */
+  kind:
+    | "open-ai-api-key"
+    | "anthropic-api-key"
+    | "claude-plan"
+    | "chat-gpt-plan"
+    | "compatible-endpoint"
+    | "google-oauth"
+    | "xai-oauth"
+    | null;
+  /** The model named in setup. Only an address or a provider sign-in names one. */
+  model: string | null;
+  /** A custom address's host, and nothing else of the address. */
+  endpointHost: string | null;
+};
+
 export const desktopKeys = {
   all: ["desktop"] as const,
+  aiConnection: ["desktop", "ai-connection"] as const,
   status: (memory: boolean) => ["desktop", "status", { memory }] as const,
   intelligence: ["desktop", "intelligence"] as const,
   appUpdate: ["desktop", "app-update"] as const,
@@ -146,6 +168,19 @@ export function desktopAppUpdateQueryOptions() {
     enabled: desktopShell() !== null,
     retry: false,
     refetchInterval: (query) => (query.state.data?.installing ? 500 : 60_000),
+  });
+}
+
+/**
+ * Settings' AI model row. Asked only inside the Desktop window. An older desktop app has no such
+ * command and refuses it every time, so a refusal is not retried: there is just no row.
+ */
+export function desktopAiConnectionQueryOptions() {
+  return queryOptions({
+    queryKey: desktopKeys.aiConnection,
+    queryFn: (): Promise<DesktopAiConnection> => invokeDesktop("ai_connection"),
+    enabled: desktopShell() !== null,
+    retry: false,
   });
 }
 

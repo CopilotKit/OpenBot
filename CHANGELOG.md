@@ -19,6 +19,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `configured_absent`, naming the variable and its value, and ignored, and a container is assigned
   automatically as though none was named. A chat whose first message failed this way works when sent
   to again.
+- **Settings shows which AI OpenBot uses, and changes it.** Settings > General has an AI model
+  section in OpenBot Desktop: the provider and how OpenBot signs in to it (a Claude or ChatGPT plan,
+  an API key, a Google or xAI account, or your own address), and the model when setup named one.
+  Never the key. Change AI connection stops OpenBot and opens the setup window at its AI screen,
+  and OpenBot starts again with the new choice.
 - **The window zooms, as a browser does.** The text was too small and nothing made it bigger.
   Command (Ctrl on Windows) with + or = zooms in, with - zooms out, and with 0 goes back to actual
   size, from 90% to 200%. On a Mac the View menu has Zoom In, Zoom Out and Actual Size. The level

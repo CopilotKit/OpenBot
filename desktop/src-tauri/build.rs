@@ -65,6 +65,9 @@ fn main() {
                     "open_logs",
                     // A Bot's notification, opening OpenBot at a page when clicked. See `src/notice.rs`.
                     "notify",
+                    // Settings' AI model row, and its Change. See `src/ai_connection.rs`.
+                    "ai_connection",
+                    "change_ai_connection",
                     // Ctrl+Q in the window on Windows. See `src/quit-shortcut.js`.
                     "quit",
                     // The zoom keys no menu carries. See `src/zoom-shortcut.js`.
