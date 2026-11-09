@@ -60,8 +60,11 @@ export function appAccessTools(options: {
     {
       name: SHOW_APP_ACCESS_TOOL,
       ref: `app-access/${SHOW_APP_ACCESS_TOOL}`,
+      // No administrator in the personal edition: the card offers the step itself.
       description:
-        "Show the person a card saying whether they can use one work app through you, and the one thing that would let them: connecting their own account, or asking an administrator to switch the app on, grant it to you, or connect its shared account. Call it whenever a question needs an app you hold no tools for, instead of only saying it is missing.",
+        currentEdition() === "personal"
+          ? "Show the person a card saying whether they can use one work app through you, and the one thing that would let them: connecting it, or setting it up. Call it whenever a question needs an app you hold no tools for or one that needs connecting, instead of only saying it is missing."
+          : "Show the person a card saying whether they can use one work app through you, and the one thing that would let them: connecting their own account, or asking an administrator to switch the app on, grant it to you, or connect its shared account. Call it whenever a question needs an app you hold no tools for, instead of only saying it is missing.",
       parameters,
       async execute(args) {
         const parsed = parameters.safeParse(args);

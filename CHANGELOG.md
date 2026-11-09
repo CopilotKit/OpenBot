@@ -141,6 +141,10 @@ deployment:
   tell it to look an app's tools up rather than say it has no access. Bots are also told to say
   what they did in plain words ("I checked your Gmail profile") and never to name a tool, such as
   `GMAIL_GET_PROFILE`.
+- **A Bot says where each app stands the way its page does.** An app that's on but that you haven't
+  connected is "needs connecting", never ready. An app nobody connected isn't called connected,
+  each app gets one reason, and a tool a Bot holds but wasn't offered on that turn isn't called
+  missing. In the personal edition a Bot never mentions an admin.
 - **Bots answer in Markdown by default.** Ordinary questions, explanations, summaries and short
   lists come back as a reply. A notice card is kept for an alert that needs you to act, or for when
   you ask for one, and a chart, table or card is drawn when it makes the answer easier to use. Bots

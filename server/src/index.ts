@@ -272,6 +272,7 @@ import {
 import { ensureSingleUserIdentity } from "./plugins/single-user-identity";
 import { createPluginStore } from "./plugins/store";
 import {
+  connectedSystems,
   grantedSkills,
   grantedTools,
   REFUSAL_MARKER,
@@ -1930,11 +1931,14 @@ const signRunForActor =
  * Google's sign-in page and asked a person to sign in to an account the deployment had already
  * connected. Naming them lets it say which one it has not been granted instead.
  *
+ * Only the ones whose tools were listed: an app whose sign-in never finished is not connected, and
+ * was being named to every Bot as one an administrator could grant. See `connectedSystems`.
+ *
  * Read per request rather than held, because a connector added a minute ago has to count.
  * Let failures reach buildAgents, which reports the missing guidance once and keeps the run usable.
  */
 const loadVendors = async () =>
-  (await pluginStore.listServers()).map((server) => server.id);
+  connectedSystems(await pluginStore.listServers());
 
 /*
  * How a run's tools are narrowed to the ones it is about.
