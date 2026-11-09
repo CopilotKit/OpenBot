@@ -19,11 +19,11 @@ import { cleanup, render } from "@testing-library/react";
 import type { ComponentType } from "react";
 import { GALLERY as ACTIVITY } from "@/components/gallery/activity";
 import { agentKeys } from "@/lib/agents/queries";
-import { auditKeys } from "@/lib/audit/queries";
 import * as gallery from "@/lib/copilot/gallery-registry";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { Route as AdminAuditRoute } from "@/routes/_authed/admin/audit";
 import { Route as ActivityRoute } from "@/routes/_authed/settings/_personal/activity";
+import { seedAuditPage } from "./seed-audit-page";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -119,7 +119,7 @@ async function renderPage(
     edition,
   });
   for (const [search, events] of Object.entries(audit))
-    queryClient.setQueryData([...auditKeys.all, search], { events });
+    seedAuditPage(queryClient, search, { events });
   queryClient.setQueryData(agentKeys.list(false), [
     { id: BOT, name: "Personal Assistant" },
   ]);

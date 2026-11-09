@@ -21,6 +21,7 @@ import {
   sharedAccountOnly,
   sharedAccountOnlySentence,
 } from "../deployment-clients";
+import { connectionGuide, fieldsForPerson } from "../key-guides";
 import {
   authorizationUrlFor,
   type ConnectOrigin,
@@ -30,7 +31,11 @@ import {
   redirectUriFor,
   sealConnectState,
 } from "../oauth";
-import { type AccountRef, asAccountRef } from "../shared-accounts";
+import {
+  type AccountRef,
+  anotherArcadeAccount,
+  asAccountRef,
+} from "../shared-accounts";
 import {
   CatalogueEntryUnknownError,
   type OAuthClient,
@@ -265,42 +270,42 @@ export function mountConnectionRoutes({
        * signed in, decided above and never by anything the request carries.
        */
       /*
-       * ONE ACCOUNT PER APP, WHERE A SECOND CONSENT WOULD MAKE A SECOND ONE. On Composio a second
-       * link attaches a second account behind a row that already says connected, so it is refused.
-       * A broker that runs a correlated flow is not that: Arcade keeps one connection per name and
-       * provider, and a consent over it adds the permissions it asks for to that same connection,
-       * as the per-action Authorize always has. So Connect over a standing Arcade row is let through.
-       * A Bot's card sends somebody whose call Arcade refused to the app's page, as it does on
-       * Composio, and the Reconnect there is this: it asks for everything the app needs, and the row
-       * the verifier then updates is the one that stood. No Disconnect comes first.
+       * A PERSON MAY HOLD SEVERAL ACCOUNTS AT ONE APP, SO A STANDING CONNECTION IS NO REFUSAL.
+       *
+       * A press over a person's standing connection adds another account beside it: two Gmail
+       * mailboxes, a work and a personal calendar. A call names which one it runs in (see
+       * `plugin-store/accounts`), so a second account is no longer the vendor's choice to make.
+       *
+       * Composio files every account a person holds under one user id, and is told a second one is
+       * wanted (`another`). Arcade keeps one account per user id, and a Connect over a standing row
+       * there has always been the Reconnect that adds permissions to that account, so a further
+       * account is asked for in so many words (`?another=1`) and filed under a further id of the
+       * person's own (`anotherArcadeAccount`). Whose ids those are still comes from the session.
+       *
+       * A Shared app's team account is one account. Connecting a different one still means ending
+       * the one that stands first.
        */
       const existing = await store.brokeredConnection({ toolkit, account });
-      if (existing && !composio.broker.authorizations) {
-        /*
-         * Named with the step to take rather than only refused: a second link would attach a
-         * second account behind a row that already says connected, and the way to a new one is
-         * through the connection they have.
-         *
-         * THE APP'S TITLE, NOT THE ROW'S ID. `composio-linear` is this deployment's name for a
-         * table row; "Linear" is the name of the thing the person connected and the only one of
-         * the two they have ever seen on a screen. An internal key in a sentence addressed to a
-         * person is both unhelpful and a small leak of how the rows are keyed.
-         *
-         * WHOSE ALREADY, SAID PLAINLY FOR A SHARED APP. "You already have an account" is true for
-         * a Personal app and false for a Shared one — nobody signed in holds that account, the
-         * deployment does — so a deployment account's refusal names the deployment's connection
-         * rather than putting the actor's own claim on it.
-         */
+      if (
+        existing &&
+        account.holder === "deployment" &&
+        !composio.broker.authorizations
+      ) {
         return context.json(
           {
-            error:
-              account.holder === "deployment"
-                ? `${row.title} already has a shared account connected. Disconnect it first if you want to connect a different one.`
-                : `You already have an account connected to ${row.title}. Disconnect it first if you want to connect a different one.`,
+            error: `${row.title} already has a shared account connected. Disconnect it first if you want to connect a different one.`,
           },
           409,
         );
       }
+      const another = Boolean(existing) && account.holder === "person";
+      const anotherArcade =
+        another &&
+        composio.broker.authorizations !== null &&
+        context.req.query("another") === "1" &&
+        account.holder === "person"
+          ? anotherArcadeAccount(account)
+          : null;
 
       /*
        * AN APP WHOSE SECRET THE PERSON HOLDS IS ANSWERED HERE AND NEVER SENT AT A CONSENT SCREEN.
@@ -408,7 +413,31 @@ export function mountConnectionRoutes({
           return context.json({ error: refusal.error }, refusal.status);
         }
 
-        if (submitted === null) return context.json({ fields: published });
+        /*
+         * THE FIRST PRESS ANSWERS THE FORM A PERSON CAN FOLLOW: the same boxes under the same
+         * names, labelled and explained in their words, and a guide saying where the key comes
+         * from. The names are untouched, so the second press is checked against `published`
+         * exactly as before. The broker's own link is asked for and a failure there costs only the
+         * link: the form is what the person came for, and `./key-guides` has the fallback.
+         */
+        if (submitted === null) {
+          const guideUrl = composio.broker.connectionGuideUrl?.bind(
+            composio.broker,
+          );
+          const link = guideUrl
+            ? await withVendorDeadline(() =>
+                guideUrl({ toolkit, authScheme }),
+              ).catch(() => null)
+            : null;
+          return context.json({
+            fields: fieldsForPerson(toolkit, published),
+            guide: connectionGuide({
+              toolkit,
+              title: row.title,
+              published: link,
+            }),
+          });
+        }
 
         /*
          * AN APP WITH NO BOXES CANNOT BE CONNECTED BY SOMEBODY TYPING, WHICH IS THE ONLY WAY THIS
@@ -852,7 +881,7 @@ export function mountConnectionRoutes({
         return startAuthorization(context, {
           broker: composio.broker,
           serverId,
-          account,
+          account: anotherArcade ?? account,
           toolkit,
           action: null,
           returnUrl,
@@ -872,7 +901,12 @@ export function mountConnectionRoutes({
       let redirectUrl: string;
       try {
         ({ redirectUrl } = await withVendorDeadline(() =>
-          composio.broker.authorize({ account, toolkit, returnUrl }),
+          composio.broker.authorize({
+            account,
+            toolkit,
+            returnUrl,
+            ...(another ? { another: true } : {}),
+          }),
         ));
       } catch (error) {
         // See `adoptHeld` above.
@@ -1460,6 +1494,151 @@ export function mountConnectionRoutes({
    * gets `refused`, which names no vendor and no variable because they can act on neither. The
    * operator's half is logged by {@link logReturnUrlRefusal}, where an operator looks.
    */
+  /**
+   * The accounts the signed-in person holds at one app, each by the name the vendor gave it.
+   *
+   * ASKED OF THE VENDOR ON EVERY READ, and the answer recorded, because this is what a Bot's call
+   * picks its account from: an account connected or ended anywhere since the last read is listed
+   * as it stands now. A person's own accounts only; a Shared app's one team account has nothing to
+   * list here and answers an empty list.
+   *
+   * `canAddAnother` is whether Connect another account is offered: a person's own app, on a
+   * broker that can tell their accounts apart.
+   */
+  routes.get("/servers/:id/accounts", requireUser, async (context) => {
+    const resolved = await brokeredAccountFor(
+      context,
+      context.req.param("id"),
+      {
+        readOnly: true,
+      },
+    );
+    if (resolved.refusal) {
+      return context.json(
+        { error: resolved.refusal.error },
+        resolved.refusal.status,
+      );
+    }
+    if (resolved.account.holder !== "person") {
+      return context.json({ accounts: [], canAddAnother: false });
+    }
+    try {
+      const accounts = await withVendorDeadline(() =>
+        store.syncBrokeredAccounts({
+          toolkit: resolved.toolkit,
+          account: resolved.account,
+        }),
+      );
+      return context.json({
+        accounts,
+        canAddAnother: Boolean(composio?.broker.accountsOf),
+      });
+    } catch (error) {
+      const refusal = personRefusal(
+        error,
+        `Couldn't list your ${resolved.title} accounts. Reload the page.`,
+      );
+      return context.json({ error: refusal.error }, refusal.status);
+    }
+  });
+
+  /** Make one of the person's accounts the one their Bots use when they name none. */
+  routes.post(
+    "/servers/:id/accounts/:accountId/default",
+    requireUser,
+    async (context) => {
+      const resolved = await brokeredAccountFor(
+        context,
+        context.req.param("id"),
+      );
+      if (resolved.refusal) {
+        return context.json(
+          { error: resolved.refusal.error },
+          resolved.refusal.status,
+        );
+      }
+      if (resolved.account.holder !== "person") {
+        return context.json(
+          { error: `${resolved.title} uses one shared account.` },
+          400,
+        );
+      }
+      const changed = await store.setDefaultBrokeredAccount({
+        toolkit: resolved.toolkit,
+        userId: resolved.account.userId,
+        id: context.req.param("accountId"),
+      });
+      if (!changed) {
+        return context.json(
+          { error: "That account isn't connected. Reload the page." },
+          404,
+        );
+      }
+      return context.json({ ok: true });
+    },
+  );
+
+  /**
+   * Disconnect one of the person's accounts at an app and keep the others.
+   *
+   * The id is looked up among the signed-in person's own accounts and nowhere else, so a request
+   * naming somebody else's is a 404 like any account that is not there. The last account goes the
+   * way the app's single account always went, through the whole disconnect.
+   */
+  routes.delete(
+    "/servers/:id/accounts/:accountId",
+    requireUser,
+    async (context) => {
+      const resolved = await brokeredAccountFor(
+        context,
+        context.req.param("id"),
+      );
+      if (resolved.refusal) {
+        return context.json(
+          { error: resolved.refusal.error },
+          resolved.refusal.status,
+        );
+      }
+      if (resolved.account.holder !== "person") {
+        return context.json(
+          { error: `${resolved.title} uses one shared account.` },
+          400,
+        );
+      }
+      try {
+        const ended = await store.disconnectBrokeredAccount({
+          toolkit: resolved.toolkit,
+          account: resolved.account,
+          id: context.req.param("accountId"),
+          by: context.var.actor.id,
+        });
+        if (ended === null) {
+          return context.json(
+            { error: "That account isn't connected. Reload the page." },
+            404,
+          );
+        }
+        if ("only" in ended) {
+          return context.json(
+            await store.disconnectBrokered({
+              toolkit: resolved.toolkit,
+              account: resolved.account,
+              by: context.var.actor.id,
+              reason: "self",
+            }),
+          );
+        }
+        return context.json(ended);
+      } catch (error) {
+        const refusal = personRefusal(
+          error,
+          "Couldn't disconnect this account. Press Disconnect again. It's safe to repeat. Ask an admin if it keeps happening.",
+        );
+        return context.json({ error: refusal.error }, refusal.status);
+      }
+    },
+  );
+
   const consentReturnUrl = (
     appUrl: string,
     serverId: string,

@@ -24,6 +24,7 @@ import { createDatabase, type Database } from "../src/db/client";
 import {
   agents,
   auditEvents,
+  brokeredAccounts,
   brokeredConnections,
   credentials as credentialRows,
   credentials,
@@ -4493,6 +4494,10 @@ async function freshDatabase(): Promise<Database> {
    * the guard's to refuse, because at that point nothing has established it is ours.
    */
   await database.delete(brokeredConnections).where(ownedConnections());
+  // The accounts behind those connections, by the same two people and never by app.
+  await database
+    .delete(brokeredAccounts)
+    .where(inArray(brokeredAccounts.userId, ["user_asker", strangerId]));
   // The person the connection outlives, who is a row in `users` like anybody else. Reached only
   // through the check at the top of this function, because there is no suffix on this id to tell a
   // fixture apart from somebody's account and ten cascades sit behind the difference.
@@ -4674,6 +4679,10 @@ afterAll(async () => {
     .delete(mcpServers)
     .where(inArray(mcpServers.id, ["gmail", "notion"]));
   await database.delete(brokeredConnections).where(ownedConnections());
+  // The accounts behind those connections, by the same two people and never by app.
+  await database
+    .delete(brokeredAccounts)
+    .where(inArray(brokeredAccounts.userId, ["user_asker", strangerId]));
   /*
    * And the witness row, which is at neither `gmail` nor any person.
    *
@@ -5340,6 +5349,114 @@ test("an identity a model puts in the arguments does not change whose account th
         userId: "user_stranger",
         user_id: "user_stranger",
         entityId: "user_stranger",
+        query: "is:unread",
+        include_payload: false,
+        verbose: false,
+        max_results: 20,
+      },
+    },
+  ]);
+});
+
+/**
+ * The same claim with several accounts: a name a model puts in the arguments picks among the
+ * asker's own accounts and nobody else's.
+ *
+ * `account` is the one argument the call path reads, and it is a NAME matched against the accounts
+ * of the person in the session. So naming somebody else's mailbox is refused before the vendor is
+ * asked, naming one of the asker's own runs in that account's id, and the identity keys beside it
+ * still reach the vendor as the action's own arguments and nothing more.
+ */
+test("with several accounts, an identity a model puts in the arguments still opens only the asker's own", async () => {
+  const { store, database } = await freshStore();
+  const reached: {
+    userId: string;
+    connectedAccountId?: string;
+    args: Record<string, unknown>;
+  }[] = [];
+  useComposioClient({
+    listActions: async () => [],
+    execute: async ({ userId, connectedAccountId }, args) => {
+      reached.push({
+        userId,
+        ...(connectedAccountId === undefined ? {} : { connectedAccountId }),
+        args,
+      });
+      return vendorAnswered();
+    },
+  });
+  await seedComposioGmail(database, store);
+  await database.insert(brokeredAccounts).values([
+    {
+      provider: "composio",
+      app: "gmail",
+      userId: "user_asker",
+      vendorUserId: "user_asker",
+      accountId: "ca_asker_work",
+      identity: "asker@work.example",
+      isDefault: true,
+      connectedAt: new Date("2026-10-01T09:00:00.000Z"),
+    },
+    {
+      provider: "composio",
+      app: "gmail",
+      userId: "user_asker",
+      vendorUserId: "user_asker",
+      accountId: "ca_asker_home",
+      identity: "asker@home.example",
+      connectedAt: new Date("2026-10-02T09:00:00.000Z"),
+    },
+    {
+      provider: "composio",
+      app: "gmail",
+      userId: strangerId,
+      vendorUserId: strangerId,
+      accountId: "ca_stranger",
+      identity: "stranger@work.example",
+      isDefault: true,
+    },
+  ]);
+
+  // The stranger's mailbox by name, beside the three identity keys: refused, and nothing sent.
+  await expect(
+    store.callTool({
+      ref: "gmail/GMAIL_FETCH_EMAILS",
+      args: {
+        userId: strangerId,
+        user_id: strangerId,
+        entityId: strangerId,
+        account: "stranger@work.example",
+        query: "is:unread",
+      },
+      botId: "bot_helper",
+      actorId: "user_asker",
+    }),
+  ).rejects.toBeInstanceOf(PluginRefusedError);
+  expect(reached).toEqual([]);
+
+  // The asker's own second account by name: their own id, that account's id, and the model's
+  // other arguments passed through whole, minus the account choice itself. A Gmail listing also
+  // carries the lean-listing defaults every GMAIL_FETCH_EMAILS call gets (composio-shapes.ts).
+  await store.callTool({
+    ref: "gmail/GMAIL_FETCH_EMAILS",
+    args: {
+      userId: strangerId,
+      user_id: strangerId,
+      entityId: strangerId,
+      account: "asker@home.example",
+      query: "is:unread",
+    },
+    botId: "bot_helper",
+    actorId: "user_asker",
+  });
+  expect(reached).toEqual([
+    {
+      userId: "user_asker",
+      connectedAccountId: "ca_asker_home",
+      args: {
+        userId: strangerId,
+        user_id: strangerId,
+        entityId: strangerId,
         query: "is:unread",
         include_payload: false,
         verbose: false,

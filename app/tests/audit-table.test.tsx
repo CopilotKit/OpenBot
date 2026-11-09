@@ -17,7 +17,7 @@ import {
 } from "@/components/audit/audit-cells";
 import { AuditPage } from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
-import { auditKeys } from "@/lib/audit/queries";
+import { seedAuditPage } from "./seed-audit-page";
 
 /**
  * Admin → Audit as a log viewer: one window tall, the table across the whole pane and the only thing
@@ -72,7 +72,7 @@ async function renderAudit(sections?: ReactNode) {
       queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
     },
   });
-  queryClient.setQueryData([...auditKeys.all, ""], { events: ROWS });
+  seedAuditPage(queryClient, "", { events: ROWS });
   queryClient.setQueryData(agentKeys.list(false), []);
   const router = createRouter({
     routeTree: createRootRoute({

@@ -1,5 +1,10 @@
-import { BrokerRefusalError, type ComposioBroker } from "../broker";
 import {
+  type BrokerAccount,
+  BrokerRefusalError,
+  type ComposioBroker,
+} from "../broker";
+import {
+  type AccountRow,
   askVendor,
   sent,
   textOf,
@@ -114,5 +119,58 @@ export function accountMethods(context: ClientContext) {
       }
       return null;
     },
-  } satisfies Pick<ComposioBroker, "revokeAccount" | "accountName">;
+
+    /*
+     * EVERY ACTIVE ACCOUNT, BY ITS ID AND THE NAME THE VENDOR PUBLISHED FOR IT. Composio fills
+     * `displayName` with the mailbox address or login once an account is active, on `data` and on
+     * `state.val` alike, and that is the only field read for the name; tokens beside it are never
+     * read. An account with no id cannot be named by a call and is left out, as the withdrawal
+     * leaves it out of what it can end. Oldest first, so the first account a person connected is
+     * the one that stays their default.
+     */
+    async accountsOf({ account, toolkit }) {
+      const rows = await accountsFor(account.vendorUserId, toolkit, CONNECTED);
+      const listed = new Map<string, BrokerAccount>();
+      for (const row of rows) {
+        const id = textOf(row.id);
+        if (id === null || listed.has(id)) continue;
+        listed.set(id, {
+          accountId: id,
+          identity: displayNameOf(row),
+          connectedAt: connectedAtOf(row),
+        });
+      }
+      return [...listed.values()].sort((left, right) =>
+        (left.connectedAt ?? "") < (right.connectedAt ?? "")
+          ? -1
+          : (left.connectedAt ?? "") > (right.connectedAt ?? "")
+            ? 1
+            : 0,
+      );
+    },
+  } satisfies Pick<
+    ComposioBroker,
+    "revokeAccount" | "accountName" | "accountsOf"
+  >;
+}
+
+/** The vendor's published name for an account: `data.displayName`, then `state.val.displayName`. */
+function displayNameOf(row: AccountRow): string | null {
+  const named = (value: unknown): string | null =>
+    value && typeof value === "object" && "displayName" in value
+      ? textOf((value as { displayName?: unknown }).displayName)
+      : null;
+  const state = (row as { state?: unknown }).state;
+  const val =
+    state && typeof state === "object"
+      ? (state as { val?: unknown }).val
+      : undefined;
+  return named(row.data) ?? named(val);
+}
+
+/** When the vendor says the account was made, as it spelled it (`createdAt` or `created_at`). */
+function connectedAtOf(row: AccountRow): string | null {
+  const shaped = row as { createdAt?: unknown; created_at?: unknown };
+  const when = textOf(shaped.createdAt) ?? textOf(shaped.created_at);
+  return when !== null && !Number.isNaN(Date.parse(when)) ? when : null;
 }

@@ -93,6 +93,12 @@ export type ApprovalCandidate = {
    * the person approves, so not in the action's digest.
    */
   declined?: AuditEventInput;
+  /**
+   * Which of the person's accounts at an app the call runs in, by the address the person knows it
+   * by, where they hold more than one. Part of what makes two actions the same action: a call to one
+   * mailbox is never answered by an approval, a denial or a saved rule about another.
+   */
+  account?: string;
 };
 export type ApprovalAction = ApprovalCandidate & {
   runId: string;
@@ -133,6 +139,8 @@ export type ApprovalRule = {
   effect: string;
   scope: string;
   behaviour: RuleBehaviour;
+  /** The one account the rule is for, or null for the app whichever account; see `ruleMatches`. */
+  account?: string | null;
   revokedAt: Date | null;
   createdAt: Date;
 };
@@ -434,6 +442,8 @@ export function approvalAction(candidate: ApprovalCandidate): ApprovalAction {
         scope: candidate.scope,
         args: candidate.args,
         target: candidate.target,
+        // Only where there is one, so a request opened before accounts were named keeps its digest.
+        ...(candidate.account ? { account: candidate.account } : {}),
       }),
     )
     .digest("hex");

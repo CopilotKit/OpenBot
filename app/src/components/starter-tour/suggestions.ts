@@ -26,7 +26,7 @@ export const STARTER_SUGGESTIONS: CopilotChatSuggestionViewProps["suggestions"] 
     {
       title: "Browse Google Maps",
       message:
-        "Use your browser to open Google Maps and check the British Museum's Saturday opening hours. Then show walking directions from King's Cross station and tell me when to leave to arrive at opening time. Don't sign in or change anything.",
+        "Use your browser to open Google Maps and check the British Museum's Saturday opening hours. Then get walking directions from King's Cross station, list them step by step, and tell me when to leave to arrive at opening time. Don't sign in or change anything.",
       isLoading: false,
     },
     {

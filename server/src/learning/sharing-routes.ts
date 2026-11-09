@@ -6,6 +6,7 @@ import {
   type LearningSource,
   type PersonalLearningSharing,
   type PersonalReview,
+  type RecordingSkills,
 } from "@openbot/shared/learning";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -20,7 +21,9 @@ import {
 import {
   CANDIDATE_ID,
   type LearningManagement,
+  type LearningModelUnavailable,
   learningFailure,
+  noLearningModel,
   readProposal,
   readProposals,
   readSkillRecordings,
@@ -81,7 +84,17 @@ export type PersonalLearningRouteDeps = {
     userId: string,
     ids: string[],
   ) => Promise<Map<string, string | null>>;
+  /**
+   * Why OpenBot Desktop could not give its local Intelligence's Learning agent a model, from
+   * `OPENBOT_LEARNING_MODEL_UNAVAILABLE`. See `learningModelUnavailable`.
+   */
+  modelUnavailable?: LearningModelUnavailable;
 };
+
+/** The most proposals one recording's skills are looked for in, newest first. Each costs a read of its evidence. */
+const RECORDING_SKILL_PROPOSALS = 5;
+/** How much earlier than the recording's stop a proposal may be dated and still count: the two clocks can differ. */
+const RECORDING_CLOCK_SLACK_MS = 60_000;
 
 /** What a person reads when they try to open their Skills while an administrator has not allowed it. */
 const SHARING_OFF =
@@ -356,8 +369,76 @@ export function createPersonalLearningRoutes(
         ? ((await deps.settings.read()).autoApprove ?? true)
         : null,
       approved,
+      ...(deps.modelUnavailable
+        ? { modelProblem: noLearningModel(deps.modelUnavailable) }
+        : {}),
       sources,
     };
+    return context.json(answer);
+  });
+
+  /**
+   * The skills Learning proposed from one recording, for Teach a Bot once it saves one: `title` is the recording's name
+   * and `since` when it stopped (milliseconds). Read from the proposals made since then in the person's own recording
+   * spaces, newest first and a few at most, kept where the evidence cites a recording of theirs by that name. Recordings
+   * that aren't theirs never match: `recordingTitles` names only their own.
+   */
+  routes.get("/recording-skills", async (context) => {
+    const title = context.req.query("title")?.trim() ?? "";
+    const since = Number(context.req.query("since"));
+    if (!title || title.length > 200 || !Number.isFinite(since)) {
+      return context.json({ error: "Name a recording to look for." }, 400);
+    }
+    const manage = deps.manage;
+    const recordingTitles = deps.recordingTitles;
+    if (!manage || !recordingTitles) {
+      return context.json(
+        { error: "Couldn't reach the back end just now. Try again." },
+        503,
+      );
+    }
+    const actor = context.var.actor;
+    const from = since - RECORDING_CLOCK_SLACK_MS;
+    const titles = (ids: string[]) => recordingTitles(actor.id, ids);
+    const sources = (await deps.scopesFor(actor)).filter(
+      (source) => source.kind === "recordings",
+    );
+    const answer: RecordingSkills = { skills: [] };
+    for (const source of sources) {
+      const listed = await settle(readProposals(manage, source.containerId));
+      // A space not made yet holds nothing; any other failure is said, so the page doesn't read it as "none yet".
+      if (listed.failed) {
+        if (listed.missing) continue;
+        if (listed.off) return context.json(answer);
+        return context.json(
+          { error: "Couldn't read your skills just now. Try again." },
+          502,
+        );
+      }
+      const recent = listed.value
+        .filter(
+          (proposal) =>
+            Date.parse(proposal.createdAt) >= from &&
+            proposal.status !== "rejected" &&
+            proposal.operation !== "remove",
+        )
+        .slice(0, RECORDING_SKILL_PROPOSALS);
+      for (const proposal of recent) {
+        const detail = await readProposal(
+          manage,
+          source.containerId,
+          proposal.id,
+          titles,
+        ).catch(() => null);
+        const cited = detail?.insights.some((insight) =>
+          (insight.evidence ?? []).some(
+            (item) => item.kind === "recording" && item.title?.trim() === title,
+          ),
+        );
+        if (cited)
+          answer.skills.push({ ...proposal, container: source.containerId });
+      }
+    }
     return context.json(answer);
   });
 
@@ -391,7 +472,7 @@ export function createPersonalLearningRoutes(
         ),
       });
     } catch (error) {
-      const failure = learningFailure(error);
+      const failure = learningFailure(error, deps.modelUnavailable);
       return context.json({ error: failure.error }, failure.status);
     }
   });
@@ -466,7 +547,7 @@ export function createPersonalLearningRoutes(
         if (error instanceof UnnamedSkillError) {
           return context.json({ error: error.message }, 422);
         }
-        const failure = learningFailure(error);
+        const failure = learningFailure(error, deps.modelUnavailable);
         return context.json({ error: failure.error }, failure.status);
       }
       await audit({
@@ -513,7 +594,7 @@ export function createPersonalLearningRoutes(
     try {
       run = await manage.startLearningRun({ containerId });
     } catch (error) {
-      const failure = learningFailure(error);
+      const failure = learningFailure(error, deps.modelUnavailable);
       return context.json({ error: failure.error }, failure.status);
     }
     await audit({

@@ -1,3 +1,4 @@
+import { accountMethods } from "./plugin-store/accounts";
 import { appAccessMethods } from "./plugin-store/app-access";
 import { callMethods } from "./plugin-store/calls";
 import { connectionMethods } from "./plugin-store/connections";
@@ -8,6 +9,7 @@ import { serverMethods } from "./plugin-store/servers";
 import { skillMethods } from "./plugin-store/skills";
 
 export type { CatalogueEntry } from "./catalogue";
+export type { BrokeredAccountRecord } from "./plugin-store/accounts";
 export type {
   AccessToken,
   BrokeredDisconnectReason,
@@ -55,6 +57,7 @@ export function createPluginStore(options: PluginStoreOptions) {
     ...connectionMethods(context),
     ...callMethods(context),
     ...appAccessMethods(context),
+    ...accountMethods(context),
   };
 }
 
