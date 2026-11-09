@@ -10,6 +10,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **The Account step says when it is waiting for Install to set up the engine.** On a new Mac it
+  said "Checking your CopilotKit account…" for minutes while Install put Podman in, because the
+  sign-in check needs a running engine. It now says "OpenBot is setting up the software it runs on.
+  Your CopilotKit sign-in comes next.", with what Install is doing ("Installing Podman.",
+  "Preparing the engine machine.", "Starting the engine machine."). The desktop log says each change
+  once as `[account]`: what the CLI's preflight answered, the install step, how long the wait took
+  and what the sign-in check answered, and how long the browser sign-in took.
 - **Settings shows which AI OpenBot uses, and changes it.** Settings > General has an AI model
   section in OpenBot Desktop: the provider and how OpenBot signs in to it (a Claude or ChatGPT plan,
   an API key, a Google or xAI account, or your own address), and the model when setup named one.

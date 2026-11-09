@@ -852,8 +852,10 @@ function Setup() {
       <main>
         <CopilotKitAccount
           root={root.trim()}
-          // Install runs behind this step. When it opens Docker Desktop, this step says so.
+          // Install runs behind this step. When it opens Docker Desktop, this step says so, and
+          // while the account check waits on the engine, it says what Install is doing about it.
           handOff={handOffNow(steps)}
+          engine={engineNow(steps)}
           onDone={(acceptedVersion) => {
             if (acceptedVersion) local.acceptTerms(acceptedVersion);
             // Intelligence sets itself up once the install has Docker answering; see above. The
