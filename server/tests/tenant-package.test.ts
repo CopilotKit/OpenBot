@@ -4,6 +4,7 @@ import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { starterSubtitle } from "@openbot/shared/harnesses";
 import { and, eq, inArray } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { installEnterpriseControls } from "../src/admin/controls";
@@ -1747,7 +1748,9 @@ describe("bundled personal starter", () => {
       );
       expect(await profiles.get(actor, "picked-harness")).toMatchObject({
         name: "Personal Assistant",
-        title: `Everyday life. Powered by ${endpoint === claude ? "Claude Agent SDK" : "LangChain"}.`,
+        title: starterSubtitle(
+          endpoint === claude ? "Claude Agent SDK" : "LangChain",
+        ),
         roleDescription: declared?.roleDescription,
         instructions: declared?.configuration.systemPrompt,
       });
@@ -1842,7 +1845,8 @@ describe("bundled personal starter", () => {
     expect(await ownedIds(pkg.id)).toEqual(["picked-harness"]);
     expect(await profiles.get(actor, "picked-harness")).toMatchObject({
       name: "Personal Assistant",
-      title: "Everyday life. Powered by LangChain.",
+      title:
+        "Everyday life agent. Powered by a LangChain agent. Bring your own agent from any stack.",
       endpoint: langchain,
     });
     await synchronizeTenantPackage(database, await loadStarter(tenantId, ""));
@@ -2324,7 +2328,8 @@ describe("bundled personal starter", () => {
       await loadStarter(tenantId, langchain),
     );
     expect(await profiles.get(actor, starter.id)).toMatchObject({
-      title: "Everyday life. Powered by Claude Agent SDK.",
+      title:
+        "Everyday life agent. Powered by a Claude Agent SDK agent. Bring your own agent from any stack.",
       endpoint: "https://agents.example/run",
     });
   });

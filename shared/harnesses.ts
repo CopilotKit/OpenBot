@@ -116,13 +116,46 @@ export const EARLIER_HARNESS_NAMES: Readonly<
 };
 
 /**
- * A subtitle with any "Powered by <earlier name>" read as the framework's current name.
+ * "Powered by a LangChain agent": a framework named as what runs the Bot, with the article its name
+ * reads with ("an AWS Strands agent").
+ */
+export function poweredByAgent(name: string): string {
+  return `Powered by ${/^[AEIOU]/.test(name) ? "an" : "a"} ${name} agent`;
+}
+
+/**
+ * The Personal Assistant's subtitle when it runs on a framework the installer picked: what it is,
+ * what runs it, and that any other agent can be brought along. Atai's wording, November 9.
+ */
+export function starterSubtitle(name: string): string {
+  return `Everyday life agent. ${poweredByAgent(name)}. Bring your own agent from any stack.`;
+}
+
+/** Every name a harness the installer can run has had, with the harness it belongs to now. */
+function namesWithHarness(): Array<[string, Harness]> {
+  return HARNESSES.filter(({ image }) => image !== null).flatMap((harness) =>
+    [harness.name, ...(EARLIER_HARNESS_NAMES[harness.id] ?? [])].map(
+      (name): [string, Harness] => [name, harness],
+    ),
+  );
+}
+
+/**
+ * A subtitle OpenBot wrote, read the way it writes it now.
  *
- * OpenBot wrote that part itself, when it seeded the Bot or when New Bot made it, so it is said
- * the way the catalogue says it now. Only that phrase changes; the person's own words around it
- * stay as they wrote them.
+ * - The Personal Assistant's earlier seed, "Everyday life. Powered by <framework>.", exactly as
+ *   seeded, reads as {@link starterSubtitle} for that framework's current name.
+ * - Any other "Powered by <earlier name>" reads with the framework's current name.
+ *
+ * Only what OpenBot wrote changes. A subtitle the person rewrote no longer matches the seed, and the
+ * person's own words around a "Powered by" stay as they wrote them.
  */
 export function withCurrentFrameworkNames(title: string): string {
+  for (const [name, harness] of namesWithHarness()) {
+    if (title === `Everyday life. Powered by ${name}.`) {
+      return starterSubtitle(harness.name);
+    }
+  }
   let current = title;
   for (const harness of HARNESSES) {
     for (const earlier of EARLIER_HARNESS_NAMES[harness.id] ?? []) {

@@ -7,6 +7,8 @@ import {
   HARNESSES,
   type Harness,
   OPENBOT_HARNESS_NAME,
+  poweredByAgent,
+  starterSubtitle,
 } from "@openbot/shared/harnesses";
 import { isPersonBrowserId } from "@openbot/shared/openbot-browser";
 import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
@@ -854,11 +856,11 @@ function catalogueNamesOf(harness: Harness): string[] {
  * an earlier "LangChain (LangGraph)" is read whole rather than as "LangChain" followed by text.
  */
 const POWERED_BY = new RegExp(
-  `Powered by (?:${HARNESSES.filter(({ image }) => image !== null)
+  `Powered by (?:an? )?(?:${HARNESSES.filter(({ image }) => image !== null)
     .flatMap(catalogueNamesOf)
     .sort((a, b) => b.length - a.length)
     .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .join("|")})(?![\\w])`,
+    .join("|")})(?: agent)?(?![\\w])`,
 );
 
 /**
@@ -870,7 +872,14 @@ const POWERED_BY = new RegExp(
  */
 function attributionFollowing(title: string, harness: Harness | undefined) {
   if (!POWERED_BY.test(title)) return title;
-  if (harness) return title.replace(POWERED_BY, `Powered by ${harness.name}`);
+  if (harness) {
+    // Said the way it was said: the starter's "Powered by a LangChain agent", or a plain name.
+    return title.replace(POWERED_BY, (said) =>
+      said.endsWith(" agent")
+        ? poweredByAgent(harness.name)
+        : `Powered by ${harness.name}`,
+    );
+  }
   const rest = title
     .replace(new RegExp(`\\s*${POWERED_BY.source}\\.?`), "")
     .trim();
@@ -919,9 +928,12 @@ function personalStarterSeed(
         ? harness.name
         : null
       : OPENBOT_HARNESS_NAME;
-    const title = harnessName
-      ? `Everyday life. Powered by ${harnessName}.`
-      : "Everyday life.";
+    // On a framework the installer picked, the starter says so and that any agent can be brought.
+    const title = harness
+      ? starterSubtitle(harness.name)
+      : harnessName
+        ? `Everyday life. Powered by ${harnessName}.`
+        : "Everyday life.";
     /*
      * What it does is the package's `role_description`, the sentence written for the person, and
      * what a conversation's header shows. Its instructions are the package's `system_prompt`,
@@ -1164,9 +1176,10 @@ export async function synchronizeTenantPackage(
         .returning({ id: agentTable.id });
       /*
        * And what the subtitle says runs it, for a Bot that now runs on what the installer picked.
-       * The starter is seeded "Everyday life. Powered by Claude Agent SDK.", and a person may have
-       * rewritten the first half; either way it went on naming the harness it was moved off. A
-       * connection the person set themselves is not moved above, so its subtitle is not touched.
+       * The starter is seeded "Everyday life agent. Powered by a Claude Agent SDK agent.", and a
+       * person may have rewritten the rest; either way it went on naming the harness it was moved
+       * off. A connection the person set themselves is not moved above, so its subtitle is not
+       * touched.
        */
       if (managed) {
         const [profile] = await transaction
