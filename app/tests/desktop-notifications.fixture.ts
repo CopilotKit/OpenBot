@@ -60,11 +60,19 @@ export function launchDesktop(options: {
    * opens its page from Windows' notification centre too. False: a desktop app from before it.
    */
   notifyCommand?: boolean;
+  /**
+   * The desktop app's answer to `is_permission_granted` comes back only once `answer()` is called:
+   * as Tauri's does, over IPC, after the page has moved on, and never in the tick it was asked.
+   */
+  answersLate?: boolean;
+  /** Windows, where Tauri sets the plugin script's `__TEMPLATE_windows__` to true (src/lib.rs). */
+  windows?: boolean;
 }) {
   const calls: DesktopCall[] = [];
   let nextCallback = 1;
   let granted = !options.grantedLate;
   const refused: string[] = [];
+  const unanswered: (() => void)[] = [];
   const shell: ShellIpc = {
     transformCallback: () => nextCallback++,
     async invoke(command, args) {
@@ -91,6 +99,10 @@ export function launchDesktop(options: {
       }
       switch (name) {
         case "is_permission_granted":
+          if (options.answersLate)
+            return new Promise((resolve) =>
+              unanswered.push(() => resolve(true)),
+            );
           return true;
         case "request_permission":
           return "granted";
@@ -112,7 +124,10 @@ export function launchDesktop(options: {
   if (options.plugin) {
     new Function(
       "window",
-      PLUGIN_SCRIPT.replace("__TEMPLATE_windows__", "false"),
+      PLUGIN_SCRIPT.replace(
+        "__TEMPLATE_windows__",
+        options.windows ? "true" : "false",
+      ),
     )(globalThis);
     (window as unknown as Globals).Notification = (
       globalThis as Globals
@@ -123,6 +138,10 @@ export function launchDesktop(options: {
     /** The shell grants the page's origin, as it did once the page had loaded. */
     grant: () => {
       granted = true;
+    },
+    /** The desktop app answers every `is_permission_granted` asked so far (`answersLate`). */
+    answer: () => {
+      for (const reply of unanswered.splice(0)) reply();
     },
     /** The commands the shell refused because the page's origin was not granted yet. */
     refused: () => [...refused],

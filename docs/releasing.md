@@ -581,6 +581,13 @@ Each stable release's installers also stay under their versioned names, for exam
 `https://downloads.copilotkit.ai/releases/v0.3.0/OpenBot_0.3.0_aarch64.dmg`. Those never change, so
 they are cached for a year; the `latest/` addresses are cached for five minutes. Signed apps read
 their [update feed](#the-updater) here, and GitHub's copy only when this address does not answer.
+This copy of the feed names this address for each update it lists: a platform's `url` that is the
+release's own GitHub download of a file the sync put under `releases/<tag>/` (the versioned
+installers and the Mac updater archives) becomes `https://downloads.copilotkit.ai/releases/<tag>/<file>`,
+and every other byte, each `signature` included, is the release's `latest.json` as the signing runs
+wrote it (minisign signs the file, not its URL). The sync checks each of those addresses answers
+before it uploads the feed, and fails otherwise. The release's own `latest.json` on GitHub is never
+changed.
 
 **Downloads sync** ([`downloads-sync.yml`](../.github/workflows/downloads-sync.yml), running
 [`scripts/downloads-sync.sh`](../scripts/downloads-sync.sh)) keeps it in step. The signing run that

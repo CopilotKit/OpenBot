@@ -77,6 +77,8 @@ const listeners = new Set<() => void>();
 let current: NotificationPermissionState | null = null;
 /** Counts each fresh read, so an answer the desktop app gives late cannot overwrite a newer one. */
 let reading = 0;
+/** Settles once the desktop app's answer to the newest read is in, while `current` is "checking". */
+let answered: Promise<void> = Promise.resolve();
 
 function read(): NotificationPermissionState {
   if (current !== null) return current;
@@ -87,7 +89,7 @@ function read(): NotificationPermissionState {
   }
   current = "checking";
   const asked = ++reading;
-  void desktopPermission(shell).then((answer) => {
+  answered = desktopPermission(shell).then((answer) => {
     if (asked === reading) set(answer ?? notificationPermission());
   });
   return current;
@@ -133,10 +135,19 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
  * the offer reads: not the plugin script's `Notification.permission`, which stays "default" for as
  * long as the page is open when its own first question went unanswered. In a browser, the browser's,
  * read afresh each time, so a site setting changed meanwhile counts.
+ *
+ * In OpenBot Desktop the answer comes back over IPC, so the first read after OpenBot starts has
+ * none yet ("checking"). This waits for it rather than take that as a no: taken as a no, the first
+ * Bot to need the person after each launch raised nothing.
  */
-export function notificationsAllowed(): boolean {
-  if (desktopShell()) return read() === "granted";
-  return notificationPermission() === "granted";
+export async function notificationsAllowed(): Promise<boolean> {
+  if (!desktopShell()) return notificationPermission() === "granted";
+  let state = read();
+  while (state === "checking") {
+    await answered;
+    state = read();
+  }
+  return state === "granted";
 }
 
 /** Reads the browser's answer again, for a "Check again" after somebody changed a site setting. */

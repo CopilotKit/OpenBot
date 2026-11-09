@@ -184,8 +184,10 @@ async function announce(
   open: (channelId: string) => void,
 ): Promise<void> {
   const key = wordsKey(activity);
-  if (announced.has(key)) return;
-  if (inSight() || !notificationsAllowed()) return;
+  if (announced.has(key) || inSight()) return;
+  // Waits for OpenBot Desktop's answer when it is still on its way; looked at again after.
+  if (!(await notificationsAllowed())) return;
+  if (announced.has(key) || inSight()) return;
   remember(key);
 
   // Read fresh: whether this conversation now waits on the person decides which notice it is.

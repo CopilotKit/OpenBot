@@ -1410,32 +1410,31 @@ async fn install_app_update_steps<R: tauri::Runtime>(
         return Err(Problem::plain("This build of OpenBot can't update itself."));
     }
     let _update = RuntimeUpdateGuard::begin(&app)?;
-    let handle = app.clone();
     let stopped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let stopped_by_installer = stopped.clone();
-    let update = app
-        .updater_builder()
-        // Runs on Windows only, in place of the updater's own cleanup, which this ends with.
-        .on_before_exit(move || {
-            stopped_by_installer.store(true, std::sync::atomic::Ordering::SeqCst);
-            stop_before_installer(&handle);
-        })
-        .build()
-        .map_err(|e| Problem::from(e.to_string()))?
-        .check()
-        .await
-        .map_err(|e| Problem::from(e.to_string()))?
-        .ok_or_else(|| Problem::plain("OpenBot is already up to date."))?;
-    log::info!("[app update] downloading {}", update.version);
-    app.state::<Shell>().app_update.begin_install();
+    let feeds = app_update::endpoints(app.config().plugins.0.get("updater")).unwrap_or_default();
     let installed = async {
-        let bytes = update
-            .download(
-                |chunk, total| app.state::<Shell>().app_update.downloaded(chunk, total),
-                || {},
-            )
-            .await
-            .map_err(|e| Problem::from(e.to_string()))?;
+        let (update, bytes) = download_app_update(
+            &feeds,
+            |feed| {
+                let handle = app.clone();
+                let stopped_by_installer = stopped.clone();
+                let mut builder = app
+                    .updater_builder()
+                    // Runs on Windows only, in place of the updater's own cleanup, which this
+                    // ends with.
+                    .on_before_exit(move || {
+                        stopped_by_installer.store(true, std::sync::atomic::Ordering::SeqCst);
+                        stop_before_installer(&handle);
+                    });
+                if let Some(feed) = feed {
+                    builder = builder.endpoints(vec![feed])?;
+                }
+                builder.build()
+            },
+            || app.state::<Shell>().app_update.begin_install(),
+            |chunk, total| app.state::<Shell>().app_update.downloaded(chunk, total),
+        )
+        .await?;
         if app
             .state::<Shell>()
             .update_cancelled
@@ -1481,6 +1480,79 @@ async fn install_app_update_steps<R: tauri::Runtime>(
     }
     log::info!("[app update] installed; restarting into it");
     restart_into_update(&app)
+}
+
+/**
+Check for the newer OpenBot and download it, verified, from the feeds `updater(None)` reads; then,
+when that download fails and a later feed in `feeds` is on another host (`app_update::feed_after`),
+once more from that feed alone, built by `updater(Some(feed))`.
+
+The updater moves on to its next feed only when reading a feed fails, not when a download does. The
+first feed is downloads.copilotkit.ai's, which names its own copy of the archive, so without this a
+mirror that served the feed but not the archive left the update failing until the mirror was fixed,
+though GitHub's feed names the same signed archive. Any other failure is returned as it is.
+
+`begin` is called before each download, and `on_chunk` with what each one receives, so the window's
+progress starts again for the second.
+*/
+async fn download_app_update(
+    feeds: &[reqwest::Url],
+    updater: impl Fn(
+        Option<reqwest::Url>,
+    ) -> tauri_plugin_updater::Result<tauri_plugin_updater::Updater>,
+    begin: impl Fn(),
+    on_chunk: impl Fn(usize, Option<u64>),
+) -> Result<(tauri_plugin_updater::Update, Vec<u8>), Problem> {
+    let failed = |e: tauri_plugin_updater::Error| Problem::from(e.to_string());
+    let check = |feed: Option<reqwest::Url>| {
+        let built = updater(feed);
+        async move {
+            built
+                .map_err(failed)?
+                .check()
+                .await
+                .map_err(failed)?
+                .ok_or_else(|| Problem::plain("OpenBot is already up to date."))
+        }
+    };
+    let downloaded = |update: &tauri_plugin_updater::Update| {
+        log::info!(
+            "[app update] downloaded {} from {}",
+            update.version,
+            update.download_url
+        )
+    };
+    let update = check(None).await?;
+    log::info!(
+        "[app update] downloading {} from {}",
+        update.version,
+        update.download_url
+    );
+    begin();
+    let error = match update.download(&on_chunk, || {}).await {
+        Ok(bytes) => {
+            downloaded(&update);
+            return Ok((update, bytes));
+        }
+        Err(error) => error,
+    };
+    let Some(feed) = app_update::feed_after(&update.download_url, feeds) else {
+        return Err(failed(error));
+    };
+    log::warn!(
+        "[app update] downloading from {} failed: {error}; trying the feed at {feed}",
+        update.download_url
+    );
+    let update = check(Some(feed)).await?;
+    log::info!(
+        "[app update] downloading {} from {}",
+        update.version,
+        update.download_url
+    );
+    begin();
+    let bytes = update.download(&on_chunk, || {}).await.map_err(failed)?;
+    downloaded(&update);
+    Ok((update, bytes))
 }
 
 /**
@@ -2874,7 +2946,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
             );
         }
         let (settings, mut secrets) = persist_start_environment(&root, settings, &credential)?;
-        report(&app, "env", true, "settings written, credentials stored");
+        report(&app, "env", true, "Your settings are saved.");
         // Compose gives inherited environment precedence over .env. Pin this run's chosen ports.
         secrets.extend(ports.settings());
         for key in [
@@ -2906,7 +2978,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
 
         // Installation already verified these images. Start only raises the local containers;
         // its no-pull policy sends missing assets back to the installation step.
-        report_running(&app, "services", "starting installed containers", None);
+        report_running(&app, "services", "Starting OpenBot's services.", None);
 
         // Only an installed harness needs the local service; a BYO endpoint is already running elsewhere.
         let installed_harness = picked
@@ -2922,7 +2994,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         let requested_services = stack::up(&found, &root, installed_harness, &secrets)?;
         // The migrations ran with that: `migrate` is the dependency Compose completes before it
         // starts `server`, once, and a failed one fails the `up`.
-        report(&app, "services", true, "containers up");
+        report(&app, "services", true, "OpenBot's services are running.");
 
         // `compose up` succeeds once it has asked for everything. A service that then exits is not its
         // problem, and both Bots exit immediately without a model key. Reported and made fatal here;
@@ -7174,6 +7246,9 @@ the page a click opens.
 On Windows a toast of our own, which opens an `openbot://` link by protocol: the only way an app
 installed without a package is brought back from the notification centre (see `notice.rs`). On
 macOS and Linux the notification plugin's, carrying the page in `extra.path` for its click report.
+
+Each one is logged, shown or not, so the log says whether the page asked and what the system
+answered. Never the notice's words or page: they are the person's.
 */
 fn show_notice<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
@@ -7183,16 +7258,16 @@ fn show_notice<R: tauri::Runtime>(
     tag: Option<&str>,
 ) -> Result<(), String> {
     #[cfg(windows)]
-    {
+    let shown = {
         let link = path.map_or_else(|| format!("{}://open", notice::SCHEME), notice::open_link);
         notice::show_toast(
             &app.config().identifier,
             &notice::toast_xml(title, body, &link),
             tag.map(notice::toast_tag).as_deref(),
         )
-    }
+    };
     #[cfg(not(windows))]
-    {
+    let shown = {
         // The plugin has no tag to replace a notice by: the page sends one notice per moment.
         let _ = tag;
         use tauri_plugin_notification::NotificationExt;
@@ -7201,7 +7276,12 @@ fn show_notice<R: tauri::Runtime>(
             builder = builder.extra("path", path);
         }
         builder.show().map_err(|error| error.to_string())
+    };
+    match &shown {
+        Ok(()) => log::info!("[notification] shown"),
+        Err(error) => log::warn!("[notification] not shown: {error}"),
     }
+    shown
 }
 
 /**
@@ -8631,6 +8711,196 @@ mod check_for_updates_tests {
             2
         );
         assert!(main.contains("app_update::MENU_ID => check_for_updates_from_menu(app.clone()),"));
+    }
+}
+
+/// The update's download through the real updater plugin: its builder, `check` and `download`,
+/// signature verification included, against feeds on 127.0.0.1.
+#[cfg(test)]
+mod update_download_fallback_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    /// A test signing key's public half, as `tauri signer generate` writes it. Its secret half was
+    /// used once, to sign `PACKAGE`, and is kept nowhere.
+    const PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ3ODJGM0QyNDNFRTk4QUYKUldTdm1PNUQwdk9DUjJWTWEyaHJFWjNkck9KK0N6emtZcmVZVDIxTm1UaGhPNy9YRmMyYTRQRVgK";
+    const PACKAGE: &[u8] = b"OpenBot update fallback test package\n";
+    /// `tauri signer sign` of `PACKAGE` with that key.
+    const SIGNATURE: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTdm1PNUQwdk9DUjBYZFFYWnQrWVZDMXNqbjY1TEdsQ0xDNHhjUnZvdEl4L2RaSEgwbVdadEpEVHcxYUVXb0lseG1mYkpQc2xjQzNydWxOS0JGcjBsRGh0NzUrTzI2ZEFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MTgwNDYzCWZpbGU6cGF5bG9hZC5iaW4KaFF5azhkUzRYNW1LWk1SRW5YRk53SVVyTXlUbmdoOXFYMmVYa3FEangwRzF3d08zWTc0dDg4alBOTmVMZ2Vid0dheldNRzVRRFB3UDJRRDB3TVBpQkE9PQo=";
+
+    /// A server on 127.0.0.1 answering each path in `routes` with its body, and 404 for any other,
+    /// as a bucket answers for a key it does not have. Its address, and every path it was asked.
+    fn serve(
+        routes: impl Fn(&str) -> Option<Vec<u8>> + Send + 'static,
+    ) -> (String, Arc<Mutex<Vec<String>>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let seen = asked.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut request = [0u8; 8192];
+                let read = std::io::Read::read(&mut stream, &mut request).unwrap_or(0);
+                let head = String::from_utf8_lossy(&request[..read]).into_owned();
+                let path = head
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_owned();
+                seen.lock().unwrap().push(path.clone());
+                let (status, body) = match routes(&path) {
+                    Some(body) => ("200 OK", body),
+                    None => ("404 Not Found", b"missing".to_vec()),
+                };
+                let _ = std::io::Write::write_all(
+                    &mut stream,
+                    format!(
+                        "HTTP/1.1 {status}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                        body.len()
+                    )
+                    .as_bytes(),
+                );
+                let _ = std::io::Write::write_all(&mut stream, &body);
+            }
+        });
+        (base, asked)
+    }
+
+    /// A feed offering 99.0.0 for this machine, its archive at `url`.
+    fn feed(url: &str) -> Vec<u8> {
+        let mut platforms = serde_json::Map::new();
+        platforms.insert(
+            app_update::platform().unwrap(),
+            serde_json::json!({ "url": url, "signature": SIGNATURE }),
+        );
+        serde_json::json!({ "version": "99.0.0", "platforms": platforms })
+            .to_string()
+            .into_bytes()
+    }
+
+    /// Every line logged, kept for the test to read.
+    static LOGGED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    struct Keep;
+    impl log::Log for Keep {
+        fn enabled(&self, _: &log::Metadata) -> bool {
+            true
+        }
+        fn log(&self, record: &log::Record) {
+            LOGGED.lock().unwrap().push(record.args().to_string());
+        }
+        fn flush(&self) {}
+    }
+
+    /**
+    The mirror's feed names the mirror's copy of the archive, and the mirror does not have it. The
+    updater would not move on to GitHub's feed for that, since only reading a feed moves it on, and
+    the update failed until the mirror was fixed. Now the archive GitHub's feed names is downloaded
+    once, verified against the configured key, and the log says where it came from.
+    */
+    #[test]
+    fn a_download_the_mirror_cannot_give_comes_from_githubs_feed() {
+        if test_support::isolated_process(
+            "update_download_fallback_tests::a_download_the_mirror_cannot_give_comes_from_githubs_feed",
+        ) {
+            return;
+        }
+        log::set_boxed_logger(Box::new(Keep)).unwrap();
+        log::set_max_level(log::LevelFilter::Info);
+        let mirror_archive = Arc::new(Mutex::new(String::new()));
+        let mirror_feed = mirror_archive.clone();
+        let (mirror, mirror_asked) = serve(move |path| {
+            (path == "/latest/latest.json").then(|| feed(&mirror_feed.lock().unwrap()))
+        });
+        *mirror_archive.lock().unwrap() = format!("{mirror}/releases/v99.0.0/OpenBot.app.tar.gz");
+        let github_archive = Arc::new(Mutex::new(String::new()));
+        let github_feed = github_archive.clone();
+        let (github, github_asked) = serve(move |path| match path {
+            "/releases/latest/download/latest.json" => Some(feed(&github_feed.lock().unwrap())),
+            "/releases/download/v99.0.0/OpenBot.app.tar.gz" => Some(PACKAGE.to_vec()),
+            _ => None,
+        });
+        *github_archive.lock().unwrap() =
+            format!("{github}/releases/download/v99.0.0/OpenBot.app.tar.gz");
+
+        // Configured as a signed release is, with the test key and these two feeds in its order.
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        context.config_mut().plugins.0.insert(
+            "updater".into(),
+            serde_json::json!({
+                "pubkey": PUBKEY,
+                "endpoints": [
+                    format!("{mirror}/latest/latest.json"),
+                    format!("{github}/releases/latest/download/latest.json"),
+                ],
+                "dangerousInsecureTransportProtocol": true,
+            }),
+        );
+        // The plugin as `main` registers it, on a test app (`shell_updates` counts the one
+        // registration in the real app by its spelling, so this one is spelled differently).
+        use tauri_plugin_updater as updater_plugin;
+        let app = tauri::test::mock_builder()
+            .plugin(updater_plugin::Builder::new().build())
+            .build(context)
+            .unwrap();
+        let feeds = app_update::endpoints(app.config().plugins.0.get("updater")).unwrap();
+        let begun = std::sync::atomic::AtomicUsize::new(0);
+        let received = std::sync::atomic::AtomicUsize::new(0);
+        let (update, bytes) = tauri::async_runtime::block_on(download_app_update(
+            &feeds,
+            |feed| {
+                use tauri_plugin_updater::UpdaterExt;
+                let mut builder = app.updater_builder().on_before_exit(|| {});
+                if let Some(feed) = feed {
+                    builder = builder.endpoints(vec![feed])?;
+                }
+                builder.build()
+            },
+            || {
+                begun.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            },
+            |chunk, _| {
+                received.fetch_add(chunk, std::sync::atomic::Ordering::SeqCst);
+            },
+        ))
+        .expect("the update downloads from GitHub's feed");
+
+        assert_eq!(bytes, PACKAGE);
+        assert_eq!(update.version, "99.0.0");
+        assert_eq!(
+            update.download_url.as_str(),
+            github_archive.lock().unwrap().as_str()
+        );
+        assert_eq!(
+            *mirror_asked.lock().unwrap(),
+            [
+                "/latest/latest.json",
+                "/releases/v99.0.0/OpenBot.app.tar.gz"
+            ],
+            "the mirror's feed was read and its archive asked for once"
+        );
+        assert_eq!(
+            *github_asked.lock().unwrap(),
+            [
+                "/releases/latest/download/latest.json",
+                "/releases/download/v99.0.0/OpenBot.app.tar.gz"
+            ],
+            "GitHub's archive was downloaded exactly once"
+        );
+        assert_eq!(begun.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert_eq!(
+            received.load(std::sync::atomic::Ordering::SeqCst),
+            PACKAGE.len()
+        );
+        let logged = LOGGED.lock().unwrap().clone();
+        let source = format!(
+            "[app update] downloaded 99.0.0 from {}",
+            github_archive.lock().unwrap()
+        );
+        assert!(
+            logged.contains(&source),
+            "the log names where it came from: {logged:#?}"
+        );
     }
 }
 

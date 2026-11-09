@@ -203,7 +203,8 @@ export function ScreenBrowser({
                 screen={screen}
               />
             </TabPanel>
-            {recording.phase === "idle" ? null : (
+            {/* While a recording runs; before one only to say there is no microphone, so nobody narrates to nothing. */}
+            {recording.phase === "idle" && !narration.noMicrophone ? null : (
               <NarrationNotice
                 className="border-t border-b-0 bg-transparent px-3 py-1.5 text-xs"
                 narration={narration}

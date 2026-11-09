@@ -52,6 +52,30 @@ export function handOffNow(steps: Progress[]): string | null {
   return handedOff?.detail ?? null;
 }
 
+/**
+ * What the engine is doing while the back end waits on it: the hand-off to another app's window
+ * when there is one, else the step that is preparing this computer, as setup says it ("Starting
+ * the engine machine.").
+ *
+ * A relaunch with OpenBot's Podman machine stopped spent ten seconds starting it under "Waiting
+ * for the back end", and nothing on the screen said so.
+ */
+export function engineNow(steps: Progress[]): string | null {
+  const handedOff = handOffNow(steps);
+  if (handedOff) return handedOff;
+  const preparing = [...steps]
+    .reverse()
+    .find((step) => step.running && PREPARING.has(step.step) && step.detail);
+  return preparing?.detail ?? null;
+}
+
+/** Where OpenBot's own icon is, as this computer names it: macOS has a menu bar, Windows a tray. */
+export function trayPlace(userAgent = navigator.userAgent): string {
+  return /Macintosh|Mac OS X/.test(userAgent)
+    ? "the menu bar"
+    : "the system tray";
+}
+
 export function SetupProgress({
   steps,
   label = "Setup progress",
@@ -323,7 +347,7 @@ function label(step: string): string {
     case "answering":
       return "Starting OpenBot";
     case "services":
-      return "Containers";
+      return "OpenBot's services";
     case "migrate":
       return "Database";
     case "stop-openbot":

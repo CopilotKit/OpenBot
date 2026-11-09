@@ -22,6 +22,7 @@ import {
 import type { NarrationProblem } from "@/lib/browser/narration";
 import { cn } from "@/lib/utils";
 import type { NarrationChoice } from "./narration-choice";
+import { useMicrophone } from "./use-microphone";
 import type { NarrationControls } from "./use-narration";
 
 /**
@@ -36,6 +37,8 @@ export const NARRATION_OFF = "Narration is off.";
 /** What narration is for, beside its switch in Record's popover. */
 export const NARRATION_EXPLAINED =
   "Talk out loud while you do the task to explain your thinking. What you say becomes part of what your Bots learn.";
+/** Said wherever narration is, on a computer with no microphone: before a recording too, so nobody narrates to nothing. */
+export const NARRATION_NO_MICROPHONE = "No microphone found. Narration is off.";
 
 /** Narration that cannot hear the person is simply off. */
 export function narrationProblemSentence(
@@ -74,8 +77,10 @@ export function NativeNarrationRow({
   /** A recording is running (or starting, or stopping). */
   recording: boolean;
 }) {
+  // No microphone on this computer: off, and said, while the person's choice stays as they made it.
+  const noMicrophone = useMicrophone() === false;
   if (!recording) {
-    const on = choice.narration === "on";
+    const on = choice.narration === "on" && !noMicrophone;
     // Not known yet (the preferences still loading, or unreadable): nothing said, and nothing to switch.
     const known = choice.narration !== undefined;
     return (
@@ -86,14 +91,18 @@ export function NativeNarrationRow({
         <ItemContent>
           <ItemTitle>Narration</ItemTitle>
           <ItemDescription className="line-clamp-none">
-            {on ? NARRATION_ON : NARRATION_OFF}
+            {noMicrophone
+              ? NARRATION_NO_MICROPHONE
+              : on
+                ? NARRATION_ON
+                : NARRATION_OFF}
           </ItemDescription>
         </ItemContent>
         <ItemActions>
           <Switch
             aria-label="Narration"
             checked={on}
-            disabled={!known}
+            disabled={!known || noMicrophone}
             onCheckedChange={choice.choose}
           />
         </ItemActions>
@@ -118,6 +127,8 @@ export function NativeNarrationRow({
               />
               {nativeNarrationSentence(voice)}
             </span>
+          ) : noMicrophone ? (
+            NARRATION_NO_MICROPHONE
           ) : (
             nativeNarrationSentence(voice)
           )}
@@ -203,6 +214,7 @@ export function NarrationSwitch({
         className="ml-auto"
         id={id}
         checked={on}
+        disabled={narration.noMicrophone}
         onCheckedChange={onChange}
       />
     </span>
@@ -247,6 +259,8 @@ function narrationNoticeSentence(
   narration: NarrationControls,
   _language: string,
 ): string | null {
+  if (narration.supported && narration.noMicrophone)
+    return NARRATION_NO_MICROPHONE;
   if (
     !narration.supported ||
     !narration.on ||
@@ -320,6 +334,7 @@ export function NarrationRow({
           <Switch
             aria-labelledby={labelId}
             checked={narration.on}
+            disabled={narration.noMicrophone}
             onCheckedChange={onChange}
           />
         </ItemActions>
