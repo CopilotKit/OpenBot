@@ -7,9 +7,10 @@ server is deterministic; these checks are protocol regressions, not live bot pro
 import asyncio
 import json
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Thread
+from threading import Lock, Thread
 from uuid import uuid4
 
 import httpx
@@ -583,6 +584,42 @@ async def test_http_refusal_tells_the_model_the_deployments_reason(
     boundary["callback_body"] = reply
     await run_protocol(run_input(["granted_lookup"], deployment=["granted_lookup"]))
     assert boundary["model"][-1]["messages"][-1]["content"] == expected
+
+
+@pytest.mark.asyncio
+async def test_computer_calls_made_together_run_one_at_a_time_in_order(boundary):
+    # A model that calls tools in parallel sends a form's fields in one step. A Bot has one browser,
+    # and side by side the fields took the focus from each other; a click could overtake the typing.
+    names = ["computer_type", "computer_click", "computer_key", "granted_lookup"]
+    computer = names[:3]
+    running = {"now": 0, "most": 0, "lookup_beside": False}
+    lock = Lock()
+
+    def authorize(body, _token):
+        with lock:
+            if body["name"] in computer:
+                running["now"] += 1
+                running["most"] = max(running["most"], running["now"])
+        # Long enough that calls sent together would overlap.
+        time.sleep(0.15)
+        with lock:
+            if body["name"] in computer:
+                running["now"] -= 1
+            elif running["now"]:
+                running["lookup_beside"] = True
+        return 200
+
+    boundary["callback_authorize"] = authorize
+    events = await run_protocol(run_input(names, deployment=names))
+    called = [each["body"]["name"] for each in boundary["callback"]]
+    assert [name for name in called if name in computer] == computer
+    assert running["most"] == 1
+    # Everything else still runs beside them.
+    assert running["lookup_beside"]
+    # The model reads each answer against the call it made, in the order it made them.
+    assert [
+        m["toolCallId"] for m in snapshot(events) if m.get("role") == "tool"
+    ] == ["call-" + name for name in names]
 
 
 @pytest.mark.asyncio

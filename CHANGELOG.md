@@ -72,6 +72,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the raw request failure in red, such as `REST run request failed: {"error":"Failed to resolve
   Learning Container"}`. It now says "OpenBot couldn't reach its back end, so your message wasn't
   sent. Try again, or quit and reopen OpenBot." The original text goes to the browser console.
+- **A Bot fills a form in one pass, whatever model it runs on.** A model that calls tools in
+  parallel, such as Claude Opus, sent a form's fields in one step, the fields took the focus from
+  each other, and values landed in the wrong field or were lost until the Bot went back and filled
+  them one by one. A Bot's browser now takes its actions one at a time, in the order they arrived,
+  on any number of server replicas. An action that never finishes gives way to the next after
+  `BROWSER_TURN_LIMIT_MS` (50 seconds by default), and one stopped while it waits never runs.
 
 ## 1.0.0
 
