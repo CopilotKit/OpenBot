@@ -31,6 +31,12 @@ const point = z.object({
     .string()
     .describe("What this point is called, e.g. a month or a team"),
   value: z.number().describe("Its value"),
+  link: z
+    .string()
+    .optional()
+    .describe(
+      "A web address this opens: the record, search or message it came from. Only one you actually have; never make one up",
+    ),
 });
 
 /** Where the figures came from. The same fields, and the same reason, as the app's charts. */
@@ -149,6 +155,12 @@ const MetricsCardProps = z.object({
           .optional()
           .describe("The movement, e.g. '+12% on last month'"),
         changeTone: tone.optional(),
+        link: z
+          .string()
+          .optional()
+          .describe(
+            "A web address this opens: the record, search or message it came from. Only one you actually have; never make one up",
+          ),
       }),
     )
     .max(6)
@@ -268,6 +280,14 @@ export type HeadlessComponentSpec = {
   /** The tool name, the catalogue key, and the renderer's key in the app. */
   name: string;
   title: string;
+  /**
+   * The description this build ships, the same words as the app's. Not what the model is given: that
+   * is the deployment's published description. Not called `description`, which would make this read
+   * as a tool registration of its own to the scan in `tests/support/built-in-tools.ts`. A catalogue row nobody here has
+   * edited is brought up to it (`followBuild` in `store.ts`), from this copy and never from a page's
+   * announcement, which any signed-in person's browser makes.
+   */
+  buildDescription: string;
   parameters: z.ZodType<Record<string, unknown>>;
   /** What the model is told once the call is recorded. Nobody is watching, so it says so. */
   confirmation: string;
@@ -283,42 +303,56 @@ export const HEADLESS_COMPONENTS: readonly HeadlessComponentSpec[] = [
   {
     name: "showAreaChart",
     title: "Area chart",
+    buildDescription:
+      "The same as showLineChart with the area under each line filled. Use for volume or accumulation rather than for a rate.",
     parameters: LineChartProps,
     confirmation: saved("area chart"),
   },
   {
     name: "showBarChart",
     title: "Bar chart",
+    buildDescription:
+      "Show values as a bar chart. Use when comparing a handful of named things, teams, months, categories. Not for a trend over time, which is showLineChart. A point may link to the page its figure came from, such as the record or the search, when you have that address; never make one up.",
     parameters: BarChartProps,
     confirmation: saved("bar chart"),
   },
   {
     name: "showLineChart",
     title: "Line chart",
+    buildDescription:
+      "Show one or more series over an ordered axis, usually time. Every series must have one value per label.",
     parameters: LineChartProps,
     confirmation: saved("line chart"),
   },
   {
     name: "showPieChart",
     title: "Donut chart",
+    buildDescription:
+      "Show how a whole is divided, as a donut with a legend. Use only when the parts sum to something meaningful, and prefer a bar chart above about six slices. A point may link to the page its figure came from, such as the record or the search, when you have that address; never make one up.",
     parameters: PieChartProps,
     confirmation: saved("donut chart"),
   },
   {
     name: "showProgress",
     title: "Progress against target",
+    buildDescription:
+      "Show values against their targets as progress bars. Use for 'are we there yet' questions, budget spent against budget, done against planned. A point may link to the page its figure came from, such as the record or the search, when you have that address; never make one up.",
     parameters: ProgressChartProps,
     confirmation: saved("progress chart"),
   },
   {
     name: "showRecord",
     title: "Record",
+    buildDescription:
+      "Show one thing and its fields, an order, a person, a ticket. Use when there are several fields worth reading side by side; a fact or two about it belong in a Markdown reply.",
     parameters: RecordCardProps,
     confirmation: saved("record"),
   },
   {
     name: "showMetrics",
     title: "Headline figures",
+    buildDescription:
+      "Show up to six headline figures, each with an optional movement. Use for figures somebody reads at a glance, not for a written summary. A figure may link to the page it came from, such as the record or the report, when you have that address; never make one up.",
     parameters: MetricsCardProps,
     confirmation:
       "The figures are saved in this conversation and are drawn when the person opens it.",
@@ -326,30 +360,40 @@ export const HEADLESS_COMPONENTS: readonly HeadlessComponentSpec[] = [
   {
     name: "showChecklist",
     title: "Checklist",
+    buildDescription:
+      "Show the tasks or steps of a piece of work and which are finished, such as a release plan or an onboarding list. Only for work somebody ticks off. Not for presenting information: findings, options, recommendations and ordinary lists of points belong in a Markdown reply. The person cannot tick these here, so do not use it to ask for anything.",
     parameters: ChecklistCardProps,
     confirmation: saved("checklist"),
   },
   {
     name: "showNotice",
     title: "Notice",
+    buildDescription:
+      "Show a distinct actionable alert needing the person's attention, such as a failed scheduled task requiring intervention or a new issue blocking their work. Also use when the person explicitly asks for a notice card. Answer ordinary questions, explanations, summaries, recommendations and short lists directly in Markdown, including important emails or deadlines. Importance, a caveat or several paragraphs alone does not justify a notice. Do not use this to wrap or repeat a routine answer. Body and supporting points support Markdown.",
     parameters: NoticeCardProps,
     confirmation: saved("notice"),
   },
   {
     name: "showTable",
     title: "Data table",
+    buildDescription:
+      "Show a sortable table to compare records, plans, or other structured facts. Use when there are enough rows or fields that a Markdown list would be hard to compare. Supply up to eight columns and 100 rows, with exactly one cell per column. Use numbers for quantities so sorting is numeric. Show only data you have; do not invent rows.",
     parameters: DataTableProps as z.ZodType<Record<string, unknown>>,
     confirmation: saved("sortable table"),
   },
   {
     name: "showQuote",
     title: "Quotation",
+    buildDescription:
+      "Show a quotation with its attribution. Use when the exact words matter, something a person said, or a line from a document you were given.",
     parameters: QuoteCardProps,
     confirmation: saved("quotation"),
   },
   {
     name: "showActivityReport",
     title: "Activity report",
+    buildDescription:
+      "Show what this deployment has actually been doing, read from its own records rather than from anything you know. Use for 'what have the Bots been up to' and 'what has been refused'. You choose the report and the period; the figures are read for you and you will not see them.",
     parameters: ActivityReportProps,
     confirmation:
       "The report is saved in this conversation. Its figures are read from this deployment when the person opens it; you were not given them.",

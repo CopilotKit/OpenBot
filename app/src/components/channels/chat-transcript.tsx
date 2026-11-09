@@ -13,10 +13,12 @@ import {
 import { answeredBy } from "@openbot/shared/handoff-markers";
 import { SUBAGENT_TOOL } from "@openbot/shared/subagent";
 import {
+  answersTheModel,
   ownToolAttempt,
   ownToolSubject,
   readToolName,
 } from "@openbot/shared/tool-name";
+import { SEARCH_TOOLS, toolsFound } from "@openbot/shared/tool-search";
 import {
   IconAlertTriangle,
   IconBox,
@@ -1765,8 +1767,13 @@ export function ServerToolLine({
         ? UNOFFERED_TOOL_SENTENCE
         : refused && body
           ? outcomeForPerson(body)
-          : // A folder step's answer for the model (JSON, grant ids) is said in words or left out.
-            folderStepBody(name, body);
+          : answersTheModel(name)
+            ? // Written for the model. A tool search opens to the tools it found, in words.
+              name === SEARCH_TOOLS
+              ? foundToolsInWords(answer)
+              : undefined
+            : // A folder step's answer for the model (JSON, grant ids) is said in words or left out.
+              folderStepBody(name, body);
   /*
    * A web search or a page read opens to the pages it found, not to the provider's JSON. The list
    * bounds itself (a few results, each cut to a few lines), so the line does not scroll around it.
@@ -1807,6 +1814,22 @@ export function ServerToolLine({
       ) : null}
     </ToolLine>
   );
+}
+
+/**
+ * The tools a search found, one to a line by the name a step gives each ("Send email on Gmail"). The
+ * search answers the model, naming each tool by the id it is offered under
+ * (`mcp__composio-gmail__GMAIL_SEND_EMAIL`), and the step opened to that answer as it was.
+ */
+function foundToolsInWords(answer: string | undefined): string | undefined {
+  const names = answer ? toolsFound(answer) : [];
+  if (names.length === 0) return undefined;
+  return names
+    .map((name) => {
+      const { label, detail } = readToolName(name);
+      return `- ${detail ? `${label} on ${detail}` : label}`;
+    })
+    .join("\n");
 }
 
 /* Moved beside the turns it also decides; re-exported for the callers that read it from here. */

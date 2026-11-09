@@ -15,6 +15,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { ASK_FIRST_TITLE } from "@/components/approvals/ask-first-copy";
 import { AccessRequestsSection } from "@/components/plugins/access-requests";
 import { AccountModeDialog } from "@/components/plugins/account-mode-dialog";
 import {
@@ -75,11 +76,12 @@ import {
   pluginsPageQueryOptions,
   pluginsProvider,
 } from "@/lib/plugins/queries";
+import { toolsListError } from "@/lib/plugins/tools-error";
 import {
   botSharedAppsQueryOptions,
   describeApproval,
 } from "@/lib/plugins/shared-use";
-import { toolInWords } from "@/lib/plugins/tool-words";
+import { toolInWords, toolName } from "@/lib/plugins/tool-words";
 
 /**
  * One vendor: what it needs from this deployment, and which Bots hold its tools.
@@ -162,6 +164,22 @@ function ToolInWords({
       {summary ? <ItemDescription>{summary}</ItemDescription> : null}
     </>
   );
+}
+
+/**
+ * An app's tools in the order its page lists them. In the personal edition, by the names the page
+ * shows ("Get IMAP settings" under G), not by the stored names they arrive sorted by, which put it
+ * under S as `GMAIL_SETTINGS_GET_IMAP`. Admin keeps the stored order beside the stored names.
+ */
+function listedTools<T extends { name: string }>(
+  tools: readonly T[],
+  personalApp: string | null,
+): readonly T[] {
+  if (personalApp === null) return tools;
+  return tools
+    .map((tool) => ({ tool, name: toolName(personalApp, tool.name) }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(({ tool }) => tool);
 }
 
 /**
@@ -612,6 +630,7 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
     );
   }
 
+  const listed = server ? listedTools(server.tools, personal ? key : null) : [];
   /* The grant dialog's two halves of the tool list, split by what a boundary would see. */
   const reads = server?.tools.filter((tool) => tool.effect !== "write") ?? [];
   const writes = server?.tools.filter((tool) => tool.effect === "write") ?? [];
@@ -1281,7 +1300,8 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
           }
           description={
             personal
-              ? "Every Bot can use these. It asks you before one that changes things while Ask before acting is on."
+              ? // The setting by the name Settings > Approvals gives it, so a person can find it there.
+                `Every Bot can use these. While ${ASK_FIRST_TITLE} is on, a Bot asks you before it uses one that makes changes.`
               : "A Bot only sees the tools it has been given. Each call is checked when it happens, so removing access applies from the next call."
           }
           title="Tools"
@@ -1292,11 +1312,12 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
           />
           {server.tools.length === 0 ? (
             <PageEmpty icon={IconTool} title="No tools listed">
-              {server.lastError ?? "Refresh tools to check again."}
+              {toolsListError(server.lastError, { title, personal }) ??
+                "Refresh tools to check again."}
             </PageEmpty>
           ) : (
             <PageRows>
-              {server.tools.map((tool, index) => (
+              {listed.map((tool, index) => (
                 <React.Fragment key={tool.ref}>
                   {/* A real link with no children: children passed to `render` replace the row's own. */}
                   {/* A list in the personal edition: there is nobody to give a tool to one at a time. */}

@@ -1,9 +1,11 @@
+import { IconPalette } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Item,
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
 import {
@@ -38,6 +40,9 @@ export function SkinPicker() {
   return (
     <>
       <Item size="sm">
+        <ItemMedia variant="icon">
+          <IconPalette />
+        </ItemMedia>
         <ItemContent>
           <ItemTitle>Skin</ItemTitle>
           <ItemDescription>

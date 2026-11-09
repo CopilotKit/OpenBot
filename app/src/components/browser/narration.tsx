@@ -1,5 +1,9 @@
 import type { LauncherState } from "@openbot/shared/openbot-browser";
-import { IconMicrophone, IconMicrophoneOff } from "@tabler/icons-react";
+import {
+  IconInfoCircle,
+  IconMicrophone,
+  IconMicrophoneOff,
+} from "@tabler/icons-react";
 import { useId } from "react";
 import {
   Item,
@@ -10,8 +14,15 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { NarrationProblem } from "@/lib/browser/narration";
+import { cn } from "@/lib/utils";
 import type { NarrationChoice } from "./narration-choice";
+import { useMicrophone } from "./use-microphone";
 import type { NarrationControls } from "./use-narration";
 
 /**
@@ -23,6 +34,11 @@ export const NARRATION_CAPTURING =
   "Narration is on. We're capturing your voice.";
 export const NARRATION_ON = "Narration is on.";
 export const NARRATION_OFF = "Narration is off.";
+/** What narration is for, beside its switch in Record's popover. */
+export const NARRATION_EXPLAINED =
+  "Talk out loud while you do the task to explain your thinking. What you say becomes part of what your Bots learn.";
+/** Said wherever narration is, on a computer with no microphone: before a recording too, so nobody narrates to nothing. */
+export const NARRATION_NO_MICROPHONE = "No microphone found. Narration is off.";
 
 /** Narration that cannot hear the person is simply off. */
 export function narrationProblemSentence(
@@ -61,8 +77,10 @@ export function NativeNarrationRow({
   /** A recording is running (or starting, or stopping). */
   recording: boolean;
 }) {
+  // No microphone on this computer: off, and said, while the person's choice stays as they made it.
+  const noMicrophone = useMicrophone() === false;
   if (!recording) {
-    const on = choice.narration === "on";
+    const on = choice.narration === "on" && !noMicrophone;
     // Not known yet (the preferences still loading, or unreadable): nothing said, and nothing to switch.
     const known = choice.narration !== undefined;
     return (
@@ -73,14 +91,18 @@ export function NativeNarrationRow({
         <ItemContent>
           <ItemTitle>Narration</ItemTitle>
           <ItemDescription className="line-clamp-none">
-            {on ? NARRATION_ON : NARRATION_OFF}
+            {noMicrophone
+              ? NARRATION_NO_MICROPHONE
+              : on
+                ? NARRATION_ON
+                : NARRATION_OFF}
           </ItemDescription>
         </ItemContent>
         <ItemActions>
           <Switch
             aria-label="Narration"
             checked={on}
-            disabled={!known}
+            disabled={!known || noMicrophone}
             onCheckedChange={choice.choose}
           />
         </ItemActions>
@@ -105,6 +127,8 @@ export function NativeNarrationRow({
               />
               {nativeNarrationSentence(voice)}
             </span>
+          ) : noMicrophone ? (
+            NARRATION_NO_MICROPHONE
           ) : (
             nativeNarrationSentence(voice)
           )}
@@ -115,7 +139,8 @@ export function NativeNarrationRow({
 }
 
 /**
- * Narration on and off, for the bar above a browser shown in the page. A switch, because it takes effect at once:
+ * Narration on and off, for a browser shown in the page: in Record's popover, and in the toolbar while a recording
+ * runs. A switch, because it takes effect at once:
  * off stops listening after the phrase being said, on listens again (and tries again after a failure). It is the
  * person's choice, so `onChange` keeps it as well. It shows the state narration is in, so a narration that failed reads
  * off, as the notice under the bar says; while a recording runs and the page hears the person, it says Listening beside
@@ -138,7 +163,11 @@ export function NarrationSwitch({
   const listening = recording && narration.status?.state === "listening";
   const Icon = on ? IconMicrophone : IconMicrophoneOff;
   return (
-    <span className="flex shrink-0 items-center gap-2 text-sm">
+    // `data-slot` lets Record's popover lay it out as a row of its own, the switch at the row's end.
+    <span
+      className="flex shrink-0 items-center gap-2 text-sm"
+      data-slot="narration-switch"
+    >
       {listening ? (
         <span
           className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400"
@@ -156,11 +185,36 @@ export function NarrationSwitch({
       <label htmlFor={id} id={labelId} className="text-muted-foreground">
         Narration
       </label>
+      {/*
+        What narration is for, on hover or focus, where the choice is made (Record's popover). Not while recording:
+        the choice is made by then, and the bar has no room. A button of type "button": in Record's form any other
+        would submit it and start the recording.
+      */}
+      {recording ? null : (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                aria-label="About narration"
+                className="-ml-1 flex size-5 items-center justify-center rounded-full text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                type="button"
+              />
+            }
+          >
+            <IconInfoCircle aria-hidden="true" className="size-4" />
+          </TooltipTrigger>
+          <TooltipContent className="max-w-60" side="top">
+            {NARRATION_EXPLAINED}
+          </TooltipContent>
+        </Tooltip>
+      )}
       {/* Named by the label's id as well: the switch is a span with role="switch", which `htmlFor` cannot name. */}
       <Switch
         aria-labelledby={labelId}
+        className="ml-auto"
         id={id}
         checked={on}
+        disabled={narration.noMicrophone}
         onCheckedChange={onChange}
       />
     </span>
@@ -175,15 +229,21 @@ export function NarrationSwitch({
 export function NarrationNotice({
   narration,
   language,
+  className,
 }: {
   narration: NarrationControls;
   language: string;
+  /** Where it is drawn as the browser window's status bar rather than a row under its bar. */
+  className?: string;
 }) {
   const sentence = narrationNoticeSentence(narration, language);
   if (!sentence) return null;
   return (
     <p
-      className="border-b border-border bg-muted/40 px-3 py-2 text-muted-foreground text-sm"
+      className={cn(
+        "border-b border-border bg-muted/40 px-3 py-2 text-muted-foreground text-sm",
+        className,
+      )}
       role="status"
     >
       {sentence}
@@ -199,6 +259,8 @@ function narrationNoticeSentence(
   narration: NarrationControls,
   _language: string,
 ): string | null {
+  if (narration.supported && narration.noMicrophone)
+    return NARRATION_NO_MICROPHONE;
   if (
     !narration.supported ||
     !narration.on ||
@@ -272,6 +334,7 @@ export function NarrationRow({
           <Switch
             aria-labelledby={labelId}
             checked={narration.on}
+            disabled={narration.noMicrophone}
             onCheckedChange={onChange}
           />
         </ItemActions>

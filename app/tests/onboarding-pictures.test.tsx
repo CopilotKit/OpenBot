@@ -37,7 +37,7 @@ const PICTURES: Array<[string, () => ReactNode]> = [
   ["The Welcome", () => <WelcomeDemo />],
   ["The Bot computer", () => <ComputerDemo />],
   ["The team", () => <TeamDemo />],
-  ["The Talk to us", () => <SelfHostDemo />],
+  ["Book a demo's fallback", () => <SelfHostDemo />],
 ];
 
 for (const [name, picture] of PICTURES) {

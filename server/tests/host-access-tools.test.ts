@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import type { AuditEventInput } from "../src/audit";
 import { createHostAccessBroker } from "../src/host-access/broker";
 import { DENIED_ON_DESKTOP, hostAccessTools } from "../src/host-access/tools";
+import { REFUSAL_MARKER } from "../src/plugins/tools";
 
 function auditRecorder() {
   const events: AuditEventInput[] = [];
@@ -226,13 +227,13 @@ describe("host access tools", () => {
       auditStore,
     })[0]!;
     const text = await list.execute({});
-    expect(text).toContain("No host folders");
+    // The team edition: an admin chooses a Bot's folders, on Admin → Computers.
+    const reason =
+      "This Bot has no folders it can read right now. Folder access ends when OpenBot stops. An admin gives a Bot a folder with Choose folder in Admin → Computers.";
+    expect(text).toBe(`${REFUSAL_MARKER} ${reason}`);
     expect(events.at(-1)).toMatchObject({
       eventType: "computer.action_refused",
-      payload: {
-        action: "host/list_folders",
-        reason: "No host folders are granted to this Bot.",
-      },
+      payload: { action: "host/list_folders", reason },
     });
   });
   /*

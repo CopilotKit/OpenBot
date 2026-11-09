@@ -11,13 +11,14 @@ type ProgressEvent = {
   ok: boolean;
   detail: string;
   running?: boolean;
+  elsewhere?: boolean;
   downloadBytes?: number;
   downloads?: {
     done: number;
     total: number;
     bytes: number;
+    size?: number;
     bytesPerSecond?: number;
-    pulling: Array<{ name: string; bytes: number; size?: number }>;
   };
 };
 type Deferred<T> = {
@@ -552,16 +553,23 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
       done: 2,
       total: 7,
       bytes: 52_000_000,
+      size: 1_300_000_000,
       bytesPerSecond: 3_000_000,
-      pulling: [{ name: "agent-bot", bytes: 12_000_000, size: 40_000_000 }],
     },
   });
   expect(
     installing.queryByText("Checking which local software to download."),
   ).toBeNull();
-  expect(installing.getByText("5 of 7 items remaining")).toBeTruthy();
-  expect(installing.getByRole("progressbar").getAttribute("value")).toBe("2");
-  expect(installing.queryByText("agent-bot")).toBeNull();
+  expect(
+    installing.getByText("52.0 MB of 1.3 GB · 5 of 7 items remaining"),
+  ).toBeTruthy();
+  // The bar is the bytes, out of the whole download.
+  expect(installing.getByRole("progressbar").getAttribute("value")).toBe(
+    "52000000",
+  );
+  expect(installing.getByRole("progressbar").getAttribute("max")).toBe(
+    "1300000000",
+  );
   expectPlain(view);
   expect(
     setupEvents().filter(
@@ -680,6 +688,91 @@ test("the account step waits for a container engine Install is still setting up,
   expect(asked).toBe(2);
   expect(view.queryByText(/Couldn.t check your CopilotKit account/)).toBeNull();
 }, 15000);
+
+// What the native side says as it opens Docker Desktop: `docker_desktop::HAND_OFF`.
+const DOCKER_HAND_OFF =
+  "Docker Desktop is starting in its own window. If it asks you to accept its terms or sign in, do that there. OpenBot comes back when Docker is ready.";
+
+function broughtToFront() {
+  return invokeCalls.filter((call) => call.command === "bring_setup_to_front");
+}
+
+test("the account step says Docker Desktop is starting while Install waits on it, until Docker answers", async () => {
+  // Dogfooding 0.3.3: Install opened Docker Desktop, whose window came to the front. OpenBot's,
+  // behind it on the account step, said only "Checking your CopilotKit account…" for minutes.
+  setupRootConfiguration("/tmp/hand-off-docker", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    prepare_installation: () => new Promise(() => {}),
+    // The account check waits on the engine Install is bringing up.
+    local_eval_terms: () => ({ status: "engine-not-ready" }),
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByRole("heading", { name: "Sign in to CopilotKit" });
+
+  await emitProgress({
+    step: "install-engine",
+    ok: true,
+    running: true,
+    elsewhere: true,
+    detail: DOCKER_HAND_OFF,
+  });
+  expectWorking(view, DOCKER_HAND_OFF);
+  // One line, saying what the wait is for.
+  expect(view.queryByText("Checking your CopilotKit account…")).toBeNull();
+
+  // Docker answers: the line goes, and the account check is what is left.
+  await emitProgress({
+    step: "install-engine",
+    ok: true,
+    running: false,
+    detail: "Docker Desktop is running.",
+  });
+  expect(view.queryByText(DOCKER_HAND_OFF)).toBeNull();
+  expectWorking(view, "Checking your CopilotKit account…");
+});
+
+test("a line about OpenBot's own work is not said as a hand-off on the account step", async () => {
+  setupRootConfiguration("/tmp/hand-off-none", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    prepare_installation: () => new Promise(() => {}),
+    local_eval_terms: () => ({ status: "engine-not-ready" }),
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByRole("heading", { name: "Sign in to CopilotKit" });
+  await emitProgress({
+    step: "install-engine",
+    ok: true,
+    running: true,
+    detail: "Installing Podman.",
+  });
+  expect(view.queryByText("Installing Podman.")).toBeNull();
+  expectWorking(view, "Checking your CopilotKit account…");
+});
+
+test("a finished install brings the window to the front for the next step", async () => {
+  const { view, preparation } = await beginPendingInstallation();
+  // Nothing is the person's while it installs: the window stays where they left it.
+  expect(broughtToFront()).toHaveLength(0);
+  await act(async () => preparation.resolve());
+  await view.findByRole("heading", { name: "Connect your AI" });
+  expect(broughtToFront()).toHaveLength(1);
+});
+
+test("a failed install brings the window to the front with its failure", async () => {
+  const { view, preparation } = await beginPendingInstallation();
+  expect(broughtToFront()).toHaveLength(0);
+  await act(async () =>
+    preparation.reject({ said: "The download was interrupted." }),
+  );
+  await view.findByRole("button", { name: "Retry installation" });
+  expect(broughtToFront()).toHaveLength(1);
+});
 
 const APPS_UNAVAILABLE = {
   said: "OpenBot couldn't connect your apps. Check your connection, then choose Connect apps. If it keeps happening, ask an admin.",
@@ -1447,6 +1540,209 @@ test("relaunch starts a connected local stack that reports ready and valid", asy
   ).toHaveLength(1);
   expect(view.getByRole("button", { name: "Start OpenBot" })).toBeTruthy();
 });
+
+const DOCKER_DID_NOT_START = {
+  said: "Docker Desktop didn't start. Open it and finish anything it shows, then try again.",
+};
+
+/**
+ * The engine as the CLI sees it: stopped until `wake_engine` opens Docker Desktop. Each wake
+ * waits on `docker.wake`, which the test settles with nothing (Docker answers) or a `Problem`.
+ * The native side's progress lines are emitted by the test, as `docker_desktop::start` says them.
+ */
+function withDockerQuit() {
+  const docker = {
+    running: false,
+    wakes: 0,
+    wake: deferred<unknown>(),
+  };
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "wake_engine") {
+      docker.wakes += 1;
+      const refused = await docker.wake.promise;
+      if (refused) throw refused;
+      docker.running = true;
+      return null;
+    }
+    if (
+      ["set_up_local_eval", "connect_local_eval", "run_local_eval"].includes(
+        command,
+      ) &&
+      !docker.running
+    ) {
+      return {
+        ...localStatus("unknown", "unknown"),
+        outcome: "blocked",
+        stack: null,
+        reason: "docker-unavailable",
+      };
+    }
+    return previous(command, args);
+  };
+  return docker;
+}
+
+test("relaunch with Docker Desktop quit opens it, says so, and starts once it answers", async () => {
+  // Live Mac check of #1295: after a reboot Docker Desktop was not running. The relaunch went
+  // straight to the CLI, which answered "docker-unavailable", and stopped at "Waiting for the back
+  // end" without ever opening Docker. Start, which opens it, was never reached.
+  setupConnectedLocalStack(
+    "/tmp/local-eval-docker-quit",
+    localStatus("ready", "valid"),
+  );
+  const docker = withDockerQuit();
+  const view = await renderApp();
+  // Docker is opened first, before any CLI call, and the screen says what to do.
+  await waitFor(() => expect(docker.wakes).toBe(1));
+  await view.findByRole("heading", { name: "Starting OpenBot" });
+  await emitDockerHandOff();
+  expectWorking(view, DOCKER_HAND_OFF);
+  const row = view.getByRole("listitem", { name: "Waiting for the back end" });
+  expect(row.textContent).toContain("In progress");
+  expect(localSequence()).toEqual([]);
+  // Docker answers: the hand-off goes, and the back end and OpenBot start.
+  await emitDockerSettled(true, "Docker Desktop is running.");
+  await act(async () => docker.wake.resolve(null));
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  expect(view.queryByText(DOCKER_HAND_OFF)).toBeNull();
+  expect(localSequence()).toEqual([
+    "run_local_eval",
+    "start_stack",
+    "show_openbot",
+  ]);
+  expect(
+    view.queryByText(
+      "The back end cannot start until the software it runs on is running.",
+    ),
+  ).toBeNull();
+});
+
+test("relaunch with the engine machine stopped says it is starting it, in setup's words", async () => {
+  // Seen on Windows: Podman's machine was stopped, and for the ten seconds it took to start the
+  // screen said only "Waiting for the back end", while the log said "Starting the engine machine".
+  setupConnectedLocalStack(
+    "/tmp/local-eval-machine-stopped",
+    localStatus("ready", "valid"),
+  );
+  const machine = deferred<unknown>();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) =>
+    command === "wake_engine" ? machine.promise : previous(command, args);
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "Starting OpenBot" });
+  // As `wake_installation_engine` reports it, before the machine answers.
+  await emitProgress({
+    step: "start-machine",
+    ok: true,
+    running: true,
+    detail: "Starting the engine machine.",
+  });
+  expectWorking(view, "Starting the engine machine.");
+  await emitProgress({
+    step: "start-machine",
+    ok: true,
+    running: false,
+    detail: "The engine machine is running.",
+  });
+  expect(view.queryByText("Starting the engine machine.")).toBeNull();
+  await act(async () => machine.resolve(null));
+  await view.findByRole("heading", { name: "OpenBot is running" });
+});
+
+test("the running screen shows none of Start's own steps, and names the system tray on Windows", async () => {
+  // Seen on Windows: "OpenBot is running" flashed "settings written, credentials stored" and
+  // "containers up" for the moment before OpenBot opened, and sent the person to "the menu bar",
+  // which Windows does not have.
+  Object.defineProperty(navigator, "userAgent", {
+    configurable: true,
+    value:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+  });
+  try {
+    setupConnectedLocalStack(
+      "/tmp/local-eval-running-words",
+      localStatus("ready", "valid"),
+    );
+    const started = deferred<unknown>();
+    const previous = invokeHandler;
+    invokeHandler = async (command, args) =>
+      command === "start_stack"
+        ? started.promise.then(() => previous(command, args))
+        : previous(command, args);
+    const view = await renderApp();
+    await waitFor(() => expect(localSequence()).toContain("start_stack"));
+    // What the native side reports as it starts OpenBot.
+    for (const progress of [
+      { step: "env", ok: true, detail: "Your settings are saved." },
+      {
+        step: "services",
+        ok: true,
+        running: true,
+        detail: "Starting OpenBot's services.",
+      },
+      { step: "services", ok: true, detail: "OpenBot's services are running." },
+      { step: "answering", ok: true, detail: "OpenBot is ready." },
+    ])
+      await emitProgress(progress);
+    await act(async () => started.resolve(null));
+    await view.findByRole("heading", { name: "OpenBot is running" });
+    const screen = document.body.textContent ?? "";
+    expect(view.queryByRole("list", { name: "Setup progress" })).toBeNull();
+    for (const internal of [
+      "settings written",
+      "credentials stored",
+      "containers up",
+      "menu bar",
+    ])
+      expect(screen).not.toContain(internal);
+    expect(
+      view.getByText(
+        "OpenBot is open in this window. You can also show it or stop it from its icon in the system tray.",
+      ),
+    ).toBeTruthy();
+  } finally {
+    delete (navigator as { userAgent?: string }).userAgent;
+  }
+});
+
+test("relaunch says when Docker Desktop did not start, and Retry opens it again", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-docker-never",
+    localStatus("ready", "valid"),
+  );
+  const docker = withDockerQuit();
+  const view = await renderApp();
+  await waitFor(() => expect(docker.wakes).toBe(1));
+  await emitDockerHandOff();
+  await emitDockerSettled(false, DOCKER_DID_NOT_START.said);
+  await act(async () => docker.wake.resolve(DOCKER_DID_NOT_START));
+  await view.findByText(DOCKER_DID_NOT_START.said);
+  expect(view.queryByText(DOCKER_HAND_OFF)).toBeNull();
+  expect(localSequence()).toEqual([]);
+  // Retry opens Docker Desktop again, and this time it answers.
+  docker.wake = deferred<unknown>();
+  await userEvent.click(view.getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(docker.wakes).toBe(2));
+  await act(async () => docker.wake.resolve(null));
+  await view.findByRole("heading", { name: "OpenBot is running" });
+});
+
+/** What `docker_desktop::start` says as it opens Docker Desktop. */
+async function emitDockerHandOff() {
+  await emitProgress({
+    step: "engine",
+    ok: true,
+    running: true,
+    elsewhere: true,
+    detail: DOCKER_HAND_OFF,
+  });
+}
+
+/** The engine row ending once Docker answers or is given up on. */
+async function emitDockerSettled(ok: boolean, detail: string) {
+  await emitProgress({ step: "engine", ok, running: false, detail });
+}
 
 /** Start finds the installation on an older release than this app, and `upgrade_and_start` answers. */
 function withOlderDeployment(outcome: unknown) {
@@ -2913,6 +3209,9 @@ function setupRootConfiguration(
     if (command === "start_stack") return null;
     if (command === "show_openbot") return null;
     if (command === "connect_intelligence_apps") return null;
+    // The engine already answers, unless a test says otherwise.
+    if (command === "wake_engine") return null;
+    if (command === "bring_setup_to_front") return null;
     throw new Error(`unexpected command ${command}`);
   };
 }
@@ -3081,6 +3380,7 @@ function useCompatibleEndpointSetup(
     }
     if (command === "start_stack") return null;
     if (command === "show_openbot") return null;
+    if (command === "wake_engine") return null;
     throw new Error(`unexpected command ${command}`);
   };
   withLocalCli(readyLocal());

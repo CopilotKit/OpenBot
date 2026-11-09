@@ -84,10 +84,19 @@ test("the first sync copies every signed installer and latest.json, and invalida
     "latest/OpenBot-mac-x64.dmg",
     "latest/OpenBot-windows-x64-setup.exe",
     "latest/latest.json",
+    "releases/v0.3.0/OpenBot-darwin-aarch64.app.tar.gz",
     "releases/v0.3.0/OpenBot_0.3.0_aarch64.dmg",
     "releases/v0.3.0/OpenBot_0.3.0_x64-setup.exe",
     "releases/v0.3.0/OpenBot_0.3.0_x64.dmg",
+    "releases/v0.3.0/container-images.json",
   ]);
+  // What the app fetches from the release besides installers, never changing.
+  expect(bucket["releases/v0.3.0/container-images.json"]).toEqual({
+    content: "{}",
+    cacheControl: IMMUTABLE,
+    contentType: "application/json",
+    sha256: true,
+  });
   expect(bucket["latest/OpenBot-mac-arm64.dmg"]).toEqual({
     content: "signed arm64 0.3.0",
     cacheControl: LATEST,
@@ -134,10 +143,116 @@ test("a second sync with nothing new uploads nothing and does not invalidate", (
   expect(again.some((call) => call.startsWith("aws s3api put-object"))).toBe(
     false,
   );
-  expect(again.some((call) => call.startsWith("gh release download"))).toBe(
-    false,
-  );
+  // Only the feed is read again, to write the mirror's copy of it and compare that.
+  expect(
+    again.filter((call) => call.startsWith("gh release download")),
+  ).toEqual([
+    "gh release download v0.3.0 -R CopilotKit/OpenBot --pattern latest.json --dir " +
+      (again
+        .find((call) => call.startsWith("gh release download"))
+        ?.split(" --dir ")[1] ?? ""),
+  ]);
   expect(fake.invalidations()).toHaveLength(1);
+});
+
+// The app updates from latest/latest.json. Its downloads must come from this address too, so the
+// mirror's copy names each one where this run put it; the signatures are over the files, not their
+// URLs, so they stay exactly as the signing run wrote them.
+test("the mirrored feed names this address for each download it mirrors, and nothing else changes", () => {
+  const fake = downloads();
+  const github =
+    "https://github.com/CopilotKit/OpenBot/releases/download/v0.3.0";
+  // As the signing runs write it: indented, a signature per platform.
+  const feed = `${JSON.stringify(
+    {
+      version: "0.3.0",
+      notes: "See the release.",
+      pub_date: "2026-11-08T00:00:00Z",
+      platforms: {
+        "windows-x86_64": {
+          signature: "c2lnbmVkIHdpbmRvd3M=",
+          url: `${github}/OpenBot_0.3.0_x64-setup.exe`,
+        },
+        "darwin-aarch64": {
+          signature: "c2lnbmVkIGFybTY0",
+          url: `${github}/OpenBot-darwin-aarch64.app.tar.gz`,
+        },
+        // A file this run does not mirror, and one from another release: both left as they are.
+        "linux-x86_64": {
+          signature: "c2lnbmVkIGxpbnV4",
+          url: `${github}/OpenBot_0.3.0_amd64.AppImage`,
+        },
+        "darwin-x86_64": {
+          signature: "c2lnbmVkIGludGVs",
+          url: "https://github.com/CopilotKit/OpenBot/releases/download/v0.2.0/OpenBot-darwin-x86_64.app.tar.gz",
+        },
+      },
+    },
+    null,
+    2,
+  )}\n`;
+  fake.release("v0.3.0", { ...signed("0.3.0"), "latest.json": feed });
+  fake.setLatest("v0.3.0");
+  const result = run(fake, { DOWNLOADS_VERIFY_DELAY: "0" });
+  expect(result.code).toBe(0);
+  const mirror = "https://downloads.copilotkit.ai/releases/v0.3.0";
+  // Byte for byte the release's feed, but for the two URLs.
+  expect(fake.bucket()["latest/latest.json"]).toEqual({
+    content: feed
+      .replace(
+        `"${github}/OpenBot_0.3.0_x64-setup.exe"`,
+        `"${mirror}/OpenBot_0.3.0_x64-setup.exe"`,
+      )
+      .replace(
+        `"${github}/OpenBot-darwin-aarch64.app.tar.gz"`,
+        `"${mirror}/OpenBot-darwin-aarch64.app.tar.gz"`,
+      ),
+    cacheControl: LATEST,
+    contentType: "application/json",
+    sha256: true,
+  });
+  const written = JSON.parse(
+    fake.bucket()["latest/latest.json"]?.content ?? "{}",
+  );
+  expect(written.platforms["darwin-aarch64"]).toEqual({
+    signature: "c2lnbmVkIGFybTY0",
+    url: `${mirror}/OpenBot-darwin-aarch64.app.tar.gz`,
+  });
+  expect(written.platforms["linux-x86_64"].url).toBe(
+    `${github}/OpenBot_0.3.0_amd64.AppImage`,
+  );
+  // Each named download answered through the address before the feed went up, last.
+  const calls = fake.calls();
+  const put = (key: string) =>
+    calls.findIndex(
+      (call) =>
+        call.startsWith("aws s3api put-object") &&
+        call.includes(`--key ${key} `),
+    );
+  const feedPut = put("latest/latest.json");
+  for (const file of [
+    "OpenBot_0.3.0_x64-setup.exe",
+    "OpenBot-darwin-aarch64.app.tar.gz",
+  ]) {
+    const checked = calls.indexOf(
+      `curl --silent --head --output /dev/null --write-out %{http_code} ${mirror}/${file}`,
+    );
+    expect(checked).toBeGreaterThan(put(`releases/v0.3.0/${file}`));
+    expect(checked).toBeLessThan(feedPut);
+  }
+  expect(puts(fake).at(-1)).toBe("latest/latest.json");
+
+  // A download the address does not serve keeps the new feed back, and says which.
+  const missing = downloads();
+  missing.release("v0.3.0", { ...signed("0.3.0"), "latest.json": feed });
+  missing.setLatest("v0.3.0");
+  missing.refuse("releases/v0.3.0/OpenBot-darwin-aarch64.app.tar.gz");
+  const refused = run(missing, { DOWNLOADS_VERIFY_DELAY: "0" });
+  expect(refused.code).toBe(1);
+  expect(refused.out).toContain(
+    `::error::${mirror}/OpenBot-darwin-aarch64.app.tar.gz answers 403, so latest.json, which names it, was not uploaded.`,
+  );
+  expect(Object.keys(missing.bucket())).not.toContain("latest/latest.json");
 });
 
 test("drift in S3 is repaired, and only what drifted is uploaded", () => {
@@ -372,9 +487,11 @@ test("a tag mirrors that stable release's releases/<tag>/ only, and leaves lates
   const result = run(fake, { DOWNLOADS_TAG: "v0.2.0" });
   expect(result.code).toBe(0);
   expect(Object.keys(fake.bucket()).sort()).toEqual([
+    "releases/v0.2.0/OpenBot-darwin-aarch64.app.tar.gz",
     "releases/v0.2.0/OpenBot_0.2.0_aarch64.dmg",
     "releases/v0.2.0/OpenBot_0.2.0_x64-setup.exe",
     "releases/v0.2.0/OpenBot_0.2.0_x64.dmg",
+    "releases/v0.2.0/container-images.json",
   ]);
   expect(fake.invalidations()).toEqual([]);
 });
@@ -505,7 +622,10 @@ test("the sync workflow runs on main only, one at a time, with the role and noth
   expect(login?.with?.["role-to-assume"]).toBe(
     "arn:aws:iam::604598162673:role/openbot-release-downloads",
   );
-  expect(job.steps?.at(-1)?.run).toBe("scripts/downloads-sync.sh");
+  const runs = job.steps?.map((step) => step.run).filter(Boolean);
+  // The images first: a failed copy stops the job before latest/ names the release.
+  expect(runs?.at(-2)).toBe("bun scripts/downloads-images.ts");
+  expect(runs?.at(-1)).toBe("scripts/downloads-sync.sh");
 
   // Both attach jobs may be the one that makes the release Latest, so both may start the sync.
   for (const path of [

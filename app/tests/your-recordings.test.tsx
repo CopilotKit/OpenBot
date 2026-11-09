@@ -117,7 +117,7 @@ test("no recordings shows one empty line", async () => {
     </QueryClientProvider>,
   );
   await view.findByText(
-    "No recordings yet. Record a task with the OpenBot Recorder to see it here.",
+    "No recordings yet. Each task you record shows up here.",
   );
 });
 

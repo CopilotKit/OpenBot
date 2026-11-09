@@ -1,10 +1,11 @@
+import { ruleTitle } from "@openbot/shared/tool-name";
 import {
   IconChevronRight,
   IconLock,
   IconPlus,
   IconShieldCheck,
 } from "@tabler/icons-react";
-import type { UseMutationResult } from "@tanstack/react-query";
+import { type UseMutationResult, useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,6 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { GONE_BOT, useBotNames } from "@/lib/agents/bot-names";
 import {
   type ApprovalRuleInput,
   type ApprovalRuleRow,
@@ -40,6 +42,10 @@ import {
   type HostCommandPolicy,
   type RuleBehaviour,
 } from "@/lib/approvals";
+import {
+  type HostFolderGrant,
+  hostAccessQueryOptions,
+} from "@/lib/computers/host-access";
 
 export const HOST_LABELS: Record<HostCommandPolicy, string> = {
   ask: "Ask every time",
@@ -97,6 +103,38 @@ const TEAM_BEHAVIOUR_LABELS = Object.fromEntries(
   ]),
 ) as Record<RuleBehaviour, string>;
 
+/** What kind of action a rule covers, in words. Any other kind is left unsaid. */
+const EFFECT_WORDS: Record<string, string> = {
+  read: "reading",
+  write: "changes",
+  destructive: "deleting",
+  delegate: "handing off work",
+};
+
+/** "for Expenses"; nothing until the names arrive, so a Bot is never named by its id. */
+function forBot(name: string): string | null {
+  if (!name) return null;
+  return name === GONE_BOT ? "for a Bot no longer here" : `for ${name}`;
+}
+
+/** A rule saved from a folder's card is on the id OpenBot gave that folder (`host-access/broker.ts`). */
+const FOLDER_GRANT = "host-grant-";
+
+/**
+ * A folder rule's place by the folder's name, as Settings → Computer shows it: "in share". A grant
+ * ends when OpenBot stops, so a rule on one that is gone says so rather than naming its id.
+ */
+function folderWords(
+  grantId: string,
+  grants: readonly HostFolderGrant[] | undefined,
+): string {
+  if (!grants) return "in a folder";
+  const grant = grants.find((candidate) => candidate.id === grantId);
+  return grant && !grant.revoked
+    ? `in ${grant.displayName}`
+    : "in a folder that's no longer shared";
+}
+
 /**
  * One saved rule, as a row: what it matches, and what a Bot does about it. A locked rule — a team
  * rule seen by a member, or a personal rule the team has switched off — states its behaviour and
@@ -118,14 +156,31 @@ export function RuleRow({
   onChange: (behaviour: RuleBehaviour) => void;
 }) {
   const labels = team ? TEAM_BEHAVIOUR_LABELS : BEHAVIOUR_LABELS;
-  // The tool is the title; the rest of what the rule matches is the line beneath, never clamped,
-  // since two rules for one tool differ only there.
+  // The action in its approval card's words is the title ("Click", "Any action on Gmail"); the rest
+  // of what the rule matches is the line beneath, never clamped, since two rules for one action
+  // differ only there. The title already names an app's rule's place.
+  const { title, place } = ruleTitle(rule);
+  const botName = useBotNames();
+  const folderRule = rule.scope.startsWith(FOLDER_GRANT);
+  const folders = useQuery({
+    ...hostAccessQueryOptions(),
+    refetchInterval: false,
+    enabled: folderRule,
+  });
   const match = [
-    rule.effect !== "*" ? rule.effect : null,
-    rule.scope !== "*" ? `on ${rule.scope}` : null,
+    EFFECT_WORDS[rule.effect] ?? null,
+    rule.scope === "*" || place
+      ? null
+      : folderRule
+        ? folderWords(rule.scope, folders.data?.grants)
+        : `on ${rule.scope}`,
     // A rule saved for one of several accounts at the app covers that account only.
     rule.account ? `from ${rule.account}` : null,
-    rule.botId !== "*" ? `for ${rule.botId}` : null,
+    rule.botId === "*"
+      ? null
+      : rule.botId.includes("*")
+        ? `for Bots matching ${rule.botId}`
+        : forBot(botName(rule.botId)),
   ]
     .filter(Boolean)
     .join(" ");
@@ -135,7 +190,7 @@ export function RuleRow({
         {locked ? <IconLock /> : <IconShieldCheck />}
       </ItemMedia>
       <ItemContent>
-        <ItemTitle>{rule.toolRef}</ItemTitle>
+        <ItemTitle>{title}</ItemTitle>
         {match ? (
           <ItemDescription className="line-clamp-none break-all">
             {match}
@@ -152,7 +207,7 @@ export function RuleRow({
           <>
             <LabelSelect
               disabled={disabled}
-              label={`Behaviour for ${rule.toolRef}`}
+              label={`Behaviour for ${title}`}
               labels={labels}
               onChange={onChange}
               value={rule.behaviour}

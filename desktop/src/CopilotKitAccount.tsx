@@ -59,9 +59,15 @@ export function CopilotKitAccount({
   root,
   onDone,
   failure,
+  handOff = null,
 }: {
   /** The installation folder the apps are connected for. */
   root: string;
+  /**
+   * What another app's window wants while Install, behind this step, waits on it: Docker Desktop
+   * starting, or a password prompt. See `handOffNow`.
+   */
+  handOff?: string | null;
   /** Signed in and agreed: the version accepted here, or null when nothing needed accepting. */
   onDone: (acceptedVersion: string | null) => void;
   /** A failure from setup itself, shown inside this card rather than under it. */
@@ -188,7 +194,9 @@ export function CopilotKitAccount({
   }
 
   const agreement = seen.at === "agreement" ? seen.terms : null;
-  // Signed in already: what is left to say is about the apps.
+  // Signed in and agreed already: what is left to say is about the apps. Said while they connect
+  // too, a few seconds after Accept, which flashed "Sign in to CopilotKit" and its sign-in lede.
+  const connecting = seen.at === "apps";
   const appsFailed = seen.at === "apps-failed";
   return (
     <div className="sheet">
@@ -199,25 +207,30 @@ export function CopilotKitAccount({
       <h1>
         {agreement
           ? "Accept the license agreement"
-          : appsFailed
-            ? "Connect your apps"
-            : "Sign in to CopilotKit"}
+          : connecting
+            ? "Setting up your apps"
+            : appsFailed
+              ? "Connect your apps"
+              : "Sign in to CopilotKit"}
       </h1>
       <p className="lede">
         {agreement
           ? `To run OpenBot on this computer, accept the CopilotKit license agreement for ${agreement.organizationName}.`
-          : appsFailed
+          : connecting || appsFailed
             ? "OpenBot uses your CopilotKit account to set up apps like Gmail and Slack."
             : "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the license agreement."}
       </p>
-      {!agreement && !appsFailed && (
+      {!agreement && !connecting && !appsFailed && (
         <p className="footnote">
           Your conversations and files are stored on this computer. Signing in
           does not send them to CopilotKit.
         </p>
       )}
 
-      {seen.at === "checking" && (
+      {/* The account check waits on the engine too. While Docker Desktop starts, this says what
+          it waits on and what the person may have to do in Docker's window. */}
+      {handOff && <StatusLine>{handOff}</StatusLine>}
+      {seen.at === "checking" && !handOff && (
         <StatusLine>Checking your CopilotKit account…</StatusLine>
       )}
       {seen.at === "signing-in" && (

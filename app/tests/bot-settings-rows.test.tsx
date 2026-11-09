@@ -209,7 +209,7 @@ const ON_HARNESS: AgentProfile = {
   endpoint: "http://agent-harness:4206/ag-ui",
   builtIn: false,
   keyFromOpenBot: true,
-  framework: "LangChain (LangGraph)",
+  framework: "LangChain",
 };
 
 function withEdition(edition: "team" | "personal") {
@@ -224,7 +224,7 @@ test("the personal edition's Setup row names the Bot's framework, not the harnes
   serving("admin");
   withEdition("personal");
   const view = draw(ON_HARNESS);
-  expect(await view.findByText("Runs on LangChain (LangGraph)")).toBeTruthy();
+  expect(await view.findByText("Runs on LangChain")).toBeTruthy();
   expect(view.queryByText("agent-harness:4206")).toBeNull();
 });
 
@@ -235,5 +235,5 @@ test("a team deployment's Setup row still shows the address", async () => {
   expect(await view.findByText("Setup")).toBeTruthy();
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(view.getByText("agent-harness:4206")).toBeTruthy();
-  expect(view.queryByText("Runs on LangChain (LangGraph)")).toBeNull();
+  expect(view.queryByText("Runs on LangChain")).toBeNull();
 });

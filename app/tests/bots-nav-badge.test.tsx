@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
+import { awayFromOpenBot } from "./desktop-notifications.fixture";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -12,7 +13,10 @@ import { settleReactWork } from "./settle-react-work";
  * browser notifications those rows used to send, and the one each check-in ping sends.
  */
 
-beforeAll(() => GlobalRegistrator.register());
+beforeAll(() => {
+  GlobalRegistrator.register();
+  awayFromOpenBot();
+});
 afterEach(cleanup);
 afterAll(async () => {
   await settleReactWork();
@@ -35,6 +39,7 @@ const attention = (
     unread: number;
     items: number;
     tasks: { needsInput: number; ready: number; failed: number };
+    waitingIn: string | null;
   }>,
 ) => ({
   agentId,
@@ -83,10 +88,21 @@ afterEach(() => {
 
 /** Stands in for the browser's Notification, recording each one it is asked to show. */
 function notifications() {
-  const sent: { title: string; body?: string; tag?: string }[] = [];
+  const sent: { title: string; body?: string; tag?: string; path?: string }[] =
+    [];
   globalThis.Notification = Object.assign(
-    function (this: unknown, title: string, options?: NotificationOptions) {
-      sent.push({ title, body: options?.body, tag: options?.tag });
+    function (
+      this: unknown,
+      title: string,
+      options?: NotificationOptions & { extra?: { path?: string } },
+    ) {
+      sent.push({
+        title,
+        body: options?.body,
+        tag: options?.tag,
+        // The page a click opens in OpenBot Desktop, which reads it from `extra`.
+        path: options?.extra?.path,
+      });
     },
     { permission: "granted" },
   ) as unknown as typeof Notification;
@@ -178,6 +194,34 @@ test("a task that starts waiting on the person sends a browser notification, tho
         title: "Expenses needs you",
         body: "1 task waiting on you",
         tag: "openbot-attention-expenses",
+        path: "/bots/expenses",
+      },
+    ]),
+  );
+});
+
+test("a Bot that starts waiting in a conversation sends a notice that opens that conversation", async () => {
+  const notices = notifications();
+  serving([attention("expenses", {})]);
+  const { client } = draw();
+  await waitFor(() =>
+    expect(client.getQueryState(botLifecycleKeys.attention)?.status).toBe(
+      "success",
+    ),
+  );
+  // A form the Bot asked with in the conversation, which the server counts as a question.
+  served = [attention("expenses", { questions: 1, waitingIn: "channel-plan" })];
+  await act(async () => {
+    await client.refetchQueries({ queryKey: botLifecycleKeys.attention });
+  });
+  await waitFor(() =>
+    expect(notices).toEqual([
+      {
+        title: "Expenses needs you",
+        body: "1 question",
+        // The conversation's tag: its reply notice, if any, is replaced by this one.
+        tag: "openbot-channel-plan",
+        path: "/channel/channel-plan",
       },
     ]),
   );
@@ -243,6 +287,7 @@ test("a ping of three items sends one browser notification, and nothing more unt
       "Knowledge: Fix the stale onboarding page",
     ].join("\n"),
     tag: "openbot-ping-ping-1",
+    path: "/bots",
   });
 
   // The same ping read again, and an item raised after it that waits for the hourly slot: no news.
@@ -267,6 +312,7 @@ test("a ping of three items sends one browser notification, and nothing more unt
     title: "One thing needs you",
     body: "Expenses: Book the venue",
     tag: "openbot-ping-ping-2",
+    path: "/bots",
   });
 });
 
@@ -301,6 +347,7 @@ test("a ping that carried one thing twice, from two Bots, lists it once, labelle
       "Expenses: Confirm November offsite headcount",
     ].join("\n"),
     tag: "openbot-ping-ping-1",
+    path: "/bots",
   });
 });
 

@@ -72,13 +72,16 @@ export const HARNESSES: readonly Harness[] =
  * The catalogue is ranked stars-first, which suits the desktop installer choosing an image to run
  * but not somebody scanning for their own framework: Atai, October 19, read CrewAI, LlamaIndex and
  * Agno at the top as "the ones on top don't make sense", and reported LangChain and ADK missing when
- * they were fourth and fifth. These lead; everything else follows in the catalogue's own order.
+ * they were fourth and fifth. Atai later named Claude Agent SDK, LangChain, Google ADK and AWS Strands
+ * as the four to read first, in that order. These lead; everything else follows in the catalogue's
+ * own order.
  */
 const WEB_LEAD: readonly string[] = [
   "claude-agent-sdk",
-  "google-adk",
-  "antigravity",
   "langgraph",
+  "google-adk",
+  "strands",
+  "antigravity",
 ];
 
 /** Where a harness sits in the web list: its lead position, or after every lead. */
@@ -117,7 +120,7 @@ export function declaredHarness(id: unknown): Harness | undefined {
 
 /**
  * The harness an image reference runs, by the directory a release builds it from:
- * `ghcr.io/copilotkit/openbot-agent-langgraph-agui@sha256:…` is LangChain (LangGraph). Undefined for
+ * `ghcr.io/copilotkit/openbot-agent-langgraph-agui@sha256:…` is LangChain. Undefined for
  * an image OpenBot does not publish.
  */
 export function harnessForImage(reference: string): Harness | undefined {

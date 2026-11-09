@@ -19,7 +19,8 @@
         "minHeight": 560,
         "resizable": true,
         "titleBarStyle": "Transparent",
-        "backgroundThrottling": "disabled"
+        "backgroundThrottling": "disabled",
+        "create": false
       }
     ],
     "security": { "csp": null }
@@ -66,5 +67,12 @@
     "category": "DeveloperTool",
     "shortDescription": "Run OpenBot on your own machine",
     "longDescription": "OpenBot Desktop installs the container engine, raises the stack, and keeps it running."
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["openbot"]
+      }
+    }
   }
 }

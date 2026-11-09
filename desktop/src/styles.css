@@ -1182,6 +1182,40 @@ a:hover {
   border-radius: inherit;
 }
 
+/* A size not known yet: the same track with a segment moving along it, claiming no fraction. */
+.downloads progress:indeterminate,
+.downloads progress:indeterminate::-webkit-progress-bar {
+  background: linear-gradient(
+      90deg,
+      var(--border) 0 45%,
+      var(--ring) 45% 55%,
+      var(--border) 55% 100%
+    )
+    var(--border);
+  background-size: 300% 100%;
+  animation: downloads-indeterminate 1.6s linear infinite;
+}
+
+.downloads progress:indeterminate::-moz-progress-bar {
+  background: transparent;
+}
+
+@keyframes downloads-indeterminate {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .downloads progress:indeterminate,
+  .downloads progress:indeterminate::-webkit-progress-bar {
+    animation: none;
+  }
+}
+
 @media (max-width: 580px) {
   .sheet {
     padding: 24px;

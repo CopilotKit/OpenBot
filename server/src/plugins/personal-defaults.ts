@@ -244,7 +244,7 @@ async function everyBotApps(deps: PersonalDefaultsDeps): Promise<string[]> {
  * At startup, in every edition: add Routines if it isn't added, bring the saved tools of every app
  * whose tools are OpenBot's own code up to date with this build (see `refreshOwnListings`), and give
  * every Bot all of Routines' tools. The ones that change things too, because scheduling is the point;
- * a Bot still asks before each one runs while Ask before acting is on.
+ * a Bot still asks before each one runs while Always ask before making changes is on.
  *
  * Brought up to date before the grants, so a tool this build adds to Routines is given to every Bot
  * at the same start rather than the one after.
@@ -381,8 +381,8 @@ export function startPersonalDefaultApps(
 /**
  * In the personal edition, connecting an app is the whole decision: every Bot gets every tool it
  * lists, the ones that change things too, as an admin grant on the trail. There is one person, so
- * there is nobody to keep an app from, and what stands in front of a write is Ask before acting:
- * Allow once, Always allow here, or Deny, in the conversation. Taking an app from one Bot is
+ * there is nobody to keep an app from, and what stands in front of a write is Always ask before
+ * making changes: Allow once, Always allow here, or Deny, in the conversation. Taking an app from one Bot is
  * refused (see {@link EVERY_BOT_REFUSAL}); turning the app off takes it from all of them.
  *
  * Installed as a wrapper on `refreshTools` because every way an app's tools are learned goes

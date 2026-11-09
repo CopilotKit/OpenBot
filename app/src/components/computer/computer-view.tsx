@@ -1,8 +1,9 @@
 import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
-import { IconX } from "@tabler/icons-react";
+import { IconLock, IconWorld, IconX } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useFittedWidth } from "@/components/browser/fitted-window";
 import {
   botBrowserKeys,
   botBrowserStateQueryOptions,
@@ -38,6 +39,25 @@ function hostOf(url: string): string {
     return new URL(url).host;
   } catch {
     return url;
+  }
+}
+
+/** An address as an address bar draws it: the site, the rest of the address after it, and whether it is secure. */
+function addressParts(
+  url: string,
+): { host: string; rest: string; secure: boolean } | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+      return null;
+    const rest = `${parsed.pathname === "/" ? "" : parsed.pathname}${parsed.search}`;
+    return {
+      host: parsed.host,
+      rest,
+      secure: parsed.protocol === "https:",
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -209,7 +229,7 @@ function NothingToSee({
           it.
         </span>
       ) : blankBrowser ? (
-        <span>The Bot hasn't opened a page yet.</span>
+        <span>Nothing is open in the Bot's browser right now.</span>
       ) : (
         <span>Waiting for the Bot's screen…</span>
       )}
@@ -221,13 +241,15 @@ function NothingToSee({
  * The Bot's browser as a window, in the live full-size view: its bar (tabs, the address, back, forward and reload) over
  * its page, framed as one, the page as large as the space left allows at the browser's own shape. The Browser page
  * draws the person's own browser the same way (`components/browser/browser-screen.tsx`), the page inside the tabs'
- * panel with the address. Sized against the space with container units rather than a measured width, so it fits both
- * ways as the window changes. A turn that is over is a picture rather than a browser, and is drawn as it always was.
+ * panel with the address. The window is sized to its page (`useFittedWidth`), centred in the space, so the page fills
+ * the window with no blank band under or beside it whatever the window's shape. A turn that is over is a picture rather
+ * than a browser, and is drawn as it always was.
  */
 function BrowserWindow({
   live,
   botId,
   bar,
+  aspectRatio,
   onNavigated,
   children,
 }: {
@@ -235,22 +257,34 @@ function BrowserWindow({
   botId: string;
   /** The Bot's browser as this person sees it; undefined until it first answers, when the page is drawn barless. */
   bar: BotBrowserApiState | undefined;
+  /** The page's shape, width over height: the browser behind it has a fixed one. */
+  aspectRatio: number;
   /** An address typed in the bar went: the keyboard goes back to the page. */
   onNavigated: () => void;
   children: ReactNode;
 }) {
+  const space = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLDivElement>(null);
+  const width = useFittedWidth(space, frame, aspectRatio, { shown: live });
   if (!live) return children;
   return (
-    // Clipped rather than hidden: a hidden overflow would let this shrink below the screen's own floor.
-    <div className="flex min-w-0 flex-1 flex-col overflow-clip rounded-xl border border-border">
-      <BotBrowserBar botId={botId} state={bar} onNavigated={onNavigated}>
-        <div
-          className="flex min-h-80 flex-1 items-center justify-center bg-muted/40 p-2"
-          style={{ containerType: "size" }}
-        >
-          {children}
-        </div>
-      </BotBrowserBar>
+    // Never less than a screen a person can work in: in a short window the card grows past it and the view scrolls.
+    // Top-aligned, as the wheel's column beside it is.
+    <div
+      ref={space}
+      className="flex min-h-80 min-w-0 flex-1 items-start justify-center"
+    >
+      {/* Clipped rather than hidden: a hidden overflow would let this shrink below the screen's own floor. */}
+      <div
+        ref={frame}
+        className="flex w-full min-w-0 flex-col overflow-clip rounded-xl border border-border"
+        style={width === undefined ? undefined : { width }}
+      >
+        <BotBrowserBar botId={botId} state={bar} onNavigated={onNavigated}>
+          {/* The page flush under the bar, as in the person's own browser (browser-screen.tsx). */}
+          <div className="bg-background">{children}</div>
+        </BotBrowserBar>
+      </div>
     </div>
   );
 }
@@ -677,54 +711,133 @@ export function ComputerView({
     />
   ) : null;
 
+  /** Where the browser in the picture is, by host: the page drawn now, or the page a finished turn left it on. */
+  const pageUrl = showScreen
+    ? drawn?.url
+    : settled
+      ? knownPage?.url
+      : undefined;
+  const address = pageUrl ? addressParts(pageUrl) : null;
+
   return (
     <>
-      <figure ref={previewRef} className="overflow-hidden rounded-2xl border">
-        {/* Inline preview remains in transcript; click opens a readable full-size view. */}
-        <button
-          type="button"
-          onClick={() => setExpanded(true)}
-          /*
-           * Opens whether or not there is a picture in it. It used to be disabled without one, and
-           * the wheel is down there: a blank browser, a screen that had not arrived yet, or a
-           * computer that could not be reached left a person with no way to take control at all —
-           * the states where they most want it. With nothing to draw the full-size view shows these
-           * same words, and the wheel below them.
-           */
-          className="relative block w-full cursor-pointer bg-muted"
-          style={frameStyle}
-          aria-label="Open the Bot's screen full size"
-        >
-          {polledScreen}
+      {/* A container, so the status over the picture can be compact in the narrow side panel (a glimpse) and roomy
+          where the card is wide in the conversation. */}
+      <figure
+        ref={previewRef}
+        className="@container overflow-hidden rounded-2xl border bg-background"
+      >
+        {/*
+          The card read as a browser window: where it is, as an address bar says it (the site in ink, the rest of the
+          address quieter), with a dot in the colour that means a Bot is acting while the picture is of the browser as
+          it is now rather than of a turn that is over. With no page open, whose browser it is.
+        */}
+        {address || name ? (
+          <figcaption className="flex h-8 items-center gap-2 border-b bg-sidebar px-3 text-xs">
+            {address ? (
+              <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                {address.secure ? (
+                  <IconLock
+                    aria-hidden="true"
+                    className="size-3 shrink-0 text-muted-foreground"
+                  />
+                ) : (
+                  <IconWorld
+                    aria-hidden="true"
+                    className="size-3 shrink-0 text-muted-foreground"
+                  />
+                )}
+                <span className="min-w-0 truncate">
+                  <span className="font-medium">{address.host}</span>
+                  <span className="text-muted-foreground">{address.rest}</span>
+                </span>
+              </span>
+            ) : (
+              <span className="flex min-w-0 flex-1 items-center gap-1.5 font-medium">
+                <ChannelAvatar participantIds={[computerId]} size={14} />
+                {name}
+              </span>
+            )}
+            {showScreen && !settled ? (
+              <span
+                aria-hidden="true"
+                className="size-1.5 shrink-0 rounded-full bg-indigo-500 motion-safe:animate-pulse"
+              />
+            ) : null}
+          </figcaption>
+        ) : null}
+        {/*
+          The picture, and over its foot, while the Bot holds the wheel, a status with Take control: the one
+          thing a person watching may want to do, on the thing they are watching. A sibling of the picture's button
+          rather than inside it, because a control cannot sit inside another control.
+        */}
+        <div className="relative">
+          {/* Inline preview remains in transcript; click opens a readable full-size view. */}
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            /*
+             * Opens whether or not there is a picture in it. It used to be disabled without one, and
+             * the wheel is down there: a blank browser, a screen that had not arrived yet, or a
+             * computer that could not be reached left a person with no way to take control at all —
+             * the states where they most want it. With nothing to draw the full-size view shows these
+             * same words, and the wheel below them.
+             */
+            className="relative block w-full cursor-pointer bg-muted"
+            style={frameStyle}
+            aria-label="Open the Bot's screen full size"
+          >
+            {polledScreen}
 
-          {/* Whose computer this is — and whose hands are on it — said on the picture itself. */}
-          {name || wheelHere ? (
-            <span className="absolute right-2 bottom-2 flex items-center gap-1.5">
-              {name ? (
-                <span className="flex items-center gap-1.5 rounded-full bg-black/60 py-1 pr-2.5 pl-1.5 font-medium text-white text-xs backdrop-blur-sm">
-                  <ChannelAvatar participantIds={[computerId]} size={16} />
-                  {name}
+            {/* Whose hands are on it, said on the picture itself. Whose computer it is, the frame above says. */}
+            {wheelHere ? (
+              <span className="absolute right-2 bottom-2 rounded-full border bg-popover px-2.5 py-1 font-medium text-popover-foreground text-xs shadow-sm">
+                You have control
+              </span>
+            ) : null}
+
+            {showScreen ? null : (
+              <NothingToSee
+                blankBrowser={blankBrowser}
+                owner={owner}
+                page={knownPage}
+                problem={shownProblem}
+                settled={settled}
+                waiting={waiting}
+              />
+            )}
+          </button>
+          {!settled && !(driving && !control?.transitioning) ? (
+            // Solid, not frosted: a blur over a screen that keeps changing is redrawn with every frame of it.
+            <div
+              className="absolute inset-x-2 bottom-2 flex items-center justify-between gap-2 rounded-xl border bg-popover py-1.5 pr-1.5 pl-3 text-popover-foreground shadow-lg"
+              data-slot="control-strip"
+            >
+              <span className="flex min-w-0 items-center gap-2 text-xs @sm:text-sm">
+                {control && !control.transitioning && !someoneElse ? (
+                  <span className="hidden shrink-0 @sm:flex">
+                    <ChannelAvatar participantIds={[computerId]} size={18} />
+                  </span>
+                ) : null}
+                <span className="min-w-0 truncate">
+                  {!control
+                    ? "Checking who has control…"
+                    : control.transitioning
+                      ? "Finishing the current action…"
+                      : someoneElse
+                        ? "Someone else has control."
+                        : // Who holds the wheel, which is always true; whether it is acting right now, the page shows.
+                          `${name ?? "The Bot"} has control`}
                 </span>
-              ) : null}
-              {wheelHere ? (
-                <span className="rounded-full bg-white px-2.5 py-1 font-medium text-black text-xs shadow-sm">
-                  You have control
-                </span>
-              ) : null}
-            </span>
+              </span>
+              <ComputerControlButton
+                computerId={computerId}
+                onTakeControl={() => setExpanded(true)}
+                prominent
+              />
+            </div>
           ) : null}
-
-          {showScreen ? null : (
-            <NothingToSee
-              blankBrowser={blankBrowser}
-              owner={owner}
-              page={knownPage}
-              problem={shownProblem}
-              settled={settled}
-              waiting={waiting}
-            />
-          )}
-        </button>
+        </div>
 
         {/* The request reason appears above the always-available ownership controls. */}
         {!driving && !settled && control?.requested ? (
@@ -830,27 +943,12 @@ export function ComputerView({
           needs you" does: someone who closes the big view and moves on is not left with a Bot
           quietly waiting on them.
         */}
-        {!settled ? (
-          <div
-            className={`flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 ${driving && !control?.transitioning ? "bg-amber-500/10" : ""}`}
-          >
-            {driving && !control?.transitioning ? (
-              <span className="text-sm">
-                <strong className="font-medium">You have control.</strong> The
-                Bot waits until you hand it back. Open the screen to click and
-                type.
-              </span>
-            ) : (
-              <span className="text-xs text-muted-foreground">
-                {!control
-                  ? "Checking who has control…"
-                  : control.transitioning
-                    ? "Finishing the current action…"
-                    : someoneElse
-                      ? "Someone else has control."
-                      : "The Bot has control."}
-              </span>
-            )}
+        {!settled && driving && !control?.transitioning ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-amber-500/10 px-3 py-2">
+            <span className="text-sm">
+              <strong className="font-medium">You have control.</strong> The Bot
+              waits until you hand it back. Open the screen to click and type.
+            </span>
             <ComputerControlButton
               computerId={computerId}
               onTakeControl={() => setExpanded(true)}
@@ -899,7 +997,7 @@ export function ComputerView({
                 past it and the view scrolls, so Record is always reachable.
               */}
               <div
-                className={`relative m-auto flex w-full min-w-0 shrink-0 flex-col rounded-2xl bg-background shadow-2xl ${settled ? "max-w-[70vw] p-4" : "min-h-[calc(100svh-1rem)] gap-4 p-3 sm:min-h-[calc(100svh-2rem)] lg:h-[calc(100svh-2rem)] lg:flex-row"}`}
+                className={`relative m-auto flex w-full min-w-0 shrink-0 flex-col rounded-2xl bg-background shadow-2xl ring-1 ring-black/5 dark:ring-white/10 ${settled ? "max-w-[70vw] p-4" : "min-h-[calc(100svh-1rem)] gap-4 p-3 sm:min-h-[calc(100svh-2rem)] lg:h-[calc(100svh-2rem)] lg:flex-row"}`}
               >
                 {/*
                   The way back to the conversation. A live view fills the window, so the backdrop
@@ -926,6 +1024,7 @@ export function ComputerView({
                   live={!settled}
                   botId={computerId}
                   bar={barState}
+                  aspectRatio={aspectRatio}
                   onNavigated={() => screen.current?.focus()}
                 >
                   {/*
@@ -934,14 +1033,7 @@ export function ComputerView({
                   wheel below is the reason this view opens at all in that state.
                 */}
                   <div
-                    className={`relative min-h-0 ${settled ? "max-h-[75vh] overflow-auto rounded-xl" : "overflow-hidden rounded-lg border border-border"} ${showLiveScreen ? "bg-black" : "bg-muted"}`}
-                    style={
-                      settled
-                        ? undefined
-                        : {
-                            width: `min(100cqw, calc(100cqh * ${aspectRatio}))`,
-                          }
-                    }
+                    className={`relative min-h-0 ${settled ? "max-h-[75vh] overflow-auto rounded-xl bg-muted" : "w-full overflow-hidden"} ${showLiveScreen ? "bg-black" : settled ? "" : "bg-background"}`}
                   >
                     {settled && drawn ? (
                       /*

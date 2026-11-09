@@ -18,6 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { unzipSync } from "fflate";
+import { toChromeManifestVersion } from "../src/manifest";
 import {
   CHROME_PACKAGE,
   EDGE_PACKAGE,
@@ -72,7 +73,8 @@ function builtRecorder(
   const manifest = {
     manifest_version: 3,
     name: "OpenBot Recorder",
-    version: ROOT_VERSION,
+    // As the build writes it: a prerelease such as 1.0.0-rc.1 is version 1.0.0 with that version_name.
+    ...toChromeManifestVersion(ROOT_VERSION),
     description:
       "Record a task in your browser so an OpenBot Bot can learn to do it.",
     icons: { "16": "icons/16.png", "128": "icons/128.png" },

@@ -1,6 +1,6 @@
 [package]
 name = "openbot-desktop"
-version = "0.3.3"
+version = "1.0.0-rc.1"
 description = "OpenBot Desktop"
 edition = "2021"
 rust-version = "1.90"
@@ -40,10 +40,17 @@ tar = "0.4"
 semver = "1"
 # Read Bun's release ZIP in-process; no unzip or PowerShell installation is required.
 zip = { version = "2.4.2", default-features = false, features = ["deflate-flate2", "flate2"] }
-tauri-plugin-single-instance = "2.0.0-rc.5"
+# With `deep-link`, a second launch's `openbot://` link reaches the running OpenBot. See `notice.rs`.
+tauri-plugin-single-instance = { version = "2.0.0-rc.5", features = ["deep-link"] }
+# The `openbot://` links a click on a notification opens on Windows, registered by the installer.
+tauri-plugin-deep-link = "2"
 portable-pty = "0.9.0"
 tauri-plugin-opener = "2.5.5"
 tauri-plugin-dialog = "2"
+# A Bot's notifications from OpenBot's own page, shown by the system. The window's web view cannot
+# grant the page's Notification API (WKWebView answers "denied" without asking), so this plugin
+# stands in for it. See `allow_app_page` in main.rs.
+tauri-plugin-notification = "2"
 # Updating a signed Mac build in place. The plugin verifies the minisign signature beside
 # each artifact against the public key in `tauri.conf.json`, so an endpoint that is taken
 # over still cannot hand this app something to install. See `docs/releasing.md`. The shell
@@ -77,7 +84,7 @@ objc2-av-foundation = { version = "0.3", default-features = false, features = ["
 
 # Narration on Windows: the SAPI in-process recognizer. See `speech/sapi.rs`. The version Tauri uses.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Media_Speech", "Win32_System_Com"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Media_Speech", "Win32_System_Com", "Data_Xml_Dom", "UI_Notifications", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

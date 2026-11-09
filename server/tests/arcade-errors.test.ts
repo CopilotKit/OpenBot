@@ -204,7 +204,10 @@ describe("callTool caps what a model is shown", () => {
     expect(result.isError).toBe(false);
     expect(result.truncated).toBe(true);
     expect(result.text.length).toBeLessThan(enormous.length);
-    expect(result.text.endsWith("[truncated]")).toBe(true);
+    // The cut says how to read the rest, not only that something is missing.
+    expect(result.text).toEndWith(
+      `\n\n[truncated: Gmail.ReadEmail returned ${JSON.stringify(enormous).length} characters and only the first ${MAX_RESULT_CHARS} are shown. To read the rest, call it again asking for less: fewer results per call, fewer fields, or a narrower search, then page through what is left.]`,
+    );
   });
 
   test("a result that fits is untouched and reports no truncation", async () => {

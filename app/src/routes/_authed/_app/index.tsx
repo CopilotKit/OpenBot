@@ -12,6 +12,7 @@ import {
   type ComposerDraft,
   toAgentOptions,
 } from "@/components/channels/composer";
+import { WorkingNow } from "@/components/channels/working-now";
 import { BusinessLink } from "@/components/edition/business-link";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
@@ -35,6 +36,8 @@ import {
   routeMessage,
 } from "@/lib/channels/route";
 import { useStartChannel } from "@/lib/channels/start";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { editionOf } from "@/lib/edition-guard";
 import { newId } from "@/lib/new-id";
 import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
 
@@ -42,6 +45,11 @@ import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
 const EXPLORE_SHOWN = 4;
 
 export const Route = createFileRoute("/_authed/_app/")({
+  // The edition decides whether there is an Explore section at all, so it is read before the page draws and the
+  // composer never moves when it arrives.
+  beforeLoad: async ({ context }) => {
+    await editionOf(context.queryClient);
+  },
   component: RouteComponent,
 });
 
@@ -54,6 +62,13 @@ function RouteComponent() {
     isError: failed,
   } = useQuery(agentListQueryOptions());
   const explore = agents?.filter(isSharedWithYou);
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
+  /*
+   * The personal edition has nobody to share a Bot with. Its Explore lists the Bots included with
+   * OpenBot, and when there are none it shows nothing: "Nobody has shared a Bot with you yet" was
+   * not true of it. A Bots list that fails to load is said under the composer already.
+   */
+  const personal = capabilities.data?.edition === "personal";
   const { start, startChosen, pending } = useStartChannel();
   const router = useRouter();
   const navigate = useNavigate();
@@ -244,7 +259,7 @@ function RouteComponent() {
          * reserves the same two rows, so the composer above it does not move when the list settles.
          */}
         <div className="mt-10 w-full max-w-2xl">
-          {loading ? (
+          {loading || capabilities.isPending ? (
             <>
               <h2 className="font-semibold text-base">Explore Bots</h2>
               <Skeleton className="mt-4 h-[140px]" />
@@ -280,7 +295,7 @@ function RouteComponent() {
                 ))}
               </ul>
             </section>
-          ) : failed && agents === undefined ? (
+          ) : personal ? null : failed && agents === undefined ? (
             // `agents === undefined` narrows this to "the query has never once returned
             // successfully" — not merely "the last request errored". `?.length` alone can't
             // tell that apart from a slice that loaded and is genuinely empty: TanStack Query
@@ -316,6 +331,8 @@ function RouteComponent() {
           )}
         </div>
       </div>
+      {/* A Bot already working somewhere, and the way to it. Nothing while every Bot is idle. */}
+      <WorkingNow channels={channels.data} />
     </>
   );
 }

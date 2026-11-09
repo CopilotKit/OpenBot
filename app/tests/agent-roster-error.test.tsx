@@ -16,6 +16,7 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
+import { deploymentKeys } from "@/lib/deployment/queries";
 import { Route as HomeRoute } from "@/routes/_authed/_app/index";
 
 /**
@@ -229,4 +230,34 @@ test("a failed REFETCH on / with explore empty shows it as empty, not broken", a
       "Couldn't load your Bots, so there's no one to send this to. Reload the page.",
     ),
   ).toBeNull();
+});
+
+/*
+ * The personal edition is one person on their own computer, and nobody can share a Bot with them.
+ * Its Home said "Nobody has shared a Bot with you yet." under Explore Bots all the same. With
+ * nothing to explore there, the section is not shown; the team edition keeps its sentence (above).
+ */
+test("on the personal edition, an empty Explore Bots says nothing about sharing", async () => {
+  const mine = agent({ id: "mine-1", name: "Mine Agent", mine: true });
+  const queryClient = staleQueryClient([mine]);
+  queryClient.setQueryData(deploymentKeys.capabilities(), {
+    edition: "personal",
+  });
+
+  const view = renderHome(queryClient);
+  await waitForFailedRefetch(queryClient);
+
+  // The composer has a Bot to send to: Home has drawn with the roster loaded.
+  expect(
+    await view.findByText(
+      "OpenBot picks the right Bot.",
+      { exact: false },
+      HOME_FIND_TIMEOUT,
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText("Nobody has shared a Bot with you yet.")).toBeNull();
+  expect(
+    view.queryByText("Couldn't load the Bots shared with you."),
+  ).toBeNull();
+  expect(view.queryByRole("heading", { name: "Explore Bots" })).toBeNull();
 });

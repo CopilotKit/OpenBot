@@ -1,3 +1,4 @@
+import type { DecisionToolName } from "@openbot/shared/decision-tools";
 import { useState } from "react";
 import { z } from "zod";
 import { DecisionCard, OTHER } from "@/components/decisions/decision-card";
@@ -184,7 +185,6 @@ export function ChoiceCard(props: Waiting<ChoiceArgs>) {
             : { label: "Answered", note: chosen.answer, tone: "positive" }
           : undefined
       }
-      caption={args.summary}
       onSubmit={async (value, text) => {
         if (!respond) return;
         setSending(true);
@@ -205,7 +205,12 @@ export function ChoiceCard(props: Waiting<ChoiceArgs>) {
       other={{ placeholder: "Answer something else…" }}
       submitting={sending || !respond}
       title={args.title}
-    />
+    >
+      {/* Drawn as the approval's summary is: a Bot writes it in markdown, which a caption shows raw. */}
+      {args.summary ? (
+        <GalleryMarkdown className="text-sm">{args.summary}</GalleryMarkdown>
+      ) : null}
+    </DecisionCard>
   );
 }
 
@@ -254,7 +259,7 @@ function readChoice(
  */
 export const GALLERY: GalleryComponent[] = [
   {
-    name: "askApproval",
+    name: "askApproval" satisfies DecisionToolName,
     title: "Approval",
     kind: "decision",
     summary:
@@ -282,7 +287,7 @@ export const GALLERY: GalleryComponent[] = [
     },
   },
   {
-    name: "askChoice",
+    name: "askChoice" satisfies DecisionToolName,
     title: "Choice",
     kind: "decision",
     summary:

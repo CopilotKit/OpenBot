@@ -271,16 +271,38 @@ describe("the personal edition without OpenBot Desktop", () => {
     expect(broker.statusFor(person.id).pending).toEqual([]);
   });
 
-  test("a Bot is offered only the folder list, and it says no folder is granted", async () => {
+  /*
+   * Found on Windows: a folder given to a Bot, then OpenBot restarted. The step read "No host folders
+   * are granted to this Bot." and the Bot told the person "an administrator can restore the folder
+   * grant". There is no administrator here: the person chooses the folder again themselves.
+   */
+  test("after OpenBot restarts, the Bot says it has no folders and how the person gives it one", async () => {
     setEdition("personal");
+    const before = guardedBroker();
+    before.rememberGrant({
+      id: "grant-share",
+      botId: bot,
+      actorId: person.id,
+      displayName: "share",
+      revoked: false,
+    });
+    const listed = await hostAccessTools({
+      broker: before,
+      botId: bot,
+      actorId: person.id,
+    })[0]?.execute({});
+    expect(listed).toContain('"displayName":"share"');
+    // OpenBot stops and starts again: a new broker, with none of the old session's folders.
     const tools = hostAccessTools({
       broker: guardedBroker(),
       botId: bot,
       actorId: person.id,
     });
     expect(tools.map((tool) => tool.name)).toEqual(["host_list_folders"]);
-    expect(await tools[0]?.execute({})).toBe(
-      `${REFUSAL_MARKER} No host folders are granted to this Bot.`,
+    const text = await tools[0]?.execute({});
+    expect(text).toBe(
+      `${REFUSAL_MARKER} This Bot has no folders it can read right now. Folder access ends when you stop OpenBot. To give it a folder, use Choose folder in Settings → Computer.`,
     );
+    expect(text).not.toMatch(/administrator|host|grant/i);
   });
 });

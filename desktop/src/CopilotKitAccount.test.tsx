@@ -144,3 +144,45 @@ test("the CopilotKit sign-in shows CopilotKit's logotype, before and while it wa
   await screen.findByText(PAGE.userCode);
   expectCopilotKitLogo(screen);
 });
+
+test("after Accept, the step says it is setting up your apps, not to sign in", async () => {
+  // Seen on Windows: Accept was followed for two seconds by "Sign in to CopilotKit" and its
+  // sign-in lede, over "Connecting your apps…", for a person already signed in and agreed.
+  let connected!: () => void;
+  invokeHandler = async ({ command }) => {
+    if (command === "local_eval_terms")
+      return {
+        status: "required",
+        accepted: false,
+        version: "developer-edition-2026-10-01-web",
+        url: "https://copilotkit.ai/legal/developer-edition",
+        organizationName: "Acme",
+      };
+    if (command === "connect_copilotkit_apps")
+      return new Promise<void>((resolve) => {
+        connected = resolve;
+      });
+    if (command === "cancel_local_eval") return null;
+    throw new Error(`unexpected ${command}`);
+  };
+  let done: string | null | undefined;
+  const screen = render(
+    <CopilotKitAccount
+      root="/tmp/account-accept"
+      onDone={(version) => {
+        done = version;
+      }}
+    />,
+  );
+  await userEvent.click(await screen.findByRole("button", { name: "Accept" }));
+  expect(
+    await screen.findByRole("heading", { name: "Setting up your apps" }),
+  ).toBeTruthy();
+  expect(screen.getByText("Connecting your apps…")).toBeTruthy();
+  expect(
+    screen.queryByRole("heading", { name: "Sign in to CopilotKit" }),
+  ).toBeNull();
+  expect(screen.queryByText(/Sign in, then accept/)).toBeNull();
+  connected();
+  await waitFor(() => expect(done).toBe("developer-edition-2026-10-01-web"));
+});

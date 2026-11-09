@@ -1,7 +1,9 @@
 import { cutAtCodeUnits } from "../channels/text";
 import { appsPage, itsAppPage } from "../edition";
 import { BrokerAccountGoneError, brokerSentence, flagOf } from "./broker";
+import { type ActionShape, shapeOf } from "./composio-shapes";
 import { type ListedTool, MAX_RESULT_CHARS, type McpCallResult } from "./mcp";
+import { fitJsonResult } from "./result-fit";
 
 /**
  * The Composio transport: an app somebody enabled, reached as the person asking.
@@ -1537,9 +1539,10 @@ function listingSentence(toolkit: string, error: unknown): string {
 }
 
 /**
- * The cap every string this module puts in front of a model goes through.
+ * The cap a failure's sentence goes through. A result goes through `fitJsonResult` in
+ * `./result-fit` instead, which keeps a list's records whole and says how to read the rest.
  *
- * Its own function because BOTH ANSWERS NEED IT, and only one of them used to get it. A refusal lands
+ * Its own function because BOTH ANSWERS NEED A CAP, and only one of them used to get it. A refusal lands
  * in a model's context exactly as a result does, and a vendor's sentence is no shorter for being a
  * failure — so {@link failure} capping nothing and reporting `truncated: false` was the silent
  * truncation's mirror image: unbounded text, plus a field stating that nothing had been cut.
@@ -1623,14 +1626,29 @@ const NOTHING = new Set(["", "null", "{}"]);
  *
  * The same cap the MCP transport applies and for the same reason: a tool result goes straight into a
  * model's context, so an unbounded one is somebody else's server deciding how much of our context
- * window to spend. Truncated visibly, never silently. An empty answer is stated in words rather than
+ * window to spend. Truncated visibly, never silently, and with the way to the rest: a list is cut
+ * between its records and the note names the call that fetches the others. An empty answer is
+ * stated in words rather than
  * returned empty — an empty string reads as "the action had nothing to say" rather than "there is
  * nothing there", and a model closes that gap from memory.
  *
  * CAN THROW, and is called from outside the vendor's `try` for that reason. See {@link callTool}.
  */
-function resultOf(data: ComposioResult["data"] | undefined): McpCallResult {
-  const text: string | undefined = JSON.stringify(data ?? null, null, 2);
+function resultOf(
+  data: ComposioResult["data"] | undefined,
+  toolName: string,
+  shape: ActionShape | null,
+): McpCallResult {
+  /*
+   * AN ACTION OPENBOT ASKS FOR IN ITS OWN WAY IS READ IN ITS OWN WAY TOO: a Gmail listing loses the
+   * raw MIME it was asked not to carry, and keeps its messages whole when it is cut. See
+   * `./composio-shapes`.
+   */
+  const shown =
+    shape && data && typeof data === "object" && !Array.isArray(data)
+      ? shape.answer(data)
+      : data;
+  const text: string | undefined = JSON.stringify(shown ?? null, null, 2);
   /*
    * `JSON.stringify` ANSWERS `undefined` RATHER THAN THROWING for a value with no JSON form — a
    * function, a symbol — and this field is the vendor's while the type saying it is a record is
@@ -1651,7 +1669,10 @@ function resultOf(data: ComposioResult["data"] | undefined): McpCallResult {
       truncated: false,
     };
   }
-  return { ...cap(text), isError: false };
+  return {
+    ...fitJsonResult(shown, text, toolName, shape?.list),
+    isError: false,
+  };
 }
 
 /**
@@ -1888,6 +1909,7 @@ export async function askAction(
   }
 
   const { [VERSION_ARG]: rawVersion, ...rest } = args;
+  const shape = shapeOf(toolName);
   const version = typeof rawVersion === "string" ? rawVersion.trim() : "";
   if (!version) {
     /*
@@ -1963,7 +1985,7 @@ export async function askAction(
          */
         ...(account === null ? {} : { connectedAccountId: account }),
       },
-      rest,
+      shape?.request ? shape.request(rest) : rest,
     );
   } catch (error) {
     /*
@@ -2085,7 +2107,10 @@ export async function askAction(
 
   try {
     // The action ran and Composio answered, which is the plainest `answered` there is.
-    return { result: resultOf(answer.data), answered: true };
+    return {
+      result: resultOf(answer.data, toolName, shape),
+      answered: true,
+    };
   } catch (error) {
     /*
      * THE LAST PATH THAT REACHED A MODEL WITHOUT PASSING THE DOOR. This quoted a raw `error.message`

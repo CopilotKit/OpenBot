@@ -109,7 +109,7 @@ const ACTIVITY = ROWS.map((row, index) => ({
   stored: STORED[index],
 })).filter((row) => !LEFT_OUT.has(row.type));
 
-async function renderAs(edition: "team" | "personal") {
+async function renderAs(edition: "team" | "personal", rows = ROWS) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
@@ -124,9 +124,9 @@ async function renderAs(edition: "team" | "personal") {
   // Activity asks without OpenBot's own working, and the server answers without it.
   if (edition === "personal")
     queryClient.setQueryData([...auditKeys.all, withoutOpenBotWorking("")], {
-      events: ROWS.filter((row) => !LEFT_OUT.has(row.eventType)),
+      events: rows.filter((row) => !LEFT_OUT.has(row.eventType)),
     });
-  else queryClient.setQueryData([...auditKeys.all, ""], { events: ROWS });
+  else queryClient.setQueryData([...auditKeys.all, ""], { events: rows });
   queryClient.setQueryData(agentKeys.list(false), [
     { id: "personal-assistant", name: "Personal Assistant" },
   ]);
@@ -184,4 +184,32 @@ test("the search box still finds a row by its stored name", async () => {
       "Search the web",
     ]),
   );
+});
+
+/**
+ * An app's tool is named the way its page names it: Windows showed "Update imap settings" and
+ * "Fetch message by thread id" in Activity while the Gmail page said "Get IMAP settings".
+ */
+test("an app's tool reads in Activity as it does on the app's page", async () => {
+  const gmail = (id: string, minute: number, tool: string) =>
+    row(
+      id,
+      minute,
+      "mcp.call_succeeded",
+      "mcp_tool",
+      {},
+      `composio-gmail/${tool}`,
+    );
+  const view = await renderAs("personal", [
+    gmail("g1", 50, "GMAIL_SETTINGS_GET_IMAP"),
+    gmail("g2", 49, "GMAIL_UPDATE_POP_SETTINGS"),
+    gmail("g3", 48, "GMAIL_FETCH_MESSAGE_BY_THREAD_ID"),
+    gmail("g4", 47, "GMAIL_WHO_AM_I"),
+  ]);
+  expect(whats(view.container).map((line) => line.textContent)).toEqual([
+    "Get IMAP settings",
+    "Update POP settings",
+    "Fetch thread messages",
+    "Who am I",
+  ]);
 });
