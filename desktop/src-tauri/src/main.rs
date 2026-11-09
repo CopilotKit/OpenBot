@@ -6416,6 +6416,10 @@ async fn local_eval_terms(
     tauri::async_runtime::spawn_blocking(move || {
         // The CLI checks its engine before it answers. See `know_cli_engine`.
         know_cli_engine(&root);
+        // An engine too small for local setup is said here, before Start fails on it.
+        if let Some(too_small) = local_eval::engine_size_terms() {
+            return Ok(too_small);
+        }
         local_eval::terms_installed(&attempt)
     })
     .await
@@ -11697,6 +11701,7 @@ mod tests {
             licence_expires_at: None,
             update_to: None,
             checks_passed: false,
+            shortfall: None,
         }
     }
 
