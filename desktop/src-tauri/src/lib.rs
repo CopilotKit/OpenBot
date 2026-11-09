@@ -39,6 +39,7 @@ pub mod stack;
 pub mod telemetry;
 pub mod tray;
 pub mod upgrade;
+pub mod usage_data;
 pub mod vault;
 pub mod windows;
 

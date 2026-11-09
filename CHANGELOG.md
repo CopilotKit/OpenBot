@@ -20,6 +20,24 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   started below the close, minimise and zoom buttons, under an empty strip. The buttons now sit 20pt
   in and level with the header's first row, and the name and + start just to their right.
   With the sidebar hidden, the page starts below them, and so does onboarding.
+- **OpenBot Desktop says it sends usage data, and Settings turns it off.** The first setup screen
+  now says that OpenBot sends CopilotKit usage data linked to your CopilotKit account, that it never
+  sends your conversations, files or keys, and links what it sends (`desktop/TELEMETRY.md`). Earlier
+  releases sent it with no notice. Settings > General > Privacy has Share usage data: off is the
+  same opt-out as `COPILOTKIT_TELEMETRY_DISABLED=1`, kept for every later launch. The desktop app's
+  own usage data and the CLI's stop at once, and the server's the next time OpenBot starts. With
+  `COPILOTKIT_TELEMETRY_DISABLED` or `DO_NOT_TRACK` set at launch the switch shows off and cannot be
+  turned on.
+- **Desktop usage data is linked to the CopilotKit account.** After you sign in, OpenBot Desktop
+  links its installation ID to your CopilotKit account through the bundled CLI's
+  `telemetry link`, so setup and runtime usage count as one person. It sends an opaque account
+  fingerprint, never an email, name or credential, and only for the personal edition; Enterprise
+  and team deployments are unchanged. The server receives the installation ID when OpenBot starts.
+  Signing in and Start never wait for the link, and nothing about it can keep OpenBot from
+  starting.
+- **CopilotKit CLI `copilotkit@6bfaa0f`.** OpenBot Desktop's bundled CLI moves to the production
+  build of Intelligence `6bfaa0f5c`, which adds `telemetry link`. It keeps Intelligence
+  0.16.0-rc.10 and CopilotKit v1.85.0 templates.
 - **A Learning container left in `~/OpenBot/.env` by an earlier setup no longer fails every
   message.** A folder set up against hosted Intelligence kept
   `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID="openbot"`, which the local back end did not have, so every
@@ -29,6 +47,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `configured_absent`, naming the variable and its value, and ignored, and a container is assigned
   automatically as though none was named. A chat whose first message failed this way works when sent
   to again.
+- **A saved Learning container the current back end does not have no longer fails every message
+  either.** A default container saved while OpenBot used hosted Intelligence still won after it
+  switched to the local one, which has no such container. The server now checks the saved container
+  at start: one its Intelligence does not have is logged as `saved_absent`, naming it, and ignored
+  there, and a container is assigned automatically in its place. The saved choice is kept, not
+  cleared, so pointing OpenBot back at the Intelligence it was chosen on uses it again; Admin shows
+  the container actually in use.
 - **Settings shows which AI OpenBot uses, and changes it.** Settings > General has an AI model
   section in OpenBot Desktop: the provider and how OpenBot signs in to it (a Claude or ChatGPT plan,
   an API key, a Google or xAI account, or your own address), and the model when setup named one.
@@ -82,6 +107,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the raw request failure in red, such as `REST run request failed: {"error":"Failed to resolve
   Learning Container"}`. It now says "OpenBot couldn't reach its back end, so your message wasn't
   sent. Try again, or quit and reopen OpenBot." The original text goes to the browser console.
+- **A Bot fills a form in one pass.** A Bot checking its work read every field that shows a
+  placeholder (such as "company.com" or "City, State") as empty, however often it had filled it,
+  so it typed the same values in again and then asked you to type them yourself. It now reads what
+  is in the field. And a Bot's browser takes its actions one at a time, in the order they arrived,
+  on any number of server replicas: a model that calls tools in parallel, such as Claude Opus,
+  sent a form's fields together through a LangGraph Bot, the fields took the focus from each
+  other, and values landed in the wrong field. A LangGraph Bot now runs its browser calls in the
+  order the model made them. An action that never finishes gives way to the next after
+  `BROWSER_TURN_LIMIT_MS` (50 seconds by default), and one stopped while it waits never runs.
 
 ### Smaller changes
 
@@ -1587,9 +1621,10 @@ published. It now installs from `agent-mastra/bun.lock` with `--frozen-lockfile`
 - Migration `0070_memory_dedup_per_bot` rebuilds one unique index on `personal_memories` to include
   the Bot that formed the memory (below). It keeps every row. While it rolls out, a server still on
   0.2.0 fails to save a newly formed Bot memory until it is replaced; nothing else is affected.
-- OpenBot Desktop now sends OpenBot's product usage events by default, under the telemetry notice it
-  already shows (below). Launching it with `DO_NOT_TRACK=1` or `COPILOTKIT_TELEMETRY_DISABLED=1`
-  turns them off with the rest of its telemetry.
+- OpenBot Desktop now sends OpenBot's product usage events by default (below). This release showed
+  no notice of it; a later release says so on the first setup screen. Launching it with
+  `DO_NOT_TRACK=1` or `COPILOTKIT_TELEMETRY_DISABLED=1` turns them off with the rest of its
+  telemetry.
 - Migration `0060_app_access_requests` adds one table, `app_access_requests`, which keeps people's
   requests that an admin switch on an app, grant it to a Bot or connect a Shared app's team account.
   It starts empty.
@@ -2252,8 +2287,9 @@ suggestions) are not counted. A person appears only as a pseudonym keyed with
 `KEY_ENCRYPTION_KEY`; no names, prompts, tool arguments, results or URLs are sent. Nothing is
 stored and there is no migration.
 
-A server sends these only with `OPENBOT_PRODUCT_TELEMETRY=1`. OpenBot Desktop sends them by default,
-under its existing telemetry notice. `OPENBOT_PRODUCT_TELEMETRY=0`, `DO_NOT_TRACK=1` or
+A server sends these only with `OPENBOT_PRODUCT_TELEMETRY=1`. OpenBot Desktop sends them by default;
+this release showed no notice of it, and later releases say so on the first setup screen.
+`OPENBOT_PRODUCT_TELEMETRY=0`, `DO_NOT_TRACK=1` or
 `COPILOTKIT_TELEMETRY_DISABLED=1` turns them off. The CopilotKit runtime's own events now carry
 `app_id=openbot`, and this deployment's ID only while product telemetry is on.
 
