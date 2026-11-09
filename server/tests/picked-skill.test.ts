@@ -71,8 +71,7 @@ const harnessBot: RegisteredAgent = {
   standingMessage: {
     id: "standing-role:picked-harness",
     role: "system",
-    content:
-      "You are Weekend Helper, Everyday life. Powered by LangChain (LangGraph).",
+    content: "You are Weekend Helper, Everyday life. Powered by LangChain.",
   },
 };
 

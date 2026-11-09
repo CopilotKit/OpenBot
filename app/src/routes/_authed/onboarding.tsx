@@ -13,6 +13,7 @@ import {
   HANDED_TO_YOU,
 } from "@/components/approvals/ask-first-copy";
 import { AskFirstSwitch } from "@/components/onboarding/ask-first-switch";
+import { BookingCalendar } from "@/components/onboarding/booking-calendar";
 import { IntroReel } from "@/components/onboarding/demos/intro-reel";
 import { SelfHostDemo } from "@/components/onboarding/demos/self-host-demo";
 import { FINISH_MS, useNameStep } from "@/components/onboarding/name-step";
@@ -39,7 +40,7 @@ const PRODUCT = appConfig.brand.productName;
  * Every step, by id, with the number the server stores for it.
  *
  * `POST /api/me/onboarding` keeps a step as an integer, so each id has a number of its own. A
- * number per id, never a position in the list: Talk to us joins the list only for somebody trying
+ * number per id, never a position in the list: Book a demo joins the list only for somebody trying
  * OpenBot alone, and the name step leaves it for somebody whose name is known, so a position would
  * mean different steps to different people. 0 is the server's "not started".
  */
@@ -88,7 +89,7 @@ export const Route = createFileRoute("/_authed/onboarding")({
 });
 
 /*
- * THREE CLICKS AT MOST INTO THE APP. Welcome, then Talk to us for somebody trying OpenBot alone,
+ * THREE CLICKS AT MOST INTO THE APP. Welcome, then Book a demo for somebody trying OpenBot alone,
  * then the name. Everything else waits for the app: the setup checklist lives in Settings → Setup,
  * apps are connected from Connections when a Bot needs one, and notifications are offered once the
  * first task has started (`NotifyPrompt`), when what they are for is plain.
@@ -145,30 +146,60 @@ function welcomeStep(computer: boolean): OnboardingStep {
 }
 
 /*
- * TALK TO US IS FOR SOMEBODY TRYING OPENBOT ON THEIR OWN MACHINE, and only they see it (see
+ * BOOK A DEMO IS FOR SOMEBODY TRYING OPENBOT ON THEIR OWN MACHINE, and only they see it (see
  * `localEvaluation` in RouteComponent). None of it is said to an organization's own people, who
  * already have OpenBot.
+ *
+ * THE CALENDAR IS THE STEP. It books a demo, or a call to scope a proof of concept, in place, so
+ * Continue moves on and Not now skips; once a call is booked there is nothing left to skip, and Not
+ * now goes. A calendar that can't load (offline, blocked, silent) gives the step back its picture
+ * and Book a call, which opens the OpenBot for Business page in a new tab (on the Desktop, in the
+ * person's browser).
  */
-const selfhost: OnboardingStep = {
-  id: "selfhost",
-  title: "Talk to us",
-  intro: () => (
-    <StepIntro>
-      <p>
-        Thinking about {PRODUCT} for your team? Book a call and we'll walk you
-        through running it for your organization.
+function useBookDemoStep(): OnboardingStep {
+  const [failed, setFailed] = React.useState(false);
+  const [booked, setBooked] = React.useState(false);
+  const fail = React.useCallback(() => setFailed(true), []);
+  const book = React.useCallback(() => setBooked(true), []);
+  const step: OnboardingStep = {
+    id: "selfhost",
+    title: "Book a demo",
+    intro: () => (
+      <StepIntro>
+        <p>
+          Thinking about {PRODUCT} for your team? Pick a time to see a demo or
+          scope a proof of concept with us.
+        </p>
+      </StepIntro>
+    ),
+    demo: () =>
+      failed ? (
+        <SelfHostDemo />
+      ) : (
+        <BookingCalendar onBooked={book} onFailed={fail} />
+      ),
+    optional: true,
+    secondary: booked ? undefined : { label: "Not now" },
+  };
+  if (!failed) return step;
+  return {
+    ...step,
+    // A new tab, so booking doesn't cost the place in onboarding, and then on to the next step.
+    primaryLabel: "Book a call",
+    onPrimary: (next) => {
+      window.open(BUSINESS_URL, "_blank", "noopener,noreferrer");
+      next();
+    },
+    notice: (
+      <p
+        className="text-sm text-center text-muted-foreground lg:text-left"
+        role="status"
+      >
+        Couldn't load the calendar. Book a call opens it in your browser.
       </p>
-    </StepIntro>
-  ),
-  demo: () => <SelfHostDemo />,
-  // A new tab, so booking doesn't cost the place in onboarding, and then on to the next step.
-  primaryLabel: "Book a call",
-  onPrimary: (next) => {
-    window.open(BUSINESS_URL, "_blank", "noopener,noreferrer");
-    next();
-  },
-  secondary: { label: "Not now" },
-};
+    ),
+  };
+}
 
 function RouteComponent() {
   const navigate = useNavigate();
@@ -180,7 +211,7 @@ function RouteComponent() {
   const me = useQuery(currentUserQueryOptions());
 
   /*
-   * Talk to us is for somebody evaluating OpenBot locally, never for an organization's people: the
+   * Book a demo is for somebody evaluating OpenBot locally, never for an organization's people: the
    * server says single-user mode, which an organization's deployment, always behind sign-in, cannot
    * be in. Until the answer arrives it is left out, and Welcome's button waits for it, so a slow or
    * failed request never shows an organization's employees a page about booking a call, and an
@@ -220,7 +251,7 @@ function RouteComponent() {
 
   /*
    * The step on screen: the address's, else the one the server saved, else the first. A step not in
-   * this person's list (Talk to us for an organization's person, the name step once it is known)
+   * this person's list (Book a demo for an organization's person, the name step once it is known)
    * reads as the last one they have, once the answer that decides it is in. Arriving without a step
    * writes it into the address in place, so the entry the person lands on already names its step.
    */
@@ -242,7 +273,7 @@ function RouteComponent() {
   const { mutate: save } = advance;
   React.useEffect(() => {
     if (savedStep === undefined || savedStep === STEP_NUMBER[current]) return;
-    // Talk to us waits for the answer that says whether this person has one.
+    // Book a demo waits for the answer that says whether this person has one.
     if (current === "selfhost" && !capabilities) return;
     /*
      * A save that fails is tried again on the next move, since the saved step still differs. It is
@@ -302,6 +333,7 @@ function RouteComponent() {
   }, [leaving, navigate, reduced]);
 
   const name = useNameStep({ finish, finished });
+  const selfhost = useBookDemoStep();
   /*
    * The checklist says whether there is a Bot computer, and the intro shows one only where there
    * is. Until it answers, the usual case: a computer that is there.
@@ -350,7 +382,7 @@ function RouteComponent() {
   };
   /*
    * Without the name step, the last step's buttons finish onboarding where they would have moved
-   * on: Get started on Welcome, and Book a call or Not now on Talk to us.
+   * on: Get started on Welcome, and Continue, Book a call or Not now on Book a demo.
    */
   const lastId = ids[ids.length - 1];
   const steps: OnboardingStep[] = ids.map((id) => {
@@ -373,7 +405,7 @@ function RouteComponent() {
     };
   });
 
-  // A Talk to us step in the address waits for the answer that puts it in the list, rather than
+  // A Book a demo step in the address waits for the answer that puts it in the list, rather than
   // drawing Welcome for a moment and then jumping.
   const waiting = askingCapabilities && current === "selfhost";
 

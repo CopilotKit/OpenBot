@@ -30,6 +30,7 @@ function harness() {
       published.push(...entries);
       return { added: entries.map((entry) => entry.name) };
     },
+    followBuild: async () => [],
   } as unknown as ComponentStore;
 
   const app = new Hono().route(

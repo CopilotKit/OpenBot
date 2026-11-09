@@ -1,7 +1,23 @@
+import { IconChevronRight, IconNotes } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
 import { Textarea } from "@/components/ui/textarea";
 import { saveInstructionsMutationOptions } from "@/lib/settings/mutations";
 import {
@@ -19,7 +35,55 @@ import { queryClient } from "@/query-client";
  * is for, this says how the person wants things done. Without that sentence the obvious mistake is
  * to write a job description here and get it applied to every coworker at once.
  */
-export function StandingInstructions() {
+const DESCRIPTION =
+  "Applies to every Bot in every conversation. A Bot's role says what it does. This says how you want it done, like your writing style.";
+
+/**
+ * The standing instructions as a row on General: what they say, cut to two lines, and a dialog to write them. A free
+ * text is a summary and a dialog on these screens, so a long box does not take over the page.
+ */
+export function StandingInstructionsRow() {
+  const stored = useQuery(instructionsQueryOptions());
+  const [open, setOpen] = useState(false);
+  const written = stored.data?.trim();
+  return (
+    <>
+      <Item
+        render={<button onClick={() => setOpen(true)} type="button" />}
+        size="sm"
+      >
+        <ItemMedia variant="icon">
+          <IconNotes />
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle>Standing instructions</ItemTitle>
+          <ItemDescription>
+            {stored.error
+              ? "Couldn't load your instructions."
+              : written || "None yet. Tell every Bot how you want things done."}
+          </ItemDescription>
+        </ItemContent>
+        <ItemActions>
+          <IconChevronRight className="size-4 text-muted-foreground" />
+        </ItemActions>
+      </Item>
+      <Dialog onOpenChange={setOpen} open={open}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Standing instructions</DialogTitle>
+            <DialogDescription>{DESCRIPTION}</DialogDescription>
+          </DialogHeader>
+          <DialogBody className="mt-4">
+            <StandingInstructionsEditor />
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+/** The box itself, with its count and Save: in the row's dialog. */
+function StandingInstructionsEditor() {
   const stored = useQuery(instructionsQueryOptions());
   const save = useMutation(saveInstructionsMutationOptions(queryClient));
 
@@ -56,16 +120,13 @@ export function StandingInstructions() {
   };
 
   return (
-    <PageSection
-      description="Applies to every Bot in every conversation. A Bot's role says what it does. This says how you want it done, like your writing style."
-      title="Standing instructions"
-    >
+    <>
       {stored.isPending ? null : stored.error ? (
-        <p className="mt-4 text-destructive text-sm" role="alert">
+        <p className="text-destructive text-sm" role="alert">
           {stored.error.message}
         </p>
       ) : (
-        <div className="mt-4 flex flex-col gap-2">
+        <div className="flex flex-col gap-2">
           <Textarea
             aria-label="Standing instructions"
             className="min-h-40"
@@ -110,6 +171,6 @@ export function StandingInstructions() {
           </div>
         </div>
       )}
-    </PageSection>
+    </>
   );
 }

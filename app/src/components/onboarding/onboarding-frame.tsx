@@ -262,7 +262,7 @@ export function OnboardingFrame({
  * reached is a button back to it, and picking one closes the list; one ahead is only its name.
  *
  * SAID, NOT ONLY DRAWN. The marks are pictures and hidden, so what they show is said in words a
- * screen reader reads with the name: "Welcome to OpenBot, done", and "Talk to us, not yet
+ * screen reader reads with the name: "Welcome to OpenBot, done", and "Book a demo, not yet
  * available" for a step ahead. The step on screen is `aria-current="step"`.
  */
 function StepMenu({

@@ -13,6 +13,7 @@ import {
   type AuditStore,
   recordAuditEvent,
 } from "../audit";
+import { currentEdition } from "../edition";
 import { REFUSAL_MARKER } from "../plugins/tools";
 import { type HostAccessBroker, HostAccessRefusedError } from "./broker";
 
@@ -171,6 +172,19 @@ async function answer(
   }
 }
 
+/**
+ * What "Check your folders" answers when this Bot has no folder: shown on the step as it is, and
+ * read by the model, which repeats it. Folder access is session-only, so after OpenBot restarts every
+ * Bot lands here. Found on Windows: "No host folders are granted to this Bot." read as jargon, and
+ * the model, given no next step, told the person "an administrator can restore the folder grant",
+ * when in the personal edition (the one OpenBot Desktop runs) nobody but the person chooses a folder.
+ */
+export function noFolders(): string {
+  return currentEdition() === "personal"
+    ? "This Bot has no folders it can read right now. Folder access ends when you stop OpenBot. To give it a folder, use Choose folder in Settings → Computer."
+    : "This Bot has no folders it can read right now. Folder access ends when OpenBot stops. An admin gives a Bot a folder with Choose folder in Admin → Computers.";
+}
+
 export function hostAccessTools(options: {
   broker: HostAccessBroker;
   botId: string;
@@ -212,11 +226,12 @@ export function hostAccessTools(options: {
       parameters: empty,
       execute: async () => {
         if (grants.length === 0) {
+          const reason = noFolders();
           await auditHostAccess(audit("list_folders"), {
             outcome: "refused",
-            reason: "No host folders are granted to this Bot.",
+            reason,
           });
-          return `${REFUSAL_MARKER} No host folders are granted to this Bot.`;
+          return `${REFUSAL_MARKER} ${reason}`;
         }
         await auditHostAccess(audit("list_folders"), { outcome: "allowed" });
         return JSON.stringify({

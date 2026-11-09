@@ -111,6 +111,30 @@ pub fn cli_images(source: &str) -> Option<CliImages> {
     })
 }
 
+/**
+The images `cli_images` leaves out, because k3d pulls them through the engine when the CLI creates
+the cluster and not into the node: the names the CLI's install filters out of its inventory (the
+k3s node image, k3d's proxy and tools), each by the digest the CLI gives k3d (`--image`,
+`K3D_IMAGE_LOADBALANCER`, `K3D_IMAGE_TOOLS`). `None` when any part cannot be read.
+*/
+pub fn cli_cluster_images(source: &str) -> Option<Vec<String>> {
+    let support: Support = serde_json::from_str(&json_of(literal_after(
+        source,
+        "define_CLI_LOCAL_EVALUATION_SUPPORT_default = ",
+    )?)?)
+    .ok()?;
+    let left_out: Vec<String> = serde_json::from_str(between(
+        source,
+        ".filter(([name]) => !",
+        ".includes(name))",
+    )?)
+    .ok()?;
+    left_out
+        .iter()
+        .map(|name| support.images.get(name)?.reference())
+        .collect()
+}
+
 #[derive(Deserialize)]
 struct Support {
     images: BTreeMap<String, Image>,
@@ -278,21 +302,201 @@ pub enum Done {
     Unavailable,
 }
 
+/**
+Where the back end's images are pulled from first: CopilotKit's own copy of ghcr.io and Docker Hub,
+with each registry itself after it.
+
+WHY. ghcr.io's CDN can be slow for a whole office (0.24 to 0.32 MB/s on a 300 Mbit line, measured
+2026-11-06, while nodejs.org gave 31.5 MB/s on the same Mac in the same minute). So the images are
+also published to `https://downloads.copilotkit.ai`: CloudFront over a private S3 bucket, holding a
+read-only OCI Distribution v2 tree at the domain root with ghcr.io's paths unchanged. A key it does
+not hold answers 403, not 404; query strings are ignored.
+
+HOW. As a registry mirror of the node's containerd, the documented way: k3s's
+`/etc/rancher/k3s/registries.yaml` (docs.k3s.io/installation/private-registry), from which k3s
+writes containerd's `certs.d/<registry>/hosts.toml` each time it starts (k3s
+`pkg/agent/containerd/config.go`). containerd tries a `hosts.toml`'s hosts in order and the
+registry itself last (containerd `docs/hosts.md`), and moves on from a host on any failure: a 403,
+a 404 or no answer, for a manifest and for a blob (containerd 1.7.23 `remotes/docker/resolver.go`
+and `fetcher.go`). An image is still stored under its ghcr.io name, so the CLI and Kubernetes find
+it where they look.
+
+WHO READS IT. Kubernetes' pulls, through containerd's CRI, read the hosts directory on every pull.
+`ctr` reads it only when given `--hosts-dir` (containerd `cmd/ctr/commands/resolver.go`; k3s says
+so in `PreloadImages`), so every `ctr` this module runs is given it. The CLI's own
+`ctr images pull` is not, and cannot be from here: what puts its pulls on the mirror is this
+module pulling the same images first, after which the CLI's pull finds every blob present.
+
+WHEN IT IS WRITTEN. Into a node the CLI creates, by k3d, before the node first starts: `local_eval`
+gives the CLI `K3D_REGISTRIES_CONFIG`, naming the file `registries_file` writes, the CLI hands its
+environment to `k3d cluster create`, and k3d v5.8.3 reads that variable as its `--registry-config`
+flag (`cmd/cluster/clusterCreate.go`, viper with the `K3D` prefix) and writes the file to
+`/etc/rancher/k3s/registries.yaml`. Into a node made before that, by `apply_mirror` before each
+download, with the `hosts.toml` k3s would write from it, which containerd reads on the next pull.
+Both live in the node's own filesystem, so they are there after every restart.
+*/
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Mirror {
+    /// Each registry the images are named for, as containerd's hosts directory names it, with the
+    /// address its copy is served from. An address with no path has the standard `/v2` API root
+    /// beneath it; an address with a path is the API root itself.
+    pub registries: Vec<(String, String)>,
+}
+
+impl Mirror {
+    /// ghcr.io's paths at the root, Docker Hub's under `v2/docker.io/` (its official images under
+    /// `library/`, as containerd names them).
+    pub fn standard() -> Self {
+        Self {
+            registries: vec![
+                ("ghcr.io".into(), "https://downloads.copilotkit.ai".into()),
+                (
+                    "docker.io".into(),
+                    "https://downloads.copilotkit.ai/v2/docker.io".into(),
+                ),
+            ],
+        }
+    }
+
+    /// The k3s registries file: each mirror, with its registry itself after it.
+    pub fn registries_yaml(&self) -> String {
+        let mut yaml = String::from("mirrors:\n");
+        for (registry, endpoint) in &self.registries {
+            yaml.push_str(&format!(
+                "  {registry:?}:\n    endpoint:\n      - {endpoint:?}\n"
+            ));
+        }
+        yaml
+    }
+
+    /**
+    The `hosts.toml` k3s v1.31 writes for `registry` from `registries_yaml`, byte for byte, so the
+    file written here and the one k3s writes when the node next starts are the same file. Its first
+    line marks it as k3s's own, and k3s replaces it from the registries file at every start. The
+    registry is plain HTTP only where k3s makes it so: a loopback address on a port other than 443.
+    Docker Hub's API is `registry-1.docker.io`. An address with a path keeps it as the API root
+    (`override_path`), as k3s's `normalizeEndpointAddress` keeps it.
+    */
+    fn hosts_toml(registry: &str, endpoint: &str) -> String {
+        let loopback = ["127.0.0.1:", "localhost:", "[::1]:"]
+            .iter()
+            .any(|prefix| registry.starts_with(prefix))
+            && !registry.ends_with(":443");
+        let scheme = if loopback { "http" } else { "https" };
+        let server = if registry == "docker.io" {
+            "registry-1.docker.io"
+        } else {
+            registry
+        };
+        let endpoint = endpoint.trim_end_matches('/');
+        let path = endpoint
+            .split_once("://")
+            .map_or(endpoint, |(_, rest)| rest)
+            .split_once('/')
+            .map_or("", |(_, path)| path);
+        let (host, override_path) = match path {
+            "" | "v2" => (format!("{}/v2", endpoint.trim_end_matches("/v2")), ""),
+            _ => (endpoint.to_owned(), "  override_path = true\n"),
+        };
+        format!(
+            "# File generated by k3s. DO NOT EDIT.\n\nserver = \"{scheme}://{server}/v2\"\ncapabilities = [\"pull\", \"resolve\", \"push\"]\n\n\n[host]\n[host.\"{host}\"]\n  capabilities = [\"pull\", \"resolve\"]\n{override_path}"
+        )
+    }
+}
+
+/// Where k3s keeps containerd's per-registry `hosts.toml`.
+const HOSTS_DIR: &str = "/var/lib/rancher/k3s/agent/etc/containerd/certs.d";
+
+static REGISTRIES_FILE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Where the registries file for new nodes lives. Set once, at start-up, by the app, which knows
+/// its data directory.
+pub fn registries_file_lives_at(path: std::path::PathBuf) {
+    let _ = REGISTRIES_FILE.set(path);
+}
+
+/// The registries file for `k3d cluster create`, written when it changed, or None when it cannot
+/// be: k3d stops on a file it cannot open, so the CLI then creates its node as before, and
+/// `apply_mirror` writes the mirror into it.
+pub fn registries_file() -> Option<&'static std::path::Path> {
+    let path = REGISTRIES_FILE.get()?;
+    let wanted = Mirror::standard().registries_yaml();
+    if std::fs::read_to_string(path).ok().as_deref() != Some(wanted.as_str()) {
+        let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
+        let written = path
+            .parent()
+            .is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
+            && std::fs::write(&temporary, &wanted).is_ok()
+            && std::fs::rename(&temporary, path).is_ok();
+        if !written {
+            log::warn!("[local images] could not write the registry mirror file");
+            return None;
+        }
+    }
+    Some(path.as_path())
+}
+
 /// The stack's k3d node, reached through the container engine the CLI runs on.
 pub struct Node<'a> {
-    engine: &'a dyn Fn() -> Command,
+    engine: &'a (dyn Fn() -> Command + Sync),
     stack: String,
     name: String,
+    mirror: Mirror,
 }
 
 impl<'a> Node<'a> {
     /// The node k3d names for `stack`, as the CLI names it: `k3d-<stack>-server-0`.
-    pub fn for_stack(engine: &'a dyn Fn() -> Command, stack: &str) -> Self {
+    pub fn for_stack(engine: &'a (dyn Fn() -> Command + Sync), stack: &str) -> Self {
         Self {
             engine,
             stack: stack.to_owned(),
             name: format!("k3d-{stack}-server-0"),
+            mirror: Mirror::standard(),
         }
+    }
+
+    /// The same node, pulling through `mirror` instead.
+    #[cfg(test)]
+    pub(crate) fn with_mirror(self, mirror: Mirror) -> Self {
+        Self { mirror, ..self }
+    }
+
+    /**
+    The mirror written into the running node, for now and for every start after: the registries
+    file k3s reads at start, unless the node has one already, and the `hosts.toml` k3s would write
+    from it, which containerd reads on the next pull. A registries file that names some other
+    mirror is somebody's own configuration, and nothing is changed. False when nothing was written.
+    */
+    fn apply_mirror(&self, limits: Limits) -> bool {
+        // `$1` the registries file, `$2` the address it is known by, then each registry's
+        // directory and `hosts.toml`. A registries file this wrote, or k3d wrote from the one
+        // `registries_file` wrote, names that address and is brought up to date.
+        const SCRIPT: &str = r#"set -e
+registries=/etc/rancher/k3s/registries.yaml
+if [ -e "$registries" ] && ! grep -qF "$2" "$registries"; then exit 3; fi
+mkdir -p /etc/rancher/k3s
+printf '%s' "$1" > "$registries.openbot"
+mv "$registries.openbot" "$registries"
+shift 2
+while [ $# -gt 1 ]; do
+  mkdir -p "$1"
+  printf '%s' "$2" > "$1/hosts.toml.openbot"
+  mv "$1/hosts.toml.openbot" "$1/hosts.toml"
+  shift 2
+done"#;
+        let Some((_, known_by)) = self.mirror.registries.first() else {
+            return false;
+        };
+        let mut files = Vec::new();
+        for (registry, endpoint) in &self.mirror.registries {
+            files.push(format!("{HOSTS_DIR}/{registry}"));
+            files.push(Mirror::hosts_toml(registry, endpoint));
+        }
+        let registries = self.mirror.registries_yaml();
+        let mut args = vec!["sh", "-c", SCRIPT, "sh", &registries, known_by];
+        args.extend(files.iter().map(String::as_str));
+        self.exec(&args, limits.call, 4096)
+            .is_some_and(|(ok, _)| ok)
     }
 
     /// An engine command, to its end or `limit`. Its exit status and at most `cap` bytes of stdout.
@@ -395,7 +599,14 @@ impl<'a> Node<'a> {
     /// One manifest or index, as the registry serves it, through the node's containerd.
     fn fetch(&self, reference: &str, limits: Limits) -> Option<Vec<u8>> {
         let (ok, out) = self.exec(
-            &["ctr", "content", "fetch-object", reference],
+            &[
+                "ctr",
+                "content",
+                "fetch-object",
+                "--hosts-dir",
+                HOSTS_DIR,
+                reference,
+            ],
             limits.call,
             4 << 20,
         )?;
@@ -431,9 +642,10 @@ impl<'a> Node<'a> {
                 &self.name,
                 "sh",
                 "-c",
-                "ctr images pull \"$1\" >/dev/null 2>&1 & echo $!; wait $!",
+                "ctr images pull --hosts-dir \"$2\" \"$1\" >/dev/null 2>&1 & echo $!; wait $!",
                 "sh",
                 reference,
+                HOSTS_DIR,
             ])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -674,53 +886,18 @@ fn download_into(
             Ok(())
         }
     };
-    let (Some(names), Some(architecture)) = (node.image_names(limits), node.architecture(limits))
-    else {
-        return Ok(Done::Unavailable);
+    // Through the mirror from here on, the CLI's later pulls included: they find what this put
+    // there. A node where it cannot be written downloads from the registry, as before.
+    node.apply_mirror(limits);
+    let planned = match plan(node, images, limits, &check, true)? {
+        Planned::Unavailable => return Ok(Done::Unavailable),
+        Planned::NothingToDo => return Ok(Done::NothingToDo),
+        Planned::Images(planned) => planned,
     };
-    // The runtime images by the digest of the index their release's tag serves, as the CLI reads it.
-    let mut wanted: Vec<(String, Option<Vec<u8>>)> = Vec::new();
-    for repository in &images.tagged {
-        check()?;
-        if let Some(index) = node.fetch(&format!("{repository}:{}", images.release), limits) {
-            wanted.push((format!("{repository}@{}", sha256(&index)), Some(index)));
-        }
-    }
-    wanted.extend(images.fixed.iter().map(|fixed| (fixed.clone(), None)));
-    let mut seen = HashSet::new();
-    wanted.retain(|(reference, _)| !names.contains(reference) && seen.insert(reference.clone()));
-    if wanted.is_empty() {
-        return Ok(Done::NothingToDo);
-    }
-    let mut planned = Vec::new();
-    for (reference, known) in wanted {
-        check()?;
-        // One that cannot be read is left for the CLI to pull.
-        if let Some(blobs) = blobs_of(node, &reference, known, architecture, limits) {
-            planned.push((reference, blobs));
-        }
-    }
     let Some(content) = node.content(limits) else {
         return Ok(Done::Unavailable);
     };
-    if planned.is_empty() {
-        return Ok(Done::Unavailable);
-    }
-    // The images being downloaded, whole, shared layers once: what containerd already holds of
-    // them, from an earlier attempt or another image, has arrived. A resumed download goes on
-    // from the figure the stopped one reached.
-    let mut blobs_wanted: BTreeMap<String, u64> = BTreeMap::new();
-    for (_, blobs) in &planned {
-        for (blob, size) in blobs {
-            blobs_wanted.insert(blob.clone(), *size);
-        }
-    }
-    let mut progress = Progress {
-        total: blobs_wanted.values().sum(),
-        blobs: blobs_wanted,
-        best: 0,
-        last_new: Instant::now(),
-    };
+    let mut progress = Progress::of(&planned);
     progress.observe(&content, shown);
     for (reference, blobs) in &planned {
         pull_one(
@@ -739,6 +916,210 @@ fn download_into(
     Ok(Done::Downloaded)
 }
 
+/// Each image the CLI will pull, with the blobs it is made of for the node, by digest and size.
+type Images = Vec<(String, Vec<(String, u64)>)>;
+
+/// What there is to download into a node.
+enum Planned {
+    /// The node's containerd, or every image's manifests, could not be read.
+    Unavailable,
+    /// Every image is already in the node.
+    NothingToDo,
+    Images(Images),
+}
+
+/**
+The images `images` names, as the node's containerd will pull them, with their blobs. Read through
+the node's own containerd, as the CLI's pull reads them: the runtime images by the digest of the
+index their release's tag serves, the rest by the digest the CLI names. `skip_present` leaves out an
+image the node already lists. One whose manifests cannot be read is left out, for the CLI to pull.
+*/
+fn plan(
+    node: &Node,
+    images: &CliImages,
+    limits: Limits,
+    check: &dyn Fn() -> Result<(), Stop>,
+    skip_present: bool,
+) -> Result<Planned, Stop> {
+    let (Some(names), Some(architecture)) = (node.image_names(limits), node.architecture(limits))
+    else {
+        return Ok(Planned::Unavailable);
+    };
+    check()?;
+    let indexes = at_once(&images.tagged, |repository| {
+        node.fetch(&format!("{repository}:{}", images.release), limits)
+            .map(|index| (format!("{repository}@{}", sha256(&index)), Some(index)))
+    });
+    let mut wanted: Vec<(String, Option<Vec<u8>>)> = indexes.into_iter().flatten().collect();
+    wanted.extend(images.fixed.iter().map(|fixed| (fixed.clone(), None)));
+    let mut seen = HashSet::new();
+    wanted.retain(|(reference, _)| {
+        !(skip_present && names.contains(reference)) && seen.insert(reference.clone())
+    });
+    if wanted.is_empty() {
+        return Ok(Planned::NothingToDo);
+    }
+    check()?;
+    let planned: Vec<_> = at_once(&wanted, |(reference, known)| {
+        blobs_of(node, reference, known.clone(), architecture, limits)
+            .map(|blobs| (reference.clone(), blobs))
+    })
+    .into_iter()
+    .flatten()
+    .collect();
+    check()?;
+    Ok(if planned.is_empty() {
+        Planned::Unavailable
+    } else {
+        Planned::Images(planned)
+    })
+}
+
+/// How many image lookups run at once.
+///
+/// Each is an `exec` into the node and a registry round trip, about a second and a half on Windows
+/// with Podman. The pinned CLI's release is 16 images, about 34 lookups, and one after another they
+/// held back the first figure for close to a minute of a fresh install's download. Six at once is
+/// a few seconds, and few enough not to crowd the CLI's own pulls or the registry's limits.
+pub const LOOKUPS_AT_ONCE: usize = 6;
+
+/// `look` for each of `items`, at most `LOOKUPS_AT_ONCE` at a time, the answers in `items`' order.
+fn at_once<T: Sync, R: Send>(items: &[T], look: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let answers: Mutex<Vec<Option<R>>> = Mutex::new((0..items.len()).map(|_| None).collect());
+    std::thread::scope(|scope| {
+        for _ in 0..LOOKUPS_AT_ONCE.min(items.len()) {
+            scope.spawn(|| loop {
+                let at = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let Some(item) = items.get(at) else {
+                    return;
+                };
+                let answer = look(item);
+                answers.lock().unwrap_or_else(|p| p.into_inner())[at] = Some(answer);
+            });
+        }
+    });
+    answers
+        .into_inner()
+        .unwrap_or_else(|p| p.into_inner())
+        .into_iter()
+        .map(|answer| answer.expect("every item was looked at"))
+        .collect()
+}
+
+/// How long the last figure stays on the row once everything has arrived: long enough for the
+/// window, which asks every second, to show the whole download before the row moves on.
+pub const SHOWN_WHOLE: Duration = Duration::from_secs(4);
+
+/**
+Follow the CLI's own pull into the node of a stack it is creating, and say how far it has got.
+
+A FIRST SETUP CANNOT BE DOWNLOADED FOR FIRST. `local setup` creates the stack's k3d node itself
+(Intelligence `apps/cli/src/services/local-install.ts`, `createLocalCluster`) and starts pulling into
+it seconds later, so there is no node to download into before the CLI's pulls begin. What can be
+done is what the person needs: say how much of the download has arrived. So this waits for a node
+that was not there when the setup began (`before`, from `stack_nodes`), confirms it by the label the
+CLI gives it, plans the release's images as `download` does, and reports what containerd holds of
+them until all of it has arrived or `cancelled`. It pulls nothing and changes nothing in the node.
+The node is new, so everything in it arrived during this setup: nothing is left out as present.
+*/
+pub fn follow_new_stack(
+    engine: &(dyn Fn() -> Command + Sync),
+    images: &CliImages,
+    before: &HashSet<String>,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    shown: &mut dyn FnMut(Download),
+) {
+    let check = || {
+        if cancelled() {
+            Err(Stop::Cancelled)
+        } else {
+            Ok(())
+        }
+    };
+    let wait = |for_how_long: Duration| {
+        let until = Instant::now() + for_how_long;
+        while Instant::now() < until && !cancelled() {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+    // The new stack's node, once its containerd answers.
+    let stack = loop {
+        if cancelled() {
+            return;
+        }
+        let found = stack_nodes(engine, limits)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|stack| !before.contains(stack))
+            .find(|stack| {
+                let node = Node::for_stack(engine, stack);
+                node.running(limits) == Some(true) && node.image_names(limits).is_some()
+            });
+        if let Some(stack) = found {
+            break stack;
+        }
+        wait(limits.poll);
+    };
+    let node = Node::for_stack(engine, &stack);
+    let planned = loop {
+        match plan(&node, images, limits, &check, false) {
+            Ok(Planned::Images(planned)) => break planned,
+            Ok(Planned::NothingToDo) | Err(_) => return,
+            // The node's containerd may not reach the registry yet: ask again.
+            Ok(Planned::Unavailable) => wait(limits.poll),
+        }
+        if cancelled() {
+            return;
+        }
+    };
+    let mut progress = Progress::of(&planned);
+    while !cancelled() {
+        if let Some(content) = node.content(limits) {
+            progress.observe(&content, shown);
+            if progress.best >= progress.total {
+                // Whole: said for a moment, so the row shows 100% before it moves on.
+                wait(SHOWN_WHOLE);
+                return;
+            }
+        }
+        wait(limits.poll);
+    }
+}
+
+/// The stacks whose k3d node is on the engine now, by the name k3d gives it: `k3d-<stack>-server-0`.
+/// None when the engine does not answer.
+pub fn stack_nodes(
+    engine: &(dyn Fn() -> Command + Sync),
+    limits: Limits,
+) -> Option<HashSet<String>> {
+    let probe = Node {
+        engine,
+        stack: String::new(),
+        name: String::new(),
+        mirror: Mirror::standard(),
+    };
+    let (ok, out) = probe.run(
+        &[
+            "ps",
+            "-a",
+            "--filter",
+            "name=k3d-",
+            "--format",
+            "{{.Names}}",
+        ],
+        limits.call,
+        1 << 20,
+    )?;
+    ok.then(|| {
+        lines(&out)
+            .filter_map(|name| name.strip_prefix("k3d-")?.strip_suffix("-server-0"))
+            .map(str::to_owned)
+            .collect()
+    })
+}
+
 /// The blobs the download is for, and when a new byte of them last arrived.
 struct Progress {
     blobs: BTreeMap<String, u64>,
@@ -748,6 +1129,24 @@ struct Progress {
 }
 
 impl Progress {
+    /// The images being downloaded, whole, shared layers once: what containerd already holds of
+    /// them, from an earlier attempt or another image, has arrived. A resumed download goes on
+    /// from the figure the stopped one reached.
+    fn of(planned: &Images) -> Self {
+        let mut blobs: BTreeMap<String, u64> = BTreeMap::new();
+        for (_, image) in planned {
+            for (blob, size) in image {
+                blobs.insert(blob.clone(), *size);
+            }
+        }
+        Self {
+            total: blobs.values().sum(),
+            blobs,
+            best: 0,
+            last_new: Instant::now(),
+        }
+    }
+
     /// Count what containerd holds. Only more than ever before is progress; it is all that is said.
     fn observe(&mut self, content: &Content, shown: &mut dyn FnMut(Download)) {
         let done = self
@@ -942,6 +1341,29 @@ mod tests {
     }
 
     #[test]
+    fn the_mirror_files_are_what_k3d_and_k3s_wrote_into_a_real_node() {
+        // Given to the pinned k3d v5.8.3 as K3D_REGISTRIES_CONFIG, then read back from the node
+        // k3s v1.31.5 started: its /etc/rancher/k3s/registries.yaml took this mirror, and the
+        // hosts.toml it wrote for ghcr.io was exactly this.
+        let mirror = Mirror::standard();
+        assert_eq!(
+            mirror.registries_yaml(),
+            "mirrors:\n  \"ghcr.io\":\n    endpoint:\n      - \"https://downloads.copilotkit.ai\"\n  \"docker.io\":\n    endpoint:\n      - \"https://downloads.copilotkit.ai/v2/docker.io\"\n"
+        );
+        let [(ghcr, at_root), (hub, under_path)] = mirror.registries.as_slice() else {
+            panic!("two registries");
+        };
+        assert_eq!(
+            Mirror::hosts_toml(ghcr, at_root),
+            "# File generated by k3s. DO NOT EDIT.\n\nserver = \"https://ghcr.io/v2\"\ncapabilities = [\"pull\", \"resolve\", \"push\"]\n\n\n[host]\n[host.\"https://downloads.copilotkit.ai/v2\"]\n  capabilities = [\"pull\", \"resolve\"]\n"
+        );
+        assert_eq!(
+            Mirror::hosts_toml(hub, under_path),
+            "# File generated by k3s. DO NOT EDIT.\n\nserver = \"https://registry-1.docker.io/v2\"\ncapabilities = [\"pull\", \"resolve\", \"push\"]\n\n\n[host]\n[host.\"https://downloads.copilotkit.ai/v2/docker.io\"]\n  capabilities = [\"pull\", \"resolve\"]\n  override_path = true\n"
+        );
+    }
+
+    #[test]
     fn reads_the_ingests_ctr_content_active_printed() {
         // Captured from k3s v1.32 (containerd v1.7.23-k3s2) after a `ctr images pull` was killed.
         let active = active_ingests(include_str!(
@@ -999,6 +1421,129 @@ mod tests {
             Some("sha256:3a68d8567335f56c168c36b53059c5dd4dfe23c2edbf4d9251e9ed3170dfacd8")
         );
         assert_eq!(platform_manifest(&index, "riscv64"), None);
+    }
+
+    /**
+    An engine whose every call into the node takes as long as `delay` says, as `podman exec` into a
+    k3d node and a registry round trip take on Windows. It answers with real bytes: the
+    `app-api:0.16.0-rc.9` index for any tag or index digest, that index's linux/arm64 manifest for
+    its digest, and a `ctr content active` captured during that image's pull.
+    */
+    const SLOW_ENGINE: &str = r#"
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+    let read = |name: &str| std::fs::read(dir.join(name)).unwrap();
+    let delay: u64 = String::from_utf8(read("delay")).unwrap().trim().parse().unwrap();
+    let stack = String::from_utf8(read("stack")).unwrap().trim().to_owned();
+    let out = |bytes: &[u8]| { use std::io::Write; std::io::stdout().write_all(bytes).unwrap(); };
+    let a: Vec<&str> = args.iter().map(String::as_str).collect();
+    match a.as_slice() {
+        ["ps", ..] => out(format!("k3d-{stack}-server-0\n").as_bytes()),
+        ["inspect", ..] => out(format!("true {stack}\n").as_bytes()),
+        ["exec", _, rest @ ..] => {
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+            match rest {
+                ["ctr", "images", "ls", "-q"] => {}
+                ["uname", "-m"] => out(b"aarch64\n"),
+                ["ctr", "content", "fetch-object", "--hosts-dir", _, reference] => {
+                    if reference.ends_with(&String::from_utf8(read("manifest-digest")).unwrap().trim().to_owned()) {
+                        out(&read("manifest"));
+                    } else {
+                        out(&read("index"));
+                    }
+                }
+                ["sh", "-c", _] => { out(b"-----\n"); out(&read("active")); }
+                _ => std::process::exit(2),
+            }
+        }
+        _ => std::process::exit(2),
+    }
+}
+"#;
+
+    /**
+    The Windows fresh install: the back end's card did not appear until about 480 of 605 MB had
+    arrived. Before saying anything, the release's 16 images were looked up one after another,
+    about 34 calls into the node at a second and a half each. Here each call takes a second: one
+    after another that is over 36 seconds before the first figure, and at `LOOKUPS_AT_ONCE` about
+    eleven. The first figure is the whole release's size, with what the captured ingests hold.
+    */
+    #[test]
+    fn a_first_setups_download_is_shown_within_seconds_of_its_node_appearing() {
+        let root = crate::test_support::temp_root("slow-engine");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("engine.rs");
+        std::fs::write(&source, SLOW_ENGINE).unwrap();
+        let engine_binary = root.join(format!("engine{}", std::env::consts::EXE_SUFFIX));
+        crate::test_support::compile_fixture(&source, &engine_binary);
+        let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/test-fixtures/local-images/");
+        let copy = |from: &str, to: &str| {
+            std::fs::copy(format!("{fixtures}{from}"), root.join(to)).unwrap();
+        };
+        copy("app-api-0.16.0-rc.9-index.raw", "index");
+        copy("app-api-0.16.0-rc.9-linux-arm64.raw", "manifest");
+        copy("ctr-content-active.txt", "active");
+        let manifest_digest =
+            "sha256:7a586c51e16004343d7dbab513da2e12cf727fe022f75e5a9b8b36f1eb3c3b8f";
+        std::fs::write(root.join("manifest-digest"), manifest_digest).unwrap();
+        std::fs::write(root.join("delay"), "1000").unwrap();
+        std::fs::write(root.join("stack"), "local-fresh").unwrap();
+        // The pinned CLI's release: five images at its tag, eleven by digest.
+        let index_digest =
+            "sha256:9ee3006d92a656a72be43f9bda0e0738aec910f3b8098aba8e029f28061e85b7";
+        let images = CliImages {
+            release: "0.16.0-rc.9".into(),
+            tagged: (0..5)
+                .map(|n| format!("ghcr.io/copilotkit/intelligence/service-{n}"))
+                .collect(),
+            fixed: (0..11)
+                .map(|n| format!("docker.io/example/fixed-{n}@{index_digest}"))
+                .collect(),
+        };
+        let engine = || crate::quiet::command(&engine_binary);
+        let limits = Limits {
+            stall: Duration::from_secs(60),
+            image: Duration::from_secs(60),
+            poll: Duration::from_millis(100),
+            call: Duration::from_secs(30),
+        };
+        let started = Instant::now();
+        let give_up = started + Duration::from_secs(25);
+        let mut first: Option<(Duration, Download)> = None;
+        let shown = std::sync::atomic::AtomicBool::new(false);
+        follow_new_stack(
+            &engine,
+            &images,
+            &HashSet::new(),
+            limits,
+            &|| shown.load(std::sync::atomic::Ordering::SeqCst) || Instant::now() >= give_up,
+            &mut |download| {
+                first.get_or_insert((started.elapsed(), download));
+                shown.store(true, std::sync::atomic::Ordering::SeqCst);
+            },
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let (after, download) = first.expect("a figure was shown");
+        assert!(
+            after < Duration::from_secs(20),
+            "first figure after {after:?}"
+        );
+        // The image's config and twelve layers, once however many images share them.
+        let manifest: Value = serde_json::from_slice(
+            &std::fs::read(format!("{fixtures}app-api-0.16.0-rc.9-linux-arm64.raw")).unwrap(),
+        )
+        .unwrap();
+        let whole: u64 = manifest["config"]["size"].as_u64().unwrap()
+            + manifest["layers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|layer| layer["size"].as_u64().unwrap())
+                .sum::<u64>();
+        assert_eq!(download.total, whole);
+        // The two layers the captured ingests were part way through: 14.68 MB each so far.
+        assert_eq!(download.done, 2 * 14_680_000);
     }
 }
 
@@ -1059,6 +1604,9 @@ pub(crate) mod live {
         proxy: String,
         port: String,
         architecture: String,
+        /// Every blob and manifest pushed, by its path under the registry's root and with the
+        /// media type it was pushed as, for a mirror to hold.
+        pushed: Mutex<Vec<(String, Vec<u8>, String)>>,
     }
 
     impl Lab {
@@ -1081,6 +1629,7 @@ pub(crate) mod live {
                 proxy,
                 port: String::new(),
                 architecture: String::new(),
+                pushed: Mutex::new(Vec::new()),
             };
             // The registry holds the network the node and the proxy join, so the node can be
             // stopped and started again without taking the registry's loopback with it.
@@ -1201,6 +1750,11 @@ pub(crate) mod live {
                     .send()
                     .unwrap();
                 assert_eq!(put.status().as_u16(), 201, "blob upload");
+                self.pushed.lock().unwrap().push((
+                    format!("v2/{repository}/blobs/{blob}"),
+                    bytes.to_vec(),
+                    "application/octet-stream".into(),
+                ));
                 (blob, bytes.len())
             };
             let mut diff_ids = Vec::new();
@@ -1252,6 +1806,11 @@ pub(crate) mod live {
                     .send()
                     .unwrap();
                 assert_eq!(answer.status().as_u16(), 201, "manifest upload");
+                self.pushed.lock().unwrap().push((
+                    format!("v2/{repository}/manifests/{reference}"),
+                    bytes.to_vec(),
+                    kind.into(),
+                ));
             };
             let manifest_digest = sha256(&manifest);
             put(
@@ -1337,6 +1896,226 @@ pub(crate) mod live {
                 let _ = docker(&["rm", "-f", "-v", name]);
             }
         }
+    }
+
+    /**
+    A stand-in for `https://downloads.copilotkit.ai`, as faithful to S3 behind CloudFront as plain
+    nginx gets: static files in a v2 tree at the root, each manifest served with the media type it
+    was stored with, blobs as octet streams, no `Docker-Content-Digest`, query strings ignored, and
+    403 for a key it does not hold. On the node's loopback, port 5002, beside the lab's registry.
+    */
+    pub(crate) struct StaticMirror {
+        name: String,
+    }
+
+    impl StaticMirror {
+        /// A mirror holding everything pushed to `lab` so far, the repositories in `hub` under
+        /// `v2/docker.io/` as Docker Hub's images are held.
+        pub(crate) fn of(lab: &Lab, hub: &[&str]) -> Self {
+            let name = format!("{}-mirror", lab.stack);
+            let netns = format!("container:{}", lab.registry);
+            assert!(docker(&["create", "--name", &name, "--network", &netns, NGINX]).0);
+            let mirror = Self { name };
+            let pushed = lab.pushed.lock().unwrap();
+            let mut types = String::new();
+            let mut archive = tar::Builder::new(Vec::new());
+            for (path, bytes, kind) in pushed.iter() {
+                let path = match hub
+                    .iter()
+                    .find(|repository| path.starts_with(&format!("v2/{repository}/")))
+                {
+                    Some(_) => path.replacen("v2/", "v2/docker.io/", 1),
+                    None => path.clone(),
+                };
+                if path.contains("/manifests/") {
+                    types.push_str(&format!(
+                        "    location = /{path} {{ default_type {kind}; try_files $uri =403; }}\n"
+                    ));
+                }
+                let mut header = tar::Header::new_gnu();
+                header.set_size(bytes.len() as u64);
+                header.set_mode(0o644);
+                header.set_cksum();
+                archive
+                    .append_data(&mut header, format!("srv/{path}"), bytes.as_slice())
+                    .unwrap();
+            }
+            let conf = format!(
+                "events {{}}\nhttp {{\n  log_format pulls '$request_method $uri $status $body_bytes_sent range=\"$http_range\"';\n  access_log /dev/stdout pulls;\n  types {{}}\n  default_type application/octet-stream;\n  server {{\n    listen 127.0.0.1:5002;\n    root /srv;\n    location = /v2/ {{ default_type application/json; return 200 '{{}}'; }}\n    location / {{ try_files $uri =403; }}\n{types}  }}\n}}\n"
+            );
+            let mut header = tar::Header::new_gnu();
+            header.set_size(conf.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            archive
+                .append_data(&mut header, "etc/nginx/nginx.conf", conf.as_bytes())
+                .unwrap();
+            let tarball = archive.into_inner().unwrap();
+            let mut copy = Command::new("docker")
+                .args(["cp", "-", &format!("{}:/", mirror.name)])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .spawn()
+                .unwrap();
+            std::io::Write::write_all(&mut copy.stdin.take().unwrap(), &tarball).unwrap();
+            assert!(copy.wait().unwrap().success());
+            assert!(docker(&["start", &mirror.name]).0);
+            let until = Instant::now() + Duration::from_secs(30);
+            let ping = [
+                "exec",
+                &mirror.name,
+                "wget",
+                "-q",
+                "-O-",
+                "http://127.0.0.1:5002/v2/",
+            ];
+            while !docker(&ping).0 {
+                assert!(Instant::now() < until, "the mirror did not come up");
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            mirror
+        }
+
+        /// The lab's registry, pulled through this mirror first.
+        pub(crate) fn mirror() -> Mirror {
+            Mirror {
+                registries: vec![
+                    ("127.0.0.1:5000".into(), "http://127.0.0.1:5002".into()),
+                    (
+                        "docker.io".into(),
+                        "http://127.0.0.1:5002/v2/docker.io".into(),
+                    ),
+                ],
+            }
+        }
+
+        /// The mirror's access log, in the proxy's format.
+        pub(crate) fn requests(&self) -> Vec<String> {
+            let output = Command::new("docker")
+                .args(["logs", &self.name])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|line| line.starts_with("GET ") || line.starts_with("HEAD "))
+                .map(str::to_owned)
+                .collect()
+        }
+    }
+
+    impl Drop for StaticMirror {
+        fn drop(&mut self) {
+            let _ = docker(&["rm", "-f", "-v", &self.name]);
+        }
+    }
+
+    /**
+    The reason for the mirror: ghcr.io can crawl, or not answer at all. With the registry the
+    images are named for stopped dead (its proxy paused, so a connection to it hangs), the download
+    is served whole by the mirror, and the image is stored under the registry's name, where the
+    CLI's own pull and Kubernetes look for it. The mirror is still in the node's configuration
+    after the node restarts, because k3s writes it again from the registries file.
+    */
+    #[test]
+    #[ignore = "runs a privileged k3s node, a registry and a proxy on Docker"]
+    fn the_download_comes_from_the_mirror_while_the_registry_does_not_answer() {
+        let lab = Lab::new("2m");
+        let image = lab.push("test/mirrored", "1", &[3_000_000]);
+        let (layer, size) = layer_of(&lab, &image);
+        // An official Docker Hub image, by the name containerd gives it, and Docker Hub itself
+        // refusing every connection from the node.
+        let pushed_hub = lab.push("library/mirrored-hub", "1", &[1_000_000]);
+        let (hub_layer, hub_size) = layer_of(&lab, &pushed_hub);
+        let hub = pushed_hub.replacen("127.0.0.1:5000/", "docker.io/", 1);
+        assert!(
+            docker(&[
+                "exec",
+                &lab.node,
+                "sh",
+                "-c",
+                "echo '127.0.0.1 registry-1.docker.io auth.docker.io' >> /etc/hosts",
+            ])
+            .0
+        );
+        let mirror = StaticMirror::of(&lab, &["library/mirrored-hub"]);
+        let before = lab.requests().len();
+        lab.pause_proxy(true);
+        let node = lab.node().with_mirror(StaticMirror::mirror());
+        let done = download(
+            &node,
+            &only(&[&image, &hub]),
+            test_limits(),
+            &|| false,
+            &mut |_| {},
+        );
+        lab.pause_proxy(false);
+        assert_eq!(done, Ok(Done::Downloaded));
+        let images = lab.images();
+        assert!(images.contains(&image), "stored under its own name");
+        assert!(images.contains(&hub), "stored under its Docker Hub name");
+        let (bytes, _) = served(&mirror.requests(), &layer);
+        assert!(
+            bytes >= size,
+            "the mirror sent the layer: {bytes} of {size}"
+        );
+        let (bytes, _) = served(&mirror.requests(), &hub_layer);
+        assert!(
+            bytes >= hub_size,
+            "the mirror sent Docker Hub's layer: {bytes} of {hub_size}"
+        );
+        assert!(
+            mirror
+                .requests()
+                .iter()
+                .any(|line| line.starts_with(&format!(
+                    "GET /v2/docker.io/library/mirrored-hub/blobs/{hub_layer} 200"
+                ))),
+            "{:?}",
+            mirror.requests()
+        );
+        let upstream = lab.requests();
+        assert!(
+            upstream[before..]
+                .iter()
+                .all(|line| !line.contains("/blobs/")),
+            "{upstream:?}"
+        );
+
+        // A CLI-style pull afterwards (no hosts directory) finds every blob present.
+        assert!(docker(&["exec", &lab.node, "ctr", "images", "pull", &image]).0);
+        let upstream = lab.requests();
+        assert!(
+            upstream[before..]
+                .iter()
+                .all(|line| !line.contains("/blobs/")),
+            "{upstream:?}"
+        );
+
+        // After a restart, k3s writes the same mirror configuration again from the registries file.
+        let hosts = format!("{HOSTS_DIR}/127.0.0.1:5000/hosts.toml");
+        let hub_hosts = format!("{HOSTS_DIR}/docker.io/hosts.toml");
+        let written = docker(&["exec", &lab.node, "cat", &hosts]).1;
+        let hub_written = docker(&["exec", &lab.node, "cat", &hub_hosts]).1;
+        assert_eq!(
+            written,
+            Mirror::hosts_toml("127.0.0.1:5000", "http://127.0.0.1:5002")
+        );
+        assert_eq!(
+            hub_written,
+            Mirror::hosts_toml("docker.io", "http://127.0.0.1:5002/v2/docker.io")
+        );
+        lab.stop_node();
+        assert!(docker(&["start", &lab.node]).0);
+        let until = Instant::now() + Duration::from_secs(120);
+        while lab.node().image_names(test_limits()).is_none() {
+            assert!(Instant::now() < until, "the node did not come back");
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        assert_eq!(docker(&["exec", &lab.node, "cat", &hosts]).1, written);
+        assert_eq!(
+            docker(&["exec", &lab.node, "cat", &hub_hosts]).1,
+            hub_written
+        );
     }
 
     pub(crate) fn only(fixed: &[&str]) -> CliImages {
@@ -1575,9 +2354,20 @@ fn main() {
         print!("{{\"version\":1,\"command\":\"local status\",\"status\":\"completed\",\"stack\":{saved},\"nextAction\":null,\"error\":null,\"diagnostics\":[]}}");
         return;
     }
+    // A first setup: no stack is recorded yet, and `local setup` makes the node (the lab's, held
+    // under the name `fresh` gives) a moment after it starts, then pulls into it.
+    let fresh = std::fs::read_to_string(dir.join("fresh")).ok();
     if command == "local list" {
-        print!("{{\"version\":1,\"command\":\"local list\",\"status\":\"completed\",\"stacks\":[{saved}],\"nextAction\":null,\"error\":null,\"diagnostics\":[]}}");
+        let stacks = if fresh.is_some() { String::new() } else { saved };
+        print!("{{\"version\":1,\"command\":\"local list\",\"status\":\"completed\",\"stacks\":[{stacks}],\"nextAction\":null,\"error\":null,\"diagnostics\":[]}}");
         return;
+    }
+    if let (Some(held), "local setup") = (fresh, command.as_str()) {
+        std::thread::sleep(Duration::from_secs(1));
+        let made = Command::new("docker").args(["rename", held.trim(), &node])
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+            .status().unwrap();
+        assert!(made.success());
     }
     let mut pulled = true;
     for image in lines.map(str::trim).filter(|line| !line.is_empty()) {
@@ -1915,6 +2705,74 @@ var init_define_CLI_LOCAL_EVALUATION_SUPPORT = __esm({{
             .is_some_and(|d| d.done == d.total && d.total > 6_000_000));
     }
 
+    /**
+    The Windows fresh-install probe: a first setup's row said nothing for minutes while ~690 MB of
+    back-end images came down. A first setup has no node until the CLI makes it, so nothing was
+    downloaded or followed for it. Here the CLI makes the node after it starts and pulls into it on a
+    slow line, and the setup's attempt is told how far that pull has got, out of the whole download,
+    until all of it has arrived. Nothing is pulled by OpenBot: the CLI's own pulls finish it.
+    */
+    #[test]
+    #[ignore = "runs a privileged k3s node, a registry and a proxy on Docker"]
+    fn a_first_setup_shows_the_download_the_cli_pulls_into_the_node_it_makes() {
+        use crate::local_eval::{setup_with, Cancel, Limits as CliLimits};
+        let lab = Lab::new("384k");
+        let (runtime, fixed, system) = release_images(&lab);
+        let (cli, installation) = pulling_cli(
+            "pulling-cli-first-setup",
+            &lab,
+            &runtime,
+            &fixed,
+            &system,
+            &[&fixed, &runtime, &system],
+            120,
+            true,
+        );
+        // The node is not there yet: it is held under another name until the CLI makes it.
+        let held = format!("{}-not-yet", lab.stack);
+        assert!(docker(&["rename", &lab.node, &held]).0);
+        std::fs::write(installation.parent().unwrap().join("fresh"), &held).unwrap();
+        let limits = CliLimits::for_setup();
+        let (report, seen) = watching("first-setup", || {
+            setup_with(
+                &cli,
+                "first-setup",
+                &installation,
+                None,
+                (limits, limits),
+                &Cancel::default(),
+                test_limits(),
+            )
+        });
+        assert_eq!(
+            report.map(|report| report.outcome),
+            Ok(crate::local_eval::Outcome::Completed)
+        );
+        assert_eq!(ran(&installation), ["local list", "local setup"]);
+        assert!(lab.images().contains(&runtime));
+        // Seen moving, out of the whole release (three images, shared blobs once), never back.
+        assert!(
+            seen.iter()
+                .filter(|d| d.done < d.total && d.total > 6_000_000)
+                .count()
+                >= 3,
+            "{seen:?}"
+        );
+        assert!(
+            seen.windows(2)
+                .all(|w| w[0].done <= w[1].done && w[0].total == w[1].total),
+            "{seen:?}"
+        );
+        // Only the CLI pulled: OpenBot read manifests, and the layer was sent once.
+        let (layer, _) = layer_of(&lab, &runtime);
+        let gets: Vec<String> = lab
+            .requests()
+            .into_iter()
+            .filter(|line| line.starts_with("GET ") && line.contains(&layer))
+            .collect();
+        assert_eq!(gets.len(), 1, "{gets:?}");
+    }
+
     /// A node the download started is stopped again when the download stops: Retry then finds the
     /// stack as Quit left it, and starts from the same place.
     #[test]
@@ -2023,6 +2881,7 @@ var init_define_CLI_LOCAL_EVALUATION_SUPPORT = __esm({{
             engine: &engine,
             stack: "local-someone-else".into(),
             name: lab.node.clone(),
+            mirror: Mirror::standard(),
         };
         assert_eq!(
             download(

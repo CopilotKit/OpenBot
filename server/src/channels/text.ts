@@ -105,3 +105,14 @@ export function plainText(markdown: string): string {
 export function plainLine(markdown: string, maxGraphemes: number): string {
   return oneLine(plainText(markdown), maxGraphemes);
 }
+
+/**
+ * The first line of a message that says something, as plain text: a reply's opening sentence, where
+ * {@link plainLine} runs every line into one. Empty when the message has no words at all.
+ */
+export function firstPlainLine(markdown: string, maxGraphemes: number): string {
+  const first = plainText(markdown)
+    .split("\n")
+    .find((line) => line.trim().length > 0);
+  return first === undefined ? "" : oneLine(first, maxGraphemes);
+}

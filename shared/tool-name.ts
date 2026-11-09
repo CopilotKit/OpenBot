@@ -2,6 +2,7 @@ import { OFFER_CHECK_IN_TOOL } from "./check-in-offer";
 import { SHOW_APP_ACCESS_TOOL } from "./connect-prompt";
 import { RESEARCH_ROLE_LABELS, researchRoleOfTool } from "./research";
 import { SUBAGENT_TOOL } from "./subagent";
+import { lowerFirst, nameInWords } from "./tool-name-words";
 import { SEARCH_TOOLS } from "./tool-search";
 
 /**
@@ -81,7 +82,9 @@ export function appToolName(server: string, tool: string): ToolName {
     const leads = appWords.every((word, index) => toolWords[index] === word);
     const action = leads ? toolWords.slice(appWords.length) : toolWords;
     return {
-      label: action.length > 0 ? humanise(action.join(" ")) : humanise(tool),
+      label: nameInWords(
+        action.length > 0 ? humanise(action.join(" ")) : humanise(tool),
+      ),
       detail: connectorName(server),
     };
   }
@@ -96,7 +99,7 @@ export function appToolName(server: string, tool: string): ToolName {
     serverLead.every((word, index) => toolLead[index] === word)
   )
     return {
-      label: humanise(toolLead.slice(serverLead.length).join(" ")),
+      label: nameInWords(humanise(toolLead.slice(serverLead.length).join(" "))),
       detail: connectorName(server),
     };
   const label = humanise(tool);
@@ -127,7 +130,8 @@ export function appToolName(server: string, tool: string): ToolName {
   const wordsActedOn = labelWords.slice(1);
   const serverWords = wordsOf(server).map(singular);
   const named = containsPhrase(wordsActedOn, serverWords);
-  return named ? { label } : { label, detail: server };
+  const said = nameInWords(label);
+  return named ? { label: said } : { label: said, detail: server };
 }
 
 /**
@@ -160,32 +164,211 @@ export function approvalWords(action: {
   action: string;
   place: string;
 } {
+  const { action: words, place } = approvalParts(action);
+  return { action: words, place };
+}
+
+/**
+ * What an approval waits on as one phrase, for a card's title and a task's waiting line: "send
+ * email on Gmail", "click on example.com", and a file as its step and its Activity row name it,
+ * "save a file todo.txt in share". A step on a whole folder is "in" it.
+ */
+export function approvalPhrase(action: {
+  toolRef: string;
+  scope: string;
+  target?: unknown;
+}): string {
+  const { action: words, place, joiner } = approvalParts(action);
+  return joiner ? `${words} ${joiner} ${place}` : `${words} ${place}`;
+}
+
+function approvalParts(action: {
+  toolRef: string;
+  scope: string;
+  target?: unknown;
+}): { action: string; place: string; joiner: "on" | "in" | "" } {
   const slash = action.toolRef.indexOf("/");
   const app = action.toolRef.slice(0, slash);
   if (slash > 0 && app === action.scope) {
     const { label } = appToolName(app, action.toolRef.slice(slash + 1));
     return {
-      action: label.charAt(0).toLowerCase() + label.slice(1),
+      action: lowerFirst(label),
       place: connectorName(app),
+      joiner: "on",
     };
   }
+  /*
+   * A browser action on the site it acts on, with the control it presses when the page named one:
+   * "click the link “Python” on en.wikipedia.org". Activity said "Approve computer_click".
+   */
+  const browser = browserAction(action.toolRef, action.target);
+  if (browser) return { action: browser, place: action.scope, joiner: "on" };
+  /*
+   * A computer's or a folder's own action in the words its step and its Activity row use. The card
+   * said "write file on todo.txt in share" above a step that read "Save a file todo.txt in share".
+   */
+  const own = ownToolAttempt(action.toolRef.replace(/^host\//, "host_"));
+  const words = own
+    ? lowerFirst(own)
+    : action.toolRef.replace(/^computer_|^host\//, "").replaceAll("_", " ");
+  /*
+   * A folder on the person's computer by the name Settings > Computer shows. Its scope is the id
+   * OpenBot gave the grant, which kept a rule saved from the card on that grant, and read on the
+   * card as "write file on host-grant-15407-1794112361547002000".
+   */
+  if (action.toolRef.startsWith("host/")) {
+    const file = folderFile(action.target);
+    const folder = folderName(action.target);
+    // "save a file todo.txt in share"; a command or a listing is in the folder itself.
+    if (file)
+      return {
+        action: words,
+        place: inFolder(file, folder) ?? file,
+        joiner: "",
+      };
+    if (folder) return { action: words, place: folder, joiner: "in" };
+  }
+  // A file on the Bot's own computer by its path, as its step names it, not the folder it is in.
+  const path = computerFile(action.target);
+  if (path) return { action: words, place: path, joiner: "" };
+  return { action: words, place: action.scope, joiner: "on" };
+}
+
+/** Handles the model cites and the run carries, which name nothing a person could check. */
+const INTERNAL_ARGS = new Set(["ref", "snapshotId", "toolCallId", "signal"]);
+
+/**
+ * What an approval would send, as labelled lines for its card: "Text: hello", "To: sam@example.test".
+ * The card showed the arguments as JSON, and a click read `{ "ref": "f3e43", "snapshotId": 4 }`, two
+ * handles to a page snapshot nobody can see. Those are left out, so a click has nothing to add to its
+ * title and shows no lines at all. Everything else stays whole: nobody allows what they were not shown.
+ */
+export function approvalDetails(
+  args: unknown,
+): { label: string; value: string }[] {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return [];
+  return Object.entries(args).flatMap(([key, value]) => {
+    if (INTERNAL_ARGS.has(key) || value === undefined || value === null)
+      return [];
+    const text =
+      typeof value === "string"
+        ? value
+        : typeof value === "boolean"
+          ? value
+            ? "Yes"
+            : "No"
+          : typeof value === "number"
+            ? String(value)
+            : Array.isArray(value) &&
+                value.every((entry) => typeof entry === "string")
+              ? value.join(", ")
+              : JSON.stringify(value, null, 2);
+    const words = wordsOf(key)
+      .map((word) => ACRONYMS[word] ?? word)
+      .join(" ");
+    const label = words ? words.charAt(0).toUpperCase() + words.slice(1) : key;
+    return [{ label, value: text }];
+  });
+}
+
+/** Argument words a person reads in capitals. */
+const ACRONYMS: Record<string, string> = { url: "URL", id: "ID" };
+
+/**
+ * A saved approval rule's title, in the words its approval card used for the action it covers:
+ * "Click", "Send email on Gmail", "Any action on Gmail". The list titled each rule by its tool id
+ * ("computer_click", "mcp/gmail/*"). `place` is true when the title already names where the rule
+ * applies, so the line under it need not say "on composio-gmail" again. A pattern a person typed
+ * that matches several actions some other way is kept as they wrote it.
+ */
+export function ruleTitle(rule: { toolRef: string; scope: string }): {
+  title: string;
+  place: boolean;
+} {
+  const upper = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+  if (rule.toolRef === "*") return { title: "Any action", place: false };
+  if (rule.toolRef === "host/*")
+    return { title: "Any action in your folders", place: false };
+  const ref = rule.toolRef.replace(/^mcp\//, "");
+  const slash = ref.indexOf("/");
+  if (slash > 0 && !ref.startsWith("host/")) {
+    const app = ref.slice(0, slash);
+    const tool = ref.slice(slash + 1);
+    if (app.includes("*")) return { title: rule.toolRef, place: false };
+    const named = rule.scope === "*" || rule.scope === app;
+    if (tool === "*")
+      return { title: `Any action on ${connectorName(app)}`, place: named };
+    if (tool.includes("*")) return { title: rule.toolRef, place: false };
+    const { action, place } = approvalWords({ toolRef: ref, scope: app });
+    return { title: `${upper(action)} on ${place}`, place: named };
+  }
+  if (ref.includes("*")) return { title: rule.toolRef, place: false };
   return {
-    action: action.toolRef
-      .replace(/^computer_|^host\//, "")
-      .replaceAll("_", " "),
-    /*
-     * A folder on the person's computer by the name Settings > Computer shows. Its scope is the id
-     * OpenBot gave the grant, which kept a rule saved from the card on that grant, and read on the
-     * card as "write file on host-grant-15407-1794112361547002000".
-     */
-    place:
-      (action.toolRef.startsWith("host/") &&
-        // "write file on todo.txt in share"; a command or a listing is on the folder itself.
-        (folderFile(action.target)
-          ? inFolder(folderFile(action.target), folderName(action.target))
-          : folderName(action.target))) ||
-      action.scope,
+    title: upper(approvalWords({ toolRef: ref, scope: rule.scope }).action),
+    place: false,
   };
+}
+
+/** What a browser action asks to do, said as its step says it. */
+const BROWSER_ACTIONS: Record<string, string> = {
+  computer_navigate: "open a page",
+  computer_click: "click",
+  computer_type: "fill in a field",
+  computer_key: "press a key",
+  computer_scroll: "scroll the page",
+};
+
+/** A page control's role in the words a person uses for it. */
+const CONTROL_WORDS: Record<string, string> = {
+  link: "link",
+  button: "button",
+  checkbox: "checkbox",
+  radio: "option",
+  option: "option",
+  tab: "tab",
+  menuitem: "menu item",
+  switch: "switch",
+  textbox: "field",
+  searchbox: "search field",
+  combobox: "list",
+};
+
+/**
+ * A browser action in words, naming the control it presses from the label the server resolved
+ * (`target.element`), never the ref and snapshot the model cited. Undefined for any other action.
+ */
+function browserAction(toolRef: string, target: unknown): string | undefined {
+  const base = BROWSER_ACTIONS[toolRef];
+  if (!base) return undefined;
+  const element =
+    target && typeof target === "object"
+      ? (target as { element?: { role?: unknown; name?: unknown } }).element
+      : undefined;
+  const name =
+    typeof element?.name === "string"
+      ? element.name.replace(/\s+/g, " ").trim()
+      : "";
+  const role =
+    typeof element?.role === "string" ? CONTROL_WORDS[element.role] : undefined;
+  if (toolRef === "computer_click") {
+    if (name) return `click ${role ? `the ${role} ` : ""}“${clipName(name)}”`;
+    return role ? `click ${/^[aeiou]/.test(role) ? "an" : "a"} ${role}` : base;
+  }
+  if (toolRef === "computer_type" && name) return `fill in “${clipName(name)}”`;
+  return base;
+}
+
+/** A control's label, short enough for a title. */
+function clipName(name: string): string {
+  const chars = Array.from(name);
+  return chars.length > 60 ? `${chars.slice(0, 59).join("")}…` : name;
+}
+
+/** The path a file action on the Bot's own computer names (`target.filePath`), or undefined. */
+function computerFile(target: unknown): string | undefined {
+  if (!target || typeof target !== "object") return undefined;
+  const { filePath } = target as { filePath?: unknown };
+  return typeof filePath === "string" && filePath.trim() ? filePath : undefined;
 }
 
 /**

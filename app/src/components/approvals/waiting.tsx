@@ -1,5 +1,5 @@
 import { offersStandingRule } from "@openbot/shared/standing-rule";
-import { approvalWords } from "@openbot/shared/tool-name";
+import { approvalDetails, approvalWords } from "@openbot/shared/tool-name";
 import {
   IconDots,
   IconHandStop,
@@ -53,6 +53,7 @@ import {
   dismissPersonQuestionMutationOptions,
 } from "@/lib/approvals";
 import { relativeTime } from "@/lib/relative-time";
+import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
 type WaitingQuestion = ApprovalInboxData["questions"][number];
@@ -128,6 +129,39 @@ function QuestionRow({
 }
 
 /**
+ * What an approval would send, a labelled line each: "Text: hello". Nothing when it sends nothing
+ * the title has not said already, as a click does: its ref and snapshot are handles for the model.
+ */
+function ApprovalDetails({
+  args,
+  className,
+}: {
+  args: unknown;
+  className?: string;
+}) {
+  const details = approvalDetails(args);
+  if (details.length === 0) return null;
+  return (
+    <dl
+      aria-label="What it would send"
+      className={cn(
+        "max-h-52 space-y-1 overflow-auto rounded bg-muted p-3 text-xs",
+        className,
+      )}
+    >
+      {details.map((detail) => (
+        <div key={detail.label}>
+          <dt className="font-medium">{detail.label}</dt>
+          <dd className="whitespace-pre-wrap break-words text-muted-foreground">
+            {detail.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/**
  * An action waiting on a decision, decided on the row's own footer line, in from the edge by the
  * icon and its gap so the buttons line up with the text, as a task's and an item's do beside it.
  */
@@ -160,9 +194,7 @@ function RequestRow({
             {request.action.policy.reason}
           </p>
         ) : null}
-        <pre className="mt-1 max-h-52 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-xs">
-          {JSON.stringify(request.action.args, null, 2)}
-        </pre>
+        <ApprovalDetails args={request.action.args} className="mt-1" />
       </ItemContent>
       {request.action.policy?.behaviour === "hand_off" ? (
         <ItemFooter className="flex-wrap justify-start pl-11">
@@ -520,11 +552,7 @@ function RequestBoardRow({ request }: { request: WaitingRequest }) {
           </span>
         ) : null,
       ]}
-      more={
-        <pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-xs">
-          {JSON.stringify(request.action.args, null, 2)}
-        </pre>
-      }
+      more={<ApprovalDetails args={request.action.args} />}
       open
       title={action}
       waiting

@@ -219,7 +219,11 @@ describe("an app's page in the personal edition", () => {
     } as unknown as PluginServer;
     const view = draw("personal", [withTools]);
     expect(await view.findByText("Search")).toBeTruthy();
-    expect(view.getByText(/Every Bot can use these/)).toBeTruthy();
+    // The setting by its name in Settings > Approvals; it was once "Ask before acting", named nowhere.
+    expect(view.getByText(/Every Bot can use these/).textContent).toContain(
+      "While Always ask before making changes is on,",
+    );
+    expect(view.container.textContent).not.toContain("Ask before acting");
     expect(view.queryByRole("button", { name: "Grant tools…" })).toBeNull();
     expect(view.queryByText("By Bot")).toBeNull();
     expect(view.queryByRole("link", { name: /search/ })).toBeNull();
@@ -655,20 +659,22 @@ test("Gmail's page names each tool as a person would, and says what each one doe
   const names = [...view.container.querySelectorAll("[data-slot=item-title]")]
     .map((title) => title.textContent)
     .slice(-13);
+  // In the order of the names it shows, not the stored names' order: "Get IMAP settings" under G,
+  // where `GMAIL_SETTINGS_GET_IMAP` put it under S.
   expect(names).toEqual([
-    "Who am I",
-    "Update IMAP settings",
-    "Update POP settings",
+    "Fetch message",
+    "Fetch thread messages",
     "Get IMAP settings",
     "Get POP settings",
     "Get send-as settings",
-    "Fetch message",
-    "Fetch thread messages",
     "List CSE identities",
     "List CSE keypairs",
     "Stop watching",
     "Untrash message",
     "Update contact",
+    "Update IMAP settings",
+    "Update POP settings",
+    "Who am I",
   ]);
   const said = (name: string) =>
     (view.getByText(name).closest("[data-slot=item]") as HTMLElement)

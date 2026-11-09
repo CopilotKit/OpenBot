@@ -55,12 +55,14 @@ import {
   wakeUpTools,
 } from "./agents/wake-up";
 import { createApp } from "./app";
+import { createDecisionWaits } from "./approvals/decision-waits";
 import { createApprovedActionExecutor } from "./approvals/execute";
 import { createPersonResponseTick } from "./approvals/person-response-sweep";
 import {
   type PersonQuestion,
   questionConversationBot,
 } from "./approvals/questions";
+import { waitForReplyInTranscript } from "./approvals/reply-in-transcript";
 import { createApprovalResumeTick } from "./approvals/resume-sweep";
 import { createApprovalStore } from "./approvals/store";
 import { ApprovalRefusedError } from "./approvals/types";
@@ -223,8 +225,8 @@ import {
 } from "./learning/sharing";
 import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
-import { createMemoryRuntime } from "./memory/runtime";
 import { createIntelligenceMemory } from "./memory/intelligence";
+import { createMemoryRuntime } from "./memory/runtime";
 import { createMemoryStore } from "./memory/store";
 import { offeredMemoryTools } from "./memory/tools";
 import { reportModelAvailability } from "./model-availability-check";
@@ -2217,6 +2219,7 @@ const copilotRuntime = mountCopilotRuntime(
   identifyActor,
   {
     productTelemetry,
+    decisionWaits: createDecisionWaits(database),
     onRunBusy: (input) => {
       void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
     },
@@ -2465,6 +2468,15 @@ const approvalSweep = repeatAfterEach(
     actorFor,
     // Assigned further down, once delivery is wired.
     notify: (scope, input) => deliveryNotifications(scope, input),
+    transcriptHolds: waitForReplyInTranscript({
+      read: async ({ ownerUserId, threadId }) =>
+        (
+          await routineIntelligence.getThreadMessages({
+            threadId,
+            userId: ownerUserId,
+          })
+        ).messages,
+    }),
   }),
   2_000,
 );

@@ -23,15 +23,15 @@ test("carries every row the desktop picker offers, in its order", () => {
 test("leads the web list with the partners people look for, keeping the rest in order", () => {
   expect(WEB_HARNESSES.map((h) => h.id)).toEqual([
     "claude-agent-sdk",
-    "google-adk",
-    "antigravity",
     "langgraph",
+    "google-adk",
+    "strands",
+    "antigravity",
     "crewai",
     "llamaindex",
     "agno",
     "pydantic-ai",
     "microsoft-agent-framework",
-    "strands",
     "ag2",
     "langroid",
     "byo-url",

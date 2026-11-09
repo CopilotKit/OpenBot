@@ -108,11 +108,20 @@ test("the release is created right after the images, and the signing runs are st
   const release = job("github-release");
   // Not after a desktop build: the signing runs need only the release, and for a candidate its
   // container-images.json, which this job attaches.
-  expect(needs("github-release")).toEqual(["metadata", "verify", "images"]);
+  // And after the list of the images the Desktop app downloads, which it attaches with
+  // container-images.json, so downloads sync always finds both on the release.
+  expect(needs("github-release")).toEqual([
+    "metadata",
+    "verify",
+    "images",
+    "image-list",
+  ]);
   expect(condition("github-release")).toBe(
     "!cancelled() && needs.metadata.outputs.is_release == 'true' && " +
-      "needs.verify.result == 'success' && needs.images.result == 'success'",
+      "needs.verify.result == 'success' && needs.images.result == 'success' && " +
+      "needs.image-list.result == 'success'",
   );
+  expect(needs("image-list")).toEqual(["metadata", "verify", "images"]);
   const names = (release.steps ?? []).map((step) => step.name);
   const publishAt = names.indexOf("Tag and publish");
   expect(publishAt).toBeGreaterThan(-1);
@@ -120,7 +129,7 @@ test("the release is created right after the images, and the signing runs are st
   expect(names.indexOf("Start signing the Windows build")).toBe(publishAt + 2);
   const tag = release.steps?.[publishAt]?.run ?? "";
   expect(tag).toContain(
-    'gh release create "$VERSION" container-images.json release-assets/*',
+    'gh release create "$VERSION" container-images.json desktop-images.json release-assets/*',
   );
   // Nothing in this job waits for, or attaches, a desktop build.
   expect(JSON.stringify(release)).not.toContain("openbot-desktop-");

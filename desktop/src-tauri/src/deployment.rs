@@ -529,9 +529,60 @@ lookups depend on seeing that promptly.
 A later attempt downloads the whole file again. GitHub answers a byte range of a commit's archive
 with the whole archive (200, no Accept-Ranges), so there is nothing to resume from, and `install.rs`
 still checks the digest of the copy that is kept.
+
+FROM downloads.copilotkit.ai FIRST. A GitHub download that downloads.copilotkit.ai keeps a copy of
+(`mirrored`) is asked of it first, once, and of GitHub, as above, only when that fails.
 */
 pub fn get(url: &str) -> Result<Vec<u8>, String> {
+    if let Some(copy) = mirrored(url) {
+        match get_from_mirror(&copy) {
+            Ok(body) => return Ok(body),
+            Err(error) => log::warn!("[download] {error}; downloading {url} instead"),
+        }
+    }
     get_with(url, STALL_TIMEOUT, WAITS)
+}
+
+/// The host that keeps a copy of what this app downloads from GitHub: CloudFront over an S3 bucket,
+/// which answers 403 for a file it does not have. See `image_mirror` for the images.
+pub const DOWNLOADS: &str = "https://downloads.copilotkit.ai";
+
+/// Where downloads.copilotkit.ai keeps its copy of a GitHub download, for the downloads it copies:
+/// OpenBot's release assets and a tag's source archive (kept with the release, as
+/// `releases/<tag>/<tag>.tar.gz`), and the Podman and Compose builds `install.rs` installs, each
+/// under the same version and file name. `None` for anything else, a commit's archive included.
+pub fn mirrored(url: &str) -> Option<String> {
+    if let Some(tag) = url
+        .strip_prefix("https://github.com/CopilotKit/OpenBot/archive/refs/tags/")
+        .and_then(|rest| rest.strip_suffix(".tar.gz"))
+    {
+        return (!tag.is_empty() && !tag.contains('/'))
+            .then(|| format!("{DOWNLOADS}/releases/{tag}/{tag}.tar.gz"));
+    }
+    const COPIES: [(&str, &str); 3] = [
+        (
+            "https://github.com/CopilotKit/OpenBot/releases/download/",
+            "releases/",
+        ),
+        (
+            "https://github.com/podman-container-tools/podman/releases/download/",
+            "tools/podman/",
+        ),
+        (
+            "https://github.com/docker/compose/releases/download/",
+            "tools/compose/",
+        ),
+    ];
+    COPIES.iter().find_map(|(github, copy)| {
+        let rest = url.strip_prefix(github)?;
+        (rest.contains('/') && !rest.ends_with('/')).then(|| format!("{DOWNLOADS}/{copy}{rest}"))
+    })
+}
+
+/// One try at a copy on downloads.copilotkit.ai, with no retries: when it fails, GitHub is asked.
+pub fn get_from_mirror(url: &str) -> Result<Vec<u8>, String> {
+    get_waiting(url, STALL_TIMEOUT)
+        .map_err(|(Failed::ForNow(error) | Failed::ForGood(error))| error)
 }
 
 /// The waits `get` makes between attempts: `RETRY_DELAYS`, and in this crate's tests the same
@@ -690,6 +741,46 @@ fn get_waiting(url: &str, stall: std::time::Duration) -> Result<Vec<u8>, Failed>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_the_copy_downloads_copilotkit_ai_keeps_of_each_github_download() {
+        assert_eq!(
+            mirrored(&images_url("v0.3.4")).as_deref(),
+            Some("https://downloads.copilotkit.ai/releases/v0.3.4/container-images.json")
+        );
+        for (download, tool) in [
+            (crate::install::podman_download(), "podman"),
+            (crate::install::compose_download(), "compose"),
+        ] {
+            // Only the builds for this kind of computer are named.
+            let Ok(download) = download else { continue };
+            let version = download.url.split('/').rev().nth(1).unwrap().to_string();
+            assert_eq!(
+                mirrored(&download.url),
+                Some(format!(
+                    "https://downloads.copilotkit.ai/tools/{tool}/{version}/{}",
+                    download.file
+                ))
+            );
+        }
+        // A tag's source archive is kept with its release.
+        assert_eq!(
+            mirrored(&tarball_url("v0.3.3")).as_deref(),
+            Some("https://downloads.copilotkit.ai/releases/v0.3.3/v0.3.3.tar.gz")
+        );
+        // A commit's archive, the release lookup and other repositories stay on GitHub.
+        for github in [
+            commit_tarball_url("0123456789abcdef"),
+            "https://github.com/CopilotKit/OpenBot/archive/refs/tags/.tar.gz".to_string(),
+            "https://github.com/someone/OpenBot/archive/refs/tags/v0.3.4.tar.gz".to_string(),
+            "https://api.github.com/repos/CopilotKit/OpenBot/releases/latest".to_string(),
+            "https://github.com/someone/OpenBot/releases/download/v0.3.4/container-images.json"
+                .to_string(),
+            "https://github.com/CopilotKit/OpenBot/releases/download/".to_string(),
+        ] {
+            assert_eq!(mirrored(&github), None, "{github}");
+        }
+    }
 
     /// A server that sends `chunks` pieces of `body`, `gap` apart, then closes.
     fn dripping(chunks: usize, gap: std::time::Duration) -> (String, std::thread::JoinHandle<()>) {

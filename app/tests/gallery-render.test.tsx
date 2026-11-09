@@ -2,14 +2,15 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, render } from "@testing-library/react";
 import { useEffect } from "react";
+import { BarChartCard } from "@/components/gallery/charts";
+import { ArgumentsArrivingContext } from "@/components/gallery/streaming";
+import { DataTable } from "@/components/gallery/table";
+import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import {
   makeDecisionRender,
   makeGalleryRender,
 } from "@/lib/copilot/gallery-tools";
 import { createGrantStore } from "@/lib/copilot/grant-store";
-import { ArgumentsArrivingContext } from "@/components/gallery/streaming";
-import { DataTable } from "@/components/gallery/table";
-import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -247,4 +248,46 @@ test("a call left without a result outside the running turn draws its last numbe
     </ArgumentsArrivingContext.Provider>,
   );
   expect(view.getByText("Sales: 125")).toBeTruthy();
+});
+
+/*
+ * A chart has no points until its first one streams in. It read "There is no data to chart." for
+ * that whole wait, as if the Bot had come back empty.
+ */
+const barChart = () => {
+  const store = createGrantStore();
+  store.set({ grants: heldGrants });
+  return makeGalleryRender(
+    spec(BarChartCard as GalleryComponent["Component"]),
+    store,
+  );
+};
+
+test("a chart whose figures are still arriving shimmers, and does not say it has no data", () => {
+  const Render = barChart();
+  const view = render(
+    <Render args={{ title: "Revenue" }} status="inProgress" />,
+  );
+  expect(view.getByRole("status").textContent).toBe("Drawing the chart…");
+  expect(view.queryByText("There is no data to chart.")).toBeNull();
+});
+
+test("a finished chart with no figures says so", () => {
+  const Render = barChart();
+  const view = render(
+    <Render args={{ title: "Revenue", points: [] }} status="complete" />,
+  );
+  expect(view.getByText("There is no data to chart.")).toBeTruthy();
+  expect(view.queryByRole("status")).toBeNull();
+});
+
+test("a chart stopped before its figures arrived says it has no data, and never shimmers for good", () => {
+  const Render = barChart();
+  const view = render(
+    <ArgumentsArrivingContext.Provider value={false}>
+      <Render args={{ title: "Revenue" }} status="inProgress" />
+    </ArgumentsArrivingContext.Provider>,
+  );
+  expect(view.getByText("There is no data to chart.")).toBeTruthy();
+  expect(view.queryByRole("status")).toBeNull();
 });

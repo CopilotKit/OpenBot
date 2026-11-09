@@ -9,6 +9,7 @@ own repository:
 | --- | --- |
 | `ag2.svg` | [`ag2ai/ag2`](https://github.com/ag2ai/ag2) `website/static/img/favicon-dark.svg`, verbatim apart from a `<title>` |
 | `agno.svg` | [`agno-agi/docs`](https://github.com/agno-agi/docs) `favicon.png`, embedded unchanged in an SVG |
+| `langgraph.svg` | LangChain's own symbol, `LangChain_Symbol_Black.svg` from the brand pack on [langchain.com/brand-assets](https://www.langchain.com/brand-assets) (downloaded 2026-11-09), verbatim apart from a `<title>`. Named for the harness id it belongs to |
 | `langroid.svg` | [`langroid/langroid`](https://github.com/langroid/langroid) `public/logo_light.png`, scaled to 128 px and embedded in an SVG |
 | `unbiased.svg` | Unbiased AI's own icon, as served at `platform.unbiased.ai/logos/unbiased-icon.svg` and supplied by Unbiased AI for this row, verbatim apart from a `<title>` and `1em` sizing |
 
@@ -19,7 +20,7 @@ sign-in guidelines allow no other G on a "Sign in with" button, so the desktop's
 The two PNGs sit inside an SVG wrapper only so every mark is one file type: both apps resolve a
 mark by globbing `*.svg`, and a second extension would mean a second rule in each.
 
-Each of the three carries a `<title>` naming the product, as every lobehub mark already does, because
+Each of these carries a `<title>` naming the product, as every lobehub mark already does, because
 the linter rejects an SVG without one.
 
 Renamed to the harness or provider id they belong to, so a row finds its mark by its own id and

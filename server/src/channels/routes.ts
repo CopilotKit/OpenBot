@@ -41,7 +41,7 @@ import {
   type ChannelEventHub,
 } from "./events";
 import { upgradeWebSocket } from "./socket";
-import { MAX_TITLE_GRAPHEMES, plainLine } from "./text";
+import { firstPlainLine, MAX_TITLE_GRAPHEMES, plainLine } from "./text";
 import type { ThreadIdentity } from "./thread-identity";
 import { type ChannelWork, channelWorkDto, workIn } from "./working";
 
@@ -1014,7 +1014,8 @@ export function createChannelStore(
 
           // Announced inside the transaction, so it is delivered on commit and a write that rolls
           // back is never announced. The payload carries the members because the writer has already
-          // resolved them; NOTIFY caps at 8000 bytes, which a 200-character preview leaves room in.
+          // resolved them; NOTIFY caps at 8000 bytes, which a 200-character preview and a first line
+          // no longer than it leave room in.
           if (applied.length > 0) {
             const event: ChannelActivityEvent = {
               channelId,
@@ -1022,6 +1023,14 @@ export function createChannelStore(
               lastMessage,
               lastMessageAt: activity.at.toISOString(),
               lastMessageAgentId: activity.agentId,
+              ...(activity.agentId !== null
+                ? {
+                    firstLine: firstPlainLine(
+                      activity.text,
+                      MAX_ACTIVITY_GRAPHEMES,
+                    ),
+                  }
+                : {}),
             };
             await transaction.execute(
               sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,

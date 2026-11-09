@@ -50,7 +50,17 @@ const ERROR_SHAKE_KEYFRAMES = [0, -3, 3, 0];
 const ERROR_SHAKE_DURATION = 0.18;
 const EASE_IN_OUT = [0.645, 0.045, 0.355, 1] as const;
 const GLOW_BLUR_RATIO = 0.28;
+/** The bloom's box reaches this far past the orb's on every side, as a fraction of the orb size. */
+const GLOW_INSET_RATIO = 0.12;
 const GLOW_MAX_OPACITY = 0.7;
+
+/**
+ * How far past its own box the orb paints, as a fraction of its size: the bloom's box, blurred
+ * outward by its blur. Something that sits over the page right next to the orb, such as a sticky
+ * header, cuts the glow flat unless this much room is left between them. The disc's own scale
+ * (at most 1.1, plus the amplitude's 12%) stays well inside it.
+ */
+export const ORB_GLOW_REACH = GLOW_INSET_RATIO + GLOW_BLUR_RATIO;
 /** Depth rim, as a fraction of the orb size. */
 const RIM_RATIO = 0.06;
 const RIM_MIN = 1.5;
@@ -257,7 +267,7 @@ const AgentOrb: React.FC<AgentOrbProps> = ({
         style={{
           background: `radial-gradient(circle at 50% 50%, ${glowColor} 0%, transparent 64%)`,
           filter: `blur(calc(var(--orb-size) * ${GLOW_BLUR_RATIO}))`,
-          inset: "-12%",
+          inset: `-${GLOW_INSET_RATIO * 100}%`,
         }}
         transition={shouldReduceMotion ? { duration: 0 } : SPRING_DEFAULT}
       />

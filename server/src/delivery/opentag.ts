@@ -18,6 +18,7 @@
  * `/openbot/deliver`, because a managed Channel can only post inside a live delivery.
  */
 import { timingSafeEqual } from "node:crypto";
+import { approvalDetails } from "@openbot/shared/tool-name";
 import { z } from "zod";
 import { cutAtCodeUnits } from "../channels/text";
 import { DELIVERY_REQUEST_TIMEOUT_MS } from "../timeouts";
@@ -385,11 +386,12 @@ export function approvalFields(preview: unknown) {
     return preview === undefined
       ? []
       : [{ label: "Arguments", value: clip(JSON.stringify(preview)) }];
-  return Object.entries(preview)
+  // Labelled as the card in OpenBot labels them, without the page handles a click carries.
+  return approvalDetails(preview)
     .slice(0, 10)
-    .map(([label, value]) => ({
+    .map(({ label, value }) => ({
       label: clip(label, 60),
-      value: clip(typeof value === "string" ? value : JSON.stringify(value)),
+      value: clip(value),
     }));
 }
 function clip(value: string | undefined, max = 300) {

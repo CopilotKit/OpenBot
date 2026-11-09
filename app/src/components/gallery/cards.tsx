@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
-import { Badge, GalleryFrame, type Tone } from "./frame";
+import { Badge, FigureLink, GalleryFrame, type Tone } from "./frame";
 import { GalleryMarkdown } from "./markdown";
 import { byPosition } from "./positions";
 
@@ -75,6 +75,12 @@ export const MetricsCardProps = z.object({
           .optional()
           .describe("The movement, e.g. '+12% on last month'"),
         changeTone: tone.optional(),
+        link: z
+          .string()
+          .optional()
+          .describe(
+            "A web address this opens: the record, search or message it came from. Only one you actually have; never make one up",
+          ),
       }),
     )
     .max(6)
@@ -91,7 +97,11 @@ export function MetricsCard({
     <GalleryFrame caption={caption} title={title}>
       <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
         {byPosition(metrics).map(({ item: metric, key }) => (
-          <div key={key}>
+          <FigureLink
+            href={metric.link}
+            key={key}
+            name={`${metric.label}: ${metric.value}`}
+          >
             <p className="truncate text-xs text-muted-foreground">
               {metric.label}
             </p>
@@ -103,7 +113,7 @@ export function MetricsCard({
                 <Badge tone={metric.changeTone as Tone}>{metric.change}</Badge>
               </p>
             ) : null}
-          </div>
+          </FigureLink>
         ))}
       </div>
     </GalleryFrame>
@@ -232,7 +242,11 @@ export function NoticeCard({
       {points?.length ? (
         <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
           {byPosition(points).map(({ item: entry, key }) => (
-            <li className="flex gap-2" key={key}>
+            // A point that is itself a list keeps only its own markers and indent, not a dot beside it.
+            <li
+              className="flex gap-2 [&:has(>div>:is(ol,ul):first-child)>span]:hidden [&>div>:is(ol,ul)]:pl-0"
+              key={key}
+            >
               <span aria-hidden="true">·</span>
               <GalleryMarkdown className="min-w-0">{entry}</GalleryMarkdown>
             </li>
@@ -251,7 +265,7 @@ export const GALLERY: GalleryComponent[] = [
     summary:
       "Shows one thing and its details, such as an order, a person or a ticket.",
     description:
-      "Show one thing and its fields, an order, a person, a ticket. Use instead of describing a record in prose.",
+      "Show one thing and its fields, an order, a person, a ticket. Use when there are several fields worth reading side by side; a fact or two about it belong in a Markdown reply.",
     parameters: RecordCardProps,
     Component: RecordCard as GalleryComponent["Component"],
     preview: {
@@ -272,7 +286,7 @@ export const GALLERY: GalleryComponent[] = [
     kind: "card",
     summary: "Shows up to six headline figures and how each one has changed.",
     description:
-      "Show up to six headline figures, each with an optional movement. Use for a summary somebody reads at a glance.",
+      "Show up to six headline figures, each with an optional movement. Use for figures somebody reads at a glance, not for a written summary. A figure may link to the page it came from, such as the record or the report, when you have that address; never make one up.",
     parameters: MetricsCardProps,
     Component: MetricsCard as GalleryComponent["Component"],
     preview: {
@@ -302,7 +316,7 @@ export const GALLERY: GalleryComponent[] = [
     summary:
       "Shows the steps of a piece of work and which ones are done, such as a release plan.",
     description:
-      "Show the tasks or steps of a piece of work and which are finished, such as a release plan or an onboarding list. Only for work somebody ticks off. Not for presenting information: findings, options, recommendations or a list of points go in text or a notice. The person cannot tick these here, so do not use it to ask for anything.",
+      "Show the tasks or steps of a piece of work and which are finished, such as a release plan or an onboarding list. Only for work somebody ticks off. Not for presenting information: findings, options, recommendations and ordinary lists of points belong in a Markdown reply. The person cannot tick these here, so do not use it to ask for anything.",
     parameters: ChecklistCardProps,
     Component: ChecklistCard as GalleryComponent["Component"],
     preview: {
@@ -322,7 +336,7 @@ export const GALLERY: GalleryComponent[] = [
     summary:
       "Shows a headline with a short explanation and a few supporting points.",
     description:
-      "Show a headline, a short explanation and optional supporting points. Use instead of writing several paragraphs of prose.",
+      "Show a distinct actionable alert needing the person's attention, such as a failed scheduled task requiring intervention or a new issue blocking their work. Also use when the person explicitly asks for a notice card. Answer ordinary questions, explanations, summaries, recommendations and short lists directly in Markdown, including important emails or deadlines. Importance, a caveat or several paragraphs alone does not justify a notice. Do not use this to wrap or repeat a routine answer. Body and supporting points support Markdown.",
     parameters: NoticeCardProps,
     Component: NoticeCard as GalleryComponent["Component"],
     preview: {

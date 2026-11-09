@@ -80,6 +80,20 @@ const couldNotStart = blocked(
   "restart-intelligence",
 );
 const busy = blocked("The back end is still running another command.", "retry");
+// The three ways a back end command ends with no answer OpenBot can act on, each said apart, so
+// the card is never only "could not start". The CLI's own words go to OpenBot's log, not here.
+const failedPartway = blocked(
+  "The back end stopped with an error partway through. OpenBot's log has the details.",
+  "restart-intelligence",
+);
+const couldNotRun = blocked(
+  "OpenBot could not run the back end's software.",
+  "restart-intelligence",
+);
+const quitUnexplained = blocked(
+  "The back end's software quit without saying why. OpenBot's log has the details.",
+  "restart-intelligence",
+);
 
 // Compiler-enforced: a new upstream reason or failure breaks the build here.
 const reasonRows: Record<LocalReason, ReadinessRow> = {
@@ -108,7 +122,7 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
   ),
   "port-unavailable": blocked("A port the back end needs is in use.", "retry"),
   "local-command-busy": busy,
-  "local-command-failed": couldNotStart,
+  "local-command-failed": failedPartway,
   // OpenBot always approves the connection it asks for, so this is the CLI asking for more.
   "confirmation-required": blocked(
     "The back end asked for a confirmation OpenBot cannot give.",
@@ -145,7 +159,7 @@ const failureRows: Record<LocalFailure, ReadinessRow> = {
   ),
   // Cancelled is the person's own call stopping, not another command holding the stack.
   cancelled: blocked("Stopped at your request before it finished.", "retry"),
-  spawn: couldNotStart,
+  spawn: couldNotRun,
   // Ran out of time, which on a slow disk or connection is not the same as failing: the cluster and
   // the images it fetched are still there for the retry. Seen at exactly 30 minutes on a Windows VM
   // that was installing OpenBot's packages at the same time.
@@ -153,7 +167,7 @@ const failureRows: Record<LocalFailure, ReadinessRow> = {
     "The back end took too long to start, so OpenBot stopped waiting. What it already downloaded is kept, so trying again picks up from there.",
     "restart-intelligence",
   ),
-  "unexpected-exit": couldNotStart,
+  "unexpected-exit": quitUnexplained,
   "invalid-stack": blocked(contract),
   "output-limit": blocked(contract),
   "invalid-json": blocked(contract),

@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { approvalPhrase } from "@openbot/shared/tool-name";
 import type { HeadlessTool } from "@openbot/toolkit/headless-tools";
 import type { IntelligenceLike } from "@openbot/toolkit/run-turn";
 import { type RunAssertion, readRunAssertion } from "../agents/callback-token";
@@ -145,7 +146,7 @@ export function createServerApprovalService(deps: {
                 id: request.id,
                 kind: "approval",
                 requestId: request.id,
-                text: `${botName} asks for approval to use ${action.toolRef}. Open the Bot's page in OpenBot to review this action.`,
+                text: `${botName} wants to ${approvalPhrase(action)}. Open the Bot's page in OpenBot to review it.`,
               },
             );
         }

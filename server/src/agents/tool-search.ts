@@ -1,6 +1,10 @@
 import type { BuiltInAgentClassicConfig } from "@copilotkit/runtime/v2";
 import { MODEL_TOOL_LIMIT } from "@openbot/shared/model-tool-limit";
-import { SEARCH_TOOLS } from "@openbot/shared/tool-search";
+import {
+  SEARCH_TOOLS,
+  TOOLS_FOUND_LINE,
+  toolsFound,
+} from "@openbot/shared/tool-search";
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { z } from "zod";
 import { researchRoleFor } from "../plugins/catalogue";
@@ -82,7 +86,7 @@ const FOUND_LIMIT = 24;
  * module writes and no description can reach: descriptions are cut to one line and sit inside the
  * untrusted envelope after it.
  */
-const FOUND_LINE = "Tools found:";
+const FOUND_LINE = TOOLS_FOUND_LINE;
 
 // Use the model contract of the runtime we actually ship, without a second AI SDK version.
 type SearchingModel = Extract<
@@ -458,13 +462,7 @@ function resultText(output: unknown): string {
 
 /** The names on a search answer's {@link FOUND_LINE}, and nothing from the lines below it. */
 function foundNames(output: unknown): string[] {
-  const first = resultText(output).split("\n", 1)[0] ?? "";
-  if (!first.startsWith(FOUND_LINE)) return [];
-  return first
-    .slice(FOUND_LINE.length)
-    .split(",")
-    .map((name) => name.trim())
-    .filter(Boolean);
+  return toolsFound(resultText(output));
 }
 
 /**
