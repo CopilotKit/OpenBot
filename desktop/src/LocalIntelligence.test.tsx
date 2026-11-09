@@ -1,6 +1,6 @@
+import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -706,6 +706,44 @@ test("setup that needs a CopilotKit sign-in offers it in the window, then carrie
     1,
   );
   expect(commands().filter((c) => c === "set_up_local_eval")).toHaveLength(2);
+});
+
+/**
+ * A fresh Mac stopped at Start with "The back end stopped with an error partway through": Docker's
+ * disk was full, and the CLI's resource check failed. Its report, as `local_eval.rs` reads the
+ * CLI's `LOCAL_DOCKER_RESOURCES_SHORT` with "0 GiB free storage (requires 40)", now says the disk
+ * is short and where to raise it.
+ */
+test("a setup refused for a full Docker disk says so, with Retry", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [
+      report({
+        outcome: "failed",
+        stack: null,
+        reason: "resources-short",
+        // As `local_eval.rs` reads the rc.10 CLI's "Docker available resources: 9.871234 CPUs
+        // (requires 4), 18.9 GiB RAM available (requires 4), 0 GiB free storage (requires 40)."
+        shortfall: {
+          podman: false,
+          cpu: false,
+          memory: false,
+          disk: true,
+          cpus: "9.8",
+          memoryGb: "18.9",
+          diskGb: "0",
+        },
+      }),
+    ],
+    local_eval_download: [null],
+    cancel_local_eval: [null],
+  });
+  const screen = view();
+  await screen.findByRole("button", { name: "Retry" });
+  const setup = row(screen, SETUP).textContent;
+  expect(setup).toContain(
+    "Docker has 0 GB of free disk. OpenBot needs 40 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+  );
+  expect(setup).not.toContain("partway through");
 });
 
 test("a CopilotKit sign-in that does not finish says so and can be tried again", async () => {

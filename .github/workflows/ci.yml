@@ -157,15 +157,16 @@ jobs:
           OPENBOT_COMPUTER_BROWSER: '1'
           COMPUTER_BROWSER_MODE: headless
       # The app's real-browser tests, here because this job has the browser: a running step's words
-      # under reduced motion, where onboarding's Back lands beside the Mac window's buttons, and the name
-      # step's orb drawn whole under the step dashes, which only a browser's layout resolves. The root
-      # playwright-core is the same version as
+      # under reduced motion, where onboarding's Back lands beside the Mac window's buttons, the name
+      # step's orb drawn whole under the step dashes, and the New Bot sheet's first four frameworks
+      # clearing its footer in an 800px window, and a conversation's rail of turns clear of the Bot's
+      # text, which only a browser's layout resolves. The root playwright-core is the same version as
       # agent-computer's playwright, so it finds the Chromium installed above. The onboarding frame
       # reads the generated app config, which `bun test` alone doesn't write (the test script's
       # pretest does).
       - run: |
           bun run generate:app-config
-          bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx
+          bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/new-bot-sheet-fit.test.tsx app/tests/transcript-rail-clearance.test.tsx
         env:
           OPENBOT_APP_BROWSER: '1'
       # Headed is the default for hosted computers, so it is tested as one: the computer starting its

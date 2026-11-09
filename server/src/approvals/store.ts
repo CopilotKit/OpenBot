@@ -56,6 +56,11 @@ export function createApprovalStore(database: Database): ApprovalStore {
       eq(approvalRules.toolRef, action.toolRef),
       eq(approvalRules.effect, action.effect),
       eq(approvalRules.scope, action.scope),
+      // One mailbox's saved rule never answers for another, and a call naming none is answered only
+      // by a rule that names none.
+      action.account
+        ? eq(approvalRules.account, action.account)
+        : isNull(approvalRules.account),
       eq(approvalRules.behaviour, "allow"),
       isNull(approvalRules.revokedAt),
     );
@@ -174,6 +179,7 @@ export function createApprovalStore(database: Database): ApprovalStore {
             toolRef: request.action.toolRef,
             effect: request.action.effect,
             scope: request.action.scope,
+            account: request.action.account ?? null,
           });
         const [updated] = await tx
           .update(approvalRequests)

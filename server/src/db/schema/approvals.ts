@@ -127,6 +127,13 @@ export const approvalRules = pgTable(
       .$type<RuleBehaviour>()
       .notNull()
       .default("allow"),
+    /**
+     * Which of the person's accounts at the app the rule is for, where they hold several: the
+     * address the card named when "Always allow here" was pressed. A rule for one mailbox never
+     * covers another. Null is a rule about the app whichever account it runs in; see `ruleMatches`
+     * in approvals/policy.ts for what such a rule may still allow.
+     */
+    account: text("account"),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
