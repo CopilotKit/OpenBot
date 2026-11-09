@@ -1543,6 +1543,7 @@ export function createApp(
                 : {}),
             })
           : undefined,
+        auditStore,
       ),
     );
   }

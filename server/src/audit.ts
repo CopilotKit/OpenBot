@@ -372,6 +372,20 @@ export const auditEventTypes = [
    */
   "computer.policy_loaded",
   /**
+   * An admin saved the boundary: added a rule, removed one, or switched trial mode.
+   *
+   * The policy table holds only the current rules and who saved them last, and the trail recorded the
+   * boundary only at start-up, so "who added the rule that stopped this, and when" had no answer, and
+   * nor did "what did the boundary say last Tuesday". Every save writes one, even one that changed
+   * nothing, because the save itself is the event.
+   *
+   * Payload: `by` (the admin's address), `added` and `removed` (each `{ list, rule, name? }`, where
+   * `list` is `deny` or `allow` and `name` is the rule's label), `mode` (`{ before, after }`), the
+   * whole policy `before` and `after`, and `authoring` (`{ source: "english", text }`) when the rule
+   * was written from a sentence in plain English, with the sentence.
+   */
+  "computer.policy_changed",
+  /**
    * Whether this deployment gives each Bot a computer of its own, said out loud at boot.
    *
    * Without a supervisor every Bot shares one browser, which is a legitimate way to run on a laptop
@@ -792,6 +806,7 @@ export type AuditEventQuery = {
   actorUserId?: string;
   /** One kind, or several separated by commas, the way `eventType` takes several. */
   initiatorKind?: string;
+  /** One target type, or several separated by commas, the way `eventType` takes several. */
   targetType?: string;
   targetId?: string;
   /**
@@ -1095,9 +1110,10 @@ export function createAuditReader(database: Database): AuditReader {
           auditEvents.initiatorKind,
           requestedValues(query.initiatorKind),
         ),
-        query.targetType
-          ? eq(auditEvents.targetType, query.targetType)
-          : undefined,
+        matchesRequested(
+          auditEvents.targetType,
+          requestedValues(query.targetType),
+        ),
         query.targetId ? eq(auditEvents.targetId, query.targetId) : undefined,
         query.bot
           ? or(

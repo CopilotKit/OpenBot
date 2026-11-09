@@ -1,7 +1,13 @@
 import { IconCheck, IconCode, IconShieldX } from "@tabler/icons-react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  type UseQueryResult,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DryRunChanges } from "@/components/boundaries/dry-run-changes";
 import {
   PageCard,
@@ -35,9 +41,10 @@ import {
 import { isComposing } from "@/lib/composing";
 import { saveActionPolicyMutationOptions } from "@/lib/computers/mutations";
 import {
+  type ActionPolicy,
   actionPolicyQueryOptions,
   type DryRunReport,
-  dryRunActionPolicy,
+  policyDryRunQueryOptions,
 } from "@/lib/computers/queries";
 
 export const Route = createFileRoute("/_authed/admin/boundaries_/new")({
@@ -49,11 +56,16 @@ const BACK = {
   linkProps: { to: "/admin/boundaries" as const },
 };
 
+/** How long the rule has to rest before it is replayed, so typing it is not a request per keystroke. */
+const PREVIEW_DELAY_MS = 400;
+
 /**
  * Adding a rule: pick a template or write one, see what it would have stopped, then add it.
  *
  * A template fills the form rather than adding itself, so its name, its cost and the rule it is
- * made of are all read before it applies to every Bot.
+ * made of are all read before it applies to every Bot. What the rule would have stopped is worked
+ * out as it is written, over a Bot's computer actions and its app calls alike, so its reach is on
+ * screen before Add rule rather than behind a button somebody may never press.
  */
 function NewRulePage() {
   const navigate = Route.useNavigate();
@@ -64,8 +76,6 @@ function NewRulePage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [rule, setRule] = useState("");
-  const [tested, setTested] = useState<DryRunReport | null>(null);
-  const [testing, setTesting] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
   const policy = stored.data;
@@ -73,9 +83,41 @@ function NewRulePage() {
   const duplicate = Boolean(policy?.deny.includes(trimmed));
   const ready = Boolean(policy && name.trim() && trimmed && !duplicate);
 
+  /*
+   * The rule as it stood a moment ago, debounced as People's search is. A template's rule arrives
+   * whole, and is replayed as soon as it rests.
+   */
+  const [settled, setSettled] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(trimmed), PREVIEW_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [trimmed]);
+
+  /*
+   * This rule on its own, with everything else allowed, replayed over recent recorded actions.
+   * Nothing is saved. Every action it would refuse that went through is one this rule would have
+   * stopped, and nothing else is.
+   *
+   * Not the policy in force plus this rule. Replayed against what happened, that also refuses every
+   * action a rule added since then stops, and they were listed here as this rule's: a rule about
+   * password fields "would have stopped" the Salesforce writes the rule before it now stops. The
+   * labels are left out too: nothing evaluates them, and a renamed rule needs no new answer.
+   */
+  const candidate: ActionPolicy | null =
+    policy && settled && !policy.deny.includes(settled)
+      ? { mode: policy.mode, deny: [settled], allow: ["true"] }
+      : null;
+  const preview = useQuery({
+    ...policyDryRunQueryOptions(
+      candidate ?? { mode: "enforce", deny: [], allow: [] },
+    ),
+    enabled: candidate !== null,
+    // The last answer stays up while the next loads, so the list does not blink between keystrokes.
+    placeholderData: keepPreviousData,
+  });
+
   const choose = (next: RuleTemplate | "custom") => {
     setChosen(next);
-    setTested(null);
     setProblem(null);
     if (next === "custom") {
       setName("");
@@ -85,28 +127,6 @@ function NewRulePage() {
       setName(next.name);
       setDescription(next.description);
       setRule(next.rule);
-    }
-  };
-
-  /*
-   * The policy in force plus this rule, replayed over recent recorded actions. Nothing is saved;
-   * the reply says what the addition would have stopped, so its reach is known before it applies.
-   */
-  const test = async () => {
-    if (!policy || !trimmed) return;
-    setProblem(null);
-    setTesting(true);
-    try {
-      setTested(
-        await dryRunActionPolicy({
-          ...policy,
-          deny: [...policy.deny, trimmed],
-        }),
-      );
-    } catch (thrown) {
-      setProblem((thrown as Error).message);
-    } finally {
-      setTesting(false);
     }
   };
 
@@ -252,19 +272,15 @@ function NewRulePage() {
                 <Field>
                   <FieldLabel htmlFor="rule-expression">Rule</FieldLabel>
                   <FieldDescription>
-                    Written in CEL. A rule that can't be evaluated counts as a
-                    match, so a typo stops actions rather than letting them
-                    through.
+                    Written in CEL. OpenBot checks the rule before it's added,
+                    so a typo can't stop every action.
                   </FieldDescription>
                   <Textarea
                     autoCapitalize="off"
                     autoCorrect="off"
                     className="min-h-20 font-mono text-xs"
                     id="rule-expression"
-                    onChange={(event) => {
-                      setRule(event.target.value);
-                      setTested(null);
-                    }}
+                    onChange={(event) => setRule(event.target.value)}
                     placeholder='tool.name == "computer_click" && contains(element.name, "delete")'
                     spellCheck={false}
                     value={rule}
@@ -281,22 +297,16 @@ function NewRulePage() {
                   ) : null}
                   <RuleReference />
                 </Field>
+                {trimmed && candidate && !duplicate ? (
+                  <RulePreview preview={preview} />
+                ) : null}
               </FieldGroup>
 
-              <div className="mt-5">
-                <Button
-                  disabled={testing || !trimmed || !policy}
-                  onClick={() => void test()}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  {testing ? "Testing…" : "Test on recent activity"}
-                </Button>
-                {tested ? <TestResult report={tested} /> : null}
-              </div>
-
-              {problem ? (
+              {/*
+               * A save refused for the reason the preview already gives under the rule says nothing
+               * twice: the sentence is on screen, beside the rule it is about.
+               */}
+              {problem && problem !== preview.error?.message ? (
                 <p className="mt-5 text-destructive text-sm" role="alert">
                   {problem}
                 </p>
@@ -342,26 +352,41 @@ function RuleReference() {
   );
 }
 
-function TestResult({ report }: { report: DryRunReport }) {
-  if (report.scanned === 0) {
-    return (
-      <p className="mt-3 text-muted-foreground text-sm" role="status">
-        No recorded actions to test against yet. The rule is valid; you'll see
-        what it stops once Bots have acted.
-      </p>
-    );
-  }
+/**
+ * What the rule would have stopped, worked out as it is written: a Bot's computer actions and its
+ * app calls, in one list. A rule that can't be evaluated says why here, under the rule, and nothing
+ * is replayed. The first answer arrives into an empty space, with no placeholder before it.
+ */
+function RulePreview({ preview }: { preview: UseQueryResult<DryRunReport> }) {
+  if (preview.isPending) return null;
   return (
-    <div className="mt-3" role="status">
-      <p className="text-muted-foreground text-sm">
-        {report.wouldRefuse === 0
-          ? `Of the last ${report.scanned} recorded actions, this rule would have stopped none. It may still stop future ones.`
-          : `Of the last ${report.scanned} recorded actions, this rule would have stopped ${report.wouldRefuse}.`}
-      </p>
-      <DryRunChanges
-        changes={report.changes.filter((change) => change.would === "refused")}
-        total={report.wouldRefuse}
-      />
-    </div>
+    <Field aria-labelledby="rule-preview" aria-live="polite">
+      <FieldLabel id="rule-preview">On recent activity</FieldLabel>
+      {preview.error ? (
+        <p className="text-destructive text-sm" role="alert">
+          {preview.error.message}
+        </p>
+      ) : preview.data.scanned === 0 ? (
+        <FieldDescription>
+          No recorded actions to test against yet. You'll see what this rule
+          stops once Bots have acted.
+        </FieldDescription>
+      ) : (
+        <div>
+          <FieldDescription>
+            {preview.data.wouldRefuse === 0
+              ? `Of the last ${preview.data.scanned} recorded actions, this rule would have stopped none. It may still stop future ones.`
+              : `Of the last ${preview.data.scanned} recorded actions, this rule would have stopped ${preview.data.wouldRefuse}.`}
+          </FieldDescription>
+          <DryRunChanges
+            changes={preview.data.changes.filter(
+              (change) => change.would === "refused",
+            )}
+            total={preview.data.wouldRefuse}
+            verdict="Would stop"
+          />
+        </div>
+      )}
+    </Field>
   );
 }
