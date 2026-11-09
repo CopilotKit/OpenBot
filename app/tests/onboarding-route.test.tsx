@@ -667,9 +667,15 @@ test("somebody trying OpenBot alone gets Book a demo before the name, with the b
     expect(await heading(view, "Book a demo")).toBeTruthy();
     expect(searchOf(view).step).toBe("selfhost");
     expect(calendar(view).getAttribute("src")).toBe(BOOKING_CALENDAR);
-    expect(footerButtons(view)).toEqual(["Back", "Continue", "Not now"]);
 
-    fireEvent.click(await continueButton(view));
+    // Before a booking there is one way on, and it says it skips: no Continue that reads as booking.
+    expect(footerButtons(view)).toEqual(["Back", "Not now"]);
+    expect(
+      view.container.querySelector("[data-onboarding-primary]"),
+    ).toBeNull();
+    expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
+
+    fireEvent.click(view.getByRole("button", { name: "Not now" }));
     expect(await heading(view, "What should we call you?")).toBeTruthy();
     expect(opened).toEqual([]);
     expect(completed).toBe(false);
@@ -721,7 +727,7 @@ test("offline, Book a demo goes straight to Book a call", async () => {
   }
 });
 
-test("a booking made in the calendar takes Not now away; a message from anywhere else does not", async () => {
+test("a booking made in the calendar turns Not now into Continue; a message from anywhere else does not", async () => {
   localEvaluation = true;
   const view = open("/onboarding?step=selfhost");
   await heading(view, "Book a demo");
@@ -737,7 +743,7 @@ test("a booking made in the calendar takes Not now away; a message from anywhere
       }),
     );
   });
-  expect(footerButtons(view)).toEqual(["Back", "Continue", "Not now"]);
+  expect(footerButtons(view)).toEqual(["Back", "Not now"]);
 
   act(() => {
     window.dispatchEvent(
@@ -751,6 +757,13 @@ test("a booking made in the calendar takes Not now away; a message from anywhere
   await waitFor(() =>
     expect(footerButtons(view)).toEqual(["Back", "Continue"]),
   );
+  // Continue takes Not now's place: no empty place kept under it that would lift it up.
+  expect(
+    view.container.querySelector("[data-onboarding-secondary-slot]"),
+  ).toBeNull();
+
+  fireEvent.click(view.getByRole("button", { name: "Continue" }));
+  expect(await heading(view, "What should we call you?")).toBeTruthy();
 });
 
 test("Not now on Book a demo moves on without opening anything", async () => {
@@ -877,7 +890,7 @@ test("somebody trying OpenBot alone whose name is known ends on Book a demo, whe
     );
     fireEvent.click(await continueButton(view));
     await heading(view, "Book a demo");
-    expect(footerButtons(view)).toEqual(["Back", "Get started", "Not now"]);
+    expect(footerButtons(view)).toEqual(["Back", "Not now"]);
 
     fireEvent.click(view.getByRole("button", { name: "Not now" }));
 

@@ -173,6 +173,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - LangChain is called **LangChain**, with LangChain's own mark, where it said "LangChain
   (LangGraph)": in New Bot, a Bot's "Powered by" subtitle and its Runs on row, and OpenBot Desktop's
   note under a ChatGPT plan.
+- Onboarding's Book a demo step has one button under the calendar, **Not now**, which moves on
+  without booking. It had Continue beside Not now, which read as going on with the booking. Once
+  you book a time in the calendar, Not now becomes **Continue**.
 
 ## 0.3.4
 
