@@ -20,6 +20,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   Downloads sync now copies a prerelease asked for by tag (its images and its own files, never
   `latest/`), and each scheduled run copies the images of every prerelease newer than Latest from
   the last 30 days. Drafts are never copied.
+- **A back end start that fails on a nearly full disk says so, with the numbers.** Relaunching a
+  used install whose back end's disk was nearly full said only "The back end stopped with an error
+  partway through." Each start, update and setup now checks the engine first and logs what it has
+  as `[local check]`, and a start that fails is checked again with the back end asked whether it is
+  short of disk. The card then says, for example, "The back end's disk is nearly full. Podman has
+  30.5 GB free of 1006.8 GB. OpenBot needs 40 GB. Free space on drive C: or in Podman, then Retry."
+  On Windows, free disk is measured on the drive that holds Podman's machine, which can run out
+  while the machine itself shows hundreds of GB free.
 
 ## 1.0.0
 

@@ -952,10 +952,170 @@ pub fn restart() -> Result<(), Problem> {
     Err(Problem::plain("Only Windows restarts from here."))
 }
 
+/// The Windows drive that holds a Podman machine's disk, and how much is free on it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MachineDrive {
+    /// `C:`, or None when the disk's folder is not on a lettered drive.
+    pub drive: Option<String>,
+    pub free: u64,
+}
+
+/**
+Where a Podman machine on WSL keeps its disk, and the space free on that drive.
+
+The machine's disk is a sparse virtual disk of about a terabyte, so the space a container sees free
+inside it says nothing about the space left on Windows: a machine can show 941 GiB free on a drive
+with 30. Podman imports each machine as the WSL distribution `podman-<machine>`
+(`env.WithPodmanPrefix`), and WSL records the folder it holds the disk in as that distribution's
+`BasePath`. None off Windows, and when WSL has no such distribution.
+*/
+pub fn podman_machine_drive(machine: &str) -> Option<MachineDrive> {
+    #[cfg(target_os = "windows")]
+    {
+        machine_drive_in(LXSS, &podman_distribution(machine))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = machine;
+        None
+    }
+}
+
+/// The WSL distribution Podman makes for `machine`, as Podman names it (`env.WithPodmanPrefix`).
+pub fn podman_distribution(machine: &str) -> String {
+    if machine.starts_with("podman") {
+        machine.to_owned()
+    } else {
+        format!("podman-{machine}")
+    }
+}
+
+/// The drive a Windows path is on, `C:`, with or without the `\\?\` prefix WSL records it with.
+pub fn drive_of(path: &str) -> Option<String> {
+    let path = path.strip_prefix(r"\\?\").unwrap_or(path);
+    match path.as_bytes() {
+        [letter, b':', ..] if letter.is_ascii_alphabetic() => {
+            Some(format!("{}:", letter.to_ascii_uppercase() as char))
+        }
+        _ => None,
+    }
+}
+
+/// Where WSL records each distribution it has, for the person signed in.
+#[cfg(target_os = "windows")]
+const LXSS: &str = r"Software\Microsoft\Windows\CurrentVersion\Lxss";
+
+#[cfg(target_os = "windows")]
+fn machine_drive_in(registry: &str, distribution: &str) -> Option<MachineDrive> {
+    let folder = distribution_folder(registry, distribution)?;
+    let free = free_space(&folder)?;
+    Some(MachineDrive {
+        drive: drive_of(&folder),
+        free,
+    })
+}
+
+/// The `BasePath` WSL recorded for `distribution`, under `registry` in the person's own hive.
+#[cfg(target_os = "windows")]
+fn distribution_folder(registry: &str, distribution: &str) -> Option<String> {
+    let lxss = windows_registry::CURRENT_USER.open(registry).ok()?;
+    let ids: Vec<String> = lxss.keys().ok()?.collect();
+    ids.iter().find_map(|id| {
+        let entry = lxss.open(id).ok()?;
+        let name = entry.get_string("DistributionName").ok()?;
+        if !name.eq_ignore_ascii_case(distribution) {
+            return None;
+        }
+        entry.get_string("BasePath").ok()
+    })
+}
+
+/// The bytes free to this account on the volume that holds `folder`.
+#[cfg(target_os = "windows")]
+fn free_space(folder: &str) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    let folder = folder.strip_prefix(r"\\?\").unwrap_or(folder);
+    let wide: Vec<u16> = std::ffi::OsStr::new(folder)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut free = 0u64;
+    // SAFETY: `wide` is a NUL-terminated path that outlives the call, and `free` is a u64 it may
+    // write; the two totals are not asked for.
+    unsafe {
+        windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(
+            windows::core::PCWSTR(wide.as_ptr()),
+            Some(&mut free),
+            None,
+            None,
+        )
+    }
+    .ok()?;
+    Some(free)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::temp_root;
+
+    /// Podman names its machine's WSL distribution as `env.WithPodmanPrefix` does, and WSL records
+    /// its folder with the `\\?\` prefix or without.
+    #[test]
+    fn a_podman_machines_distribution_and_drive_are_named_as_podman_and_wsl_name_them() {
+        assert_eq!(podman_distribution("openbot"), "podman-openbot");
+        assert_eq!(
+            podman_distribution("podman-machine-default"),
+            "podman-machine-default"
+        );
+        for (path, drive) in [
+            (
+                r"\\?\C:\Users\me\.local\share\containers\podman\machine\wsl\wsldist\openbot",
+                Some("C:"),
+            ),
+            (r"d:\podman\wsldist\openbot", Some("D:")),
+            (r"\\server\share\wsldist\openbot", None),
+            ("", None),
+        ] {
+            assert_eq!(drive_of(path).as_deref(), drive, "{path}");
+        }
+    }
+
+    /// The machine's drive is read where WSL keeps it: a distribution's `BasePath` in the person's
+    /// own registry hive, here under a key of this test's own with the shape WSL writes, and the
+    /// free space of the real volume that folder is on.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn a_podman_machines_drive_is_read_from_the_folder_wsl_recorded() {
+        let registry = format!(r"Software\OpenBot\Tests\Lxss-{}", std::process::id());
+        let folder = temp_root("wsl-distribution");
+        std::fs::create_dir_all(&folder).unwrap();
+        let entry = |id: &str, name: &str, base: &str| {
+            let key = windows_registry::CURRENT_USER
+                .create(format!(r"{registry}\{id}"))
+                .unwrap();
+            key.set_string("DistributionName", name).unwrap();
+            key.set_string("BasePath", base).unwrap();
+            key.set_string("VhdFileName", "ext4.vhdx").unwrap();
+        };
+        entry(
+            "{0d4e1c9a-5f0b-4a57-9d3e-1a2b3c4d5e6f}",
+            "Ubuntu",
+            r"Z:\elsewhere",
+        );
+        entry(
+            "{7c1f2e3d-9a8b-4c5d-8e7f-6a5b4c3d2e1f}",
+            "podman-openbot",
+            &format!(r"\\?\{}", folder.display()),
+        );
+        let found = machine_drive_in(&registry, "podman-openbot");
+        let missing = machine_drive_in(&registry, "podman-other");
+        let _ = windows_registry::CURRENT_USER.remove_tree(&registry);
+        let found = found.expect("the machine's folder and its volume were read");
+        assert_eq!(found.drive, drive_of(&folder.display().to_string()));
+        assert!(found.free > 0, "{found:?}");
+        assert_eq!(missing, None);
+    }
 
     const PROBE_OUTPUTS: [&str; 6] = [
         "hypervisor=True\nfirmware=False\n",

@@ -141,8 +141,19 @@ function shortfallSaid(
     return `${engine} doesn't have enough CPUs, memory or disk space for the back end. ${fix}, then ${then}.`;
   }
   const fix = shortfall.podman
-    ? `Stop your Podman machine, run podman machine set ${short.map((resource) => podmanFlag[resource]).join(" ")}, start it again`
+    ? podmanFix(short, shortfall.drive)
     : `Raise the ${short.length === 1 ? `${limitName[short[0]]} limit` : "limits"} in Docker Desktop > Settings > Resources${shortfall.disk ? ", or free space in Docker" : ""}`;
+  // OpenBot's own check after a start that failed: k3s itself is short of disk.
+  if (shortfall.nearlyFull && short.length === 1) {
+    const free = shortfall.diskGb
+      ? ` ${engine} has ${shortfall.diskGb} GB free${shortfall.diskSizeGb ? ` of ${shortfall.diskSizeGb} GB` : ""}.`
+      : "";
+    const needs40 =
+      shortfall.diskGb && Number(shortfall.diskGb) < 40
+        ? ` OpenBot needs ${needed.disk}.`
+        : "";
+    return `The back end's disk is nearly full.${free}${needs40} ${fix}, then ${then}.`;
+  }
   // The CLI's own numbers, when its error gave one for every resource that is short.
   const measured: Record<Resource, string | undefined> = {
     cpu: shortfall.cpus && `${shortfall.cpus} free CPUs`,
@@ -159,7 +170,28 @@ function shortfallSaid(
     : short.length === 1 && short[0] === "disk"
       ? `${engine} is out of disk space. OpenBot needs ${needs.disk}.`
       : `${engine} doesn't have enough ${listed(short.map((resource) => resourceName[resource]))}. OpenBot needs ${listed(short.map((resource) => needs[resource]))}.`;
-  return `${said} ${fix}, then ${then}.`;
+  const full = shortfall.nearlyFull
+    ? "The back end's disk is nearly full. "
+    : "";
+  return `${full}${said} ${fix}, then ${then}.`;
+}
+
+/**
+ * Where Podman raises what is short. On Windows its machine's disk is a sparse virtual disk on
+ * `drive`, and `podman machine set` does not change it, so space is freed there instead.
+ */
+function podmanFix(short: Resource[], drive: string | undefined): string {
+  const raised = short.filter((resource) => !(drive && resource === "disk"));
+  const set =
+    raised.length > 0 &&
+    `Stop your Podman machine, run podman machine set ${raised.map((resource) => podmanFlag[resource]).join(" ")}, start it again`;
+  const freed =
+    drive &&
+    short.includes("disk") &&
+    `free space on drive ${drive} or in Podman`;
+  if (set && freed) return `${set}, and ${freed}`;
+  if (freed) return freed.charAt(0).toUpperCase() + freed.slice(1);
+  return set || "";
 }
 
 // What the CLI requires free, beside its own numbers: "Docker has 0 GB of free disk. OpenBot

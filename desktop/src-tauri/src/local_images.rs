@@ -586,6 +586,28 @@ done"#;
         ok.then(|| lines(&out).map(str::to_owned).collect())
     }
 
+    /**
+    Whether the node's kubelet says it is short of disk: its `DiskPressure` condition, from `kubectl
+    get nodes` run in the node, as the CLI runs its own `kubectl`. k3s raises it below 5% free and
+    removes images it is not running above 85% used, which is how a relaunch on a nearly full disk
+    loses the back end's images. None when the node does not answer.
+    */
+    pub fn disk_pressure(&self, limit: Duration) -> Option<bool> {
+        let (ok, out) = self.exec(
+            &[
+                "kubectl",
+                "get",
+                "nodes",
+                "--request-timeout=5s",
+                "-o",
+                "json",
+            ],
+            limit,
+            4 << 20,
+        )?;
+        ok.then(|| disk_pressure_of(&out)).flatten()
+    }
+
     /// The node's architecture, as an image index names it.
     fn architecture(&self, limits: Limits) -> Option<&'static str> {
         let (ok, out) = self.exec(&["uname", "-m"], limits.call, 64)?;
@@ -674,6 +696,36 @@ done"#;
             }
         }
     }
+}
+
+/// `DiskPressure` from `kubectl get nodes -o json`: true when any node has it, false when every
+/// node that says has not, None when none says.
+pub fn disk_pressure_of(json: &[u8]) -> Option<bool> {
+    let nodes: Value = serde_json::from_slice(json).ok()?;
+    let said: Vec<bool> = nodes
+        .get("items")?
+        .as_array()?
+        .iter()
+        .filter_map(|node| node.pointer("/status/conditions")?.as_array())
+        .flatten()
+        .filter(|condition| condition.get("type").and_then(Value::as_str) == Some("DiskPressure"))
+        .filter_map(|condition| match condition.get("status")?.as_str()? {
+            "True" => Some(true),
+            "False" => Some(false),
+            _ => None,
+        })
+        .collect();
+    (!said.is_empty()).then(|| said.contains(&true))
+}
+
+/// What every k3d node on the engine says of `DiskPressure` (`Node::disk_pressure`): true when
+/// any has it. The nodes share the engine's disk.
+pub fn any_disk_pressure(engine: &(dyn Fn() -> Command + Sync), limits: Limits) -> Option<bool> {
+    let said: Vec<bool> = stack_nodes(engine, limits)?
+        .iter()
+        .filter_map(|stack| Node::for_stack(engine, stack).disk_pressure(limits.call))
+        .collect();
+    (!said.is_empty()).then(|| said.contains(&true))
 }
 
 fn lines(bytes: &[u8]) -> impl Iterator<Item = &str> {

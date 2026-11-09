@@ -90,6 +90,14 @@ export type Shortfall = {
   cpus?: string;
   memoryGb?: string;
   diskGb?: string;
+  /**
+   * OpenBot's own check after a start that failed: the back end's disk is nearly full, and how
+   * large it is beside `diskGb`.
+   */
+  nearlyFull?: boolean;
+  diskSizeGb?: string;
+  /** Podman on Windows: the drive that holds its machine's disk, `C:`. */
+  drive?: string;
 };
 
 export type LocalReport = {

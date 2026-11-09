@@ -8,7 +8,11 @@ import {
   localFailures,
   type Shortfall,
 } from "./localEvalCli";
-import { localReadiness, type ReadinessInput } from "./localReadiness";
+import {
+  engineTooSmallSaid,
+  localReadiness,
+  type ReadinessInput,
+} from "./localReadiness";
 
 const reasons: LocalReason[] = [
   "authentication-required",
@@ -226,6 +230,62 @@ test("specific wording and actions", () => {
       .said,
   ).toBe(
     "Docker has 3.5 free CPUs and 12 GB of free disk. OpenBot needs 4 free CPUs and 40 GB of free disk. Raise the limits in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+  );
+  // OpenBot's own check after a start that failed (`local_eval::checked_call`), as it reports
+  // each case. A nearly full disk is said as k3s's, beside the 40 GB only when it is below it.
+  expect(
+    short({
+      podman: true,
+      disk: true,
+      diskGb: "30.5",
+      nearlyFull: true,
+      diskSizeGb: "1006.8",
+      drive: "C:",
+    }).said,
+  ).toBe(
+    "The back end's disk is nearly full. Podman has 30.5 GB free of 1006.8 GB. OpenBot needs 40 GB. Free space on drive C: or in Podman, then Retry.",
+  );
+  expect(
+    short({ podman: true, disk: true, diskGb: "30", drive: "C:" }).said,
+  ).toBe(
+    "Podman has 30 GB of free disk. OpenBot needs 40 GB. Free space on drive C: or in Podman, then Retry.",
+  );
+  expect(
+    short({
+      disk: true,
+      diskGb: "300",
+      nearlyFull: true,
+      diskSizeGb: "1827.9",
+    }).said,
+  ).toBe(
+    "The back end's disk is nearly full. Docker has 300 GB free of 1827.9 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+  );
+  expect(
+    short({
+      podman: true,
+      disk: true,
+      diskGb: "8",
+      nearlyFull: true,
+      diskSizeGb: "60",
+    }).said,
+  ).toBe(
+    "The back end's disk is nearly full. Podman has 8 GB free of 60 GB. OpenBot needs 40 GB. Stop your Podman machine, run podman machine set --disk-size 160, start it again, then Retry.",
+  );
+  // Podman on Windows short of CPUs too: those are raised, the drive's space is freed.
+  expect(short({ podman: true, cpu: true, disk: true, drive: "C:" }).said).toBe(
+    "Podman doesn't have enough CPUs and disk space. OpenBot needs 4 free CPUs and 40 GB free. Stop your Podman machine, run podman machine set --cpus 6, start it again, and free space on drive C: or in Podman, then Retry.",
+  );
+  // The account step's check before a first setup, on Windows.
+  expect(
+    engineTooSmallSaid({
+      podman: true,
+      cpu: false,
+      memory: false,
+      disk: true,
+      drive: "C:",
+    }),
+  ).toBe(
+    "Podman is out of disk space. OpenBot needs 40 GB free. Free space on drive C: or in Podman, then Try again.",
   );
   // A report that does not say which is still about resources, never "partway through".
   expect(
