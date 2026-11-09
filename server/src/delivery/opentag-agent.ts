@@ -7,6 +7,7 @@
  * runs.
  */
 import { randomUUID } from "node:crypto";
+import { approvalPhrase } from "@openbot/shared/tool-name";
 import type { DrawnComponent } from "@openbot/toolkit/run-turn";
 import { z } from "zod";
 import {
@@ -59,6 +60,9 @@ export type PairedApprovals = {
         botId: string;
         toolRef: string;
         effect: string;
+        /** Where it acts, and what it is aimed at: the card names the action by both. */
+        scope: string;
+        target?: unknown;
         threadId: string;
         args: unknown;
         /** Why the gate asked; a check-in task's approval offers no "Always allow". */
@@ -530,7 +534,8 @@ async function approvalCard(
   const bot = await deps.store.botIdentity(record.action.botId);
   return confirmWriteInterrupt({
     approvalId,
-    action: `${bot?.name ?? "Your Bot"}: ${record.action.toolRef}`,
+    // In the words the approval card in OpenBot uses, never the tool's id ("Your Bot: computer_click").
+    action: `${bot?.name ?? "Your Bot"} wants to ${approvalPhrase(record.action)}`,
     approver: `${binding.transport}:${binding.identity}`,
     effect: record.action.effect,
     // The approvals preview already redacts secrets and private content.
@@ -594,7 +599,7 @@ async function decideFromCard(
   return {
     text:
       decision === "deny"
-        ? `Denied. ${name} will not run ${record.action.toolRef}.`
+        ? `Denied. ${name} won't ${approvalPhrase(record.action)}.`
         : `${decision === "allow_always" ? "Always allowed" : "Allowed once"}. ${name} is continuing and will send its result here.`,
   };
 }
