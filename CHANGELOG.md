@@ -100,6 +100,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Conversations
 
+- **A Bot that runs its own agent reads your Gmail and finds your Slack channels again.** Such a
+  Bot, like the personal starter Bot, can be sent only some of an app's actions in one request, and
+  they were picked by matching the words of your message. With Gmail connected it could be sent
+  sending and settings actions and nothing that fetches a message, so it said it could not read your
+  mail and that an administrator had to add a tool. On Slack it could read a conversation it had the
+  id of but not find a channel or a DM by name. Each app's actions that read now come first,
+  alongside the ones your message asks for, so a Bot can search, list and read messages, threads,
+  channels and people. Sending and deleting still ask you first. In OpenBot Personal a Bot is also
+  told plainly that every action an app offers is already its own.
 - **A Bot calls you "you".** Its instructions call the user "the person", and a Bot said that back,
   such as "which the person didn't ask for". Every Bot is now told to write "you".
 - **A Claude plan has a model picker in the conversation again.** Signed in with a Claude plan,
