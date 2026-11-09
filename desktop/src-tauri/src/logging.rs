@@ -205,6 +205,72 @@ pub fn scrub<'a>(text: &'a str, home: Option<&str>) -> Cow<'a, str> {
     }
 }
 
+/**
+Every name the home folder goes by: itself, and on Windows its 8.3 short form and long form. Windows writes temporary paths with the short one (`C:\Users\RUNNER~1\AppData\Local\Temp`,
+for `C:\Users\runneradmin`), and that names the person as much as the long one does.
+*/
+pub fn home_forms(home: &str) -> Vec<String> {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut forms = vec![home.to_owned()];
+    #[cfg(windows)]
+    for other in [windows_path(home, true), windows_path(home, false)]
+        .into_iter()
+        .flatten()
+    {
+        let other = other.trim_end_matches(['/', '\\']).to_owned();
+        if other.len() > 3 && !forms.contains(&other) {
+            forms.push(other);
+        }
+    }
+    forms
+}
+
+/// `redact`, then each of `homes` as `~`, longest first so one never leaves part of another.
+pub fn scrub_homes<'a>(text: &'a str, homes: &[String]) -> Cow<'a, str> {
+    let mut text = redact(text);
+    let mut homes: Vec<&String> = homes.iter().filter(|home| home.len() > 3).collect();
+    homes.sort_by_key(|home| std::cmp::Reverse(home.len()));
+    for home in homes {
+        if text.contains(home.as_str()) {
+            text = Cow::Owned(text.replace(home.as_str(), "~"));
+        }
+    }
+    text
+}
+
+/// `path` in its 8.3 short form (`short`) or its long form, as Windows resolves it. None when the
+/// volume keeps no short names or the path does not exist.
+#[cfg(windows)]
+fn windows_path(path: &str, short: bool) -> Option<String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Storage::FileSystem::{GetLongPathNameW, GetShortPathNameW};
+    let wide: Vec<u16> = std::ffi::OsStr::new(path)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let resolve = |buffer: Option<&mut [u16]>| {
+        let at = windows::core::PCWSTR(wide.as_ptr());
+        // SAFETY: `wide` is a NUL-terminated path that outlives the call, and the buffer, when
+        // given, is one the call may fill up to its length.
+        unsafe {
+            if short {
+                GetShortPathNameW(at, buffer)
+            } else {
+                GetLongPathNameW(at, buffer)
+            }
+        }
+    };
+    // Asked with no buffer, each answers the length it needs, NUL included.
+    let needed = resolve(None) as usize;
+    if needed == 0 {
+        return None;
+    }
+    let mut buffer = vec![0u16; needed];
+    // Filled, it answers the length it wrote, NUL not included.
+    let written = resolve(Some(&mut buffer)) as usize;
+    (written > 0 && written < buffer.len()).then(|| String::from_utf16_lossy(&buffer[..written]))
+}
+
 /// One way a key or a token shows itself, and what is kept of the match.
 struct Rule {
     pattern: Regex,

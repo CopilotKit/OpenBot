@@ -234,9 +234,18 @@ static IDENTIFIER: LazyLock<Regex> = LazyLock::new(|| {
     .expect("the identifier pattern compiles")
 });
 
-/// `logging::scrub`, then account identifiers as `[id]`.
+/// `logging::redact`, the home folder as `~` by every name it goes by (`logging::home_forms`), then
+/// account identifiers as `[id]`.
 pub fn redact<'a>(text: &'a str, home: Option<&str>) -> Cow<'a, str> {
-    let scrubbed = crate::logging::scrub(text, home);
+    redact_homes(
+        text,
+        &home.map(crate::logging::home_forms).unwrap_or_default(),
+    )
+}
+
+/// `redact`, given the home folder's forms.
+fn redact_homes<'a>(text: &'a str, homes: &[String]) -> Cow<'a, str> {
+    let scrubbed = crate::logging::scrub_homes(text, homes);
     if !IDENTIFIER.is_match(&scrubbed) {
         return scrubbed;
     }
@@ -408,6 +417,60 @@ mod tests {
             "2026-11-08T10:12:05.000Z INFO  [config] wrote ~/OpenBot/.env"
         );
         assert_eq!(said(&cases[8].0), "OPENAI_API_KEY=[redacted]");
+    }
+
+    /**
+    The home folder by its 8.3 short name. On a Windows runner the Desktop log's folder came out as
+    `C:\Users\RUNNER~1\AppData\Local\Temp\…`, which `USERPROFILE` (`C:\Users\runneradmin`) does not
+    match, so the user's name went into the bundle. Every form is written as `~`, the longer first.
+    */
+    #[test]
+    fn the_home_folder_is_redacted_by_its_short_name_too() {
+        let homes = [
+            r"C:\Users\runneradmin".to_owned(),
+            r"C:\Users\RUNNER~1".to_owned(),
+        ];
+        let text = concat!(
+            r"C:\Users\RUNNER~1\AppData\Local\Temp\openbot-troubleshooting-logs-3408-0\logs\openbot-desktop.log",
+            "\n",
+            r"C:\Users\runneradmin\.copilotkit\cli.log",
+        );
+        assert_eq!(
+            redact_homes(text, &homes),
+            concat!(
+                r"~\AppData\Local\Temp\openbot-troubleshooting-logs-3408-0\logs\openbot-desktop.log",
+                "\n",
+                r"~\.copilotkit\cli.log",
+            )
+        );
+        // A home that is a prefix of another's name never leaves part of it behind.
+        let nested = [
+            r"C:\Users\run".to_owned(),
+            r"C:\Users\runneradmin".to_owned(),
+        ];
+        assert_eq!(redact_homes(r"C:\Users\runneradmin\x", &nested), r"~\x");
+    }
+
+    /// This computer's own temporary folder, which Windows names by the home folder's short form
+    /// when it has one, reads as under `~`.
+    #[cfg(windows)]
+    #[test]
+    fn this_windows_temp_folder_is_under_the_home_folder_by_any_name() {
+        let home = crate::logging::home_folder().expect("USERPROFILE is set");
+        let temp = std::env::temp_dir().display().to_string();
+        let user = home.rsplit('\\').next().unwrap().to_owned();
+        let forms = crate::logging::home_forms(&home);
+        if !forms.iter().any(|form| temp.starts_with(form.as_str())) {
+            // TEMP is somewhere else on this machine; nothing of the home folder is in it.
+            assert!(
+                !temp.contains(&user),
+                "{temp} names {user} outside {forms:?}"
+            );
+            return;
+        }
+        let redacted = redact(&temp, Some(&home));
+        assert!(redacted.starts_with('~'), "{temp} became {redacted}");
+        assert!(!redacted.contains(&user), "{redacted}");
     }
 
     /// What the bundle is for has to survive: steps, exit codes, sizes, versions and the stack's name.
