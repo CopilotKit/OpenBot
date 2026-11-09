@@ -81,6 +81,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   other, and values landed in the wrong field. A LangGraph Bot now runs its browser calls in the
   order the model made them. An action that never finishes gives way to the next after
   `BROWSER_TURN_LIMIT_MS` (50 seconds by default), and one stopped while it waits never runs.
+- **A budget a Bot draws is in colour, with a bar of how the total splits.** Amounts that add up to
+  a total, such as the "Build a trip budget" starter task, draw as one card: each part in its own
+  chart colour on its swatch, slider and slice of the bar, a box to type it, its share, and the
+  total in large bold type, all updating as you edit. It was grey sliders or number boxes and a line
+  of black text. In the dark theme, the frame around an interface a Bot draws has lost its bright
+  border.
 
 ## 1.0.0
 
