@@ -34,8 +34,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **The Account step leads with OpenBot.** Its header reads "OpenBot by CopilotKit" and its
   heading "OpenBot runs on this computer". It says that signing in to CopilotKit gets a free local
   license key for CopilotKit Intelligence, which runs on this computer too, that signing in doesn't
-  send your conversations or files to CopilotKit, and that what you ask goes to your AI provider. The button reads "Sign in for a free license key", and CopilotKit's logo
-  no longer heads the step.
+  send your conversations or files to CopilotKit, and that what you ask goes to your AI provider.
+  The button reads "Sign in for a free license key", and CopilotKit's logo no longer heads the
+  step.
+- **Docker Desktop 29 pulls OpenBot's images from downloads.copilotkit.ai.** Its pulls there
+  failed with 403 and went to GitHub, because the copy held only each image's Linux amd64 and arm64
+  manifests, and Docker 29 also fetches the image's attestations and asks which artifacts refer to
+  it. The copy now holds every manifest each image names, and answers that question with an empty
+  list.
 - **A back end setup that stops says why.** OpenBot's log now records how every back end setup,
   start, update and stop ended: how long it took, its exit code, what its report says went wrong
   and the end of its error output. A setup that stopped used to leave nothing in the log. The card

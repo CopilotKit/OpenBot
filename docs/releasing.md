@@ -612,14 +612,18 @@ all from this address and go to GitHub only when it does not answer
 | `tools/podman/v<version>/<file>`, `tools/compose/v<version>/<file>` | every Podman installer and Compose binary the release's `desktop/src-tauri/src/install.rs` pins, under the upstream file name, checked against those pins | a year, immutable |
 | `v2/` | `{}` (`application/json`), so a registry client's first request answers | five minutes |
 | `v2/<repo>/manifests/<tag>` | the bytes ghcr.io serves for the tag, typed by their `mediaType`; invalidated whenever it changes | five minutes |
-| `v2/<repo>/manifests/sha256:<hex>` | each index, and its `linux/amd64` and `linux/arm64` manifests, byte for byte | a year, immutable |
+| `v2/<repo>/manifests/sha256:<hex>` | each index, and every manifest it names (every platform and every attestation), byte for byte | a year, immutable |
 | `v2/<repo>/blobs/sha256:<hex>` | each config and layer of those (`application/octet-stream`) | a year, immutable |
+| `v2/<repo>/referrers/sha256:<hex>` | an empty OCI image index (`application/vnd.oci.image.index.v1+json`) for each of those manifests | five minutes |
 
 The `v2/` tree is a read-only copy of the OCI Distribution API, at ghcr.io's own paths: `<repo>` is
 the ghcr.io path unchanged, such as `copilotkit/openbot-server`, so Docker and containerd pull
 `downloads.copilotkit.ai/<repo>@<digest>` (or use it as a mirror for `ghcr.io`) exactly as they
-pull from ghcr.io. Indexes are copied byte for byte, so every digest stays the same; attestations
-and other platforms are not copied. S3 cannot send `Docker-Content-Digest`, and clients do not need
+pull from ghcr.io. Indexes are copied byte for byte, so every digest stays the same, and whole:
+Docker 29's containerd image store fetches every manifest an index names, attestations included,
+and asks the referrers API (`/v2/<repo>/referrers/<digest>`) for each, and a 403 for either fails
+its pull. The empty referrers index is a valid answer (OCI distribution spec, "Listing Referrers")
+that says nothing refers to the manifest. S3 cannot send `Docker-Content-Digest`, and clients do not need
 it: they hash what they receive. A key that is not there answers 403, not 404 (CloudFront has no
 `ListBucket`), and containerd moves on to its next host, ghcr.io, on any 4xx.
 
