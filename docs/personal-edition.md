@@ -48,7 +48,7 @@ The server's container is given the supervisor by name in `docker-compose.yml` u
 A new installation starts with one Bot, the Personal Assistant. When a Bot was picked during setup,
 the Personal Assistant runs on what was picked: it takes the `picked-harness` row's id and
 connection, and the Personal Assistant's instructions, skills and conversation, and its subtitle
-says what runs it ("Everyday life. Powered by LangChain (LangGraph)."). With nothing picked, as
+says what runs it ("Everyday life. Powered by LangChain."). With nothing picked, as
 `start.sh` leaves it, `PICKED_HARNESS_URL` is empty, the `picked-harness` row in
 [`examples/personal/agents.yaml`](../examples/personal/agents.yaml) is dropped, and the Personal
 Assistant runs inside the server ("Everyday life. Powered by OpenBot."). Either way it is an

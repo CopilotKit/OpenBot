@@ -14,7 +14,6 @@
  */
 import { IconFile, IconFolder, IconTerminal2 } from "@tabler/icons-react";
 import { useSyncExternalStore } from "react";
-import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import {
   activityFor,
   type ComputerActivity,
@@ -155,15 +154,12 @@ export function ActivityLog({ computerId }: { computerId: string }) {
     () => activityFor(computerId),
   );
 
+  // One quiet line under the screen, not a box as tall as the screen's own card, while there is nothing to list.
   if (entries.length === 0) {
     return (
-      <Empty className="h-[180px] border border-dashed">
-        <EmptyHeader>
-          <EmptyTitle className="text-muted-foreground">
-            Nothing yet. Commands the Bot runs and files it reads appear here.
-          </EmptyTitle>
-        </EmptyHeader>
-      </Empty>
+      <p className="text-muted-foreground text-sm">
+        Nothing yet. Commands the Bot runs and files it reads appear here.
+      </p>
     );
   }
 

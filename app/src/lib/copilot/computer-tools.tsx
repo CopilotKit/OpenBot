@@ -833,8 +833,9 @@ export function ComputerTools() {
       return (
         <ActionLine
           running={status !== "complete"}
-          label={args?.append === true ? "Added to file" : "Saved file"}
-          attempted={args?.append === true ? "Add to file" : "Save file"}
+          // The words the approval card and Activity use for the same action.
+          label={args?.append === true ? "Added to a file" : "Saved a file"}
+          attempted={args?.append === true ? "Add to a file" : "Save a file"}
           // Show the path, never file contents.
           detail={
             outcome.refused === true

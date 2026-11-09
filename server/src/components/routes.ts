@@ -7,7 +7,7 @@ import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
 import { currentEdition } from "../edition";
 import { DATA_FUNCTIONS, dataFunction, functionRefusal } from "./functions";
-import { COMPONENT_DATA_FUNCTIONS } from "./headless";
+import { COMPONENT_DATA_FUNCTIONS, HEADLESS_COMPONENTS } from "./headless";
 import {
   SandboxedNotFoundError,
   SandboxedPublicationRefusedError,
@@ -99,8 +99,15 @@ export function createComponentRoutes(
    * Drop a file in and it appears here, published, and any Bot may draw it until somebody says
    * otherwise.
    *
-   * Additive only, and not an administrator action: any signed-in person's browser announces it on
-   * load, and it cannot change who may use a component, its publication state or its description.
+   * Not an administrator action: any signed-in person's browser announces it on load. So what it
+   * sends can only add a component this deployment has never seen. It cannot change who may use a
+   * component, its publication state, its title or its description.
+   *
+   * Announcing also brings each description nobody here has edited up to the one this server was
+   * built with (`followBuild`). That text is the server's own copy in `HEADLESS_COMPONENTS`, never
+   * the request's: a description is what the model reads in every Bot, so a person who sent their
+   * own wording would be writing into every Bot's instructions. Started here only because it is the
+   * moment the catalogue is known to exist; the request decides nothing about it.
    */
   routes.put("/catalogue", requireUser, async (context) => {
     const body = (await context.req.json().catch(() => null)) as {
@@ -179,6 +186,25 @@ export function createComponentRoutes(
         name,
         {
           note: "First seen in a build, published and available to every Bot.",
+        },
+        DEPLOYMENT_INITIATOR,
+      );
+    }
+    // A description nobody here had edited, brought up to this server's own copy of the build's.
+    // Only rows this call changed are named, so two page loads at once write one row each.
+    for (const name of await store.followBuild(
+      HEADLESS_COMPONENTS.map(({ name, title, buildDescription }) => ({
+        name,
+        title,
+        description: buildDescription,
+      })),
+    )) {
+      await audit(
+        context,
+        "component.description_updated",
+        name,
+        {
+          note: "Its description follows this version of OpenBot. Nobody had edited it here.",
         },
         DEPLOYMENT_INITIATOR,
       );

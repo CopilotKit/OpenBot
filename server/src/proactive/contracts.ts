@@ -248,6 +248,12 @@ export type BotAttentionPayload = {
   /** Open items from this Bot's check-ins. */
   items: number;
   tasks: Omit<BotTaskCounts, "agentId">;
+  /**
+   * The conversation of the newest thing this Bot waits on the person for, while it waits on them
+   * for anything: where a notice about it opens. Null when it waits on nothing, or on nothing that
+   * belongs to a conversation.
+   */
+  waitingIn: string | null;
 };
 
 /**

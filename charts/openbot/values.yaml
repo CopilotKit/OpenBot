@@ -854,7 +854,7 @@ commonAnnotations: {}
 #
 # Everything under this key except `enabled` is the Intelligence chart's own values, passed to it
 # unchanged: its README (`helm show readme oci://ghcr.io/copilotkit/charts/intelligence --version
-# 0.16.0-rc.9`) documents every one, and anything it documents can be set here.
+# 0.16.0-rc.10`) documents every one, and anything it documents can be set here.
 #
 # THE SECRET NAMES BELOW ARE FIXED, NOT DERIVED FROM THE RELEASE, because the Intelligence chart takes
 # them as plain names. This chart creates each one under exactly the name written here, so changing a

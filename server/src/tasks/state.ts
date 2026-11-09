@@ -1,5 +1,6 @@
-import { approvalWords } from "@openbot/shared/tool-name";
+import { approvalPhrase } from "@openbot/shared/tool-name";
 import { and, desc, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
+import { DECISION_KIND } from "../approvals/decision-waits";
 import type { Database } from "../db/client";
 import {
   approvalRequests,
@@ -231,8 +232,7 @@ export function waitingLine(
     const words = Array.from(waiting.question.trim());
     return `Waiting for your answer: ${words.length > QUOTE_MAX ? `${words.slice(0, QUOTE_MAX - 1).join("")}…` : words.join("")}`;
   }
-  const { action, place } = approvalWords(waiting);
-  return `${waiting.handOff ? "This needs you" : "Waiting for your approval"}: ${action} on ${place}`;
+  return `${waiting.handOff ? "This needs you" : "Waiting for your approval"}: ${approvalPhrase(waiting)}`;
 }
 
 /** The suffix of the line a task's turn records when it fails on its last run. */
@@ -361,119 +361,137 @@ export async function readTaskStates(
   };
 
   const taskIds = rows.map((row) => row.id);
-  const [approvals, questions, turns, carriedOn] = await Promise.all([
-    // Waiting on the person: an action its turn paused on for Allow once.
-    database
-      .select({
-        threadId: approvalThread,
-        toolRef: sql<string>`${approvalRequests.action}->>'toolRef'`,
-        scope: sql<string>`${approvalRequests.action}->>'scope'`,
-        target: sql<unknown>`${approvalRequests.action}->'target'`,
-        handOff: sql<boolean>`coalesce(${approvalRequests.action}->'policy'->>'behaviour' = 'hand_off', false)`,
-        createdAt: approvalRequests.createdAt,
-      })
-      .from(approvalRequests)
-      .where(
-        and(
-          eq(approvalRequests.ownerUserId, owner),
-          eq(approvalRequests.status, "pending"),
-          inThreads(approvalThread),
-        ),
-      ),
-    // Or a question its Bot asked them, in its conversation or its thread.
-    database
-      .select({
-        channelId: payload("channelId"),
-        threadId: payload("threadId"),
-        question: payload("question"),
-        createdAt: workItems.createdAt,
-      })
-      .from(workItems)
-      .where(
-        and(
-          eq(workItems.kind, "person.question"),
-          isNull(workItems.finishedAt),
-          sql`${payload("actorId")} = ${owner}`,
-          or(
-            inArray(payload("channelId"), channelIds),
-            inThreads(payload("threadId")),
+  const [approvals, questions, decisions, turns, carriedOn] = await Promise.all(
+    [
+      // Waiting on the person: an action its turn paused on for Allow once.
+      database
+        .select({
+          threadId: approvalThread,
+          toolRef: sql<string>`${approvalRequests.action}->>'toolRef'`,
+          scope: sql<string>`${approvalRequests.action}->>'scope'`,
+          target: sql<unknown>`${approvalRequests.action}->'target'`,
+          handOff: sql<boolean>`coalesce(${approvalRequests.action}->'policy'->>'behaviour' = 'hand_off', false)`,
+          createdAt: approvalRequests.createdAt,
+        })
+        .from(approvalRequests)
+        .where(
+          and(
+            eq(approvalRequests.ownerUserId, owner),
+            eq(approvalRequests.status, "pending"),
+            inThreads(approvalThread),
           ),
         ),
-      ),
-    /*
-     * Its turns. The effective outcome follows when each turn finished or failed, not when it was
-     * queued: an older turn may run, and fail, after a newer one finished.
-     */
-    database
-      .select({
-        key: workItems.key,
-        taskId: payload("taskId"),
-        input: workItems.payload,
-        acceptedAt: sql`extract(epoch from ${workItems.createdAt})`.mapWith(
-          Number,
+      // Or a question its Bot asked them, in its conversation or its thread.
+      database
+        .select({
+          channelId: payload("channelId"),
+          threadId: payload("threadId"),
+          question: payload("question"),
+          createdAt: workItems.createdAt,
+        })
+        .from(workItems)
+        .where(
+          and(
+            eq(workItems.kind, "person.question"),
+            isNull(workItems.finishedAt),
+            sql`${payload("actorId")} = ${owner}`,
+            or(
+              inArray(payload("channelId"), channelIds),
+              inThreads(payload("threadId")),
+            ),
+          ),
         ),
-        // Compared in SQL, so a turn accepted in the same millisecond still follows the "done".
-        afterResolution: sql<boolean>`coalesce(${workItems.createdAt} > ${botTasks.resolvedAt}, false)`,
-        // A crash fails at lease expiry, not its last heartbeat. Finished rows use their actual
-        // completion; released rows use the release. Kept in PostgreSQL's sub-millisecond order.
-        outcomeAt: sql`extract(epoch from coalesce(
+      // Or a card its Bot asked with in its conversation and is waiting on (approvals/decision-waits.ts).
+      database
+        .select({
+          channelId: payload("channelId"),
+          title: payload("title"),
+          createdAt: workItems.createdAt,
+        })
+        .from(workItems)
+        .where(
+          and(
+            eq(workItems.kind, DECISION_KIND),
+            isNull(workItems.finishedAt),
+            sql`${payload("actorId")} = ${owner}`,
+            inArray(payload("channelId"), channelIds),
+          ),
+        ),
+      /*
+       * Its turns. The effective outcome follows when each turn finished or failed, not when it was
+       * queued: an older turn may run, and fail, after a newer one finished.
+       */
+      database
+        .select({
+          key: workItems.key,
+          taskId: payload("taskId"),
+          input: workItems.payload,
+          acceptedAt: sql`extract(epoch from ${workItems.createdAt})`.mapWith(
+            Number,
+          ),
+          // Compared in SQL, so a turn accepted in the same millisecond still follows the "done".
+          afterResolution: sql<boolean>`coalesce(${workItems.createdAt} > ${botTasks.resolvedAt}, false)`,
+          // A crash fails at lease expiry, not its last heartbeat. Finished rows use their actual
+          // completion; released rows use the release. Kept in PostgreSQL's sub-millisecond order.
+          outcomeAt: sql`extract(epoch from coalesce(
           ${workItems.finishedAt},
           case when ${workItems.claimedBy} is not null then ${workItems.leaseUntil} end,
           ${workItems.updatedAt}
         ))`.mapWith(Number),
-        attempts: workItems.attempts,
-        live: sql<boolean>`coalesce(${workItems.leaseUntil} > now(), false)`,
-        finished: sql<boolean>`${workItems.finishedAt} is not null`,
-        lastError: workItems.lastError,
-        claimed: sql<boolean>`${workItems.claimedBy} is not null`,
-        updatedAt: workItems.updatedAt,
-        leaseUntil: workItems.leaseUntil,
-      })
-      .from(workItems)
-      .innerJoin(botTasks, eq(botTasks.id, payload("taskId")))
-      .where(
-        and(
-          eq(workItems.kind, PROACTIVE_TASK_KIND),
-          inArray(payload("taskId"), taskIds),
-        ),
-      )
-      .orderBy(desc(workItems.createdAt), desc(workItems.key)),
-    /*
-     * The person answered, and the conversation is being carried on: an approved action being
-     * carried out and its result given back to the Bot, or an answer to a question being given to
-     * it. While either is in flight, nothing waits on the person and the Bot is working.
-     */
-    Promise.all([
-      database
-        .select({ threadId: approvalThread })
+          attempts: workItems.attempts,
+          live: sql<boolean>`coalesce(${workItems.leaseUntil} > now(), false)`,
+          finished: sql<boolean>`${workItems.finishedAt} is not null`,
+          lastError: workItems.lastError,
+          claimed: sql<boolean>`${workItems.claimedBy} is not null`,
+          updatedAt: workItems.updatedAt,
+          leaseUntil: workItems.leaseUntil,
+        })
         .from(workItems)
-        .innerJoin(
-          approvalRequests,
-          eq(approvalRequests.id, payload("approvalId")),
+        .innerJoin(botTasks, eq(botTasks.id, payload("taskId")))
+        .where(
+          and(
+            eq(workItems.kind, PROACTIVE_TASK_KIND),
+            inArray(payload("taskId"), taskIds),
+          ),
         )
-        .where(
-          and(
-            eq(workItems.kind, "approval.resume"),
-            isNull(workItems.finishedAt),
-            eq(approvalRequests.ownerUserId, owner),
-            inThreads(approvalThread),
-            sql`(${workItems.attempts} < ${DEFAULT_MAX_ATTEMPTS} or ${workItems.leaseUntil} > now())`,
+        .orderBy(desc(workItems.createdAt), desc(workItems.key)),
+      /*
+       * The person answered, and the conversation is being carried on: an approved action being
+       * carried out and its result given back to the Bot, or an answer to a question being given to
+       * it. While either is in flight, nothing waits on the person and the Bot is working.
+       */
+      Promise.all([
+        database
+          .select({ threadId: approvalThread })
+          .from(workItems)
+          .innerJoin(
+            approvalRequests,
+            eq(approvalRequests.id, payload("approvalId")),
+          )
+          .where(
+            and(
+              eq(workItems.kind, "approval.resume"),
+              isNull(workItems.finishedAt),
+              eq(approvalRequests.ownerUserId, owner),
+              inThreads(approvalThread),
+              sql`(${workItems.attempts} < ${DEFAULT_MAX_ATTEMPTS} or ${workItems.leaseUntil} > now())`,
+            ),
           ),
-        ),
-      database
-        .select({ threadId: answeredThread })
-        .from(workItems)
-        .where(
-          and(
-            eq(workItems.kind, "person.response"),
-            isNull(workItems.finishedAt),
-            sql`${payload("ownerUserId")} = ${owner}`,
-            inThreads(answeredThread),
-            sql`(${workItems.attempts} < ${DEFAULT_MAX_ATTEMPTS} or ${workItems.leaseUntil} > now())`,
+        database
+          .select({ threadId: answeredThread })
+          .from(workItems)
+          .where(
+            and(
+              eq(workItems.kind, "person.response"),
+              isNull(workItems.finishedAt),
+              sql`${payload("ownerUserId")} = ${owner}`,
+              inThreads(answeredThread),
+              sql`(${workItems.attempts} < ${DEFAULT_MAX_ATTEMPTS} or ${workItems.leaseUntil} > now())`,
+            ),
           ),
-        ),
-    ]).then(([resuming, answering]) => [...resuming, ...answering]),
-  ]);
+      ]).then(([resuming, answering]) => [...resuming, ...answering]),
+    ],
+  );
   for (const row of approvals)
     waitsFor(
       channelOfThread.get(row.threadId),
@@ -485,6 +503,14 @@ export async function readTaskStates(
         target: row.target,
         handOff: row.handOff,
       }),
+    );
+  for (const decision of decisions)
+    waitsFor(
+      decision.channelId,
+      decision.createdAt,
+      decision.title
+        ? waitingLine({ kind: "question", question: decision.title })
+        : "Waiting for your answer",
     );
   for (const question of questions)
     waitsFor(

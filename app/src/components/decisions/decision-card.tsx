@@ -181,7 +181,11 @@ export function DecisionCard({
              * group's keys (Tab to the picked row, Up and Down to move) and screen readers name
              * them as choices.
              */}
-            <fieldset aria-label={title} className="border-border border-t">
+            {/* A fieldset is as wide as its longest word unless told otherwise, which clipped a long link. */}
+            <fieldset
+              aria-label={title}
+              className="min-w-0 border-border border-t"
+            >
               {options.map((option, index) => (
                 <label
                   className={cn(
@@ -213,7 +217,7 @@ export function DecisionCard({
                     </span>
                     {option.description ? (
                       <span
-                        className="mt-0.5 block text-muted-foreground text-xs"
+                        className="mt-0.5 block break-words text-muted-foreground text-xs"
                         id={`${id}-${index}`}
                       >
                         {option.description}

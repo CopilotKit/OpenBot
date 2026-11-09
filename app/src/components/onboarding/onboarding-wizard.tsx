@@ -99,7 +99,7 @@ function Pane({
 /**
  * The steps, moved through one at a time inside {@link OnboardingFrame}.
  *
- * WHERE SOMEBODY IS, BY ID. The list grows after it first draws: Talk to us joins once the server
+ * WHERE SOMEBODY IS, BY ID. The list grows after it first draws: Book a demo joins once the server
  * says this is somebody trying OpenBot alone, and that answer can arrive while they are on Welcome. Held as an index, their place would slide; held as an id, the step they are on stays
  * the step they are on, and only the list around it changes.
  *

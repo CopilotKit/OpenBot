@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render } from "@testing-library/react";
-import { SkillFiles, skillBody } from "@/components/learning/skill-files";
+import { SkillFiles } from "@/components/learning/skill-files";
+import { skillBody } from "@/lib/learning/display";
 
 beforeAll(() => GlobalRegistrator.register());
 afterAll(() => GlobalRegistrator.unregister());
@@ -14,13 +15,13 @@ test("skillBody drops the front matter", () => {
   expect(skillBody(skill)).toBe("Check the order first.");
 });
 
-test("shows the SKILL.md body and not its front matter", async () => {
-  const { findByText, queryByText, getByText } = render(
+test("shows the SKILL.md body, with neither its front matter nor its file name", async () => {
+  const { findByText, queryByText } = render(
     <SkillFiles files={[{ path: "SKILL.md", text: skill }]} />,
   );
   expect(await findByText("Check the order first.")).toBeTruthy();
   expect(queryByText(/description: Issue a refund/)).toBeNull();
-  expect(getByText("SKILL.md")).toBeTruthy();
+  expect(queryByText("SKILL.md")).toBeNull();
 });
 
 test("lists another file by path", () => {

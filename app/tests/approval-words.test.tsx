@@ -33,6 +33,7 @@ const request = (
   toolRef: string,
   scope: string,
   args: Record<string, unknown>,
+  target: Record<string, unknown> | null = null,
 ) => ({
   id,
   status: "pending",
@@ -48,7 +49,7 @@ const request = (
     toolCallId: `call-${id}`,
     actionDigest: `digest-${id}`,
     args,
-    target: null,
+    target,
     policy: {
       behaviour: "ask",
       source: "task",
@@ -80,6 +81,28 @@ function serving() {
           request("computer", "computer_click", "example.com", {
             ref: "e12",
           }),
+          // A file in a folder on the person's computer, and one on the Bot's own computer.
+          request(
+            "folder-file",
+            "host/write_file",
+            "host-grant-1",
+            { path: "todo.txt" },
+            { displayName: "share", relativePath: "todo.txt" },
+          ),
+          request(
+            "computer-file",
+            "computer_write_file",
+            "workspace",
+            { path: "notes.txt" },
+            { pageUrl: "", filePath: "notes.txt" },
+          ),
+          // Named the way Gmail's page names it, not "settings get imap".
+          request(
+            "settings",
+            "composio-gmail/GMAIL_SETTINGS_GET_IMAP",
+            "composio-gmail",
+            {},
+          ),
         ],
       });
     if (path.startsWith("/api/agents"))
@@ -121,6 +144,29 @@ test("in the conversation, an app's approval names the action in words and the a
   ]);
 });
 
+/*
+ * FOUND ON WINDOWS (0.3.4 release candidates): one file save had three names. The card read "Write
+ * file on todo.txt in share" and "Write file on workspace", the step "Save a file todo.txt in share"
+ * and "Save file", and Activity "Save a file". The card says it the way the step and Activity do.
+ */
+test("a file save's card names it as its step and its Activity row do", async () => {
+  serving();
+  const view = draw(
+    <>
+      <InlineApproval toolCallId="call-folder-file" fallback={null} />
+      <InlineApproval toolCallId="call-computer-file" fallback={null} />
+    </>,
+  );
+  const cards = await view.findAllByRole("region", {
+    name: "Waiting for your approval",
+  });
+  expect(cards.map((card) => card.querySelector("p")?.textContent)).toEqual([
+    "Save a file todo.txt in share",
+    "Save a file notes.txt",
+  ]);
+  expect(view.container.textContent).not.toMatch(/write file|workspace/i);
+});
+
 test("on the Bot's page, the row says what the Bot wants to do, over the app's name", async () => {
   serving();
   const view = draw(<WaitingForYou agentId="assistant" />);
@@ -133,5 +179,8 @@ test("on the Bot's page, the row says what the Bot wants to do, over the app's n
       ?.textContent,
   ).toContain("Gmail");
   expect(view.getByText("General Assistant wants to click")).toBeTruthy();
+  expect(
+    view.getByText("General Assistant wants to get IMAP settings"),
+  ).toBeTruthy();
   expect(view.container.textContent).not.toContain("composio");
 });

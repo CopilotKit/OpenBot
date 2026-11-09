@@ -850,7 +850,7 @@ const PICKED_HARNESS = "picked-harness";
  * the current name.
  */
 const EARLIER_HARNESS_NAMES: Readonly<Record<string, readonly string[]>> = {
-  langgraph: ["LangGraph", "LangChain"],
+  langgraph: ["LangGraph", "LangChain (LangGraph)"],
 };
 
 function catalogueNamesOf(harness: Harness): string[] {
@@ -859,7 +859,7 @@ function catalogueNamesOf(harness: Harness): string[] {
 
 /**
  * "Powered by <framework>" for any framework the installer can run, longest name first so that
- * "LangChain (LangGraph)" is read whole rather than as "LangChain" followed by text.
+ * an earlier "LangChain (LangGraph)" is read whole rather than as "LangChain" followed by text.
  */
 const POWERED_BY = new RegExp(
   `Powered by (?:${HARNESSES.filter(({ image }) => image !== null)

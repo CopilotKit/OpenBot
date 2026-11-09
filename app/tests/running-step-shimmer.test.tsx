@@ -127,7 +127,8 @@ const SHIMMER = "tool-line-running";
 test("the step still running shimmers, and stops when its answer arrives", async () => {
   const view = render(transcript(run(false), true));
 
-  const running = await view.findByText("Fetch message by thread id");
+  // Named as the app's page names it, not in its stored order ("Fetch message by thread id").
+  const running = await view.findByText("Fetch thread messages");
   expect(running.classList.contains(SHIMMER)).toBe(true);
   // The steps already answered look as they always have.
   const finished = view.getAllByText("Fetch emails");
@@ -137,7 +138,7 @@ test("the step still running shimmers, and stops when its answer arrives", async
 
   view.rerender(transcript(run(true), true));
   expect(
-    view.getByText("Fetch message by thread id").classList.contains(SHIMMER),
+    view.getByText("Fetch thread messages").classList.contains(SHIMMER),
   ).toBe(false);
 });
 

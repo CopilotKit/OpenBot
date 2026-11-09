@@ -33,6 +33,7 @@ import {
   labelledRead,
   resolveServerUrl,
   serverCredentialKind,
+  summaryFor,
   tokenHeaderFor,
 } from "../catalogue";
 import { sharedAccountOnly } from "../deployment-clients";
@@ -2222,7 +2223,7 @@ export function serverMethods(context: StoreContext) {
           logo: row.logo,
           vendor: row.vendor,
           url: effectiveUrl(row, entry),
-          summary: entry?.summary ?? "",
+          summary: entry ? summaryFor(entry) : "",
           docsUrl: entry?.docsUrl ?? "",
           provenance: row.provenance,
           hasCredential: row.credentialId !== null,

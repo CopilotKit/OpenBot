@@ -1,3 +1,4 @@
+import { IconLayoutSidebar } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChannelItemContent } from "@/components/app-sidebar/channel-item-content";
 import { PageRows } from "@/components/layout/page-shell";
@@ -7,6 +8,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
 import {
@@ -34,6 +36,9 @@ export function MessageListPreference() {
   return (
     <PageRows>
       <Item size="sm">
+        <ItemMedia variant="icon">
+          <IconLayoutSidebar />
+        </ItemMedia>
         <ItemContent>
           <ItemTitle>Message list emphasis</ItemTitle>
           <ItemDescription>

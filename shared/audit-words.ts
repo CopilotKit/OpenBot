@@ -1,4 +1,5 @@
 import { appToolName, connectorName, humanise } from "./tool-name";
+import { lowerFirst } from "./tool-name-words";
 
 /**
  * What an Activity or Audit row is about, in words: the What column, where the trail's own names
@@ -76,8 +77,9 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "mcp.call_rejected": "Use an app",
   "mcp.call_failed": "Use an app",
   "mcp.callback_refused": "Use an app",
-  "mcp.oauth_client_registered": "Register an OAuth client",
-  "mcp.oauth_client_read_failed": "Read an OAuth client",
+  // Said as what it is for: an app's sign-in, set up or read back. Admin hovers for the stored name.
+  "mcp.oauth_client_registered": "Set up an app's sign-in",
+  "mcp.oauth_client_read_failed": "Check an app's sign-in",
   "mcp.connection_verified": "Check a connection",
   "mcp.account_connected": "Connect an account",
   "mcp.authorization_unreconciled": "Finish connecting an account",
@@ -146,6 +148,7 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "component.published": "Publish a component",
   "component.unpublished": "Unpublish a component",
   "component.draft_saved": "Save a component draft",
+  "component.description_updated": "Update a component's description",
   "component.refused": "Show a component",
   "component.function_granted": "Let a component read data",
   "component.function_revoked": "Stop a component reading data",
@@ -302,9 +305,7 @@ export function appToolsWords(refs: readonly string[]): string {
     .slice(0, refs.length > TOOLS_NAMED + 1 ? TOOLS_NAMED : refs.length)
     .map((ref, index) => {
       const words = auditActionWords(ref);
-      return index === 0
-        ? words
-        : words.charAt(0).toLowerCase() + words.slice(1);
+      return index === 0 ? words : lowerFirst(words);
     });
   const more = refs.length - named.length;
   const list =

@@ -8,12 +8,11 @@ import { and, eq, inArray } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { installEnterpriseControls } from "../src/admin/controls";
 import { createEnterpriseGate } from "../src/admin/gate";
+import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createAgentRoutes } from "../src/agents/routes";
+import { createRuntimeAgentLoader } from "../src/agents/runtime-agents";
 import { createAuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
-import { setEdition } from "../src/edition";
-import { createAgentProfileStore } from "../src/agents/profile-store";
-import { createRuntimeAgentLoader } from "../src/agents/runtime-agents";
 import { createDatabase } from "../src/db/client";
 import {
   agentProfiles,
@@ -28,6 +27,7 @@ import {
   skillTools,
   users,
 } from "../src/db/schema";
+import { setEdition } from "../src/edition";
 import {
   createApplicationConfiguration,
   deploymentNameOf,
@@ -1681,8 +1681,7 @@ describe("bundled personal starter", () => {
     const env = {
       PICKED_HARNESS_URL: endpoint,
       PICKED_HARNESS_NAME:
-        name ??
-        (endpoint === claude ? "Claude Agent SDK" : "LangChain (LangGraph)"),
+        name ?? (endpoint === claude ? "Claude Agent SDK" : "LangChain"),
       PICKED_HARNESS_KIND: "remote-ag-ui",
     };
     const previous = Object.fromEntries(
@@ -1748,7 +1747,7 @@ describe("bundled personal starter", () => {
       );
       expect(await profiles.get(actor, "picked-harness")).toMatchObject({
         name: "Personal Assistant",
-        title: `Everyday life. Powered by ${endpoint === claude ? "Claude Agent SDK" : "LangChain (LangGraph)"}.`,
+        title: `Everyday life. Powered by ${endpoint === claude ? "Claude Agent SDK" : "LangChain"}.`,
         roleDescription: declared?.roleDescription,
         instructions: declared?.configuration.systemPrompt,
       });
@@ -1843,7 +1842,7 @@ describe("bundled personal starter", () => {
     expect(await ownedIds(pkg.id)).toEqual(["picked-harness"]);
     expect(await profiles.get(actor, "picked-harness")).toMatchObject({
       name: "Personal Assistant",
-      title: "Everyday life. Powered by LangChain (LangGraph).",
+      title: "Everyday life. Powered by LangChain.",
       endpoint: langchain,
     });
     await synchronizeTenantPackage(database, await loadStarter(tenantId, ""));
@@ -2277,8 +2276,7 @@ describe("bundled personal starter", () => {
     );
     expect(await profiles.get(actor, starter.id)).toMatchObject({
       name: "Personal Assistant F5",
-      title:
-        "Errands and research, edited on F5. Powered by LangChain (LangGraph).",
+      title: "Errands and research, edited on F5. Powered by LangChain.",
       endpoint: langchain,
     });
 
@@ -2331,52 +2329,55 @@ describe("bundled personal starter", () => {
     });
   });
 
-  test("legacy catalogue names follow harness changes without renaming custom Bots", async () => {
-    const tenantId = starterTestTenant();
-    // Seeded by an earlier desktop, under the name the catalogue gave LangGraph then.
-    const legacy = await loadStarter(tenantId, langchain, "LangGraph");
-    await synchronizeTenantPackage(database, {
-      ...legacy,
-      sourcePath: "/tmp/legacy-personal-package",
-    });
-    await synchronizeTenantPackage(
-      database,
-      await loadStarter(tenantId, langchain),
-    );
-    expect(await profiles.get(actor, "picked-harness")).toMatchObject({
-      name: "LangChain (LangGraph)",
-      title: "Powered by LangChain (LangGraph)",
-    });
-    await synchronizeTenantPackage(
-      database,
-      await loadStarter(tenantId, claude),
-    );
-    expect(await profiles.get(actor, "picked-harness")).toMatchObject({
-      name: "Claude Agent SDK",
-      title: "Powered by Claude Agent SDK",
-      endpoint: claude,
-      systemOwned: true,
-    });
-    await synchronizeTenantPackage(
-      database,
-      await loadStarter(
-        tenantId,
-        "https://agents.example/run",
-        "An agent you already run",
-      ),
-    );
-    expect(await profiles.get(actor, "picked-harness")).toMatchObject({
-      endpoint: "https://agents.example/run",
-    });
-    await synchronizeTenantPackage(
-      database,
-      await loadStarter(tenantId, claude),
-    );
-    expect(await profiles.get(actor, "picked-harness")).toMatchObject({
-      endpoint: claude,
-      systemOwned: true,
-    });
-  });
+  // Seeded by an earlier desktop, under a name the catalogue gave LangChain then.
+  test.each(["LangGraph", "LangChain (LangGraph)"])(
+    "legacy catalogue name %s follows harness changes without renaming custom Bots",
+    async (earlier) => {
+      const tenantId = starterTestTenant();
+      const legacy = await loadStarter(tenantId, langchain, earlier);
+      await synchronizeTenantPackage(database, {
+        ...legacy,
+        sourcePath: "/tmp/legacy-personal-package",
+      });
+      await synchronizeTenantPackage(
+        database,
+        await loadStarter(tenantId, langchain),
+      );
+      expect(await profiles.get(actor, "picked-harness")).toMatchObject({
+        name: "LangChain",
+        title: "Powered by LangChain",
+      });
+      await synchronizeTenantPackage(
+        database,
+        await loadStarter(tenantId, claude),
+      );
+      expect(await profiles.get(actor, "picked-harness")).toMatchObject({
+        name: "Claude Agent SDK",
+        title: "Powered by Claude Agent SDK",
+        endpoint: claude,
+        systemOwned: true,
+      });
+      await synchronizeTenantPackage(
+        database,
+        await loadStarter(
+          tenantId,
+          "https://agents.example/run",
+          "An agent you already run",
+        ),
+      );
+      expect(await profiles.get(actor, "picked-harness")).toMatchObject({
+        endpoint: "https://agents.example/run",
+      });
+      await synchronizeTenantPackage(
+        database,
+        await loadStarter(tenantId, claude),
+      );
+      expect(await profiles.get(actor, "picked-harness")).toMatchObject({
+        endpoint: claude,
+        systemOwned: true,
+      });
+    },
+  );
 
   test("source installs keep the built-in fallback if a harness later appears", async () => {
     const tenantId = starterTestTenant();

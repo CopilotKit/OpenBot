@@ -1345,10 +1345,10 @@ test("a file save the person declines says what was tried, live and when opened 
   });
   expect(await view.findByText(reply, {}, { timeout: 5000 })).toBeTruthy();
 
-  // Live: what was tried, what it was aimed at, and why it did not happen. Never "Saved file".
+  // Live: what was tried, what it was aimed at, and why it did not happen. Never "Saved a file".
   await waitFor(() =>
     expect(saveLine(view)).toBe(
-      "Blocked: Save filenotes.txt · You declined it.",
+      "Blocked: Save a filenotes.txt · You declined it.",
     ),
   );
 
@@ -1369,7 +1369,9 @@ test("a file save the person declines says what was tried, live and when opened 
           message.content !== DECLINED_BY_PERSON,
       ),
   ).toBe(false);
-  expect(saveLine(view)).toBe("Blocked: Save filenotes.txt · You declined it.");
+  expect(saveLine(view)).toBe(
+    "Blocked: Save a filenotes.txt · You declined it.",
+  );
   cleanup();
 
   // Opened again from the thread: still declined, not drawn as a file that was saved.
@@ -1379,7 +1381,7 @@ test("a file save the person declines says what was tried, live and when opened 
   ).toBeTruthy();
   await waitFor(() =>
     expect(saveLine(again)).toBe(
-      "Blocked: Save filenotes.txt · You declined it.",
+      "Blocked: Save a filenotes.txt · You declined it.",
     ),
   );
 });

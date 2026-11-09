@@ -262,15 +262,6 @@ export async function localEvalDownload(
     : null;
 }
 
-/** "48 of 147 MB": decimal megabytes, one decimal place below ten. */
-export function downloadSaid({ done, total }: LocalDownload): string {
-  const megabytes = (bytes: number) => {
-    const mb = bytes / 1e6;
-    return mb < 10 ? mb.toFixed(1) : Math.round(mb).toString();
-  };
-  return `${megabytes(Math.min(done, total))} of ${megabytes(total)} MB`;
-}
-
 /**
  * Connects this installation's apps with the CopilotKit sign-in the CLI now holds: CopilotKit
  * makes or replays its Composio project, and the native side keeps the key. Resolves once
@@ -345,6 +336,16 @@ export function connectLocalEval(root: string): {
     throw failure(rejection);
   });
   return { attempt, connection };
+}
+
+/**
+ * The installation's engine answering before any CLI call: Docker Desktop opened, or OpenBot's
+ * Podman machine started, when either is stopped. What the native side says meanwhile, such as
+ * Docker's hand-off, arrives as setup progress (see `handOffNow`). Rejects with a `Problem` when
+ * the engine would not start.
+ */
+export async function wakeEngine(root: string): Promise<void> {
+  await invoke("wake_engine", { root });
 }
 
 /** Whether the OpenBot app's page may offer the back end dashboard for `root`. */
