@@ -185,6 +185,7 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "approval.person_decided": "Decide on an action",
   "approval.withdrawn": "Withdraw a request",
   "approval.rule_changed": "Change an approval rule",
+  "approval.rules_translated": "Write approval rules from a description",
   "approval.settings_changed": "Change approval settings",
   "capability.changed": "Change a permission",
   "enterprise.setting_changed": "Change an organization setting",

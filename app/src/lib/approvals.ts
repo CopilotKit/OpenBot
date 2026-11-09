@@ -245,7 +245,8 @@ export const updateTeamApprovalRule = (
     fallback: "The team rule could not be changed.",
   });
 
-const approvalsKey = ["approvals"] as const;
+/** The inbox's key, which every approval write invalidates: requests, rules and settings alike. */
+export const approvalsKey = ["approvals"] as const;
 const settle = (queryClient: QueryClient) => () =>
   queryClient.invalidateQueries({ queryKey: approvalsKey });
 

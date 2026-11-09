@@ -794,6 +794,13 @@ export function decisionDetails(
    */
   const named = ruleNameLine(event, storedNames);
   if (named) lines.push(named);
+  // Team rules saved from a description say the sentence they were written from, as a boundary does.
+  const ruleAuthoring = (payload.authoring ?? {}) as { text?: unknown };
+  if (
+    event.eventType === "approval.rule_changed" &&
+    typeof ruleAuthoring.text === "string"
+  )
+    lines.push(`Written from: “${ruleAuthoring.text}”`);
   if (
     decision.mode === "dry-run" &&
     decision.allowed === false &&
@@ -1121,6 +1128,8 @@ const DECISIONS: Record<string, string> = {
 
   // A request closed without an answer: asking was turned off, or a rule now allows it.
   "approval.withdrawn": "Withdrawn",
+  // A draft for the admin to read, as a boundary's is. Nothing was decided and nothing changed.
+  "approval.rules_translated": "Drafted, not saved",
 
   "configuration.changed": "Configuration changed",
   "credential.created": "Credential saved",
