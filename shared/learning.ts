@@ -291,12 +291,26 @@ export type PersonalReview = {
    * always sends it; optional so a reader written before it still type-checks.
    */
   approved?: number;
+  /**
+   * Why Learning can't run on this machine at all, in a sentence for the person (OpenBot Desktop signed in with a model
+   * Learning can't use). Absent when nothing is known to be wrong.
+   */
+  modelProblem?: string;
   sources: (LearningSource & {
     proposals: LearningProposal[] | null;
     latestRun: LearningRunSummary | null;
     /** Set when Learning is switched off in Intelligence (or, for now, not in its licence), so there is nothing to read. */
     unavailable?: "learning-off";
   })[];
+};
+
+/**
+ * The skills Learning proposed from one of the person's recordings, newest first: each proposal made since the
+ * recording stopped whose evidence cites a recording of theirs by that name. Rejected proposals and removals are left
+ * out. `container` is the Learning space it is in, for opening or reviewing it.
+ */
+export type RecordingSkills = {
+  skills: (LearningProposal & { container: string })[];
 };
 
 /** What an administrator reviews for each person, where people's Learning is reviewed by admins. */

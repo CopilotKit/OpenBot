@@ -193,6 +193,10 @@ pub enum Reason {
     DashboardUnavailable,
     /// `login`: the CLI could not open the browser. Its fallback is a code approved in a terminal.
     BrowserOpenFailed,
+    /// The CLI's own resource check: the engine has too few free CPUs, or too little free memory
+    /// or disk. Read from `error.code`, since its `nextAction.reason` is only
+    /// `local_command_failed`. Which of them is short is the report's `shortfall`.
+    ResourcesShort,
     /// A reason this build does not know. Treated as blocking, never as success.
     Unrecognized,
 }
@@ -243,6 +247,62 @@ pub struct Report {
     /// on record, however well the release it has answers. This is how the window tells that apart
     /// from a back end that is down (see `UnfinishedUpdate`).
     pub checks_passed: bool,
+    /// With `Reason::ResourcesShort`: which resources the CLI found short, and on which engine.
+    /// With `Readiness::Degraded`: a disk OpenBot found short, or recovering, behind a back end that
+    /// runs but does not answer (`checked_when_unhealthy`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shortfall: Option<Shortfall>,
+}
+
+/// Which of the engine's resources are below what local setup needs, and whether the engine is
+/// Podman, so the window names the right resource and the right settings.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Shortfall {
+    pub podman: bool,
+    pub cpu: bool,
+    pub memory: bool,
+    pub disk: bool,
+    /// What the CLI measured free, as it said it, to one decimal: CPUs, and GiB of memory and of
+    /// disk. Absent when its error did not say.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpus: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_gb: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk_gb: Option<String>,
+    /// The back end's own disk is nearly full: its node reports `DiskPressure`, or so little is
+    /// free that k3s removes the back end's images (`EngineCheck::nearly_full`). OpenBot's own
+    /// check after a start that failed, never the CLI's.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub nearly_full: bool,
+    /// How large that disk is, in GiB to one decimal, beside `disk_gb`, when it is nearly full.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk_size_gb: Option<String>,
+    /// The node still reports `DiskPressure` with the disk above both lines: k3s keeps the
+    /// condition for five minutes after space is freed, and the back end recovers by itself.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub recovering: bool,
+    /// Podman on Windows, whose machine runs in WSL: `podman machine set` changes none of its
+    /// resources there, and its disk is freed on the drive that holds it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub wsl: bool,
+    /// That drive, `C:`, when WSL says where the machine's disk is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drive: Option<String>,
+}
+
+/// A number the CLI printed, to one decimal and rounded down as it rounds, without a trailing `.0`.
+fn shown(value: f64) -> String {
+    let tenths = (value.max(0.0) * 10.0).floor() / 10.0;
+    let said = format!("{tenths:.1}");
+    said.strip_suffix(".0").map(str::to_owned).unwrap_or(said)
+}
+
+impl Shortfall {
+    fn named(&self) -> bool {
+        self.cpu || self.memory || self.disk || self.recovering
+    }
 }
 
 /// What `local connect` answered. The settings it wrote stay in the installation's `.env`; their
@@ -600,15 +660,28 @@ fn report(command: &str, exit_code: i32, stdout: &[u8]) -> Result<Report, Failur
     };
     // Believed with the readiness they came with: a malformed `readiness` carries no checks either.
     let checks_passed = readiness != Readiness::Unknown && checks_passed(wire.get("readiness"));
+    let reason = reason(outcome, wire)?;
+    // Which resource is short, from the CLI's error, or measured when its error does not say.
+    let shortfall = (reason == Some(Reason::ResourcesShort))
+        .then(|| shortfall_of(wire, on_podman()))
+        .flatten()
+        .map(|said| {
+            if said.named() {
+                said
+            } else {
+                measured_shortfall(said)
+            }
+        });
     Ok(Report {
         outcome,
         stack: reported_stack(outcome, wire)?,
-        reason: reason(outcome, wire)?,
+        reason,
         readiness,
         licence,
         licence_expires_at,
         update_to: None,
         checks_passed,
+        shortfall,
     })
 }
 
@@ -786,6 +859,19 @@ pub enum Terms {
     /// The CLI answers nothing about the agreement until a container engine answers it. On a new
     /// Windows computer Install is still putting Podman in while the person signs in.
     EngineNotReady,
+    /// The engine has fewer CPUs or less memory than local setup needs (`engine_size_terms`).
+    /// Not a CLI answer: OpenBot's own check, so a small engine is caught before Start.
+    EngineTooSmall {
+        podman: bool,
+        cpu: bool,
+        memory: bool,
+        disk: bool,
+        /// Podman on Windows, in WSL (`Shortfall::wsl`), and the drive that holds its disk.
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        wsl: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        drive: Option<String>,
+    },
 }
 
 /// `onboard local-terms --json`: one object, exit 0. The address must be https; the organization
@@ -1016,6 +1102,9 @@ pub fn normalize_list(exit_code: i32, stdout: &[u8]) -> Result<Listing, Failure>
 
 /// Only the CLI's reason for stopping, never its summary, instructions or resume command.
 fn reason(outcome: Outcome, wire: &Map<String, Value>) -> Result<Option<Reason>, Failure> {
+    if outcome != Outcome::Completed && resource_shortfall_code(wire).is_some() {
+        return Ok(Some(Reason::ResourcesShort));
+    }
     match (outcome, wire.get("nextAction")) {
         (Outcome::Completed, _) | (_, None | Some(Value::Null)) => Ok(None),
         (_, Some(next)) => match object(next)?.get("reason") {
@@ -1023,6 +1112,506 @@ fn reason(outcome: Outcome, wire: &Map<String, Value>) -> Result<Option<Reason>,
             None | Some(Value::Null) => Ok(None),
             Some(_) => Err(Failure::InvalidStatus),
         },
+    }
+}
+
+/**
+The `error.code` the CLI gives when its resource check fails (`LocalResourceShortfallError`): too
+few free CPUs, too little free memory or too little free storage in the engine. A probe that could
+not measure (`LOCAL_DOCKER_RESOURCES_UNMEASURABLE`) is not a shortfall and stays a plain failure.
+*/
+const RESOURCES_SHORT: &str = "LOCAL_DOCKER_RESOURCES_SHORT";
+const MEMORY_SHORT: &str = "LOCAL_DOCKER_MEMORY_SHORT";
+
+fn resource_shortfall_code(wire: &Map<String, Value>) -> Option<&str> {
+    wire.get("error")
+        .and_then(|error| error.get("code"))
+        .and_then(Value::as_str)
+        .filter(|code| [RESOURCES_SHORT, MEMORY_SHORT].contains(code))
+}
+
+/**
+Which resources the CLI found short, from its own error. `LOCAL_DOCKER_MEMORY_SHORT` is memory
+alone. `LOCAL_DOCKER_RESOURCES_SHORT` says each measure beside what it requires: "Docker available
+resources: 9.8 CPUs (requires 4), 18.9 GiB RAM available (requires 4), 0 GiB free storage (requires
+40)." Only these numbers are read; the rest of the message is not kept.
+*/
+fn shortfall_of(wire: &Map<String, Value>, podman: bool) -> Option<Shortfall> {
+    let code = resource_shortfall_code(wire)?;
+    let mut shortfall = Shortfall {
+        podman,
+        ..Shortfall::default()
+    };
+    let message = wire
+        .get("error")
+        .and_then(|error| error.get("message"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if code == MEMORY_SHORT {
+        shortfall.memory = true;
+        let available = regex::Regex::new(r"([\d.]+) GiB available to new containers")
+            .expect("a valid pattern");
+        shortfall.memory_gb = available
+            .captures(message)
+            .and_then(|found| found[1].parse::<f64>().ok())
+            .map(shown);
+        return Some(shortfall);
+    }
+    let measures = regex::Regex::new(
+        r"(-?[\d.]+) CPUs \(requires ([\d.]+)\), (-?[\d.]+) GiB RAM available \(requires ([\d.]+)\), (-?[\d.]+) GiB free storage \(requires ([\d.]+)\)",
+    )
+    .expect("a valid pattern");
+    if let Some(found) = measures.captures(message) {
+        let number = |at: usize| found[at].parse::<f64>().ok();
+        let below = |have: usize, need: usize| match (number(have), number(need)) {
+            (Some(have), Some(need)) => have < need,
+            _ => false,
+        };
+        shortfall.cpu = below(1, 2);
+        shortfall.memory = below(3, 4);
+        shortfall.disk = below(5, 6);
+        shortfall.cpus = number(1).map(shown);
+        shortfall.memory_gb = number(3).map(shown);
+        shortfall.disk_gb = number(5).map(shown);
+    }
+    Some(shortfall)
+}
+
+/// The engine the CLI runs on, when the app has said.
+fn cli_engine() -> Option<crate::engine::Address> {
+    ENGINE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
+
+fn on_podman() -> bool {
+    cli_engine().is_some_and(|address| address.engine == crate::engine::Engine::Podman)
+}
+
+const GIB: u64 = 1024 * 1024 * 1024;
+
+/**
+The smallest engine OpenBot lets through before local setup: 4 CPUs, 4 GiB of memory and 40 GiB of
+free disk.
+
+The CLI's own check wants 4 free CPUs and 4 GiB of free memory inside a container, so an engine
+below those totals can never pass it. Anything larger is left to the CLI at Start: OpenBot's own
+Podman machine is 4 CPUs and 6 GiB and passes there, so a stricter total here would stop every
+Podman install. Free disk is the CLI's own 40 GiB, measured as it measures it, inside a container.
+*/
+pub const MIN_ENGINE_CPUS: u64 = 4;
+pub const MIN_ENGINE_MEMORY_BYTES: u64 = 4 * GIB;
+pub const MIN_ENGINE_FREE_DISK_BYTES: u64 = 40 * GIB;
+
+/// What an engine of this size is short of for local setup. Free disk that could not be measured
+/// is not judged.
+pub fn engine_shortfall(cpus: u64, memory_bytes: u64, free_disk_bytes: Option<u64>) -> Shortfall {
+    Shortfall {
+        cpu: cpus < MIN_ENGINE_CPUS,
+        memory: memory_bytes < MIN_ENGINE_MEMORY_BYTES,
+        disk: free_disk_bytes.is_some_and(|free| free < MIN_ENGINE_FREE_DISK_BYTES),
+        ..Shortfall::default()
+    }
+}
+
+/// The engine's CPUs and memory as its `info` reports them: `NCPU MemTotal` on Docker,
+/// `Host.CPUs Host.MemTotal` on Podman. Anything else is no answer.
+pub fn parse_engine_size(output: &str) -> Option<(u64, u64)> {
+    let mut fields = output.split_whitespace();
+    let cpus = fields.next()?.parse().ok()?;
+    let memory = fields.next()?.parse().ok()?;
+    fields.next().is_none().then_some((cpus, memory))
+}
+
+/// A filesystem as `df -Pk` reports it, in bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Disk {
+    pub size: u64,
+    pub free: u64,
+}
+
+/// Size and free bytes from `df -Pk /`: the second and fourth fields of its last line, in KiB, as
+/// the CLI reads them.
+pub fn parse_disk(output: &str) -> Option<Disk> {
+    let mut fields = output.trim().lines().last()?.split_whitespace();
+    let size: u64 = fields.nth(1)?.parse().ok()?;
+    let free: u64 = fields.nth(1)?.parse().ok()?;
+    Some(Disk {
+        size: size * 1024,
+        free: free * 1024,
+    })
+}
+
+/// Free bytes from `df -Pk /`, as the CLI reads them.
+pub fn parse_free_disk(output: &str) -> Option<u64> {
+    parse_disk(output).map(|disk| disk.free)
+}
+
+/// The engine's CPUs and memory from its `info`.
+fn engine_size(address: &crate::engine::Address) -> Option<(u64, u64)> {
+    let format = if address.engine == crate::engine::Engine::Podman {
+        "{{.Host.CPUs}} {{.Host.MemTotal}}"
+    } else {
+        "{{.NCPU}} {{.MemTotal}}"
+    };
+    let output = address
+        .command()
+        .args(["info", "--format", format])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    parse_engine_size(&String::from_utf8_lossy(&output.stdout))
+}
+
+/**
+The engine's disk inside a container, the way the CLI measures it: `df -Pk /` in a container of an
+image the engine already has, so nothing is downloaded. An engine with no image that has a shell
+gives no answer, and disk is then not judged.
+*/
+fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
+    let images = address
+        .command()
+        .args(["image", "ls", "--quiet", "--no-trunc"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    let images = String::from_utf8_lossy(&images.stdout).into_owned();
+    let mut tried = Vec::new();
+    for image in images.lines().map(str::trim).filter(|id| !id.is_empty()) {
+        if tried.contains(&image) {
+            continue;
+        }
+        if tried.len() == 3 {
+            break;
+        }
+        tried.push(image);
+        let measured = address
+            .command()
+            .args([
+                "run",
+                "--rm",
+                "--pull=never",
+                "--network=none",
+                "--entrypoint",
+                "/bin/sh",
+                image,
+                "-c",
+                "df -Pk /",
+            ])
+            .output();
+        let disk = measured
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| parse_disk(&String::from_utf8_lossy(&output.stdout)));
+        if disk.is_some() {
+            return disk;
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+thread_local! {
+    /// What Windows says of the drive that holds the Podman machine's disk, for the tests: Some
+    /// stands in for `windows::podman_machine_drive` on this thread.
+    static MACHINE_DRIVE: std::cell::RefCell<Option<Option<crate::windows::MachineDrive>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The drive that holds the Podman machine `address` names, on Windows (`podman_machine_drive`).
+fn machine_drive(address: &crate::engine::Address) -> Option<crate::windows::MachineDrive> {
+    if address.engine != crate::engine::Engine::Podman {
+        return None;
+    }
+    #[cfg(test)]
+    if let Some(said) = MACHINE_DRIVE.with(|drive| drive.borrow().clone()) {
+        return said;
+    }
+    let connection = address
+        .connection
+        .clone()
+        .or_else(|| address.pin().ok().and_then(|pinned| pinned.connection))?;
+    crate::windows::podman_machine_drive(crate::acquire::machine_of(&connection))
+}
+
+/**
+What OpenBot measured of the engine the back end runs on (`[local check]` in the log): its CPUs and
+memory, its disk as a container sees it, on Windows the drive that holds a Podman machine's disk, and
+after a call that failed, whether the back end's node says it is short of disk.
+*/
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct EngineCheck {
+    podman: bool,
+    /// CPUs and bytes of memory, from the engine's `info`.
+    size: Option<(u64, u64)>,
+    disk: Option<Disk>,
+    drive: Option<crate::windows::MachineDrive>,
+    /// `DiskPressure` on the back end's node (`local_images::Node::disk_pressure`).
+    pressure: Option<bool>,
+}
+
+/// Bytes as GiB to one decimal, as the CLI rounds them.
+fn gib(bytes: u64) -> String {
+    shown(bytes as f64 / GIB as f64)
+}
+
+impl EngineCheck {
+    fn of(address: &crate::engine::Address) -> Self {
+        Self {
+            podman: address.engine == crate::engine::Engine::Podman,
+            size: engine_size(address),
+            disk: engine_disk(address),
+            drive: machine_drive(address),
+            pressure: None,
+        }
+    }
+
+    /// The free disk that counts: the smaller of what a container sees and what the drive under
+    /// the machine's disk has. Either can run out first.
+    fn free_disk(&self) -> Option<u64> {
+        [
+            self.disk.map(|disk| disk.free),
+            self.drive.as_ref().map(|drive| drive.free),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
+    /**
+    The back end's own disk is nearly full, by k3s's lines rather than the CLI's 40 GiB: its node
+    says `DiskPressure`, which k3s raises below 5% free (`evictionHard`), or less than 15% is free,
+    where the kubelet starts removing the images it is not running (`imageGCHighThresholdPercent`
+    85). A relaunched back end runs none yet, so that is when it loses them.
+    */
+    fn nearly_full(&self) -> bool {
+        self.pressure == Some(true) && !self.recovering() || self.below_image_line()
+    }
+
+    /// Less than 15% of the node's disk free: the kubelet removes images it is not running.
+    fn below_image_line(&self) -> bool {
+        self.disk
+            .is_some_and(|disk| u128::from(disk.free) * 100 < u128::from(disk.size) * 15)
+    }
+
+    /// Below the CLI's 40 GiB, or below the kubelet's image line.
+    fn low_on_disk(&self) -> bool {
+        self.free_disk()
+            .is_some_and(|free| free < MIN_ENGINE_FREE_DISK_BYTES)
+            || self.below_image_line()
+    }
+
+    /**
+    The node still says `DiskPressure`, but the disk is above both lines: space was freed, and k3s
+    keeps the condition for five minutes after (`evictionPressureTransitionPeriod`). The back end
+    recovers by itself, and a Retry in those minutes only fails again.
+    */
+    fn recovering(&self) -> bool {
+        self.pressure == Some(true) && self.free_disk().is_some() && !self.low_on_disk()
+    }
+
+    /// Podman on Windows, whose machine runs in WSL.
+    fn wsl(&self) -> bool {
+        self.podman && (cfg!(target_os = "windows") || self.drive.is_some())
+    }
+
+    /// What is short, with the numbers. Anything not measured is not judged.
+    fn shortfall(&self) -> Shortfall {
+        let (cpus, memory) = self.size.unwrap_or((u64::MAX, u64::MAX));
+        let free = self.free_disk();
+        let mut short = engine_shortfall(cpus, memory, free);
+        short.podman = self.podman;
+        short.wsl = self.wsl();
+        short.recovering = self.recovering();
+        short.nearly_full = self.nearly_full();
+        short.disk |= short.nearly_full;
+        if short.disk {
+            short.disk_gb = free.map(gib);
+            short.disk_size_gb = self
+                .disk
+                .filter(|_| short.nearly_full)
+                .map(|disk| gib(disk.size));
+        }
+        short.drive = self.drive.as_ref().and_then(|drive| drive.drive.clone());
+        short
+    }
+
+    /// `4 CPUs and 5.8 GiB of memory, 30.5 GiB free of 983.2 GiB in a container, 120.0 GiB free on
+    /// C:, no disk pressure`, then what is short.
+    fn said(&self) -> String {
+        let mut said = vec![match self.size {
+            Some((cpus, memory)) => format!("{cpus} CPUs and {} GiB of memory", gib(memory)),
+            None => "CPUs and memory not measured".to_owned(),
+        }];
+        said.push(match self.disk {
+            Some(disk) => format!(
+                "{} GiB free of {} GiB in a container",
+                gib(disk.free),
+                gib(disk.size)
+            ),
+            None => "free disk not measured".to_owned(),
+        });
+        if let Some(drive) = &self.drive {
+            let on = drive
+                .drive
+                .as_deref()
+                .unwrap_or("the drive that holds its disk");
+            said.push(format!("{} GiB free on {on}", gib(drive.free)));
+        }
+        match self.pressure {
+            Some(true) => said.push("the node reports disk pressure".to_owned()),
+            Some(false) => said.push("no disk pressure".to_owned()),
+            None => {}
+        }
+        let short = self.shortfall();
+        let mut verdict: Vec<&str> = Vec::new();
+        if short.cpu {
+            verdict.push("CPUs");
+        }
+        if short.memory {
+            verdict.push("memory");
+        }
+        if short.disk {
+            verdict.push(if short.nearly_full {
+                "disk (nearly full)"
+            } else {
+                "disk (OpenBot needs 40 GiB free)"
+            });
+        }
+        let verdict = if short.recovering && verdict.is_empty() {
+            "recovering: the node still reports disk pressure with the disk above both lines"
+                .to_owned()
+        } else if !verdict.is_empty() {
+            format!("short of {}", verdict.join(", "))
+        } else if self.size.is_none() && self.free_disk().is_none() {
+            "not measured".to_owned()
+        } else {
+            "enough".to_owned()
+        };
+        format!("{}; {verdict}", said.join(", "))
+    }
+}
+
+/// Log a check: `[local check] before local start: ...`. A shortfall is a warning.
+fn log_check(when: &str, check: &EngineCheck) {
+    let level = if check.shortfall().named() {
+        log::Level::Warn
+    } else {
+        log::Level::Info
+    };
+    log::log!(level, "[local check] {when}: {}", check.said());
+}
+
+/**
+The onboarding check of the engine, before the account screen asks about the agreement:
+`Some(Terms::EngineTooSmall)` for an engine below `MIN_ENGINE_CPUS`, `MIN_ENGINE_MEMORY_BYTES` or
+`MIN_ENGINE_FREE_DISK_BYTES` free. An engine that is not known yet or does not answer is not judged
+here; the CLI's own check still runs at Start.
+*/
+pub fn engine_size_terms() -> Option<Terms> {
+    let address = cli_engine()?;
+    let check = EngineCheck::of(&address);
+    let (cpus, memory) = check.size?;
+    let short = engine_shortfall(cpus, memory, check.free_disk());
+    if !short.named() {
+        return None;
+    }
+    log_check("before local setup", &check);
+    Some(Terms::EngineTooSmall {
+        podman: check.podman,
+        cpu: short.cpu,
+        memory: short.memory,
+        disk: short.disk,
+        wsl: check.wsl(),
+        drive: check.drive.and_then(|drive| drive.drive),
+    })
+}
+
+/**
+A shortfall whose CLI error did not say which resource, measured here instead: CPUs and memory from
+the engine's `info` against the CLI's 4 and 4 GiB, and free disk inside a container, and on the drive
+under a Podman machine's disk, against its 40 GiB.
+*/
+fn measured_shortfall(shortfall: Shortfall) -> Shortfall {
+    let Some(address) = cli_engine() else {
+        return shortfall;
+    };
+    let measured = EngineCheck::of(&address).shortfall();
+    Shortfall {
+        podman: shortfall.podman,
+        ..measured
+    }
+}
+
+/**
+The engine checked around a call that starts the back end, `local start`, `local update` or `local
+setup`.
+
+Before it, the check is only logged: an existing back end can run on less than the CLI's 40 GiB, and
+the CLI enforces that only at a first setup. After a call that failed, it is checked again, with the
+back end's node asked whether it is short of disk, and anything short becomes the report's reason
+with its numbers, so the card names it and says where to raise or free it. A failure the CLI already
+named, or one OpenBot stopped, keeps its own words.
+*/
+fn checked_call(
+    command: &str,
+    stack: Option<&StackId>,
+    call: impl FnOnce() -> Result<Report, Failure>,
+) -> Result<Report, Failure> {
+    let Some(address) = cli_engine() else {
+        return call();
+    };
+    log_check(&format!("before {command}"), &EngineCheck::of(&address));
+    let result = call();
+    let unexplained = match &result {
+        Ok(report) => {
+            report.outcome == Outcome::Failed
+                && matches!(
+                    report.reason,
+                    None | Some(Reason::LocalCommandFailed | Reason::Unrecognized)
+                )
+        }
+        // The back end ran and stopped without a report OpenBot can use. One OpenBot stopped, or
+        // that never ran, is not about the engine.
+        Err(failure) => matches!(
+            failure,
+            Failure::Timeout
+                | Failure::OutputLimit
+                | Failure::InvalidJson
+                | Failure::UnexpectedExit
+        ),
+    };
+    if !unexplained {
+        return result;
+    }
+    let mut check = EngineCheck::of(&address);
+    check.pressure = node_disk_pressure(stack);
+    log_check(&format!("after {command} failed"), &check);
+    let short = check.shortfall();
+    match result {
+        Ok(mut report) if short.named() => {
+            report.reason = Some(Reason::ResourcesShort);
+            report.shortfall = Some(short);
+            Ok(report)
+        }
+        other => other,
+    }
+}
+
+/// `DiskPressure` on `stack`'s node, or on any back end node on the engine when no stack is named
+/// (a setup's failed report names none).
+fn node_disk_pressure(stack: Option<&StackId>) -> Option<bool> {
+    let engine = recorded_engine();
+    let command = || engine_command(engine.as_ref());
+    let limits = crate::local_images::Limits {
+        call: Duration::from_secs(20),
+        ..crate::local_images::Limits::standard()
+    };
+    match stack {
+        Some(stack) => crate::local_images::Node::for_stack(&command, stack.as_str())
+            .disk_pressure(limits.call),
+        None => crate::local_images::any_disk_pressure(&command, limits),
     }
 }
 
@@ -2628,6 +3217,55 @@ pub(crate) fn run_with(
     cancel: &Cancel,
     images_limits: crate::local_images::Limits,
 ) -> Result<Report, Failure> {
+    let call = || run_downloading(cli, attempt, action, stack, limits, cancel, images_limits);
+    match action {
+        // The calls that start the back end: the engine is checked around them.
+        Action::Start | Action::Update => {
+            checked_call(&format!("local {}", action.as_str()), Some(stack), call)
+        }
+        Action::Status => call().map(|report| checked_when_unhealthy(report, stack)),
+        Action::Stop => call(),
+    }
+}
+
+/**
+A back end that runs but does not answer (`local status` says `degraded`), checked as a failed start
+is. After a start that failed on a full disk the node stays up, so Retry reads its status rather
+than starting it again, and k3s keeps its `DiskPressure` for minutes after space is freed. A disk
+that is short, or a node recovering from one, becomes the report's `shortfall`, and the card says
+which; anything else leaves the report as it was. Not when every check passed: an update the CLI
+keeps on record is `degraded` too, with the back end answering.
+*/
+fn checked_when_unhealthy(mut report: Report, stack: &StackId) -> Report {
+    if report.outcome != Outcome::Completed
+        || report.readiness != Readiness::Degraded
+        || report.checks_passed
+    {
+        return report;
+    }
+    let Some(address) = cli_engine() else {
+        return report;
+    };
+    let mut check = EngineCheck::of(&address);
+    check.pressure = node_disk_pressure(Some(stack));
+    log_check("local status, running but not healthy", &check);
+    let short = check.shortfall();
+    if short.disk || short.recovering {
+        report.shortfall = Some(short);
+    }
+    report
+}
+
+/// `run_with`, without the engine check.
+fn run_downloading(
+    cli: &PinnedCli,
+    attempt: &str,
+    action: Action,
+    stack: &StackId,
+    limits: (Limits, Limits),
+    cancel: &Cancel,
+    images_limits: crate::local_images::Limits,
+) -> Result<Report, Failure> {
     // A CLI whose images cannot be read runs exactly as before, with nothing asked of it first.
     let downloaded = match (action, cli_images_of(cli)) {
         (Action::Update, Some(images)) => match update_resumes(cli, stack, cancel)? {
@@ -2832,6 +3470,30 @@ pub fn configure_learning_model_installed(
 
 /// `setup`, after downloading the images a resumed setup is about to pull. Limits as `run_with`.
 pub(crate) fn setup_with(
+    cli: &PinnedCli,
+    attempt: &str,
+    installation: &std::path::Path,
+    accepted: Option<&EulaVersion>,
+    limits: (Limits, Limits),
+    cancel: &Cancel,
+    images_limits: crate::local_images::Limits,
+) -> Result<Report, Failure> {
+    // The engine is checked around it, as around `local start` (`checked_call`).
+    checked_call("local setup", None, || {
+        setup_downloading(
+            cli,
+            attempt,
+            installation,
+            accepted,
+            limits,
+            cancel,
+            images_limits,
+        )
+    })
+}
+
+/// `setup_with`, without the engine check.
+fn setup_downloading(
     cli: &PinnedCli,
     attempt: &str,
     installation: &std::path::Path,
@@ -6172,6 +6834,259 @@ fn main() {{
         );
     }
 
+    /// The CLI's report of a failed resource check, as the 4.34.0-pre.647a03b CLI prints it.
+    fn refused_for_resources(code: &str, message: &str) -> Vec<u8> {
+        json!({
+            "version": 1,
+            "command": "local setup",
+            "status": "failed",
+            "error": { "code": code, "message": message },
+            "nextAction": {
+                "reason": "local_command_failed",
+                "summary": "The local command did not finish. Check local status for the recorded failed step, then resume the command. No automatic rollback was requested.",
+                "instructions": ["Inspect the recorded stack with npx --yes copilotkit@4.34.0-pre.647a03b local status --json."],
+                "resumeCommand": "npx --yes copilotkit@4.34.0-pre.647a03b local setup --json",
+                "url": null, "linkLabel": null, "linkFile": null,
+                "caveats": [], "requiredEnvVars": [], "artifacts": []
+            },
+            "diagnostics": []
+        })
+        .to_string()
+        .into_bytes()
+    }
+
+    /// A fresh Mac failed at Start with "stopped with an error partway through": Docker had 10
+    /// CPUs and 20.5 GiB, but its virtual disk was full, against the CLI's 40 GiB free. The CLI's
+    /// `nextAction.reason` is only `local_command_failed`; its `error` says which resource is short,
+    /// and the window is told that one.
+    #[test]
+    fn a_setup_the_cli_refused_for_resources_names_the_resource() {
+        let none = Shortfall::default();
+        let numbers = |cpus: &str, memory: &str, disk: &str| Shortfall {
+            cpus: Some(cpus.into()),
+            memory_gb: Some(memory.into()),
+            disk_gb: Some(disk.into()),
+            ..Shortfall::default()
+        };
+        for (code, message, short) in [
+            (
+                "LOCAL_DOCKER_RESOURCES_SHORT",
+                "Docker available resources: 9.871234 CPUs (requires 4), 18.9 GiB RAM available (requires 4), 0 GiB free storage (requires 40). Stop other container workloads or increase Docker resources, then retry local setup.",
+                Shortfall { disk: true, ..numbers("9.8", "18.9", "0") },
+            ),
+            (
+                "LOCAL_DOCKER_RESOURCES_SHORT",
+                "Docker available resources: 3.71 CPUs (requires 4), 5.2 GiB RAM available (requires 4), 51 GiB free storage (requires 40). Stop other container workloads or increase Docker resources, then retry local setup.",
+                Shortfall { cpu: true, ..numbers("3.7", "5.2", "51") },
+            ),
+            (
+                "LOCAL_DOCKER_RESOURCES_SHORT",
+                "Docker available resources: 3.5 CPUs (requires 4), 2.9 GiB RAM available (requires 4), 12 GiB free storage (requires 40). Docker memory: 3.8 GiB total, 2.9 GiB available to new containers (requires 4 GiB available). Docker keeps part of its memory limit for itself, so raise Docker's memory limit by at least 3 GiB (Docker Desktop: Settings > Resources > Memory), or stop other containers, raise the CPUs or storage named above, then retry local setup.",
+                Shortfall { cpu: true, memory: true, disk: true, ..numbers("3.5", "2.9", "12") },
+            ),
+            (
+                "LOCAL_DOCKER_MEMORY_SHORT",
+                "Docker memory: 7.6 GiB total, 2.9 GiB available to new containers (requires 4 GiB available). Docker keeps part of its memory limit for itself, so raise Docker's memory limit by at least 3 GiB (Docker Desktop: Settings > Resources > Memory), or stop other containers, then retry local setup.",
+                Shortfall { memory: true, memory_gb: Some("2.9".into()), ..none.clone() },
+            ),
+        ] {
+            let report = normalize_setup(1, &refused_for_resources(code, message)).unwrap();
+            assert_eq!(report.outcome, Outcome::Failed);
+            assert_eq!(report.reason, Some(Reason::ResourcesShort), "{message}");
+            assert_eq!(report.shortfall, Some(short), "{message}");
+        }
+        let disk = normalize_setup(
+            1,
+            &refused_for_resources(
+                "LOCAL_DOCKER_RESOURCES_SHORT",
+                "Docker available resources: 9.871234 CPUs (requires 4), 18.9 GiB RAM available (requires 4), 0 GiB free storage (requires 40). Stop other container workloads or increase Docker resources, then retry local setup.",
+            ),
+        )
+        .unwrap();
+        let wire = serde_json::to_value(&disk).unwrap();
+        assert_eq!(wire["reason"], json!("resources-short"));
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": false, "cpu": false, "memory": false, "disk": true,
+                "cpus": "9.8", "memoryGb": "18.9", "diskGb": "0"
+            })
+        );
+        // A probe that measured nothing is not a shortfall the person can fix in Settings.
+        let unmeasurable = normalize_setup(
+            1,
+            &refused_for_resources(
+                "LOCAL_DOCKER_RESOURCES_UNMEASURABLE",
+                "Docker available memory or storage could not be measured. Check the container engine, then retry local setup.",
+            ),
+        )
+        .unwrap();
+        assert_eq!(unmeasurable.reason, Some(Reason::LocalCommandFailed));
+        assert_eq!(unmeasurable.shortfall, None);
+        assert!(serde_json::to_value(&unmeasurable)
+            .unwrap()
+            .get("shortfall")
+            .is_none());
+    }
+
+    /// The onboarding check stops only an engine that can never pass the CLI's check at Start:
+    /// fewer than 4 CPUs, under 4 GiB of memory, or under 40 GiB of free disk. OpenBot's own
+    /// 4 CPU, 6 GiB Podman machine passes. Free disk is measured as the CLI measures it, with
+    /// `df -Pk /` in a container.
+    #[test]
+    fn a_small_or_full_engine_is_caught_before_local_setup() {
+        const GB: u64 = 1_000_000_000;
+        let roomy = Some(100 * GB);
+        // `docker info --format '{{.NCPU}} {{.MemTotal}}'` on Docker Desktop.
+        for (said, free, cpu, memory, disk) in [
+            // OpenBot's own Podman machine: 4 CPUs and 6144 MiB, as `podman info` reports it. The
+            // CLI's check passes on it, so this check must too.
+            (
+                "4 6262661120
+",
+                roomy,
+                false,
+                false,
+                false,
+            ),
+            // 4 CPUs and 8 GB, as Docker Desktop reports an 8 GB limit.
+            (
+                "4 8217473024
+",
+                roomy,
+                false,
+                false,
+                false,
+            ),
+            // Fewer than 4 CPUs can never leave the CLI 4 free ones.
+            (
+                "3 8217473024
+",
+                roomy,
+                true,
+                false,
+                false,
+            ),
+            (
+                "6 4113829888
+",
+                roomy,
+                false,
+                true,
+                false,
+            ),
+            // 10 CPUs and 20.5 GiB with a full disk: the case that happened.
+            (
+                "10 22011707392
+",
+                Some(0),
+                false,
+                false,
+                true,
+            ),
+            (
+                "10 22011707392
+",
+                Some(39 * GIB),
+                false,
+                false,
+                true,
+            ),
+            // 6 CPUs, 8 GB and 40 GiB free, and a larger one, are enough.
+            (
+                "6 8217473024
+",
+                Some(40 * GIB),
+                false,
+                false,
+                false,
+            ),
+            (
+                "18 16745730048
+",
+                roomy,
+                false,
+                false,
+                false,
+            ),
+            // Free disk that could not be measured is not judged.
+            (
+                "18 16745730048
+",
+                None,
+                false,
+                false,
+                false,
+            ),
+        ] {
+            let (cpus, bytes) = parse_engine_size(said).unwrap();
+            let short = engine_shortfall(cpus, bytes, free);
+            assert_eq!(
+                (short.cpu, short.memory, short.disk),
+                (cpu, memory, disk),
+                "{said} {free:?}"
+            );
+        }
+        assert!(!engine_shortfall(MIN_ENGINE_CPUS, 8 * GB, roomy).named());
+        for unread in [
+            "",
+            "4",
+            "four 8217473024",
+            "4 8217473024 extra",
+            "-1 8217473024",
+        ] {
+            assert_eq!(parse_engine_size(unread), None, "{unread:?}");
+        }
+        // `df -Pk /` inside a container on a full Docker Desktop disk, and on a roomy one.
+        assert_eq!(
+            parse_free_disk(
+                "Filesystem     1024-blocks      Used Available Capacity Mounted on
+overlay          100597760 100597760         0     100% /
+"
+            ),
+            Some(0)
+        );
+        assert_eq!(
+            parse_free_disk(
+                "Filesystem 1024-blocks Used Available Capacity Mounted on
+overlay 164506208 20481024 135620148 14% /
+"
+            ),
+            Some(135_620_148 * 1024)
+        );
+        assert_eq!(
+            parse_free_disk(
+                "df: /: No such file or directory
+"
+            ),
+            None
+        );
+        assert_eq!(
+            serde_json::to_value(Terms::EngineTooSmall {
+                podman: false,
+                cpu: false,
+                memory: false,
+                disk: true,
+                wsl: false,
+                drive: None,
+            })
+            .unwrap(),
+            json!({ "status": "engine-too-small", "podman": false, "cpu": false, "memory": false, "disk": true })
+        );
+        assert_eq!(
+            serde_json::to_value(Terms::EngineTooSmall {
+                podman: true,
+                cpu: false,
+                memory: false,
+                disk: true,
+                wsl: true,
+                drive: Some("C:".into()),
+            })
+            .unwrap(),
+            json!({ "status": "engine-too-small", "podman": true, "cpu": false, "memory": false, "disk": true, "wsl": true, "drive": "C:" })
+        );
+    }
+
     /// A new Windows computer installs Podman while the person signs in, and the CLI will not say
     /// anything about the agreement until an engine answers. Those answers, as the CLI gave them on
     /// Windows, are "not yet", which the account screen waits out, not a failure it shows.
@@ -6277,5 +7192,610 @@ fn main() {{
         assert!(option_env!("OPENBOT_BUNDLED_CLI_PROGRAM_SHA256").is_none());
         assert!(bundled_cli().is_none());
         assert!(bundled_cli_root().is_some());
+    }
+
+    /**
+    A container engine as `local start` meets it, put on PATH as `docker` or `podman`. It answers
+    what OpenBot asks before and after a start with what the real one prints, from files beside it:
+    `info --format` (`info`), `image ls --quiet --no-trunc` (`images`), `df -Pk /` in a container
+    (`df`), `kubectl get nodes -o json` in the stack's node (`nodes`) and `machine inspect`
+    (`inspect`). A node or a file that is not there fails as the engine does.
+    */
+    const FAKE_ENGINE: &str = r#"
+use std::io::Write;
+fn main() {
+    let exe = std::env::current_exe().unwrap();
+    let dir = exe.parent().unwrap().to_path_buf();
+    let name = exe.file_stem().unwrap().to_string_lossy().into_owned();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let mut asked = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("asked")).unwrap();
+    writeln!(asked, "{} {}", name, args.join(" ")).unwrap();
+    while matches!(args.first().map(String::as_str), Some("--connection" | "--url" | "--context" | "--host")) {
+        args.drain(..2.min(args.len()));
+    }
+    let a: Vec<&str> = args.iter().map(String::as_str).collect();
+    let file = match a.as_slice() {
+        ["info", "--format", _] => "info",
+        ["image", "ls", "--quiet", "--no-trunc"] => "images",
+        ["run", "--rm", "--pull=never", "--network=none", "--entrypoint", "/bin/sh", _, "-c", "df -Pk /"] => "df",
+        ["exec", "k3d-local-abc123-server-0", "kubectl", "get", "nodes", ..] => "nodes",
+        ["machine", "inspect", "openbot"] => "inspect",
+        _ => "",
+    };
+    if let Some(bytes) = (!file.is_empty()).then(|| std::fs::read(dir.join(file)).ok()).flatten() {
+        std::io::stdout().write_all(&bytes).unwrap();
+        return;
+    }
+    if a.first() == Some(&"exec") {
+        let node = a.get(1).copied().unwrap_or_default();
+        if name == "podman" {
+            eprintln!("Error: no container with name or ID \"{node}\" found: no such container");
+            std::process::exit(125);
+        }
+        eprintln!("Error response from daemon: No such container: {node}");
+        std::process::exit(1);
+    }
+    eprintln!("Error: unknown command {a:?}");
+    std::process::exit(125);
+}
+"#;
+
+    /// Every entry logged in this process. Only a test that runs alone in its process
+    /// (`isolated_process`) installs it.
+    static LOGGED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+    struct Keep;
+
+    impl log::Log for Keep {
+        fn enabled(&self, _: &log::Metadata) -> bool {
+            true
+        }
+        fn log(&self, record: &log::Record) {
+            LOGGED
+                .lock()
+                .unwrap()
+                .push(format!("{} {}", record.level(), record.args()));
+        }
+        fn flush(&self) {}
+    }
+
+    /// The `[local check]` entries logged since the last call, taken.
+    fn checks_logged() -> Vec<String> {
+        std::mem::take(&mut *LOGGED.lock().unwrap())
+            .into_iter()
+            .filter(|entry| entry.contains("[local check]"))
+            .collect()
+    }
+
+    /// `docker info --format '{{.NCPU}} {{.MemTotal}}'` on a Mac's Docker Desktop with 10 CPUs and
+    /// 20.5 GiB, and `podman info --format '{{.Host.CPUs}} {{.Host.MemTotal}}'` on OpenBot's own
+    /// Podman machine, 4 CPUs and 6144 MiB.
+    const DOCKER_INFO: &str = "10 22011707392\n";
+    const PODMAN_INFO: &str = "4 6262661120\n";
+
+    /// `df -Pk /` in a container, as busybox prints it: a disk of `size` KiB with `free` KiB free.
+    fn df(size: u64, free: u64) -> String {
+        let used = size - free - size / 20;
+        format!(
+            "Filesystem           1024-blocks    Used Available Capacity Mounted on\noverlay              {size} {used} {free} {}% /\n",
+            used * 100 / (used + free)
+        )
+    }
+
+    const KIB_PER_GIB: u64 = 1024 * 1024;
+    /// OpenBot's Podman machine on WSL: a sparse virtual disk of about a terabyte.
+    const WSL_DISK: u64 = 1_055_762_868;
+
+    /// `kubectl get nodes -o json` in the stack's node, as k3s v1.31.5 printed it, with its
+    /// `DiskPressure` condition as the kubelet sets it when `pressure`.
+    fn nodes(pressure: bool) -> String {
+        let mut nodes: Value = serde_json::from_str(include_str!(
+            "../test-fixtures/local-eval/k3s-v1.31.5-get-nodes.json"
+        ))
+        .unwrap();
+        if pressure {
+            for condition in nodes["items"][0]["status"]["conditions"]
+                .as_array_mut()
+                .unwrap()
+            {
+                if condition["type"] == "DiskPressure" {
+                    condition["status"] = json!("True");
+                    condition["reason"] = json!("KubeletHasDiskPressure");
+                    condition["message"] = json!("kubelet has disk pressure");
+                }
+            }
+        }
+        serde_json::to_string_pretty(&nodes).unwrap()
+    }
+
+    /// `podman machine inspect openbot` for OpenBot's own rootful machine on WSL, as Podman 5
+    /// prints it on Windows.
+    const WSL_INSPECT: &str = r#"[
+     {
+          "ConfigDir": {
+               "Path": "C:\\Users\\me\\.config\\containers\\podman\\machine\\wsl"
+          },
+          "ConnectionInfo": {
+               "PodmanSocket": null,
+               "PodmanPipe": {
+                    "Path": "\\\\.\\pipe\\podman-openbot"
+               }
+          },
+          "Created": "2026-11-02T09:14:03.4719262-08:00",
+          "LastUp": "2026-11-09T08:02:51.1063417-08:00",
+          "Name": "openbot",
+          "Resources": {
+               "CPUs": 4,
+               "DiskSize": 100,
+               "Memory": 6144,
+               "USBs": []
+          },
+          "SSHConfig": {
+               "IdentityPath": "C:\\Users\\me\\.local\\share\\containers\\podman\\machine\\machine",
+               "Port": 61842,
+               "RemoteUsername": "user"
+          },
+          "State": "running",
+          "UserModeNetworking": true,
+          "Rootful": true,
+          "Rosetta": false
+     }
+]
+"#;
+
+    /// `local start` as the pinned CLI (4.34.0-pre.647a03b) reports a start that stopped in
+    /// `stack-services-ready`, the step that waits for the back end's deployments.
+    fn start_failed() -> String {
+        json!({
+            "version": 1,
+            "command": "local start",
+            "status": "failed",
+            "error": {
+                "code": "LOCAL_COMMAND_FAILED",
+                "message": "Local stack-services-ready failed (exit 1). Run `copilotkit local status` and retry the failed step."
+            },
+            "nextAction": {
+                "reason": "local_command_failed",
+                "summary": "The local command did not finish. Check local status for the recorded failed step, then resume the command. No automatic rollback was requested.",
+                "instructions": ["Inspect the recorded stack with npx --yes copilotkit@4.34.0-pre.647a03b local status --json."],
+                "resumeCommand": "npx --yes copilotkit@4.34.0-pre.647a03b local start --json",
+                "url": null, "linkLabel": null, "linkFile": null,
+                "caveats": [], "requiredEnvVars": [], "artifacts": []
+            },
+            "diagnostics": []
+        })
+        .to_string()
+    }
+
+    fn start_completed() -> String {
+        let mut done = envelope();
+        done["command"] = json!("local start");
+        done.to_string()
+    }
+
+    /**
+    An engine and a CLI for `local start` through `run_installed`, the window's own path. The engine
+    is `engine` on PATH answering with `answers` (`FAKE_ENGINE`), and named to the CLI as OpenBot
+    names it; the CLI is pinned as a developer pins one. Windows' answer for the drive that holds a
+    Podman machine's disk is `drive`. Sets process environment: only for a test in its own process.
+    */
+    struct StartLab {
+        fixture: Fixture,
+        bin: PathBuf,
+    }
+
+    impl StartLab {
+        fn new(label: &str) -> Self {
+            let fixture = Fixture::new(label, "0\n{}");
+            let bin = fixture.root.join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            let source = fixture.root.join("engine.rs");
+            std::fs::write(&source, FAKE_ENGINE).unwrap();
+            for engine in ["docker", "podman"] {
+                compile_fixture(
+                    &source,
+                    &bin.join(format!("{engine}{}", std::env::consts::EXE_SUFFIX)),
+                );
+            }
+            std::env::set_var(
+                "PATH",
+                std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(
+                    &std::env::var_os("PATH").unwrap_or_default(),
+                )))
+                .unwrap(),
+            );
+            std::env::set_var(DEVELOPER_PROGRAM, &fixture.program);
+            std::env::set_var(DEVELOPER_PROGRAM_SHA256, sha256(&fixture.program));
+            let _ = log::set_boxed_logger(Box::new(Keep));
+            log::set_max_level(log::LevelFilter::Info);
+            Self { fixture, bin }
+        }
+
+        /// The engine as it answers now, and how `local start` ends.
+        fn engine(
+            &self,
+            engine: crate::engine::Engine,
+            info: &str,
+            df: &str,
+            nodes: Option<&str>,
+            drive: Option<crate::windows::MachineDrive>,
+        ) {
+            let write = |file: &str, said: Option<&str>| match said {
+                Some(said) => std::fs::write(self.bin.join(file), said).unwrap(),
+                None => {
+                    let _ = std::fs::remove_file(self.bin.join(file));
+                }
+            };
+            write("info", Some(info));
+            // `image ls --quiet --no-trunc`: the k3d tools image, which has a shell.
+            write(
+                "images",
+                Some("sha256:3a68d8567335f56c168c36b53059c5dd4dfe23c2edbf4d9251e9ed3170dfacd8\n"),
+            );
+            write("df", Some(df));
+            write("nodes", nodes);
+            write("inspect", Some(WSL_INSPECT));
+            use_engine(&match engine {
+                crate::engine::Engine::Docker => crate::engine::Address::new(engine, None),
+                crate::engine::Engine::Podman => {
+                    crate::engine::Address::new(engine, Some("openbot-root".into()))
+                }
+            });
+            MACHINE_DRIVE.with(|said| *said.borrow_mut() = Some(drive));
+        }
+
+        fn start(&self, ends: &str) -> Report {
+            self.run(Action::Start, ends)
+        }
+
+        /// `action` through the window's path, answered with `ends`.
+        fn run(&self, action: Action, ends: &str) -> Report {
+            std::fs::write(self.fixture.root.join("scenario"), ends).unwrap();
+            let stack = StackId::parse("local-abc123").unwrap();
+            let report = run_installed("checked", action, &stack).unwrap();
+            assert_eq!(
+                self.fixture.argv().unwrap(),
+                format!("local\n{}\n--stack\nlocal-abc123\n--json", action.as_str())
+            );
+            report
+        }
+    }
+
+    /// Windows' answer for drive C: with `tenths` tenths of a GiB free, and a little more.
+    fn drive(tenths: u64) -> Option<crate::windows::MachineDrive> {
+        Some(crate::windows::MachineDrive {
+            drive: Some("C:".into()),
+            free: tenths * GIB / 10 + GIB / 100,
+        })
+    }
+
+    /**
+    1.0.0 on Windows, a used install on OpenBot's own Podman machine with 30.5 GiB free inside it:
+    Quit, then a relaunch. The CLI checks resources only at a first setup, and an existing back end
+    can run on less than its 40 GiB, so a start that finishes is let through. The log warns, with the
+    numbers, and nothing else changes.
+    */
+    #[test]
+    fn a_used_install_short_of_disk_still_starts_and_the_log_warns() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_used_install_short_of_disk_still_starts_and_the_log_warns",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("start-short-of-disk-warns");
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 30 * KIB_PER_GIB + KIB_PER_GIB / 2),
+            Some(&nodes(false)),
+            drive(946),
+        );
+        let report = lab.start(&format!("0\n{}", start_completed()));
+        let wire = serde_json::to_value(&report).unwrap();
+        assert_eq!(wire["outcome"], json!("completed"));
+        assert_eq!(wire["reason"], Value::Null);
+        assert!(wire.get("shortfall").is_none(), "{wire}");
+        assert_eq!(
+            checks_logged(),
+            ["WARN [local check] before local start: 4 CPUs and 5.8 GiB of memory, 30.5 GiB free of 1006.8 GiB in a container, 94.6 GiB free on C:; short of disk (nearly full)"]
+        );
+    }
+
+    /**
+    The same start, failed: the card said only "The back end stopped with an error partway through"
+    while k3s, short of disk, had removed 13 of the back end's 15 images. A start that fails is
+    checked again with the node asked, and the report names the disk with its numbers, for Podman on
+    Windows, and for Docker short of the CLI's 40 GiB or with its node under disk pressure.
+    */
+    #[test]
+    fn a_start_that_fails_short_of_disk_names_the_disk_with_its_numbers() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_start_that_fails_short_of_disk_names_the_disk_with_its_numbers",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("start-short-of-disk-named");
+        let failed = format!("1\n{}", start_failed());
+
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 30 * KIB_PER_GIB + KIB_PER_GIB / 2),
+            Some(&nodes(true)),
+            drive(946),
+        );
+        let wire = serde_json::to_value(lab.start(&failed)).unwrap();
+        assert_eq!(wire["outcome"], json!("failed"));
+        assert_eq!(wire["reason"], json!("resources-short"));
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": true, "cpu": false, "memory": false, "disk": true,
+                "diskGb": "30.5", "nearlyFull": true, "diskSizeGb": "1006.8",
+                "wsl": true, "drive": "C:"
+            })
+        );
+        assert_eq!(
+            checks_logged(),
+            [
+                "WARN [local check] before local start: 4 CPUs and 5.8 GiB of memory, 30.5 GiB free of 1006.8 GiB in a container, 94.6 GiB free on C:; short of disk (nearly full)",
+                "WARN [local check] after local start failed: 4 CPUs and 5.8 GiB of memory, 30.5 GiB free of 1006.8 GiB in a container, 94.6 GiB free on C:, the node reports disk pressure; short of disk (nearly full)",
+            ]
+        );
+
+        // Docker Desktop with 30 GiB of a 64 GiB disk free: below the CLI's 40 GiB.
+        lab.engine(
+            crate::engine::Engine::Docker,
+            DOCKER_INFO,
+            &df(64 * KIB_PER_GIB, 30 * KIB_PER_GIB),
+            Some(&nodes(false)),
+            None,
+        );
+        let wire = serde_json::to_value(lab.start(&failed)).unwrap();
+        assert_eq!(wire["reason"], json!("resources-short"));
+        assert_eq!(
+            wire["shortfall"],
+            json!({ "podman": false, "cpu": false, "memory": false, "disk": true, "diskGb": "30" })
+        );
+        assert_eq!(
+            checks_logged().last().unwrap(),
+            "WARN [local check] after local start failed: 10 CPUs and 20.5 GiB of memory, 30 GiB free of 64 GiB in a container, no disk pressure; short of disk (OpenBot needs 40 GiB free)"
+        );
+
+        // Docker on a 1.8 TiB disk with 160 GiB free, its node under DiskPressure: nearly full
+        // by k3s's own line, though above the CLI's 40 GiB.
+        lab.engine(
+            crate::engine::Engine::Docker,
+            DOCKER_INFO,
+            &df(1_916_694_008, 160 * KIB_PER_GIB),
+            Some(&nodes(true)),
+            None,
+        );
+        let wire = serde_json::to_value(lab.start(&failed)).unwrap();
+        assert_eq!(wire["reason"], json!("resources-short"));
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": false, "cpu": false, "memory": false, "disk": true,
+                "diskGb": "160", "nearlyFull": true, "diskSizeGb": "1827.9"
+            })
+        );
+        checks_logged();
+    }
+
+    /**
+    Windows, once space was freed: k3s keeps its DiskPressure condition for five minutes after, and
+    a Retry in those minutes failed again, three times over six minutes. A start that fails while
+    the node still says DiskPressure, with the disk above both lines, says the back end is
+    recovering, so the card can say to wait rather than to free more space.
+    */
+    #[test]
+    fn a_start_that_fails_while_the_node_recovers_from_low_disk_says_so() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_start_that_fails_while_the_node_recovers_from_low_disk_says_so",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("start-recovering");
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 941 * KIB_PER_GIB),
+            Some(&nodes(true)),
+            drive(1200),
+        );
+        let wire = serde_json::to_value(lab.start(&format!("1\n{}", start_failed()))).unwrap();
+        assert_eq!(wire["reason"], json!("resources-short"));
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": true, "cpu": false, "memory": false, "disk": false,
+                "recovering": true, "wsl": true, "drive": "C:"
+            })
+        );
+        assert_eq!(
+            checks_logged().last().unwrap(),
+            "WARN [local check] after local start failed: 4 CPUs and 5.8 GiB of memory, 941 GiB free of 1006.8 GiB in a container, 120 GiB free on C:, the node reports disk pressure; recovering: the node still reports disk pressure with the disk above both lines"
+        );
+    }
+
+    /**
+    On Windows the machine's disk is a sparse virtual disk of about a terabyte, so a container sees
+    941 GiB free while the drive that holds it has 30. The drive is what runs out: it is checked,
+    the smaller figure counts, and the card says to free space on that drive. The account step's
+    check before a first setup reads the drive too.
+    */
+    #[test]
+    fn on_windows_the_drive_under_podmans_disk_is_the_free_disk_that_counts() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::on_windows_the_drive_under_podmans_disk_is_the_free_disk_that_counts",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("start-windows-drive");
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 941 * KIB_PER_GIB),
+            Some(&nodes(false)),
+            drive(300),
+        );
+        let wire = serde_json::to_value(lab.start(&format!("1\n{}", start_failed()))).unwrap();
+        assert_eq!(wire["reason"], json!("resources-short"));
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": true, "cpu": false, "memory": false, "disk": true,
+                "diskGb": "30", "wsl": true, "drive": "C:"
+            })
+        );
+        assert_eq!(
+            checks_logged(),
+            [
+                "WARN [local check] before local start: 4 CPUs and 5.8 GiB of memory, 941 GiB free of 1006.8 GiB in a container, 30 GiB free on C:; short of disk (OpenBot needs 40 GiB free)",
+                "WARN [local check] after local start failed: 4 CPUs and 5.8 GiB of memory, 941 GiB free of 1006.8 GiB in a container, 30 GiB free on C:, no disk pressure; short of disk (OpenBot needs 40 GiB free)",
+            ]
+        );
+        assert_eq!(
+            serde_json::to_value(engine_size_terms()).unwrap(),
+            json!({
+                "status": "engine-too-small", "podman": true, "cpu": false, "memory": false,
+                "disk": true, "wsl": true, "drive": "C:"
+            })
+        );
+    }
+
+    /**
+    OpenBot's own Podman machine, 4 CPUs and 6144 MiB, with room on its disk and its drive, passes:
+    a start that finishes says so in the log, and one that fails for some other reason keeps its
+    own words rather than being blamed on resources. The account step lets it through.
+    */
+    #[test]
+    fn openbots_own_podman_machine_with_room_passes_the_check() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::openbots_own_podman_machine_with_room_passes_the_check",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("start-roomy-podman");
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 941 * KIB_PER_GIB),
+            Some(&nodes(false)),
+            drive(1200),
+        );
+        let started =
+            serde_json::to_value(lab.start(&format!("0\n{}", start_completed()))).unwrap();
+        assert_eq!(started["outcome"], json!("completed"));
+        assert!(started.get("shortfall").is_none(), "{started}");
+        let failed = serde_json::to_value(lab.start(&format!("1\n{}", start_failed()))).unwrap();
+        assert_eq!(failed["reason"], json!("local-command-failed"));
+        assert!(failed.get("shortfall").is_none(), "{failed}");
+        let enough = "4 CPUs and 5.8 GiB of memory, 941 GiB free of 1006.8 GiB in a container, 120 GiB free on C:";
+        assert_eq!(
+            checks_logged(),
+            [
+                format!("INFO [local check] before local start: {enough}; enough"),
+                format!("INFO [local check] before local start: {enough}; enough"),
+                format!("INFO [local check] after local start failed: {enough}, no disk pressure; enough"),
+            ]
+        );
+        assert_eq!(engine_size_terms(), None);
+    }
+
+    /// `local status` for a back end left up after a start that failed: its node runs, and the
+    /// API and gateway do not answer. `passed` when every check passed, as with an update on record.
+    fn status_degraded(passed: bool) -> String {
+        let mut status = canonical("degraded", "valid", Value::Null);
+        status["readiness"]["checks"] = json!([
+            { "name": "api", "ok": passed },
+            { "name": "gateway", "ok": passed },
+            { "name": "dashboard", "ok": true }
+        ]);
+        format!("0\n{status}")
+    }
+
+    /**
+    Windows, after space was freed: Retry read the back end's status, which said `degraded`, and the
+    card said "The back end is running but not healthy." twice over two minutes while the node still
+    reported DiskPressure. A back end that runs but does not answer is checked as a failed start is:
+    recovering, nearly full, or nothing to say, in which case the report is as it was.
+    */
+    #[test]
+    fn a_back_end_running_but_not_healthy_is_checked_for_its_disk() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_back_end_running_but_not_healthy_is_checked_for_its_disk",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("status-degraded-checked");
+        let degraded = status_degraded(false);
+
+        // Space freed, the node still under DiskPressure.
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 941 * KIB_PER_GIB),
+            Some(&nodes(true)),
+            drive(1200),
+        );
+        let wire = serde_json::to_value(lab.run(Action::Status, &degraded)).unwrap();
+        assert_eq!(wire["readiness"], json!("degraded"));
+        assert_eq!(wire["reason"], Value::Null);
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": true, "cpu": false, "memory": false, "disk": false,
+                "recovering": true, "wsl": true, "drive": "C:"
+            })
+        );
+        assert_eq!(
+            checks_logged(),
+            ["WARN [local check] local status, running but not healthy: 4 CPUs and 5.8 GiB of memory, 941 GiB free of 1006.8 GiB in a container, 120 GiB free on C:, the node reports disk pressure; recovering: the node still reports disk pressure with the disk above both lines"]
+        );
+
+        // Still nearly full.
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 30 * KIB_PER_GIB + KIB_PER_GIB / 2),
+            Some(&nodes(true)),
+            drive(946),
+        );
+        let wire = serde_json::to_value(lab.run(Action::Status, &degraded)).unwrap();
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": true, "cpu": false, "memory": false, "disk": true,
+                "diskGb": "30.5", "nearlyFull": true, "diskSizeGb": "1006.8",
+                "wsl": true, "drive": "C:"
+            })
+        );
+
+        // Room on the disk and no pressure: not the disk, and the report is as it was.
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 941 * KIB_PER_GIB),
+            Some(&nodes(false)),
+            drive(1200),
+        );
+        let wire = serde_json::to_value(lab.run(Action::Status, &degraded)).unwrap();
+        assert_eq!(wire["readiness"], json!("degraded"));
+        assert!(wire.get("shortfall").is_none(), "{wire}");
+        checks_logged();
+
+        // Every check passed: an update on record, not a back end that does not answer.
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 30 * KIB_PER_GIB),
+            Some(&nodes(true)),
+            drive(946),
+        );
+        let wire = serde_json::to_value(lab.run(Action::Status, &status_degraded(true))).unwrap();
+        assert!(wire.get("shortfall").is_none(), "{wire}");
+        assert_eq!(checks_logged(), Vec::<String>::new());
     }
 }

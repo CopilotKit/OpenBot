@@ -14,7 +14,7 @@ import { ChannelAvatar } from "@/components/channels/avatar";
 import { AuditPage } from "@/components/manage/audit-page";
 import { useBotNames } from "@/lib/agents/bot-names";
 import { agentKeys } from "@/lib/agents/queries";
-import { auditKeys } from "@/lib/audit/queries";
+import { seedAuditPage } from "./seed-audit-page";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -57,7 +57,7 @@ function everythingOn(root: Element): string {
 }
 
 async function renderActivity(queryClient: QueryClient) {
-  queryClient.setQueryData([...auditKeys.all, ""], {
+  seedAuditPage(queryClient, "", {
     events: [
       {
         id: "e1",

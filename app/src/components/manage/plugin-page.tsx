@@ -919,7 +919,13 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                 <ItemContent>
                   <ItemTitle>How this is reached</ItemTitle>
                   <ItemDescription>
-                    {brokeredReach(provider, brokeredApp).description}
+                    {
+                      brokeredReach(
+                        provider,
+                        brokeredApp,
+                        brokeredAccount.kind === "fields",
+                      ).description
+                    }
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>

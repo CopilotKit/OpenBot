@@ -80,6 +80,53 @@ test("install progress is the bytes downloaded out of the whole download, and di
   expect(row.queryByRole("progressbar")).toBeNull();
 });
 
+// Reported on 1.0.0-rc.1: a full bar read "1.1 GB of 1.1 GB · 1 of 5 items remaining" while the
+// last image was still being unpacked, so a person took the step for done.
+test("with every byte in and an item still unpacking, the bar is not full and says it is unpacking", () => {
+  const size = 1_100_000_000;
+  const view = render(
+    <SetupProgress
+      steps={installing({ done: 4, total: 5, bytes: size, size })}
+      showElapsed={false}
+    />,
+  );
+  const row = within(
+    view.getByRole("listitem", { name: "Installing OpenBot" }),
+  );
+  const said = "1.1 GB downloaded · Unpacking the last item";
+  let bar = row.getByRole("progressbar", { name: "Download progress" });
+  // No value: the indeterminate bar, not a full one.
+  expect(bar.hasAttribute("value")).toBe(false);
+  expect(bar.getAttribute("aria-valuetext")).toBe(said);
+  expect(row.getByText(said)).toBeTruthy();
+  expect(row.queryByText(/remaining/)).toBeNull();
+
+  view.rerender(
+    <SetupProgress
+      steps={installing({ done: 2, total: 5, bytes: size, size })}
+      showElapsed={false}
+    />,
+  );
+  bar = row.getByRole("progressbar", { name: "Download progress" });
+  expect(bar.hasAttribute("value")).toBe(false);
+  expect(
+    row.getByText("1.1 GB downloaded · Unpacking the last 3 items"),
+  ).toBeTruthy();
+
+  // Bytes still arriving: the bar shows its fraction, as before.
+  view.rerender(
+    <SetupProgress
+      steps={installing({ done: 4, total: 5, bytes: 1_000_000_000, size })}
+      showElapsed={false}
+    />,
+  );
+  bar = row.getByRole("progressbar", { name: "Download progress" });
+  expect(bar.getAttribute("value")).toBe("1000000000");
+  expect(
+    row.getByText("1.0 GB of 1.1 GB · 1 of 5 items remaining"),
+  ).toBeTruthy();
+});
+
 test("a download whose size is not known yet says so, and its bar does not guess", () => {
   const view = render(
     <SetupProgress

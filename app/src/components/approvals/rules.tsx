@@ -174,6 +174,8 @@ export function RuleRow({
       : folderRule
         ? folderWords(rule.scope, folders.data?.grants)
         : `on ${rule.scope}`,
+    // A rule saved for one of several accounts at the app covers that account only.
+    rule.account ? `from ${rule.account}` : null,
     rule.botId === "*"
       ? null
       : rule.botId.includes("*")

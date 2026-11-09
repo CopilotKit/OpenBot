@@ -43,6 +43,8 @@ export type OnboardingStep = {
   /** The primary is waiting on something, such as the browser's permission prompt. */
   primaryPending?: boolean;
   primaryDisabled?: boolean;
+  /** No primary: the second button is the only way on, such as Not now before a booking. */
+  primaryHidden?: boolean;
   /** A way past it, beside the primary. Moves on when it has no action of its own. */
   secondary?: { label: string; onClick?: (next: () => void) => void };
   /**
@@ -246,18 +248,23 @@ export function OnboardingWizard({
           onPick={(at) => {
             if (at <= reachedAt) go(at);
           }}
-          primary={{
-            label: step?.primaryLabel ?? "Continue",
-            disabled:
-              step?.primaryDisabled === true || step?.primaryPending === true,
-            done: step?.primaryDone === true,
-            pending: step?.primaryPending === true,
-            form: step?.primaryForm,
-            onClick: () => {
-              if (step?.onPrimary) return step.onPrimary(next);
-              next();
-            },
-          }}
+          primary={
+            step?.primaryHidden
+              ? undefined
+              : {
+                  label: step?.primaryLabel ?? "Continue",
+                  disabled:
+                    step?.primaryDisabled === true ||
+                    step?.primaryPending === true,
+                  done: step?.primaryDone === true,
+                  pending: step?.primaryPending === true,
+                  form: step?.primaryForm,
+                  onClick: () => {
+                    if (step?.onPrimary) return step.onPrimary(next);
+                    next();
+                  },
+                }
+          }
           reached={reachedAt}
           reserveSecondary={step?.optional === true}
           secondary={

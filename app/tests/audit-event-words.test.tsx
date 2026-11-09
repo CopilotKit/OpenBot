@@ -15,8 +15,8 @@ import {
 } from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
 import { OPENBOT_WORKING_EVENT_TYPES } from "@/lib/audit/outcome";
-import { auditKeys } from "@/lib/audit/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { seedAuditPage } from "./seed-audit-page";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -123,10 +123,10 @@ async function renderAs(edition: "team" | "personal", rows = ROWS) {
   });
   // Activity asks without OpenBot's own working, and the server answers without it.
   if (edition === "personal")
-    queryClient.setQueryData([...auditKeys.all, withoutOpenBotWorking("")], {
+    seedAuditPage(queryClient, withoutOpenBotWorking(""), {
       events: rows.filter((row) => !LEFT_OUT.has(row.eventType)),
     });
-  else queryClient.setQueryData([...auditKeys.all, ""], { events: rows });
+  else seedAuditPage(queryClient, "", { events: rows });
   queryClient.setQueryData(agentKeys.list(false), [
     { id: "personal-assistant", name: "Personal Assistant" },
   ]);

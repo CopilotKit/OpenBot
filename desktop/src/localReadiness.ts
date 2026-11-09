@@ -16,6 +16,7 @@ import {
   type LocalReason,
   licenceExpiresSoon,
   onInstalledRelease,
+  type Shortfall,
 } from "./localEvalCli";
 
 /**
@@ -95,6 +96,149 @@ const quitUnexplained = blocked(
   "restart-intelligence",
 );
 
+type Resource = "cpu" | "memory" | "disk";
+
+function listed(words: string[]): string {
+  return words.length < 2
+    ? (words[0] ?? "")
+    : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
+}
+
+const resourceName: Record<Resource, string> = {
+  cpu: "CPUs",
+  memory: "memory",
+  disk: "disk space",
+};
+const limitName: Record<Resource, string> = {
+  cpu: "CPU",
+  memory: "memory",
+  disk: "disk",
+};
+// What `podman machine set` raises each to, for the minimum below.
+const podmanFlag: Record<Resource, string> = {
+  cpu: "--cpus 6",
+  memory: "--memory 8192",
+  disk: "--disk-size 160",
+};
+
+/**
+ * Which resource is short and where to raise it. `needs` is what OpenBot needs of each: free, at
+ * Start, as the CLI measures it, or in total, before it. Disk alone is "out of disk space".
+ */
+function shortfallSaid(
+  shortfall: Shortfall,
+  needs: Record<Resource, string>,
+  then: string,
+): string {
+  const engine = shortfall.podman ? "Podman" : "Docker";
+  const short = (["cpu", "memory", "disk"] as const).filter(
+    (resource) => shortfall[resource],
+  );
+  // Space was freed, and k3s still says the disk is low for a few minutes after.
+  if (shortfall.recovering && short.length === 0) {
+    return `The back end is recovering from low disk space. Wait a few minutes, then ${then}.`;
+  }
+  if (short.length === 0) {
+    const fix = shortfall.podman
+      ? "Stop your Podman machine, raise them with podman machine set, start it again"
+      : "Raise them in Docker Desktop > Settings > Resources";
+    return `${engine} doesn't have enough CPUs, memory or disk space for the back end. ${fix}, then ${then}.`;
+  }
+  const fix = shortfall.podman
+    ? podmanFix(short, shortfall)
+    : `Raise the ${short.length === 1 ? `${limitName[short[0]]} limit` : "limits"} in Docker Desktop > Settings > Resources${shortfall.disk ? ", or free space in Docker" : ""}`;
+  // OpenBot's own check after a start that failed: k3s itself is short of disk.
+  if (shortfall.nearlyFull && short.length === 1) {
+    const free = shortfall.diskGb
+      ? ` ${engine} has ${shortfall.diskGb} GB free${shortfall.diskSizeGb ? ` of ${shortfall.diskSizeGb} GB` : ""}.`
+      : "";
+    const needs40 =
+      shortfall.diskGb && Number(shortfall.diskGb) < 40
+        ? ` OpenBot needs ${needed.disk}.`
+        : "";
+    return `The back end's disk is nearly full.${free}${needs40} ${fix}, then ${then}.`;
+  }
+  // The CLI's own numbers, when its error gave one for every resource that is short.
+  const measured: Record<Resource, string | undefined> = {
+    cpu: shortfall.cpus && `${shortfall.cpus} free CPUs`,
+    memory: shortfall.memoryGb && `${shortfall.memoryGb} GB of free memory`,
+    disk: shortfall.diskGb && `${shortfall.diskGb} GB of free disk`,
+  };
+  const has = short.map((resource) => measured[resource]);
+  const said = has.every((said) => said !== undefined)
+    ? `${engine} has ${listed(has as string[])}. OpenBot needs ${
+        short.length === 1
+          ? needed[short[0]]
+          : listed(short.map((resource) => neededFully[resource]))
+      }.`
+    : short.length === 1 && short[0] === "disk"
+      ? `${engine} is out of disk space. OpenBot needs ${needs.disk}.`
+      : `${engine} doesn't have enough ${listed(short.map((resource) => resourceName[resource]))}. OpenBot needs ${listed(short.map((resource) => needs[resource]))}.`;
+  const full = shortfall.nearlyFull
+    ? "The back end's disk is nearly full. "
+    : "";
+  return `${full}${said} ${fix}, then ${then}.`;
+}
+
+/**
+ * Where Podman raises what is short. On Windows its machine runs in WSL, where `podman machine set`
+ * refuses to change its disk ("changing disk size not supported for WSL machines"), and the disk
+ * is a sparse virtual disk on `drive`, so space is freed on that drive instead.
+ */
+function podmanFix(short: Resource[], shortfall: Shortfall): string {
+  const raised = short.filter(
+    (resource) => !(shortfall.wsl && resource === "disk"),
+  );
+  const set =
+    raised.length > 0 &&
+    `Stop your Podman machine, run podman machine set ${raised.map((resource) => podmanFlag[resource]).join(" ")}, start it again`;
+  const freed =
+    shortfall.wsl &&
+    short.includes("disk") &&
+    `free space on the drive that holds OpenBot's engine${shortfall.drive ? ` (${shortfall.drive})` : ""}`;
+  if (set && freed) return `${set}, and ${freed}`;
+  if (freed) return freed.charAt(0).toUpperCase() + freed.slice(1);
+  return set || "";
+}
+
+// What the CLI requires free, beside its own numbers: "Docker has 0 GB of free disk. OpenBot
+// needs 40 GB."
+const needed: Record<Resource, string> = {
+  cpu: "4",
+  memory: "4 GB",
+  disk: "40 GB",
+};
+const neededFully: Record<Resource, string> = {
+  cpu: "4 free CPUs",
+  memory: "4 GB of free memory",
+  disk: "40 GB of free disk",
+};
+
+/**
+ * The CLI's resource check at Start: 4 free CPUs, 4 GB of free memory and 40 GB of free disk, with
+ * OpenBot's own containers running.
+ */
+export function resourcesShortSaid(shortfall: Shortfall): string {
+  return shortfallSaid(
+    shortfall,
+    {
+      cpu: "4 free CPUs",
+      memory: "4 GB of free memory",
+      disk: "40 GB free",
+    },
+    "Retry",
+  );
+}
+
+/** OpenBot's own check before Start: the engine's totals, with room for its own containers. */
+export function engineTooSmallSaid(shortfall: Shortfall): string {
+  return shortfallSaid(
+    shortfall,
+    { cpu: "4 CPUs", memory: "4 GB of memory", disk: "40 GB free" },
+    "Try again",
+  );
+}
+
 // Compiler-enforced: a new upstream reason or failure breaks the build here.
 const reasonRows: Record<LocalReason, ReadinessRow> = {
   "authentication-required": blocked("Sign in to CopilotKit.", "sign-in"),
@@ -133,6 +277,16 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
     "retry",
   ),
   "browser-open-failed": blocked("Your browser did not open.", "retry"),
+  // Said with the resource when the report names it: see `intelligenceRow`.
+  "resources-short": blocked(
+    resourcesShortSaid({
+      podman: false,
+      cpu: false,
+      memory: false,
+      disk: false,
+    }),
+    "retry",
+  ),
   unrecognized: couldNotStart,
 };
 
@@ -222,6 +376,9 @@ function intelligenceRow(
         : "The back end is ready.",
     };
   }
+  if (intelligence.reason === "resources-short" && intelligence.shortfall) {
+    return blocked(resourcesShortSaid(intelligence.shortfall), "retry");
+  }
   if (intelligence.reason !== null) return reasonRows[intelligence.reason];
   if (intelligence.outcome !== "completed") return couldNotStart;
   const licence = intelligence.licence;
@@ -233,6 +390,13 @@ function intelligenceRow(
     return blocked("The back end is stopped.", "start-intelligence");
   }
   if (intelligence.readiness === "degraded") {
+    // OpenBot's check of a back end that runs but does not answer: a full disk, or one recovering.
+    if (intelligence.shortfall) {
+      return blocked(
+        resourcesShortSaid(intelligence.shortfall),
+        "restart-intelligence",
+      );
+    }
     return blocked(
       "The back end is running but not healthy.",
       "restart-intelligence",

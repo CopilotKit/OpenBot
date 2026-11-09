@@ -13,8 +13,8 @@ import {
   withoutOpenBotWorking,
 } from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
-import { auditKeys } from "@/lib/audit/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { seedAuditPage } from "./seed-audit-page";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -117,7 +117,7 @@ async function renderActivity() {
     localEvaluation: true,
     edition: "personal",
   });
-  queryClient.setQueryData([...auditKeys.all, withoutOpenBotWorking("")], {
+  seedAuditPage(queryClient, withoutOpenBotWorking(""), {
     events: ROWS,
   });
   queryClient.setQueryData(agentKeys.list(false), [

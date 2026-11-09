@@ -1,0 +1,229 @@
+{
+  "_captured": "GET https://backend.composio.dev/api/v3/toolkits (catalogue rows) and /api/v3/toolkits/{slug} (details), read-only, 2026-11-08. Verbatim, trimmed to the keys the server reads.",
+  "catalogue": [
+    {
+      "name": "HubSpot",
+      "slug": "hubspot",
+      "type": "native",
+      "app": "HubSpot",
+      "toolkit_type": "api",
+      "auth_schemes": ["OAUTH2", "API_KEY"],
+      "composio_managed_auth_schemes": ["OAUTH2"],
+      "is_local_toolkit": false,
+      "meta": {
+        "triggers_count": 2,
+        "tools_count": 343,
+        "description": "HubSpot is an inbound marketing, sales, and customer service platform integrating CRM, email automation, and analytics to facilitate lead nurturing and seamless customer experiences",
+        "logo": "https://logos.composio.dev/api/hubspot",
+        "app_url": "https://www.hubspot.com/",
+        "categories": [
+          {
+            "id": "crm",
+            "name": "crm"
+          },
+          {
+            "id": "marketing-automation",
+            "name": "marketing automation"
+          }
+        ],
+        "created_at": "2024-05-03T11:44:32.061Z",
+        "updated_at": "2026-11-08T11:16:45.396Z",
+        "version": "20261104_00"
+      },
+      "no_auth": false,
+      "auth_guide_url": null,
+      "deprecated": {
+        "toolkitId": "635cc036-aba3-48ad-a6ab-1abd84f8817b"
+      }
+    },
+    {
+      "name": "Gmail",
+      "slug": "gmail",
+      "type": "native",
+      "app": "Gmail",
+      "toolkit_type": "api",
+      "auth_schemes": ["OAUTH2"],
+      "composio_managed_auth_schemes": ["OAUTH2"],
+      "is_local_toolkit": false,
+      "meta": {
+        "triggers_count": 2,
+        "tools_count": 61,
+        "description": "Gmail is Google\u2019s email service, featuring spam protection, search functions, and seamless integration with other G Suite apps for productivity",
+        "logo": "https://logos.composio.dev/api/gmail",
+        "app_url": "https://mail.google.com",
+        "categories": [
+          {
+            "id": "email",
+            "name": "email"
+          }
+        ],
+        "created_at": "2024-05-03T11:44:32.061Z",
+        "updated_at": "2026-11-08T00:36:45.480Z",
+        "version": "20261105_00"
+      },
+      "no_auth": false,
+      "auth_guide_url": null,
+      "deprecated": {
+        "toolkitId": "a90e7d79-4f7a-4ff2-bd7d-19c78640b8f8"
+      }
+    },
+    {
+      "name": "1password",
+      "slug": "_1password",
+      "type": "native",
+      "app": "1password",
+      "toolkit_type": "api",
+      "auth_schemes": ["API_KEY"],
+      "composio_managed_auth_schemes": [],
+      "is_local_toolkit": false,
+      "meta": {
+        "triggers_count": 0,
+        "tools_count": 6,
+        "description": "Password manager and digital vault for secure credential storage and team collaboration",
+        "logo": "https://logos.composio.dev/api/1password",
+        "app_url": "https://1password.com",
+        "categories": [
+          {
+            "id": "security-&-identity-tools",
+            "name": "security & identity tools"
+          },
+          {
+            "id": "developer-tools",
+            "name": "developer tools"
+          }
+        ],
+        "created_at": "2026-03-13T21:40:05.341Z",
+        "updated_at": "2026-11-08T11:16:45.396Z",
+        "version": "20261101_00"
+      },
+      "no_auth": false,
+      "auth_guide_url": null,
+      "deprecated": {
+        "toolkitId": "344237d4-2a7d-47ef-9dbb-c490cf0e546f"
+      }
+    },
+    {
+      "name": "PostHog",
+      "slug": "posthog",
+      "type": "native",
+      "app": "PostHog",
+      "toolkit_type": "api",
+      "auth_schemes": ["API_KEY"],
+      "composio_managed_auth_schemes": [],
+      "is_local_toolkit": false,
+      "meta": {
+        "triggers_count": 11,
+        "tools_count": 686,
+        "description": "PostHog is an open-source product analytics platform tracking user interactions and behaviors to help teams refine features, improve funnels, and reduce churn",
+        "logo": "https://logos.composio.dev/api/posthog",
+        "app_url": "https://posthog.com/",
+        "categories": [
+          {
+            "id": "analytics",
+            "name": "analytics"
+          }
+        ],
+        "created_at": "2024-08-13T09:10:05.121Z",
+        "updated_at": "2026-11-08T11:16:45.396Z",
+        "version": "20261101_00"
+      },
+      "no_auth": false,
+      "auth_guide_url": null,
+      "deprecated": {
+        "toolkitId": "8153cee4-4659-48ec-9bd2-27b36603e42b"
+      }
+    }
+  ],
+  "details": {
+    "_1password": {
+      "name": "1password",
+      "slug": "_1password",
+      "composio_managed_auth_schemes": [],
+      "auth_config_details": [
+        {
+          "name": "onepassword_api_key",
+          "mode": "API_KEY",
+          "required_scopes": [],
+          "fields": {
+            "auth_config_creation": {
+              "required": [],
+              "optional": []
+            },
+            "connected_account_initiation": {
+              "required": [
+                {
+                  "name": "full",
+                  "displayName": "Base URL",
+                  "type": "string",
+                  "description": "For Connect Server: your self-hosted server URL (e.g., https://connect.example.com). For Events API: https://events.1password.com, https://events.ent.1password.com, https://events.1password.ca, or https://events.1password.eu based on your account server.",
+                  "required": true,
+                  "is_secret": false,
+                  "user_visible": true
+                },
+                {
+                  "name": "generic_api_key",
+                  "displayName": "Bearer Token",
+                  "type": "string",
+                  "description": "Service Account Token (ops_* prefix), Connect Server Access Token, or Events API Bearer Token. Get it from your 1Password account settings.",
+                  "required": true,
+                  "is_secret": true,
+                  "legacy_template_name": "api_key",
+                  "user_visible": true
+                }
+              ],
+              "optional": []
+            }
+          },
+          "auth_hint_url": null
+        }
+      ],
+      "auth_guide_url": null
+    },
+    "braze": {
+      "name": "Braze",
+      "slug": "braze",
+      "composio_managed_auth_schemes": [],
+      "auth_config_details": [
+        {
+          "name": "braze_api_key",
+          "mode": "API_KEY",
+          "required_scopes": [],
+          "fields": {
+            "auth_config_creation": {
+              "required": [],
+              "optional": []
+            },
+            "connected_account_initiation": {
+              "required": [
+                {
+                  "name": "full",
+                  "displayName": "REST Endpoint",
+                  "type": "string",
+                  "description": "Copy the exact REST endpoint shown for your workspace in Braze under Settings > APIs and Identifiers > API Keys, for example https://rest.iad-01.braze.com or https://rest.fra-01.braze.eu. Use the REST endpoint, not an SDK endpoint, and omit a trailing slash.",
+                  "required": true,
+                  "is_secret": false,
+                  "user_visible": true
+                },
+                {
+                  "name": "generic_api_key",
+                  "displayName": "REST API Key",
+                  "type": "string",
+                  "description": "Create or copy a server-side REST API key under Settings > APIs and Identifiers > API Keys in your Braze workspace. Use a separate Braze REST API key for each connected integration. The key must include every endpoint permission needed by the tools you use and the campaigns.list permission used to validate the connection. Braze does not allow a key's permissions or IP allowlist to be changed after creation, so create a replacement key if either must change.",
+                  "required": true,
+                  "is_secret": true,
+                  "user_visible": true
+                }
+              ],
+              "optional": []
+            }
+          },
+          "proxy": {
+            "base_url": "{{full}}"
+          },
+          "auth_hint_url": "https://www.braze.com/docs/api/basics#creating-a-rest-api-key"
+        }
+      ],
+      "auth_guide_url": null
+    }
+  }
+}

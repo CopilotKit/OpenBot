@@ -2746,7 +2746,7 @@ dependencies = [
 
 [[package]]
 name = "openbot-desktop"
-version = "0.3.4"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "block2",
@@ -2780,6 +2780,7 @@ dependencies = [
  "tauri-plugin-updater",
  "time",
  "windows 0.62.2",
+ "windows-registry",
  "zip 2.4.2",
 ]
 

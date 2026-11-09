@@ -1,4 +1,5 @@
 import type { IdentityProviders, LinkedAccount } from "@/lib/identity/queries";
+import { schemeNeedsKey } from "@/lib/plugins/enablement-notes";
 import { brokeredProvenance } from "@/lib/plugins/provider-vocabulary";
 import type { CatalogueItem, PluginServer } from "@/lib/plugins/queries";
 
@@ -131,8 +132,12 @@ export function connectionRows(input: {
           key: server.id,
           title: server.title,
           // No line rather than "Connect your Todoist account.", which only repeated the tile's
-          // Connect button.
-          summary: server.summary,
+          // Connect button. A key app not yet connected says it needs a key, so nobody who
+          // expected a sign-in is surprised when the page asks for one.
+          summary:
+            !input.connected.has(server.id) && schemeNeedsKey(server.authScheme)
+              ? `Needs a key from ${server.title}`
+              : server.summary,
           state: input.connected.has(server.id) ? "connected" : "available",
           mark: { kind: "logo", logo: server.logo },
         }),

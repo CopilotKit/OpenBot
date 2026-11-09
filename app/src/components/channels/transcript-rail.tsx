@@ -40,9 +40,9 @@ export function sameRail(a: RailProps, b: RailProps): boolean {
  * Hovering or focusing a mark previews its turn — what the person sent, and the start of the
  * reply — and choosing it goes there.
  *
- * Only where the margin is wide enough to hold it (`@3xl` of the scroller: the transcript's
- * `max-w-2xl` column and a gutter either side), and only once there is more than one turn to move
- * between.
+ * Only where the margin is wide enough to hold it clear of the messages (`@4xl` of the scroller,
+ * 896px: the transcript's 768px `max-w-3xl` column, and 64px either side for the marks and a gap
+ * after them), and only once there is more than one turn to move between.
  */
 export const TranscriptRail = memo(function TranscriptRail({
   turns,
@@ -64,7 +64,7 @@ export const TranscriptRail = memo(function TranscriptRail({
   return (
     <nav
       aria-label="Turns"
-      className="pointer-events-none absolute inset-y-0 left-2 z-10 hidden items-center @3xl:flex"
+      className="pointer-events-none absolute inset-y-0 left-2 z-10 hidden items-center @4xl:flex"
     >
       <ol
         className="pointer-events-auto flex max-h-[min(60vh,32rem)] flex-col overflow-y-auto py-2 [scrollbar-width:none]"
