@@ -193,6 +193,40 @@ impl Telemetry {
         self.change_account(None)
     }
 
+    /// Settings' Share usage data, turned off: the same as launching with the opt-out. The
+    /// identity, its account binding and every queued event are deleted, and nothing more is
+    /// recorded or sent.
+    pub fn stop_sharing(&self) -> Result<()> {
+        let mut guard = self.state.lock().map_err(|_| TelemetryError::Poisoned)?;
+        *guard = None;
+        match fs::remove_file(&self.state_path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Settings' Share usage data, turned back on: a fresh identity, with nothing from before the
+    /// opt-out. Setup is long finished by the time Settings can be reached, so activation is not
+    /// recorded a second time.
+    pub fn resume_sharing(&self) -> Result<()> {
+        if !self.config.enabled || telemetry_disabled(EnvOverride::Process) {
+            return Ok(());
+        }
+        let mut guard = self.state.lock().map_err(|_| TelemetryError::Poisoned)?;
+        if guard.is_some() {
+            return Ok(());
+        }
+        if let Some(parent) = self.state_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut state = PersistedState::new(new_uuid());
+        state.activated = true;
+        write_state(&self.state_path, &state)?;
+        *guard = Some(state);
+        Ok(())
+    }
+
     fn change_account(&self, account: Option<&str>) -> Result<()> {
         let mut guard = self.state.lock().map_err(|_| TelemetryError::Poisoned)?;
         let Some(current) = guard.as_ref() else {
@@ -928,6 +962,12 @@ fn write_state(path: &Path, state: &PersistedState) -> Result<()> {
 
 fn normalized_max_queue(configured: usize) -> usize {
     configured.clamp(1, 256)
+}
+
+/// `COPILOTKIT_TELEMETRY_DISABLED` or `DO_NOT_TRACK` in this app's own environment. Settings
+/// cannot turn sharing back on over it.
+pub fn disabled_by_environment() -> bool {
+    telemetry_disabled(EnvOverride::Process)
 }
 
 fn telemetry_disabled(env_override: EnvOverride) -> bool {

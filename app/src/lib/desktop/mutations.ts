@@ -1,9 +1,24 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import {
   type DesktopAppUpdateCheck,
+  type DesktopUsageData,
   desktopKeys,
   invokeDesktop,
 } from "./queries";
+
+/**
+ * Turn Share usage data on or off. The desktop app keeps the choice for the next launch, stops its
+ * own events and the CLI's at once, and starts the server with it the next time OpenBot starts.
+ * It answers with the setting as it now stands.
+ */
+export function setUsageDataMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (share: boolean): Promise<DesktopUsageData> =>
+      invokeDesktop("set_usage_data", { share }),
+    onSuccess: (usageData) =>
+      queryClient.setQueryData(desktopKeys.usageData, usageData),
+  });
+}
 
 function invalidateDesktop(queryClient: QueryClient) {
   return queryClient.invalidateQueries({ queryKey: desktopKeys.all });

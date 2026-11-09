@@ -2,19 +2,77 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use openbot_desktop_lib::{engine, local_eval, quiet, telemetry};
+use openbot_desktop_lib::{engine, local_eval, quiet, telemetry, usage_data};
 use tauri::Manager;
 
 pub struct DesktopTelemetry {
     emitter: Arc<telemetry::Telemetry>,
     runtime_env: Mutex<BTreeMap<String, String>>,
     identity_link: Mutex<()>,
+    /// The installation and account `telemetry link` last confirmed in this launch. Each link is a
+    /// CLI command with its own analytics, so a confirmed pair is not asked about again until a
+    /// new sign-in, a rotated installation, or the next launch.
+    linked: Mutex<Option<(String, String)>>,
+}
+
+impl DesktopTelemetry {
+    fn new(emitter: Arc<telemetry::Telemetry>) -> Self {
+        Self {
+            runtime_env: Mutex::new(fresh_runtime_env(&emitter)),
+            emitter,
+            identity_link: Mutex::new(()),
+            linked: Mutex::new(None),
+        }
+    }
+
+    /// An emitter in `data_dir`, sharing or not, for tests that drive the app's commands.
+    #[cfg(test)]
+    pub(crate) fn for_tests(data_dir: std::path::PathBuf, sharing: bool) -> Self {
+        let emitter = telemetry::Telemetry::open_with_env(
+            data_dir,
+            tests::context(),
+            telemetry::Config::disabled_for_tests(),
+            if sharing {
+                telemetry::EnvOverride::Enabled
+            } else {
+                telemetry::EnvOverride::Disabled
+            },
+        )
+        .unwrap();
+        Self::new(emitter)
+    }
+}
+
+/// What the server is started with: the emitter's identity and metadata, or the opt-out, and the
+/// app's own telemetry settings passed through.
+fn fresh_runtime_env(emitter: &telemetry::Telemetry) -> BTreeMap<String, String> {
+    let mut runtime_env = emitter.runtime_env();
+    for variable in [
+        "COPILOTKIT_TELEMETRY_DISABLED",
+        "DO_NOT_TRACK",
+        "COPILOTKIT_TELEMETRY_URL",
+    ] {
+        if let Ok(value) = std::env::var(variable) {
+            runtime_env.insert(variable.into(), value);
+        }
+    }
+    if emitter.install_id().is_none() || usage_data::off() {
+        runtime_env.insert("COPILOTKIT_TELEMETRY_DISABLED".into(), "1".into());
+    }
+    runtime_env
 }
 
 pub fn initialize<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    // Settings' Share usage data, as it was left. Off is the environment opt-out by another name.
+    let shared = app
+        .path()
+        .app_config_dir()
+        .map(|directory| usage_data::saved(&directory))
+        .unwrap_or(true);
+    usage_data::set_off(!shared);
     let initialized = (|| {
         let context = context(&app.package_info().version.to_string())?;
-        let emitter = telemetry::Telemetry::open(
+        let emitter = telemetry::Telemetry::open_with_env(
             app.path().app_local_data_dir().ok()?.join("telemetry"),
             context,
             telemetry::Config {
@@ -25,26 +83,14 @@ pub fn initialize<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
                 ),
                 max_queue: 256,
             },
+            if shared {
+                telemetry::EnvOverride::Process
+            } else {
+                telemetry::EnvOverride::Disabled
+            },
         )
         .ok()?;
-        let mut runtime_env = emitter.runtime_env();
-        for variable in [
-            "COPILOTKIT_TELEMETRY_DISABLED",
-            "DO_NOT_TRACK",
-            "COPILOTKIT_TELEMETRY_URL",
-        ] {
-            if let Ok(value) = std::env::var(variable) {
-                runtime_env.insert(variable.into(), value);
-            }
-        }
-        if emitter.install_id().is_none() {
-            runtime_env.insert("COPILOTKIT_TELEMETRY_DISABLED".into(), "1".into());
-        }
-        app.manage(DesktopTelemetry {
-            emitter,
-            runtime_env: Mutex::new(runtime_env),
-            identity_link: Mutex::new(()),
-        });
+        app.manage(DesktopTelemetry::new(emitter));
         Some(())
     })();
     if initialized.is_none() {
@@ -112,16 +158,82 @@ fn context(version: &str) -> Option<telemetry::Context> {
     })
 }
 
-/// Run on a worker alongside startup preparation, before the runtime reads its identity.
-/// Alias failures never prevent opening OpenBot; the next launch retries the same binding.
-pub fn link_account<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    let Some(state) = app.try_state::<DesktopTelemetry>() else {
-        return;
-    };
-    local_eval::cancel_background_telemetry();
-    if link_account_with(&state, local_eval::link_telemetry_installed).is_err() {
-        log::warn!("[telemetry] account link deferred until sign-in or Start");
+/// After a successful Start, on its own thread: Start never waits for attribution. The runtime
+/// was handed the identity as it stood; a link that changes it reaches the runtime at the next
+/// Start. The handshake yields to required CLI work and is bounded by the CLI's own budget (two
+/// calls of eight seconds each, plus termination grace), so it holds nothing up after it either.
+pub fn link_account_after_start<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let app = app.clone();
+    spawn_link(move || link_account_background(&app));
+}
+
+/// Settings' Share usage data: whether this installation shares, and whether the app's own
+/// environment turned it off, which Settings cannot override.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageData {
+    pub shared: bool,
+    pub off_by_environment: bool,
+}
+
+pub fn usage_data_now() -> UsageData {
+    let off_by_environment = telemetry::disabled_by_environment();
+    UsageData {
+        shared: !off_by_environment && !usage_data::off(),
+        off_by_environment,
     }
+}
+
+/// Turn sharing on or off from Settings. Kept for the next launch, and applied at once to the
+/// desktop's own events and to the CLI. The server reads it the next time OpenBot starts.
+pub fn set_usage_data<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    share: bool,
+) -> Result<UsageData, String> {
+    let directory = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| error.to_string())?;
+    let state = app.try_state::<DesktopTelemetry>();
+    set_usage_data_in(&directory, state.as_deref(), share)
+}
+
+fn set_usage_data_in(
+    directory: &std::path::Path,
+    state: Option<&DesktopTelemetry>,
+    share: bool,
+) -> Result<UsageData, String> {
+    if share && telemetry::disabled_by_environment() {
+        return Err("Usage data is turned off on this computer.".into());
+    }
+    usage_data::save(directory, share).map_err(|error| error.to_string())?;
+    usage_data::set_off(!share);
+    if let Some(state) = state {
+        if share {
+            state
+                .emitter
+                .resume_sharing()
+                .map_err(|error| error.to_string())?;
+        } else {
+            // A handshake already running stops; none starts again while sharing is off.
+            local_eval::cancel_background_telemetry();
+            state
+                .emitter
+                .stop_sharing()
+                .map_err(|error| error.to_string())?;
+        }
+        if let Ok(mut linked) = state.linked.lock() {
+            *linked = None;
+        }
+        if let Ok(mut environment) = state.runtime_env.lock() {
+            *environment = fresh_runtime_env(&state.emitter);
+        }
+    }
+    log::info!(
+        "[telemetry] usage data {} from Settings",
+        if share { "shared" } else { "turned off" }
+    );
+    Ok(usage_data_now())
 }
 
 /// A hook never queues another handshake behind an active one; Start remains the retry.
@@ -146,6 +258,12 @@ fn link_account_background_with(
     let Ok(_link) = state.identity_link.try_lock() else {
         return Ok(());
     };
+    // Confirmed already in this launch: not asked again until a new sign-in clears it.
+    if let (Some(id), Some(account)) = (state.emitter.install_id(), state.emitter.bound_account()) {
+        if state.linked.lock().map_err(|_| ())?.as_ref() == Some(&(id, account)) {
+            return Ok(());
+        }
+    }
     link_account_unlocked(state, link)
 }
 
@@ -176,6 +294,14 @@ pub fn finish_sign_in<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     result: Result<local_eval::AccountSignIn, local_eval::Failure>,
 ) -> Result<local_eval::AccountSignIn, local_eval::Failure> {
+    if result.as_ref().is_ok_and(|signed| signed.signed_in) {
+        // A new sign-in may be another account: ask again.
+        if let Some(state) = app.try_state::<DesktopTelemetry>() {
+            if let Ok(mut linked) = state.linked.lock() {
+                *linked = None;
+            }
+        }
+    }
     let app = app.clone();
     finish_sign_in_with(result, move || link_account_background(&app))
 }
@@ -220,7 +346,9 @@ fn spawn_link(link: impl FnOnce() + Send + 'static) {
     }
 }
 
-/// Keep the binding durable before invoking the CLI's permanent alias operation.
+/// Keep the binding durable before invoking the CLI's permanent alias operation. Waits for a
+/// handshake already running, where the app's own hooks skip it; tests drive the protocol here.
+#[cfg(test)]
 fn link_account_with(
     state: &DesktopTelemetry,
     link: impl FnMut(
@@ -241,6 +369,10 @@ fn link_account_unlocked(
     ) -> Result<local_eval::TelemetryIdentity, local_eval::Failure>,
 ) -> Result<(), ()> {
     for _ in 0..2 {
+        // Turned off in Settings: no identity, and no CLI call.
+        if usage_data::off() {
+            return Ok(());
+        }
         let Some(id) = state.emitter.install_id() else {
             return Ok(());
         };
@@ -260,7 +392,8 @@ fn link_account_unlocked(
             local_eval::TelemetryIdentity::Linked { account_id }
                 if account.as_deref() == Some(&account_id) =>
             {
-                return Ok(())
+                *state.linked.lock().map_err(|_| ())? = Some((id, account_id));
+                return Ok(());
             }
             local_eval::TelemetryIdentity::Account { account_id } => {
                 state.emitter.bind_account(&account_id).map_err(|_| ())?;
@@ -364,11 +497,198 @@ pub fn shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+/// A CLI pinned as this debug build's developer CLI, exactly as `local_eval::installed` checks one,
+/// that records each call and answers `telemetry link` with `skipped`. With `slow`, it takes longer
+/// to answer than the handshake's eight-second budget. Only for a test in its own process.
+#[cfg(test)]
+pub(crate) mod fake_cli {
+    use std::path::PathBuf;
+
+    const SOURCE: &str = r#"
+fn main() {
+    let exe = std::env::current_exe().unwrap();
+    let dir = exe.parent().unwrap().to_path_buf();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--warm") {
+        return;
+    }
+    let mut calls = std::fs::read_to_string(dir.join("calls")).unwrap_or_default();
+    calls.push_str(&args.join(" "));
+    calls.push('\n');
+    std::fs::write(dir.join("calls"), calls).unwrap();
+    if dir.join("slow").exists() {
+        std::thread::sleep(std::time::Duration::from_secs(30));
+    }
+    println!("{{\"type\":\"skipped\"}}");
+}
+"#;
+
+    pub(crate) struct FakeCli {
+        pub(crate) dir: PathBuf,
+    }
+
+    impl FakeCli {
+        pub(crate) fn pinned(label: &str, slow: bool) -> Self {
+            let dir = crate::test_support::temp_root(label);
+            std::fs::create_dir_all(&dir).unwrap();
+            let source = dir.join("cli.rs");
+            std::fs::write(&source, SOURCE).unwrap();
+            let program = dir.join(format!("cli{}", std::env::consts::EXE_SUFFIX));
+            crate::test_support::compile_fixture(&source, &program);
+            assert!(std::process::Command::new(&program)
+                .arg("--warm")
+                .status()
+                .unwrap()
+                .success());
+            if slow {
+                std::fs::write(dir.join("slow"), "").unwrap();
+            }
+            use sha2::Digest;
+            let digest: String = sha2::Sha256::digest(std::fs::read(&program).unwrap())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_PROGRAM", &program);
+            std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_PROGRAM_SHA256", digest);
+            Self { dir }
+        }
+
+        /// Every call so far, one line each, arguments space-separated.
+        pub(crate) fn calls(&self) -> String {
+            std::fs::read_to_string(self.dir.join("calls")).unwrap_or_default()
+        }
+
+        pub(crate) fn forget_calls(&self) {
+            let _ = std::fs::remove_file(self.dir.join("calls"));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::temp_root;
     use tauri::Manager;
+
+    /// Settings' Share usage data, turned off. It writes the same opt-out the environment variable
+    /// gives: kept for the next launch, the server started with `COPILOTKIT_TELEMETRY_DISABLED=1`
+    /// and no identity, and the desktop's identity and queue gone. And `telemetry link` is never
+    /// run again, by any of the app's hooks, against a real (pinned) CLI process.
+    #[test]
+    fn turning_usage_data_off_writes_the_opt_out_and_prevents_telemetry_link() {
+        if crate::test_support::isolated_process(
+            "desktop_telemetry::tests::turning_usage_data_off_writes_the_opt_out_and_prevents_telemetry_link",
+        ) {
+            return;
+        }
+        std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
+        std::env::remove_var("DO_NOT_TRACK");
+        let cli = fake_cli::FakeCli::pinned("usage-data-cli", false);
+        let settings = temp_root("usage-data-settings");
+        let app = tauri::test::mock_builder()
+            .manage(DesktopTelemetry::for_tests(
+                temp_root("usage-data-telemetry"),
+                true,
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let handle = app.handle().clone();
+        let state = app.state::<DesktopTelemetry>();
+        state.emitter.bind_account(&"a".repeat(64)).unwrap();
+
+        // Sharing: the hooks reach the CLI.
+        link_account_background(&handle);
+        assert!(
+            cli.calls().starts_with("telemetry link --installation-id "),
+            "{}",
+            cli.calls()
+        );
+        cli.forget_calls();
+
+        assert_eq!(
+            set_usage_data_in(&settings, Some(&state), false),
+            Ok(UsageData {
+                shared: false,
+                off_by_environment: false
+            })
+        );
+        assert!(!usage_data::saved(&settings), "kept for the next launch");
+        assert!(!usage_data_now().shared);
+        let environment = state.runtime_env.lock().unwrap().clone();
+        assert_eq!(
+            environment
+                .get("COPILOTKIT_TELEMETRY_DISABLED")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert!(!environment.contains_key("CPK_TELEMETRY_ID"));
+        assert_eq!(state.emitter.install_id(), None);
+
+        // Every hook that links: none reaches the CLI.
+        link_account_background(&handle);
+        let _ = finish_sign_in(&handle, Ok(local_eval::AccountSignIn { signed_in: true }));
+        let _ = finish_account_check(&handle, Ok(local_eval::Terms::NotRequired));
+        let _ = finish_account_setup(&handle, Ok(()));
+        link_account_after_start(&handle);
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        assert_eq!(cli.calls(), "", "opted out, yet `telemetry link` ran");
+
+        // On again: a fresh identity, and linking resumes.
+        set_usage_data_in(&settings, Some(&state), true).unwrap();
+        assert!(usage_data::saved(&settings));
+        assert!(state.emitter.install_id().is_some());
+        assert_eq!(
+            state.runtime_env.lock().unwrap().get("CPK_TELEMETRY_ID"),
+            state.emitter.install_id().as_ref()
+        );
+        link_account_background(&handle);
+        assert!(cli.calls().starts_with("telemetry link --installation-id "));
+    }
+
+    /// The environment opt-out wins: Settings cannot turn sharing on over it.
+    #[test]
+    fn settings_cannot_share_over_the_environment_opt_out() {
+        if crate::test_support::isolated_process(
+            "desktop_telemetry::tests::settings_cannot_share_over_the_environment_opt_out",
+        ) {
+            return;
+        }
+        std::env::set_var("DO_NOT_TRACK", "1");
+        let settings = temp_root("usage-data-environment");
+        assert_eq!(
+            usage_data_now(),
+            UsageData {
+                shared: false,
+                off_by_environment: true
+            }
+        );
+        assert!(set_usage_data_in(&settings, None, true).is_err());
+        assert!(usage_data::saved(&settings), "nothing was written");
+    }
+
+    /// `telemetry link` is a CLI command with its own analytics. Once it confirmed this
+    /// installation's account, later hooks in the same launch do not ask again; a new sign-in does.
+    #[test]
+    fn a_confirmed_link_is_not_asked_again_until_a_new_sign_in() {
+        let state = identity_state(true);
+        let account = "a".repeat(64);
+        state.emitter.bind_account(&account).unwrap();
+        let calls = std::cell::Cell::new(0);
+        let linked = |_: &local_eval::Installation, _: Option<&str>| {
+            calls.set(calls.get() + 1);
+            Ok(local_eval::TelemetryIdentity::Linked {
+                account_id: "a".repeat(64),
+            })
+        };
+        for _ in 0..5 {
+            assert!(link_account_background_with(&state, linked).is_ok());
+        }
+        assert_eq!(calls.get(), 1);
+        // What a successful sign-in does before it links.
+        *state.linked.lock().unwrap() = None;
+        assert!(link_account_background_with(&state, linked).is_ok());
+        assert_eq!(calls.get(), 2);
+    }
 
     fn identity_state(enabled: bool) -> DesktopTelemetry {
         let emitter = telemetry::Telemetry::open_with_env(
@@ -382,11 +702,7 @@ mod tests {
             },
         )
         .unwrap();
-        DesktopTelemetry {
-            runtime_env: Mutex::new(emitter.runtime_env()),
-            emitter,
-            identity_link: Mutex::new(()),
-        }
+        DesktopTelemetry::new(emitter)
     }
 
     #[test]
@@ -701,7 +1017,7 @@ mod tests {
         assert_eq!(calls, 2);
     }
 
-    fn context() -> telemetry::Context {
+    pub(super) fn context() -> telemetry::Context {
         telemetry::Context {
             distribution: telemetry::Distribution::Desktop,
             app_version: telemetry::NumericVersion::parse("1.2.3").unwrap(),
@@ -733,11 +1049,7 @@ mod tests {
             )
             .unwrap();
             let app = tauri::test::mock_builder()
-                .manage(DesktopTelemetry {
-                    emitter,
-                    runtime_env: Mutex::new(BTreeMap::new()),
-                    identity_link: Mutex::new(()),
-                })
+                .manage(DesktopTelemetry::new(emitter))
                 .invoke_handler(tauri::generate_handler![crate::record_setup_event])
                 .build(tauri::test::mock_context(tauri::test::noop_assets()))
                 .unwrap();

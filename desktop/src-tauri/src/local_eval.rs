@@ -2471,6 +2471,10 @@ fn cli_environment(
             command.env(name, value);
         }
     }
+    // Share usage data turned off in Settings is the same opt-out as the variable.
+    if crate::usage_data::off() {
+        command.env("COPILOTKIT_TELEMETRY_DISABLED", "1");
+    }
     // Docker's configuration without the person's credential helper, which macOS stops to ask
     // about when OpenBot runs it, so the chart and image downloads never wait on a dialog. See
     // `docker_config`. The person's own configuration is what it mirrors.
@@ -3720,19 +3724,6 @@ pub enum TelemetryIdentity {
     Linked { account_id: String },
     SignedOut,
     Skipped,
-}
-
-/// Link only after the desktop has durably saved the account returned by the first call.
-/// Credentials and the account's email stay in the CLI. Old CLIs fail without blocking setup.
-pub fn link_telemetry_installed(
-    installation: &Installation,
-    account: Option<&str>,
-) -> Result<TelemetryIdentity, Failure> {
-    let cancel = Cancel::default();
-    one_at_a_time(&cancel, telemetry_link_limits(), |limits| {
-        let cli = installed()?;
-        link_telemetry(&cli, installation, account, limits, &cancel)
-    })
 }
 
 /// Background attribution never queues ahead of required CLI work, and yields if it arrives.
@@ -6091,7 +6082,7 @@ fn main() {
     std::fs::write(dir.join("argv"), args.join("\n")).unwrap();
     std::fs::write(dir.join("cwd"), std::env::current_dir().unwrap().display().to_string()).unwrap();
     let inherited = |name: &str| format!("{name}={}", std::env::var(name).is_ok());
-    std::fs::write(dir.join("env"), [inherited("NODE_OPTIONS"), inherited("HOME"), inherited("DO_NOT_TRACK")].join("\n")).unwrap();
+    std::fs::write(dir.join("env"), [inherited("NODE_OPTIONS"), inherited("HOME"), inherited("DO_NOT_TRACK"), inherited("COPILOTKIT_TELEMETRY_DISABLED")].join("\n")).unwrap();
     let scenario = std::fs::read_to_string(dir.join("scenario")).unwrap();
     let (mode, body) = scenario.split_once('\n').unwrap_or((scenario.as_str(), ""));
     match mode {
@@ -6825,6 +6816,33 @@ fn main() {{
             std::env::var_os("HOME").is_some(),
             "{env}"
         );
+    }
+
+    /// Share usage data turned off in Settings reaches the CLI as the variable it reads, though
+    /// nothing in the app's own environment set it.
+    #[test]
+    fn usage_data_turned_off_in_settings_reaches_the_cli_as_its_opt_out() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::usage_data_turned_off_in_settings_reaches_the_cli_as_its_opt_out",
+        ) {
+            return;
+        }
+        std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
+        let fixture = Fixture::new("local-eval-usage-data", &format!("0\n{}", envelope()));
+        let run = || {
+            fixture
+                .run(
+                    Action::Status,
+                    Limits::for_action(Action::Status),
+                    &Cancel::default(),
+                )
+                .unwrap();
+            std::fs::read_to_string(fixture.root.join("env")).unwrap()
+        };
+        assert!(run().contains("COPILOTKIT_TELEMETRY_DISABLED=false"));
+        crate::usage_data::set_off(true);
+        let env = run();
+        assert!(env.contains("COPILOTKIT_TELEMETRY_DISABLED=true"), "{env}");
     }
 
     fn listing(stacks: Value) -> Value {

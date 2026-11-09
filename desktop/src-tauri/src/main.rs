@@ -2648,6 +2648,8 @@ async fn start_stack_now<R: tauri::Runtime>(
     // Setup is done once OpenBot starts: the window hands over to it at once. Recorded once.
     if started.is_ok() {
         desktop_telemetry::record(&menus, telemetry::EventData::Activated);
+        // Attribution after Start, in the background: OpenBot is already open.
+        desktop_telemetry::link_account_after_start(&menus);
     }
     started
 }
@@ -2694,12 +2696,6 @@ async fn start_stack_inner<R: tauri::Runtime>(
     // Named rather than inlined: the Bot choice below reads it, the store file is written from it,
     // and reading the model screen twice could not be relied on to give the same answer.
     let credential = start_stack_credential(&root, model)?;
-    let identity_app = app.clone();
-    // Run alongside engine and image preparation. Only the runtime environment needs the
-    // resulting identity, so optional telemetry does not delay the preceding setup work.
-    let identity_link = std::thread::Builder::new()
-        .name("openbot-account-link".into())
-        .spawn(move || desktop_telemetry::link_account(&identity_app));
 
     /*
      * A PLAN CHOOSES ITS OWN BOT, because only one Bot can spend it.
@@ -2969,13 +2965,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
                 secrets.insert(key.into(), value.clone());
             }
         }
-        // Join only at the identity handoff, after vault, port and image preparation.
-        if identity_link
-            .map(|worker| worker.join().is_err())
-            .unwrap_or(true)
-        {
-            eprintln!("[telemetry] account link worker did not complete");
-        }
+        // The identity as it stands: Start never waits for `telemetry link`, which runs after it.
         // Handed to Compose with the rest; a service receives only what the Compose file names.
         secrets.extend(desktop_telemetry::runtime_env(&app));
         // After the credential store has been written, so the token never is. See where it is
@@ -15247,6 +15237,75 @@ fn main() {
         );
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
+    }
+
+    /// Start never waits for account attribution. A CLI that takes longer than the handshake's
+    /// eight-second budget to answer `telemetry link` must not show in how long Start takes: the
+    /// runtime is handed the identity as it stands, and the link runs after Start, in the
+    /// background.
+    #[test]
+    fn start_does_not_wait_for_a_slow_telemetry_link() {
+        if crate::test_support::isolated_process(
+            "tests::start_does_not_wait_for_a_slow_telemetry_link",
+        ) {
+            return;
+        }
+        std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
+        std::env::remove_var("DO_NOT_TRACK");
+        let cli = desktop_telemetry::fake_cli::FakeCli::pinned("openbot-slow-link-cli", true);
+        let root = temp_root("openbot-slow-link-start");
+        write_installed_deployment(&root);
+        remember_local_intelligence_key(&root);
+        let record = temp_root("openbot-slow-link-record").join("commands.log");
+        std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
+        let _path = SerializedPath::set_only_with("docker", "dead-service");
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .manage(desktop_telemetry::DesktopTelemetry::for_tests(
+                temp_root("openbot-slow-link-telemetry"),
+                true,
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+
+        let asked = std::time::Instant::now();
+        let problem = tauri::async_runtime::block_on(start_stack_inner(
+            app.handle().clone(),
+            root.clone(),
+            "https://intelligence.example.test".into(),
+            "wss://gateway.example.test".into(),
+            ChosenModel {
+                provider: "openai".into(),
+                login: "api-key".into(),
+                api_key: Some("synthetic-openai-key".into()),
+                base_url: None,
+                container_base_url: None,
+                model: None,
+                token: None,
+                saved: Some(false),
+            },
+            None,
+        ))
+        .expect_err("the fixture's dead service fails Start after the identity handoff");
+        let took = asked.elapsed();
+
+        assert_eq!(problem.said, "Part of OpenBot stopped during startup.");
+        let commands = std::fs::read_to_string(&record).expect("command record");
+        assert!(
+            commands.contains(
+                "\tcompose up -d --no-build --pull never postgres agent-computer server worker\n"
+            ),
+            "Start reached the runtime handoff: {commands}"
+        );
+        assert!(
+            took < std::time::Duration::from_secs(5),
+            "Start waited {took:?} on a slow telemetry link (calls: {})",
+            cli.calls()
+        );
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
+        let _ = std::fs::remove_dir_all(&cli.dir);
     }
 
     /// The personal edition raises no bundled Bot, so one an earlier Start left exited is neither
