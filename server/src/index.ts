@@ -847,6 +847,20 @@ const reviewActions = createModelCompleter({
   resolveApiKey: resolveDeploymentModelKey,
 });
 
+/**
+ * Writes a boundary from an admin's description, and reads it back (computer/policy-translate.ts).
+ * The deployment's own model, with longer to answer than the router: an admin pressed a button and
+ * is waiting for a rule, which is a longer answer than a router's one name, and a reasoning model
+ * spends seconds before it starts.
+ */
+const writeBoundaries = createModelCompleter({
+  model: runtimeModel,
+  resolveApiKey: resolveDeploymentModelKey,
+  timeoutMs: 45_000,
+  // Room for the thinking a current Claude model does before it answers, which counts against it.
+  maxTokens: 16_000,
+});
+
 /*
  * The pair a headless turn is driven through, built ONCE.
  *
@@ -3181,6 +3195,7 @@ const app = createApp(
         }
       : {}),
     learningModel: learningModelEndpoint,
+    boundaryWriter: writeBoundaries,
     personalLearning: {
       store: learningSharingStore,
       ...(learningModelEndpoint?.calls

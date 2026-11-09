@@ -10,6 +10,7 @@ import { encryptSecret, resolveModelApiKey } from "../src/credentials";
 import {
   anthropicMessagesUrl,
   createModelCompleter,
+  ModelNotConfiguredError,
   routingModelFor,
 } from "../src/routing/model";
 import { validateTenantPackage } from "../src/tenant-package";
@@ -644,5 +645,105 @@ describe("the router's fast model", () => {
     } finally {
       await server.stop(true);
     }
+  });
+});
+
+describe("an answer held to a schema", () => {
+  const schema = {
+    name: "boundary_rule",
+    schema: {
+      type: "object",
+      properties: { rule: { type: "string" } },
+      required: ["rule"],
+      additionalProperties: false,
+    },
+  };
+
+  test("Anthropic is asked through output_config.format, with the caller's output cap", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch(request) {
+        bodies.push((await request.json()) as Record<string, unknown>);
+        return Response.json({
+          content: [{ type: "text", text: '{"rule":"true"}' }],
+        });
+      },
+    });
+    try {
+      process.env.ANTHROPIC_BASE_URL = server.url.origin;
+      const complete = createModelCompleter({
+        model: anthropicModel,
+        resolveApiKey: async () => "synthetic-key",
+        maxTokens: 16_000,
+      });
+      expect(await complete("Write it.", undefined, { schema })).toBe(
+        '{"rule":"true"}',
+      );
+      expect(bodies[0]).toMatchObject({
+        max_tokens: 16_000,
+        output_config: {
+          format: { type: "json_schema", schema: schema.schema },
+        },
+      });
+      expect(bodies[0]).not.toHaveProperty("response_format");
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test("a model that refuses the schema with a 400 is asked once more without it", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch(request) {
+        const body = (await request.json()) as Record<string, unknown>;
+        bodies.push(body);
+        const format = (body.response_format as { type?: string }).type;
+        return format === "json_schema"
+          ? Response.json(
+              { error: { message: "response_format json_schema unsupported" } },
+              { status: 400 },
+            )
+          : Response.json({
+              choices: [{ message: { content: '{"rule":"true"}' } }],
+            });
+      },
+    });
+    try {
+      process.env.OPENAI_BASE_URL = `${server.url.origin}/v1`;
+      const complete = createModelCompleter({
+        model: packageModel,
+        resolveApiKey: async () => "synthetic-key",
+      });
+      expect(await complete("Write it.", undefined, { schema })).toBe(
+        '{"rule":"true"}',
+      );
+      expect(bodies.map((body) => body.response_format)).toEqual([
+        {
+          type: "json_schema",
+          json_schema: {
+            name: "boundary_rule",
+            schema: schema.schema,
+            strict: true,
+          },
+        },
+        { type: "json_object" },
+      ]);
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test("no key and no plan is its own error, so a caller can say a model is needed", async () => {
+    const complete = createModelCompleter({
+      model: packageModel,
+      resolveApiKey: async () => null,
+    });
+    await expect(complete("Write it.")).rejects.toBeInstanceOf(
+      ModelNotConfiguredError,
+    );
   });
 });
