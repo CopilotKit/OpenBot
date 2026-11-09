@@ -141,9 +141,6 @@ deployment:
 - A chart whose figures are still arriving shows "Drawing the chart…" at the chart's own height,
   where it said "There is no data to chart." A chart that was stopped, or has no figures, still says
   so.
-- **A bar chart with long names lies down**, largest first, with each name in full beside its bar
-  (over it in a narrow chat) and its figure at the bar's end, where "Chart Hacker News" cut every
-  story to "2. Car unlo…". Bars with short names still stand up as before.
 - **+ and Shift+N open a new conversation with To: empty** and the Bot menu open, in the personal
   edition and wherever there is only one Bot, where since 0.3.3 they started with your Bot picked. A
   Bot's own Message link still starts with that Bot, and Send with nobody in To: still keeps the
@@ -171,8 +168,6 @@ deployment:
   host-grant-15407-… for shopper-bot".
 - An opened "Looked for a tool" step lists the tools the Bot found by name ("Send email on Gmail"),
   where it showed their ids and the descriptions the search returned to the Bot.
-- The marks for each turn on the left of a conversation no longer sit on the first letters of a
-  Bot's replies. They show only where the window leaves room for them beside the messages.
 
 ### Personal edition
 
@@ -232,10 +227,16 @@ deployment:
   "1Password" where it said "1password". An app added before the upgrade keeps its name.
 - Onboarding's Welcome says "Give work to Bots in plain words.", where it said "Hand work to Bots".
 - Onboarding's Book a demo step has one button under the calendar, **Not now**, which moves on
-  without booking. It had Continue beside Not now, which read as going on with the booking. Once
-  you book a time in the calendar, Not now becomes **Continue**.
-- The "Browse Google Maps" starter task asks the Bot to list the walking directions from King's
+  without booking, where Continue sat beside it. Once you book a time, it becomes **Continue**. If
+  the calendar can't load, Book a call and Not now show as before.
+- The Browse Google Maps starter task asks the Bot to list the walking directions from King's
   Cross step by step, where a Bot could reply with only the walking time and distance.
+- A bar chart with any name longer than 12 characters lies on its side, largest first, with each
+  name beside its bar (above it in a narrow chat) on up to two lines, the whole name on hover, and
+  its figure at the bar's end. "Chart Hacker News" cut every story to a few letters ("2. Car
+  unlo…"). Bars with short names still stand up as before.
+- The marks for each turn on the left of a conversation show only where the window leaves room for
+  them beside the messages, so they never sit on the first letters of a Bot's replies.
 
 ## 0.3.4
 
