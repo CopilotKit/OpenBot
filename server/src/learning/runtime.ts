@@ -244,8 +244,9 @@ export function createLearningRuntime(options: {
   personalWaitMs?: number;
   now?: () => number;
   /**
-   * Whether `containerId` is the environment's container, found missing on this Intelligence and
-   * forgotten (`ConfiguredLearningContainer.forgotten` in learning/settings.ts).
+   * Whether `containerId` was found missing on this Intelligence: the environment's container,
+   * forgotten (`ConfiguredLearningContainer.forgotten` in learning/settings.ts), or the saved
+   * default, set aside (`LearningSettingsStore.isSetAside`).
    */
   forgotten?: (containerId: string) => boolean;
 }) {

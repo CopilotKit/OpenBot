@@ -257,15 +257,82 @@ function parseLabels(
 }
 
 /**
+ * Where a saved rule came from, when it was not typed as CEL: a sentence in plain English that a model
+ * turned into the rule the admin then approved. Recorded with the save, so the trail can answer what
+ * the admin asked for as well as what was enforced.
+ */
+export type PolicyAuthoring = { source: "english"; text: string };
+
+const MAX_AUTHORING_TEXT = 2_000;
+
+/** The optional `authoring` a save carries, refused rather than dropped when it is malformed. */
+export function parsePolicyAuthoring(
+  input: unknown,
+): { ok: true; authoring?: PolicyAuthoring } | { ok: false; error: string } {
+  if (input === undefined || input === null) return { ok: true };
+  const candidate = input as { source?: unknown; text?: unknown };
+  const text = typeof candidate.text === "string" ? candidate.text.trim() : "";
+  if (
+    typeof input !== "object" ||
+    candidate.source !== "english" ||
+    !text ||
+    text.length > MAX_AUTHORING_TEXT
+  ) {
+    return {
+      ok: false,
+      error: `authoring must be { source: "english", text } with text of at most ${MAX_AUTHORING_TEXT} characters.`,
+    };
+  }
+  return { ok: true, authoring: { source: "english", text } };
+}
+
+type RuleChange = { list: "deny" | "allow"; rule: string; name?: string };
+
+/** The rules in `from` that `to` does not have, list by list, each with its name where it has one. */
+function rulesOnlyIn(from: ActionPolicy, to: ActionPolicy): RuleChange[] {
+  return (["deny", "allow"] as const).flatMap((list) =>
+    from[list]
+      .filter((rule) => !to[list].includes(rule))
+      .map((rule) => {
+        const name = from.labels?.[rule]?.name;
+        return { list, rule, ...(name ? { name } : {}) };
+      }),
+  );
+}
+
+/**
+ * What a save changed, as `computer.policy_changed` records it: who, the rules added and removed, the
+ * mode either side, and the whole policy before and after, so the trail alone can say what the
+ * boundary was at any moment. A rule has no identity apart from its text, so an edited rule is the
+ * old text removed and the new text added.
+ */
+export function policyChange(
+  before: ActionPolicy,
+  after: ActionPolicy,
+  by: string,
+  authoring?: PolicyAuthoring,
+): Record<string, unknown> {
+  return {
+    by,
+    added: rulesOnlyIn(after, before),
+    removed: rulesOnlyIn(before, after),
+    mode: { before: before.mode, after: after.mode },
+    before: clone(before),
+    after: clone(after),
+    ...(authoring ? { authoring } : {}),
+  };
+}
+
+/**
  * Validate a policy that arrived over HTTP.
  *
  * Rejects rather than coerces. A policy is the thing standing between a Bot and somebody's live
  * website, and "we accepted your rule but not in the shape you wrote it" is the one behaviour that
  * must never happen here: an operator would believe a restriction is in force when it is not.
  *
- * Expressions are NOT validated for correctness on the way in, only for being strings. Whether a rule
- * is meaningful is the policy engine's business, it fails closed there, and pre-validating here would
- * mean two parsers to keep in agreement.
+ * Only the shape is checked here. Whether each rule can be evaluated is `checkPolicyRule`'s question
+ * (`./policy.ts`), asked by the routes that save and replay a policy, with cel-js's own parser, so
+ * there is one parser and nothing to keep in agreement with it.
  */
 export function parseActionPolicy(
   input: unknown,

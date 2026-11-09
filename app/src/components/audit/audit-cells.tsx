@@ -605,6 +605,35 @@ function refusalLine(payload: Record<string, unknown>): string | undefined {
 }
 
 /**
+ * What a boundary save changed, one line each: the rules added and removed by their names, trial
+ * mode switched, and the sentence a rule was written from when it was written in plain English.
+ */
+function policyChangeLines(payload: Record<string, unknown>): string[] {
+  const named = (changes: unknown) =>
+    Array.isArray(changes)
+      ? changes
+          .map((change: { name?: unknown; rule?: unknown }) =>
+            typeof change?.name === "string" && change.name
+              ? change.name
+              : change?.rule,
+          )
+          .filter((name): name is string => typeof name === "string")
+      : [];
+  const mode = (payload.mode ?? {}) as { before?: unknown; after?: unknown };
+  const authoring = (payload.authoring ?? {}) as { text?: unknown };
+  return [
+    ...named(payload.added).map((name) => `Added: ${name}`),
+    ...named(payload.removed).map((name) => `Removed: ${name}`),
+    ...(mode.before !== mode.after && typeof mode.after === "string"
+      ? [mode.after === "dry-run" ? "Trial mode on" : "Trial mode off"]
+      : []),
+    ...(typeof authoring.text === "string"
+      ? [`Written from: “${authoring.text}”`]
+      : []),
+  ];
+}
+
+/**
  * Why a component was not shown, for a page anybody can open. The stored reason is the one the Bot
  * is given, which names the component and its data by their ids and sends the person to an admin.
  */
@@ -707,6 +736,8 @@ export function decisionDetails(
   const silence =
     event.eventType === "agent.stream_stalled" ? silenceOf(payload) : null;
   if (silence) lines.push(silence);
+  if (event.eventType === "computer.policy_changed")
+    lines.push(...policyChangeLines(payload));
   // Show concrete policy rules, but suppress the uninformative default `true` allow rule.
   if (storedNames && decision.rule && decision.rule !== "true")
     lines.push(decision.rule);
@@ -936,6 +967,9 @@ const DECISIONS: Record<string, string> = {
   "agent.stream_stalled": "The Bot stopped responding",
   "agent.tool_limit_refused": "Too many tools for its model",
   "computer.policy_loaded": "Boundary at start-up",
+  "computer.policy_changed": "Boundaries saved",
+  // A draft for the admin to read. Not "Allowed": nothing was decided and nothing changed.
+  "computer.policy_translated": "Drafted, not saved",
   "computer.isolation_loaded": "Isolation at start-up",
   "computer.control_taken": "A person took control",
   "computer.control_released": "Control went back to the Bot",

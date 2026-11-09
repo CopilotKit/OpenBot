@@ -72,6 +72,8 @@ export const computerKeys = {
   all: ["computers"] as const,
   fleet: () => ["computers", "fleet"] as const,
   policy: () => ["computers", "policy"] as const,
+  dryRun: (candidate: ActionPolicy) =>
+    ["computers", "policy", "dry-run", candidate] as const,
   status: (botId: string) => ["computers", "status", botId] as const,
 };
 
@@ -128,12 +130,17 @@ export function actionPolicyQueryOptions() {
 export type DryRunChange = {
   id: string;
   createdAt: string;
+  /** A Bot's computer action, or a call to a tool on an app. */
+  kind: "computer" | "app";
+  /** The computer's tool (`computer_click`), or the app's tool as `<app>/<tool>`. */
   action: string;
   bot: string;
   page: string;
   element: { role: string; name: string } | null;
   command: string | null;
   file: string | null;
+  /** What started the run: a person, a routine, a handoff. */
+  initiator: { kind: string; id: string };
   was: "allowed" | "refused";
   would: "allowed" | "refused";
   rule: string | null;
@@ -150,10 +157,11 @@ export type DryRunReport = {
 };
 
 /**
- * What would this policy have decided, about recent recorded actions?
+ * What would this policy have decided, about recent recorded actions: a Bot's computer actions and
+ * its app calls alike?
  *
- * A plain function rather than a query: the answer is about this candidate at this moment, nothing
- * caches it and nothing invalidates it. It writes nothing — not the policy, and no audit row.
+ * It writes nothing, not the policy and no audit row. A rule that can't be evaluated is refused with
+ * the server's sentence saying why, and nothing is replayed.
  */
 export async function dryRunActionPolicy(
   candidate: ActionPolicy,
@@ -162,5 +170,20 @@ export async function dryRunActionPolicy(
     method: "POST",
     body: { policy: candidate },
     fallback: "The rule could not be tested against history.",
+  });
+}
+
+/**
+ * The dry-run of one candidate, as a query, so a screen can run it as a rule is typed.
+ *
+ * Keyed by the candidate itself: the answer is about those rules and nothing else, and typing back to
+ * a rule already tried answers from the cache. A rule that doesn't compile is an answer, not a fault,
+ * so it is not retried.
+ */
+export function policyDryRunQueryOptions(candidate: ActionPolicy) {
+  return queryOptions({
+    queryKey: computerKeys.dryRun(candidate),
+    queryFn: (): Promise<DryRunReport> => dryRunActionPolicy(candidate),
+    retry: false,
   });
 }

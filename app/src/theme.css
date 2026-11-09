@@ -8,7 +8,7 @@
    * is CopilotKit's pale lavender, the grays lean towards its lilac, the ring is its periwinkle, and
    * the selected sidebar row is a lilac tint. Only shadcn's own tokens, so a stock shadcn theme drops in.
    */
-  --background: oklch(0.993 0.002 286.4);
+  --background: oklch(0.983 0.003 286.4);
   --foreground: oklch(0.108 0.015 220.9);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.108 0.015 220.9);
@@ -103,7 +103,8 @@ body {
   min-height: 100vh;
   background: var(--background);
   color: var(--foreground);
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  /* "Inter Variable" is the face @fontsource-variable/inter loads; plain Inter matches only one installed locally. */
+  font-family: "Inter Variable", Inter, ui-sans-serif, system-ui, sans-serif;
 }
 
 /*

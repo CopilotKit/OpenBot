@@ -1,7 +1,18 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import {
+  DescribeRule,
+  type WrittenRule,
+} from "@/components/boundaries/describe-rule";
 import { DryRunChanges } from "@/components/boundaries/dry-run-changes";
+import { RulePreview } from "@/components/boundaries/rule-preview";
+import { RuleReading } from "@/components/boundaries/rule-reading";
 import {
   PageCard,
   PageSection,
@@ -16,13 +27,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ruleLabel, withoutRule } from "@/lib/boundaries/rules";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  ruleLabel,
+  withoutRule,
+  withRuleReplaced,
+} from "@/lib/boundaries/rules";
 import { saveActionPolicyMutationOptions } from "@/lib/computers/mutations";
 import {
   type ActionPolicy,
   actionPolicyQueryOptions,
-  dryRunActionPolicy,
+  policyDryRunQueryOptions,
 } from "@/lib/computers/queries";
+
+/** How long the rule has to rest before it is replayed, as on Add rule. */
+const PREVIEW_DELAY_MS = 400;
 
 export const Route = createFileRoute("/_authed/admin/boundaries_/$index")({
   component: RulePage,
@@ -65,7 +85,8 @@ function RulePage() {
       </PageShell>
     );
   }
-  return <RuleDetail policy={policy} rule={rule} />;
+  // Keyed by the rule, so a saved change starts the editor and its preview afresh from what is stored.
+  return <RuleDetail key={rule} policy={policy} rule={rule} />;
 }
 
 function RuleDetail({ policy, rule }: { policy: ActionPolicy; rule: string }) {
@@ -77,12 +98,10 @@ function RuleDetail({ policy, rule }: { policy: ActionPolicy; rule: string }) {
 
   /*
    * What this rule has stopped, read as the difference it makes: the policy without it, replayed
-   * over recent actions, would have allowed exactly the ones it stopped.
+   * over recent actions, would have allowed exactly the ones it stopped. A Bot's computer actions
+   * and its app calls alike, so a rule about an app shows the calls it stopped.
    */
-  const reach = useQuery({
-    queryKey: ["computers", "policy", "reach", rule],
-    queryFn: () => dryRunActionPolicy(withoutRule(policy, rule)),
-  });
+  const reach = useQuery(policyDryRunQueryOptions(withoutRule(policy, rule)));
 
   const remove = () =>
     savePolicy.mutate(withoutRule(policy, rule), {
@@ -106,11 +125,7 @@ function RuleDetail({ policy, rule }: { policy: ActionPolicy; rule: string }) {
         description="Written in CEL. It is checked before every action a Bot takes."
         title="Rule"
       >
-        <PageCard className="mt-4">
-          <code className="block whitespace-pre-wrap break-all font-mono text-xs">
-            {rule}
-          </code>
-        </PageCard>
+        <RuleEditor policy={policy} rule={rule} />
       </PageSection>
 
       <PageSection title="Recently stopped">
@@ -135,6 +150,7 @@ function RuleDetail({ policy, rule }: { policy: ActionPolicy; rule: string }) {
                 (change) => change.would === "allowed",
               )}
               total={reach.data.wouldAllow}
+              verdict="Stopped"
             />
           </>
         )}
@@ -186,5 +202,130 @@ function RuleDetail({ policy, rule }: { policy: ActionPolicy; rule: string }) {
         </DialogContent>
       </Dialog>
     </PageShell>
+  );
+}
+
+/**
+ * The rule, editable in CEL or rewritten from a description, and saved only by Save rule.
+ *
+ * A changed rule is replayed on its own as it rests, as Add rule replays a new one, so what the new
+ * version would have stopped sits right above what the rule in force has stopped. Saved, it takes
+ * the old rule's place and name.
+ */
+function RuleEditor({ policy, rule }: { policy: ActionPolicy; rule: string }) {
+  const queryClient = useQueryClient();
+  const savePolicy = useMutation(saveActionPolicyMutationOptions(queryClient));
+  const [draft, setDraft] = useState(rule);
+  const [written, setWritten] = useState<WrittenRule | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const trimmed = draft.trim();
+  const changed = trimmed !== rule;
+  const duplicate = changed && policy.deny.includes(trimmed);
+  // The model's rule, unedited, that the compiler refused: its error is already under the rule.
+  const broken = Boolean(
+    written && !written.compile.ok && written.rule.trim() === trimmed,
+  );
+  const ready = changed && Boolean(trimmed) && !duplicate && !broken;
+
+  const [settled, setSettled] = useState(rule);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(trimmed), PREVIEW_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [trimmed]);
+  const candidate: ActionPolicy | null =
+    settled && settled !== rule && !policy.deny.includes(settled) && !broken
+      ? { mode: policy.mode, deny: [settled], allow: ["true"] }
+      : null;
+  const preview = useQuery({
+    ...policyDryRunQueryOptions(
+      candidate ?? { mode: "enforce", deny: [], allow: [] },
+    ),
+    enabled: candidate !== null,
+    placeholderData: keepPreviousData,
+  });
+
+  /* The model's rule goes into the CEL field, where the preview picks it up as it would any edit. */
+  const takeWritten = (next: WrittenRule) => {
+    setWritten(next);
+    setDraft(next.rule);
+  };
+
+  const reset = () => {
+    setDraft(rule);
+    setWritten(null);
+    setProblem(null);
+  };
+
+  const save = () => {
+    if (!ready) return;
+    setProblem(null);
+    savePolicy.mutate(
+      {
+        ...withRuleReplaced(policy, rule, trimmed),
+        ...(written
+          ? { authoring: { source: "english" as const, text: written.text } }
+          : {}),
+      },
+      { onError: (thrown: Error) => setProblem(thrown.message) },
+    );
+  };
+
+  return (
+    <form
+      className="mt-4"
+      noValidate
+      onSubmit={(event) => {
+        event.preventDefault();
+        save();
+      }}
+    >
+      <PageCard
+        footer={
+          changed ? (
+            <>
+              <Button onClick={reset} type="button" variant="outline">
+                Cancel
+              </Button>
+              <Button disabled={!ready || savePolicy.isPending} type="submit">
+                {savePolicy.isPending ? "Saving…" : "Save rule"}
+              </Button>
+            </>
+          ) : undefined
+        }
+      >
+        <FieldGroup>
+          <DescribeRule onWritten={takeWritten} />
+          <Field>
+            <FieldLabel htmlFor="rule-expression">Rule</FieldLabel>
+            <Textarea
+              autoCapitalize="off"
+              autoCorrect="off"
+              className="min-h-20 font-mono text-xs"
+              id="rule-expression"
+              onChange={(event) => setDraft(event.target.value)}
+              spellCheck={false}
+              value={draft}
+            />
+            {duplicate ? (
+              <p className="text-destructive text-sm">
+                This rule is already in place.
+              </p>
+            ) : null}
+            {written ? <RuleReading rule={draft} written={written} /> : null}
+          </Field>
+          {changed && candidate && !duplicate ? (
+            <RulePreview preview={preview} />
+          ) : null}
+        </FieldGroup>
+
+        {/* A save refused for the reason the preview already gives says nothing twice. */}
+        {problem && problem !== preview.error?.message ? (
+          <p className="mt-5 text-destructive text-sm" role="alert">
+            {problem}
+          </p>
+        ) : null}
+      </PageCard>
+    </form>
   );
 }
