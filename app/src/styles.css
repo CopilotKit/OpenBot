@@ -183,12 +183,23 @@
  * button inside a Card, outrank Tailwind's utilities however specific those are: headings came out
  * smaller than in a reply and the copy buttons lost their muted colour. `revert-layer` hands exactly
  * those properties back to the layered rules, which are the ones a reply is drawn with.
+ *
+ * The amount boxes of a Breakdown (lib/copilot/a2ui-breakdown.tsx) are the app's own inputs and
+ * take back their type size the same way.
  */
 .a2ui-surface
-  .openbot-markdown
+  :is(.openbot-markdown, .openbot-breakdown)
   :is(h1, h2, h3, h4, h5, h6, button, input, select, textarea) {
   font: revert-layer;
   color: revert-layer;
+}
+
+/*
+ * The frame CopilotKit draws around an interface in the conversation has a fixed light grey border,
+ * which in the dark theme was a bright ring around the card. It takes the app's border colour.
+ */
+[data-generative-ui-chat-surface] {
+  border-color: var(--border);
 }
 
 /*
