@@ -158,27 +158,67 @@ export function parseStoredLearningSettings(
   });
 }
 
+/**
+ * The Learning container the environment names (`CPK_INTELLIGENCE_LEARNING_CONTAINER_ID`), until a
+ * check finds the Intelligence this server talks to has no such container.
+ *
+ * A name is only good on the Intelligence it was written for. One left in `.env` by a setup against
+ * another Intelligence (hosted, say, before OpenBot Desktop pointed the same folder at its own) named
+ * a container this one does not have, so every new thread was refused ("Failed to initialize
+ * thread"), and naming one also stood automatic assignment aside. Forgotten, it is as though it was
+ * never set: the default is unchosen and automatic assignment picks one (learning/auto-assign.ts).
+ */
+export type ConfiguredLearningContainer = {
+  /** The configured container, or undefined once forgotten or when none was named. */
+  target(): LearningTarget | undefined;
+  /** This Intelligence does not have it: stop offering it as the default. */
+  forget(): void;
+  /** Whether `containerId` is the configured container this Intelligence was found not to have. */
+  forgotten(containerId: string): boolean;
+};
+
+export function configuredLearningContainer(
+  configured?: LearningTarget,
+): ConfiguredLearningContainer {
+  let current = configured;
+  return {
+    target: () => current,
+    forget() {
+      current = undefined;
+    },
+    forgotten: (containerId) =>
+      configured !== undefined &&
+      current === undefined &&
+      configured.containerId === containerId,
+  };
+}
+
 /** Reads the database each time so changes take effect across replicas without a stale cache. */
 export function createLearningSettingsStore(
   database?: Database,
-  configured?: LearningTarget,
+  configured?: LearningTarget | ConfiguredLearningContainer,
 ): LearningSettingsStore {
-  const fallback: LearningSettings = {
+  const environment =
+    configured !== undefined && "target" in configured
+      ? configured
+      : configuredLearningContainer(configured);
+  /** Read each time, so a forgotten container stops being the default at once. */
+  const fallback = (): LearningSettings => ({
     enabled: true,
-    defaultTarget: configured ?? null,
+    defaultTarget: structuredClone(environment.target()) ?? null,
     agents: {},
-  };
-  let current = structuredClone(fallback);
+  });
+  let current = fallback();
   let written = false;
   const bindings = new Map<string, string | null>();
   const stored = async (): Promise<LearningSettings> => {
-    if (!database) return structuredClone(current);
+    if (!database) return structuredClone(written ? current : fallback());
     const [row] = await database
       .select()
       .from(learningSettings)
       .where(eq(learningSettings.id, "current"))
       .limit(1);
-    if (!row) return structuredClone(fallback);
+    if (!row) return fallback();
     const parsed = parseStoredLearningSettings(row.settings);
     if (!parsed.ok) throw new Error("Stored learning settings are invalid.");
     return parsed.settings;
@@ -264,11 +304,11 @@ export function createLearningSettingsStore(
       if (typeof autoApprove !== "boolean")
         throw new TypeError("Automatic approval is on or off.");
       if (!database) {
-        current = { ...current, autoApprove };
+        current = { ...(written ? current : fallback()), autoApprove };
         written = true;
         return;
       }
-      const settings: LearningSettings = { ...fallback, autoApprove };
+      const settings: LearningSettings = { ...fallback(), autoApprove };
       await database
         .insert(learningSettings)
         .values({ id: "current", settings })

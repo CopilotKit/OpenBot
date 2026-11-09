@@ -218,7 +218,10 @@ import {
 } from "./learning/personal-space";
 import { clearLearningRevisionFallback } from "./learning/runtime";
 import { learningScopes } from "./learning/scopes";
-import { createLearningSettingsStore } from "./learning/settings";
+import {
+  configuredLearningContainer,
+  createLearningSettingsStore,
+} from "./learning/settings";
 import {
   createLearningSharingStore,
   createOpenSkillIndex,
@@ -373,9 +376,13 @@ const prepareProductRunInput = productHeadlessBoundary(productTelemetry);
 const profileStore = createProfileStore(database);
 // Every dispatch point asks this database whether its person paused the Bot. See agents/lifecycle.ts.
 configureBotLifecycle({ database });
+// The environment's container, until the boot check finds this Intelligence has no such container
+// (learning/auto-assign.ts). A name left over from a setup against another Intelligence then gives
+// way to automatic assignment instead of failing every new thread.
+const configuredLearning = configuredLearningContainer(config.learning);
 const learningSettingsStore = createLearningSettingsStore(
   database,
-  config.learning,
+  configuredLearning,
 );
 // Its own client, like the self-host banner's: the constructor opens nothing.
 const learningProbeIntelligence = createIntelligenceClient(
@@ -419,6 +426,7 @@ const learningCredentials = (): LearningContainerCredentials => ({
 });
 const learningAutoAssign = createLearningAutoAssign({
   enabled: config.learningAutoAssign,
+  configured: configuredLearning,
   store: learningSettingsStore,
   probe: (containerId) =>
     probeLearningContainer(learningProbeIntelligence, containerId),
@@ -2240,6 +2248,7 @@ const copilotRuntime = mountCopilotRuntime(
       void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
     },
     learningSettings,
+    learningContainerForgotten: configuredLearning.forgotten,
     personalSkills: {
       containerFor: personalLearningSpaces.containerFor,
       openSkills: () => openSkillIndex.sources(),

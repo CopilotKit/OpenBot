@@ -37,7 +37,7 @@ Pausing OpenBot Learning preserves its mappings and thread assignments. It stops
 
 With no container assigned, the server asks Intelligence, using its runtime key, whether the project has a container with ID `openbot`. If it does, the server saves it as the default, exactly as an administrator saving it in Admin would, and records a `configuration.changed` audit row initiated by the deployment. It asks at start, every ten minutes, and when a turn or the Admin page reads Learning settings, at most once a minute. A container created later is picked up without a restart.
 
-- It never overrides a choice. Any saved Admin setting, including off or an empty default, means there is nothing to do, and so does `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID`.
+- It never overrides a choice. Any saved Admin setting, including off or an empty default, means there is nothing to do, and so does `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID`, once Intelligence confirms it has that container. One it does not have (a name left over from a setup against another Intelligence, say) is logged once as `configured_absent`, with the variable and its value, and ignored: the server assigns `openbot` as though nothing was named, rather than fail every new thread.
 - It creates the container with the runtime key where Intelligence allows it, and otherwise only with a credential that can. See [Creating the container](#creating-the-container).
 - It is safe on many replicas. The save only succeeds where nothing was ever saved, so one replica wins and writes the audit row.
 - It never blocks startup or a turn. A missing container, a plan without Learning, or an unreachable Intelligence is logged once as a `learning-auto-assign` line and tried again later. The Admin page says which one applies.

@@ -10,6 +10,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **A Learning container left in `~/OpenBot/.env` by an earlier setup no longer fails every
+  message.** A folder set up against hosted Intelligence kept
+  `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID="openbot"`, which the local back end did not have, so every
+  message failed with "Failed to initialize thread" (or "Failed to resolve Learning Container").
+  Start now writes that setting itself, empty, in place of any other line for it. The server also
+  checks a named container at start: one its Intelligence does not have is logged as
+  `configured_absent`, naming the variable and its value, and ignored, and a container is assigned
+  automatically as though none was named. A chat whose first message failed this way works when sent
+  to again.
 - **Docker Desktop 29 pulls OpenBot's images from downloads.copilotkit.ai.** Its pulls there
   failed with 403 and went to GitHub, because the copy held only each image's Linux amd64 and arm64
   manifests, and Docker 29 also fetches the image's attestations and asks which artifacts refer to
