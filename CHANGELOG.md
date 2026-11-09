@@ -81,6 +81,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   Command (Ctrl on Windows) with + or = zooms in, with - zooms out, and with 0 goes back to actual
   size, from 90% to 200%. On a Mac the View menu has Zoom In, Zoom Out and Actual Size. The level
   applies to every window, from setup to OpenBot itself, and is kept for the next launch.
+- **Troubleshooting logs in one click.** Every setup failure, the Status window, and a new Get
+  Troubleshooting Logs… item in the OpenBot menu and the tray now offer Copy logs and Save to a
+  file. Both give one block of text: the version and build, the system, what failed, the container
+  engine's version and disk use, its CPUs, memory and free disk as the back end's engine check
+  measures them, and the end of OpenBot Desktop's log and the back end CLI's log
+  (`~/.copilotkit/cli.log`). Keys, tokens, passwords (quoted `.env` values too) and email addresses
+  are removed, along with account, organisation, user, subject and installation ids, and the home
+  folder is written as `~`. The card suggests pasting the logs into the AI assistant you use and
+  says what was taken out. Saved files go in the log folder as `openbot-troubleshooting-<time>.txt`.
 - **Docker Desktop 29 pulls OpenBot's images from downloads.copilotkit.ai.** Its pulls there
   failed with 403 and went to GitHub, because the copy held only each image's Linux amd64 and arm64
   manifests, and Docker 29 also fetches the image's attestations and asks which artifacts refer to
