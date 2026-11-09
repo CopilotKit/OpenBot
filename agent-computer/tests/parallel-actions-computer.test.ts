@@ -12,6 +12,9 @@ import { reservePort } from "../../tests/support/reserved-port";
  * each other and the form kept some of the values and lost the rest. One browser takes one action at a time, in the
  * order they arrived, whatever the model sends.
  *
+ * And the Bot reads the form back to check its work: a field that shows a placeholder read as empty however often it
+ * was filled, so the Bot typed it again and again.
+ *
  *   OPENBOT_COMPUTER_BROWSER=1 bun test tests/parallel-actions-computer.test.ts
  */
 const asked = process.env.OPENBOT_COMPUTER_BROWSER === "1";
@@ -27,9 +30,15 @@ let child: ReturnType<typeof Bun.spawn> | undefined;
 let site: ReturnType<typeof Bun.serve> | undefined;
 
 /*
- * A new-account form, as a CRM draws one: a field commits what it holds when it loses the focus, the way a form
- * library's blur handler does, so a field whose typing was interrupted keeps what had arrived by then.
+ * A CRM's new-account form, as Kite CRM draws it: some fields show a placeholder until they are filled, and a Bot
+ * reads every field back from a snapshot to check its work.
  */
+const PLACEHOLDERS: Record<string, string> = {
+  Website: "company.com",
+  Headquarters: "City, State",
+  Employees: "e.g. 1,200",
+  Notes: "What you know about this company",
+};
 const FIELDS = [
   "Account name",
   "Website",
@@ -41,7 +50,9 @@ const FIELDS = [
 const FORM = `<title>New account</title><h1>New account</h1>
   <form>${FIELDS.map(
     (name, index) =>
-      `<label>${name} <input id="f${index}" name="${name}" aria-label="${name}"></label>`,
+      `<label>${name} <input id="f${index}" name="${name}" aria-label="${name}"${
+        PLACEHOLDERS[name] ? ` placeholder="${PLACEHOLDERS[name]}"` : ""
+      }></label>`,
   ).join("")}
   <button type="button" id="covered">Save</button>
   <div style="position:fixed;inset:0;background:transparent"></div>
@@ -146,6 +157,25 @@ afterAll(async () => {
 });
 
 describe.skipIf(!asked)("actions sent together, on one browser", () => {
+  test("a field that shows a placeholder reads back what was typed in it", async () => {
+    // One at a time, so only the reading is under test. Read as empty, a Bot checking its work typed the value again.
+    const snap = await openForm();
+    for (const name of ["Website", "Employees"]) {
+      const typed = await call("/type", {
+        ref: refOf(snap, name),
+        snapshotId: snap.snapshotId,
+        text: name === "Website" ? "halvorsen.com" : "2,400",
+      });
+      expect(typed.status).toBe(200);
+    }
+    const read = await values();
+    expect([read.Website, read.Employees, read.Headquarters]).toEqual([
+      "halvorsen.com",
+      "2,400",
+      undefined,
+    ]);
+  });
+
   test("a form's worth of typing sent at once keeps every value in its own field", async () => {
     // Long enough that typing one value takes several frames, as a real address or a note does, and short enough
     // that a snapshot reads it back whole (it cuts a value at 200 characters).
