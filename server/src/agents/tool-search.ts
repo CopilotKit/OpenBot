@@ -239,7 +239,7 @@ export function appToolsInOrder(
   candidates: readonly GrantedTool[],
 ): GrantedTool[] {
   if (candidates.length === 0) return [];
-  const said = new Set(words(text));
+  const said = new Set(askedWords(text));
   // What was said counts in full; the everyday words it stands for count half.
   const weight = new Map<string, number>();
   for (const word of said)
@@ -391,7 +391,21 @@ const EVERYDAY: Record<string, readonly string[]> = {
   text: ["message", "sms"],
   customer: ["contact", "client"],
   people: ["contact", "user"],
+  // FOUND IN 1.0.0, on Slack: "what did Sam say in #design" found Sam's user settings and not the
+  // channel's messages, and "find my DM with Sam" needed the conversation the DM is.
+  say: ["message", "conversation"],
+  said: ["message", "conversation"],
+  wrote: ["message"],
+  dm: ["conversation", "message"],
 };
+
+/**
+ * The words of what a person asked. `#design` is a channel named design, as Slack, Teams and
+ * Discord all spell one, so the `#` reads as the word channel.
+ */
+function askedWords(text: string): string[] {
+  return words(text.replace(/(^|\s)#(?=[a-z0-9])/gi, "$1channel "));
+}
 
 /** Lower-cased words of a name, a description or a query, with plurals folded into the singular. */
 function words(text: string): string[] {
@@ -470,7 +484,7 @@ function scoreIndexed(
   query: string,
   index: readonly Indexed[],
 ): { tool: GrantedTool; score: number }[] {
-  const said = [...new Set(words(query))];
+  const said = [...new Set(askedWords(query))];
   if (said.length === 0)
     return index.map((entry) => ({ tool: entry.tool, score: 0 }));
   // What was said counts in full; the everyday words it stands for count half.
