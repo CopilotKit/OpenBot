@@ -241,8 +241,10 @@ function toElement(
   };
 
   // Values arrive as text, with quoting and escapes already resolved.
-  if (typeof value === "string") {
-    const text = value.trim();
+  const typed =
+    typeof value === "string" ? value : typedTextOf(descriptor, value);
+  if (typed !== undefined) {
+    const text = typed.trim();
     if (text) element.value = cutAtCodeUnits(text, 200);
   }
 
@@ -281,6 +283,31 @@ function toElement(
   }
 
   return element;
+}
+
+/** The roles a person types into, whose value is what was typed. */
+const TYPED_ROLES = new Set(["combobox", "searchbox", "spinbutton", "textbox"]);
+
+/**
+ * What is typed in a field that also shows a placeholder.
+ *
+ * Playwright writes a filled field as `textbox "Name": Ada`, but one with a placeholder as a list, the
+ * placeholder and the value each a child of their own (`- /placeholder: company.com` then
+ * `- text: acme.com`). Read as text alone, every field with a placeholder looked empty however often it
+ * was filled, and a Bot checking its work typed the same values in again and again.
+ */
+function typedTextOf(
+  descriptor: Descriptor,
+  value: unknown,
+): string | undefined {
+  if (!TYPED_ROLES.has(descriptor.role) || !Array.isArray(value))
+    return undefined;
+  for (const child of value) {
+    if (!child || typeof child !== "object" || Array.isArray(child)) continue;
+    const text = (child as Record<string, unknown>).text;
+    if (typeof text === "string") return text;
+  }
+  return undefined;
 }
 
 /**

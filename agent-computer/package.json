@@ -11,6 +11,7 @@
   "dependencies": {
     "@xterm/addon-serialize": "0.14.0",
     "@xterm/headless": "6.0.0",
+    "p-queue": "9.3.5",
     "playwright": "1.62.1",
     "spiffe": "^0.5.1",
     "web-bot-auth": "0.2.0",

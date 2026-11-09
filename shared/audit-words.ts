@@ -119,6 +119,7 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "computer.browser_cleared": "Clear the browser",
   "computer.updated": "Update the computer",
   "computer.policy_loaded": "Start the computer",
+  "computer.policy_changed": "Change the boundaries",
   "computer.isolation_loaded": "Start the computer",
   "computer.terminated": "Shut down a computer",
   "computer.terminated_inactive": "Shut down an idle computer",

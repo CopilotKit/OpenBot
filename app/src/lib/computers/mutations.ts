@@ -104,9 +104,17 @@ export function setComputerStateMutationOptions(queryClient: QueryClient) {
  * difference would leave the server deciding where a new rule belongs, and where a deny sits
  * relative to an allow is most of what a policy means.
  */
+/**
+ * A rule written from a sentence in plain English, recorded with the save that adds it: the trail
+ * keeps what the admin asked for beside the rule that was enforced.
+ */
+export type PolicyAuthoring = { source: "english"; text: string };
+
 export function saveActionPolicyMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (next: ActionPolicy): Promise<ActionPolicy> =>
+    mutationFn: (
+      next: ActionPolicy & { authoring?: PolicyAuthoring },
+    ): Promise<ActionPolicy> =>
       client("/api/computers/policy", "policy", {
         method: "PUT",
         body: next,
