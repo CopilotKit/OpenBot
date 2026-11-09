@@ -127,6 +127,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- **A Bot calls you "you".** Its instructions call the user "the person", and a Bot said that back,
+  such as "which the person didn't ask for". Every Bot is now told to write "you".
 - **A budget a Bot draws is in colour, with a bar of how the total splits.** Amounts that add up to
   a total, such as the "Build a trip budget" starter task, draw as one card: each part in its own
   chart colour on its swatch, slider and slice of the bar, a box to type it, its share, and the
