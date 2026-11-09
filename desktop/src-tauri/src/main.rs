@@ -12,6 +12,7 @@ mod desktop_telemetry;
 mod intelligence_bridge;
 mod notice;
 mod outside_links;
+mod zoom;
 
 #[cfg(test)]
 mod test_support;
@@ -60,6 +61,9 @@ struct Shell {
     starting: std::sync::atomic::AtomicBool,
     /// An explicit Stop must survive setup navigation; a new app session may resume again.
     stopped_in_session: std::sync::atomic::AtomicBool,
+    /// Settings asked to change the AI connection, and the Stop it asked for finished: the setup
+    /// page opens at its AI screen, once, instead of at Start.
+    change_ai_connection: std::sync::atomic::AtomicBool,
     /// Quit keeps the event loop alive until one background cleanup attempt finishes.
     quit: std::sync::Arc<QuitState>,
     /// Why the stack stopped, kept for the screen that has not loaded yet.
@@ -4563,7 +4567,7 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
     // than above them (`TRAFFIC_LIGHTS`, and the page's styles that make room beside them).
     #[cfg(target_os = "macos")]
     let builder = builder.traffic_light_position(TRAFFIC_LIGHTS);
-    builder
+    let window = builder
         .on_new_window(move |destination, _features| {
             outside_links::new_window(&destination, |to| {
                 use tauri_plugin_opener::OpenerExt;
@@ -4572,6 +4576,8 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
             tauri::webview::NewWindowResponse::Deny
         })
         .build()?;
+    // At the level kept from the last launch before anything paints (`zoom`).
+    let _ = window.set_zoom(saved_zoom(app));
     Ok(())
 }
 
@@ -5057,6 +5063,75 @@ mod app_page_tests {
         assert!(desktop_page::QUIT_SHORTCUT_PAGE.contains("\"plugin:openbot-desktop|quit\""));
     }
 
+    /// "The text is too small and you can't zoom in." The window now zooms as a browser does: the
+    /// View menu on macOS and Linux, and the page's own shortcut (`zoom-shortcut.js`) for what no
+    /// menu carries, every key on Windows and Command and + on macOS, which the setup screens and
+    /// OpenBot's own page may ask and a page on another loopback port may not. Every window's page
+    /// starts at the level kept from the last launch.
+    #[test]
+    fn the_window_zooms_from_the_view_menu_or_the_page_and_starts_at_the_kept_level() {
+        const ZOOM: &str = "plugin:openbot-desktop|zoom";
+        let (app, window) = app();
+        let setup = if cfg!(windows) {
+            "http://tauri.localhost/"
+        } else {
+            "tauri://localhost/"
+        };
+        assert_eq!(ask(&window, setup, ZOOM), Ok(serde_json::Value::Null));
+        let foreign = "http://127.0.0.1:3011/";
+        allow_app_page(app.handle(), &foreign.parse().unwrap());
+        assert!(ask(&window, foreign, ZOOM).is_err());
+        trust_owned_app(app.handle(), "http://127.0.0.1:3010");
+        let owned = "http://127.0.0.1:3010/";
+        allow_app_page(app.handle(), &owned.parse().unwrap());
+        assert_eq!(ask(&window, owned, ZOOM), Ok(serde_json::Value::Null));
+        assert!(zoom::SHORTCUT_PAGE.contains("\"plugin:openbot-desktop|zoom\""));
+
+        // Read as text: the real webview and AppKit's menus cannot be built here. Each anchor and
+        // each line looked for is put together here, so this test's own text never matches it.
+        let main = include_str!("main.rs");
+        let at = |pieces: &[&str]| main.find(&pieces.concat()).unwrap();
+        let menus = &main[at(&["\nfn install", "_menus"])..];
+        let menus = &menus[..menus.find("app.set_menu(").unwrap()];
+        let view = &menus[menus.find("\"View\",").expect("a View menu")..];
+        for (id, label, keys) in [
+            (
+                "zoom::MENU_ACTUAL_SIZE",
+                "\"Actual Size\"",
+                "\"CmdOrCtrl+0\"",
+            ),
+            ("zoom::MENU_IN", "\"Zoom In\"", "\"CmdOrCtrl+=\""),
+            ("zoom::MENU_OUT", "\"Zoom Out\"", "\"CmdOrCtrl+-\""),
+        ] {
+            let item = &view[view.find(id).unwrap_or_else(|| panic!("{id}"))..];
+            let item = &item[..item.find(")?").unwrap()];
+            assert!(item.contains(label) && item.contains(keys), "{item}");
+        }
+        assert!(main.contains(
+            &[
+                "\n    app.set_menu(",
+                "Menu::with_items(app, &[&openbot, &edit, &view])?)?;"
+            ]
+            .concat()
+        ));
+        assert!(main.contains(
+            "if let Some(step) = zoom::Step::of_menu(other) {\n                zoom_windows(app, step);"
+        ));
+        assert!(main.contains(
+            "if cfg!(any(target_os = \"windows\", target_os = \"macos\")) && page != WindowPage::Other {\n                let _ = window.eval(zoom::shortcut_page());"
+        ));
+        assert_eq!(
+            zoom::shortcut_page().starts_with("window.__openbotZoomMenu = true;"),
+            cfg!(target_os = "macos")
+        );
+        let page_load = &main[at(&[".on_page_load(", "|window, payload| {"])..];
+        let page_load = &page_load[..page_load.find("\n        })").unwrap()];
+        assert!(page_load.contains("let _ = window.set_zoom(saved_zoom(window.app_handle()));"));
+        let build = &main[at(&["\nfn build_main", "_window"])..];
+        let build = &build[..build.find("\n}\n").unwrap()];
+        assert!(build.contains("let _ = window.set_zoom(saved_zoom(app));"));
+    }
+
     /// Every command OpenBot's page may ask, the update banner's among them (installing an update
     /// stops OpenBot and restarts the app), answers only the OpenBot this shell owns.
     #[test]
@@ -5344,8 +5419,12 @@ fn show_status_window(app: &tauri::AppHandle) {
         .inner_size(640.0, 720.0)
         .min_inner_size(520.0, 480.0)
         .build();
-    if let Err(error) = built {
-        log::warn!("[status] could not open the Status window: {error}");
+    match built {
+        // At the level the main window has (`zoom`).
+        Ok(window) => {
+            let _ = window.set_zoom(saved_zoom(app));
+        }
+        Err(error) => log::warn!("[status] could not open the Status window: {error}"),
     }
 }
 
@@ -7474,6 +7553,50 @@ fn publish_quit_notice_failure<R: tauri::Runtime>(app: tauri::AppHandle<R>, erro
 /// Stop in the background, then the setup window: the menu's Stop, and the Status window's and
 /// Settings > This computer's, which `from` tells apart in the log.
 fn stop_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>, from: AskedFrom) {
+    stop_then_show_setup(app, from, false);
+}
+
+/// Settings' Change on the AI model row: the same Stop, then the setup window at its AI screen,
+/// where the setup window's own Change AI connection goes. A Stop that failed shows setup as any
+/// failed Stop does, with its failure and Start, since OpenBot may still be running.
+pub(crate) fn change_ai_connection_from_settings<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    stop_then_show_setup(app, AskedFrom::Settings, true);
+}
+
+/// The setup page's one question on load: was it opened to change the AI connection? Answered
+/// once, so a later visit to setup opens at Start as usual.
+#[tauri::command]
+fn take_ai_connection_change<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> bool {
+    take_change_ai_connection(&app.state::<Shell>())
+}
+
+fn take_change_ai_connection(shell: &Shell) -> bool {
+    shell
+        .change_ai_connection
+        .swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Asked for only once everything stopped: the AI screen then starts OpenBot with the new choice.
+fn settle_change_ai_connection(shell: &Shell, stopped: bool, change_ai_connection: bool) {
+    shell.change_ai_connection.store(
+        stopped && change_ai_connection,
+        std::sync::atomic::Ordering::SeqCst,
+    );
+}
+
+/// What Settings' AI model row says: the provider and sign-in this installation starts with.
+pub(crate) fn ai_connection_now<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> openbot_desktop_lib::ai_connection::AiConnection {
+    let root = cleanup_root(&app.state::<Shell>(), &stack::default_root());
+    openbot_desktop_lib::ai_connection::read(&root)
+}
+
+fn stop_then_show_setup<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    from: AskedFrom,
+    change_ai_connection: bool,
+) {
     std::thread::spawn(move || {
         let asked = std::time::Instant::now();
         let root = stack::default_root();
@@ -7486,6 +7609,7 @@ fn stop_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>, from: AskedFrom) 
             Some(problem) => Err(problem),
         };
         logging::outcome("stop", asked, &settled);
+        settle_change_ai_connection(&shell, settled.is_ok(), change_ai_connection);
         match settled {
             Ok(()) => report(&app, "stopped", true, "OpenBot has been stopped"),
             // Said rather than swallowed. A menu item that fails silently is worse than one
@@ -7538,8 +7662,41 @@ fn chose(app: &tauri::AppHandle, item: &str) {
         "quit" => {
             app.exit(0);
         }
-        _ => {}
+        other => {
+            if let Some(step) = zoom::Step::of_menu(other) {
+                zoom_windows(app, step);
+            }
+        }
     }
+}
+
+/**
+Zoom In, Zoom Out or Actual Size, from the View menu or the page's own shortcut (`zoom-shortcut.js`):
+every window's page at the new level, kept for the next launch (`zoom`).
+*/
+pub(crate) fn zoom_windows<R: tauri::Runtime>(app: &tauri::AppHandle<R>, step: zoom::Step) {
+    let Ok(directory) = app.path().app_config_dir() else {
+        return;
+    };
+    let level = match zoom::step(&directory, step) {
+        Ok(level) => level,
+        Err(error) => {
+            log::warn!("[zoom] could not keep the zoom level: {error}");
+            zoom::next(zoom::saved(&directory), step)
+        }
+    };
+    for window in app.webview_windows().values() {
+        let _ = window.set_zoom(level);
+    }
+    log::info!("[zoom] {}%", (level * 100.0).round());
+}
+
+/// The zoom level kept from the last launch (`zoom`), for a window's page as it is built and loads.
+fn saved_zoom<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> f64 {
+    app.path()
+        .app_config_dir()
+        .map(|directory| zoom::saved(&directory))
+        .unwrap_or(zoom::ACTUAL_SIZE)
 }
 
 /**
@@ -7896,7 +8053,30 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
             &PredefinedMenuItem::select_all(app, None)?,
         ],
     )?;
-    app.set_menu(Menu::with_items(app, &[&openbot, &edit])?)?;
+    /*
+     * A VIEW MENU, FOR THE TEXT THAT WAS TOO SMALL.
+     *
+     * The page zooms as a browser's does, in the order and with the keys a Mac's View menu has
+     * them. Items of our own, not the predefined zoom items: those ask the first responder, and a
+     * web view has no zoom of its own to answer them. See `zoom`.
+     */
+    let view = Submenu::with_items(
+        app,
+        "View",
+        true,
+        &[
+            &MenuItem::with_id(
+                app,
+                zoom::MENU_ACTUAL_SIZE,
+                "Actual Size",
+                true,
+                Some("CmdOrCtrl+0"),
+            )?,
+            &MenuItem::with_id(app, zoom::MENU_IN, "Zoom In", true, Some("CmdOrCtrl+="))?,
+            &MenuItem::with_id(app, zoom::MENU_OUT, "Zoom Out", true, Some("CmdOrCtrl+-"))?,
+        ],
+    )?;
+    app.set_menu(Menu::with_items(app, &[&openbot, &edit, &view])?)?;
     Ok(())
 }
 
@@ -8332,6 +8512,7 @@ fn main() {
             show_setup,
             already_running,
             last_failure,
+            take_ai_connection_change,
             default_root,
             selected_root,
             providers,
@@ -8373,12 +8554,19 @@ fn main() {
                 .eval("document.addEventListener('contextmenu', e => e.preventDefault(), true)");
             let page = window_page(window.app_handle(), payload.url());
             match_title_bar(&window.window(), page);
+            // The level kept from the last launch, on every page this window loads (`zoom`).
+            let _ = window.set_zoom(saved_zoom(window.app_handle()));
             if matches!(page, WindowPage::OwnedApp | WindowPage::LocalApp) {
                 let _ = window.eval(outside_links::PAGE);
             }
             // Ctrl+Q quits, as the tray says. Windows only: no menu there carries the shortcut.
             if cfg!(target_os = "windows") && page != WindowPage::Other {
                 let _ = window.eval(desktop_page::QUIT_SHORTCUT_PAGE);
+            }
+            // A browser's zoom keys: all of them on Windows, and on macOS the one the View menu
+            // never receives, Command and +.
+            if cfg!(any(target_os = "windows", target_os = "macos")) && page != WindowPage::Other {
+                let _ = window.eval(zoom::shortcut_page());
             }
             if matches!(page, WindowPage::OwnedApp | WindowPage::LocalApp)
                 && payload.event() == tauri::webview::PageLoadEvent::Finished

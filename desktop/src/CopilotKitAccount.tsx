@@ -19,6 +19,7 @@ import { engineTooSmallSaid } from "./localReadiness";
 import { InlineFailure, type Problem } from "./Problem";
 import { Sections } from "./Sections";
 import { StatusLine } from "./SetupProgress";
+import { Command } from "./WindowsBlocker";
 
 type Seen =
   | { at: "checking" }
@@ -27,9 +28,14 @@ type Seen =
   | { at: "agreement"; terms: Extract<LocalTerms, { status: "required" }> }
   | { at: "apps"; version: string | null }
   | { at: "apps-failed"; version: string | null; problem: Problem }
-  | { at: "failed"; said: string };
+  | { at: "failed"; said: string }
+  /** The CLI refused the container engine. Trying again by itself would not change it. */
+  | { at: "unsupported-engine"; said: string; switchEngine: boolean };
 
 const COULD_NOT_CHECK = "Couldn’t check your CopilotKit account. Try again.";
+const ENGINE_REFUSED =
+  "OpenBot's back end can't run on the container engine this computer uses.";
+const BLOCKED = "OpenBot's back end can't run on this computer as it's set up.";
 
 /**
  * How long the account check waits for a container engine, and how often it asks again. A new
@@ -136,6 +142,18 @@ export function CopilotKitAccount({
         waitingSince.current = null;
         if (terms.status === "engine-too-small")
           setSeen({ at: "failed", said: engineTooSmallSaid(terms) });
+        // Refused, not missing: said at once, in the CLI's own sentence when it gave one.
+        else if (
+          terms.status === "blocked" &&
+          terms.reason === "unsupported-engine"
+        )
+          setSeen({
+            at: "unsupported-engine",
+            said: terms.said ?? ENGINE_REFUSED,
+            switchEngine: terms.switchEngine === true,
+          });
+        else if (terms.status === "blocked")
+          setSeen({ at: "failed", said: terms.said ?? BLOCKED });
         else if (terms.status === "signed-out") setSeen({ at: "signed-out" });
         else if (terms.status === "required" && !terms.accepted)
           setSeen({ at: "agreement", terms });
@@ -201,6 +219,7 @@ export function CopilotKitAccount({
   // too, a few seconds after Accept, which flashed "Sign in to CopilotKit" and its sign-in lede.
   const connecting = seen.at === "apps";
   const appsFailed = seen.at === "apps-failed";
+  const refused = seen.at === "unsupported-engine" ? seen : null;
   return (
     <div className="sheet">
       {/* OpenBot is what is being set up, so its mark heads this step as it heads every other.
@@ -214,16 +233,39 @@ export function CopilotKitAccount({
             ? "Setting up your apps"
             : appsFailed
               ? "Connect your apps"
-              : "Sign in to CopilotKit"}
+              : refused
+                ? refused.switchEngine
+                  ? "Switch to Docker Desktop or Podman"
+                  : "Change your container engine setup"
+                : "Sign in to CopilotKit"}
       </h1>
       <p className="lede">
         {agreement
           ? `To run OpenBot on this computer, accept the CopilotKit license agreement for ${agreement.organizationName}.`
           : connecting || appsFailed
             ? "OpenBot uses your CopilotKit account to set up apps like Gmail and Slack."
-            : "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the license agreement."}
+            : refused
+              ? refused.said
+              : "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the license agreement."}
       </p>
-      {!agreement && !connecting && !appsFailed && (
+      {refused?.switchEngine && (
+        <ol className="blocker-steps">
+          <li>
+            Open Docker Desktop. To use Podman instead, quit the engine you use
+            now and start Podman.
+          </li>
+          <li>
+            If Docker still uses another engine, run this in a terminal to
+            switch it to Docker Desktop:
+            <Command lines={["docker context use desktop-linux"]} />
+          </li>
+          <li>Choose Try again.</li>
+        </ol>
+      )}
+      {refused && !refused.switchEngine && (
+        <p className="footnote">Make the change, then choose Try again.</p>
+      )}
+      {!agreement && !connecting && !appsFailed && !refused && (
         <p className="footnote">
           Your conversations and files are stored on this computer. Signing in
           does not send them to CopilotKit.
@@ -289,7 +331,7 @@ export function CopilotKitAccount({
             </button>
           </>
         )}
-        {seen.at === "failed" && (
+        {(seen.at === "failed" || refused) && (
           <button type="button" onClick={check}>
             Try again
           </button>

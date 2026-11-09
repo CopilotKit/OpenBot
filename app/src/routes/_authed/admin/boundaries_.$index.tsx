@@ -21,7 +21,7 @@ import { saveActionPolicyMutationOptions } from "@/lib/computers/mutations";
 import {
   type ActionPolicy,
   actionPolicyQueryOptions,
-  dryRunActionPolicy,
+  policyDryRunQueryOptions,
 } from "@/lib/computers/queries";
 
 export const Route = createFileRoute("/_authed/admin/boundaries_/$index")({
@@ -77,12 +77,10 @@ function RuleDetail({ policy, rule }: { policy: ActionPolicy; rule: string }) {
 
   /*
    * What this rule has stopped, read as the difference it makes: the policy without it, replayed
-   * over recent actions, would have allowed exactly the ones it stopped.
+   * over recent actions, would have allowed exactly the ones it stopped. A Bot's computer actions
+   * and its app calls alike, so a rule about an app shows the calls it stopped.
    */
-  const reach = useQuery({
-    queryKey: ["computers", "policy", "reach", rule],
-    queryFn: () => dryRunActionPolicy(withoutRule(policy, rule)),
-  });
+  const reach = useQuery(policyDryRunQueryOptions(withoutRule(policy, rule)));
 
   const remove = () =>
     savePolicy.mutate(withoutRule(policy, rule), {
@@ -135,6 +133,7 @@ function RuleDetail({ policy, rule }: { policy: ActionPolicy; rule: string }) {
                 (change) => change.would === "allowed",
               )}
               total={reach.data.wouldAllow}
+              verdict="Stopped"
             />
           </>
         )}

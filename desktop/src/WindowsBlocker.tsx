@@ -275,7 +275,7 @@ export function WindowsRestart() {
 }
 
 /** Commands to run, one per line, copied as a whole: PowerShell runs a pasted block line by line. */
-function Command({ lines }: { lines: string[] }) {
+export function Command({ lines }: { lines: string[] }) {
   const [copied, setCopied] = useState(false);
   const text = lines.join("\n");
   return (
