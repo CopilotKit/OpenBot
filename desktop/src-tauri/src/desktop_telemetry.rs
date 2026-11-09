@@ -191,6 +191,24 @@ fn finish_sign_in_with(
     result
 }
 
+/// Retry after app setup, which may have cancelled the earlier account-check handshake.
+/// The CLI still verifies the account; app provisioning success is not identity authority.
+pub fn finish_account_setup<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    result: Result<(), crate::Problem>,
+) -> Result<(), crate::Problem> {
+    let app = app.clone();
+    finish_account_setup_with(result, move || link_account_background(&app))
+}
+
+fn finish_account_setup_with(
+    result: Result<(), crate::Problem>,
+    link: impl FnOnce() + Send + 'static,
+) -> Result<(), crate::Problem> {
+    spawn_link(link);
+    result
+}
+
 /// Detach optional telemetry work; failures leave the next lifecycle attempt free to retry.
 fn spawn_link(link: impl FnOnce() + Send + 'static) {
     if std::thread::Builder::new()
@@ -444,6 +462,25 @@ mod tests {
                 "duplicate link must not reach the CLI"
             ))
             .is_ok());
+        }
+    }
+
+    #[test]
+    fn account_setup_completion_retries_attribution_even_when_apps_are_unavailable() {
+        for result in [
+            Ok(()),
+            Err(crate::Problem::plain("synthetic unavailable apps")),
+        ] {
+            let expected_ok = result.is_ok();
+            let (sent, received) = std::sync::mpsc::channel();
+            let answer = finish_account_setup_with(result, move || sent.send(()).unwrap());
+            assert_eq!(answer.is_ok(), expected_ok);
+            assert!(
+                received
+                    .recv_timeout(std::time::Duration::from_secs(2))
+                    .is_ok(),
+                "the last required CLI call did not retry attribution"
+            );
         }
     }
 

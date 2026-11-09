@@ -6456,14 +6456,19 @@ Only adds a key, and never fails the sign-in: the window offers Continue without
 Start tries again. `attempt` lets `cancel_local_eval` stop the CLI call.
 */
 #[tauri::command]
-async fn connect_copilotkit_apps(attempt: String, root: String) -> Result<(), Problem> {
+async fn connect_copilotkit_apps<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    attempt: String,
+    root: String,
+) -> Result<(), Problem> {
     let root = stack::root_from(&root);
     if !root.is_absolute() {
         return Err(apps_unavailable());
     }
-    tauri::async_runtime::spawn_blocking(move || connect_apps(&root, &attempt))
+    let result = tauri::async_runtime::spawn_blocking(move || connect_apps(&root, &attempt))
         .await
-        .map_err(|_| apps_unavailable())?
+        .map_err(|_| apps_unavailable())?;
+    desktop_telemetry::finish_account_setup(&app, result)
 }
 
 /// Ask CopilotKit for this installation's Composio project through the CLI, and keep its key.
