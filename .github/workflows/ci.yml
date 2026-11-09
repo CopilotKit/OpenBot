@@ -361,7 +361,9 @@ jobs:
 
   test:
     name: tests
-    runs-on: ubuntu-latest
+    # CPU-bound: main and release runs get a 16-core larger runner (org runner group
+    # openbot-larger, billed per minute); pull requests stay on the free standard runner.
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     # The suite includes a real database integration test. Without a database it fails on every run,
     # including on main, which trains everyone to read a red CI as normal. pgvector rather than plain
     # postgres because the knowledge schema uses the extension.
@@ -447,7 +449,9 @@ jobs:
 
   python-harness:
     name: python harness regressions
-    runs-on: ubuntu-latest
+    # CPU-bound: main and release runs get a 16-core larger runner (org runner group
+    # openbot-larger, billed per minute); pull requests stay on the free standard runner.
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
