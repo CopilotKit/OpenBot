@@ -102,9 +102,20 @@ export type DesktopAiConnection = {
   endpointHost: string | null;
 };
 
+/**
+ * Settings' Share usage data, as the desktop app keeps it. Off is the same opt-out as
+ * `COPILOTKIT_TELEMETRY_DISABLED`; when that variable (or `DO_NOT_TRACK`) is set where the app was
+ * launched, sharing is off and Settings cannot turn it on.
+ */
+export type DesktopUsageData = {
+  shared: boolean;
+  offByEnvironment: boolean;
+};
+
 export const desktopKeys = {
   all: ["desktop"] as const,
   aiConnection: ["desktop", "ai-connection"] as const,
+  usageData: ["desktop", "usage-data"] as const,
   status: (memory: boolean) => ["desktop", "status", { memory }] as const,
   intelligence: ["desktop", "intelligence"] as const,
   appUpdate: ["desktop", "app-update"] as const,
@@ -179,6 +190,19 @@ export function desktopAiConnectionQueryOptions() {
   return queryOptions({
     queryKey: desktopKeys.aiConnection,
     queryFn: (): Promise<DesktopAiConnection> => invokeDesktop("ai_connection"),
+    enabled: desktopShell() !== null,
+    retry: false,
+  });
+}
+
+/**
+ * Settings' Share usage data row. Asked only inside the Desktop window; an older desktop app has
+ * no such command and refuses it every time, so a refusal is not retried and there is no row.
+ */
+export function desktopUsageDataQueryOptions() {
+  return queryOptions({
+    queryKey: desktopKeys.usageData,
+    queryFn: (): Promise<DesktopUsageData> => invokeDesktop("usage_data"),
     enabled: desktopShell() !== null,
     retry: false,
   });

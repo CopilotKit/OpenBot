@@ -791,6 +791,51 @@ fn harness_port_overlay(root: &Path, ipv4_only: bool) -> Result<Option<String>, 
     Ok(Some(overlay))
 }
 
+const DESKTOP_TELEMETRY_FILE: &str = ".openbot-desktop-telemetry.yml";
+const DESKTOP_TELEMETRY: &str = include_str!("../telemetry.compose.yml");
+const DESKTOP_TELEMETRY_DISABLED_FILE: &str = ".openbot-desktop-telemetry-disabled.yml";
+const DESKTOP_TELEMETRY_DISABLED: &str = include_str!("../telemetry-disabled.compose.yml");
+
+fn desktop_telemetry_disabled(secrets: &Secrets) -> bool {
+    ["COPILOTKIT_TELEMETRY_DISABLED", "DO_NOT_TRACK"]
+        .iter()
+        .any(|key| {
+            secrets
+                .get(*key)
+                .is_some_and(|value| matches!(value.as_str(), "1" | "true"))
+        })
+}
+
+/// Overlays contain configuration names only; identities and credentials remain in environment.
+fn append_compose_overlay(
+    command: &mut Command,
+    root: &Path,
+    file: &str,
+    contents: &str,
+) -> Result<(), Problem> {
+    let overlay = root.join(file);
+    if std::fs::read(&overlay).ok().as_deref() != Some(contents.as_bytes()) {
+        std::fs::write(&overlay, contents).map_err(|error| {
+            Problem::with(
+                "OpenBot could not prepare its local Compose settings.",
+                error.to_string(),
+            )
+        })?;
+    }
+    command.arg("-f").arg(file);
+    Ok(())
+}
+
+/// The native personal edition alone may hand its installation identity to its server.
+fn uses_desktop_telemetry(root: &Path, secrets: &Secrets) -> bool {
+    let settings = crate::env::already_set(&root.join(".env"), &["OPENBOT_EDITION"]);
+    settings.get("OPENBOT_EDITION").map(String::as_str) == Some("personal")
+        && (secrets.get("OPENBOT_DISTRIBUTION").map(String::as_str) == Some("desktop")
+            || secrets
+                .get("COPILOTKIT_TELEMETRY_DISABLED")
+                .is_some_and(|value| matches!(value.as_str(), "1" | "true")))
+}
+
 /// Only service creation needs the Mac Podman port overlay. In particular, `run migrate` can
 /// create its Postgres dependency, so it must use the same configuration as `up`.
 fn compose_start_command(
@@ -802,7 +847,8 @@ fn compose_start_command(
     let mut command = compose_command(engine, root, secrets);
     let macos_podman = os == "macos" && engine.engine == crate::engine::Engine::Podman;
     let harness_ports = harness_port_overlay(root, macos_podman)?;
-    if !macos_podman && harness_ports.is_none() {
+    let desktop_telemetry = uses_desktop_telemetry(root, secrets);
+    if !macos_podman && harness_ports.is_none() && !desktop_telemetry {
         return Ok(command);
     }
 
@@ -811,13 +857,28 @@ fn compose_start_command(
     // This output can contain credentials: retain only file-selection settings, never log it.
     let environment = compose_command(engine, root, secrets)
         .args(["config", "--environment"])
-        .output()
-        .map_err(|error| {
-            Problem::with(
-                "OpenBot could not read the deployment's Compose settings.",
-                error.to_string(),
-            )
-        })?;
+        .output();
+    // Only the optional telemetry overrides need the probe here. An older Compose without it, or
+    // one that fails it, starts OpenBot as before: telemetry never blocks Start, opted out or not.
+    let optional_only = desktop_telemetry && !macos_podman && harness_ports.is_none();
+    if optional_only
+        && environment
+            .as_ref()
+            .map_or(true, |output| !output.status.success())
+    {
+        log::warn!(
+            "[telemetry] Compose settings unavailable; starting without the desktop telemetry \
+             overrides (opted out: {})",
+            desktop_telemetry_disabled(secrets)
+        );
+        return Ok(command);
+    }
+    let environment = environment.map_err(|error| {
+        Problem::with(
+            "OpenBot could not read the deployment's Compose settings.",
+            error.to_string(),
+        )
+    })?;
     if !environment.status.success() {
         return Err(Problem::with(
             "OpenBot could not read the deployment's Compose settings.",
@@ -827,8 +888,22 @@ fn compose_start_command(
     let environment = String::from_utf8(environment.stdout)
         .map_err(|_| Problem::plain("Compose returned unreadable deployment settings."))?;
     let files = compose_files(root, &environment)?;
-    for file in files {
+    for (index, file) in files.iter().enumerate() {
         command.arg("-f").arg(file);
+        // Desktop defaults precede user overrides, so a server-level opt-out is preserved.
+        if index == 0 && desktop_telemetry {
+            if let Err(error) = append_compose_overlay(
+                &mut command,
+                root,
+                DESKTOP_TELEMETRY_FILE,
+                DESKTOP_TELEMETRY,
+            ) {
+                log::warn!(
+                    "[telemetry] Compose overlay unavailable; starting without it: {}",
+                    error.detail.as_deref().unwrap_or(&error.said)
+                );
+            }
+        }
     }
     for (file, contents) in [
         (
@@ -838,16 +913,22 @@ fn compose_start_command(
         (HARNESS_PORT_FILE, harness_ports.as_deref()),
     ] {
         if let Some(contents) = contents {
-            let overlay = root.join(file);
-            if std::fs::read(&overlay).ok().as_deref() != Some(contents.as_bytes()) {
-                std::fs::write(&overlay, contents).map_err(|error| {
-                    Problem::with(
-                        "OpenBot could not prepare its local port settings.",
-                        error.to_string(),
-                    )
-                })?;
-            }
-            command.arg("-f").arg(file);
+            append_compose_overlay(&mut command, root, file, contents)?;
+        }
+    }
+    // Last, so the native opt-out wins over any override. Optional like the rest of telemetry: a
+    // file that cannot be written is logged, and OpenBot starts.
+    if desktop_telemetry && desktop_telemetry_disabled(secrets) {
+        if let Err(error) = append_compose_overlay(
+            &mut command,
+            root,
+            DESKTOP_TELEMETRY_DISABLED_FILE,
+            DESKTOP_TELEMETRY_DISABLED,
+        ) {
+            log::warn!(
+                "[telemetry] Compose opt-out override unavailable; starting without it: {}",
+                error.detail.as_deref().unwrap_or(&error.said)
+            );
         }
     }
     Ok(command)
@@ -8152,6 +8233,169 @@ fn main() {
         let patience = std::time::Duration::from_secs(3);
         wait_for_ports_to_clear(&[port], patience);
         assert!(started.elapsed() < patience, "a released port kept waiting");
+    }
+
+    #[test]
+    fn telemetry_overlay_requires_native_identity_and_the_personal_edition() {
+        let root = temp_root("telemetry-edition-policy");
+        std::fs::create_dir_all(&root).unwrap();
+        let desktop = Secrets::from([("OPENBOT_DISTRIBUTION".into(), "desktop".into())]);
+        let opted_out = Secrets::from([("COPILOTKIT_TELEMETRY_DISABLED".into(), "1".into())]);
+        for edition in ["", "OPENBOT_EDITION=team\n", "OPENBOT_EDITION=enterprise\n"] {
+            std::fs::write(root.join(".env"), edition).unwrap();
+            assert!(!uses_desktop_telemetry(&root, &desktop));
+            assert!(!uses_desktop_telemetry(&root, &opted_out));
+        }
+        std::fs::write(root.join(".env"), "OPENBOT_EDITION=personal\n").unwrap();
+        assert!(!uses_desktop_telemetry(&root, &Secrets::new()));
+        assert!(uses_desktop_telemetry(&root, &desktop));
+        assert!(uses_desktop_telemetry(&root, &opted_out));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn desktop_telemetry_is_selected_only_by_personal_native_startup() {
+        if crate::test_support::isolated_process(
+            "stack::tests::desktop_telemetry_is_selected_only_by_personal_native_startup",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("macos-podman-start");
+        let (root, _) = computer_stop_root(&path, "telemetry-start", "{}");
+        std::fs::write(root.join("docker-compose.override.yml"), "services: {}\n").unwrap();
+        let settings = "OPENBOT_EDITION=personal\n";
+        std::fs::write(root.join(".env"), settings).unwrap();
+        for secrets in [
+            Secrets::from([
+                ("OPENBOT_DISTRIBUTION".into(), "desktop".into()),
+                (
+                    "CPK_TELEMETRY_ID".into(),
+                    "12345678-1234-4123-8123-123456789012".into(),
+                ),
+            ]),
+            Secrets::from([("COPILOTKIT_TELEMETRY_DISABLED".into(), "1".into())]),
+        ] {
+            for os in ["macos", "windows", "linux"] {
+                let command = compose_start_command(
+                    &Address::new(crate::engine::Engine::Docker, None),
+                    &root,
+                    &secrets,
+                    os,
+                )
+                .unwrap();
+                let args: Vec<_> = command
+                    .get_args()
+                    .map(|arg| arg.to_string_lossy().into_owned())
+                    .collect();
+                let mut expected = vec![
+                    "compose",
+                    "-f",
+                    "docker-compose.yml",
+                    "-f",
+                    DESKTOP_TELEMETRY_FILE,
+                    "-f",
+                    "docker-compose.override.yml",
+                ];
+                if desktop_telemetry_disabled(&secrets) {
+                    expected.extend(["-f", DESKTOP_TELEMETRY_DISABLED_FILE]);
+                }
+                assert_eq!(args, expected);
+                assert_eq!(
+                    std::fs::read_to_string(root.join(DESKTOP_TELEMETRY_FILE)).unwrap(),
+                    DESKTOP_TELEMETRY
+                );
+                assert_eq!(
+                    std::fs::read_to_string(root.join(".env")).unwrap(),
+                    settings
+                );
+            }
+        }
+        // Optional telemetry cannot block startup when its generated file cannot be written.
+        std::fs::remove_file(root.join(DESKTOP_TELEMETRY_FILE)).unwrap();
+        std::fs::create_dir(root.join(DESKTOP_TELEMETRY_FILE)).unwrap();
+        let command = compose_start_command(
+            &Address::new(crate::engine::Engine::Docker, None),
+            &root,
+            &Secrets::from([("OPENBOT_DISTRIBUTION".into(), "desktop".into())]),
+            "linux",
+        )
+        .unwrap();
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            [
+                "compose",
+                "-f",
+                "docker-compose.yml",
+                "-f",
+                "docker-compose.override.yml"
+            ]
+        );
+        std::fs::remove_dir(root.join(DESKTOP_TELEMETRY_FILE)).unwrap();
+        // An older provider lacking the optional probe must not block ordinary startup.
+        std::fs::write(root.join(".fixture-config-failure"), "unsupported probe").unwrap();
+        let command = compose_start_command(
+            &Address::new(crate::engine::Engine::Docker, None),
+            &root,
+            &Secrets::from([("OPENBOT_DISTRIBUTION".into(), "desktop".into())]),
+            "linux",
+        )
+        .unwrap();
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["compose"]);
+        // An opted-out person is never kept from starting by an optional probe either: OpenBot
+        // starts as Compose finds it, with no desktop identity handed to the server.
+        let command = compose_start_command(
+            &Address::new(crate::engine::Engine::Docker, None),
+            &root,
+            &Secrets::from([("COPILOTKIT_TELEMETRY_DISABLED".into(), "1".into())]),
+            "linux",
+        )
+        .expect("an opted-out Start must not fail on the optional Compose probe");
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["compose"]);
+        std::fs::remove_file(root.join(".fixture-config-failure")).unwrap();
+        // Nor by an override file that cannot be written: the opt-out override is still applied.
+        std::fs::remove_file(root.join(DESKTOP_TELEMETRY_FILE)).ok();
+        std::fs::create_dir(root.join(DESKTOP_TELEMETRY_FILE)).unwrap();
+        let command = compose_start_command(
+            &Address::new(crate::engine::Engine::Docker, None),
+            &root,
+            &Secrets::from([("COPILOTKIT_TELEMETRY_DISABLED".into(), "1".into())]),
+            "linux",
+        )
+        .expect("an opted-out Start must not fail on an unwritable telemetry override");
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            [
+                "compose",
+                "-f",
+                "docker-compose.yml",
+                "-f",
+                "docker-compose.override.yml",
+                "-f",
+                DESKTOP_TELEMETRY_DISABLED_FILE
+            ]
+        );
+        std::fs::remove_dir(root.join(DESKTOP_TELEMETRY_FILE)).unwrap();
+        // And when the opt-out override itself cannot be written, OpenBot still starts.
+        std::fs::remove_file(root.join(DESKTOP_TELEMETRY_DISABLED_FILE)).ok();
+        std::fs::create_dir(root.join(DESKTOP_TELEMETRY_DISABLED_FILE)).unwrap();
+        assert!(compose_start_command(
+            &Address::new(crate::engine::Engine::Docker, None),
+            &root,
+            &Secrets::from([("COPILOTKIT_TELEMETRY_DISABLED".into(), "1".into())]),
+            "linux",
+        )
+        .is_ok());
+        std::fs::remove_dir(root.join(DESKTOP_TELEMETRY_DISABLED_FILE)).unwrap();
+        // A file left from a personal launch is never auto-selected for the team edition.
+        std::fs::write(root.join(".env"), "OPENBOT_EDITION=team\n").unwrap();
+        let command = compose_start_command(
+            &Address::new(crate::engine::Engine::Docker, None),
+            &root,
+            &Secrets::from([("OPENBOT_DISTRIBUTION".into(), "desktop".into())]),
+            "linux",
+        )
+        .unwrap();
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["compose"]);
     }
 
     #[test]

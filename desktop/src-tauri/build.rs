@@ -68,6 +68,9 @@ fn main() {
                     // Settings' AI model row, and its Change. See `src/ai_connection.rs`.
                     "ai_connection",
                     "change_ai_connection",
+                    // Settings' Share usage data. See `src/usage_data.rs`.
+                    "usage_data",
+                    "set_usage_data",
                     // Ctrl+Q in the window on Windows. See `src/quit-shortcut.js`.
                     "quit",
                     // The zoom keys no menu carries. See `src/zoom-shortcut.js`.

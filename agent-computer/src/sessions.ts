@@ -25,6 +25,7 @@
  * separate control store retains their outcomes and marks active handoffs interrupted on reload.
  */
 import type { Page } from "playwright";
+import { type BrowserTurns, createBrowserTurns } from "./browser-turns";
 import { type Control, createControl } from "./control";
 import { createControlStore } from "./control-store";
 import { createViewerSlot, type ViewerSlot } from "./viewer";
@@ -58,6 +59,8 @@ export type BotSession = {
    * navigating, so it never moves a page out from under someone who has started driving.
    */
   humanInputs: number;
+  /** This Bot's actions on its browser, one at a time in the order they arrived (browser-turns.ts). */
+  turns: BrowserTurns;
 };
 
 export type SessionsOptions = {
@@ -71,6 +74,8 @@ export type SessionsOptions = {
   mintRun?: () => string;
   /** Told when the wheel leaves the person who held this Bot's browser (see `createControl`'s `onWheelLeft`). */
   onWheelLeft?: (botId: string) => Promise<unknown> | undefined;
+  /** How long one action may hold a Bot's browser before the next goes ahead anyway (browser-turns.ts). */
+  turnLimitMs?: number;
 };
 
 /**
@@ -103,6 +108,8 @@ export function createSessions(options: SessionsOptions) {
   function forgetIdle(): void {
     for (const [botId, session] of [...sessions.entries()]) {
       if (session.viewer.occupied()) continue;
+      // An action waiting its turn belongs to this session's line; a new session would start a second one.
+      if (session.turns.busy()) continue;
       if (options.isLive(botId)) continue;
       if (wheelWithPerson(session)) continue;
       sessions.delete(botId);
@@ -145,6 +152,13 @@ export function createSessions(options: SessionsOptions) {
       run: mintRun(),
       viewer: createViewerSlot(),
       humanInputs: 0,
+      turns: createBrowserTurns({
+        limitMs: options.turnLimitMs ?? 60_000,
+        onOverrun: (limitMs) =>
+          console.warn(
+            JSON.stringify({ type: "browser-turn-overrun", botId, limitMs }),
+          ),
+      }),
     };
     sessions.set(botId, created);
     // Cheap, and only ever on the path that adds one, so the map cannot grow without this running.
