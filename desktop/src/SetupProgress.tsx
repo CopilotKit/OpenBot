@@ -393,6 +393,8 @@ function label(step: string): string {
       return "OpenBot's services";
     case "migrate":
       return "Database";
+    case "finish-update":
+      return "Finishing the back end update";
     case "stop-openbot":
       return "Stopping OpenBot";
     case "stop-intelligence":

@@ -20,6 +20,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   when you choose Continue. It now says "OpenBot needs your password to install Podman, which runs
   OpenBot's back end." Closing it without a password offers Continue again instead of stopping
   Install. Windows and Linux install as before.
+- **A back end update that was stopped partway no longer breaks every later Start.** Quitting
+  while the back end updated could leave it half updated, and every Start after that failed with
+  "Local update-quiesce failed (exit 1)". OpenBot now lets an update finish once it has begun
+  changing the back end ("Finishing the back end update" on the Shutting down screen), repairs a
+  back end an earlier update left half done, rolls back one Helm left mid-upgrade, uncordons a
+  back end node left unschedulable, and tries the update once more. While it runs, the row names
+  the step it is waiting on and for how long, and a failed database job is said as soon as it
+  fails. A failed update says the step it stopped at, and that your data is kept.
 - **The Account step says when it is waiting for Install to set up the engine.** On a new Mac it
   said "Checking your CopilotKit account…" for minutes while Install put Podman in, because the
   license agreement check needs a running engine. It now says "You're signed in. OpenBot is setting
@@ -118,6 +126,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Conversations
 
+- **A Bot whose whole answer is something it drew now raises its "replied" notification.**
 - **A Bot that runs its own agent reads your Gmail and finds your Slack channels again.** Such a
   Bot, like the personal starter Bot, can be sent only some of an app's actions in one request, and
   they were picked by matching the words of your message. With Gmail connected it could be sent

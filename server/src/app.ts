@@ -28,6 +28,7 @@ import { createApprovalRoutes } from "./approvals/routes";
 import { createApprovalRuleDraftRoutes } from "./approvals/rule-translate";
 import type { RuleVocabulary } from "./approvals/rule-vocabulary";
 import type { ApprovalService } from "./approvals/service";
+import { type AuditVocabulary, createAuditAskRoutes } from "./audit-ask";
 import {
   type AuditEventType,
   type AuditInitiator,
@@ -523,6 +524,16 @@ export function createApp(
      * are not mounted.
      */
     approvalRules?: { vocabulary: () => Promise<RuleVocabulary> };
+    /**
+     * Questions about the audit trail in plain English (audit-ask.ts): the deployment's own model,
+     * and what a filter may name. Absent, `/api/admin/audit-events/ask` is not mounted.
+     */
+    auditQuestions?: {
+      complete: ModelCompleter;
+      vocabulary: () => Promise<AuditVocabulary>;
+      /** The clock a question's "yesterday" is read against. A test fixes it; absent is now. */
+      now?: () => Date;
+    };
   },
   /**
    * Whether to offer help self-hosting, which also hides it from a deployment that pays for
@@ -1000,8 +1011,8 @@ export function createApp(
       }
       /*
        * The export answers the same filtered query as the list — `eventType`,
-       * `actorUserId`, `initiatorKind`, `targetType`, `targetId`, `bot`, `from`, `to` — so the
-       * downloaded file and the table agree. Paging (`cursor`, `limit`) belongs to the
+       * `actorUserId`, `initiatorKind`, `targetType`, `targetId`, `bot`, `app`, `tool`, `effect`,
+       * `intent`, `rule`, `from`, `to` — so the downloaded file and the table agree. Paging (`cursor`, `limit`) belongs to the
        * JSON list and is ignored here; the export walks every matching page up to the
        * cap in `readAuditExportRows` and names the file after the day it was pulled.
        */
@@ -1040,6 +1051,19 @@ export function createApp(
       throw error;
     }
   });
+  if (coworker?.auditQuestions)
+    app.route(
+      "/api/admin/audit-events",
+      createAuditAskRoutes({
+        requireUser,
+        complete: coworker.auditQuestions.complete,
+        vocabulary: coworker.auditQuestions.vocabulary,
+        ...(coworker.auditQuestions.now
+          ? { now: coworker.auditQuestions.now }
+          : {}),
+        ...(auditStore ? { auditStore } : {}),
+      }),
+    );
   /*
    * Who is here, and what they may do.
    *

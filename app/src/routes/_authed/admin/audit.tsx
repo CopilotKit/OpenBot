@@ -26,7 +26,11 @@ function AdminAuditPage() {
   const { bot } = useSearch({ strict: false }) as { bot?: string };
   const navigate = useNavigate();
   return (
-    <AuditPage bot={bot} onClearBot={() => navigate({ to: "/admin/audit" })}>
+    <AuditPage
+      ask
+      bot={bot}
+      onClearBot={() => navigate({ to: "/admin/audit" })}
+    >
       <RecordingSection />
     </AuditPage>
   );
