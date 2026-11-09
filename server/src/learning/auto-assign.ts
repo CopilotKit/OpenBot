@@ -2,6 +2,7 @@ import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import {
   AUTOMATIC_LEARNING_CONTAINER_ID,
   type LearningAutoAssignState,
+  type LearningTarget,
 } from "@openbot/shared/learning";
 import {
   type AuditStore,
@@ -12,7 +13,10 @@ import {
   askWhileIntelligenceStarts,
   type StartupClock,
 } from "../intelligence-startup";
-import type { LearningSettingsStore } from "./settings";
+import type {
+  ConfiguredLearningContainer,
+  LearningSettingsStore,
+} from "./settings";
 
 /**
  * What asking Intelligence about one container found. `learning_off`: Intelligence answered and has
@@ -273,7 +277,9 @@ const MIN_INTERVAL_MS = 60_000;
  * for every deployment whose Intelligence project already has the container:
  *
  * - It never overrides a choice. A saved Admin setting of any kind, including a saved off, and a
- *   container named in the environment both mean there is nothing to do.
+ *   container named in the environment both mean there is nothing to do, once Intelligence says it
+ *   has the container named. One it does not have is a stale name, not a choice: it is logged,
+ *   forgotten, and assignment goes ahead as though nothing was named (see `configured`).
  * - It creates the container only through `create`, with a credential that can (the runtime key on
  *   an Intelligence that allows it, a service token on a local evaluation install, or a CopilotKit
  *   CLI login on this machine; see learning/ensure-container.ts), once per process unless Admin asks
@@ -286,8 +292,15 @@ const MIN_INTERVAL_MS = 60_000;
  *   when the startup window closes.
  */
 export function createLearningAutoAssign(options: {
-  /** False when the operator switched this off or the environment names a container. */
+  /** False when the operator switched this off (`OPENBOT_LEARNING_AUTO_ASSIGN`). */
   enabled: boolean;
+  /**
+   * The container the environment names, checked first. There, and there is nothing to assign.
+   * Absent on this Intelligence, and it is forgotten and assignment runs as though it was never
+   * named. The Intelligence a server talks to is fixed for its life, and pointing it at another one
+   * restarts it, so a check per process is a check per Intelligence.
+   */
+  configured?: ConfiguredLearningContainer;
   store: Pick<LearningSettingsStore, "saved" | "adoptDefault">;
   probe: (containerId: string) => Promise<ContainerProbe>;
   /** Create the container with a credential that can. Absent when this deployment holds none. */
@@ -307,7 +320,10 @@ export function createLearningAutoAssign(options: {
   const now = options.now ?? Date.now;
   const minIntervalMs = options.minIntervalMs ?? MIN_INTERVAL_MS;
   const log = options.log ?? ((entry) => console.warn(JSON.stringify(entry)));
-  let current: LearningAutoAssignState = options.enabled
+  /** Whether there is anything to check: assignment, or a container the environment names. */
+  const active = () =>
+    options.enabled || options.configured?.target() !== undefined;
+  let current: LearningAutoAssignState = active()
     ? { state: "pending" }
     : { state: "off" };
   let running: Promise<LearningAutoAssignState> | undefined;
@@ -398,10 +414,40 @@ export function createLearningAutoAssign(options: {
     ...(createError ? { createError } : {}),
   });
 
+  /**
+   * Whether the environment's container is there. "stands": it is, or Intelligence answered without
+   * saying it is not (Learning off, or not licensed), so the choice stands as it always did.
+   * "forgotten": Intelligence says it has no such container, so it no longer names the default.
+   */
+  const checkConfigured = async (
+    target: LearningTarget,
+  ): Promise<"stands" | "forgotten" | "unavailable"> => {
+    const found = await options.probe(target.containerId);
+    if (found === "unavailable") return "unavailable";
+    if (found !== "absent") return "stands";
+    options.configured?.forget();
+    once("configured_absent", {
+      containerId: target.containerId,
+      variable: "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID",
+      message: `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID is "${target.containerId}", but this Intelligence has no Learning container with that ID, so OpenBot ignores it${options.enabled ? ` and assigns "${containerId}" instead` : ""}. Remove it from the environment, or set it to a container this Intelligence has.`,
+    });
+    return "forgotten";
+  };
+
   const run = async (): Promise<LearningAutoAssignState> => {
     unsaid = false;
-    if (!options.enabled) return { state: "off" };
+    if (!active()) return { state: "off" };
     if (await options.store.saved()) return { state: "saved" };
+    const configured = options.configured?.target();
+    if (configured) {
+      const checked = await checkConfigured(configured);
+      if (checked === "unavailable") {
+        if (starting) unsaid = true;
+        else sayUnavailable();
+        return { state: "unavailable" };
+      }
+      if (checked === "stands" || !options.enabled) return { state: "off" };
+    }
     let found = await options.probe(containerId);
     if (found === "absent") {
       const created = await tryCreate();
@@ -517,7 +563,7 @@ export function createLearningAutoAssign(options: {
     },
     state: () => current,
     start() {
-      if (!options.enabled) return;
+      if (!active()) return;
       void startup();
       timer = setInterval(() => void check(), options.retryMs ?? RETRY_MS);
       // Never keep the process alive for this alone.
@@ -546,8 +592,9 @@ export function withLearningAutoAssign<T extends LearningSettingsStore>(
     ...store,
     async read() {
       const settings = await store.read();
-      if (settings.enabled && settings.defaultTarget === null)
-        autoAssign.kick();
+      // With a default too, until the check settles: that default may be the environment's
+      // container, not yet confirmed on this Intelligence. Once settled, `kick` does nothing.
+      if (settings.enabled) autoAssign.kick();
       return settings;
     },
   };

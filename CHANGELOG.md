@@ -10,6 +10,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **A Learning container left in `~/OpenBot/.env` by an earlier setup no longer fails every
+  message.** A folder set up against hosted Intelligence kept
+  `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID="openbot"`, which the local back end did not have, so every
+  message failed with "Failed to initialize thread" (or "Failed to resolve Learning Container").
+  Start now writes that setting itself, empty, in place of any other line for it. The server also
+  checks a named container at start: one its Intelligence does not have is logged as
+  `configured_absent`, naming the variable and its value, and ignored, and a container is assigned
+  automatically as though none was named. A chat whose first message failed this way works when sent
+  to again.
 - **Settings shows which AI OpenBot uses, and changes it.** Settings > General has an AI model
   section in OpenBot Desktop: the provider and how OpenBot signs in to it (a Claude or ChatGPT plan,
   an API key, a Google or xAI account, or your own address), and the model when setup named one.
