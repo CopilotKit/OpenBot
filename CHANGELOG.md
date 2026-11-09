@@ -8,118 +8,153 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-- OpenBot Desktop's updates download from downloads.copilotkit.ai too. The update feed there names
-  that address for the Windows installer and the Mac update archives, instead of GitHub; every
-  signature is unchanged, and the feed is only published once each of those files answers there.
+**Before upgrading.** There are no migrations: the database stays at
+`0083_learning_skill_approvals`. Four things change for an existing deployment:
+- OpenBot Desktop updates its back end to CopilotKit Intelligence 0.16.0-rc.10 at the next Start,
+  saying "Updating the back end to 0.16.0-rc.10. Its data stays." With it, a first back end setup
+  downloads all of its images through downloads.copilotkit.ai first, where its own images came
+  straight from ghcr.io and Docker Hub, and a setup step that fails reports its own error, which
+  OpenBot's log keeps (below).
+- The Helm chart's bundled back end (the `intelligence` subchart) is 0.16.0-rc.10, from rc.9.
+- The first time anybody opens OpenBot in a browser or in OpenBot Desktop after the upgrade, every
+  built-in component description nobody has edited takes this release's wording, so Bots read the
+  new Notice, Checklist, Record, Headline figures, Data table, Bar chart, Donut chart and Progress
+  against target descriptions (below). Until then, Bots keep the old wording. A component whose
+  description an admin saved, or that an admin published or unpublished, on Admin → UI components
+  keeps what they chose. Each change is one row in Admin → Audit, "Update a component's
+  description", started by this deployment. In the personal edition every built-in description
+  follows, and Activity leaves these rows out.
+- On OpenBot Desktop, a Bot on LangChain that follows the installer has "Powered by LangChain
+  (LangGraph)" in its subtitle changed to "Powered by LangChain" at the next Start, keeping the rest
+  of the subtitle, and a Bot picked in setup before 0.3.3 and named "LangChain (LangGraph)" is
+  renamed "LangChain". A Bot whose connection you set yourself keeps its subtitle.
+
 ### OpenBot Desktop
 
-- **An update the mirror cannot send comes from GitHub.** When downloading the new version from
-  downloads.copilotkit.ai fails, OpenBot reads GitHub's update feed and downloads the same signed
-  version from there once, instead of failing until the mirror is fixed. The log says which one it
-  came from.
 - **A back end setup that stops says why.** OpenBot's log now records how every back end setup,
   start, update and stop ended: how long it took, its exit code, what its report says went wrong
   and the end of its error output. A setup that stopped used to leave nothing in the log. The card
   says whether the back end stopped with an error partway, quit without saying why, or could not
   be run, where all three said "The back end could not start."
-- The first Bot to need you after OpenBot Desktop starts raises its notification. It used to raise
-  nothing while the app was still checking that notifications were on, so the first question after
-  each launch, asked while OpenBot was minimised or behind another window, went unannounced.
-- A Bot with no folders, as every Bot has after OpenBot restarts, now says so in plain words: it
-  has no folders it can read, access ends when you stop OpenBot, and Choose folder in Settings →
-  Computer gives it one. It said "No host folders are granted to this Bot.", and the Bot told you
-  an administrator could restore it.
+- **The first notification after OpenBot Desktop starts is raised**, for a Bot that needs you or
+  replies while OpenBot is minimised or behind another window. The first one after each launch used
+  to raise nothing, because the app was still checking that notifications were on. OpenBot's log
+  now says whether each notification was shown, never what it said.
+- **Setup says what is happening.** The screen shown while OpenBot runs says you can show or stop
+  it from its icon in the system tray on Windows, where it said the menu bar everywhere, and no
+  longer flashes Start's own steps before OpenBot opens. After you accept the terms, the account
+  step says "Setting up your apps" while they connect, where it flashed "Sign in to CopilotKit".
+  Opening OpenBot after a restart says "Starting the engine machine." while it starts OpenBot's
+  Podman machine, and Start's steps say "OpenBot's services" where they said "Containers".
+- **App updates download from downloads.copilotkit.ai.** The update feed there names
+  downloads.copilotkit.ai for the Windows installer and the Mac update archives, where they came
+  from GitHub, and every signature is unchanged. If that download fails, OpenBot Desktop reads
+  GitHub's update feed and downloads the same signed version from there, where the update failed.
+  The log says where it came from.
+- **A Bot with no folders says so in plain words**, as every Bot does after OpenBot restarts: "This
+  Bot has no folders it can read right now. Folder access ends when you stop OpenBot. To give it a
+  folder, use Choose folder in Settings → Computer." It said "No host folders are granted to this
+  Bot."
 
-- **CopilotKit Intelligence 0.16.0-rc.10.** OpenBot Desktop's back end and the Helm chart move to
-  Intelligence 0.16.0-rc.10 (CLI `copilotkit@647a03b`). A first back end setup now downloads its
-  images through downloads.copilotkit.ai too, because the CLI's own pulls read the cluster's
-  mirrors, and a setup step that fails now reports its own error instead of only that the command
-  did not finish.
-- **Setup and Home say what is true.** "OpenBot is running" no longer flashes Start's own steps, and
-  points to the system tray on Windows instead of the menu bar; after Accept the account step says
-  it is setting up your apps; a relaunch says "Starting the engine machine." while it does; the
-  personal edition's Home no longer says nobody has shared a Bot; and Teach a Bot says "No
-  microphone found. Narration is off." on a computer with none, keeping your choice for when there
-  is one.
+### Teach a Bot
 
-### Automatic Learning and Teach a Bot
-
-- **Teach a Bot reads as one page**: its title and how in one sentence, the browser, and your
-  recordings under it, all as wide as the browser. The browser is drawn as a window (tabs on its
-  frame, a pill address bar with a lock, a start page for an empty tab), sized to its page so no
-  blank band sits under it, and the page is laid out while the browser opens. **Record** is one
-  button at the toolbar's end that asks for the task's name and narration in a popover, with an
-  (i) saying what narration is for; the narration bar shows only while recording, or to say there
-  is no microphone. Your recordings links to Settings → Learning, where what a recording teaches
-  shows up.
+- **Teach a Bot is one page.** Its title and one line on how sit above the browser, and Your
+  recordings sits under it at the same width and scrolls on its own, so a long list no longer makes
+  the browser smaller. The page was headed "Browser". Where the browser opens as a window on your
+  desktop, the page is as it was.
+- **The browser looks like a browser**: tabs along the top, a rounded address bar with a lock on
+  https pages, and a search field in an empty tab, sized so the page fills it. While it starts it
+  says "Opening your browser…", where the page showed no browser.
+- **Record is one button** at the end of the toolbar. It opens **Record a task**, with the task's
+  name, the Narration switch (its (i) says what narration is for) and **Start recording**, where the
+  name field, the switch and Record sat in a bar above the browser. The narration line shows under
+  the browser only while recording, or to say "No microphone found. Narration is off." on a
+  computer with none, which keeps your narration choice for when there is one.
+- Your recordings links to Settings → Learning ("See what your Bots learned").
 
 ### Conversations
 
-- **The sidebar's + opens a new conversation with To: empty** and the Bot menu open, where it
-  picked a Bot for you, as do Shift+N and a skin's new conversation link. A Bot's own Message link
-  still starts with that Bot, and a message sent before a Bot is picked stays in the box with
-  "Choose a Bot first."
-- The Bot's browser beside a conversation is a 360px glimpse with the address it is on and Take
-  control on the picture, and its full-size view fits its window to the page.
-- Home says which Bot is working, with a way to it, and a conversation says "Working" in the
-  sidebar while its Bot works. A Bot's browsing reads "Browsed example.com", where it read "Browsed
-  1 page".
-- Bots answer ordinary questions, summaries and short lists directly in Markdown by default. A
-  notice card is kept for a distinct alert that needs you to act, or for when you ask for one, and
-  other components for when a chart, table or card makes the answer easier to use. A Bot asked for
-  its top emails used to wrap the list in a notice.
-- A component description nobody has edited now follows OpenBot's own when you upgrade, so the new
-  Notice, Checklist, Record, Headline figures, Data table, Bar chart, Donut chart and Progress
-  against target descriptions reach an existing deployment. The text comes from OpenBot itself,
-  never from a browser. A description an admin has saved, or a component an admin has published or
-  unpublished, keeps what they chose. Each update is one row in Admin → Audit, started by OpenBot.
-- A notice card's supporting point that is itself a list is drawn as that list, without a stray dot
-  and an extra indent beside it.
-- A long link in a card's text (a notice, a checklist, a quotation, an approval, a choice's
-  options) wraps, where it ran under the card's edge and lost its end.
-- A choice card's summary is drawn as Markdown, as an approval's is, where it showed the raw
-  markers, such as `**two**`.
-- A Bot can link a bar, a progress row, a headline figure or a donut chart's legend row to where
-  the figure came from, such as the record or the search, when it has that address. Clicking it
-  opens the page in a new tab, as a source under a chart does. Only web addresses become links, and
-  a figure without one draws as before.
-- A chart whose figures are still arriving shimmers with "Drawing the chart…" at its own height,
-  where it said "There is no data to chart." until its first figure came in. A chart that was
-  stopped, or that finished with no figures, still says there is no data.
-- A bar chart whose figures don't fit their bars, such as ten bars on a phone, writes them
-  compactly ("15K", "3.7K"), where they ran into one another. The exact figure stays in the
-  tooltip and is what a screen reader reads.
+- **Bots answer in Markdown by default.** Ordinary questions, explanations, summaries and short
+  lists come back as a reply. A notice card is kept for an alert that needs you to act, or for when
+  you ask for one, and a chart, table or card is drawn when it makes the answer easier to use. Bots
+  used to be told to answer with a component whenever an answer had structure, so ordinary answers
+  came back as cards.
+- **A figure can link to where it came from.** A bar, a progress row, a headline figure or a donut
+  chart's legend row links to the record or search its figure came from when the Bot has that
+  address, and opens it in a new tab (in OpenBot Desktop, in your own browser). Only web addresses
+  become links.
+- A chart whose figures are still arriving shows "Drawing the chart…" at the chart's own height,
+  where it said "There is no data to chart." A chart that was stopped, or has no figures, still says
+  so.
+- **+ and Shift+N open a new conversation with To: empty** and the Bot menu open, in the personal
+  edition and wherever there is only one Bot, where since 0.3.3 they started with your Bot picked. A
+  Bot's own Message link still starts with that Bot, and Send with nobody in To: still keeps the
+  message and says "Choose a Bot first."
+- **The Bot's screen shows where it is.** In a conversation and in the panel beside it, the address
+  the Bot's browser is on sits above the picture. While the Bot has control, a strip over the
+  picture names it with **Take control**, where "The Bot has control." and Take control sat in a bar
+  under the picture. The panel beside a conversation is narrower, and the full-size view is sized to
+  the page.
+- **A Bot that is working says so.** Its conversation says "Working" in the sidebar where its time
+  was, and Home shows that the Bot is working, with the conversation's name and **Open**.
+- A Bot's browsing names the site when it stayed on one, "Browsed example.com" or "Browsed 3 pages
+  on example.com", where it said "Browsed 1 page".
+- **Approvals for a folder or a Bot's own computer use the words of their step.** The approval
+  card, Needs you and a task's waiting line say "Save a file todo.txt in share", "Read a file" and
+  "Run a command", where they said "Write file on todo.txt in share". A file on the Bot's own
+  computer is named by its path, and its save step reads "Saved a file".
+- An opened "Looked for a tool" step lists the tools the Bot found by name ("Send email on Gmail"),
+  where it showed their ids and the descriptions the search returned to the Bot.
 
 ### Personal edition
 
-- In Activity, a Bot's call to an app you haven't connected reads "Not connected" and "Gmail isn't
-  connected. Connect it in Connections.", rows already recorded included. It read "The server
-  didn't answer" and printed raw `[connect-app]` text, which Admin → Audit no longer shows either.
-- Home no longer shows an empty Explore Bots box.
+- Home no longer shows an empty Explore Bots box saying "Nobody has shared a Bot with you yet."
+- In Activity, a Bot's call to an app you haven't connected reads "Not connected" with "Gmail isn't
+  connected. Connect it in Connections.", or "No longer connected" when it needs connecting again,
+  rows already recorded included. It read "The server didn't answer" with raw `[connect-app]` text
+  under it, which Admin → Audit no longer shows either.
+- Activity names a skill by its title ("Write a skill", where it said "Skill creator"), on older
+  rows too. An app a Bot got when you pressed Connect in a conversation reads "Let a Bot use an
+  app", "Allowed automatically", where it read "Approve a request for an app", as if somebody had
+  approved it.
+- An app's page names the setting that makes a Bot ask first by its name, "Always ask before making
+  changes", where it said "Ask before acting".
 
 ### Smaller changes
 
-- LangChain is listed as **LangChain**, with LangChain's own symbol, where it said "LangChain
-  (LangGraph)". This covers New Bot, a Bot's "Powered by" subtitle, its setup row and OpenBot
-  Desktop's plan note. A subtitle saved under the old name still follows a change of harness. New
-  Bot's custom agents are one line each, and the four named frameworks show without scrolling.
-- **New Bot** shows custom agents on its first screen. Below the simple form, **Connect a custom
-  agent** lists every framework with its logo, Claude Agent SDK, LangChain, Google ADK and AWS
-  Strands first, and on a desktop its heading and first row show without scrolling. Pressing one
-  goes straight to its address, and Back returns to the list. Its labels are small and uppercase,
-  and Isolated and apps are plain rows.
 - The sidebar floats as frosted glass over the colours of OpenBot's orb, the orb sits beside
-  OpenBot's name, and the app is set in Atkinson Hyperlegible Next. A skin keeps its own faces.
-- Settings → General lists your answers as rows that open a dialog. Settings → Notifications shows
-  a switch only for channels that are set up, and says how to set them up, or that your admin does.
-  In OpenBot Desktop it says those channels need OpenBot running on a server.
-- **Activity, approvals and a Bot's page say things the way a person would.** Activity names a skill
-  by its title ("Write a skill", not "Skill creator"), says "Set up an app's sign-in" for "Register
-  an OAuth client", and says an app the personal edition gave a Bot on Connect was "Allowed
-  automatically" where it read as a person's approval. A file save's approval card reads "Save a
-  file todo.txt in share", as its step and its Activity row do, and an opened "Looked for a tool"
-  names the tools it found in words. A Bot's Your skills lists each skill by its title, and an app's
-  page names the "Always ask before making changes" setting by its name.
+  OpenBot's name, and the app is set in Atkinson Hyperlegible Next. The glass turns off with the
+  system's reduce transparency or increase contrast setting, and a skin keeps its own look.
+- Settings → General, headed "Preferences" before, shows your name and standing instructions as
+  rows under About you, each opening a dialog to change it, where both were edited on the page. Dark
+  theme, Skin and Message list emphasis sit under Appearance.
+- Settings → Notifications shows a switch only for channels that are set up, where the rest showed
+  as "Not set up". A choice saved for one is kept and comes back once it is set up. With none set up
+  it says "Updates stay in OpenBot", with **How to set them up** for admins and anyone running
+  OpenBot themselves, and that your admin sets them up for everyone else. In OpenBot Desktop it says
+  they need OpenBot running on a server.
+- The skill OpenBot ships as Make a coworker is called **Make a Bot**, and Write a skill's
+  description says it saves a new skill rather than a `/` command. Their `/` names are unchanged.
+- Activity and Admin → Audit say "Set up an app's sign-in" and "Check an app's sign-in", where they
+  said "Register an OAuth client" and "Read an OAuth client".
+- Your skills on a Bot's page lists each skill by its title ("Tide report"), where it showed
+  "/tide-report".
+- A notice card's supporting point that is itself a list is drawn as that list, without a stray
+  dot and an extra indent beside it.
+- A long link or path in a card's text wraps where it was cut off at the card's edge: in a notice,
+  a checklist, a record, a quotation, a data table, an approval, and a choice card's summary and
+  options. A choice card's summary is drawn as Markdown, as an approval's is, where it showed the
+  raw text, such as `**two**`.
+- When a bar chart's figures don't fit above their bars, every bar shows a shorter figure, such as
+  "15K" or "3.7K", where they ran into each other. The exact figure shows when you point at it and
+  is read out by screen readers.
+- **New Bot** lists the frameworks a custom agent can run on under **Connect a custom agent** on its
+  first screen, below the form, one line each with its logo, Claude Agent SDK, LangChain, Google ADK
+  and AWS Strands first. Choosing one goes straight to its address, and Back returns to the list.
+  They were behind a Connect a custom agent button.
+- LangChain is called **LangChain**, with LangChain's own mark, where it said "LangChain
+  (LangGraph)": in New Bot, a Bot's "Powered by" subtitle and its Runs on row, and OpenBot Desktop's
+  note under a ChatGPT plan.
 - A browser action waiting for your approval is named the way its card names it. A Bot's Activity
   row read "Approve computer_click" with "write" beside it, and now reads "Click the link “Python”
   on en.wikipedia.org". The Needs you card names the link too and lists what the action would send
