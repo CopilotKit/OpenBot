@@ -72,6 +72,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the raw request failure in red, such as `REST run request failed: {"error":"Failed to resolve
   Learning Container"}`. It now says "OpenBot couldn't reach its back end, so your message wasn't
   sent. Try again, or quit and reopen OpenBot." The original text goes to the browser console.
+- **The words that say a Bot is working pulse slowly instead of flashing.** "Thinking", a running
+  step such as "Drew an interface" and "Asking Ana…" now fade gently to a little over half strength
+  and back every 2.4 seconds, where a quick band used to flicker across them. With reduced motion
+  turned on they stay still.
 
 ## 1.0.0
 
