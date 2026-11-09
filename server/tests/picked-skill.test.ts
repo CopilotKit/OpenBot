@@ -72,7 +72,7 @@ const harnessBot: RegisteredAgent = {
     id: "standing-role:picked-harness",
     role: "system",
     content:
-      "You are Weekend Helper, Everyday life. Powered by LangChain (LangGraph).",
+      "You are Weekend Helper, Everyday life. Powered by LangChain.",
   },
 };
 

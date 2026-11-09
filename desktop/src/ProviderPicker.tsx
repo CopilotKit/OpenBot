@@ -841,7 +841,7 @@ export function ProviderPicker({
                   Your Bot will use{" "}
                   {row.id === "anthropic"
                     ? "Claude Agent SDK"
-                    : "LangChain (LangGraph)"}
+                    : "LangChain"}
                   . It’s the one that can use this plan.
                 </p>
               </>

@@ -58,11 +58,9 @@ test("the personal edition names what runs a Bot instead of its address", () => 
   const harness = {
     builtIn: false,
     endpoint: "http://agent-harness:4206/ag-ui",
-    framework: "LangChain (LangGraph)",
+    framework: "LangChain",
   };
-  expect(setupSummary(harness, "personal")).toBe(
-    "Runs on LangChain (LangGraph)",
-  );
+  expect(setupSummary(harness, "personal")).toBe("Runs on LangChain");
   expect(setupSummary(harness, "team")).toBe("agent-harness:4206");
   expect(setupSummary(harness)).toBe("agent-harness:4206");
   // An agent connected by address with no framework named: the address is all there is.

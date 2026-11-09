@@ -1024,7 +1024,7 @@ describe("agent profile store integration", () => {
         ).agent;
 
       expect((await detail(picked.agentId)).framework).toBe(
-        "LangChain (LangGraph)",
+        "LangChain",
       );
       // An agent connected by address with no framework named: OpenBot doesn't know, so it says none.
       expect(await detail(unnamed.agentId)).not.toHaveProperty("framework");

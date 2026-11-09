@@ -238,16 +238,14 @@ test("unavailable hosting still permits the custom path", async () => {
   expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
   await user.click(framework);
   expect(await view.findByLabelText("Agent address")).toBeTruthy();
-  expect(view.getByText("LangChain (LangGraph)")).toBeTruthy();
+  expect(view.getByText("LangChain")).toBeTruthy();
   await user.type(
     view.getByLabelText("Agent address"),
     "https://agent.example.test/ag-ui",
   );
   await user.click(view.getByRole("button", { name: "Create Bot" }));
   await waitFor(() => expect(creates).toHaveLength(1));
-  expect(creates[0]?.roleDescription).toBe(
-    "Connected from LangChain (LangGraph).",
-  );
+  expect(creates[0]?.roleDescription).toBe("Connected from LangChain.");
 });
 
 test("Create fills in what was left blank, then hands over", async () => {
@@ -310,7 +308,7 @@ test("checks the connection then creates with its saved name and key", async () 
     endpoint: "https://agent.example.com/ag-ui",
     auth: { header: "Authorization", value: "Bearer secret" },
     // The framework picked from the list, by the name the list showed.
-    title: "Powered by LangChain (LangGraph)",
+    title: "Powered by LangChain",
     // And by its id, so the Bot is told what runs it whatever its subtitle becomes.
     harness: "langgraph",
   });
@@ -476,7 +474,7 @@ test("a framework on the first screen validates the name, then goes straight to 
     customAgents(view).getByRole("button", { name: /LangChain/ }),
   );
   expect(await view.findByLabelText("Agent address")).toBeTruthy();
-  expect(view.getByText("LangChain (LangGraph)")).toBeTruthy();
+  expect(view.getByText("LangChain")).toBeTruthy();
   await user.click(view.getByRole("button", { name: "Back" }));
   // Back to the first screen, not the list: the name is there, and so are the custom agents.
   expect(((await view.findByLabelText("Name")) as HTMLInputElement).value).toBe(
@@ -511,7 +509,7 @@ test("the first screen's custom agents lead with Claude Agent SDK, LangChain, Go
     .filter(Boolean);
   expect(names.slice(0, 4)).toEqual([
     "Claude Agent SDK",
-    "LangChain (LangGraph)",
+    "LangChain",
     "Google ADK",
     "AWS Strands",
   ]);
@@ -611,10 +609,11 @@ test("team: the sheet offers only the apps the person can give, ticked", async (
   expect(requested).not.toContain("/api/plugins");
 });
 
-test("LangGraph is offered under LangChain's name, the one people know it by", async () => {
+test("the LangGraph harness is offered as LangChain, the name people know it by", async () => {
   const { view } = await customFlow();
   const framework = customAgents(view).getByRole("button", {
-    name: /LangGraph/,
+    name: /^LangChain/,
   });
-  expect(framework.textContent).toContain("LangChain (LangGraph)");
+  // LangChain's own name and a description that doesn't talk about graphs.
+  expect(framework.textContent).not.toMatch(/Graph/);
 });
