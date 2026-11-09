@@ -214,15 +214,18 @@ test.each(["user", "admin"] as const)(
   },
 );
 
-test("the running OpenBot version sits under the person's name, from /api/me", async () => {
+test("the running OpenBot version sits to the right of the person's name, in one row, from /api/me", async () => {
   const { view } = renderSidebar("user", "team", { version: "v0.3.1" });
   const version = await view.findByText("v0.3.1");
   const account = view.getByRole("button", { name: /Maya Chen/ });
   expect(account.contains(version)).toBe(true);
-  // Directly under the name, in the same column.
+  // The name, then the version, side by side in one row that splits its width 80/20.
   const name = within(account).getByText("Maya Chen");
-  expect(version.parentElement).toBe(name.parentElement);
   expect(name.nextElementSibling).toBe(version);
+  const row = name.parentElement;
+  expect(row).toBe(version.parentElement);
+  expect(row?.className).toContain("grid-cols-[4fr_1fr]");
+  expect(version.className).toContain("text-right");
 });
 
 test.each([
@@ -231,7 +234,9 @@ test.each([
 ])("no version line when the server has none (%s)", async (_label, me) => {
   const { view } = renderSidebar("user", "team", me);
   const account = await view.findByRole("button", { name: /Maya Chen/ });
-  expect(account.querySelector('[data-slot="openbot-version"]')).toBeNull();
+  expect(
+    view.container.ownerDocument.querySelector('[data-slot="openbot-version"]'),
+  ).toBeNull();
   expect(account.textContent).not.toMatch(/v\d/);
 });
 

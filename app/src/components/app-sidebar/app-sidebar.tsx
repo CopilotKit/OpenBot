@@ -45,7 +45,6 @@ import {
 } from "@/lib/settings/message-list";
 import { BotsNavBadge } from "../bot-profile/attention";
 import { BrowserNavItem } from "../browser/browser-nav-item";
-import { OpenBotLogo } from "../edition/openbot-logo";
 import { navigationRender } from "../edition/team-features-dialog";
 import { OpenBotVersion } from "../layout/openbot-version";
 import { Button } from "../ui/button";
@@ -234,19 +233,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarMenu>
           <SidebarMenuItem className="flex flex-row gap-1.5">
             <SidebarMenuButton
-              // The product's name, not a menu row: nothing changes on hover or press (the row fill read as a blue box on
-              // the frosted sidebar). It still goes home when clicked, and the keyboard's focus ring stays.
-              className="h-full cursor-default font-semibold text-[14px] leading-tight tracking-tighter hover:bg-transparent hover:text-sidebar-foreground active:bg-transparent active:text-sidebar-foreground"
+              className="font-semibold text-[14px] tracking-tighter h-full leading-tight"
               render={(props) => (
                 <Link {...appLinkOptions} {...props}>
-                  {/* OpenBot's mark beside its name, as on open.bot and the desktop app. A deployment that renames the
-                      product (brand.yaml) has no mark here: the orb is OpenBot's, not theirs. */}
-                  {appConfig.brand.productName === "OpenBot" ? (
-                    <OpenBotLogo
-                      aria-hidden="true"
-                      className="size-5 shrink-0"
-                    />
-                  ) : null}
                   {appConfig.brand.productName}
                 </Link>
               )}
@@ -377,11 +366,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 }
               >
                 <UserAvatar />
-                <span className="flex min-w-0 flex-col">
+                {/* The name and the release the server runs, side by side: 80/20 of the row. */}
+                <span className="grid min-w-0 flex-1 grid-cols-[4fr_1fr] items-center gap-2">
                   <span className="truncate text-sm trackint-tight">
                     {currentUser?.name || currentUser?.email}
                   </span>
-                  <OpenBotVersion className="text-[10px] leading-3 text-muted-foreground" />
+                  <OpenBotVersion className="text-right text-[10px] leading-3 text-muted-foreground" />
                 </span>
               </DropdownMenuTrigger>
               <DropdownMenuContent
