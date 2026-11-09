@@ -15,7 +15,6 @@ import {
 } from "@/components/manage/audit-page";
 import { PluginPage } from "@/components/manage/plugin-page";
 import { agentKeys } from "@/lib/agents/queries";
-import { auditKeys } from "@/lib/audit/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { managePaths } from "@/lib/manage-paths";
 import {
@@ -28,6 +27,7 @@ import {
   pluginKeys,
 } from "@/lib/plugins/queries";
 import { Route as ActivityRoute } from "@/routes/_authed/settings/_personal/activity";
+import { seedAuditPage } from "./seed-audit-page";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -133,8 +133,9 @@ function draw(edition: "team" | "personal", screen: () => ReactNode) {
   client.setQueryData(agentKeys.list(false), []);
   client.setQueryData(agentKeys.list(true), []);
   // Activity asks without OpenBot's own working; Admin asks for everything.
-  client.setQueryData(
-    [...auditKeys.all, edition === "personal" ? withoutOpenBotWorking("") : ""],
+  seedAuditPage(
+    client,
+    edition === "personal" ? withoutOpenBotWorking("") : "",
     { events: [startedByOpenBot] },
   );
   const router = createRouter({

@@ -14,8 +14,8 @@ import {
 } from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
 import { OPENBOT_WORKING_EVENT_TYPES } from "@/lib/audit/outcome";
-import { auditKeys } from "@/lib/audit/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { seedAuditPage } from "./seed-audit-page";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -142,8 +142,9 @@ async function renderAs(edition: "team" | "personal") {
     edition,
   });
   // Activity asks without OpenBot's own working; Admin asks for everything.
-  queryClient.setQueryData(
-    [...auditKeys.all, edition === "personal" ? withoutOpenBotWorking("") : ""],
+  seedAuditPage(
+    queryClient,
+    edition === "personal" ? withoutOpenBotWorking("") : "",
     // What the server answers each: Activity's query leaves a build's components out.
     {
       events:
