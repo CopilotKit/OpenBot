@@ -14,13 +14,18 @@
  *   v2/                                  `{}`, so a client's first request answers
  *   v2/<repo>/manifests/<tag>            the bytes ghcr.io serves for the tag, typed by their
  *                                        mediaType; cached for five minutes, invalidated here
- *   v2/<repo>/manifests/sha256:<hex>     each index and each linux/amd64 and linux/arm64 manifest,
- *                                        byte for byte, so its digest is the same; cached a year
+ *   v2/<repo>/manifests/sha256:<hex>     each index and every manifest it names, every platform and
+ *                                        every attestation, byte for byte, so its digest is the same;
+ *                                        cached a year
  *   v2/<repo>/blobs/sha256:<hex>         each config and layer of those; cached a year
+ *   v2/<repo>/referrers/sha256:<hex>     an empty image index for each of those manifests, so the
+ *                                        referrers API Docker 29 asks with every pull answers 200;
+ *                                        cached for five minutes
  * <repo> is the path on ghcr.io unchanged, such as copilotkit/openbot-server, or for Docker Hub
- * docker.io/ and its path, official images under library/ (docker.io/library/busybox). An image
- * named by digest whose manifest is there already is not read again. Attestations and other
- * platforms are not copied; a client that asks for one gets 403 and goes to ghcr.io.
+ * docker.io/ and its path, official images under library/ (docker.io/library/busybox). The whole
+ * index is copied because Docker 29 fetches every manifest it names, attestations included, and a
+ * 403 for one fails the pull. An image named by digest whose referrers are there already is whole,
+ * and is not read again.
  *
  * Running it again changes nothing. Each object S3 holds is compared by the SHA-256 S3 computed on
  * upload, its Content-Type and its Cache-Control, and only what is missing or differs is read from
@@ -68,7 +73,12 @@ const MANIFEST_TYPES = new Set([
   "application/vnd.oci.image.manifest.v1+json",
   "application/vnd.docker.distribution.manifest.v2+json",
 ]);
-const ARCHITECTURES = new Set(["amd64", "arm64"]);
+const MANIFEST_ACCEPT = [...INDEX_TYPES, ...MANIFEST_TYPES].join(", ");
+const OCI_INDEX = "application/vnd.oci.image.index.v1+json";
+/** What `v2/<repo>/referrers/<digest>` answers: an empty image index, which says nothing refers to it. */
+export const EMPTY_REFERRERS = new TextEncoder().encode(
+  `{"schemaVersion":2,"mediaType":"${OCI_INDEX}","manifests":[]}`,
+);
 
 const repoPattern =
   /^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$/;
@@ -146,7 +156,7 @@ export function imageRef(
 
 type Planned = {
   key: string;
-  kind: "file" | "blob" | "manifest" | "index" | "tag" | "ping";
+  kind: "file" | "blob" | "manifest" | "index" | "referrers" | "tag" | "ping";
   /** A file already downloaded, or where to download one from github.com. */
   path?: string;
   url?: string;
@@ -554,37 +564,76 @@ async function verify(
   },
 ): Promise<number> {
   const delay = Number(options.env.DOWNLOADS_VERIFY_DELAY ?? "10") * 1000;
-  const urls = [
-    ...new Set(
-      refs.map(
-        (ref) =>
-          `${options.address}/${options.prefix}v2/${ref.path}/manifests/${ref.digest ?? ref.tag}`,
-      ),
+  const base = (ref: Ref) =>
+    `${options.address}/${options.prefix}v2/${ref.path}`;
+  const tops = [
+    ...new Map(
+      refs.map((ref) => [
+        `${base(ref)}/manifests/${ref.digest ?? ref.tag}`,
+        ref,
+      ]),
     ),
   ];
-  let missing = urls;
-  for (let attempt = 1; attempt <= 3 && missing.length > 0; attempt++) {
-    if (attempt > 1) await Bun.sleep(delay);
-    const failed: string[] = [];
-    await pool(missing, options.parallel, async (url) => {
-      try {
-        const answer = await fetch(url, { method: "HEAD" });
-        if (answer.status !== 200) failed.push(`${url} (${answer.status})`);
-      } catch (error) {
-        failed.push(
-          `${url} (${error instanceof Error ? error.message : error})`,
-        );
-      }
-    });
-    missing = failed.map((line) => line.slice(0, line.lastIndexOf(" (")));
-    if (attempt === 3 && failed.length > 0) {
-      fail(
-        `${failed.length} of ${urls.length} images for ${options.label} do not answer through ${options.address}: ${failed.sort().join(", ")}`,
-      );
+  /** Asks for each URL, three times at most, and gives what never answered `expected`. */
+  const ask = async (
+    urls: string[],
+    read: (url: string, answer: Response) => Promise<void>,
+  ) => {
+    let missing = urls;
+    let failed: string[] = [];
+    for (let attempt = 1; attempt <= 3 && missing.length > 0; attempt++) {
+      if (attempt > 1) await Bun.sleep(delay);
+      failed = [];
+      await pool(missing, options.parallel, async (url) => {
+        try {
+          // As a registry client asks: by the manifest types it reads.
+          const answer = await fetch(url, {
+            method: read === none ? "HEAD" : "GET",
+            headers: { accept: MANIFEST_ACCEPT },
+          });
+          if (answer.status !== 200) failed.push(`${url} (${answer.status})`);
+          else await read(url, answer);
+        } catch (error) {
+          failed.push(
+            `${url} (${error instanceof Error ? error.message : error})`,
+          );
+        }
+      });
+      missing = failed.map((line) => line.slice(0, line.lastIndexOf(" (")));
     }
+    return failed;
+  };
+  const none = async () => {};
+  // Each image's top manifest, as a pull asks for it first, then every manifest an index names
+  // and the referrers of each, as Docker 29 asks for them.
+  const more: string[] = [];
+  const failed = await ask(
+    tops.map(([url]) => url),
+    async (url, answer) => {
+      const bytes = new Uint8Array(await answer.arrayBuffer());
+      const ref = new Map(tops).get(url) as Ref;
+      const document = JSON.parse(new TextDecoder().decode(bytes)) as {
+        manifests?: { digest?: string }[];
+      };
+      const digests = [`sha256:${sha256Hex(bytes)}`];
+      for (const child of document.manifests ?? []) {
+        if (child.digest && digestPattern.test(child.digest)) {
+          more.push(`${base(ref)}/manifests/${child.digest}`);
+          digests.push(child.digest);
+        }
+      }
+      for (const digest of digests)
+        more.push(`${base(ref)}/referrers/${digest}`);
+    },
+  );
+  failed.push(...(await ask([...new Set(more)], none)));
+  if (failed.length > 0) {
+    fail(
+      `${failed.length} of the objects for the ${tops.length} images for ${options.label} do not answer through ${options.address}: ${failed.sort().join(", ")}`,
+    );
   }
   console.log(
-    `All ${urls.length} images for ${options.label} answer through ${options.address}.`,
+    `All ${tops.length} images for ${options.label} answer through ${options.address}, every manifest and referrers object included.`,
   );
   return 0;
 }
@@ -734,8 +783,11 @@ async function copy(options: Copy): Promise<number> {
     }
     return { bytes, document, digest: `sha256:${sha256Hex(bytes)}` };
   };
-  const key = (ref: Ref, kind: "manifests" | "blobs", reference: string) =>
-    `${prefix}v2/${ref.path}/${kind}/${reference}`;
+  const key = (
+    ref: Ref,
+    kind: "manifests" | "blobs" | "referrers",
+    reference: string,
+  ) => `${prefix}v2/${ref.path}/${kind}/${reference}`;
   const blobs = (
     ref: Ref,
     document: Awaited<ReturnType<typeof manifest>>["document"],
@@ -772,15 +824,29 @@ async function copy(options: Copy): Promise<number> {
     }
   };
 
+  // An empty referrers index for a manifest: a valid answer to the OCI referrers API (Docker 29
+  // asks for one with every pull, and takes a 403 as a failed pull), and nothing refers to it here.
+  const referrers = (ref: Ref, digest: string) =>
+    add({
+      key: key(ref, "referrers", digest),
+      kind: "referrers",
+      sha256: sha256Hex(EMPTY_REFERRERS),
+      contentType: OCI_INDEX,
+      cache: TAG_CACHE,
+      bytes: EMPTY_REFERRERS,
+    });
+
   let whole = 0;
   await pool(copied, parallel, async (ref) => {
     const reference = ref.digest ?? (ref.tag as string);
     const name = `${ref.name}${ref.digest ? "@" : ":"}${reference}`;
-    // An image named by digest whose manifest S3 holds already is whole: a manifest is uploaded
-    // only after everything it names. Not read again, so Docker Hub's pull limit is not spent.
+    // An image named by digest whose referrers S3 holds already is whole: they are uploaded only
+    // after every manifest and blob the image is made of. Not read again, so Docker Hub's pull limit
+    // is not spent. (Its manifest alone is not enough: a copy from before every child was copied
+    // has the manifest and lacks the rest.)
     if (ref.digest) {
-      const found = await held(key(ref, "manifests", ref.digest));
-      if (found?.sha256 === ref.digest.slice(7) && found.cache === IMMUTABLE) {
+      const found = await held(key(ref, "referrers", ref.digest));
+      if (found?.sha256 === sha256Hex(EMPTY_REFERRERS)) {
         whole++;
         return;
       }
@@ -790,14 +856,13 @@ async function copy(options: Copy): Promise<number> {
       fail(`${name} served bytes whose digest is ${top.digest}.`);
     }
     const type = top.document.mediaType ?? "";
+    referrers(ref, top.digest);
     if (INDEX_TYPES.has(type)) {
-      const children = (top.document.manifests ?? []).filter(
-        (child) =>
-          child.platform?.os === "linux" &&
-          ARCHITECTURES.has(child.platform.architecture ?? ""),
-      );
-      if (children.length === 0)
-        fail(`${name} has no linux/amd64 or linux/arm64 image.`);
+      // The whole index: every platform and every attestation it names. A client may fetch any of
+      // them (Docker 29 fetches each child, attestations included), and one it cannot fetch fails
+      // its pull.
+      const children = top.document.manifests ?? [];
+      if (children.length === 0) fail(`${name} names no manifests.`);
       for (const child of children) {
         if (!child.digest || !digestPattern.test(child.digest))
           fail(`${name} names a manifest without a digest.`);
@@ -823,6 +888,7 @@ async function copy(options: Copy): Promise<number> {
           bytes: found.bytes,
         });
         blobs(ref, found.document, childName);
+        referrers(ref, child.digest);
       }
       add({
         key: key(ref, "manifests", top.digest),
@@ -891,6 +957,7 @@ async function copy(options: Copy): Promise<number> {
     "blob",
     "manifest",
     "index",
+    "referrers",
     "tag",
     "ping",
   ];
