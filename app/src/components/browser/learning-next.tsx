@@ -61,6 +61,21 @@ const finished = (run: LearningRunSummary) =>
   run.status === "succeeded" || run.status === "failed";
 
 /**
+ * Whether a stopped recording is in the person's Learning space, so there is a next step to say: not discarded, not
+ * empty, not kept in the browser, and no longer on its way or being retried.
+ */
+export function savedToLearning(stopped: Stopped | undefined): boolean {
+  return (
+    !!stopped &&
+    !stopped.discarded &&
+    !stopped.empty &&
+    !stopped.kept &&
+    !stopped.sending &&
+    !stopped.retrying
+  );
+}
+
+/**
  * What Learning has made of the recording Stop just saved, read from the person's own review (their runs, and whether
  * they or an admin approve) and the skills proposed from that recording since it stopped. Learn now starts the same
  * run as Settings, Learning on each of the person's recording spaces.
@@ -286,9 +301,14 @@ export function learningNextWords(
 export function LearningNextRow({
   learning,
   title,
+  className,
+  more,
 }: {
   learning: LearningNextState;
   title: string;
+  className?: string;
+  /** Another way on beside the row's own action: See your skills, where the row is the whole of the next step. */
+  more?: ReactNode;
 }) {
   const { next, canReview, learnError } = learning;
   const learnNow = canReview ? (
@@ -379,7 +399,7 @@ export function LearningNextRow({
   }
   return (
     // Announced as it changes, without being a second status beside the recording's own.
-    <Item size="sm" aria-live="polite">
+    <Item size="sm" aria-live="polite" className={className}>
       <ItemMedia
         variant="icon"
         className={cn(
@@ -396,7 +416,45 @@ export function LearningNextRow({
           {sentence}
         </ItemDescription>
       </ItemContent>
-      {action ? <ItemActions>{action}</ItemActions> : null}
+      {action || more ? (
+        <ItemActions>
+          {action}
+          {more}
+        </ItemActions>
+      ) : null}
     </Item>
+  );
+}
+
+/**
+ * The next step under a saved recording in the browser drawn in the page (OpenBot Desktop, hosted OpenBot), where Teach
+ * a Bot is one page and Record lives in the browser's toolbar: under the toolbar's line that says where the recording
+ * went, what Learning does with it next, worded for who approves, and the row that follows it through Learning, with
+ * See your skills beside its action. Record another is the toolbar's Record.
+ */
+export function LearningNextNotice({ stopped }: { stopped: Stopped }) {
+  const learning = useLearningNext(stopped);
+  if (!learning.loaded) return null;
+  const { sentence } = learningNextWords(learning, stopped.title);
+  return (
+    <div className="border-b border-border bg-background">
+      <p className="px-3 pt-2 text-pretty text-foreground/75 text-sm">
+        {sentence}
+      </p>
+      <LearningNextRow
+        className="px-3 py-2"
+        learning={learning}
+        title={stopped.title}
+        more={
+          <Button
+            size="sm"
+            variant="outline"
+            render={<Link to={YOUR_SKILLS} />}
+          >
+            See your skills
+          </Button>
+        }
+      />
+    </div>
   );
 }

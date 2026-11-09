@@ -1026,6 +1026,90 @@ test("on OpenBot Desktop a saved recording says why Learning can't run, didn't f
   expect(view.getByText(noModel)).toBeTruthy();
 });
 
+/** The same saved recording where the browser is drawn in the page (OpenBot Desktop since #1306, and hosted OpenBot). */
+function savedMeetingOnScreen(): BrowserApiState {
+  const base = screenState();
+  return {
+    ...base,
+    recorder: {
+      ...(base.recorder as NonNullable<BrowserApiState["recorder"]>),
+      lastStopped: savedMeeting().recorder?.lastStopped,
+    },
+  };
+}
+
+// Teach a Bot became one page with Record in the browser's toolbar (#1306), and after Stop it said only "Saved “Find my
+// meeting” to your Learning space: 6 actions and 6 narrated phrases." under the toolbar.
+test("with the browser in the page, a saved recording says what happens next under the toolbar, Learn now starts Learning, and See your skills opens Settings, Learning", async () => {
+  state = savedMeetingOnScreen();
+  openAnswer = answerFor("screen");
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  expect(await stopSays(view)).toBe(
+    "Saved “Find my meeting” to your Learning space: 6 actions and 6 narrated phrases.",
+  );
+  expect(
+    await view.findByText(
+      "OpenBot learns a skill from it, and you'll find it in Settings, Learning. Once it's learned, ask any Bot to do it.",
+    ),
+  ).toBeTruthy();
+  expect(await view.findByText("Learning runs on its own")).toBeTruthy();
+  expect(linkNamed(view, "See your skills").getAttribute("href")).toBe(
+    "/settings/learning",
+  );
+
+  await user.click(view.getByRole("button", { name: "Learn now" }));
+  await waitFor(() =>
+    expect(writes).toContainEqual({
+      path: `/api/settings/learning/runs?container=${RECORDINGS_SPACE}`,
+      method: "POST",
+      body: {},
+    }),
+  );
+  expect(await view.findByText("Learning from your recordings")).toBeTruthy();
+
+  await user.click(view.getByText("See your skills", { exact: true }));
+  await waitFor(() =>
+    expect(drawnRouter?.state.location.pathname).toBe("/settings/learning"),
+  );
+});
+
+test("with the browser in the page, a skill learned from the saved recording says so, with Try it", async () => {
+  state = savedMeetingOnScreen();
+  openAnswer = answerFor("screen");
+  recordingSkills = [meetingSkill("approved")];
+  const view = draw(<BrowserPage />);
+  expect(await view.findByText("Skill learned")).toBeTruthy();
+  expect(
+    view.getByText(
+      "Your Bots can do “Find my meeting” now. Try it, or ask any Bot to do it.",
+    ),
+  ).toBeTruthy();
+  expect(linkNamed(view, "Try it").getAttribute("href")).toMatch(
+    /^\/\?ask=Find(\+|%20)my(\+|%20)meeting$/,
+  );
+});
+
+test("with the browser in the page, a recording still on its way has no next step yet", async () => {
+  const base = savedMeetingOnScreen();
+  const stopped = base.recorder?.lastStopped;
+  if (!stopped) throw new Error("savedMeetingOnScreen has no recording");
+  state = {
+    ...base,
+    recorder: {
+      ...(base.recorder as NonNullable<BrowserApiState["recorder"]>),
+      lastStopped: { ...stopped, sending: true },
+    },
+  };
+  openAnswer = answerFor("screen");
+  const view = draw(<BrowserPage />);
+  expect(await stopSays(view)).toBe(
+    "Saving “Find my meeting” to your Learning space: 6 actions and 6 narrated phrases.",
+  );
+  expect(view.queryByText("See your skills")).toBeNull();
+  expect(view.queryByText("Learning runs on its own")).toBeNull();
+});
+
 test("on OpenBot Desktop a recording discarded from the Recorder's mark in the browser is said to be discarded, never saved", async () => {
   state = {
     ...nativeState(),

@@ -14,6 +14,7 @@ import { queryClient } from "@/query-client";
 import {
   LearningNextRow,
   learningNextWords,
+  savedToLearning,
   useLearningNext,
   YOUR_SKILLS,
 } from "./learning-next";
@@ -193,12 +194,7 @@ export function TeachSteps({ state }: { state: BrowserApiState }) {
         </div>
       </Slide>
     );
-  } else if (
-    recording.stopped &&
-    saved &&
-    !recording.stopped.sending &&
-    !recording.stopped.retrying
-  ) {
+  } else if (recording.stopped && savedToLearning(recording.stopped)) {
     body = <SavedStep stopped={recording.stopped} another={() => setStep(2)} />;
   } else if (recording.stopped) {
     const stopped = recording.stopped;
