@@ -19,6 +19,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `configured_absent`, naming the variable and its value, and ignored, and a container is assigned
   automatically as though none was named. A chat whose first message failed this way works when sent
   to again.
+- **A saved Learning container the current back end does not have no longer fails every message
+  either.** A default container saved while OpenBot used hosted Intelligence still won after it
+  switched to the local one, which has no such container. The server now checks the saved container
+  at start: one its Intelligence does not have is logged as `saved_absent`, naming it, and ignored
+  there, and a container is assigned automatically in its place. The saved choice is kept, not
+  cleared, so pointing OpenBot back at the Intelligence it was chosen on uses it again; Admin shows
+  the container actually in use.
 - **Settings shows which AI OpenBot uses, and changes it.** Settings > General has an AI model
   section in OpenBot Desktop: the provider and how OpenBot signs in to it (a Claude or ChatGPT plan,
   an API key, a Google or xAI account, or your own address), and the model when setup named one.
