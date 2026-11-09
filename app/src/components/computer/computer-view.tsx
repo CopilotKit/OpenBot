@@ -194,6 +194,7 @@ function NothingToSee({
             for the assistant's screen…" and waited there for ever, because the poll that would have
             ended the wait stops the moment a turn settles.
           */}
+          {/* A turn that opened no page never gets here: it draws no card at all (see `nothingOpened`). */}
           {page?.url ? (
             <>
               <span className="font-medium">{page.title || "A page"}</span>
@@ -202,13 +203,7 @@ function NothingToSee({
                 Opened during this turn. The screen has moved on since.
               </span>
             </>
-          ) : (
-            /*
-             * A turn that ended without getting anywhere: refused by a boundary, stopped, or failed.
-             * Saying "opened during this turn" here would describe something that did not happen.
-             */
-            <span>This turn did not open a page.</span>
-          )}
+          ) : null}
         </>
       ) : problem ? (
         <>
@@ -718,6 +713,18 @@ export function ComputerView({
       ? knownPage?.url
       : undefined;
   const address = pageUrl ? addressParts(pageUrl) : null;
+
+  /*
+   * A TURN THAT IS OVER AND OPENED NO PAGE DRAWS NOTHING.
+   *
+   * The frame is reserved at the screen's shape so that a page still loading does not move the
+   * conversation around it, and that is still what a running turn gets. A turn refused by a boundary,
+   * stopped or failed has no page coming, and its reserved frame was a grey box the width of the
+   * conversation between the Bot's sentence and its answer, saying only "This turn did not open a
+   * page." The answer says what happened; the navigation's own line says it was tried (computer-tools).
+   */
+  const nothingOpened = settled && !knownPage?.url && keptFrame === null;
+  if (nothingOpened) return null;
 
   return (
     <>
