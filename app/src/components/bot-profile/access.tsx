@@ -292,13 +292,14 @@ function YourSkills({ agentId }: { agentId: string }) {
                 <ItemMedia variant="icon">
                   <IconBox />
                 </ItemMedia>
+                {/* By its title, as What it can use names it below; the section says how to run it. */}
                 <ItemContent>
-                  <ItemTitle>/{skill.slug}</ItemTitle>
+                  <ItemTitle>{skill.title}</ItemTitle>
                   <ItemDescription>{skill.summary}</ItemDescription>
                 </ItemContent>
                 <ItemActions>
                   <Switch
-                    aria-label={skill.slug}
+                    aria-label={skill.title}
                     checked={carried.has(skill.slug)}
                     disabled={grant.isPending}
                     onCheckedChange={(granted) =>

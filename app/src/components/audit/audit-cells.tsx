@@ -30,6 +30,11 @@ export type AuditEvent = {
   targetId: string | null;
   payload: Record<string, unknown>;
   createdAt: string;
+  /**
+   * The name the page found for the row's subject, where the trail stores an id: a skill's title
+   * ("Write a skill" for `skill-creator`). Not part of the stored row, so older rows read it too.
+   */
+  subjectTitle?: string;
 };
 
 type NameFor = (botId: string) => string;
@@ -119,7 +124,7 @@ export function WhatCell({
         className="font-medium"
         title={storedName ? whatName(event) : undefined}
       >
-        {whatText(event)}
+        {whatText(event, storedName)}
       </div>
       <OnCell event={event} storedNames={storedName} />
     </>
@@ -199,8 +204,12 @@ export function whatName(event: AuditEvent): string {
 /**
  * What a row is about, in words: "Save a file", "Choose tools for a run", "Give a Bot tools". See
  * `audit-words`. A configuration row says what changed when its change has words of its own.
+ *
+ * `storedNames` is false on the personal edition's Activity, where an app given by its one press
+ * was nobody's approval (see {@link givenWithoutAsking}).
  */
-export function whatText(event: AuditEvent): string {
+export function whatText(event: AuditEvent, storedNames = true): string {
+  if (!storedNames && givenWithoutAsking(event)) return "Let a Bot use an app";
   const action = actionOf(event);
   if (action) return auditActionWords(action);
   const change =
@@ -270,7 +279,9 @@ function subjectWords(event: AuditEvent): string | undefined {
       ? `${componentName(target)} · ${dataWords(functions)}`
       : componentName(target);
   }
-  if (event.targetType === "skill" && target) return humanise(target);
+  // By the title its page shows ("Write a skill"), or its stored name in words once it is gone.
+  if (event.targetType === "skill" && target)
+    return event.subjectTitle || humanise(target);
   if (event.targetType === "credential") {
     if (typeof payload.server === "string")
       return connectorName(payload.server);
@@ -458,9 +469,25 @@ export function startedByText(
   }
 }
 
-export function decisionText(event: AuditEvent): string {
+/**
+ * An app the personal edition gave a Bot on the one press of its card (Connect): the request and
+ * its approval are written as the team edition's would be, `direct`, and nobody approved anything.
+ * Every Bot may use every app the person turns on there, so the app was allowed by that, on its own.
+ */
+function givenWithoutAsking(event: AuditEvent): boolean {
+  return (
+    event.eventType === "app_access.approved" && event.payload?.direct === true
+  );
+}
+
+/**
+ * What came of a row. `storedNames` is false on the personal edition's Activity; see
+ * {@link givenWithoutAsking}.
+ */
+export function decisionText(event: AuditEvent, storedNames = true): string {
   const payload = event.payload ?? {};
   const outcome = outcomeOf(event);
+  if (!storedNames && givenWithoutAsking(event)) return "Allowed automatically";
   /*
    * Three different things, and the difference is what somebody comes to this row to find out.
    *
@@ -700,6 +727,7 @@ export function searchTextOf(
 ): string {
   return [
     whatText(event),
+    whatText(event, false),
     // The stored name too, so a row is found by what the export and a collector call it.
     whatName(event),
     // Both ways a tool or an app is named, so either finds the row on either page.
@@ -709,6 +737,7 @@ export function searchTextOf(
     botText(event, nameFor),
     startedByText(event, nameFor, deployment),
     decisionText(event),
+    decisionText(event, false),
     // Both ways a reason is said, as for the subject above.
     ...decisionDetails(event),
     ...decisionDetails(event, false),
@@ -842,7 +871,7 @@ export function DecisionCell({
               : "text-muted-foreground"
         }
       >
-        {decisionText(event)}
+        {decisionText(event, storedNames)}
       </span>
       {decisionDetails(event, storedNames).map((line) => (
         /*

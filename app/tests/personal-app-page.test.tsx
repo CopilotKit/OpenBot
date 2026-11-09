@@ -219,7 +219,11 @@ describe("an app's page in the personal edition", () => {
     } as unknown as PluginServer;
     const view = draw("personal", [withTools]);
     expect(await view.findByText("Search")).toBeTruthy();
-    expect(view.getByText(/Every Bot can use these/)).toBeTruthy();
+    // The setting by its name in Settings > Approvals; it was once "Ask before acting", named nowhere.
+    expect(view.getByText(/Every Bot can use these/).textContent).toContain(
+      "While Always ask before making changes is on,",
+    );
+    expect(view.container.textContent).not.toContain("Ask before acting");
     expect(view.queryByRole("button", { name: "Grant tools…" })).toBeNull();
     expect(view.queryByText("By Bot")).toBeNull();
     expect(view.queryByRole("link", { name: /search/ })).toBeNull();

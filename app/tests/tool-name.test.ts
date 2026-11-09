@@ -225,15 +225,15 @@ describe("naming what an approval asks to do", () => {
     ).toEqual({ action: "send message", place: "Slack" });
   });
 
-  test("a computer action and a command keep the words they always had", () => {
+  test("a computer action keeps its words, and a file or a command reads as its step does", () => {
     expect(
       approvalWords({ toolRef: "computer_click", scope: "example.com" }),
     ).toEqual({ action: "click", place: "example.com" });
     expect(
       approvalWords({ toolRef: "computer_write_file", scope: "workspace" }),
-    ).toEqual({ action: "write file", place: "workspace" });
+    ).toEqual({ action: "save a file", place: "workspace" });
     expect(
       approvalWords({ toolRef: "host/run_command", scope: "grant-1" }),
-    ).toEqual({ action: "run command", place: "grant-1" });
+    ).toEqual({ action: "run a command", place: "grant-1" });
   });
 });

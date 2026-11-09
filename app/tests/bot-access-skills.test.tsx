@@ -54,11 +54,12 @@ const skill = (
   slug: string,
   ownerUserId: string | null,
   grantedTo: string[],
+  title = slug,
 ) => ({
   id: slug,
   slug,
   ownerUserId,
-  title: slug,
+  title,
   summary: `${slug} summary`,
   instructions: "",
   origin: "user",
@@ -77,9 +78,11 @@ function serving(options: { held?: string[]; givesOnListing?: boolean } = {}) {
   grants.length = 0;
   const held = new Set(options.held ?? ["mine-on"]);
   const all = [
-    { slug: "mine-on", owner: "me" },
-    { slug: "mine-off", owner: "me" },
-    { slug: "theirs", owner: "other" },
+    { slug: "mine-on", owner: "me", title: "mine-on" },
+    { slug: "mine-off", owner: "me", title: "mine-off" },
+    { slug: "theirs", owner: "other", title: "theirs" },
+    // A skill whose title is not its slug, as every skill a person writes has.
+    { slug: "tide-report", owner: "me", title: "Tide report" },
   ];
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -96,9 +99,9 @@ function serving(options: { held?: string[]; givesOnListing?: boolean } = {}) {
         tools: [],
         skills: all
           .filter(({ slug }) => held.has(slug))
-          .map(({ slug }) => ({
+          .map(({ slug, title }) => ({
             slug,
-            title: slug,
+            title,
             summary: `${slug} summary`,
             instructions: "",
           })),
@@ -110,8 +113,8 @@ function serving(options: { held?: string[]; givesOnListing?: boolean } = {}) {
         servers: [],
         botsMayCallBack: true,
         redirectUri: null,
-        skills: all.map(({ slug, owner }) =>
-          skill(slug, owner, held.has(slug) ? ["expenses"] : []),
+        skills: all.map(({ slug, owner, title }) =>
+          skill(slug, owner, held.has(slug) ? ["expenses"] : [], title),
         ),
       });
     }
@@ -158,6 +161,23 @@ test("your own skills each have a switch that reflects whether this Bot carries 
   expect(off.getAttribute("aria-checked")).toBe("false");
   // Somebody else's skill is not offered: the server would refuse it.
   expect(view.queryByRole("switch", { name: "theirs" })).toBeNull();
+});
+
+/*
+ * FOUND ON WINDOWS (0.3.4 release candidates): Your skills listed "/tide-report" above What it can
+ * use's "Tide report", one skill under two names. Both say its title; the section says to type /.
+ */
+test("a skill is named by its title, never listed again by its slug", async () => {
+  serving({ held: ["tide-report"] });
+  const view = draw(BOT);
+  const tide = await view.findByRole("switch", { name: "Tide report" });
+  expect(tide.getAttribute("aria-checked")).toBe("true");
+  await view.findByText("Type / in a conversation to run it.", {
+    exact: false,
+  });
+  // Once in Your skills and once in What it can use, by the same name.
+  await waitFor(() => expect(view.getAllByText("Tide report").length).toBe(2));
+  expect(view.container.textContent).not.toContain("/tide-report");
 });
 
 test("a Bot made a moment ago shows the skills its first listing gave it", async () => {
