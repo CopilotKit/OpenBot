@@ -487,6 +487,45 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     docsUrl: "https://developers.notion.com/guides/mcp/build-mcp-client",
   },
   {
+    key: "cognee",
+    title: "Cognee",
+    vendor: "Cognee",
+    summary: "Memory in the Cognee workspace of whoever is asking.",
+    personalSummary: "Your Cognee memory.",
+    /*
+     * The hosted MCP server Cognee runs for Cognee Cloud, on the default MCP transport, the same
+     * shape as Notion's entry. One host for every customer: the server signs a person in with their
+     * own Cognee account and calls their own workspace, so two people asking the same question get
+     * what their own workspaces hold.
+     */
+    host: "https://mcp.aws.cognee.ai",
+    path: "/mcp",
+    auth: {
+      kind: "user-oauth",
+      // From https://mcp.aws.cognee.ai/.well-known/oauth-authorization-server, verified live.
+      authorizationUrl: "https://mcp.aws.cognee.ai/authorize",
+      tokenUrl: "https://mcp.aws.cognee.ai/token",
+      revokeUrl: "https://mcp.aws.cognee.ai/revoke",
+      /*
+       * Cognee's server advertises only `openid`, and access is the person's whole workspace, so a
+       * scope string here would assert a narrower grant than the one that exists.
+       */
+      scopes: Object.freeze([]),
+      clientRegistration: "dynamic",
+      registrationUrl: "https://mcp.aws.cognee.ai/register",
+    },
+    // `remember` stores into the person's memory and `forget` deletes from it.
+    writeTools: Object.freeze(["remember", "forget"]),
+    /*
+     * THE READS, NAMED, so a tool Cognee adds later is a write until somebody reads it and lists it
+     * here. As the hosted server advertised them on 2026-11-09, which is what Refresh tools records.
+     * Cognee's own page (https://docs.cognee.ai/cognee-cloud/connections/cloud-mcp) calls the
+     * status tool `cognify_status`; the server names it `check_ingestion_status`.
+     */
+    readTools: Object.freeze(["recall", "check_ingestion_status"]),
+    docsUrl: "https://docs.cognee.ai/cognee-cloud/connections/cloud-mcp",
+  },
+  {
     key: "routines",
     title: "Routines",
     vendor: "OpenBot",

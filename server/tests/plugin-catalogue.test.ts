@@ -279,6 +279,58 @@ describe("Notion", () => {
   });
 });
 
+describe("Cognee", () => {
+  const entry = catalogueEntry("cognee");
+
+  test("is in the catalogue with the MCP transport, on Cognee's one hosted address", () => {
+    expect(entry).not.toBeNull();
+    expect(entry?.transport).toBeUndefined();
+    expect(resolveServerUrl("cognee")?.url).toBe(
+      "https://mcp.aws.cognee.ai/mcp",
+    );
+    expect(hostAdmissible(entry!, "https://mcp.aws.cognee.ai")).toBe(true);
+    // A tenant's own API host, a lookalike and a suffix are each refused.
+    expect(hostAdmissible(entry!, "https://tenant-1234.aws.cognee.ai")).toBe(
+      false,
+    );
+    expect(hostAdmissible(entry!, "https://mcp.aws.cognee.ai.evil.test")).toBe(
+      false,
+    );
+    expect(hostAdmissible(entry!, "http://mcp.aws.cognee.ai")).toBe(false);
+  });
+
+  test("is reached as the person asking, with a dynamically registered client", () => {
+    if (entry?.auth.kind !== "user-oauth") throw new Error("wrong auth kind");
+    expect(entry.auth.clientRegistration).toBe("dynamic");
+    expect(entry.auth.registrationUrl).toBe(
+      "https://mcp.aws.cognee.ai/register",
+    );
+    expect(entry.auth.authorizationUrl).toBe(
+      "https://mcp.aws.cognee.ai/authorize",
+    );
+    expect(entry.auth.tokenUrl).toBe("https://mcp.aws.cognee.ai/token");
+    expect(entry.auth.revokeUrl).toBe("https://mcp.aws.cognee.ai/revoke");
+    expect(entry.auth.scopes).toEqual([]);
+  });
+
+  test("pins its writes and its reads, so anything else is a write", () => {
+    expect(entry?.writeTools).toEqual(["remember", "forget"]);
+    expect(entry?.readTools).toEqual(["recall", "check_ingestion_status"]);
+    for (const name of entry?.writeTools ?? [])
+      expect(classifyTool(entry, name, true)).toBe("write");
+    for (const name of entry?.readTools ?? [])
+      expect(classifyTool(entry, name, true)).toBe("read");
+    // Tools the open-source cognee-mcp offers but the hosted server does not, and one added later.
+    for (const name of ["improve", "call_tool", "a-tool-added-next-year"])
+      expect(classifyTool(entry, name, true)).toBe("write");
+    // A vendor label may narrow and never widen.
+    expect(classifyTool(entry, "forget", true, "read")).toBe("write");
+    expect(
+      entry?.readTools?.filter((name) => entry.writeTools.includes(name)),
+    ).toEqual([]);
+  });
+});
+
 describe("what a check-in may call: the tool's own read-only label", () => {
   const notion = catalogueEntry("notion");
   const nothing = { effect: null, destructive: false, declaredRead: false };
