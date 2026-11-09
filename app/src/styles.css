@@ -177,18 +177,57 @@
 }
 
 /*
+ * An interface a Bot draws inside a Card has one frame, not two. CopilotKit draws a frame of its own
+ * around every interface in a chat (a border and 12px of padding), and the catalog's Card draws a
+ * border as well, so a Card on top, the shape most interfaces take, came out as a box inside a box.
+ * When the top component is a Card that draws a box, the frame gives up its border and padding and
+ * the Card, drawn in the app's tokens, is the one card in the conversation. Anything else on top,
+ * including a Card drawn as a borderless section or a transparent one, keeps the frame as its box.
+ *
+ * `data-a2ui-card="top"` is the catalog's mark for a Card that is not inside another one. A
+ * component given an accessible name it does not apply itself sits in a `display: contents` span.
+ */
+[data-generative-ui-chat-surface]:has(
+  > .a2ui-surface
+    > [data-a2ui-card="top"]:not(
+      [data-a2ui-card-variant="section"],
+      [data-a2ui-card-variant="transparent"]
+    ),
+  > .a2ui-surface
+    > [data-a2ui-accessibility]
+    > [data-a2ui-card="top"]:not(
+      [data-a2ui-card-variant="section"],
+      [data-a2ui-card-variant="transparent"]
+    )
+) {
+  border-width: 0;
+  padding: 0;
+}
+
+/*
  * Markdown and code in an interface a Bot generates are drawn by a reply's renderer (see
  * lib/copilot/a2ui-markdown.tsx), inside a surface that also carries CopilotKit's own stylesheet.
  * That stylesheet is in no layer, so its heading sizes, and the `color: inherit` it gives every
  * button inside a Card, outrank Tailwind's utilities however specific those are: headings came out
  * smaller than in a reply and the copy buttons lost their muted colour. `revert-layer` hands exactly
  * those properties back to the layered rules, which are the ones a reply is drawn with.
+ *
+ * The amount boxes of a Breakdown (lib/copilot/a2ui-breakdown.tsx) are the app's own inputs and
+ * take back their type size the same way.
  */
 .a2ui-surface
-  .openbot-markdown
+  :is(.openbot-markdown, .openbot-breakdown)
   :is(h1, h2, h3, h4, h5, h6, button, input, select, textarea) {
   font: revert-layer;
   color: revert-layer;
+}
+
+/*
+ * The frame CopilotKit draws around an interface in the conversation has a fixed light grey border,
+ * which in the dark theme was a bright ring around the card. It takes the app's border colour.
+ */
+[data-generative-ui-chat-surface] {
+  border-color: var(--border);
 }
 
 /*

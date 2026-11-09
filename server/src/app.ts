@@ -25,6 +25,8 @@ import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
 import { createApprovalRoutes } from "./approvals/routes";
+import { createApprovalRuleDraftRoutes } from "./approvals/rule-translate";
+import type { RuleVocabulary } from "./approvals/rule-vocabulary";
 import type { ApprovalService } from "./approvals/service";
 import {
   type AuditEventType,
@@ -510,9 +512,17 @@ export function createApp(
     learningModel?: LearningModelEndpoint;
     /**
      * The deployment's own model, for writing a boundary from an admin's description
-     * (computer/policy-translate.ts). Absent, `/api/computers/policy-translate` is not mounted.
+     * (computer/policy-translate.ts) and team approval rules from one (approvals/rule-translate.ts).
+     * Absent, `/api/computers/policy-translate` is not mounted, and approval rules say a model is
+     * needed.
      */
     boundaryWriter?: ModelCompleter;
+    /**
+     * What a team approval rule can name: this OpenBot's apps, their tools and its Bots
+     * (approvals/rule-vocabulary.ts). Absent, `/api/approvals/team/rules/{translate,backtest,batch}`
+     * are not mounted.
+     */
+    approvalRules?: { vocabulary: () => Promise<RuleVocabulary> };
   },
   /**
    * Whether to offer help self-hosting, which also hides it from a deployment that pays for
@@ -1847,6 +1857,21 @@ export function createApp(
     app.route(
       "/api/approvals/shared-use",
       createSharedUseRoutes(coworker.shared.use, requireUser, auditStore),
+    );
+  // Before `/api/approvals` for the same reason: describing, replaying and saving team rules together.
+  if (coworker?.approvals && coworker.approvalRules)
+    app.route(
+      "/api/approvals/team/rules",
+      createApprovalRuleDraftRoutes({
+        requireUser,
+        service: coworker.approvals,
+        vocabulary: coworker.approvalRules.vocabulary,
+        ...(coworker.boundaryWriter
+          ? { complete: coworker.boundaryWriter }
+          : {}),
+        ...(auditStore ? { auditStore } : {}),
+        ...(auditReader ? { auditReader } : {}),
+      }),
     );
   if (coworker?.approvals)
     app.route(

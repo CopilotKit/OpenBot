@@ -33,6 +33,7 @@ import {
   type ApprovalRecord,
   ApprovalRefusedError,
   type ApprovalRule,
+  type ApprovalRuleAuthoring,
   type ApprovalRuleInput,
   type ApprovalStore,
   type ApprovalTeamSettings,
@@ -90,6 +91,16 @@ export function equivalenceOf(candidate: ApprovalCandidate): string {
     )
     .digest("hex");
 }
+/** The call a verdict is about, for the trail, so its request pairs with it (see `recordDecision`). */
+const callOf = (continuation: ApprovalContinuation | undefined) =>
+  continuation?.runId && continuation.toolCallId
+    ? {
+        call: {
+          runId: continuation.runId,
+          toolCallId: continuation.toolCallId,
+        },
+      }
+    : {};
 const userTurnsOf = (continuation: ApprovalContinuation | undefined) =>
   (continuation?.messages ?? []).filter((message) => message.role === "user")
     .length;
@@ -201,6 +212,7 @@ export function createApprovalService(
         ...(continuation?.initiator
           ? { initiator: continuation.initiator }
           : {}),
+        ...callOf(continuation),
       });
     return outcome;
   }
@@ -337,6 +349,7 @@ export function createApprovalService(
             ...(continuation.initiator
               ? { initiator: continuation.initiator }
               : {}),
+            ...callOf(continuation),
           });
           throw new ApprovalRefusedError(DECLINED_BY_PERSON);
         }
@@ -569,6 +582,16 @@ export function createApprovalService(
       if (!store.policy)
         throw new ApprovalRefusedError("Team rules are unavailable here.");
       return store.policy.revokeTeamRule(by, id);
+    },
+    /** Several team rules in one save, with the sentence they were written from. */
+    async createTeamRules(
+      by: string,
+      input: readonly ApprovalRuleInput[],
+      authoring?: ApprovalRuleAuthoring,
+    ) {
+      if (!store.policy?.createTeamRules)
+        throw new ApprovalRefusedError("Team rules are unavailable here.");
+      return store.policy.createTeamRules(by, input, authoring);
     },
     async resume(
       ownerUserId: string,

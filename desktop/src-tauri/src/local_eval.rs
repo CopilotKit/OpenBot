@@ -859,8 +859,13 @@ pub enum Terms {
     Unavailable,
     SignedOut,
     /// The CLI answers nothing about the agreement until a container engine answers it. On a new
-    /// Windows computer Install is still putting Podman in while the person signs in.
-    EngineNotReady,
+    /// computer Install is still putting Podman in while the person signs in.
+    EngineNotReady {
+        /// What the CLI's preflight said, for the log only (`AccountWait`): `docker_unavailable`,
+        /// or `engine_mismatch`. The window is told only that the engine is not ready.
+        #[serde(skip)]
+        cause: &'static str,
+    },
     /// The CLI's preflight refused this computer for a reason waiting does not change: an engine
     /// local setup does not run on, such as OrbStack on a Mac, or too few CPUs. `said` is the CLI's
     /// own sentence for it, when it is one plain line.
@@ -962,10 +967,15 @@ fn preflight_terms(preflight: Option<&Value>) -> Result<Terms, Failure> {
     }
     let reason = field("reason").unwrap_or("");
     let detail = field("failureDetail");
-    if reason == "docker_unavailable"
-        || reason == "unsupported_engine" && detail == Some("engine_mismatch")
-    {
-        return Ok(Terms::EngineNotReady);
+    if reason == "docker_unavailable" {
+        return Ok(Terms::EngineNotReady {
+            cause: "docker_unavailable",
+        });
+    }
+    if reason == "unsupported_engine" && detail == Some("engine_mismatch") {
+        return Ok(Terms::EngineNotReady {
+            cause: "engine_mismatch",
+        });
     }
     Ok(Terms::Blocked {
         reason: Reason::from_wire(reason),
@@ -981,6 +991,107 @@ fn preflight_terms(preflight: Option<&Value>) -> Result<Terms, Failure> {
         switch_engine: reason == "unsupported_engine"
             && detail == Some("engine_not_docker_desktop"),
     })
+}
+
+/**
+What the Account step's sign-in check is waiting on, kept from one check to the next so the desktop
+log says each change once. The window asks every 2 seconds while no engine answers.
+
+On a new Mac the step said "Checking your CopilotKit account…" for minutes while Install put Podman
+in, and only the CLI's own log, a failed preflight every few seconds, said why.
+*/
+#[derive(Debug, Default)]
+pub struct AccountWait {
+    engine: Option<EngineWait>,
+}
+
+#[derive(Debug)]
+struct EngineWait {
+    since: Instant,
+    checks: u32,
+    step: Option<String>,
+}
+
+impl AccountWait {
+    pub const fn new() -> Self {
+        Self { engine: None }
+    }
+
+    /**
+    The log entry for one sign-in check that ended at `now` after `took`, or None when it changes
+    nothing the log has said. `step` is the setup step running now, if any, such as
+    `create-machine`.
+    */
+    pub fn heard(
+        &mut self,
+        now: Instant,
+        took: Duration,
+        answer: &Result<Terms, Failure>,
+        step: Option<&str>,
+    ) -> Option<String> {
+        let step_said = step.unwrap_or("none running");
+        if let Ok(Terms::EngineNotReady { cause }) = answer {
+            let Some(wait) = &mut self.engine else {
+                self.engine = Some(EngineWait {
+                    since: now.checked_sub(took).unwrap_or(now),
+                    checks: 1,
+                    step: step.map(str::to_owned),
+                });
+                return Some(format!(
+                    "[account] waiting for the engine before the sign-in check: the CLI's \
+                     preflight says {cause}; install step: {step_said}"
+                ));
+            };
+            wait.checks += 1;
+            if wait.step.as_deref() == step {
+                return None;
+            }
+            wait.step = step.map(str::to_owned);
+            return Some(format!(
+                "[account] still waiting for the engine after {}s ({} checks); install step: \
+                 {step_said}",
+                now.saturating_duration_since(wait.since).as_secs(),
+                wait.checks,
+            ));
+        }
+        let took = took.as_secs_f32();
+        let checked = match answer {
+            Ok(terms) => format!(
+                "sign-in check answered {} after {took:.1}s",
+                terms_said(terms)
+            ),
+            Err(failure) => format!("sign-in check failed after {took:.1}s: {failure:?}"),
+        };
+        Some(match self.engine.take() {
+            Some(wait) => format!(
+                "[account] {} after {}s ({} checks); {checked}",
+                if answer.is_ok() {
+                    "engine answering"
+                } else {
+                    "stopped waiting for the engine"
+                },
+                now.saturating_duration_since(wait.since).as_secs(),
+                wait.checks + 1,
+            ),
+            None => format!("[account] {checked}"),
+        })
+    }
+}
+
+/// An answer as the log says it, in the CLI's own status words.
+fn terms_said(terms: &Terms) -> String {
+    match terms {
+        Terms::Required { accepted: true, .. } => "required, accepted".to_owned(),
+        Terms::Required {
+            accepted: false, ..
+        } => "required, not accepted".to_owned(),
+        Terms::NotRequired => "not-required".to_owned(),
+        Terms::Unavailable => "unavailable".to_owned(),
+        Terms::SignedOut => "signed-out".to_owned(),
+        Terms::EngineNotReady { cause } => format!("engine-not-ready ({cause})"),
+        Terms::Blocked { reason, .. } => format!("blocked ({reason:?})"),
+        Terms::EngineTooSmall { .. } => "engine-too-small".to_owned(),
+    }
 }
 
 /**
@@ -7609,14 +7720,20 @@ overlay 164506208 20481024 135620148 14% /
             r#"{"command":"onboard local-terms","status":"blocked","preflight":{"status":"fail","reason":"docker_unavailable","detail":"Docker did not answer. Start Docker Desktop or the Docker service, and check that your user can run `docker info`, then try again."},"next":"Tell the developer `preflight.detail` in one sentence."}"#,
             r#"{"command":"onboard local-terms","status":"blocked","preflight":{"status":"fail","reason":"unsupported_engine","failureDetail":"engine_mismatch","detail":"The Docker address answers with Podman. Set COPILOTKIT_LOCAL_ENGINE=podman to use Podman, then retry."},"next":"Tell the developer `preflight.detail` in one sentence."}"#,
         ] {
-            assert_eq!(
-                normalize_terms(0, wire.as_bytes()),
-                Ok(Terms::EngineNotReady),
+            assert!(
+                matches!(
+                    normalize_terms(0, wire.as_bytes()),
+                    Ok(Terms::EngineNotReady { .. })
+                ),
                 "{wire}"
             );
         }
+        // The CLI's cause is for the log: the window is told only that the engine is not ready.
         assert_eq!(
-            serde_json::to_value(Terms::EngineNotReady).unwrap(),
+            serde_json::to_value(Terms::EngineNotReady {
+                cause: "docker_unavailable"
+            })
+            .unwrap(),
             serde_json::json!({ "status": "engine-not-ready" })
         );
         // Blocked for anything but the engine is still not an answer.
@@ -7626,6 +7743,60 @@ overlay 164506208 20481024 135620148 14% /
                 br#"{"command":"onboard local-terms","status":"blocked"}"#
             ),
             Err(Failure::InvalidStatus)
+        );
+    }
+
+    /**
+    1.0.0 on a new Mac: the Account step said "Checking your CopilotKit account…" for minutes while
+    Install put Podman in, and the desktop log said nothing about why. The CLI's answer for a Podman
+    that does not answer yet is waited out, and the log says each change in what the step waits on
+    once, not every 2 seconds. `local-eval-terms-no-engine.json` is what the window's test is given.
+    */
+    #[test]
+    fn the_account_steps_wait_for_the_engine_is_logged_once_per_change() {
+        let wire = include_str!("../test-fixtures/local-eval/onboard-local-terms-no-engine.json");
+        let window: Value = serde_json::from_str(include_str!(
+            "../test-fixtures/local-eval/local-eval-terms-no-engine.json"
+        ))
+        .unwrap();
+        let no_engine = normalize_terms(0, wire.as_bytes());
+        assert_eq!(
+            serde_json::to_value(no_engine.clone().unwrap()).unwrap(),
+            window
+        );
+
+        let start = Instant::now();
+        let took = Duration::from_secs(1);
+        let mut wait = AccountWait::default();
+        let mut logged = Vec::new();
+        let mut hear = |seconds: u64, answer: &Result<Terms, Failure>, step: Option<&str>| {
+            logged.extend(wait.heard(start + Duration::from_secs(seconds), took, answer, step));
+        };
+        // As on that Mac: Podman installing, its machine made and started, then the engine answers.
+        hear(1, &no_engine, Some("install-engine"));
+        hear(4, &no_engine, Some("install-engine"));
+        hear(7, &no_engine, Some("install-engine"));
+        hear(121, &no_engine, Some("create-machine"));
+        hear(124, &no_engine, Some("create-machine"));
+        hear(179, &no_engine, Some("start-machine"));
+        hear(193, &Ok(Terms::SignedOut), Some("images"));
+        // Checks with no wait in them say what they answered, and how long the CLI took.
+        hear(500, &Ok(Terms::SignedOut), None);
+        hear(540, &Err(Failure::Timeout), None);
+        assert_eq!(
+            logged,
+            [
+                "[account] waiting for the engine before the sign-in check: the CLI's preflight \
+                 says docker_unavailable; install step: install-engine",
+                "[account] still waiting for the engine after 121s (4 checks); install step: \
+                 create-machine",
+                "[account] still waiting for the engine after 179s (6 checks); install step: \
+                 start-machine",
+                "[account] engine answering after 193s (7 checks); sign-in check answered \
+                 signed-out after 1.0s",
+                "[account] sign-in check answered signed-out after 1.0s",
+                "[account] sign-in check failed after 1.0s: Timeout",
+            ]
         );
     }
 

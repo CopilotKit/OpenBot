@@ -6636,7 +6636,21 @@ async fn sign_in_to_copilotkit(
     let root = selected_root_or_default(&app);
     let result = tauri::async_runtime::spawn_blocking(move || {
         know_cli_engine(&root);
-        local_eval::account_sign_in_installed(&attempt)
+        // The person is in their browser for as long as this takes, minutes at times.
+        log::info!("[account] browser sign-in started");
+        let asked = std::time::Instant::now();
+        let signed_in = local_eval::account_sign_in_installed(&attempt);
+        let took = asked.elapsed().as_secs();
+        match &signed_in {
+            Ok(said) => log::info!(
+                "[account] browser sign-in ended after {took}s, signed in: {}",
+                said.signed_in
+            ),
+            Err(failure) => {
+                log::info!("[account] browser sign-in ended after {took}s: {failure:?}")
+            }
+        }
+        signed_in
     })
     .await
     .map_err(|_| local_eval::Failure::Spawn)?;
@@ -6665,18 +6679,41 @@ async fn local_eval_terms(
 ) -> Result<local_eval::Terms, local_eval::Failure> {
     let root = selected_root_or_default(&app);
     let result = tauri::async_runtime::spawn_blocking(move || {
+        let asked = std::time::Instant::now();
         // The CLI checks its engine before it answers. See `know_cli_engine`.
         know_cli_engine(&root);
         // An engine too small for local setup is said here, before Start fails on it.
-        if let Some(too_small) = local_eval::engine_size_terms() {
-            return Ok(too_small);
+        let terms = match local_eval::engine_size_terms() {
+            Some(too_small) => Ok(too_small),
+            None => local_eval::terms_installed(&attempt),
+        };
+        // What the step waits on, said in the log when it changes. See `AccountWait`.
+        let step = RUNNING_LOGGED
+            .lock()
+            .unwrap_or_else(|held| held.into_inner())
+            .as_ref()
+            .map(|(step, _)| step.clone());
+        let entry = ACCOUNT_WAIT
+            .lock()
+            .unwrap_or_else(|held| held.into_inner())
+            .heard(
+                std::time::Instant::now(),
+                asked.elapsed(),
+                &terms,
+                step.as_deref(),
+            );
+        if let Some(entry) = entry {
+            log::info!("{entry}");
         }
-        local_eval::terms_installed(&attempt)
+        terms
     })
     .await
     .map_err(|_| local_eval::Failure::Spawn)?;
     desktop_telemetry::finish_account_check(&app, result)
 }
+
+/// What the Account step's sign-in check has been waiting on, between one check and the next.
+static ACCOUNT_WAIT: Mutex<local_eval::AccountWait> = Mutex::new(local_eval::AccountWait::new());
 
 /// The folder this window is installing into, or the default one.
 fn selected_root_or_default(app: &tauri::AppHandle) -> PathBuf {

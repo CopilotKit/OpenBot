@@ -64,6 +64,7 @@ import {
 } from "./approvals/questions";
 import { waitForReplyInTranscript } from "./approvals/reply-in-transcript";
 import { createApprovalResumeTick } from "./approvals/resume-sweep";
+import { loadRuleVocabulary } from "./approvals/rule-vocabulary";
 import { createApprovalStore } from "./approvals/store";
 import { ApprovalRefusedError } from "./approvals/types";
 import { createServerApprovalService } from "./approvals/wiring";
@@ -3199,6 +3200,7 @@ const app = createApp(
       : {}),
     learningModel: learningModelEndpoint,
     boundaryWriter: writeBoundaries,
+    approvalRules: { vocabulary: () => loadRuleVocabulary(database) },
     personalLearning: {
       store: learningSharingStore,
       ...(learningModelEndpoint?.calls

@@ -97,8 +97,9 @@ at `agent-langgraph` on a laptop.
 
 **`OPENBOT_GENERATIVE_UI`** enables generated interfaces by default: streamed HTML/CSS/JavaScript
 in a sandboxed iframe, and A2UI 1.0 interfaces built from CopilotKit's standard catalog (every
-standard component except Map, Favicon, LinkCard and Citation). Their buttons send their named action
-and the values entered back to the current conversation's Bot.
+standard component except Map, Favicon, LinkCard and Citation), plus OpenBot's own Breakdown:
+editable amounts that add up to a total, each in its own colour, with a bar of how the total splits.
+Their buttons send their named action and the values entered back to the current conversation's Bot.
 Set `OPENBOT_GENERATIVE_UI=false` or `0` to disable both. `true`, `1`, an empty value, or an unset
 value leave the capability on. The server configures both runtime renderers and reports the same
 setting through `/api/capabilities` to the browser.
