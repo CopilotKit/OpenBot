@@ -282,7 +282,7 @@ test("two rules for one tool are told apart by the rest of what they match, neve
   };
   const view = draw(<ApprovalSettings />);
   const match = await view.findByText(
-    "write on checkout.a-very-long-shop-name.example",
+    "changes on checkout.a-very-long-shop-name.example",
   );
   expect(match.className).toContain("line-clamp-none");
   // The action, in its approval card's words, stays the row's title.
