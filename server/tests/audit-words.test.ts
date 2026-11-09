@@ -44,6 +44,8 @@ test("no event's words are its stored name, or carry one", () => {
     expect(words).not.toContain(".");
     expect(words).not.toContain("_");
     expect(words.charAt(0)).toBe(words.charAt(0).toUpperCase());
+    // Settings > Activity is anybody's page: no broker's name and no OAuth ("Register an OAuth client").
+    expect(words).not.toMatch(/composio|arcade|oauth/i);
   }
 });
 
