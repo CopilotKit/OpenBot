@@ -42,6 +42,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   free disk) now gives up on a command after 15 to 20 seconds, so an engine that stops answering
   no longer leaves the step on "Checking your CopilotKit account…" for good.
 
+### Conversations
+
+- **A message that couldn't reach the back end says so in plain words.** The conversation showed
+  the raw request failure in red, such as `REST run request failed: {"error":"Failed to resolve
+  Learning Container"}`. It now says "OpenBot couldn't reach its back end, so your message wasn't
+  sent. Try again, or quit and reopen OpenBot." The original text goes to the browser console.
+
 ## 1.0.0
 
 **Before upgrading.** Two migrations run at start, and the database moves to
