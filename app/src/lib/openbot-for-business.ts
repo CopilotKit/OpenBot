@@ -30,6 +30,8 @@ export type BookingCalendarColors = {
  * window, and honours the hide options. The script itself is not loaded, since all it would do here
  * is write this address into an iframe. `hide_event_type_details` drops the event's name, host and
  * length, which the step's own words already say, so the narrow column shows the calendar first.
+ * `hide_gdpr_banner` drops Calendly's cookie banner, which otherwise sits over the calendar inside
+ * the step.
  * Colours are the app's own, where they could be read.
  */
 export function bookingCalendarSrc(
@@ -40,6 +42,7 @@ export function bookingCalendarSrc(
   url.searchParams.set("embed_domain", host);
   url.searchParams.set("embed_type", "Inline");
   url.searchParams.set("hide_event_type_details", "1");
+  url.searchParams.set("hide_gdpr_banner", "1");
   if (colors) {
     url.searchParams.set("background_color", colors.background);
     url.searchParams.set("text_color", colors.text);
