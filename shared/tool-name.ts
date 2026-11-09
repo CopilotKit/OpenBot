@@ -263,10 +263,50 @@ export function approvalDetails(
                 value.every((entry) => typeof entry === "string")
               ? value.join(", ")
               : JSON.stringify(value, null, 2);
-    const words = wordsOf(key).join(" ");
+    const words = wordsOf(key)
+      .map((word) => ACRONYMS[word] ?? word)
+      .join(" ");
     const label = words ? words.charAt(0).toUpperCase() + words.slice(1) : key;
     return [{ label, value: text }];
   });
+}
+
+/** Argument words a person reads in capitals. */
+const ACRONYMS: Record<string, string> = { url: "URL", id: "ID" };
+
+/**
+ * A saved approval rule's title, in the words its approval card used for the action it covers:
+ * "Click", "Send email on Gmail", "Any action on Gmail". The list titled each rule by its tool id
+ * ("computer_click", "mcp/gmail/*"). `place` is true when the title already names where the rule
+ * applies, so the line under it need not say "on composio-gmail" again. A pattern a person typed
+ * that matches several actions some other way is kept as they wrote it.
+ */
+export function ruleTitle(rule: { toolRef: string; scope: string }): {
+  title: string;
+  place: boolean;
+} {
+  const upper = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+  if (rule.toolRef === "*") return { title: "Any action", place: false };
+  if (rule.toolRef === "host/*")
+    return { title: "Any action in your folders", place: false };
+  const ref = rule.toolRef.replace(/^mcp\//, "");
+  const slash = ref.indexOf("/");
+  if (slash > 0 && !ref.startsWith("host/")) {
+    const app = ref.slice(0, slash);
+    const tool = ref.slice(slash + 1);
+    if (app.includes("*")) return { title: rule.toolRef, place: false };
+    const named = rule.scope === "*" || rule.scope === app;
+    if (tool === "*")
+      return { title: `Any action on ${connectorName(app)}`, place: named };
+    if (tool.includes("*")) return { title: rule.toolRef, place: false };
+    const { action, place } = approvalWords({ toolRef: ref, scope: app });
+    return { title: `${upper(action)} on ${place}`, place: named };
+  }
+  if (ref.includes("*")) return { title: rule.toolRef, place: false };
+  return {
+    title: upper(approvalWords({ toolRef: ref, scope: rule.scope }).action),
+    place: false,
+  };
 }
 
 /** What a browser action asks to do, said as its step says it. */

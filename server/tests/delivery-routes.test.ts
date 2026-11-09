@@ -38,6 +38,13 @@ function fixture(
     challengeTransport?: "slack" | "teams";
     /** Why the gate asked, as the stored request carries it; "task" for a check-in task's. */
     policySource?: string;
+    /** What the stored request asks to do, in place of opening example.com. */
+    action?: {
+      toolRef: string;
+      scope: string;
+      args: Record<string, unknown>;
+      target?: unknown;
+    };
   } = {},
 ) {
   const calls: unknown[] = [];
@@ -132,10 +139,12 @@ function fixture(
             status: "pending",
             action: {
               botId: "bot",
-              toolRef: "browser/navigate",
+              toolRef: "computer_navigate",
+              scope: "example.com",
               effect: "write",
               threadId: "canonical",
               args: { url: "https://example.com" },
+              ...options.action,
               ...(options.policySource
                 ? {
                     policy: {
@@ -597,8 +606,8 @@ test("bound sender runs the canonical turn and an approval becomes an OpenTag ca
     __copilotkit_interrupt_value__: {
       action: "confirm_write",
       args: {
-        action: "Research Bot: browser/navigate",
-        fields: [{ label: "url", value: "https://example.com" }],
+        action: "Research Bot wants to open a page on example.com",
+        fields: [{ label: "URL", value: "https://example.com" }],
         approver: "slack:U1",
         effect: "write",
         allow_always: true,
@@ -626,7 +635,7 @@ test("a check-in task's approval becomes a card without Always allow, and an old
     (e) => e.type === "CUSTOM" && e.name === "on_interrupt",
   );
   expect(card.value.__copilotkit_interrupt_value__.args).toMatchObject({
-    action: "Research Bot: browser/navigate",
+    action: "Research Bot wants to open a page on example.com",
     allow_always: false,
   });
   const resumed = await run(f, {
@@ -765,6 +774,63 @@ test("card resume decides through the approvals service as the binding owner onl
   expect(f.decisions).toHaveLength(1);
   await resume({ confirmed: false, by: "slack:T1:U1" });
   expect(f.decisions[1]).toEqual(["owner", APPROVAL, "deny"]);
+});
+/*
+ * FOUND IN THE 1.0 RC1 MAC PASS: a click waiting in Slack read "Research Bot: computer_click" over
+ * "ref" and "snapshotId" fields, and denying it said "will not run computer_click". Both are said in
+ * the words the approval card in OpenBot uses, and the click's page handles are left out.
+ */
+test("a click waiting in Slack is named in words, with no tool id or page handles", async () => {
+  const f = fixture({
+    action: {
+      toolRef: "computer_click",
+      scope: "en.wikipedia.org",
+      args: { ref: "f3e43", snapshotId: 4 },
+      target: {
+        pageUrl: "https://en.wikipedia.org/wiki/Main_Page",
+        element: { ref: "f3e43", role: "link", name: "Python", type: "" },
+        snapshotId: 4,
+      },
+    },
+    converse: {
+      kind: "waiting",
+      binding: bound,
+      inboxId: "in1",
+      replyText: "",
+      extras: { approvals: [APPROVAL], questions: [] },
+    },
+  });
+  const asked = await run(f, {
+    context: [sender()],
+    messages: [
+      { id: "m9", role: "user", content: "<@UBOT> read about Python" },
+    ],
+  });
+  const card = asked.events.find(
+    (e) => e.type === "CUSTOM" && e.name === "on_interrupt",
+  );
+  expect(card.value.__copilotkit_interrupt_value__.args).toMatchObject({
+    action: "Research Bot wants to click the link “Python” on en.wikipedia.org",
+    fields: [],
+  });
+  const denied = await run(f, {
+    forwardedProps: {
+      command: {
+        resume: {
+          "0f8fad5bd9cb469fa16570867728950e": {
+            confirmed: false,
+            by: "slack:T1:U1",
+          },
+        },
+      },
+    },
+  });
+  expect(said(denied.events)).toBe(
+    "Denied. Research Bot won't click the link “Python” on en.wikipedia.org.",
+  );
+  expect(JSON.stringify([asked.events, denied.events])).not.toMatch(
+    /computer_click|snapshotId|f3e43/,
+  );
 });
 test("SMS STOP and START record opt-out without a turn or a second reply", async () => {
   const f = fixture();

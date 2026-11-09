@@ -1,3 +1,4 @@
+import { ruleTitle } from "@openbot/shared/tool-name";
 import {
   IconChevronRight,
   IconLock,
@@ -118,11 +119,13 @@ export function RuleRow({
   onChange: (behaviour: RuleBehaviour) => void;
 }) {
   const labels = team ? TEAM_BEHAVIOUR_LABELS : BEHAVIOUR_LABELS;
-  // The tool is the title; the rest of what the rule matches is the line beneath, never clamped,
-  // since two rules for one tool differ only there.
+  // The action in its approval card's words is the title ("Click", "Any action on Gmail"); the rest
+  // of what the rule matches is the line beneath, never clamped, since two rules for one action
+  // differ only there. The title already names an app's rule's place.
+  const { title, place } = ruleTitle(rule);
   const match = [
     rule.effect !== "*" ? rule.effect : null,
-    rule.scope !== "*" ? `on ${rule.scope}` : null,
+    rule.scope !== "*" && !place ? `on ${rule.scope}` : null,
     rule.botId !== "*" ? `for ${rule.botId}` : null,
   ]
     .filter(Boolean)
@@ -133,7 +136,7 @@ export function RuleRow({
         {locked ? <IconLock /> : <IconShieldCheck />}
       </ItemMedia>
       <ItemContent>
-        <ItemTitle>{rule.toolRef}</ItemTitle>
+        <ItemTitle>{title}</ItemTitle>
         {match ? (
           <ItemDescription className="line-clamp-none break-all">
             {match}
@@ -150,7 +153,7 @@ export function RuleRow({
           <>
             <LabelSelect
               disabled={disabled}
-              label={`Behaviour for ${rule.toolRef}`}
+              label={`Behaviour for ${title}`}
               labels={labels}
               onChange={onChange}
               value={rule.behaviour}
