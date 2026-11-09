@@ -389,6 +389,8 @@ export function callMethods(context: StoreContext) {
           allowed: verdict.allowed,
           mode: verdict.mode,
           rule: verdict.matched,
+          // Its name from the Boundaries page, where it has one, as a computer action's row carries it.
+          ...(verdict.ruleName ? { ruleName: verdict.ruleName } : {}),
           source: verdict.source,
           carriedOut: verdict.forward,
         },
