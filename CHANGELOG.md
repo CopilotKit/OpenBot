@@ -55,6 +55,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   Bot has no folders it can read right now. Folder access ends when you stop OpenBot. To give it a
   folder, use Choose folder in Settings → Computer." It said "No host folders are granted to this
   Bot."
+- **Install's bar is full only when it is done.** Once every byte has arrived and the last items
+  are still unpacking, the bar moves without filling and the line says "1.1 GB downloaded ·
+  Unpacking the last item". It showed a full bar beside "1.1 GB of 1.1 GB · 1 of 5 items
+  remaining".
 
 ### Teach a Bot
 
@@ -173,6 +177,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - LangChain is called **LangChain**, with LangChain's own mark, where it said "LangChain
   (LangGraph)": in New Bot, a Bot's "Powered by" subtitle and its Runs on row, and OpenBot Desktop's
   note under a ChatGPT plan.
+- Onboarding's Welcome says "Give work to Bots in plain words.", where it said "Hand work to
+  Bots".
 
 ## 0.3.4
 
