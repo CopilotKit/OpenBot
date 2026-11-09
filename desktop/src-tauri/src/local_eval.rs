@@ -3188,6 +3188,46 @@ impl Drop for Attempt {
 /// Held by the one call that is running. The CLI refuses a second `local` command while one is in
 /// progress (`local_command_busy`), so a start racing a stop would fail one of them for nothing.
 static CALLS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static REQUIRED_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static BACKGROUND_TELEMETRY: std::sync::Mutex<Option<Cancel>> = std::sync::Mutex::new(None);
+
+/// Required CLI work cancels optional attribution before waiting for the process slot.
+struct RequiredCliCall;
+
+impl RequiredCliCall {
+    fn begin() -> Self {
+        REQUIRED_CALLS.fetch_add(1, Ordering::SeqCst);
+        cancel_background_telemetry();
+        Self
+    }
+}
+
+impl Drop for RequiredCliCall {
+    fn drop(&mut self) {
+        REQUIRED_CALLS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Start may also need the native identity lock held by the background handshake.
+pub fn cancel_background_telemetry() {
+    let active = BACKGROUND_TELEMETRY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(cancel) = active.as_ref() {
+        cancel.cancel();
+    }
+}
+
+/// Clear the optional process before releasing its CLI slot, including after an error.
+struct BackgroundTelemetryCall;
+
+impl Drop for BackgroundTelemetryCall {
+    fn drop(&mut self) {
+        *BACKGROUND_TELEMETRY
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    }
+}
 
 /**
 Run `call` once every earlier call has finished, with what is left of `limits.timeout`.
@@ -3201,6 +3241,7 @@ fn one_at_a_time<T>(
     limits: Limits,
     call: impl FnOnce(Limits) -> Result<T, Failure>,
 ) -> Result<T, Failure> {
+    let _priority = RequiredCliCall::begin();
     let deadline = Instant::now() + limits.timeout;
     let _turn = loop {
         if cancel.requested() {
@@ -3691,6 +3732,39 @@ pub fn link_telemetry_installed(
     one_at_a_time(&cancel, telemetry_link_limits(), |limits| {
         let cli = installed()?;
         link_telemetry(&cli, installation, account, limits, &cancel)
+    })
+}
+
+/// Background attribution never queues ahead of required CLI work, and yields if it arrives.
+fn background_telemetry_call<T>(
+    call: impl FnOnce(&Cancel, Limits) -> Result<T, Failure>,
+) -> Result<T, Failure> {
+    let cancel = Cancel::default();
+    let mut active = BACKGROUND_TELEMETRY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if REQUIRED_CALLS.load(Ordering::SeqCst) != 0 {
+        return Err(Failure::Cancelled);
+    }
+    let _turn = match CALLS.try_lock() {
+        Ok(turn) => turn,
+        Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return Err(Failure::Cancelled),
+    };
+    *active = Some(cancel.clone());
+    drop(active);
+    let _cleanup = BackgroundTelemetryCall;
+    call(&cancel, telemetry_link_limits())
+}
+
+/// Use the same verified CLI contract, but let required account/setup calls preempt it.
+pub fn link_telemetry_background_installed(
+    installation: &Installation,
+    account: Option<&str>,
+) -> Result<TelemetryIdentity, Failure> {
+    background_telemetry_call(|cancel, limits| {
+        let cli = installed()?;
+        link_telemetry(&cli, installation, account, limits, cancel)
     })
 }
 
@@ -5208,6 +5282,42 @@ mod tests {
     }
 
     #[test]
+    fn required_cli_work_preempts_background_attribution() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::required_cli_work_preempts_background_attribution",
+        ) {
+            return;
+        }
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let background = std::thread::spawn(move || {
+            background_telemetry_call(|cancel, _| {
+                entered.send(()).unwrap();
+                let deadline = Instant::now() + Duration::from_secs(2);
+                while !cancel.requested() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Ok(cancel.requested())
+            })
+        });
+        waiting.recv_timeout(Duration::from_secs(3)).unwrap();
+        let started = Instant::now();
+        assert_eq!(
+            one_at_a_time(
+                &Cancel::default(),
+                Limits::for_action(Action::Status),
+                |_| Ok(())
+            ),
+            Ok(())
+        );
+        let cancelled = background.join().unwrap().unwrap();
+        assert!(
+            cancelled,
+            "required account checks waited for optional telemetry"
+        );
+        assert!(started.elapsed() < Duration::from_millis(500));
+    }
+
+    #[test]
     fn calls_run_one_at_a_time() {
         let active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let most = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -6410,6 +6520,54 @@ fn main() {{
                 &Cancel::default()
             ),
             Ok(TelemetryIdentity::SignedOut)
+        );
+    }
+
+    #[test]
+    fn required_cli_work_stops_a_real_background_process_tree() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::required_cli_work_stops_a_real_background_process_tree",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new("telemetry-preempt", "stubborn");
+        let cli = fixture.cli();
+        let worker = std::thread::spawn(move || {
+            background_telemetry_call(|cancel, limits| {
+                link_telemetry(
+                    &cli,
+                    &Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap(),
+                    None,
+                    limits,
+                    cancel,
+                )
+            })
+        });
+        Fixture::wait_for_grandchild(&fixture.root);
+        let started = Instant::now();
+        assert_eq!(
+            one_at_a_time(
+                &Cancel::default(),
+                Limits::for_action(Action::Status),
+                |_| Ok(())
+            ),
+            Ok(())
+        );
+        assert_eq!(worker.join().unwrap(), Err(Failure::Cancelled));
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "required work waited for the eight-second telemetry timeout"
+        );
+        #[cfg(unix)]
+        assert!(fixture.grandchild_stops());
+    }
+
+    #[test]
+    fn background_telemetry_defers_instead_of_queueing_behind_required_work() {
+        let _turn = hold_turn();
+        assert_eq!(
+            background_telemetry_call::<()>(|_, _| panic!("busy CLI must not run telemetry")),
+            Err(Failure::Cancelled)
         );
     }
 

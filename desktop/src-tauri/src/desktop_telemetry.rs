@@ -118,9 +118,35 @@ pub fn link_account<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Some(state) = app.try_state::<DesktopTelemetry>() else {
         return;
     };
+    local_eval::cancel_background_telemetry();
     if link_account_with(&state, local_eval::link_telemetry_installed).is_err() {
         log::warn!("[telemetry] account link deferred until sign-in or Start");
     }
+}
+
+/// A hook never queues another handshake behind an active one; Start remains the retry.
+fn link_account_background<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(state) = app.try_state::<DesktopTelemetry>() else {
+        return;
+    };
+    if link_account_background_with(&state, local_eval::link_telemetry_background_installed)
+        .is_err()
+    {
+        log::warn!("[telemetry] account link deferred until sign-in or Start");
+    }
+}
+
+fn link_account_background_with(
+    state: &DesktopTelemetry,
+    link: impl FnMut(
+        &local_eval::Installation,
+        Option<&str>,
+    ) -> Result<local_eval::TelemetryIdentity, local_eval::Failure>,
+) -> Result<(), ()> {
+    let Ok(_link) = state.identity_link.try_lock() else {
+        return Ok(());
+    };
+    link_account_unlocked(state, link)
 }
 
 /// A restored account has already passed the CLI's account check, even before Start.
@@ -129,7 +155,7 @@ pub fn finish_account_check<R: tauri::Runtime>(
     result: Result<local_eval::Terms, local_eval::Failure>,
 ) -> Result<local_eval::Terms, local_eval::Failure> {
     let app = app.clone();
-    finish_account_check_with(result, move || link_account(&app))
+    finish_account_check_with(result, move || link_account_background(&app))
 }
 
 fn finish_account_check_with(
@@ -151,7 +177,7 @@ pub fn finish_sign_in<R: tauri::Runtime>(
     result: Result<local_eval::AccountSignIn, local_eval::Failure>,
 ) -> Result<local_eval::AccountSignIn, local_eval::Failure> {
     let app = app.clone();
-    finish_sign_in_with(result, move || link_account(&app))
+    finish_sign_in_with(result, move || link_account_background(&app))
 }
 
 /// Return the sign-in result without waiting for optional attribution.
@@ -179,13 +205,23 @@ fn spawn_link(link: impl FnOnce() + Send + 'static) {
 /// Keep the binding durable before invoking the CLI's permanent alias operation.
 fn link_account_with(
     state: &DesktopTelemetry,
-    mut link: impl FnMut(
+    link: impl FnMut(
         &local_eval::Installation,
         Option<&str>,
     ) -> Result<local_eval::TelemetryIdentity, local_eval::Failure>,
 ) -> Result<(), ()> {
     // Launch, sign-in and Start must never interleave binding writes with permanent aliases.
     let _link = state.identity_link.lock().map_err(|_| ())?;
+    link_account_unlocked(state, link)
+}
+
+fn link_account_unlocked(
+    state: &DesktopTelemetry,
+    mut link: impl FnMut(
+        &local_eval::Installation,
+        Option<&str>,
+    ) -> Result<local_eval::TelemetryIdentity, local_eval::Failure>,
+) -> Result<(), ()> {
     for _ in 0..2 {
         let Some(id) = state.emitter.install_id() else {
             return Ok(());
@@ -396,6 +432,18 @@ mod tests {
             assert!(received
                 .recv_timeout(std::time::Duration::from_millis(100))
                 .is_err());
+        }
+    }
+
+    #[test]
+    fn background_hooks_do_not_queue_behind_an_existing_handshake() {
+        let state = identity_state(true);
+        let _active = state.identity_link.lock().unwrap();
+        for _ in 0..20 {
+            assert!(link_account_background_with(&state, |_, _| panic!(
+                "duplicate link must not reach the CLI"
+            ))
+            .is_ok());
         }
     }
 

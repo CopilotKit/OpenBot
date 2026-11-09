@@ -793,6 +793,38 @@ fn harness_port_overlay(root: &Path, ipv4_only: bool) -> Result<Option<String>, 
 
 const DESKTOP_TELEMETRY_FILE: &str = ".openbot-desktop-telemetry.yml";
 const DESKTOP_TELEMETRY: &str = include_str!("../telemetry.compose.yml");
+const DESKTOP_TELEMETRY_DISABLED_FILE: &str = ".openbot-desktop-telemetry-disabled.yml";
+const DESKTOP_TELEMETRY_DISABLED: &str = include_str!("../telemetry-disabled.compose.yml");
+
+fn desktop_telemetry_disabled(secrets: &Secrets) -> bool {
+    ["COPILOTKIT_TELEMETRY_DISABLED", "DO_NOT_TRACK"]
+        .iter()
+        .any(|key| {
+            secrets
+                .get(*key)
+                .is_some_and(|value| matches!(value.as_str(), "1" | "true"))
+        })
+}
+
+/// Overlays contain configuration names only; identities and credentials remain in environment.
+fn append_compose_overlay(
+    command: &mut Command,
+    root: &Path,
+    file: &str,
+    contents: &str,
+) -> Result<(), Problem> {
+    let overlay = root.join(file);
+    if std::fs::read(&overlay).ok().as_deref() != Some(contents.as_bytes()) {
+        std::fs::write(&overlay, contents).map_err(|error| {
+            Problem::with(
+                "OpenBot could not prepare its local Compose settings.",
+                error.to_string(),
+            )
+        })?;
+    }
+    command.arg("-f").arg(file);
+    Ok(())
+}
 
 /// The native personal edition alone may hand its installation identity to its server.
 fn uses_desktop_telemetry(root: &Path, secrets: &Secrets) -> bool {
@@ -825,13 +857,25 @@ fn compose_start_command(
     // This output can contain credentials: retain only file-selection settings, never log it.
     let environment = compose_command(engine, root, secrets)
         .args(["config", "--environment"])
-        .output()
-        .map_err(|error| {
-            Problem::with(
-                "OpenBot could not read the deployment's Compose settings.",
-                error.to_string(),
-            )
-        })?;
+        .output();
+    let optional_only = desktop_telemetry
+        && !desktop_telemetry_disabled(secrets)
+        && !macos_podman
+        && harness_ports.is_none();
+    if optional_only
+        && environment
+            .as_ref()
+            .map_or(true, |output| !output.status.success())
+    {
+        log::warn!("[telemetry] Compose settings unavailable; runtime attribution deferred");
+        return Ok(command);
+    }
+    let environment = environment.map_err(|error| {
+        Problem::with(
+            "OpenBot could not read the deployment's Compose settings.",
+            error.to_string(),
+        )
+    })?;
     if !environment.status.success() {
         return Err(Problem::with(
             "OpenBot could not read the deployment's Compose settings.",
@@ -841,8 +885,22 @@ fn compose_start_command(
     let environment = String::from_utf8(environment.stdout)
         .map_err(|_| Problem::plain("Compose returned unreadable deployment settings."))?;
     let files = compose_files(root, &environment)?;
-    for file in files {
+    for (index, file) in files.iter().enumerate() {
         command.arg("-f").arg(file);
+        // Desktop defaults precede user overrides, so a server-level opt-out is preserved.
+        if index == 0 && desktop_telemetry {
+            if let Err(error) = append_compose_overlay(
+                &mut command,
+                root,
+                DESKTOP_TELEMETRY_FILE,
+                DESKTOP_TELEMETRY,
+            ) {
+                if desktop_telemetry_disabled(secrets) {
+                    return Err(error);
+                }
+                log::warn!("[telemetry] Compose overlay unavailable; runtime attribution deferred");
+            }
+        }
     }
     for (file, contents) in [
         (
@@ -851,21 +909,13 @@ fn compose_start_command(
         ),
         (HARNESS_PORT_FILE, harness_ports.as_deref()),
         (
-            DESKTOP_TELEMETRY_FILE,
-            desktop_telemetry.then_some(DESKTOP_TELEMETRY),
+            DESKTOP_TELEMETRY_DISABLED_FILE,
+            (desktop_telemetry && desktop_telemetry_disabled(secrets))
+                .then_some(DESKTOP_TELEMETRY_DISABLED),
         ),
     ] {
         if let Some(contents) = contents {
-            let overlay = root.join(file);
-            if std::fs::read(&overlay).ok().as_deref() != Some(contents.as_bytes()) {
-                std::fs::write(&overlay, contents).map_err(|error| {
-                    Problem::with(
-                        "OpenBot could not prepare its local port settings.",
-                        error.to_string(),
-                    )
-                })?;
-            }
-            command.arg("-f").arg(file);
+            append_compose_overlay(&mut command, root, file, contents)?;
         }
     }
     Ok(command)
@@ -8224,18 +8274,19 @@ fn main() {
                     .get_args()
                     .map(|arg| arg.to_string_lossy().into_owned())
                     .collect();
-                assert_eq!(
-                    args,
-                    [
-                        "compose",
-                        "-f",
-                        "docker-compose.yml",
-                        "-f",
-                        "docker-compose.override.yml",
-                        "-f",
-                        DESKTOP_TELEMETRY_FILE
-                    ]
-                );
+                let mut expected = vec![
+                    "compose",
+                    "-f",
+                    "docker-compose.yml",
+                    "-f",
+                    DESKTOP_TELEMETRY_FILE,
+                    "-f",
+                    "docker-compose.override.yml",
+                ];
+                if desktop_telemetry_disabled(&secrets) {
+                    expected.extend(["-f", DESKTOP_TELEMETRY_DISABLED_FILE]);
+                }
+                assert_eq!(args, expected);
                 assert_eq!(
                     std::fs::read_to_string(root.join(DESKTOP_TELEMETRY_FILE)).unwrap(),
                     DESKTOP_TELEMETRY
@@ -8246,6 +8297,46 @@ fn main() {
                 );
             }
         }
+        // Optional telemetry cannot block startup when its generated file cannot be written.
+        std::fs::remove_file(root.join(DESKTOP_TELEMETRY_FILE)).unwrap();
+        std::fs::create_dir(root.join(DESKTOP_TELEMETRY_FILE)).unwrap();
+        let command = compose_start_command(
+            &Address::new(crate::engine::Engine::Docker, None),
+            &root,
+            &Secrets::from([("OPENBOT_DISTRIBUTION".into(), "desktop".into())]),
+            "linux",
+        )
+        .unwrap();
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            [
+                "compose",
+                "-f",
+                "docker-compose.yml",
+                "-f",
+                "docker-compose.override.yml"
+            ]
+        );
+        std::fs::remove_dir(root.join(DESKTOP_TELEMETRY_FILE)).unwrap();
+        // An older provider lacking the optional probe must not block ordinary startup.
+        std::fs::write(root.join(".fixture-config-failure"), "unsupported probe").unwrap();
+        let command = compose_start_command(
+            &Address::new(crate::engine::Engine::Docker, None),
+            &root,
+            &Secrets::from([("OPENBOT_DISTRIBUTION".into(), "desktop".into())]),
+            "linux",
+        )
+        .unwrap();
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["compose"]);
+        // Do not silently discard an explicit native opt-out when its handoff cannot be resolved.
+        assert!(compose_start_command(
+            &Address::new(crate::engine::Engine::Docker, None),
+            &root,
+            &Secrets::from([("COPILOTKIT_TELEMETRY_DISABLED".into(), "1".into())]),
+            "linux",
+        )
+        .is_err());
+        std::fs::remove_file(root.join(".fixture-config-failure")).unwrap();
         // A file left from a personal launch is never auto-selected for the team edition.
         std::fs::write(root.join(".env"), "OPENBOT_EDITION=team\n").unwrap();
         let command = compose_start_command(

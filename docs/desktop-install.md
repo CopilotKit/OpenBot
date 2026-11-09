@@ -80,7 +80,7 @@ The personal-edition runtime receives the current UUID through `CPK_TELEMETRY_ID
 
 Desktop opt-out suppresses the call. CLI opt-out, CI and development-build rules still apply.
 An offline, signed-out or old CLI cannot prevent opening OpenBot. Sign-in does not wait
-for telemetry. Start overlaps linking with preparation and joins before handing the UUID
+for telemetry. Required CLI calls preempt optional background linking, and duplicate hooks do not queue. Start overlaps linking with preparation and joins before handing the UUID
 to the runtime. Each of at most two CLI calls has an eight-second budget plus 250 ms kill
 grace; failure logs a fixed deferred message and retries at the next successful account check, sign-in or Start.
 A successful CLI response means Ops accepted the authenticated verify request. Aliases
