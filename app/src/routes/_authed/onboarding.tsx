@@ -8,10 +8,7 @@ import {
 } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
 import * as React from "react";
-import {
-  ALWAYS_ASKS,
-  HANDED_TO_YOU,
-} from "@/components/approvals/ask-first-copy";
+import { ALWAYS_ASKS_SHORT } from "@/components/approvals/ask-first-copy";
 import { AskFirstSwitch } from "@/components/onboarding/ask-first-switch";
 import { BookingCalendar } from "@/components/onboarding/booking-calendar";
 import { IntroReel } from "@/components/onboarding/demos/intro-reel";
@@ -102,6 +99,10 @@ export const Route = createFileRoute("/_authed/onboarding")({
  * What always asks is said above the switch, so nobody reads turning it off as turning those off
  * too. The switch only adds routine changes on top (reported on 0.3.3).
  *
+ * A few lines a new person takes in at a glance: what always asks, the one choice, and where to
+ * change it later. The detail (payments left to you, a Bot's own workspace) lives in Settings →
+ * Approvals, said in full there.
+ *
  * The animation is a picture and the switch is real, so they never share a pane: the switch sits
  * with the words, and the picture stays a picture.
  */
@@ -121,20 +122,16 @@ function welcomeStep(computer: boolean): OnboardingStep {
                 className="text-lg font-semibold text-pretty"
                 id="onboarding-permissions"
               >
-                Set up your permissions
+                Choose when Bots ask
               </h2>
               <p className="text-pretty text-muted-foreground">
-                {ALWAYS_ASKS} {HANDED_TO_YOU}
+                {ALWAYS_ASKS_SHORT} Turn this on to approve every change too.
               </p>
             </div>
-            <AskFirstSwitch />
-            <div className="flex flex-col gap-1 text-sm text-pretty text-muted-foreground">
-              <p>
-                Bots can create, edit, and delete files in their own workspace
-                without asking, unless this is on.
-              </p>
-              <p>You can change this setting anytime in Settings.</p>
-            </div>
+            <AskFirstSwitch described={false} />
+            <p className="text-sm text-pretty text-muted-foreground">
+              You can change this anytime in Settings.
+            </p>
           </section>
         }
       >

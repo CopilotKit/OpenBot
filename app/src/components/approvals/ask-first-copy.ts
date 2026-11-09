@@ -16,6 +16,14 @@
 export const ALWAYS_ASKS =
   "Bots always ask for your approval before deleting, sending, sharing, or posting content in your apps or on websites.";
 
+/**
+ * What always asks, said once on onboarding's Welcome, where the switch is offered: the same rule as
+ * ALWAYS_ASKS in fewer words. "In your apps or on websites" stays, because a Bot deleting a file in
+ * its own workspace does not ask.
+ */
+export const ALWAYS_ASKS_SHORT =
+  "Bots always ask before they delete, send, share, or post in your apps or on websites.";
+
 export const HANDED_TO_YOU =
   "Bots leave payments and account security changes for you to do yourself.";
 

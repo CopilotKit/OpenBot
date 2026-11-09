@@ -27,7 +27,12 @@ import { queryClient } from "@/query-client";
  * The step is still a picture of what a Bot asks; the switch sits with the words, outside the
  * picture's frame, because it is the one real control here.
  */
-export function AskFirstSwitch() {
+export function AskFirstSwitch({
+  described = true,
+}: {
+  /** The switch's description under its title. Settings says it in full; a shorter screen may not. */
+  described?: boolean;
+} = {}) {
   // Read once: the inbox's own polling is for the approvals page, not for a single switch.
   const inbox = useQuery({ ...approvalInboxOptions(), refetchInterval: false });
   const preferences = useMutation(
@@ -45,9 +50,11 @@ export function AskFirstSwitch() {
         </ItemMedia>
         <ItemContent>
           <ItemTitle>{ASK_FIRST_TITLE}</ItemTitle>
-          <ItemDescription className="line-clamp-none">
-            {ASK_FIRST_DESCRIPTION}
-          </ItemDescription>
+          {described ? (
+            <ItemDescription className="line-clamp-none">
+              {ASK_FIRST_DESCRIPTION}
+            </ItemDescription>
+          ) : null}
         </ItemContent>
         <ItemActions>
           <Switch

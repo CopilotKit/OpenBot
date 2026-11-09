@@ -398,12 +398,12 @@ test("on every step, its name in the list of steps is its heading", async () => 
   ]);
 });
 
-test("Welcome asks to set up permissions, with Always ask before making changes beside the words, not in the picture", async () => {
+test("Welcome asks when Bots should ask, with Always ask before making changes beside the words, not in the picture", async () => {
   const view = open("/onboarding?step=welcome");
   await heading(view, "Welcome to OpenBot");
 
   const permissions = view.getByRole("heading", {
-    name: "Set up your permissions",
+    name: "Choose when Bots ask",
   });
   expect(permissions.tagName).toBe("H2");
   const ask = await view.findByRole("switch", {
@@ -424,7 +424,7 @@ test("Welcome asks to set up permissions, with Always ask before making changes 
  * switch where it was missed. What always asks is said first, above the switch, and the switch says
  * it adds routine changes on top (server/src/approvals/policy.ts: safety before the default).
  */
-test("Welcome says what always asks before the switch, and the switch says it covers every change", async () => {
+test("Welcome says what always asks before the switch, and what the switch adds, in a few lines", async () => {
   const view = open("/onboarding?step=welcome");
   await heading(view, "Welcome to OpenBot");
 
@@ -432,36 +432,24 @@ test("Welcome says what always asks before the switch, and the switch says it co
     name: "Always ask before making changes",
   });
   const always = view.getByText(
-    /^Bots always ask for your approval before deleting, sending, sharing, or posting content in your apps or on websites\./,
-  );
-  expect(always.textContent).toContain(
-    "Bots leave payments and account security changes for you to do yourself.",
+    "Bots always ask before they delete, send, share, or post in your apps or on websites. Turn this on to approve every change too.",
   );
   // Above the switch in the reading order, not under it.
   expect(
     always.compareDocumentPosition(ask) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
 
+  // The switch is its title alone here; Settings → Approvals says the rest.
   const row = ask.closest("[data-slot='item']");
-  expect(row?.textContent).toContain("Always ask before making changes");
-  expect(row?.textContent).toContain(
-    "Require your approval for every change to your apps, websites, and files, including routine edits and updates.",
-  );
-  expect(row?.textContent).not.toContain(
-    "Review a Bot's changes to websites, connected apps, and files.",
-  );
+  expect(row?.textContent).toBe("Always ask before making changes");
 
-  // The workspace exception and where to change it later come after the switch, each on its own.
-  const workspace = view.getByText(
-    "Bots can create, edit, and delete files in their own workspace without asking, unless this is on.",
-  );
-  const later = view.getByText(
-    "You can change this setting anytime in Settings.",
-  );
+  const later = view.getByText("You can change this anytime in Settings.");
   expect(
-    ask.compareDocumentPosition(workspace) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ask.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
-  expect(workspace).not.toBe(later);
+  // The detail stays in Settings, not on this step.
+  expect(view.queryByText(/payments/)).toBeNull();
+  expect(view.queryByText(/own workspace/)).toBeNull();
   expect(view.queryByText(/always wait for you/)).toBeNull();
 });
 
