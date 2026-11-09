@@ -48,6 +48,7 @@ import {
   type ChannelSummary,
   channelKeys,
 } from "@/lib/channels/queries";
+import { runReply } from "@/lib/channels/run-reply";
 import {
   onTurnFinishedAway,
   turnFinishedAway,
@@ -71,6 +72,7 @@ import {
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useConversationModel } from "@/lib/models/run-model";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
+import { publishedSandboxedQueryOptions } from "@/lib/sandboxed/queries";
 import {
   askChannelAgent,
   messageText,
@@ -364,6 +366,15 @@ function describeAttachments(attachments: readonly Attachment[]): string {
     return filename ? `Sent ${filename}` : "Sent an attachment";
   }
   return `Sent ${attachments.length} attachments`;
+}
+
+/** The components this deployment's people wrote, which a Bot draws as tools of those names. */
+function authoredComponents(): ReadonlySet<string> {
+  return new Set(
+    (
+      queryClient.getQueryData(publishedSandboxedQueryOptions().queryKey) ?? []
+    ).map((component) => component.name),
+  );
 }
 
 /**
@@ -1103,7 +1114,15 @@ export function ChannelChat({
        * without this screen. The run-finished subscription that tells the roster what the Bot said went with it, so the
        * reply is reported here.
        */
-      if (!onScreen.current) reportRef.current(reply, runtimeAgentId);
+      if (!onScreen.current) {
+        // A turn that said nothing and drew its answer is reported by what it drew.
+        const drawn = runReply(
+          agentRef.current.messages,
+          assistantMessagesBeforeRun.current,
+          authoredComponents(),
+        );
+        reportRef.current(reply || (drawn?.text ?? ""), runtimeAgentId);
+      }
       return reply;
     } finally {
       turnsRef.current -= 1;
@@ -1162,18 +1181,15 @@ export function ChannelChat({
          */
         if (!wasOurs && turnsRef.current === 0) return;
 
-        const reply = [...agent.messages]
-          .reverse()
-          .find(
-            (message) =>
-              message.role === "assistant" &&
-              !assistantMessagesBeforeRun.current.has(message.id) &&
-              typeof message.content === "string" &&
-              message.content.trim() !== "",
-          );
+        // Its words, or what it drew when it said nothing: a drawn answer is a reply too.
+        const reply = runReply(
+          agent.messages,
+          assistantMessagesBeforeRun.current,
+          authoredComponents(),
+        );
         if (!reply || reply.id === reportedReply.current) return;
         reportedReply.current = reply.id;
-        reportRef.current(String(reply.content), runtimeAgentId);
+        reportRef.current(reply.text, runtimeAgentId);
       },
     });
     return () => subscription?.unsubscribe();

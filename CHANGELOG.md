@@ -116,6 +116,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Conversations
 
+- **A Bot whose whole answer is something it drew now raises its "replied" notification.**
 - **A Bot that runs its own agent reads your Gmail and finds your Slack channels again.** Such a
   Bot, like the personal starter Bot, can be sent only some of an app's actions in one request, and
   they were picked by matching the words of your message. With Gmail connected it could be sent
