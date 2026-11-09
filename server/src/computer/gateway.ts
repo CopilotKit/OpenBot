@@ -1906,6 +1906,14 @@ function auditRow(entry: ActionRow): AuditEventInput {
         mode: entry.decision.mode,
         source: entry.decision.source,
         rule: entry.decision.matched,
+        /**
+         * The rule's name from the Boundaries page, where it has one, so the row reads by what the
+         * rule is called. Beside `rule`, never instead of it: the replay and the trail match on the
+         * expression.
+         */
+        ...(entry.decision.ruleName
+          ? { ruleName: entry.decision.ruleName }
+          : {}),
         /** Present so the trail explains a dry-run row that was recorded as refused but still ran. */
         carriedOut: entry.refusal ? false : entry.decision.forward,
       },

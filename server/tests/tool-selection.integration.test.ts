@@ -13,15 +13,19 @@ import { buildAGUITextResponse, LLMock } from "@copilotkit/aimock";
 import { AGUIMock } from "@copilotkit/aimock/agui";
 import { CopilotRuntime } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
-import type { GrantedTool } from "@openbot/toolkit/granted-tool";
+import { type GrantedTool, parametersFor } from "@openbot/toolkit/granted-tool";
 import { z } from "zod";
 import {
   buildAgents,
   type RegisteredAgent,
   type RuntimeModel,
 } from "../src/copilot";
+import { classifyTool } from "../src/plugins/catalogue";
+import { effectOf } from "../src/plugins/composio";
 import type { Selection } from "../src/plugins/selection";
 import { createModelCompleter } from "../src/routing/model";
+import gmailCatalogue from "./fixtures/composio-gmail-catalogue.json";
+import slackCatalogue from "./fixtures/composio-slack-catalogue.json";
 
 declare global {
   var __SRA009_AFTER_TOOL_SELECTION_RESTORE__:
@@ -1387,6 +1391,152 @@ describe("a remote Bot past what one request may carry", () => {
     running.addMessage({ id: "m-crowded", role: "user", content: "hello" });
     await running.runAgent({ tools: crowded });
     expect((sentToRemote.at(-1)?.tools ?? []).length).toBeLessThanOrEqual(128);
+  });
+
+  /** A Composio app's catalogue as `grantedTools` hands it over, each read decided as a call is. */
+  function composioApp(
+    app: string,
+    rows: readonly {
+      slug: string;
+      description: string;
+      tags: string[];
+      input_parameters: Record<string, unknown>;
+    }[],
+  ): GrantedTool[] {
+    return rows.map((row) => ({
+      ref: `composio-${app}/${row.slug}`,
+      name: `mcp__composio-${app}__${row.slug}`,
+      description: row.description,
+      parameters: parametersFor(row.input_parameters),
+      execute: async () => "ok",
+      searchable: true as const,
+      ...(classifyTool(null, row.slug, true, effectOf(row.tags).effect) ===
+      "read"
+        ? { reads: true as const }
+        : {}),
+    }));
+  }
+
+  /**
+   * What an endpoint Bot holding one app is sent of it, for one message, on a run whose browser
+   * offers enough that eleven of the app's actions fit: the room the report's Bot had.
+   */
+  async function sentOfApp(app: string, appTools: GrantedTool[]) {
+    const crowded = Array.from(
+      { length: 128 - ownTools.length - routines.length - 11 },
+      (_, index) => ({
+        name: `surface_tool_${index}`,
+        description: `Surface tool ${index}`,
+        parameters: { type: "object", properties: {} },
+      }),
+    );
+    const agents = await buildAgents(
+      [remoteAgent()],
+      model,
+      "test-key",
+      undefined,
+      async () => [...ownTools, ...routines, ...appTools],
+    );
+    const prefix = `mcp__composio-${app}__`;
+    return async (text: string) => {
+      const running = (
+        agents.risk as never as { clone: () => never }
+      ).clone() as unknown as {
+        addMessage: (message: unknown) => void;
+        runAgent: (parameters: { tools: unknown[] }) => Promise<unknown>;
+      };
+      running.addMessage({ id: `m-${text}`, role: "user", content: text });
+      await running.runAgent({ tools: crowded });
+      return (sentToRemote.at(-1)?.tools ?? [])
+        .filter((name) => name.startsWith(prefix))
+        .map((name) => name.slice(prefix.length));
+    };
+  }
+
+  /*
+   * FOUND IN 1.0.0. The personal starter Bot held every Gmail action and was sent eleven:
+   * DELETE_MESSAGE, GET_PROFILE, LIST_LABELS, three SEND_AS settings, SEND_DRAFT, SEND_EMAIL and the
+   * POP settings. It told the person it could not read a subject or a body, and that an administrator
+   * had to add a tool. Composio's own Gmail catalogue, on a run with room for eleven of its actions.
+   */
+  test("a Bot holding Gmail is sent the actions that read mail, whatever the request's words", async () => {
+    const sentFor = await sentOfApp(
+      "gmail",
+      composioApp("gmail", gmailCatalogue.gmail),
+    );
+
+    // The request that was answered with "I can only send".
+    const sending = await sentFor(
+      "Send an email to Sam saying I'm running late",
+    );
+    expect(sending).toHaveLength(11);
+    expect(sending).toContain("GMAIL_SEND_EMAIL");
+    expect(sending).toContain("GMAIL_FETCH_EMAILS");
+
+    const reading = await sentFor(
+      "Find the emails I got about the offsite and read me their subjects and what they say",
+    );
+    expect(reading).toContain("GMAIL_FETCH_EMAILS");
+    expect(reading).toContain("GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID");
+
+    const thread = await sentFor(
+      "What did Sam say in the thread about the offsite?",
+    );
+    expect(thread).toContain("GMAIL_LIST_THREADS");
+    expect(thread).toContain("GMAIL_FETCH_MESSAGE_BY_THREAD_ID");
+
+    // A follow-up that names nothing is sent the reads first.
+    const followUp = await sentFor("yes please, go ahead");
+    for (const action of [
+      "GMAIL_FETCH_EMAILS",
+      "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID",
+      "GMAIL_FETCH_MESSAGE_BY_THREAD_ID",
+    ])
+      expect(followUp).toContain(action);
+    expect(followUp).not.toContain("GMAIL_DELETE_MESSAGE");
+  });
+
+  /*
+   * FOUND IN 1.0.0, ON SLACK, FROM THE SAME PERSON. The Bot could read a conversation it was given
+   * the id of, and said it had no permission to find a channel or a DM by name. The same cut: Slack
+   * lists 171 actions, and the ones that find a channel, a person or a DM lost to the ones whose
+   * words matched the message. Composio's own Slack catalogue, with the same room as above.
+   */
+  test("a Bot holding Slack is sent the actions that find a channel, a person and a DM", async () => {
+    const sentFor = await sentOfApp(
+      "slack",
+      composioApp("slack", slackCatalogue.slack),
+    );
+
+    const dm = await sentFor(
+      "Find my DM with Sam and tell me what she said yesterday",
+    );
+    expect(dm).toHaveLength(11);
+    for (const action of [
+      "SLACK_FIND_CHANNELS",
+      "SLACK_FIND_USERS",
+      "SLACK_OPEN_DM",
+    ])
+      expect(dm).toContain(action);
+
+    const channel = await sentFor("What did people say in #design today?");
+    expect(channel).toContain("SLACK_FIND_CHANNELS");
+    expect(channel).toContain("SLACK_LIST_ALL_CHANNELS");
+
+    const search = await sentFor(
+      "Search Slack for the offsite channel and summarise it",
+    );
+    expect(search).toContain("SLACK_FIND_CHANNELS");
+    expect(search).toContain("SLACK_SEARCH_MESSAGES");
+
+    // A follow-up that names nothing is sent the reads first.
+    const followUp = await sentFor("yes please, go ahead");
+    for (const action of [
+      "SLACK_FIND_CHANNELS",
+      "SLACK_FETCH_CONVERSATION_HISTORY",
+    ])
+      expect(followUp).toContain(action);
+    expect(followUp).not.toContain("SLACK_ADD_EMOJI");
   });
 
   test("the row says how many it was sent, and that the offer was cut", async () => {

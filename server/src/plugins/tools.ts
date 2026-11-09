@@ -240,7 +240,7 @@ export function grantedToolGuidance(
             : []),
           `If one of these systems is involved and no tool you hold covers the part you need${waiting.size > 0 ? ` (search with ${SEARCH_TOOLS} first)` : ""},`,
           personal
-            ? "say so plainly and name the capability you would need."
+            ? "say so plainly and name the capability you would need. Every action an app here offers is already yours: never say one has to be added or granted, or that anybody else has to do it, because the person you work for is the only one here."
             : "that is a missing grant. Say so plainly, name the capability you would need, and say an administrator can grant it on that connector.",
           "Do not reach for the browser, do not ask the person to sign in, and do not ask them to fetch it",
           "for you.",
@@ -550,6 +550,7 @@ export async function grantedTools(options: {
     name: tool.toolName,
     ref: tool.ref,
     searchable: true as const,
+    ...(tool.read ? { reads: true as const } : {}),
     initiator,
     // OpenBot always asks before a tool its app marks destructive, and the Bot is told so here, on
     // the tool, since its name needn't say it (APPROVAL_GUIDANCE names these words).

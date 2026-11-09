@@ -741,7 +741,8 @@ test("the account step says Docker Desktop is starting while Install waits on it
   // One line, saying what the wait is for.
   expect(view.queryByText("Checking your CopilotKit account…")).toBeNull();
 
-  // Docker answers: the line goes, and the account check is what is left.
+  // Docker answers: the line goes. Until the account check hears the engine, the step says what
+  // Install is doing, as Install's own row does.
   await emitProgress({
     step: "install-engine",
     ok: true,
@@ -749,16 +750,18 @@ test("the account step says Docker Desktop is starting while Install waits on it
     detail: "Docker Desktop is running.",
   });
   expect(view.queryByText(DOCKER_HAND_OFF)).toBeNull();
-  expectWorking(view, "Checking your CopilotKit account…");
+  expectWorking(view, "Checking the software OpenBot needs.");
 });
 
-test("a line about OpenBot's own work is not said as a hand-off on the account step", async () => {
+test("a line about OpenBot's own work is said on the account step only while it waits on the engine", async () => {
   setupRootConfiguration("/tmp/hand-off-none", async () =>
     emptyConfiguration(),
   );
+  let engineAnswers = false;
   withLocalCli({
     prepare_installation: () => new Promise(() => {}),
-    local_eval_terms: () => ({ status: "engine-not-ready" }),
+    local_eval_terms: () =>
+      engineAnswers ? { status: "signed-out" } : { status: "engine-not-ready" },
   });
   const view = await renderApp();
   await installLocal(view);
@@ -769,9 +772,19 @@ test("a line about OpenBot's own work is not said as a hand-off on the account s
     running: true,
     detail: "Installing Podman.",
   });
+  // What the account check waits on, in Install's own words.
+  expectWorking(view, "Installing Podman.");
+  expect(view.queryByText("Checking your CopilotKit account…")).toBeNull();
+
+  // Signed out, the step is about signing in. Install's own work is not said there.
+  engineAnswers = true;
+  await view.findByRole(
+    "button",
+    { name: "Sign in to CopilotKit" },
+    { timeout: 5000 },
+  );
   expect(view.queryByText("Installing Podman.")).toBeNull();
-  expectWorking(view, "Checking your CopilotKit account…");
-});
+}, 15000);
 
 test("a finished install brings the window to the front for the next step", async () => {
   const { view, preparation } = await beginPendingInstallation();
