@@ -4537,6 +4537,11 @@ enum WindowPage {
 fn outside_links_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::<R>::new("outside-links")
         .on_navigation(|webview, destination| {
+            // A file dropped where nothing takes it opens nowhere (`outside_links::opens_a_file`).
+            if webview.label() == "main" && outside_links::opens_a_file(destination) {
+                log::info!("[window] kept the page; a dropped file does not replace it");
+                return false;
+            }
             if webview.label() != "main"
                 || !outside_links::leaves(destination)
                 || outside_links::loads_in_a_frame(destination)
@@ -8881,6 +8886,30 @@ mod background_launch_tests {
             Some(BackgroundThrottlingPolicy::Disabled),
         );
     }
+
+    /// A screenshot dragged onto a conversation attached nothing: the cursor showed a plus, the
+    /// drop vanished, and the Bot never saw the image. Tauri's own drag-and-drop handler, on by
+    /// default, takes every file dropped on the window to raise its `DragDropEvent`s (on macOS it
+    /// answers WebKit's dragging calls itself and never passes them on; on Windows it replaces
+    /// WebView2's drop target), so the page's HTML `drop` never fires and the composer never sees
+    /// the file. Nothing in this app listens for those events; the page handles drops itself, as it
+    /// does in a browser. The window's configuration, as compiled into the app, must leave them to it.
+    #[test]
+    fn main_window_leaves_dropped_files_to_the_page() {
+        let context: tauri::Context<tauri::test::MockRuntime> =
+            tauri::generate_context!(test = true);
+        let main = context
+            .config()
+            .app
+            .windows
+            .iter()
+            .find(|window| window.label == "main")
+            .expect("tauri.conf.json declares the main window");
+        assert!(
+            !main.drag_drop_enabled,
+            "Tauri's drag-and-drop handler is on, so a file dropped on the composer never reaches it"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -12436,7 +12465,8 @@ mod tests {
             "minHeight": 560,
             "resizable": true,
             "titleBarStyle": "Transparent",
-            "backgroundThrottling": "disabled"
+            "backgroundThrottling": "disabled",
+            "dragDropEnabled": false
         });
         let config: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
