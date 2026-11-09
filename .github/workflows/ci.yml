@@ -360,9 +360,28 @@ jobs:
       - name: A new values key can be absent
         run: bun scripts/check-new-values-keys.ts charts/openbot/ci/${{ matrix.target }}-values.yaml
 
+  # The suite in shards, one runner each, so the run takes as long as its slowest shard rather than
+  # as long as every file one after another. `bun test --shard` does the split, cut by the per-file
+  # durations in scripts/test-timings.json so the shards take about as long as each other (dealt
+  # round-robin, the few files that take a minute each pile up on one runner). Every shard has its
+  # own database, installs and migration, so the shards share no state, and inside a shard the files
+  # still run one at a time because they share that one database. The `tests` job below is the
+  # result people read.
+  #
+  # The id stays `test` for the upstream upgrade, which runs this job's `run` steps as CI's own
+  # checks (scripts/integrate-upstream.ts); the shard reaches those steps through
+  # .github/actions/test-shard, which says why.
   test:
-    name: tests
+    name: tests (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
+    # Five shards take about three and a half minutes each on the free standard runner, so a
+    # larger runner would add cost without shortening the run.
     runs-on: ubuntu-latest
+    strategy:
+      # Every shard runs to the end, so one red run names every failing test, not just the first
+      # shard's.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
     # The suite includes a real database integration test. Without a database it fails on every run,
     # including on main, which trains everyone to read a red CI as normal. pgvector rather than plain
     # postgres because the knowledge schema uses the extension.
@@ -390,6 +409,9 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
+      - uses: $/.github/actions/test-shard
+        with:
+          shard: ${{ matrix.shard }}/${{ strategy.job-total }}
       - run: bun install --frozen-lockfile
       # The Bots are not root workspaces and each keeps its own lockfile. The startup tests spawn
       # the real entrypoint, so its dependencies have to be installed as well.
@@ -425,9 +447,53 @@ jobs:
         with:
           version: v3.19.0
       - run: helm dependency build charts/openbot
-      # A passing job must include the expected test floor. Import-time failures can otherwise skip
-      # files before their tests are registered.
+      # This shard's tests, failing on a failed test or on a count it cannot read. The floor under the
+      # count is the suite's, so the `tests` job checks it on the sum of the shards.
       - run: bun run test:ci
+      # The shard's count, and how long each of its files took.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-shard-${{ matrix.shard }}
+          path: ${{ env.TEST_COUNT_DIR }}
+          if-no-files-found: error
+          retention-days: 1
+
+  # One result for the suite, under the name the unsharded job had. A passing job must include the
+  # expected test floor: import-time failures can otherwise skip files before their tests are
+  # registered, and a shard cannot see that, because it does not know how big it is meant to be. So
+  # this fails when any shard did not succeed, when any shard's count is missing, and when the counts
+  # add up to less than the floor (scripts/test-floor.ts).
+  test-total:
+    name: tests
+    runs-on: ubuntu-latest
+    # Also when a shard failed, so this reports the failure rather than being skipped, which a
+    # required check would read as a pass.
+    if: always()
+    needs: [test]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: test-shard-*
+          path: ${{ runner.temp }}/test-counts
+          merge-multiple: true
+      - name: The shards passed and add up to the floor
+        env:
+          SHARDS_RESULT: ${{ needs.test.result }}
+        run: bun scripts/test-ci-aggregate.ts "$RUNNER_TEMP/test-counts" "$RUNNER_TEMP/test-timings.json"
+      # This run's per-file durations, to download over scripts/test-timings.json when the shards
+      # drift out of balance.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-timings
+          path: ${{ runner.temp }}/test-timings.json
+          if-no-files-found: ignore
+          retention-days: 14
 
   startup:
     name: startup (${{ matrix.os }})
@@ -448,7 +514,9 @@ jobs:
 
   python-harness:
     name: python harness regressions
-    runs-on: ubuntu-latest
+    # CPU-bound: main and release runs get a 16-core larger runner (org runner group
+    # openbot-larger, billed per minute); pull requests stay on the free standard runner.
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -915,7 +983,7 @@ jobs:
     name: verify
     runs-on: ubuntu-latest
     if: always()
-    needs: [static, deployables, mobile, computer-browser, chart, test, startup, python-harness, build, migrations, image, component-dockerfiles]
+    needs: [static, deployables, mobile, computer-browser, chart, test, test-total, startup, python-harness, build, migrations, image, component-dockerfiles]
     steps:
       - name: Require every check
         env:

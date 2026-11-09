@@ -8,6 +8,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### OpenBot Desktop
+
+- **Docker Desktop 29 pulls OpenBot's images from downloads.copilotkit.ai.** Its pulls there
+  failed with 403 and went to GitHub, because the copy held only each image's Linux amd64 and arm64
+  manifests, and Docker 29 also fetches the image's attestations and asks which artifacts refer to
+  it. The copy now holds every manifest each image names, and answers that question with an empty
+  list.
+- **A release candidate's images are on downloads.copilotkit.ai too.** A fresh install of a
+  candidate got 403 there for every image, because only the Latest stable release was copied.
+  Downloads sync now copies a prerelease asked for by tag (its images and its own files, never
+  `latest/`), and each scheduled run copies the images of every prerelease newer than Latest from
+  the last 30 days. Drafts are never copied.
+
 ## 1.0.0
 
 **Before upgrading.** Two migrations run at start, and the database moves to

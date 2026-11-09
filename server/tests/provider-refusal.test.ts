@@ -10,6 +10,7 @@ import {
   type RuntimeModel,
   registeredAgentFromRow,
 } from "../src/copilot";
+import { clearDesktopConnectionFailure } from "../src/desktop-connection-failure";
 import { testEnvironment } from "./support/environment";
 
 /**
@@ -298,6 +299,9 @@ beforeAll(() => {
 });
 
 afterEach(() => {
+  // A refused key goes through the real path, which records a model failure for Desktop to ask for
+  // the credential again. That state is one per process, so it is not left for the next file.
+  clearDesktopConnectionFailure("model");
   for (const [name, value] of [
     ["OPENAI_BASE_URL", saved.openai],
     ["ANTHROPIC_BASE_URL", saved.anthropic],

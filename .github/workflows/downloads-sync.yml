@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Mirror only releases/<tag>/ of this stable release, such as v0.3.0. Empty mirrors the Latest release, latest/ included.
+        description: Mirror only releases/<tag>/ and the images of this release, such as v0.3.0 or a candidate such as v1.0.0-rc.1. Empty mirrors the Latest release, latest/ included, and the images of every prerelease newer than it from the last 30 days.
         type: string
         default: ""
         required: false
