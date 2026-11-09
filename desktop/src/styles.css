@@ -1584,5 +1584,8 @@ a:hover {
 
 .troubleshooting .caution {
   margin-top: 8px;
+}
+
+.troubleshooting .caution.failed {
   color: var(--destructive);
 }

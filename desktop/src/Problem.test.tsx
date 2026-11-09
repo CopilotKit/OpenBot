@@ -83,6 +83,14 @@ test("a failure offers its troubleshooting logs, with what failed", async () => 
     command: "save_troubleshooting_logs",
     args: { failure: "The back end could not start.\nexit 1" },
   });
+  await view.findByText("Saved in the log folder.");
+});
+
+test("the logs say what is taken out before they are pasted anywhere", () => {
+  const view = render(<TroubleshootingLogs />);
+  expect(view.container.textContent).toContain(
+    "OpenBot takes out keys, passwords and your email address first.",
+  );
 });
 
 test("troubleshooting logs that cannot be saved say so", async () => {

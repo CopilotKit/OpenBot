@@ -8174,7 +8174,12 @@ fn main() {
         ] {
             assert!(text.contains(expected), "missing {expected:?} in\n{text}");
         }
-        for secret in ["dana.rivera@acme-robotics.io", "org_2xK9pQ7vLm", "user_31aZ", &home] {
+        for secret in [
+            "dana.rivera@acme-robotics.io",
+            "org_2xK9pQ7vLm",
+            "user_31aZ",
+            &home,
+        ] {
             assert!(!text.contains(secret), "{secret} survived in\n{text}");
         }
     }
