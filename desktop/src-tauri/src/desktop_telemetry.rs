@@ -823,7 +823,9 @@ mod tests {
         }
         for result in [
             Ok(local_eval::Terms::SignedOut),
-            Ok(local_eval::Terms::EngineNotReady),
+            Ok(local_eval::Terms::EngineNotReady {
+                cause: "docker_unavailable",
+            }),
             Ok(local_eval::Terms::Unavailable),
             Err(local_eval::Failure::UnexpectedExit),
         ] {

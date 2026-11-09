@@ -10,6 +10,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **The Account step says when it is waiting for Install to set up the engine.** On a new Mac it
+  said "Checking your CopilotKit account…" for minutes while Install put Podman in, because the
+  sign-in check needs a running engine. It now says "OpenBot is setting up the software it runs on.
+  Your CopilotKit sign-in comes next.", with what Install is doing ("Installing Podman.",
+  "Preparing the engine machine.", "Starting the engine machine."). The desktop log says each change
+  once as `[account]`: what the CLI's preflight answered, the install step, how long the wait took
+  and what the sign-in check answered, and how long the browser sign-in took.
 - **Connecting an app from OpenBot Desktop brings you back to OpenBot Desktop.** The app's sign-in
   opens in your browser, and when it finished, the browser showed OpenBot in a new tab while the
   window behind it still had the app as not connected. The browser now shows a short "Back to
