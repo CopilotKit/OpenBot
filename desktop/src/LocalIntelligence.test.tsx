@@ -708,6 +708,32 @@ test("setup that needs a CopilotKit sign-in offers it in the window, then carrie
   expect(commands().filter((c) => c === "set_up_local_eval")).toHaveLength(2);
 });
 
+/**
+ * A fresh Mac with a small Docker stopped at Start with "The back end stopped with an error
+ * partway through": the CLI's resource check failed. Its report, as `local_eval.rs` reads the
+ * CLI's `LOCAL_DOCKER_RESOURCES_SHORT`, now says what is short and where to raise it.
+ */
+test("a setup refused for too few CPUs or too little memory says so, with Retry", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [
+      report({
+        outcome: "failed",
+        stack: null,
+        reason: "docker-resources-short",
+      }),
+    ],
+    local_eval_download: [null],
+    cancel_local_eval: [null],
+  });
+  const screen = view();
+  await screen.findByRole("button", { name: "Retry" });
+  const setup = row(screen, SETUP).textContent;
+  expect(setup).toContain(
+    "Docker doesn't have enough free CPUs or memory for the back end. It needs at least 4 free CPUs and 4 GB of free memory. Raise them in Docker Desktop > Settings > Resources, then Retry.",
+  );
+  expect(setup).not.toContain("partway through");
+});
+
 test("a CopilotKit sign-in that does not finish says so and can be tried again", async () => {
   invokeHandler = answers({
     set_up_local_eval: [blockedOnSignIn],

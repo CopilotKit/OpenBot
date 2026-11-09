@@ -193,6 +193,11 @@ pub enum Reason {
     DashboardUnavailable,
     /// `login`: the CLI could not open the browser. Its fallback is a code approved in a terminal.
     BrowserOpenFailed,
+    /// The CLI's own resource check: Docker has too few free CPUs or too little free memory or
+    /// storage. Read from `error.code`, since its `nextAction.reason` is only `local_command_failed`.
+    DockerResourcesShort,
+    /// The same, on OpenBot's Podman machine, whose limits are set in another place.
+    PodmanResourcesShort,
     /// A reason this build does not know. Treated as blocking, never as success.
     Unrecognized,
 }
@@ -786,6 +791,11 @@ pub enum Terms {
     /// The CLI answers nothing about the agreement until a container engine answers it. On a new
     /// Windows computer Install is still putting Podman in while the person signs in.
     EngineNotReady,
+    /// The engine has fewer CPUs or less memory than local setup needs (`engine_size_terms`).
+    /// Not a CLI answer: OpenBot's own check, so a small engine is caught before Start.
+    EngineTooSmall {
+        podman: bool,
+    },
 }
 
 /// `onboard local-terms --json`: one object, exit 0. The address must be https; the organization
@@ -1016,6 +1026,13 @@ pub fn normalize_list(exit_code: i32, stdout: &[u8]) -> Result<Listing, Failure>
 
 /// Only the CLI's reason for stopping, never its summary, instructions or resume command.
 fn reason(outcome: Outcome, wire: &Map<String, Value>) -> Result<Option<Reason>, Failure> {
+    if outcome != Outcome::Completed && resources_short(wire) {
+        return Ok(Some(if on_podman() {
+            Reason::PodmanResourcesShort
+        } else {
+            Reason::DockerResourcesShort
+        }));
+    }
     match (outcome, wire.get("nextAction")) {
         (Outcome::Completed, _) | (_, None | Some(Value::Null)) => Ok(None),
         (_, Some(next)) => match object(next)?.get("reason") {
@@ -1024,6 +1041,85 @@ fn reason(outcome: Outcome, wire: &Map<String, Value>) -> Result<Option<Reason>,
             Some(_) => Err(Failure::InvalidStatus),
         },
     }
+}
+
+/**
+The `error.code` the CLI gives when its resource check fails (`LocalResourceShortfallError`): too
+few free CPUs, too little free memory or too little free storage in the engine. A probe that could
+not measure (`LOCAL_DOCKER_RESOURCES_UNMEASURABLE`) is not a shortfall and stays a plain failure.
+*/
+const RESOURCE_SHORTFALL_CODES: [&str; 2] =
+    ["LOCAL_DOCKER_RESOURCES_SHORT", "LOCAL_DOCKER_MEMORY_SHORT"];
+
+fn resources_short(wire: &Map<String, Value>) -> bool {
+    wire.get("error")
+        .and_then(|error| error.get("code"))
+        .and_then(Value::as_str)
+        .is_some_and(|code| RESOURCE_SHORTFALL_CODES.contains(&code))
+}
+
+/// Whether the CLI runs on a Podman engine, so a person is sent to Podman's settings.
+fn on_podman() -> bool {
+    ENGINE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .as_ref()
+        .is_some_and(|address| address.engine == crate::engine::Engine::Podman)
+}
+
+/**
+The smallest engine OpenBot asks for before local setup: 6 CPUs and 8 GB of memory.
+
+The CLI's own check wants 4 free CPUs and 4 GiB of free memory inside a container, measured while
+OpenBot's own containers run, so an engine of exactly that size fails it at Start. Memory is
+compared at 7 GiB, since an engine set to 8 GB reports a little under 8 GiB.
+*/
+pub const MIN_ENGINE_CPUS: u64 = 6;
+pub const MIN_ENGINE_MEMORY_BYTES: u64 = 7 * 1024 * 1024 * 1024;
+
+/// Whether an engine of this size is too small for local setup.
+pub fn engine_too_small(cpus: u64, memory_bytes: u64) -> bool {
+    cpus < MIN_ENGINE_CPUS || memory_bytes < MIN_ENGINE_MEMORY_BYTES
+}
+
+/// The engine's CPUs and memory as its `info` reports them: `NCPU MemTotal` on Docker,
+/// `Host.CPUs Host.MemTotal` on Podman. Anything else is no answer.
+pub fn parse_engine_size(output: &str) -> Option<(u64, u64)> {
+    let mut fields = output.split_whitespace();
+    let cpus = fields.next()?.parse().ok()?;
+    let memory = fields.next()?.parse().ok()?;
+    fields.next().is_none().then_some((cpus, memory))
+}
+
+/**
+The onboarding check of the engine's size, before the account screen asks about the agreement:
+`Some(Terms::EngineTooSmall)` for an engine below `MIN_ENGINE_CPUS` or `MIN_ENGINE_MEMORY_BYTES`.
+An engine that is not known yet or does not answer is not judged here; the CLI's own check still
+runs at Start.
+*/
+pub fn engine_size_terms() -> Option<Terms> {
+    let address = ENGINE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()?;
+    let podman = address.engine == crate::engine::Engine::Podman;
+    let format = if podman {
+        "{{.Host.CPUs}} {{.Host.MemTotal}}"
+    } else {
+        "{{.NCPU}} {{.MemTotal}}"
+    };
+    let output = address
+        .command()
+        .args(["info", "--format", format])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    let (cpus, memory) = parse_engine_size(&String::from_utf8_lossy(&output.stdout))?;
+    if !engine_too_small(cpus, memory) {
+        return None;
+    }
+    log::warn!("[local terms] the engine has {cpus} CPUs and {memory} bytes of memory");
+    Some(Terms::EngineTooSmall { podman })
 }
 
 /// The version-1 envelope every `local` command shares: version, command, and a status that
@@ -6169,6 +6265,97 @@ fn main() {{
         assert_eq!(
             normalize_account_sign_in(0, b"not json\n"),
             Err(Failure::InvalidJson)
+        );
+    }
+
+    /// A new Windows computer installs Podman while the person signs in, and the CLI will not say
+    /// A fresh Mac with a small Docker failed at Start with "stopped with an error partway
+    /// through": the CLI's resource check failed, and its `nextAction.reason` is only
+    /// `local_command_failed`. These are the reports the 4.34.0-pre.647a03b CLI prints for it,
+    /// and the window is told the resources are short.
+    #[test]
+    fn a_setup_the_cli_refused_for_resources_says_resources_are_short() {
+        let resume = "npx --yes copilotkit@4.34.0-pre.647a03b local setup --json";
+        let summary = "The local command did not finish. Check local status for the recorded failed step, then resume the command. No automatic rollback was requested.";
+        for (code, message) in [
+            (
+                "LOCAL_DOCKER_RESOURCES_SHORT",
+                "Docker available resources: 3.71 CPUs (requires 4), 5.2 GiB RAM available (requires 4), 51 GiB free storage (requires 40). Stop other container workloads or increase Docker resources, then retry local setup.",
+            ),
+            (
+                "LOCAL_DOCKER_MEMORY_SHORT",
+                "Docker memory: 7.6 GiB total, 2.9 GiB available to new containers (requires 4 GiB available). Docker keeps part of its memory limit for itself, so raise Docker's memory limit by at least 3 GiB (Docker Desktop: Settings > Resources > Memory), or stop other containers, then retry local setup.",
+            ),
+        ] {
+            let failed = json!({
+                "version": 1,
+                "command": "local setup",
+                "status": "failed",
+                "error": { "code": code, "message": message },
+                "nextAction": {
+                    "reason": "local_command_failed",
+                    "summary": summary,
+                    "instructions": ["Inspect the recorded stack with npx --yes copilotkit@4.34.0-pre.647a03b local status --json."],
+                    "resumeCommand": resume,
+                    "url": null, "linkLabel": null, "linkFile": null,
+                    "caveats": [], "requiredEnvVars": [], "artifacts": []
+                },
+                "diagnostics": []
+            });
+            let report = normalize_setup(1, failed.to_string().as_bytes()).unwrap();
+            assert_eq!(report.outcome, Outcome::Failed);
+            assert_eq!(report.reason, Some(Reason::DockerResourcesShort), "{code}");
+            assert_eq!(
+                serde_json::to_value(report.reason).unwrap(),
+                json!("docker-resources-short")
+            );
+        }
+        // A probe that measured nothing is not a shortfall the person can fix in Settings.
+        let unmeasurable = json!({
+            "version": 1, "command": "local setup", "status": "failed",
+            "error": { "code": "LOCAL_DOCKER_RESOURCES_UNMEASURABLE", "message": "Docker available memory or storage could not be measured." },
+            "nextAction": { "reason": "local_command_failed", "resumeCommand": resume },
+            "diagnostics": []
+        });
+        assert_eq!(
+            normalize_setup(1, unmeasurable.to_string().as_bytes())
+                .unwrap()
+                .reason,
+            Some(Reason::LocalCommandFailed)
+        );
+    }
+
+    /// The onboarding check asks for 6 CPUs and 8 GB, so an engine that would fail the CLI's check
+    /// at Start, with OpenBot's own containers running beside it, is caught first.
+    #[test]
+    fn a_small_engine_is_too_small_for_local_setup() {
+        const GB: u64 = 1_000_000_000;
+        // `docker info --format '{{.NCPU}} {{.MemTotal}}'` on Docker Desktop.
+        for (said, too_small) in [
+            // 4 CPUs and 8 GB, as Docker Desktop reports an 8 GB limit.
+            ("4 8217473024\n", true),
+            ("6 4113829888\n", true),
+            ("5 16745730048\n", true),
+            // 6 CPUs and 8 GB, and a larger one, are enough.
+            ("6 8217473024\n", false),
+            ("18 16745730048\n", false),
+        ] {
+            let (cpus, memory) = parse_engine_size(said).unwrap();
+            assert_eq!(engine_too_small(cpus, memory), too_small, "{said}");
+        }
+        assert!(!engine_too_small(MIN_ENGINE_CPUS, 8 * GB));
+        for unread in [
+            "",
+            "4",
+            "four 8217473024",
+            "4 8217473024 extra",
+            "-1 8217473024",
+        ] {
+            assert_eq!(parse_engine_size(unread), None, "{unread:?}");
+        }
+        assert_eq!(
+            serde_json::to_value(Terms::EngineTooSmall { podman: true }).unwrap(),
+            json!({ "status": "engine-too-small", "podman": true })
         );
     }
 

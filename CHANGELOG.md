@@ -72,6 +72,13 @@ deployment:
   and the end of its error output. A setup that stopped used to leave nothing in the log. The card
   says whether the back end stopped with an error partway, quit without saying why, or could not
   be run, where all three said "The back end could not start."
+- **A Docker too small for the back end says so, and where to raise it.** A setup the back end
+  refuses for too few free CPUs or too little free memory now says "Docker doesn't have enough free
+  CPUs or memory for the back end. It needs at least 4 free CPUs and 4 GB of free memory. Raise them
+  in Docker Desktop > Settings > Resources, then Retry.", where it said "The back end stopped with
+  an error partway through." On Podman it names `podman machine set` instead. The CopilotKit
+  account step now checks the engine first, and one with fewer than 6 CPUs or less than 8 GB of
+  memory stops there with the same advice, before Start.
 - When OpenBot Desktop is signed in with a model Learning can't use, Learn now in Settings →
   Learning says "Learning can't run on the model you signed in with. To use it, sign OpenBot in with
   an OpenAI or Anthropic API key, or a Claude or ChatGPT plan.", where it told you to give the back

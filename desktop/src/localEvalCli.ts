@@ -55,6 +55,9 @@ export type LocalReason =
   // `local login` only; the menu says these as a fixed sentence.
   | "dashboard-unavailable"
   | "browser-open-failed"
+  // The CLI's resource check failed: too few free CPUs or too little free memory in the engine.
+  | "docker-resources-short"
+  | "podman-resources-short"
   | "unrecognized";
 
 /** `local_eval::Readiness`: the CLI's own end-to-end check. Running pods are not this. */
@@ -301,7 +304,9 @@ export type LocalTerms =
     }
   | { status: "not-required" | "unavailable" | "signed-out" }
   /** No container engine answers yet, so the CLI says nothing about the account. */
-  | { status: "engine-not-ready" };
+  | { status: "engine-not-ready" }
+  /** OpenBot's own check: the engine has fewer CPUs or less memory than local setup needs. */
+  | { status: "engine-too-small"; podman: boolean };
 
 export function localEvalTerms(): {
   attempt: string;

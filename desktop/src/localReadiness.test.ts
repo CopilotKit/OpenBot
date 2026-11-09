@@ -27,6 +27,8 @@ const reasons: LocalReason[] = [
   "confirmation-required",
   "dashboard-unavailable",
   "browser-open-failed",
+  "docker-resources-short",
+  "podman-resources-short",
   "unrecognized",
 ];
 
@@ -86,7 +88,7 @@ test("every failure gives a plain, non-empty sentence without its own name or In
 });
 
 test("the reason and failure lists in this test match the source", () => {
-  expect(new Set(reasons).size).toBe(18);
+  expect(new Set(reasons).size).toBe(20);
   expect(localFailures.length).toBe(18);
 });
 
@@ -173,6 +175,17 @@ test("specific wording and actions", () => {
   ).toBe(
     "The back end stopped with an error partway through. OpenBot's log has the details.",
   );
+  // The CLI's resource check: what is short and where to raise it, on each engine.
+  expect(
+    said(report({ outcome: "failed", reason: "docker-resources-short" })),
+  ).toEqual({
+    state: "blocked",
+    said: "Docker doesn't have enough free CPUs or memory for the back end. It needs at least 4 free CPUs and 4 GB of free memory. Raise them in Docker Desktop > Settings > Resources, then Retry.",
+    action: "retry",
+  });
+  expect(
+    said(report({ outcome: "failed", reason: "podman-resources-short" })).said,
+  ).toContain("podman machine set");
   expect(said("unavailable").action).toBeUndefined();
   expect(said("unverified").action).toBe("repair");
   expect(said("invalid-json")).toEqual({

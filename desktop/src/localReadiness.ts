@@ -95,6 +95,22 @@ const quitUnexplained = blocked(
   "restart-intelligence",
 );
 
+/**
+ * The CLI's resource check wants 4 free CPUs and 4 GB of free memory in the engine, measured at
+ * Start while OpenBot's own containers run. Said with where to raise them.
+ */
+export const DOCKER_RESOURCES_SHORT =
+  "Docker doesn't have enough free CPUs or memory for the back end. It needs at least 4 free CPUs and 4 GB of free memory. Raise them in Docker Desktop > Settings > Resources, then Retry.";
+export const PODMAN_RESOURCES_SHORT =
+  "Podman doesn't have enough free CPUs or memory for the back end. It needs at least 4 free CPUs and 4 GB of free memory. Stop your Podman machine, raise them with podman machine set --cpus 6 --memory 8192, start it again, then Retry.";
+
+/** OpenBot's own check before Start: the engine's totals, with room for OpenBot's own containers. */
+export function engineTooSmallSaid(podman: boolean): string {
+  return podman
+    ? "Podman needs at least 6 CPUs and 8 GB of memory to run the back end. Stop your Podman machine, run podman machine set --cpus 6 --memory 8192, start it again, then Try again."
+    : "Docker needs at least 6 CPUs and 8 GB of memory to run the back end. Raise them in Docker Desktop > Settings > Resources, then Try again.";
+}
+
 // Compiler-enforced: a new upstream reason or failure breaks the build here.
 const reasonRows: Record<LocalReason, ReadinessRow> = {
   "authentication-required": blocked("Sign in to CopilotKit.", "sign-in"),
@@ -133,6 +149,8 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
     "retry",
   ),
   "browser-open-failed": blocked("Your browser did not open.", "retry"),
+  "docker-resources-short": blocked(DOCKER_RESOURCES_SHORT, "retry"),
+  "podman-resources-short": blocked(PODMAN_RESOURCES_SHORT, "retry"),
   unrecognized: couldNotStart,
 };
 
