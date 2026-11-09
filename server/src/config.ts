@@ -237,9 +237,10 @@ export type DeploymentConfig = {
   /**
    * Whether OpenBot assigns the Intelligence project's `openbot` Learning container as the default
    * when nobody has chosen one (learning/auto-assign.ts). On unless OPENBOT_LEARNING_AUTO_ASSIGN is
-   * "false" or "0", and off whenever CPK_INTELLIGENCE_LEARNING_CONTAINER_ID names a container. It
-   * never overrides a saved Admin setting. It creates the container only with a credential that can
-   * (see `learningSetup`), never with the runtime key.
+   * "false" or "0". A container CPK_INTELLIGENCE_LEARNING_CONTAINER_ID names stands it aside once
+   * Intelligence confirms it has that container; one it does not have is ignored, and this assigns
+   * as though nothing was named. It never overrides a saved Admin setting. It creates the container
+   * only with a credential that can (see `learningSetup`), never with the runtime key.
    */
   learningAutoAssign: boolean;
   /**
@@ -1783,11 +1784,10 @@ function personalEditionRequirements(
 
 /**
  * Same rule as generated interfaces: on unless explicitly "false" or "0". A container named in the
- * environment is a choice, so there is nothing to assign.
+ * environment is a choice only if the Intelligence this server talks to has it, which the server asks
+ * at boot (learning/auto-assign.ts), not here.
  */
 function learningAutoAssignEnabled(environment: Environment): boolean {
-  if (optional(environment, "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID"))
-    return false;
   const value = optional(environment, "OPENBOT_LEARNING_AUTO_ASSIGN");
   return value !== "false" && value !== "0";
 }

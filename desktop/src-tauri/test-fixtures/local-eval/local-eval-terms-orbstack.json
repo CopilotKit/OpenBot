@@ -1,0 +1,6 @@
+{
+  "status": "blocked",
+  "reason": "unsupported-engine",
+  "said": "Docker Desktop or rootful Podman is required on macOS. This machine runs OrbStack.",
+  "switchEngine": true
+}

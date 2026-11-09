@@ -13,6 +13,7 @@ import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as SignRouteImport } from './routes/sign'
 import { Route as AuthedAppRouteImport } from './routes/_authed/_app'
 import { Route as AuthedAdminRouteRouteImport } from './routes/_authed/admin/route'
+import { Route as AuthedDesktopReturnRouteImport } from './routes/_authed/desktop-return'
 import { Route as AuthedOnboardingRouteImport } from './routes/_authed/onboarding'
 import { Route as AuthedSettingsRouteRouteImport } from './routes/_authed/settings/route'
 import { Route as AuthedAppIndexRouteImport } from './routes/_authed/_app/index'
@@ -121,6 +122,11 @@ const AuthedAppRoute = AuthedAppRouteImport.update({
 const AuthedAdminRouteRoute = AuthedAdminRouteRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedDesktopReturnRoute = AuthedDesktopReturnRouteImport.update({
+  id: '/desktop-return',
+  path: '/desktop-return',
   getParentRoute: () => AuthedRoute,
 } as any)
 const AuthedOnboardingRoute = AuthedOnboardingRouteImport.update({
@@ -627,6 +633,7 @@ export interface FileRoutesByFullPath {
   '/sign': typeof SignRoute
   '/admin': typeof AuthedAdminRouteRouteWithChildren
   '/settings': typeof AuthedSettingsRouteRouteWithChildren
+  '/desktop-return': typeof AuthedDesktopReturnRoute
   '/onboarding': typeof AuthedOnboardingRoute
   '/approvals': typeof AuthedAppApprovalsRoute
   '/bot': typeof AuthedAppBotRoute
@@ -719,6 +726,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof AuthedAppIndexRoute
   '/sign': typeof SignRoute
+  '/desktop-return': typeof AuthedDesktopReturnRoute
   '/onboarding': typeof AuthedOnboardingRoute
   '/approvals': typeof AuthedAppApprovalsRoute
   '/bot': typeof AuthedAppBotRoute
@@ -814,6 +822,7 @@ export interface FileRoutesById {
   '/_authed/admin': typeof AuthedAdminRouteRouteWithChildren
   '/_authed/settings': typeof AuthedSettingsRouteRouteWithChildren
   '/_authed/_app': typeof AuthedAppRouteWithChildren
+  '/_authed/desktop-return': typeof AuthedDesktopReturnRoute
   '/_authed/onboarding': typeof AuthedOnboardingRoute
   '/_authed/_app/approvals': typeof AuthedAppApprovalsRoute
   '/_authed/_app/bot': typeof AuthedAppBotRoute
@@ -912,6 +921,7 @@ export interface FileRouteTypes {
     | '/sign'
     | '/admin'
     | '/settings'
+    | '/desktop-return'
     | '/onboarding'
     | '/approvals'
     | '/bot'
@@ -1004,6 +1014,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/sign'
+    | '/desktop-return'
     | '/onboarding'
     | '/approvals'
     | '/bot'
@@ -1098,6 +1109,7 @@ export interface FileRouteTypes {
     | '/_authed/admin'
     | '/_authed/settings'
     | '/_authed/_app'
+    | '/_authed/desktop-return'
     | '/_authed/onboarding'
     | '/_authed/_app/approvals'
     | '/_authed/_app/bot'
@@ -1223,6 +1235,13 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AuthedAdminRouteRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/desktop-return': {
+      id: '/_authed/desktop-return'
+      path: '/desktop-return'
+      fullPath: '/desktop-return'
+      preLoaderRoute: typeof AuthedDesktopReturnRouteImport
       parentRoute: typeof AuthedRoute
     }
     '/_authed/onboarding': {
@@ -2107,6 +2126,7 @@ interface AuthedRouteChildren {
   AuthedAdminRouteRoute: typeof AuthedAdminRouteRouteWithChildren
   AuthedSettingsRouteRoute: typeof AuthedSettingsRouteRouteWithChildren
   AuthedAppRoute: typeof AuthedAppRouteWithChildren
+  AuthedDesktopReturnRoute: typeof AuthedDesktopReturnRoute
   AuthedOnboardingRoute: typeof AuthedOnboardingRoute
   AuthedSignInRequestIdRoute: typeof AuthedSignInRequestIdRoute
 }
@@ -2115,6 +2135,7 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedAdminRouteRoute: AuthedAdminRouteRouteWithChildren,
   AuthedSettingsRouteRoute: AuthedSettingsRouteRouteWithChildren,
   AuthedAppRoute: AuthedAppRouteWithChildren,
+  AuthedDesktopReturnRoute: AuthedDesktopReturnRoute,
   AuthedOnboardingRoute: AuthedOnboardingRoute,
   AuthedSignInRequestIdRoute: AuthedSignInRequestIdRoute,
 }

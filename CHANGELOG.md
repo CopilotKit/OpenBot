@@ -10,6 +10,62 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **Connecting an app from OpenBot Desktop brings you back to OpenBot Desktop.** The app's sign-in
+  opens in your browser, and when it finished, the browser showed OpenBot in a new tab while the
+  window behind it still had the app as not connected. The browser now shows a short "Back to
+  OpenBot" page, which records the account and opens the Desktop window where you left it. An app's
+  page in the window checks the account again when the window is back in front. Apps that sign in
+  through Arcade, or by their own sign-in page, still return to the browser tab.
+- **On a Mac, the window's buttons share a row with OpenBot's name and +.** The sidebar's header
+  started below the close, minimise and zoom buttons, under an empty strip. The buttons now sit 20pt
+  in and level with the header's first row, and the name and + start just to their right.
+  With the sidebar hidden, the page starts below them, and so does onboarding.
+- **Check for Updates… on the Mac answers with OpenBot's icon.** "OpenBot is up to date", the offer
+  of a newer version, and "couldn't check" or "couldn't install" showed the system's grey note icon,
+  because the alert was drawn by macOS rather than by OpenBot. They are now OpenBot's own alerts.
+- **OpenBot Desktop says it sends usage data, and Settings turns it off.** The first setup screen
+  now says that OpenBot sends CopilotKit usage data linked to your CopilotKit account, that it never
+  sends your conversations, files or keys, and links what it sends (`desktop/TELEMETRY.md`). Earlier
+  releases sent it with no notice. Settings > General > Privacy has Share usage data: off is the
+  same opt-out as `COPILOTKIT_TELEMETRY_DISABLED=1`, kept for every later launch. The desktop app's
+  own usage data and the CLI's stop at once, and the server's the next time OpenBot starts. With
+  `COPILOTKIT_TELEMETRY_DISABLED` or `DO_NOT_TRACK` set at launch the switch shows off and cannot be
+  turned on.
+- **Desktop usage data is linked to the CopilotKit account.** After you sign in, OpenBot Desktop
+  links its installation ID to your CopilotKit account through the bundled CLI's
+  `telemetry link`, so setup and runtime usage count as one person. It sends an opaque account
+  fingerprint, never an email, name or credential, and only for the personal edition; Enterprise
+  and team deployments are unchanged. The server receives the installation ID when OpenBot starts.
+  Signing in and Start never wait for the link, and nothing about it can keep OpenBot from
+  starting.
+- **CopilotKit CLI `copilotkit@6bfaa0f`.** OpenBot Desktop's bundled CLI moves to the production
+  build of Intelligence `6bfaa0f5c`, which adds `telemetry link`. It keeps Intelligence
+  0.16.0-rc.10 and CopilotKit v1.85.0 templates.
+- **A Learning container left in `~/OpenBot/.env` by an earlier setup no longer fails every
+  message.** A folder set up against hosted Intelligence kept
+  `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID="openbot"`, which the local back end did not have, so every
+  message failed with "Failed to initialize thread" (or "Failed to resolve Learning Container").
+  Start now writes that setting itself, empty, in place of any other line for it. The server also
+  checks a named container at start: one its Intelligence does not have is logged as
+  `configured_absent`, naming the variable and its value, and ignored, and a container is assigned
+  automatically as though none was named. A chat whose first message failed this way works when sent
+  to again.
+- **A saved Learning container the current back end does not have no longer fails every message
+  either.** A default container saved while OpenBot used hosted Intelligence still won after it
+  switched to the local one, which has no such container. The server now checks the saved container
+  at start: one its Intelligence does not have is logged as `saved_absent`, naming it, and ignored
+  there, and a container is assigned automatically in its place. The saved choice is kept, not
+  cleared, so pointing OpenBot back at the Intelligence it was chosen on uses it again; Admin shows
+  the container actually in use.
+- **Settings shows which AI OpenBot uses, and changes it.** Settings > General has an AI model
+  section in OpenBot Desktop: the provider and how OpenBot signs in to it (a Claude or ChatGPT plan,
+  an API key, a Google or xAI account, or your own address), and the model when setup named one.
+  Never the key. Change AI connection stops OpenBot and opens the setup window at its AI screen,
+  and OpenBot starts again with the new choice.
+- **The window zooms, as a browser does.** The text was too small and nothing made it bigger.
+  Command (Ctrl on Windows) with + or = zooms in, with - zooms out, and with 0 goes back to actual
+  size, from 90% to 200%. On a Mac the View menu has Zoom In, Zoom Out and Actual Size. The level
+  applies to every window, from setup to OpenBot itself, and is kept for the next launch.
 - **Troubleshooting logs in one click.** Every setup failure, the Status window, and a new Get
   Troubleshooting Logs… item in the OpenBot menu and the tray now offer Copy logs and Save to a
   file. Both give one block of text: the version and build, the system, what failed, the container
@@ -28,6 +84,79 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   Downloads sync now copies a prerelease asked for by tag (its images and its own files, never
   `latest/`), and each scheduled run copies the images of every prerelease newer than Latest from
   the last 30 days. Drafts are never copied.
+- **A back end start that fails on a nearly full disk says so, with the numbers.** Relaunching a
+  used install whose back end's disk was nearly full said only "The back end stopped with an error
+  partway through." Each start, update and setup now checks the engine first and logs what it has
+  as `[local check]`, and a start that fails is checked again with the back end asked whether it is
+  short of disk. The card then says, for example, "The back end's disk is nearly full. Podman has
+  30.5 GB free of 1006.8 GB. OpenBot needs 40 GB. Free space on the drive that holds OpenBot's
+  engine (C:), then Retry." On Windows, free disk is measured on that drive, which can run out
+  while the machine itself shows hundreds of GB free, and the card never suggests
+  `podman machine set`, which WSL machines refuse. In the few minutes after space was freed, while
+  the back end still reports low disk, a start that fails, or a Retry that finds the back end
+  running but not healthy, says "The back end is recovering from low disk space. Wait a few
+  minutes, then Retry." where Retry said "The back end is running but not healthy."
+- **An engine the back end doesn't run on is said at once on the Account step.** On a Mac whose
+  Docker is another engine, such as OrbStack, the step checked again every 2 seconds for 15
+  minutes, then said only "Couldn't check your CopilotKit account." It now says straight away what
+  the back end needs, in its own words ("Docker Desktop or rootful Podman is required on macOS.
+  This machine runs OrbStack."), with how to switch to Docker Desktop (`docker context use
+  desktop-linux`) or Podman, and Try again. Only an engine that isn't running yet is waited for.
+  The engine check before it (`docker info`, `docker image ls` and the container that measures
+  free disk) now gives up on a command after 15 to 20 seconds, so an engine that stops answering
+  no longer leaves the step on "Checking your CopilotKit account…" for good.
+
+### Conversations
+
+- **A Bot calls you "you".** Its instructions call the user "the person", and a Bot said that back,
+  such as "which the person didn't ask for". Every Bot is now told to write "you".
+- **A Claude plan has a model picker in the conversation again.** Signed in with a Claude plan,
+  the picker never showed, because the server asked Anthropic for the plan's models with
+  OpenBot's own harness token instead of the plan's sign-in, Anthropic answered 401
+  (`{"type":"model-list-unreadable","source":"claude","status":401}` in the server log), and only
+  the default model was known. The list is now asked for with the plan's own token, and the
+  harness token is never sent anywhere but the harness.
+- **A message that couldn't reach the back end says so in plain words.** The conversation showed
+  the raw request failure in red, such as `REST run request failed: {"error":"Failed to resolve
+  Learning Container"}`. It now says "OpenBot couldn't reach its back end, so your message wasn't
+  sent. Try again, or quit and reopen OpenBot." The original text goes to the browser console.
+- **A Bot fills a form in one pass.** A Bot checking its work read every field that shows a
+  placeholder (such as "company.com" or "City, State") as empty, however often it had filled it,
+  so it typed the same values in again and then asked you to type them yourself. It now reads what
+  is in the field. And a Bot's browser takes its actions one at a time, in the order they arrived,
+  on any number of server replicas: a model that calls tools in parallel, such as Claude Opus,
+  sent a form's fields together through a LangGraph Bot, the fields took the focus from each
+  other, and values landed in the wrong field. A LangGraph Bot now runs its browser calls in the
+  order the model made them. An action that never finishes gives way to the next after
+  `BROWSER_TURN_LIMIT_MS` (50 seconds by default), and one stopped while it waits never runs.
+- **The words that say a Bot is working pulse slowly instead of flashing.** "Thinking", a running
+  step such as "Drew an interface" and "Asking Ana…" now fade gently to a little over half strength
+  and back every 2.4 seconds, where a quick band used to flicker across them. With reduced motion
+  turned on they stay still.
+
+### Smaller changes
+
+- Onboarding's OpenBot for Business step says what OpenBot for Business is before it asks for a
+  demo: work sign-in, Bots shared in Slack and Microsoft Teams, and the controls and audit trail,
+  beside the picture of running OpenBot yourself that the step showed before. Book a demo then
+  opens the calendar in the step, and its cookie banner no longer covers it.
+- The sidebar is solid again, without the frosted glass and the orb's colours behind it, and the
+  app is set in Inter again rather than Atkinson Hyperlegible Next. Inter now loads as the page's
+  own font, where the page had asked for an installed Inter and so fell back to the system font on
+  a computer without one. The page's background is its earlier shade, and OpenBot's name at the top
+  of the sidebar highlights on hover again, without the orb beside it.
+- New Bot's first screen is as it was before 1.0.0: the simple Bot's form, with **Connect a custom
+  agent** opening the list of frameworks, in their earlier order. LangChain keeps its own name and
+  mark.
+- The OpenBot version sits to the right of your name at the foot of the sidebar, where it was a
+  line under it.
+
+### Personal edition
+
+- **Settings → Learning says Waiting for your review only when a skill is waiting.** With
+  **Approve new skills automatically** on, the heading showed while Learning was in progress and
+  after it finished, though nothing waited. The section is now **New skills** until a learned skill
+  waits for approval, and the team edition's **Waiting for an admin** follows the same rule.
 
 ## 1.0.0
 
@@ -1516,9 +1645,10 @@ published. It now installs from `agent-mastra/bun.lock` with `--frozen-lockfile`
 - Migration `0070_memory_dedup_per_bot` rebuilds one unique index on `personal_memories` to include
   the Bot that formed the memory (below). It keeps every row. While it rolls out, a server still on
   0.2.0 fails to save a newly formed Bot memory until it is replaced; nothing else is affected.
-- OpenBot Desktop now sends OpenBot's product usage events by default, under the telemetry notice it
-  already shows (below). Launching it with `DO_NOT_TRACK=1` or `COPILOTKIT_TELEMETRY_DISABLED=1`
-  turns them off with the rest of its telemetry.
+- OpenBot Desktop now sends OpenBot's product usage events by default (below). This release showed
+  no notice of it; a later release says so on the first setup screen. Launching it with
+  `DO_NOT_TRACK=1` or `COPILOTKIT_TELEMETRY_DISABLED=1` turns them off with the rest of its
+  telemetry.
 - Migration `0060_app_access_requests` adds one table, `app_access_requests`, which keeps people's
   requests that an admin switch on an app, grant it to a Bot or connect a Shared app's team account.
   It starts empty.
@@ -2181,8 +2311,9 @@ suggestions) are not counted. A person appears only as a pseudonym keyed with
 `KEY_ENCRYPTION_KEY`; no names, prompts, tool arguments, results or URLs are sent. Nothing is
 stored and there is no migration.
 
-A server sends these only with `OPENBOT_PRODUCT_TELEMETRY=1`. OpenBot Desktop sends them by default,
-under its existing telemetry notice. `OPENBOT_PRODUCT_TELEMETRY=0`, `DO_NOT_TRACK=1` or
+A server sends these only with `OPENBOT_PRODUCT_TELEMETRY=1`. OpenBot Desktop sends them by default;
+this release showed no notice of it, and later releases say so on the first setup screen.
+`OPENBOT_PRODUCT_TELEMETRY=0`, `DO_NOT_TRACK=1` or
 `COPILOTKIT_TELEMETRY_DISABLED=1` turns them off. The CopilotKit runtime's own events now carry
 `app_id=openbot`, and this deployment's ID only while product telemetry is on.
 

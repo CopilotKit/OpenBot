@@ -444,6 +444,24 @@ test("the first screen is Install, with nothing to choose", async () => {
   expect(localCliCalls()).toEqual([]);
 });
 
+test("the first screen says what usage data OpenBot sends, before the CopilotKit sign-in links it", async () => {
+  setupRootConfiguration("/tmp/local-eval-welcome-usage", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({});
+  const view = await renderApp();
+  const notice = view.getByText(/OpenBot sends CopilotKit usage data/);
+  expect(notice.textContent).toBe(
+    "OpenBot sends CopilotKit usage data, linked to your CopilotKit account. It never sends your conversations, files or keys. You can turn this off in Settings. What OpenBot sends",
+  );
+  const link = view.getByRole("link", { name: "What OpenBot sends" });
+  expect(link.getAttribute("href")).toBe(
+    "https://github.com/CopilotKit/OpenBot/blob/main/desktop/TELEMETRY.md",
+  );
+  // Before anything is installed or signed in to: the notice comes first.
+  expect(localCliCalls()).toEqual([]);
+});
+
 test("Install prepares the default Bot in the default folder, with no Bot or folder screen", async () => {
   setupRootConfiguration("/tmp/local-eval-install", async () =>
     emptyConfiguration(),
@@ -2896,6 +2914,64 @@ test("an interrupted shutdown restores saved setup for explicit recovery", async
   ).toBe(false);
   expect(view.queryByText(notice)).toBeNull();
   expect(invokeCalls).toContainEqual({ command: "show_openbot" });
+});
+
+/*
+ * The report: somebody on 1.0.0 could not find which AI they had signed in with, or change it.
+ * Settings' AI model row has a Change, which stops OpenBot and brings this window back. It opens at
+ * the AI screen, the one Change AI connection opens, and the new choice is what starts OpenBot.
+ */
+test("Settings' Change AI connection opens setup at the AI screen and starts with the new choice", async () => {
+  setupConnectedLocalStack(
+    "/tmp/settings-change-ai-connection",
+    localStatus("ready", "valid"),
+    // Stopped in this session, as the Change from Settings leaves it.
+    { autoStart: false },
+  );
+  const previous = invokeHandler;
+  let asked = true;
+  invokeHandler = async (command, args) => {
+    if (command === "take_ai_connection_change") {
+      const answer = asked;
+      asked = false;
+      return answer;
+    }
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await view.findByLabelText("OpenAI API key");
+  expect(
+    view.queryByRole("heading", { name: "OpenBot is stopped" }),
+  ).toBeNull();
+  expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+    false,
+  );
+  await userEvent.type(view.getByLabelText("OpenAI API key"), "new-model-key");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await waitFor(() =>
+    expect(invokeCalls).toContainEqual({ command: "show_openbot" }),
+  );
+  expect(getStartStackPayload()).toMatchObject({
+    model: { apiKey: "new-model-key" },
+  });
+});
+
+test("Back from Settings' Change AI connection shows the stopped screen with Start", async () => {
+  setupConnectedLocalStack(
+    "/tmp/settings-change-ai-connection-back",
+    localStatus("ready", "valid"),
+    { autoStart: false },
+  );
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) =>
+    command === "take_ai_connection_change" ? true : previous(command, args);
+  const view = await renderApp();
+  await view.findByLabelText("OpenAI API key");
+  await userEvent.click(view.getByRole("button", { name: "Back" }));
+  await view.findByRole("heading", { name: "OpenBot is stopped" });
+  expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+    false,
+  );
 });
 
 test("changing the saved model during recovery still opens OpenBot after Start", async () => {

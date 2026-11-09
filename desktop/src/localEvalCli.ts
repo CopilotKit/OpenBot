@@ -90,11 +90,29 @@ export type Shortfall = {
   cpus?: string;
   memoryGb?: string;
   diskGb?: string;
+  /**
+   * OpenBot's own check after a start that failed: the back end's disk is nearly full, and how
+   * large it is beside `diskGb`.
+   */
+  nearlyFull?: boolean;
+  diskSizeGb?: string;
+  /**
+   * The node still reports low disk with the disk above both lines: space was freed, and the
+   * back end recovers by itself within minutes.
+   */
+  recovering?: boolean;
+  /** Podman on Windows, in WSL: `podman machine set` changes nothing there. */
+  wsl?: boolean;
+  /** The drive that holds its machine's disk, `C:`. */
+  drive?: string;
 };
 
 export type LocalReport = {
   outcome: LocalOutcome;
-  /** With the reason `resources-short`: which resources the CLI found short. */
+  /**
+   * With the reason `resources-short`: which resources the CLI found short. With readiness
+   * `degraded`: a disk OpenBot found short, or recovering, behind a back end that does not answer.
+   */
   shortfall?: Shortfall;
   stack: null | {
     id: string;
@@ -318,6 +336,17 @@ export type LocalTerms =
   | { status: "not-required" | "unavailable" | "signed-out" }
   /** No container engine answers yet, so the CLI says nothing about the account. */
   | { status: "engine-not-ready" }
+  /**
+   * The CLI's preflight refused this computer for a reason waiting does not change, such as
+   * OrbStack on a Mac. `said` is the CLI's own sentence, when it gave one; `switchEngine` when the
+   * engine itself is refused and Docker Desktop or Podman is the fix.
+   */
+  | {
+      status: "blocked";
+      reason: LocalReason;
+      said?: string;
+      switchEngine?: boolean;
+    }
   /** OpenBot's own check: the engine has fewer CPUs or less memory than local setup needs. */
   | ({ status: "engine-too-small" } & Shortfall);
 

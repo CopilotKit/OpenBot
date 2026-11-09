@@ -12,6 +12,7 @@ mod desktop_telemetry;
 mod intelligence_bridge;
 mod notice;
 mod outside_links;
+mod zoom;
 
 #[cfg(test)]
 mod test_support;
@@ -60,6 +61,9 @@ struct Shell {
     starting: std::sync::atomic::AtomicBool,
     /// An explicit Stop must survive setup navigation; a new app session may resume again.
     stopped_in_session: std::sync::atomic::AtomicBool,
+    /// Settings asked to change the AI connection, and the Stop it asked for finished: the setup
+    /// page opens at its AI screen, once, instead of at Start.
+    change_ai_connection: std::sync::atomic::AtomicBool,
     /// Quit keeps the event loop alive until one background cleanup attempt finishes.
     quit: std::sync::Arc<QuitState>,
     /// Why the stack stopped, kept for the screen that has not loaded yet.
@@ -1325,20 +1329,48 @@ fn check_for_updates_from_menu(app: tauri::AppHandle) {
     });
 }
 
+/// A Check for Updates… answer, in a native alert. `answered` hears whether the first button was
+/// chosen, off the main thread.
+///
+/// On macOS, OpenBot's own alert, with OpenBot's icon (`native_alert`): the dialog plugin shows a
+/// message with no parent window in an alert the system draws, with its grey note icon. Elsewhere,
+/// the dialog plugin's message, which on Windows carries the information icon a message box should.
 fn show_prompt(
     app: &tauri::AppHandle,
     prompt: app_update::Prompt,
     answered: impl FnOnce(bool) + Send + 'static,
 ) {
-    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
-    let dialog = app.dialog().message(prompt.message).title(prompt.title);
-    let dialog = match prompt.buttons {
-        Some((yes, no)) => {
-            dialog.buttons(MessageDialogButtons::OkCancelCustom(yes.into(), no.into()))
+    #[cfg(target_os = "macos")]
+    {
+        let shown = app.run_on_main_thread(move || {
+            let Some(mtm) = objc2::MainThreadMarker::new() else {
+                log::error!("[app update] the update alert was not on the main thread");
+                return;
+            };
+            let ahead = openbot_desktop_lib::native_alert::ask(
+                mtm,
+                &prompt.title,
+                &prompt.message,
+                prompt.buttons,
+            );
+            std::thread::spawn(move || answered(ahead));
+        });
+        if let Err(error) = shown {
+            log::warn!("[app update] could not show the update alert: {error}");
         }
-        None => dialog,
-    };
-    dialog.show(answered);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+        let dialog = app.dialog().message(prompt.message).title(prompt.title);
+        let dialog = match prompt.buttons {
+            Some((yes, no)) => {
+                dialog.buttons(MessageDialogButtons::OkCancelCustom(yes.into(), no.into()))
+            }
+            None => dialog,
+        };
+        dialog.show(answered);
+    }
 }
 
 /// What the banner and the setup window offer: the newer version, unless this person closed it.
@@ -2644,6 +2676,8 @@ async fn start_stack_now<R: tauri::Runtime>(
     // Setup is done once OpenBot starts: the window hands over to it at once. Recorded once.
     if started.is_ok() {
         desktop_telemetry::record(&menus, telemetry::EventData::Activated);
+        // Attribution after Start, in the background: OpenBot is already open.
+        desktop_telemetry::link_account_after_start(&menus);
     }
     started
 }
@@ -2959,6 +2993,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
                 secrets.insert(key.into(), value.clone());
             }
         }
+        // The identity as it stands: Start never waits for `telemetry link`, which runs after it.
         // Handed to Compose with the rest; a service receives only what the Compose file names.
         secrets.extend(desktop_telemetry::runtime_env(&app));
         // After the credential store has been written, so the token never is. See where it is
@@ -4312,7 +4347,17 @@ fn show_openbot_on<R: tauri::Runtime>(
     refresh_menus(&app);
     // Only the owned app itself.
     trust_owned_app(&app, &url);
-    let destination = url;
+    // A debug build may show a developer's own app in its place, on this installation's back end.
+    let destination = match dev_app_url() {
+        Some(dev) => {
+            trust_owned_app(&app, &dev);
+            log::info!(
+                "[show] showing the developer's app at {dev} in place of the installation's"
+            );
+            dev
+        }
+        None => url,
+    };
     log::info!("[show] navigating to the owned OpenBot app");
     let window = app
         .get_webview_window("main")
@@ -4524,6 +4569,18 @@ link in the booking calendar's frame, which the page's shim can't reach) opens i
 browser for a site outside OpenBot, and nowhere otherwise. Without one, macOS opened nothing and
 Windows opened a bare browser window of its own. The configuration says `"create": false`.
 */
+/**
+Where the main window's buttons sit on macOS: 20pt in from the left, and low enough that their middle
+lines up with the first row of OpenBot's sidebar header (its name and +), which the page
+moves right to clear them (app/src/styles.css, `data-desktop-titlebar`).
+
+Set on the builder, not per page, because tao keeps it and puts the buttons back after anything that
+moves them (a resize, leaving full screen), and Tauri 2.12 can't change it after the window exists.
+So the setup screens have the buttons here too, where nothing of theirs is near them.
+*/
+#[cfg(target_os = "macos")]
+const TRAFFIC_LIGHTS: tauri::LogicalPosition<f64> = tauri::LogicalPosition { x: 20.0, y: 35.0 };
+
 fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
     let Some(config) = app
         .config()
@@ -4536,7 +4593,12 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
         return Ok(());
     };
     let opener = app.clone();
-    tauri::WebviewWindowBuilder::from_config(app, &config)?
+    let builder = tauri::WebviewWindowBuilder::from_config(app, &config)?;
+    // The window's buttons on the same row as the OpenBot name and + in the sidebar's header, rather
+    // than above them (`TRAFFIC_LIGHTS`, and the page's styles that make room beside them).
+    #[cfg(target_os = "macos")]
+    let builder = builder.traffic_light_position(TRAFFIC_LIGHTS);
+    let window = builder
         .on_new_window(move |destination, _features| {
             outside_links::new_window(&destination, |to| {
                 use tauri_plugin_opener::OpenerExt;
@@ -4545,6 +4607,8 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
             tauri::webview::NewWindowResponse::Deny
         })
         .build()?;
+    // At the level kept from the last launch before anything paints (`zoom`).
+    let _ = window.set_zoom(saved_zoom(app));
     Ok(())
 }
 
@@ -5030,6 +5094,75 @@ mod app_page_tests {
         assert!(desktop_page::QUIT_SHORTCUT_PAGE.contains("\"plugin:openbot-desktop|quit\""));
     }
 
+    /// "The text is too small and you can't zoom in." The window now zooms as a browser does: the
+    /// View menu on macOS and Linux, and the page's own shortcut (`zoom-shortcut.js`) for what no
+    /// menu carries, every key on Windows and Command and + on macOS, which the setup screens and
+    /// OpenBot's own page may ask and a page on another loopback port may not. Every window's page
+    /// starts at the level kept from the last launch.
+    #[test]
+    fn the_window_zooms_from_the_view_menu_or_the_page_and_starts_at_the_kept_level() {
+        const ZOOM: &str = "plugin:openbot-desktop|zoom";
+        let (app, window) = app();
+        let setup = if cfg!(windows) {
+            "http://tauri.localhost/"
+        } else {
+            "tauri://localhost/"
+        };
+        assert_eq!(ask(&window, setup, ZOOM), Ok(serde_json::Value::Null));
+        let foreign = "http://127.0.0.1:3011/";
+        allow_app_page(app.handle(), &foreign.parse().unwrap());
+        assert!(ask(&window, foreign, ZOOM).is_err());
+        trust_owned_app(app.handle(), "http://127.0.0.1:3010");
+        let owned = "http://127.0.0.1:3010/";
+        allow_app_page(app.handle(), &owned.parse().unwrap());
+        assert_eq!(ask(&window, owned, ZOOM), Ok(serde_json::Value::Null));
+        assert!(zoom::SHORTCUT_PAGE.contains("\"plugin:openbot-desktop|zoom\""));
+
+        // Read as text: the real webview and AppKit's menus cannot be built here. Each anchor and
+        // each line looked for is put together here, so this test's own text never matches it.
+        let main = include_str!("main.rs");
+        let at = |pieces: &[&str]| main.find(&pieces.concat()).unwrap();
+        let menus = &main[at(&["\nfn install", "_menus"])..];
+        let menus = &menus[..menus.find("app.set_menu(").unwrap()];
+        let view = &menus[menus.find("\"View\",").expect("a View menu")..];
+        for (id, label, keys) in [
+            (
+                "zoom::MENU_ACTUAL_SIZE",
+                "\"Actual Size\"",
+                "\"CmdOrCtrl+0\"",
+            ),
+            ("zoom::MENU_IN", "\"Zoom In\"", "\"CmdOrCtrl+=\""),
+            ("zoom::MENU_OUT", "\"Zoom Out\"", "\"CmdOrCtrl+-\""),
+        ] {
+            let item = &view[view.find(id).unwrap_or_else(|| panic!("{id}"))..];
+            let item = &item[..item.find(")?").unwrap()];
+            assert!(item.contains(label) && item.contains(keys), "{item}");
+        }
+        assert!(main.contains(
+            &[
+                "\n    app.set_menu(",
+                "Menu::with_items(app, &[&openbot, &edit, &view])?)?;"
+            ]
+            .concat()
+        ));
+        assert!(main.contains(
+            "if let Some(step) = zoom::Step::of_menu(other) {\n                zoom_windows(app, step);"
+        ));
+        assert!(main.contains(
+            "if cfg!(any(target_os = \"windows\", target_os = \"macos\")) && page != WindowPage::Other {\n                let _ = window.eval(zoom::shortcut_page());"
+        ));
+        assert_eq!(
+            zoom::shortcut_page().starts_with("window.__openbotZoomMenu = true;"),
+            cfg!(target_os = "macos")
+        );
+        let page_load = &main[at(&[".on_page_load(", "|window, payload| {"])..];
+        let page_load = &page_load[..page_load.find("\n        })").unwrap()];
+        assert!(page_load.contains("let _ = window.set_zoom(saved_zoom(window.app_handle()));"));
+        let build = &main[at(&["\nfn build_main", "_window"])..];
+        let build = &build[..build.find("\n}\n").unwrap()];
+        assert!(build.contains("let _ = window.set_zoom(saved_zoom(app));"));
+    }
+
     /// Every command OpenBot's page may ask, the update banner's among them (installing an update
     /// stops OpenBot and restarts the app), answers only the OpenBot this shell owns.
     #[test]
@@ -5317,8 +5450,12 @@ fn show_status_window(app: &tauri::AppHandle) {
         .inner_size(640.0, 720.0)
         .min_inner_size(520.0, 480.0)
         .build();
-    if let Err(error) = built {
-        log::warn!("[status] could not open the Status window: {error}");
+    match built {
+        // At the level the main window has (`zoom`).
+        Ok(window) => {
+            let _ = window.set_zoom(saved_zoom(app));
+        }
+        Err(error) => log::warn!("[status] could not open the Status window: {error}"),
     }
 }
 
@@ -5922,6 +6059,40 @@ fn desktop_test_app_url() -> Option<String> {
     None
 }
 
+/// An OpenBot app a developer runs from source (`OPENBOT_DEV_APP_URL`, such as `cd app && SERVER_PORT=3001 bun run dev
+/// --port 3030`, whose `/api` goes to this installation's server), shown in place of the installation's own once it has
+/// started, so a change to the app shows in the real window as it is saved. Unlike `OPENBOT_DESKTOP_TEST_APP_URL` it
+/// waits for the installation: setup and Start run as they always do. Debug builds only: a release binary never reads
+/// the variable.
+///
+/// `localhost` is read as `127.0.0.1`. Only a loopback IP is trusted as OpenBot's own page
+/// (`intelligence_bridge::app_origin`), so at `localhost` the window drew the system's title bar over a page that never
+/// made room for the buttons.
+#[cfg(debug_assertions)]
+fn dev_app_url() -> Option<String> {
+    let address = std::env::var("OPENBOT_DEV_APP_URL")
+        .ok()
+        .filter(|url| !url.is_empty())?;
+    Some(loopback_ip(&address))
+}
+
+#[cfg(not(debug_assertions))]
+fn dev_app_url() -> Option<String> {
+    None
+}
+
+/// `address` with a `localhost` host written as `127.0.0.1`, and unchanged otherwise.
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+fn loopback_ip(address: &str) -> String {
+    match tauri::Url::parse(address) {
+        Ok(mut url) if url.host_str() == Some("localhost") => {
+            let _ = url.set_host(Some("127.0.0.1"));
+            url.into()
+        }
+        _ => address.to_owned(),
+    }
+}
+
 /// Trust `address` as this shell's OpenBot and show it, the way `show_openbot` shows a verified one.
 fn show_test_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>, address: &str) {
     let (Some(window), Ok(url)) = (
@@ -6508,12 +6679,13 @@ async fn sign_in_to_copilotkit(
     attempt: String,
 ) -> Result<local_eval::AccountSignIn, local_eval::Failure> {
     let root = selected_root_or_default(&app);
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         know_cli_engine(&root);
         local_eval::account_sign_in_installed(&attempt)
     })
     .await
-    .map_err(|_| local_eval::Failure::Spawn)?
+    .map_err(|_| local_eval::Failure::Spawn)?;
+    desktop_telemetry::finish_sign_in(&app, result)
 }
 
 /// The approval page and code `sign_in_to_copilotkit`'s `attempt` is waiting on, once the CLI has
@@ -6537,7 +6709,7 @@ async fn local_eval_terms(
     attempt: String,
 ) -> Result<local_eval::Terms, local_eval::Failure> {
     let root = selected_root_or_default(&app);
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         // The CLI checks its engine before it answers. See `know_cli_engine`.
         know_cli_engine(&root);
         // An engine too small for local setup is said here, before Start fails on it.
@@ -6547,7 +6719,8 @@ async fn local_eval_terms(
         local_eval::terms_installed(&attempt)
     })
     .await
-    .map_err(|_| local_eval::Failure::Spawn)?
+    .map_err(|_| local_eval::Failure::Spawn)?;
+    desktop_telemetry::finish_account_check(&app, result)
 }
 
 /// The folder this window is installing into, or the default one.
@@ -6565,14 +6738,19 @@ Only adds a key, and never fails the sign-in: the window offers Continue without
 Start tries again. `attempt` lets `cancel_local_eval` stop the CLI call.
 */
 #[tauri::command]
-async fn connect_copilotkit_apps(attempt: String, root: String) -> Result<(), Problem> {
+async fn connect_copilotkit_apps<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    attempt: String,
+    root: String,
+) -> Result<(), Problem> {
     let root = stack::root_from(&root);
     if !root.is_absolute() {
         return Err(apps_unavailable());
     }
-    tauri::async_runtime::spawn_blocking(move || connect_apps(&root, &attempt))
+    let result = tauri::async_runtime::spawn_blocking(move || connect_apps(&root, &attempt))
         .await
-        .map_err(|_| apps_unavailable())?
+        .map_err(|_| apps_unavailable())?;
+    desktop_telemetry::finish_account_setup(&app, result)
 }
 
 /// Ask CopilotKit for this installation's Composio project through the CLI, and keep its key.
@@ -7554,6 +7732,50 @@ fn publish_quit_notice_failure<R: tauri::Runtime>(app: tauri::AppHandle<R>, erro
 /// Stop in the background, then the setup window: the menu's Stop, and the Status window's and
 /// Settings > This computer's, which `from` tells apart in the log.
 fn stop_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>, from: AskedFrom) {
+    stop_then_show_setup(app, from, false);
+}
+
+/// Settings' Change on the AI model row: the same Stop, then the setup window at its AI screen,
+/// where the setup window's own Change AI connection goes. A Stop that failed shows setup as any
+/// failed Stop does, with its failure and Start, since OpenBot may still be running.
+pub(crate) fn change_ai_connection_from_settings<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    stop_then_show_setup(app, AskedFrom::Settings, true);
+}
+
+/// The setup page's one question on load: was it opened to change the AI connection? Answered
+/// once, so a later visit to setup opens at Start as usual.
+#[tauri::command]
+fn take_ai_connection_change<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> bool {
+    take_change_ai_connection(&app.state::<Shell>())
+}
+
+fn take_change_ai_connection(shell: &Shell) -> bool {
+    shell
+        .change_ai_connection
+        .swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Asked for only once everything stopped: the AI screen then starts OpenBot with the new choice.
+fn settle_change_ai_connection(shell: &Shell, stopped: bool, change_ai_connection: bool) {
+    shell.change_ai_connection.store(
+        stopped && change_ai_connection,
+        std::sync::atomic::Ordering::SeqCst,
+    );
+}
+
+/// What Settings' AI model row says: the provider and sign-in this installation starts with.
+pub(crate) fn ai_connection_now<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> openbot_desktop_lib::ai_connection::AiConnection {
+    let root = cleanup_root(&app.state::<Shell>(), &stack::default_root());
+    openbot_desktop_lib::ai_connection::read(&root)
+}
+
+fn stop_then_show_setup<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    from: AskedFrom,
+    change_ai_connection: bool,
+) {
     std::thread::spawn(move || {
         let asked = std::time::Instant::now();
         let root = stack::default_root();
@@ -7566,6 +7788,7 @@ fn stop_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>, from: AskedFrom) 
             Some(problem) => Err(problem),
         };
         logging::outcome("stop", asked, &settled);
+        settle_change_ai_connection(&shell, settled.is_ok(), change_ai_connection);
         match settled {
             Ok(()) => report(&app, "stopped", true, "OpenBot has been stopped"),
             // Said rather than swallowed. A menu item that fails silently is worse than one
@@ -7624,8 +7847,41 @@ fn chose(app: &tauri::AppHandle, item: &str) {
         "quit" => {
             app.exit(0);
         }
-        _ => {}
+        other => {
+            if let Some(step) = zoom::Step::of_menu(other) {
+                zoom_windows(app, step);
+            }
+        }
     }
+}
+
+/**
+Zoom In, Zoom Out or Actual Size, from the View menu or the page's own shortcut (`zoom-shortcut.js`):
+every window's page at the new level, kept for the next launch (`zoom`).
+*/
+pub(crate) fn zoom_windows<R: tauri::Runtime>(app: &tauri::AppHandle<R>, step: zoom::Step) {
+    let Ok(directory) = app.path().app_config_dir() else {
+        return;
+    };
+    let level = match zoom::step(&directory, step) {
+        Ok(level) => level,
+        Err(error) => {
+            log::warn!("[zoom] could not keep the zoom level: {error}");
+            zoom::next(zoom::saved(&directory), step)
+        }
+    };
+    for window in app.webview_windows().values() {
+        let _ = window.set_zoom(level);
+    }
+    log::info!("[zoom] {}%", (level * 100.0).round());
+}
+
+/// The zoom level kept from the last launch (`zoom`), for a window's page as it is built and loads.
+fn saved_zoom<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> f64 {
+    app.path()
+        .app_config_dir()
+        .map(|directory| zoom::saved(&directory))
+        .unwrap_or(zoom::ACTUAL_SIZE)
 }
 
 /**
@@ -8000,7 +8256,30 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
             &PredefinedMenuItem::select_all(app, None)?,
         ],
     )?;
-    app.set_menu(Menu::with_items(app, &[&openbot, &edit])?)?;
+    /*
+     * A VIEW MENU, FOR THE TEXT THAT WAS TOO SMALL.
+     *
+     * The page zooms as a browser's does, in the order and with the keys a Mac's View menu has
+     * them. Items of our own, not the predefined zoom items: those ask the first responder, and a
+     * web view has no zoom of its own to answer them. See `zoom`.
+     */
+    let view = Submenu::with_items(
+        app,
+        "View",
+        true,
+        &[
+            &MenuItem::with_id(
+                app,
+                zoom::MENU_ACTUAL_SIZE,
+                "Actual Size",
+                true,
+                Some("CmdOrCtrl+0"),
+            )?,
+            &MenuItem::with_id(app, zoom::MENU_IN, "Zoom In", true, Some("CmdOrCtrl+="))?,
+            &MenuItem::with_id(app, zoom::MENU_OUT, "Zoom Out", true, Some("CmdOrCtrl+-"))?,
+        ],
+    )?;
+    app.set_menu(Menu::with_items(app, &[&openbot, &edit, &view])?)?;
     Ok(())
 }
 
@@ -8436,6 +8715,7 @@ fn main() {
             show_setup,
             already_running,
             last_failure,
+            take_ai_connection_change,
             default_root,
             selected_root,
             providers,
@@ -8479,12 +8759,19 @@ fn main() {
                 .eval("document.addEventListener('contextmenu', e => e.preventDefault(), true)");
             let page = window_page(window.app_handle(), payload.url());
             match_title_bar(&window.window(), page);
+            // The level kept from the last launch, on every page this window loads (`zoom`).
+            let _ = window.set_zoom(saved_zoom(window.app_handle()));
             if matches!(page, WindowPage::OwnedApp | WindowPage::LocalApp) {
                 let _ = window.eval(outside_links::PAGE);
             }
             // Ctrl+Q quits, as the tray says. Windows only: no menu there carries the shortcut.
             if cfg!(target_os = "windows") && page != WindowPage::Other {
                 let _ = window.eval(desktop_page::QUIT_SHORTCUT_PAGE);
+            }
+            // A browser's zoom keys: all of them on Windows, and on macOS the one the View menu
+            // never receives, Command and +.
+            if cfg!(any(target_os = "windows", target_os = "macos")) && page != WindowPage::Other {
+                let _ = window.eval(zoom::shortcut_page());
             }
             if matches!(page, WindowPage::OwnedApp | WindowPage::LocalApp)
                 && payload.event() == tauri::webview::PageLoadEvent::Finished
@@ -8865,6 +9152,27 @@ mod check_for_updates_tests {
             2
         );
         assert!(main.contains("app_update::MENU_ID => check_for_updates_from_menu(app.clone()),"));
+    }
+
+    /// Check for Updates…'s answers carry OpenBot's icon on the Mac. The dialog plugin shows a
+    /// message with no parent window through `CFUserNotificationDisplayAlert`, which draws the
+    /// system's grey note icon, so on macOS `show_prompt` runs OpenBot's own alert
+    /// (`native_alert`, tested in `tests/native_alert.rs`) and leaves the plugin to the others.
+    #[test]
+    fn the_update_answers_show_openbots_icon_on_the_mac() {
+        let main = include_str!("main.rs");
+        let shown = &main[main.find("\nfn show_prompt(").unwrap()..];
+        let shown = &shown[..shown.find("\n}\n").unwrap()];
+        let mac = &shown[shown.find("#[cfg(target_os = \"macos\")]").unwrap()..];
+        let mac = &mac[..mac.find("#[cfg(not(target_os = \"macos\"))]").unwrap()];
+        assert!(mac.contains("native_alert::ask("));
+        assert!(!mac.contains(".dialog()"));
+        for asked in [
+            "show_prompt(&app, app_update::prompt(&asked)",
+            "show_prompt(\n",
+        ] {
+            assert!(main.contains(asked), "{asked}");
+        }
     }
 }
 
@@ -12278,6 +12586,22 @@ mod tests {
         assert_eq!(window.label(), "main");
     }
 
+    /// The developer's app is trusted only at a loopback IP, so `localhost` is read as `127.0.0.1`.
+    #[test]
+    fn the_developers_app_at_localhost_is_shown_at_127_0_0_1() {
+        assert_eq!(
+            loopback_ip("http://localhost:3030"),
+            "http://127.0.0.1:3030/"
+        );
+        assert_eq!(
+            loopback_ip("http://127.0.0.1:3030"),
+            "http://127.0.0.1:3030"
+        );
+        assert_eq!(loopback_ip("http://[::1]:3030"), "http://[::1]:3030");
+        assert!(intelligence_bridge::app_origin(&loopback_ip("http://localhost:3030")).is_some());
+        assert!(intelligence_bridge::app_origin("http://localhost:3030").is_none());
+    }
+
     #[test]
     fn about_openbot_names_the_commit_branch_and_build_time() {
         assert_eq!(utc_minute(0), "1970-01-01 00:00 UTC");
@@ -15189,6 +15513,83 @@ fn main() {
         );
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
+    }
+
+    /// Start never waits for account attribution. A CLI that takes longer than the handshake's
+    /// eight-second budget to answer `telemetry link` must not show in how long Start takes: the
+    /// runtime is handed the identity as it stands, and the link runs after Start, in the
+    /// background.
+    #[test]
+    fn start_does_not_wait_for_a_slow_telemetry_link() {
+        if crate::test_support::isolated_process(
+            "tests::start_does_not_wait_for_a_slow_telemetry_link",
+        ) {
+            return;
+        }
+        std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
+        std::env::remove_var("DO_NOT_TRACK");
+        let cli = desktop_telemetry::fake_cli::FakeCli::pinned("openbot-slow-link-cli", true);
+        let root = temp_root("openbot-slow-link-start");
+        write_installed_deployment(&root);
+        remember_local_intelligence_key(&root);
+        let record = temp_root("openbot-slow-link-record").join("commands.log");
+        std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
+        let _path = SerializedPath::set_only_with("docker", "dead-service");
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .manage(desktop_telemetry::DesktopTelemetry::for_tests(
+                temp_root("openbot-slow-link-telemetry"),
+                true,
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+
+        let asked = std::time::Instant::now();
+        let problem = tauri::async_runtime::block_on(start_stack_inner(
+            app.handle().clone(),
+            root.clone(),
+            "https://intelligence.example.test".into(),
+            "wss://gateway.example.test".into(),
+            ChosenModel {
+                provider: "openai".into(),
+                login: "api-key".into(),
+                api_key: Some("synthetic-openai-key".into()),
+                base_url: None,
+                container_base_url: None,
+                model: None,
+                token: None,
+                saved: Some(false),
+            },
+            None,
+        ))
+        .expect_err("the fixture's dead service fails Start after the identity handoff");
+        let took = asked.elapsed();
+
+        assert_eq!(problem.said, "Part of OpenBot stopped during startup.");
+        let commands = std::fs::read_to_string(&record).expect("command record");
+        assert!(
+            commands.contains(
+                "\tcompose up -d --no-build --pull never postgres agent-computer server worker\n"
+            ),
+            "Start reached the runtime handoff: {commands}"
+        );
+        // Not on Start's path at all: when Start returns, the link has not been asked for. (Before,
+        // Start ran it and joined it, so the call was there and Start took its 8-second budget.)
+        // How long Start itself takes depends on the platform's fake engine, so that is bounded
+        // only by the fake CLI's own 30 seconds.
+        assert_eq!(
+            cli.calls(),
+            "",
+            "Start ran `telemetry link` and waited {took:?} for it"
+        );
+        assert!(
+            took < std::time::Duration::from_secs(30),
+            "Start waited {took:?} on a slow telemetry link"
+        );
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
+        let _ = std::fs::remove_dir_all(&cli.dir);
     }
 
     /// The personal edition raises no bundled Bot, so one an earlier Start left exited is neither

@@ -5,10 +5,6 @@
 @import "prompt-area/tailwind.css";
 @import "@fontsource-variable/inter";
 @import "./theme.css";
-/* OpenBot's own frame: the orb's colours behind a frosted sidebar. Remove for the solid frame theme.css draws. */
-@import "./frame.css";
-/* OpenBot's own typeface, the one open.bot is set in. Remove for theme.css's Inter. */
-@import "./typeface.css";
 @import "./skins/skins.css";
 
 /*
@@ -23,15 +19,16 @@
 /*
  * OpenBot Desktop on macOS has no separate title bar over this page: the window's buttons sit over
  * the top-left corner and the sidebar runs to the top edge, as in Mac apps with a sidebar. The
- * desktop marks the page (`data-desktop-titlebar`) and makes the sidebar's header the drag handle;
- * here the header makes room for the buttons above its own row. With the sidebar collapsed the
- * buttons are over the main column instead, so that moves down. The main column is the shell's own
- * `<main>`; the primitive's `SidebarInset`, which an earlier rule aimed at, is used by no shell.
- * Outside the desktop nothing changes.
+ * desktop marks the page (`data-desktop-titlebar`) and makes the sidebar's header the drag handle.
+ * It draws the buttons 20px in, on the middle of the header's row (`TRAFFIC_LIGHTS` in the
+ * desktop's main.rs), so here the row starts to their right: OpenBot's name and + share
+ * one line with them. With the sidebar collapsed the buttons are over the main column instead, so
+ * that moves down below them. The main column is the shell's own `<main>`; the primitive's
+ * `SidebarInset`, which an earlier rule aimed at, is used by no shell. Outside the desktop nothing
+ * changes.
  */
 :root[data-desktop-titlebar="overlay"] [data-slot="sidebar-header"] {
-  height: auto;
-  padding-top: 36px;
+  padding-left: 80px;
 }
 
 :root[data-desktop-titlebar="overlay"]
@@ -39,7 +36,7 @@
     > [data-slot="sidebar"][data-state="collapsed"]
   )
   > main {
-  padding-top: 28px;
+  padding-top: 40px;
 }
 
 /* While the sidebar's edge is dragged, it follows the pointer rather than easing after it. */
@@ -51,49 +48,27 @@
 /*
  * A tool line that is still running.
  *
- * A light band sweeps left to right across the words. `background-clip: text` with a transparent
- * colour is what confines the gradient to the glyphs, and the band is built from the line's own
- * colour so it reads the same in either theme. Only `background-position` animates, which the
- * compositor handles without laying the text out again on every frame.
+ * The words breathe: they ease down to a little over half strength and back once every 2.4 seconds,
+ * a pace that reads as calm progress. A light band used to sweep across them every 1.6 seconds,
+ * crossing the words in under half a second and then holding still, so on screen the text seemed to
+ * blink on and off. The words are drawn in the line's own colour throughout and never fade further
+ * than 0.6, so a running step can be read at any moment of the cycle. Only `opacity` animates, which
+ * the compositor handles without painting the text again on every frame.
  */
 .tool-line-running {
-  background-image: linear-gradient(
-    100deg,
-    currentColor 40%,
-    color-mix(in oklab, currentColor 25%, transparent) 50%,
-    currentColor 60%
-  );
-  background-size: 250% 100%;
-  background-position: 100% 0;
-  background-clip: text;
-  -webkit-background-clip: text;
-  /*
-   * THE GLYPH FILL, NOT `color`. This was `color: transparent`, which blanked the gradient too —
-   * `currentColor` resolves against this element's own `color` — so nothing was ever drawn. The
-   * transparent fill only works while the gradient is painted behind it, so the reduced-motion
-   * branch below, which drops the gradient, has to put the fill back as well.
-   */
-  -webkit-text-fill-color: transparent;
-  animation: tool-line-sweep 1.6s linear infinite;
+  animation: tool-line-pulse 2.4s ease-in-out infinite;
 }
 
-@keyframes tool-line-sweep {
-  to {
-    background-position: -150% 0;
+@keyframes tool-line-pulse {
+  50% {
+    opacity: 0.6;
   }
 }
 
-/*
- * Reduced motion keeps the words and drops the sweep. Without the gradient a transparent fill draws
- * nothing, and on a computer with animations off every running step showed only its caret. The
- * fill goes back to the line's own colour, the tone the sweep is drawn in, rather than the darker
- * colour of whatever holds the line.
- */
+/* Reduced motion keeps the words at full strength and still. */
 @media (prefers-reduced-motion: reduce) {
   .tool-line-running {
     animation: none;
-    background-image: none;
-    -webkit-text-fill-color: currentColor;
   }
 }
 

@@ -1,8 +1,23 @@
-import { IconCheck, IconCode, IconShieldX } from "@tabler/icons-react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  IconCheck,
+  IconCode,
+  IconShieldX,
+  IconSparkles,
+} from "@tabler/icons-react";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
-import { DryRunChanges } from "@/components/boundaries/dry-run-changes";
+import { useEffect, useState } from "react";
+import {
+  DescribeRule,
+  type WrittenRule,
+} from "@/components/boundaries/describe-rule";
+import { RulePreview } from "@/components/boundaries/rule-preview";
+import { RuleReading } from "@/components/boundaries/rule-reading";
 import {
   PageCard,
   PageRows,
@@ -35,9 +50,9 @@ import {
 import { isComposing } from "@/lib/composing";
 import { saveActionPolicyMutationOptions } from "@/lib/computers/mutations";
 import {
+  type ActionPolicy,
   actionPolicyQueryOptions,
-  type DryRunReport,
-  dryRunActionPolicy,
+  policyDryRunQueryOptions,
 } from "@/lib/computers/queries";
 
 export const Route = createFileRoute("/_authed/admin/boundaries_/new")({
@@ -49,35 +64,92 @@ const BACK = {
   linkProps: { to: "/admin/boundaries" as const },
 };
 
+/** How long the rule has to rest before it is replayed, so typing it is not a request per keystroke. */
+const PREVIEW_DELAY_MS = 400;
+
+type Start = RuleTemplate | "describe" | "custom";
+
 /**
- * Adding a rule: pick a template or write one, see what it would have stopped, then add it.
+ * Adding a rule: describe it, pick a template or write one, see what it would have stopped, then
+ * add it.
  *
  * A template fills the form rather than adding itself, so its name, its cost and the rule it is
- * made of are all read before it applies to every Bot.
+ * made of are all read before it applies to every Bot. A description does the same: the model's rule
+ * lands in the CEL field beside an independent reading of it, and only Add rule saves it. What the
+ * rule would have stopped is worked out as it is written, over a Bot's computer actions and its app
+ * calls alike, so its reach is on screen before Add rule rather than behind a button somebody may
+ * never press.
  */
 function NewRulePage() {
   const navigate = Route.useNavigate();
   const queryClient = useQueryClient();
   const stored = useQuery(actionPolicyQueryOptions());
   const savePolicy = useMutation(saveActionPolicyMutationOptions(queryClient));
-  const [chosen, setChosen] = useState<RuleTemplate | "custom" | null>(null);
+  const [chosen, setChosen] = useState<Start | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [rule, setRule] = useState("");
-  const [tested, setTested] = useState<DryRunReport | null>(null);
-  const [testing, setTesting] = useState(false);
+  const [written, setWritten] = useState<WrittenRule | null>(null);
+  /*
+   * What a written rule last put in Name and What it stops. A field still holding it is ours to
+   * replace when the rule is written again; anything else in it is the admin's, and stays.
+   */
+  const [filled, setFilled] = useState({ name: "", description: "" });
   const [problem, setProblem] = useState<string | null>(null);
 
   const policy = stored.data;
   const trimmed = rule.trim();
   const duplicate = Boolean(policy?.deny.includes(trimmed));
-  const ready = Boolean(policy && name.trim() && trimmed && !duplicate);
+  /*
+   * The model's rule, unedited, that the compiler refused. Its error is already under the rule, from
+   * the writing, so it is neither replayed nor offered to Add rule.
+   */
+  const broken = Boolean(
+    written && !written.compile.ok && written.rule.trim() === trimmed,
+  );
+  const ready = Boolean(
+    policy && name.trim() && trimmed && !duplicate && !broken,
+  );
 
-  const choose = (next: RuleTemplate | "custom") => {
+  /*
+   * The rule as it stood a moment ago, debounced as People's search is. A template's rule arrives
+   * whole, and is replayed as soon as it rests.
+   */
+  const [settled, setSettled] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(trimmed), PREVIEW_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [trimmed]);
+
+  /*
+   * This rule on its own, with everything else allowed, replayed over recent recorded actions.
+   * Nothing is saved. Every action it would refuse that went through is one this rule would have
+   * stopped, and nothing else is.
+   *
+   * Not the policy in force plus this rule. Replayed against what happened, that also refuses every
+   * action a rule added since then stops, and they were listed here as this rule's: a rule about
+   * password fields "would have stopped" the Salesforce writes the rule before it now stops. The
+   * labels are left out too: nothing evaluates them, and a renamed rule needs no new answer.
+   */
+  const candidate: ActionPolicy | null =
+    policy && settled && !policy.deny.includes(settled) && !broken
+      ? { mode: policy.mode, deny: [settled], allow: ["true"] }
+      : null;
+  const preview = useQuery({
+    ...policyDryRunQueryOptions(
+      candidate ?? { mode: "enforce", deny: [], allow: [] },
+    ),
+    enabled: candidate !== null,
+    // The last answer stays up while the next loads, so the list does not blink between keystrokes.
+    placeholderData: keepPreviousData,
+  });
+
+  const choose = (next: Start) => {
     setChosen(next);
-    setTested(null);
     setProblem(null);
-    if (next === "custom") {
+    setWritten(null);
+    setFilled({ name: "", description: "" });
+    if (next === "custom" || next === "describe") {
       setName("");
       setDescription("");
       setRule("");
@@ -88,26 +160,23 @@ function NewRulePage() {
     }
   };
 
-  /*
-   * The policy in force plus this rule, replayed over recent recorded actions. Nothing is saved;
-   * the reply says what the addition would have stopped, so its reach is known before it applies.
-   */
-  const test = async () => {
-    if (!policy || !trimmed) return;
-    setProblem(null);
-    setTesting(true);
-    try {
-      setTested(
-        await dryRunActionPolicy({
-          ...policy,
-          deny: [...policy.deny, trimmed],
-        }),
-      );
-    } catch (thrown) {
-      setProblem((thrown as Error).message);
-    } finally {
-      setTesting(false);
-    }
+  /* The model's rule goes into the CEL field, where the preview picks it up as it would any rule. */
+  const takeWritten = (next: WrittenRule) => {
+    setWritten(next);
+    setRule(next.rule);
+    const ours = (value: string, last: string) =>
+      !value.trim() || value === last;
+    const nextName = next.text.slice(0, 80);
+    const nextDescription = next.summary?.slice(0, 300) ?? "";
+    const takeName = ours(name, filled.name);
+    const takeDescription =
+      Boolean(nextDescription) && ours(description, filled.description);
+    if (takeName) setName(nextName);
+    if (takeDescription) setDescription(nextDescription);
+    setFilled({
+      name: takeName ? nextName : filled.name,
+      description: takeDescription ? nextDescription : filled.description,
+    });
   };
 
   const add = () => {
@@ -121,6 +190,9 @@ function NewRulePage() {
           ...policy.labels,
           [trimmed]: { name: name.trim(), description: description.trim() },
         },
+        ...(written
+          ? { authoring: { source: "english" as const, text: written.text } }
+          : {}),
       },
       {
         onError: (thrown: Error) => setProblem(thrown.message),
@@ -129,7 +201,8 @@ function NewRulePage() {
     );
   };
 
-  const options: { key: string; value: RuleTemplate | "custom" }[] = [
+  const options: { key: string; value: Start }[] = [
+    { key: "describe", value: "describe" },
     ...RULE_TEMPLATES.map((template) => ({
       key: template.rule,
       value: template,
@@ -147,7 +220,9 @@ function NewRulePage() {
         <PageRows>
           {options.map((option, index) => {
             const custom = option.value === "custom";
-            const template = custom ? null : (option.value as RuleTemplate);
+            const describe = option.value === "describe";
+            const template =
+              custom || describe ? null : (option.value as RuleTemplate);
             const selected = chosen === option.value;
             const taken = template
               ? policy?.deny.includes(template.rule)
@@ -161,18 +236,30 @@ function NewRulePage() {
                   size="sm"
                 >
                   <ItemMedia variant="icon">
-                    {custom ? <IconCode /> : <IconShieldX />}
+                    {describe ? (
+                      <IconSparkles />
+                    ) : custom ? (
+                      <IconCode />
+                    ) : (
+                      <IconShieldX />
+                    )}
                   </ItemMedia>
                   <ItemContent>
                     <ItemTitle>
-                      {template ? template.name : "Write your own"}
+                      {template
+                        ? template.name
+                        : describe
+                          ? "Describe it in words"
+                          : "Write your own"}
                     </ItemTitle>
                     <ItemDescription>
                       {template
                         ? taken
                           ? "Already one of your rules."
                           : template.description
-                        : "Describe the action yourself, in CEL."}
+                        : describe
+                          ? "Say what no Bot may do, and your model writes the rule."
+                          : "Describe the action yourself, in CEL."}
                     </ItemDescription>
                   </ItemContent>
                   {selected ? (
@@ -225,6 +312,9 @@ function NewRulePage() {
               }
             >
               <FieldGroup>
+                {chosen === "describe" ? (
+                  <DescribeRule onWritten={takeWritten} />
+                ) : null}
                 <Field>
                   <FieldLabel htmlFor="rule-name">Name</FieldLabel>
                   <Input
@@ -252,19 +342,15 @@ function NewRulePage() {
                 <Field>
                   <FieldLabel htmlFor="rule-expression">Rule</FieldLabel>
                   <FieldDescription>
-                    Written in CEL. A rule that can't be evaluated counts as a
-                    match, so a typo stops actions rather than letting them
-                    through.
+                    Written in CEL. OpenBot checks the rule before it's added,
+                    so a typo can't stop every action.
                   </FieldDescription>
                   <Textarea
                     autoCapitalize="off"
                     autoCorrect="off"
                     className="min-h-20 font-mono text-xs"
                     id="rule-expression"
-                    onChange={(event) => {
-                      setRule(event.target.value);
-                      setTested(null);
-                    }}
+                    onChange={(event) => setRule(event.target.value)}
                     placeholder='tool.name == "computer_click" && contains(element.name, "delete")'
                     spellCheck={false}
                     value={rule}
@@ -274,29 +360,26 @@ function NewRulePage() {
                       This rule is already in place.
                     </p>
                   ) : null}
-                  {chosen !== "custom" ? (
+                  {chosen !== "custom" && chosen !== "describe" ? (
                     <p className="text-amber-600 text-sm dark:text-amber-500">
                       {chosen.cost}
                     </p>
                   ) : null}
+                  {written ? (
+                    <RuleReading rule={rule} written={written} />
+                  ) : null}
                   <RuleReference />
                 </Field>
+                {trimmed && candidate && !duplicate ? (
+                  <RulePreview preview={preview} />
+                ) : null}
               </FieldGroup>
 
-              <div className="mt-5">
-                <Button
-                  disabled={testing || !trimmed || !policy}
-                  onClick={() => void test()}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  {testing ? "Testing…" : "Test on recent activity"}
-                </Button>
-                {tested ? <TestResult report={tested} /> : null}
-              </div>
-
-              {problem ? (
+              {/*
+               * A save refused for the reason the preview already gives under the rule says nothing
+               * twice: the sentence is on screen, beside the rule it is about.
+               */}
+              {problem && problem !== preview.error?.message ? (
                 <p className="mt-5 text-destructive text-sm" role="alert">
                   {problem}
                 </p>
@@ -339,29 +422,5 @@ function RuleReference() {
         .
       </p>
     </details>
-  );
-}
-
-function TestResult({ report }: { report: DryRunReport }) {
-  if (report.scanned === 0) {
-    return (
-      <p className="mt-3 text-muted-foreground text-sm" role="status">
-        No recorded actions to test against yet. The rule is valid; you'll see
-        what it stops once Bots have acted.
-      </p>
-    );
-  }
-  return (
-    <div className="mt-3" role="status">
-      <p className="text-muted-foreground text-sm">
-        {report.wouldRefuse === 0
-          ? `Of the last ${report.scanned} recorded actions, this rule would have stopped none. It may still stop future ones.`
-          : `Of the last ${report.scanned} recorded actions, this rule would have stopped ${report.wouldRefuse}.`}
-      </p>
-      <DryRunChanges
-        changes={report.changes.filter((change) => change.would === "refused")}
-        total={report.wouldRefuse}
-      />
-    </div>
   );
 }
