@@ -6,12 +6,18 @@ import { ProgressRow } from "../src/components/channels/progress-row";
 import { ToolLine } from "../src/components/channels/tool-line";
 
 /**
- * A running step's words stay readable when the operating system asks for reduced motion.
+ * A running step's words pulse slowly, and stay still and readable under reduced motion.
  *
- * The running shimmer paints a gradient through the glyphs and makes their own fill transparent.
- * The reduced-motion branch dropped the gradient and left the fill transparent, so on a computer
- * with animations turned off (Windows with "Animation effects" off, macOS with "Reduce motion")
- * every running step showed only its caret: "Asked you · Which city should I search" was blank.
+ * The words breathe rather than flash. A light band used to sweep through them every 1.6 seconds,
+ * and on the Mac it read as the text blinking on and off quickly while the Bot worked. The pulse is
+ * pinned by sampling the running animation itself: a cycle of two to three seconds, eased, and never
+ * fading the words below half strength.
+ *
+ * Reduced motion has broken these words before. The sweep painted a gradient through the glyphs and
+ * made their own fill transparent, and the reduced-motion branch dropped the gradient but left the
+ * fill transparent, so on a computer with animations turned off (Windows with "Animation effects"
+ * off, macOS with "Reduce motion") every running step showed only its caret: "Asked you · Which city
+ * should I search" was blank. The checks below still hold the words to being drawn.
  *
  * Rendered in a real Chromium, because the cascade of a media query, a layered utility and an
  * unlayered rule is what broke, and only a browser resolves it the way the app's WebView does. The
@@ -88,7 +94,7 @@ function painted(page: Page) {
 }
 
 describe.skipIf(!asked)("a running step under reduced motion", () => {
-  test("every running label is drawn in its own tone, without the sweep", async () => {
+  test("every running label is drawn in its own tone, standing still", async () => {
     const page = await open("reduce");
     try {
       expect(
@@ -108,7 +114,7 @@ describe.skipIf(!asked)("a running step under reduced motion", () => {
       for (const line of lines) {
         expect(line.fill).not.toBe(TRANSPARENT);
         expect(line.fill).toBe(line.color);
-        // The same muted tone the sweep is drawn in, not the darker colour of what holds it.
+        // The line's own muted tone, not the darker colour of what holds it.
         expect(line.color).toBe(muted);
         expect(line.background).toBe("none");
         expect(line.animation).toBe("none");
@@ -135,13 +141,53 @@ describe.skipIf(!asked)("a running step under reduced motion", () => {
     }
   });
 
-  test("with motion allowed the label still sweeps through a transparent fill", async () => {
+  test("with motion allowed the label pulses slowly, drawn in its own tone", async () => {
     const page = await open("no-preference");
     try {
       for (const line of await painted(page)) {
-        expect(line.fill).toBe(TRANSPARENT);
-        expect(line.background).toContain("linear-gradient");
-        expect(line.animation).toBe("tool-line-sweep");
+        expect(line.animation).toBe("tool-line-pulse");
+        // The words are drawn the whole time, never through a transparent fill.
+        expect(line.fill).not.toBe(TRANSPARENT);
+        expect(line.fill).toBe(line.color);
+        expect(line.background).toBe("none");
+      }
+      const cycles = await page.$$eval(".tool-line-running", (lines) =>
+        lines.map((line) => {
+          const [pulse] = line.getAnimations();
+          pulse.pause();
+          const timing = pulse.effect?.getComputedTiming();
+          const duration = Number(timing?.duration);
+          // Forty points across one cycle, read back as the browser draws them.
+          const opacities: number[] = [];
+          for (let i = 0; i <= 40; i++) {
+            pulse.currentTime = (duration * i) / 40;
+            opacities.push(Number(getComputedStyle(line).opacity));
+          }
+          return {
+            duration,
+            iterations: timing?.iterations,
+            easing: getComputedStyle(line).animationTimingFunction,
+            opacities,
+          };
+        }),
+      );
+      expect(cycles).toHaveLength(2);
+      for (const cycle of cycles) {
+        // Slow: one breath every two to three seconds, well under three flashes a second.
+        expect(cycle.duration).toBeGreaterThanOrEqual(2000);
+        expect(cycle.duration).toBeLessThanOrEqual(3000);
+        expect(cycle.iterations).toBe(Number.POSITIVE_INFINITY);
+        expect(cycle.easing).toBe("ease-in-out");
+        // Gentle: full strength at the top, never below half at the bottom.
+        expect(Math.max(...cycle.opacities)).toBe(1);
+        const lowest = Math.min(...cycle.opacities);
+        expect(lowest).toBeGreaterThanOrEqual(0.5);
+        expect(lowest).toBeLessThanOrEqual(0.7);
+        // Calm: no jump between neighbouring frames, as a blink or a step would make.
+        for (let i = 1; i < cycle.opacities.length; i++)
+          expect(
+            Math.abs(cycle.opacities[i] - cycle.opacities[i - 1]),
+          ).toBeLessThan(0.05);
       }
     } finally {
       await page.close();

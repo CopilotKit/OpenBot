@@ -100,6 +100,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Conversations
 
+- **A Bot calls you "you".** Its instructions call the user "the person", and a Bot said that back,
+  such as "which the person didn't ask for". Every Bot is now told to write "you".
 - **A Claude plan has a model picker in the conversation again.** Signed in with a Claude plan,
   the picker never showed, because the server asked Anthropic for the plan's models with
   OpenBot's own harness token instead of the plan's sign-in, Anthropic answered 401
@@ -127,6 +129,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   other, and values landed in the wrong field. A LangGraph Bot now runs its browser calls in the
   order the model made them. An action that never finishes gives way to the next after
   `BROWSER_TURN_LIMIT_MS` (50 seconds by default), and one stopped while it waits never runs.
+- **The words that say a Bot is working pulse slowly instead of flashing.** "Thinking", a running
+  step such as "Drew an interface" and "Asking Ana…" now fade gently to a little over half strength
+  and back every 2.4 seconds, where a quick band used to flicker across them. With reduced motion
+  turned on they stay still.
 
 ### Smaller changes
 
@@ -144,6 +150,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   mark.
 - The OpenBot version sits to the right of your name at the foot of the sidebar, where it was a
   line under it.
+
+### Personal edition
+
+- **Settings → Learning says Waiting for your review only when a skill is waiting.** With
+  **Approve new skills automatically** on, the heading showed while Learning was in progress and
+  after it finished, though nothing waited. The section is now **New skills** until a learned skill
+  waits for approval, and the team edition's **Waiting for an admin** follows the same rule.
 
 ## 1.0.0
 
