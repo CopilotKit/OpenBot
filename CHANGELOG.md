@@ -42,6 +42,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   free disk) now gives up on a command after 15 to 20 seconds, so an engine that stops answering
   no longer leaves the step on "Checking your CopilotKit account…" for good.
 
+### Conversations
+
+- **A Claude plan has a model picker in the conversation again.** Signed in with a Claude plan,
+  the picker never showed, because the server asked Anthropic for the plan's models with
+  OpenBot's own harness token instead of the plan's sign-in, Anthropic answered 401
+  (`{"type":"model-list-unreadable","source":"claude","status":401}` in the server log), and only
+  the default model was known. The list is now asked for with the plan's own token, and the
+  harness token is never sent anywhere but the harness.
+
 ## 1.0.0
 
 **Before upgrading.** Two migrations run at start, and the database moves to
