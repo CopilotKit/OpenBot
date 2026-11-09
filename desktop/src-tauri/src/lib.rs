@@ -19,6 +19,8 @@ pub mod local_eval;
 pub mod local_eval_state;
 pub mod local_images;
 pub mod logging;
+#[cfg(target_os = "macos")]
+pub mod native_alert;
 pub mod paths;
 pub mod plan;
 pub mod preparation;
@@ -39,6 +41,7 @@ pub mod stack;
 pub mod telemetry;
 pub mod tray;
 pub mod upgrade;
+pub mod usage_data;
 pub mod vault;
 pub mod windows;
 

@@ -529,3 +529,37 @@ test("the consent starts carry the screen they were started from", async () => {
     }),
   ).toEqual([`/api/plugins/servers/${ENCODED_ID}/authorize?returnTo=admin`]);
 });
+
+/**
+ * Started in OpenBot Desktop's window, both consent starts say so (`from=desktop`), so the sign-in
+ * that opens in the person's browser comes back to the page that hands them back to the window
+ * (`/desktop-return`). In a browser they say nothing of the kind.
+ */
+test("the consent starts say when they were pressed in OpenBot Desktop", async () => {
+  const scope = globalThis as unknown as { window?: Record<string, unknown> };
+  const hadWindow = "window" in scope;
+  const window = scope.window ?? {};
+  scope.window = window;
+  window.__TAURI_INTERNALS__ = {
+    invoke: async () => null,
+    transformCallback: () => 0,
+  };
+  try {
+    expect(
+      await requestedBy(() => connectAccountMutationOptions(), "gmail"),
+    ).toEqual([
+      "/api/plugins/servers/gmail/connect?returnTo=settings&from=desktop",
+    ]);
+    expect(
+      await requestedBy(() => authorizeActionMutationOptions(), {
+        serverId: "gmail",
+        action: "GMAIL_SEND_EMAIL",
+      }),
+    ).toEqual([
+      "/api/plugins/servers/gmail/authorize?returnTo=settings&from=desktop",
+    ]);
+  } finally {
+    delete window.__TAURI_INTERNALS__;
+    if (!hadWindow) delete scope.window;
+  }
+});

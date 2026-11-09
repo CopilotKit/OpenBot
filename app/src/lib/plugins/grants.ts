@@ -1,5 +1,6 @@
 import { mutationOptions, queryOptions } from "@tanstack/react-query";
 import { client } from "@/lib/client";
+import { desktopConsentQuery } from "@/lib/desktop/shell";
 import type { ConsentAction } from "./enablement-notes";
 
 /**
@@ -57,7 +58,7 @@ export function authorizeActionMutationOptions(
       action: string;
     }): Promise<string | null> => {
       const authorizationUrl = await client<string | undefined>(
-        `/api/plugins/servers/${encodeURIComponent(variables.serverId)}/authorize?returnTo=${returnTo}`,
+        `/api/plugins/servers/${encodeURIComponent(variables.serverId)}/authorize?returnTo=${returnTo}${desktopConsentQuery()}`,
         "authorizationUrl",
         {
           method: "POST",

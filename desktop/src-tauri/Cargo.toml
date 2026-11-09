@@ -81,6 +81,8 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 objc2-speech = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-avf-audio", "SFSpeechRecognizer", "SFSpeechRecognitionRequest", "SFSpeechRecognitionResult", "SFSpeechRecognitionTask", "SFTranscription"] }
 objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "block2", "AVAudioEngine", "AVAudioNode", "AVAudioIONode", "AVAudioFormat", "AVAudioBuffer", "AVAudioTime", "AVAudioTypes"] }
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "AVCaptureDevice", "AVMediaFormat"] }
+# The shell's own messages in an alert with OpenBot's icon. See `native_alert.rs`.
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAlert", "NSApplication", "NSButton", "NSControl", "NSImage", "NSResponder", "NSView"] }
 
 # Narration on Windows: the SAPI in-process recognizer. See `speech/sapi.rs`. The version Tauri uses.
 [target.'cfg(windows)'.dependencies]
@@ -88,6 +90,11 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalizati
 # Where WSL keeps a Podman machine's disk, so its drive's free space is checked before Start. See
 # `windows::podman_machine_drive`. The version reqwest already uses.
 windows-registry = "0.6"
+
+[[test]]
+# On the main thread, which AppKit needs, so without the test harness. See the file.
+name = "native_alert"
+harness = false
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
