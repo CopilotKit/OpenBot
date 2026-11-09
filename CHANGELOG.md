@@ -73,6 +73,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   Learning Container"}`. It now says "OpenBot couldn't reach its back end, so your message wasn't
   sent. Try again, or quit and reopen OpenBot." The original text goes to the browser console.
 
+### Personal edition
+
+- **Settings → Learning says Waiting for your review only when a skill is waiting.** With
+  **Approve new skills automatically** on, the heading showed while Learning was in progress and
+  after it finished, though nothing waited. The section is now **New skills** until a learned skill
+  waits for approval, and the team edition's **Waiting for an admin** follows the same rule.
+
 ## 1.0.0
 
 **Before upgrading.** Two migrations run at start, and the database moves to
