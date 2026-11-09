@@ -17,6 +17,11 @@ import {
   browserTabsRequestSchema,
   type LauncherState,
 } from "@openbot/shared/openbot-browser";
+import type {
+  LearningRunSummary,
+  PersonalReview,
+  RecordingSkills,
+} from "@openbot/shared/learning";
 import type { RecordingRow } from "@openbot/shared/recorder-api";
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -95,6 +100,68 @@ let preferencesFail = false;
 let recordingRows: RecordingRow[] = [];
 let recordingsHeld: Promise<void> | null = null;
 let recordingsAsked = 0;
+
+/** The person's own Learning review, as Settings, Learning reads it: one space of their recordings, nothing run yet. */
+const RECORDINGS_SPACE = "openbot-person-ada";
+function freshReview(): PersonalReview {
+  return {
+    canReview: true,
+    autoApprove: true,
+    approved: 0,
+    sources: [
+      {
+        containerId: RECORDINGS_SPACE,
+        kind: "recordings",
+        label: "Your recordings",
+        proposals: [],
+        latestRun: null,
+      },
+    ],
+  };
+}
+let review: PersonalReview = freshReview();
+/** The skills Learning proposed from the recording the page asks about, and what it asked. */
+let recordingSkills: RecordingSkills["skills"] = [];
+const skillsAsked: string[] = [];
+/** Learn now's refusal, in the server's sentence, while set. */
+let learnRefusal: string | null = null;
+
+/** A run of Learning over the person's recordings, made a minute after now. */
+function learningRun(
+  status: LearningRunSummary["status"],
+  failure: string | null = null,
+): LearningRunSummary {
+  const at = new Date(Date.now() + 60_000).toISOString();
+  return {
+    id: "run-after",
+    status,
+    trigger: "manual",
+    proposals: null,
+    insights: null,
+    failureCode: failure ? "BatchInsightAgentFailed" : null,
+    failure,
+    createdAt: at,
+    startedAt: at,
+    completedAt: status === "succeeded" || status === "failed" ? at : null,
+  };
+}
+
+/** A skill Learning proposed from "Find my meeting". */
+function meetingSkill(
+  status: "pending_review" | "approved",
+): RecordingSkills["skills"][number] {
+  return {
+    id: "4b9f2a8e-1c3d-4e5f-8a9b-0c1d2e3f4a5b",
+    title: "find-my-meeting",
+    description: "Find a meeting on Google Calendar by name and open it.",
+    reason: "You did this in a recording.",
+    operation: "add",
+    status,
+    createdAt: new Date().toISOString(),
+    reviewedAt: null,
+    container: RECORDINGS_SPACE,
+  };
+}
 
 function nativeState(): BrowserApiState {
   return {
@@ -184,6 +251,16 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
         narration: narrationChoice,
       },
     });
+  }
+  if (path === "/api/settings/learning/review") return Response.json(review);
+  if (path.startsWith("/api/settings/learning/recording-skills")) {
+    skillsAsked.push(path);
+    return Response.json({ skills: recordingSkills });
+  }
+  if (path.startsWith("/api/settings/learning/runs") && method === "POST") {
+    if (learnRefusal)
+      return Response.json({ error: learnRefusal }, { status: 409 });
+    return Response.json({ run: { id: "run-new", status: "queued" } });
   }
   if (path === "/api/recorder/recordings") {
     recordingsAsked += 1;
@@ -376,6 +453,10 @@ beforeEach(() => {
   opening = null;
   preferencesHeld = null;
   preferencesFail = false;
+  review = freshReview();
+  recordingSkills = [];
+  skillsAsked.length = 0;
+  learnRefusal = null;
   recordingRows = [];
   recordingsHeld = null;
   recordingsAsked = 0;
@@ -410,6 +491,9 @@ const recording = (title: string): RecordingRow => ({
   reason: null,
 });
 
+/** The router the page was last drawn in, to read where a link took it. */
+let drawnRouter: { state: { location: { pathname: string } } } | undefined;
+
 /** Drawn as the app draws it: strict mode, the app's one query client, a router, and its toasts. */
 function draw(ui: ReactNode, entry = "/") {
   const router = createRouter({
@@ -423,6 +507,7 @@ function draw(ui: ReactNode, entry = "/") {
       ),
     }),
   });
+  drawnRouter = router;
   return render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
@@ -800,6 +885,229 @@ test("on OpenBot Desktop the introduction shows until a recording is saved, Cont
   await user.click(view.getByRole("button", { name: "Stop" }));
   await view.findByRole("button", { name: "Record another" });
   expect(localStorage.getItem(INTRODUCED_KEY)).toBe("1");
+});
+
+/** OpenBot Desktop, after Stop saved "Find my meeting": the Recorder's own report, as a reload reads it. */
+function savedMeeting(): BrowserApiState {
+  const base = nativeState();
+  return {
+    ...base,
+    recorder: {
+      ...(base.recorder as NonNullable<BrowserApiState["recorder"]>),
+      lastStopped: {
+        recordingId: "rec-1",
+        title: "Find my meeting",
+        stoppedAt: Date.now() - 5_000,
+        actions: 6,
+        phrases: 6,
+      },
+    },
+  };
+}
+
+/** The link a button on the page draws, by its words. */
+function linkNamed(view: ReturnType<typeof draw>, name: string) {
+  const link = view.getByText(name, { exact: true }).closest("a");
+  if (!link) throw new Error(`${name} is not a link`);
+  return link;
+}
+
+// A teammate on OpenBot Desktop 0.3.3, after Stop: "I'm not sure what to do next. It doesn't tell me to go back."
+// The page said only "Saved to your Learning space: 6 actions and 6 narrated phrases."
+test("on OpenBot Desktop a saved recording says what happens next, Learn now starts Learning on the person's recordings, and See your skills opens Settings, Learning", async () => {
+  state = savedMeeting();
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  expect(
+    await view.findByRole("heading", { name: "Saved “Find my meeting”" }),
+  ).toBeTruthy();
+  expect(
+    view.getByText(
+      "OpenBot learns a skill from it, and you'll find it in Settings, Learning. Once it's learned, ask any Bot to do it.",
+    ),
+  ).toBeTruthy();
+  expect(await view.findByText("Learning runs on its own")).toBeTruthy();
+  expect(view.getByRole("button", { name: "Record another" })).toBeTruthy();
+  expect(linkNamed(view, "See your skills").getAttribute("href")).toBe(
+    "/settings/learning",
+  );
+
+  // The same run as Settings, Learning's Learn now, on the person's own recordings.
+  await user.click(view.getByRole("button", { name: "Learn now" }));
+  await waitFor(() =>
+    expect(writes).toContainEqual({
+      path: `/api/settings/learning/runs?container=${RECORDINGS_SPACE}`,
+      method: "POST",
+      body: {},
+    }),
+  );
+  expect(await view.findByText("Learning from your recordings")).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Learn now" })).toBeNull();
+
+  await user.click(view.getByText("See your skills", { exact: true }));
+  await waitFor(() =>
+    expect(drawnRouter?.state.location.pathname).toBe("/settings/learning"),
+  );
+});
+
+test("on OpenBot Desktop a skill learned from the saved recording says so, with Try it opening a new conversation with the task", async () => {
+  state = savedMeeting();
+  review.sources[0] = {
+    ...(review.sources[0] as PersonalReview["sources"][number]),
+    latestRun: learningRun("succeeded"),
+  };
+  // Waiting for the person's review first.
+  recordingSkills = [meetingSkill("pending_review")];
+  const view = draw(<BrowserPage />);
+  expect(
+    await view.findByRole("heading", {
+      name: "Your new skill is ready to review",
+    }),
+  ).toBeTruthy();
+  expect(view.getByText("Ready to review")).toBeTruthy();
+  expect(linkNamed(view, "Review").getAttribute("href")).toBe(
+    "/settings/learning",
+  );
+  // Asked about this recording, by its name and when it stopped.
+  expect(skillsAsked[0]).toMatch(
+    /^\/api\/settings\/learning\/recording-skills\?title=Find%20my%20meeting&since=\d+$/,
+  );
+
+  // Approved: the page says the Bots learned it, and Try it starts a conversation with the task in the box.
+  cleanup();
+  queryClient.clear();
+  recordingSkills = [meetingSkill("approved")];
+  const learned = draw(<BrowserPage />);
+  expect(
+    await learned.findByRole("heading", { name: "Your Bots learned it" }),
+  ).toBeTruthy();
+  expect(learned.getByText("Skill learned")).toBeTruthy();
+  expect(
+    learned.getByText("Find a meeting on Google Calendar by name and open it."),
+  ).toBeTruthy();
+  expect(linkNamed(learned, "Try it").getAttribute("href")).toMatch(
+    /^\/\?ask=Find(\+|%20)my(\+|%20)meeting$/,
+  );
+});
+
+test("on OpenBot Desktop a saved recording says why Learning can't run, didn't finish, or didn't start", async () => {
+  const noModel =
+    "Learning can't run on the model you signed in with. To use it, sign OpenBot in with an OpenAI or Anthropic API key, or a Claude or ChatGPT plan.";
+  state = savedMeeting();
+  review.modelProblem = noModel;
+  let view = draw(<BrowserPage />);
+  expect(await view.findByText("Learning can't run yet")).toBeTruthy();
+  expect(view.getByText(noModel)).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Learn now" })).toBeNull();
+  expect(
+    view.getByText(
+      "Your recording is kept. OpenBot learns a skill from it once Learning can run.",
+    ),
+  ).toBeTruthy();
+
+  cleanup();
+  queryClient.clear();
+  const why =
+    "Your model plan didn't answer Learning. Try Learn now again in a few minutes.";
+  review = freshReview();
+  review.sources[0] = {
+    ...(review.sources[0] as PersonalReview["sources"][number]),
+    latestRun: learningRun("failed", why),
+  };
+  view = draw(<BrowserPage />);
+  expect(await view.findByText("Learning didn't finish")).toBeTruthy();
+  expect(view.getByText(why)).toBeTruthy();
+
+  // Learn now again, refused with #1238's reason: said where it was pressed.
+  learnRefusal = noModel;
+  const user = userEvent.setup({ document });
+  await user.click(view.getByRole("button", { name: "Learn now" }));
+  expect(await view.findByText("Learning didn't start")).toBeTruthy();
+  expect(view.getByText(noModel)).toBeTruthy();
+});
+
+/** The same saved recording where the browser is drawn in the page (OpenBot Desktop since #1306, and hosted OpenBot). */
+function savedMeetingOnScreen(): BrowserApiState {
+  const base = screenState();
+  return {
+    ...base,
+    recorder: {
+      ...(base.recorder as NonNullable<BrowserApiState["recorder"]>),
+      lastStopped: savedMeeting().recorder?.lastStopped,
+    },
+  };
+}
+
+// Teach a Bot became one page with Record in the browser's toolbar (#1306), and after Stop it said only "Saved “Find my
+// meeting” to your Learning space: 6 actions and 6 narrated phrases." under the toolbar.
+test("with the browser in the page, a saved recording says what happens next under the toolbar, Learn now starts Learning, and See your skills opens Settings, Learning", async () => {
+  state = savedMeetingOnScreen();
+  openAnswer = answerFor("screen");
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  expect(await stopSays(view)).toBe(
+    "Saved “Find my meeting” to your Learning space: 6 actions and 6 narrated phrases.",
+  );
+  expect(
+    await view.findByText(
+      "OpenBot learns a skill from it, and you'll find it in Settings, Learning. Once it's learned, ask any Bot to do it.",
+    ),
+  ).toBeTruthy();
+  expect(await view.findByText("Learning runs on its own")).toBeTruthy();
+  expect(linkNamed(view, "See your skills").getAttribute("href")).toBe(
+    "/settings/learning",
+  );
+
+  await user.click(view.getByRole("button", { name: "Learn now" }));
+  await waitFor(() =>
+    expect(writes).toContainEqual({
+      path: `/api/settings/learning/runs?container=${RECORDINGS_SPACE}`,
+      method: "POST",
+      body: {},
+    }),
+  );
+  expect(await view.findByText("Learning from your recordings")).toBeTruthy();
+
+  await user.click(view.getByText("See your skills", { exact: true }));
+  await waitFor(() =>
+    expect(drawnRouter?.state.location.pathname).toBe("/settings/learning"),
+  );
+});
+
+test("with the browser in the page, a skill learned from the saved recording says so, with Try it", async () => {
+  state = savedMeetingOnScreen();
+  openAnswer = answerFor("screen");
+  recordingSkills = [meetingSkill("approved")];
+  const view = draw(<BrowserPage />);
+  expect(await view.findByText("Skill learned")).toBeTruthy();
+  expect(
+    view.getByText(
+      "Your Bots can do “Find my meeting” now. Try it, or ask any Bot to do it.",
+    ),
+  ).toBeTruthy();
+  expect(linkNamed(view, "Try it").getAttribute("href")).toMatch(
+    /^\/\?ask=Find(\+|%20)my(\+|%20)meeting$/,
+  );
+});
+
+test("with the browser in the page, a recording still on its way has no next step yet", async () => {
+  const base = savedMeetingOnScreen();
+  const stopped = base.recorder?.lastStopped;
+  if (!stopped) throw new Error("savedMeetingOnScreen has no recording");
+  state = {
+    ...base,
+    recorder: {
+      ...(base.recorder as NonNullable<BrowserApiState["recorder"]>),
+      lastStopped: { ...stopped, sending: true },
+    },
+  };
+  openAnswer = answerFor("screen");
+  const view = draw(<BrowserPage />);
+  expect(await stopSays(view)).toBe(
+    "Saving “Find my meeting” to your Learning space: 6 actions and 6 narrated phrases.",
+  );
+  expect(view.queryByText("See your skills")).toBeNull();
+  expect(view.queryByText("Learning runs on its own")).toBeNull();
 });
 
 test("on OpenBot Desktop a recording discarded from the Recorder's mark in the browser is said to be discarded, never saved", async () => {
