@@ -78,6 +78,7 @@ import {
   PERSON_INITIATOR,
   recordAuditEvent,
 } from "./audit";
+import { readAuditVocabulary } from "./audit-ask";
 import { startRetentionSweeps } from "./audit-retention";
 import { createAuth, sessionLifetimeMs } from "./auth";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
@@ -859,6 +860,18 @@ const writeBoundaries = createModelCompleter({
   resolveApiKey: resolveDeploymentModelKey,
   timeoutMs: 45_000,
   // Room for the thinking a current Claude model does before it answers, which counts against it.
+  maxTokens: 16_000,
+});
+
+/**
+ * Reads an admin's question about the audit trail as filters, and reads the filters back
+ * (audit-ask.ts). The deployment's own model, given as long as a boundary's writer for the same
+ * reason: an admin pressed Ask and is waiting.
+ */
+const askTheAuditTrail = createModelCompleter({
+  model: runtimeModel,
+  resolveApiKey: resolveDeploymentModelKey,
+  timeoutMs: 45_000,
   maxTokens: 16_000,
 });
 
@@ -3201,6 +3214,10 @@ const app = createApp(
     learningModel: learningModelEndpoint,
     boundaryWriter: writeBoundaries,
     approvalRules: { vocabulary: () => loadRuleVocabulary(database) },
+    auditQuestions: {
+      complete: askTheAuditTrail,
+      vocabulary: () => readAuditVocabulary(database, () => policyStore.get()),
+    },
     personalLearning: {
       store: learningSharingStore,
       ...(learningModelEndpoint?.calls

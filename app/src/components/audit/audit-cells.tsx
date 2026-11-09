@@ -334,6 +334,9 @@ export function subjectText(event: AuditEvent, storedNames = true): string {
       typeof payload.granted === "number"
       ? `${payload.offered} of ${payload.granted} tools`
       : "";
+  // What an admin asked the trail, in their words.
+  if (event.eventType === "audit.asked")
+    return typeof payload.question === "string" ? payload.question : "";
   if (!storedNames) {
     const words = subjectWords(event);
     if (words !== undefined) return words;
@@ -1092,6 +1095,8 @@ const DECISIONS: Record<string, string> = {
   "computer.policy_changed": "Boundaries saved",
   // A draft for the admin to read. Not "Allowed": nothing was decided and nothing changed.
   "computer.policy_translated": "Drafted, not saved",
+  // A question read into filters. Not "Allowed": nothing was decided, and nothing left the trail.
+  "audit.asked": "Asked, nothing changed",
   "computer.isolation_loaded": "Isolation at start-up",
   "computer.control_taken": "A person took control",
   "computer.control_released": "Control went back to the Bot",
