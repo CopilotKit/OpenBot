@@ -1,5 +1,5 @@
-import { IconArrowUpRight } from "@tabler/icons-react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { IconArrowUpRight, IconUser } from "@tabler/icons-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { ConnectionFields } from "@/components/plugins/connection-fields";
 import { Button } from "@/components/ui/button";
@@ -15,21 +15,27 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { Separator } from "@/components/ui/separator";
 import {
   type BrokerField,
   brokeredConnectionFieldsMutationOptions,
   confirmBrokeredConnectionMutationOptions,
   connectAccountMutationOptions,
+  connectAnotherAccountMutationOptions,
   connectBrokeredWithFieldsMutationOptions,
+  disconnectBrokeredAccountMutationOptions,
   disconnectBrokeredMutationOptions,
   invalidatePlugins,
   type KeyForm,
   type KeyGuide,
   recheckBrokeredConnectionMutationOptions,
+  setDefaultBrokeredAccountMutationOptions,
 } from "@/lib/plugins/mutations";
 import { schemeNeedsKey } from "@/lib/plugins/enablement-notes";
+import { brokeredAccountsQueryOptions } from "@/lib/plugins/queries";
 import {
   type BrokeredAccountKind,
   brokeredKeyMissing,
@@ -177,8 +183,8 @@ export type BrokeredAccount = {
    * TRUE WHERE THE BROKER AUTHORIZES PER ACTION, which is Arcade: a consent there adds what it asks
    * for to the one connection, and the connect route lets it through over a standing row. A Bot's
    * card sends a person here to reconnect on both brokers, and on Arcade this is where it finishes,
-   * with no Disconnect first. FALSE ON COMPOSIO, whose second consent would attach a second account
-   * and is refused, so reconnecting there is Disconnect and then Connect.
+   * with no Disconnect first. FALSE ON COMPOSIO, where a second consent adds a second account, which
+   * is what Connect another account asks for. Reconnecting there is Disconnect and then Connect.
    */
   reconnectsInPlace: boolean;
   /** See {@link BrokeredAccountKind}. Derived here so no branch below re-asks. */
@@ -247,6 +253,19 @@ export type BrokeredAccount = {
   /** Spend one read-only call at the vendor to find out whether the key still works. */
   recheck: () => void;
   rechecking: boolean;
+  /** The app this row is about, for the account list beneath it. */
+  serverId: string;
+  /** Whether the last key handed over was taken, which closes the form it was typed into. */
+  fieldsSubmitted: boolean;
+  /** Leave for the app's sign-in page to add one more account beside the ones connected. */
+  connectAnother: () => void;
+  connectingAnother: boolean;
+  /** Make one of the person's accounts the one their Bots use when they name none. */
+  makeDefault: (accountId: string) => void;
+  /** Disconnect one of the person's accounts and keep the rest. */
+  disconnectAccount: (accountId: string) => void;
+  /** Which account a press is in flight for, so only its buttons wait. */
+  changingAccount: string | null;
 };
 
 export function useBrokeredAccount(input: {
@@ -576,6 +595,42 @@ export function useBrokeredAccount(input: {
    * at all, null included. Its null IS the new record. The one path where it writes a name and then
    * raises never reaches here — a refusal clears both answers — so what is left is authoritative.
    */
+  /*
+   * ONE MORE ACCOUNT, ONE PERSON'S ACCOUNT MADE THE DEFAULT, ONE ENDED. Each refetches the plugin
+   * queries on its own `onSettled`, which is where the account list beneath the row is read from.
+   */
+  const connectAnother = useMutation({
+    ...connectAnotherAccountMutationOptions(returnTo),
+    onError: (thrown: Error) => report(thrown.message),
+    onSuccess: (start) => {
+      forgetConfirmation();
+      forgetRecheck();
+      if (start !== null && "connected" in start) {
+        void invalidatePlugins(queryClient);
+        return;
+      }
+      if (start === null) {
+        report(
+          "This app connects with a key, not a sign-in page, so nothing was connected. Reload the page and press Connect again.",
+        );
+        return;
+      }
+      window.location.href = start.authorizationUrl;
+    },
+  });
+  const makeDefault = useMutation({
+    ...setDefaultBrokeredAccountMutationOptions(queryClient),
+    onError: (thrown: Error) => report(thrown.message),
+  });
+  const disconnectAccount = useMutation({
+    ...disconnectBrokeredAccountMutationOptions(queryClient),
+    onError: (thrown: Error) => {
+      report(thrown.message);
+      forgetAnswers();
+    },
+    onSuccess: forgetAnswers,
+  });
+
   const answered =
     recheck.data && recheck.data.probe !== null
       ? recheck.data
@@ -686,6 +741,26 @@ export function useBrokeredAccount(input: {
     },
     submittingFields: submission.isPending,
     submissionError: submission.error?.message ?? null,
+    serverId,
+    fieldsSubmitted: submission.isSuccess,
+    connectAnother: () => {
+      report(null);
+      connectAnother.mutate(serverId);
+    },
+    connectingAnother: connectAnother.isPending,
+    makeDefault: (accountId: string) => {
+      report(null);
+      makeDefault.mutate({ serverId, accountId });
+    },
+    disconnectAccount: (accountId: string) => {
+      report(null);
+      disconnectAccount.mutate({ serverId, accountId });
+    },
+    changingAccount: makeDefault.isPending
+      ? (makeDefault.variables?.accountId ?? null)
+      : disconnectAccount.isPending
+        ? (disconnectAccount.variables?.accountId ?? null)
+        : null,
   };
 }
 
@@ -723,6 +798,8 @@ function accountSentence(input: {
   edition: Edition;
   /** Who reads the row: see {@link brokeredKeyMissing}. */
   reader: "admin" | "person";
+  /** The one connected account's name, where the app reported one. */
+  identity?: string | null;
 }): string {
   const {
     account,
@@ -730,6 +807,7 @@ function accountSentence(input: {
     edition,
     disconnectedDescription,
     disconnectedReassurance,
+    identity,
     provider,
     reader,
     title,
@@ -841,7 +919,7 @@ function accountSentence(input: {
    * mail is an argument, not a branch — see this file's opening comment.
    */
   return account.connected
-    ? `Signed in with ${title}. ${connectedDescription}`
+    ? `Signed in with ${title}${identity ? ` as ${identity}` : ""}. ${connectedDescription}`
     : disconnectedDescription;
 }
 
@@ -974,6 +1052,41 @@ export function BrokeredAccountRow({
   useEffect(() => {
     if (account.connected) setAsking(false);
   }, [account.connected]);
+  /*
+   * And a key handed over for ANOTHER account closes it too: the row was connected before the form
+   * opened, so the effect above has nothing to see change.
+   */
+  useEffect(() => {
+    if (account.fieldsSubmitted) setAsking(false);
+  }, [account.fieldsSubmitted]);
+
+  /*
+   * THE PERSON'S ACCOUNTS AT THE APP, BY NAME, once the row is connected. While the list is loading
+   * or could not be read the row reads as it always did: one connection, with its own Disconnect.
+   */
+  const listing = useQuery({
+    ...brokeredAccountsQueryOptions(account.serverId),
+    enabled:
+      account.configured && account.connected && account.kind !== "no-auth",
+  });
+  const accounts =
+    account.connected && !listing.isPending && !listing.error && listing.data
+      ? listing.data.accounts
+      : [];
+  const canAddAnother =
+    account.connected &&
+    !listing.isPending &&
+    !listing.error &&
+    listing.data?.canAddAnother === true;
+  const several = accounts.length > 1;
+  const addAnother = () => {
+    if (account.kind === "fields") {
+      setAsking(true);
+      account.requestFields();
+      return;
+    }
+    account.connectAnother();
+  };
 
   return (
     <>
@@ -981,22 +1094,29 @@ export function BrokeredAccountRow({
         <ItemContent>
           {/* Not "Connect your account": the row is also the connected state, and a title has to
               read for both. */}
-          <ItemTitle>{heading ?? "Your account"}</ItemTitle>
+          <ItemTitle>
+            {several && !heading
+              ? "Your accounts"
+              : (heading ?? "Your account")}
+          </ItemTitle>
           {/* Unclamped where the key is missing: that sentence is the only place the setting is
               named, so it is the point rather than a hint. */}
           <ItemDescription
             className={account.configured ? undefined : "line-clamp-none"}
           >
-            {accountSentence({
-              account,
-              connectedDescription,
-              edition,
-              disconnectedDescription,
-              disconnectedReassurance,
-              provider,
-              reader,
-              title,
-            })}
+            {several
+              ? `You connected ${accounts.length} ${title} accounts. Bots use your default account unless you ask for another.`
+              : accountSentence({
+                  account,
+                  connectedDescription,
+                  edition,
+                  disconnectedDescription,
+                  disconnectedReassurance,
+                  identity: accounts[0]?.identity ?? null,
+                  provider,
+                  reader,
+                  title,
+                })}
           </ItemDescription>
           {/* A fact about the row itself rather than about the connection, so it holds under
               either of the sentences above and is never clamped away. */}
@@ -1088,15 +1208,36 @@ export function BrokeredAccountRow({
                     <IconArrowUpRight />
                   </Button>
                 ) : null}
-                <Button
-                  disabled={account.disconnecting}
-                  onClick={account.disconnect}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  Disconnect
-                </Button>
+                {/*
+                 * ONE MORE ACCOUNT BESIDE THE ONES CONNECTED, where the app can tell a person's
+                 * accounts apart. A key app opens the form; a sign-in app leaves for its page.
+                 */}
+                {canAddAnother && account.kind !== "no-auth" ? (
+                  <Button
+                    disabled={
+                      account.connectingAnother || account.requestingFields
+                    }
+                    onClick={addAnother}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    Connect another account
+                    {account.kind === "consent" ? <IconArrowUpRight /> : null}
+                  </Button>
+                ) : null}
+                {/* With several accounts each has its own Disconnect, in its row below. */}
+                {several ? null : (
+                  <Button
+                    disabled={account.disconnecting}
+                    onClick={account.disconnect}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    Disconnect
+                  </Button>
+                )}
               </>
             ) : (
               /* The arrow says this leaves OpenBot for the vendor's consent page. It does, for
@@ -1128,6 +1269,24 @@ export function BrokeredAccountRow({
           </ItemActions>
         )}
       </Item>
+
+      {/*
+       * ONE ROW PER ACCOUNT, where there are several: its name, whether Bots use it by default, and
+       * what can be done to it. With one account the row above already names it.
+       */}
+      {several
+        ? accounts.map((held) => (
+            <AccountListRow
+              changing={account.changingAccount === held.id}
+              connectedAt={held.connectedAt}
+              isDefault={held.isDefault}
+              key={held.id}
+              label={held.label}
+              onDisconnect={() => account.disconnectAccount(held.id)}
+              onMakeDefault={() => account.makeDefault(held.id)}
+            />
+          ))
+        : null}
 
       <Dialog onOpenChange={setAsking} open={asking}>
         <DialogContent>
@@ -1208,6 +1367,66 @@ export function BrokeredAccountRow({
           </DialogBody>
         </DialogContent>
       </Dialog>
+    </>
+  );
+}
+
+/** One of a person's several accounts at an app, beneath the row that names the app. */
+function AccountListRow({
+  changing,
+  connectedAt,
+  isDefault,
+  label,
+  onDisconnect,
+  onMakeDefault,
+}: {
+  changing: boolean;
+  connectedAt: string | null;
+  isDefault: boolean;
+  label: string;
+  onDisconnect: () => void;
+  onMakeDefault: () => void;
+}) {
+  return (
+    <>
+      <Separator />
+      <Item size="sm">
+        <ItemMedia variant="icon">
+          <IconUser />
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle className="break-all">{label}</ItemTitle>
+          <ItemDescription>
+            {isDefault
+              ? "Default. Bots use this account unless you ask for another."
+              : connectedAt
+                ? `Connected ${formatDate(connectedAt)}. Bots use it when you ask for it.`
+                : "Bots use it when you ask for it."}
+          </ItemDescription>
+        </ItemContent>
+        <ItemActions>
+          {isDefault ? null : (
+            <Button
+              disabled={changing}
+              onClick={onMakeDefault}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Make default
+            </Button>
+          )}
+          <Button
+            disabled={changing}
+            onClick={onDisconnect}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Disconnect
+          </Button>
+        </ItemActions>
+      </Item>
     </>
   );
 }

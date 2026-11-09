@@ -160,6 +160,8 @@ export function approvalWords(action: {
   scope: string;
   /** What the action is aimed at, as the server resolved it. A folder's carries its name. */
   target?: unknown;
+  /** Which of the person's accounts at the app, where they hold several: "from dana@work.example". */
+  account?: string;
 }): {
   action: string;
   place: string;
@@ -177,6 +179,8 @@ export function approvalPhrase(action: {
   toolRef: string;
   scope: string;
   target?: unknown;
+  /** Which of the person's accounts at the app, where they hold several: "from dana@work.example". */
+  account?: string;
 }): string {
   const { action: words, place, joiner } = approvalParts(action);
   return joiner ? `${words} ${joiner} ${place}` : `${words} ${place}`;
@@ -186,13 +190,15 @@ function approvalParts(action: {
   toolRef: string;
   scope: string;
   target?: unknown;
+  account?: string;
 }): { action: string; place: string; joiner: "on" | "in" | "" } {
   const slash = action.toolRef.indexOf("/");
   const app = action.toolRef.slice(0, slash);
   if (slash > 0 && app === action.scope) {
     const { label } = appToolName(app, action.toolRef.slice(slash + 1));
+    const words = lowerFirst(label);
     return {
-      action: lowerFirst(label),
+      action: action.account ? `${words} from ${action.account}` : words,
       place: connectorName(app),
       joiner: "on",
     };

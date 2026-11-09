@@ -84,6 +84,8 @@ export function equivalenceOf(candidate: ApprovalCandidate): string {
         // alone made every later call to that tool "the same" as one the person declined.
         stable(candidate.target),
         stable(candidate.args),
+        // Which mailbox: a denial of a send from one account says nothing about another.
+        ...(candidate.account ? [candidate.account] : []),
       ]),
     )
     .digest("hex");
@@ -771,6 +773,8 @@ function publicApproval(request: ApprovalRecord) {
       toolCallId: action.toolCallId,
       args: approvalPreview(action.args),
       target: approvalPreview(action.target),
+      // The account the card names: "send email from dana@work.example on Gmail".
+      ...(action.account ? { account: action.account } : {}),
       ...(action.policy
         ? {
             policy: {
