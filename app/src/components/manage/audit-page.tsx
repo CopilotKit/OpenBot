@@ -9,9 +9,16 @@ import {
   IconSearch,
   IconX,
 } from "@tabler/icons-react";
+import type { AuditFilters } from "@openbot/shared/audit-filters";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
+import { AskTheTrail, AuditAnswerNote } from "@/components/audit/ask-the-trail";
 import type { AuditEvent } from "@/components/audit/audit-cells";
+import {
+  AuditFilterChips,
+  sameFilters,
+  withFilters,
+} from "@/components/audit/audit-filters";
 import { AuditTable } from "@/components/audit/audit-table";
 import { PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
@@ -26,7 +33,12 @@ import {
   oneRowPerAction,
   REFUSED_EVENT_TYPES,
 } from "@/lib/audit/outcome";
-import { auditEventsQueryOptions, auditExportUrl } from "@/lib/audit/queries";
+import type { AuditAnswer, AuditFilterLabels } from "@/lib/audit/ask";
+import {
+  auditEventsQueryOptions,
+  auditExportUrl,
+  auditVocabularyQueryOptions,
+} from "@/lib/audit/queries";
 import { client } from "@/lib/client";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
@@ -125,12 +137,25 @@ const ADMIN_DESCRIPTION =
  *
  * `bot` narrows every view to one Bot's rows, asked of the server; `onClearBot` takes it off.
  */
+const NO_LABELS: AuditFilterLabels = {
+  bots: {},
+  people: {},
+  apps: {},
+  rules: {},
+};
+
 export function AuditPage({
+  ask = false,
   bot,
   children,
   description = ADMIN_DESCRIPTION,
   onClearBot,
 }: {
+  /**
+   * Admin's Ask and its filter chips: questions in English, and the trail's own filters by app,
+   * tool, effect, action and rule. The personal edition's Activity has neither.
+   */
+  ask?: boolean;
   bot?: string;
   children?: ReactNode;
   description?: string;
@@ -138,13 +163,22 @@ export function AuditPage({
 } = {}) {
   const paths = useManagePaths();
   const [view, setView] = useState<string>(FILTERS[0].search);
+  // The chips: asked of the server beside the view, from an answer or added by hand.
+  const [chips, setChips] = useState<AuditFilters>({});
+  const [answer, setAnswer] = useState<
+    (AuditAnswer & { question: string }) | null
+  >(null);
+  // This deployment's Bots, apps and rules, asked for the first time a chip menu opens.
+  const [vocabularyWanted, setVocabularyWanted] = useState(false);
+  const vocabulary = useQuery({
+    ...auditVocabularyQueryOptions(),
+    enabled: ask && vocabularyWanted,
+  }).data;
   // The stored event names and OpenBot's own working are Admin's to read; the personal edition's
   // Activity is anybody's page. Its route has the edition loaded before this draws.
   const edition = useQuery(deploymentCapabilitiesQueryOptions()).data?.edition;
-  const search =
-    edition === "personal"
-      ? withoutOpenBotWorking(withBot(view, bot))
-      : withBot(view, bot);
+  const asked = withFilters(withBot(view, bot), ask ? chips : {});
+  const search = edition === "personal" ? withoutOpenBotWorking(asked) : asked;
   const [query, setQuery] = useState("");
   // A page at a time, newest first; "Show older events" under the last row asks for the next.
   const events = useInfiniteQuery(auditEventsQueryOptions(search));
@@ -212,6 +246,43 @@ export function AuditPage({
         <div
           className={children ? "flex h-[60vh] min-h-80 flex-col" : "contents"}
         >
+          {/*
+           * Above the table rather than in its toolbar, which is drawn again whenever the filters
+           * change: a question being typed, an answer and an open chip menu outlast the reload.
+           */}
+          {ask ? (
+            <div className="flex shrink-0 flex-col gap-2 px-4 pb-3">
+              <AskTheTrail
+                onAnswer={(next) => {
+                  setAnswer(next);
+                  // The answer is the whole question, so it starts from every event. One the trail
+                  // can't give clears the chips too, so no earlier filters stand under it as its rows.
+                  setView(FILTERS[0].search);
+                  setChips(next.filters);
+                }}
+              />
+              {answer ? (
+                <AuditAnswerNote
+                  answer={answer}
+                  edited={
+                    answer.answerable !== "no" &&
+                    !sameFilters(chips, answer.filters)
+                  }
+                />
+              ) : null}
+              {/* The chips are the answer's proof: the filters the rows below were asked with. */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <AuditFilterChips
+                  filters={chips}
+                  labels={answer?.labels ?? NO_LABELS}
+                  nameFor={nameFor}
+                  onChange={setChips}
+                  onOpen={() => setVocabularyWanted(true)}
+                  vocabulary={vocabulary}
+                />
+              </div>
+            </div>
+          ) : null}
           {events.isPending ? null : events.isError &&
             !events.isFetchNextPageError ? (
             <p className="px-4 text-destructive text-sm" role="alert">
@@ -252,7 +323,7 @@ export function AuditPage({
                    * The saved views are one control with one answer, so they are drawn as a segmented
                    * group: the pressed one is filled, the rest sit flat inside the same outline.
                    */}
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-muted-foreground text-xs">View</span>
                     <fieldset
                       aria-label="View"
@@ -307,7 +378,10 @@ export function AuditPage({
                       </Button>
                     ) : null}
                     {filters}
-                    <span className="ml-1 text-muted-foreground text-xs tabular-nums">
+                    <span
+                      className="ml-1 text-muted-foreground text-xs tabular-nums"
+                      data-audit-count
+                    >
                       {count}
                     </span>
                     <div className="ml-auto flex items-center gap-2">

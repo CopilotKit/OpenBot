@@ -165,6 +165,7 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "person.deprovisioned": "Remove a person",
   "person.reprovisioned": "Add a person back",
   "audit.exported": "Export events",
+  "audit.asked": "Ask the audit trail",
   "session.signed_in": "Sign in",
   "session.refused": "Sign in",
   "session.break_glass": "Use emergency sign-in",

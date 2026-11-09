@@ -15,6 +15,14 @@ import {
   sql,
 } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
+import {
+  actorCondition,
+  appCondition,
+  effectCondition,
+  intentCondition,
+  ruleCondition,
+  toolCondition,
+} from "./audit-filters";
 import type { Database } from "./db/client";
 import { auditEvents } from "./db/schema";
 import { parsePageLimit } from "./paging";
@@ -477,6 +485,18 @@ export const auditEventTypes = [
    * it, under which filter, belongs on it too.
    */
   "audit.exported",
+  /**
+   * An admin asked the trail a question in plain English, and the deployment's model turned it into
+   * filters (`audit-ask.ts`).
+   *
+   * Nothing changed and nothing left: the answer is the trail's own rows under those filters, drawn
+   * on the admin's screen. Recorded because a question names what somebody went looking for, and the
+   * filters say what they were shown. Target `audit_trail`; payload `actor`, `question`, `outcome`
+   * (`answered`, `partly_answered`, `unanswerable`, `not_valid`, `no_model` or `model_failed`), and
+   * when there was an answer `filters`, `reading`, `unanswered` and `attempts`; `problems` when the
+   * model's filters could not be used.
+   */
+  "audit.asked",
   /*
    * Getting in, and being turned away.
    *
@@ -844,6 +864,22 @@ export type AuditEventQuery = {
    * `botId`, and is that Bot's row too.
    */
   bot?: string;
+  /**
+   * App calls (`mcp.call_*`) to these apps, separated by commas, matched by `appKey` so
+   * `composio-gmail`, `arcade-Gmail` and `gmail` are one app. See `audit-filters.ts`.
+   */
+  app?: string;
+  /** App calls of these tools, separated by commas, by the name the row records, in any case. */
+  tool?: string;
+  /** App calls that only read (`read`) or change something (`write`). */
+  effect?: string;
+  /**
+   * What an action did, separated by commas, in the boundary's own words (`run_command`,
+   * `navigate`, `write_tool`), derived from the row's tool and key as the gateway derives it.
+   */
+  intent?: string;
+  /** Refusals by this boundary rule, its text exactly as recorded. One: a rule can hold commas. */
+  rule?: string;
   from?: string;
   to?: string;
 };
@@ -1131,9 +1167,7 @@ export function createAuditReader(database: Database): AuditReader {
           requestedValues(query.excludeEventType),
         ),
         notSucceededCall(requestedValues(query.excludeCalls)),
-        query.actorUserId
-          ? eq(auditEvents.actorUserId, query.actorUserId)
-          : undefined,
+        actorCondition(query.actorUserId),
         matchesRequested(
           auditEvents.initiatorKind,
           requestedValues(query.initiatorKind),
@@ -1164,6 +1198,11 @@ export function createAuditReader(database: Database): AuditReader {
               ),
             )
           : undefined,
+        appCondition(requestedValues(query.app)),
+        toolCondition(requestedValues(query.tool)),
+        effectCondition(query.effect?.trim()),
+        intentCondition(requestedValues(query.intent)),
+        ruleCondition(query.rule),
         query.from
           ? gt(auditEvents.createdAt, new Date(query.from))
           : undefined,
@@ -1270,6 +1309,11 @@ export function auditQueryFromUrl(url: URL): AuditEventQuery {
     targetType: optional("targetType"),
     targetId: optional("targetId"),
     bot: optional("bot"),
+    app: optional("app"),
+    tool: optional("tool"),
+    effect: optional("effect"),
+    intent: optional("intent"),
+    rule: optional("rule"),
     from,
     to,
   };
