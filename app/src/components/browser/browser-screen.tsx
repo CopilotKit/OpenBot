@@ -32,6 +32,7 @@ import {
   useOpenedTab,
 } from "./browser-bar";
 import { useFittedWidth } from "./fitted-window";
+import { LearningNextNotice, savedToLearning } from "./learning-next";
 import { NarrationNotice, NarrationSwitch } from "./narration";
 import { NarrationChoiceDialog, useNarrationChoice } from "./narration-choice";
 import {
@@ -183,6 +184,14 @@ export function ScreenBrowser({
               </div>
               {recording.stopped ? (
                 <StoppedNotice stopped={recording.stopped} />
+              ) : null}
+              {/* Once it is in the Learning space: what happens to it next, and the way to the skill it becomes. */}
+              {recording.stopped && savedToLearning(recording.stopped) ? (
+                <LearningNextNotice
+                  // A new recording follows its own skill, not the last one's.
+                  key={recording.stopped.recordingId}
+                  stopped={recording.stopped}
+                />
               ) : null}
               {failure ? (
                 <p

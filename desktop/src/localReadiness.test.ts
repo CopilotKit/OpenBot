@@ -6,6 +6,7 @@ import {
   type LocalReason,
   type LocalReport,
   localFailures,
+  type Shortfall,
 } from "./localEvalCli";
 import { localReadiness, type ReadinessInput } from "./localReadiness";
 
@@ -27,6 +28,7 @@ const reasons: LocalReason[] = [
   "confirmation-required",
   "dashboard-unavailable",
   "browser-open-failed",
+  "resources-short",
   "unrecognized",
 ];
 
@@ -86,7 +88,7 @@ test("every failure gives a plain, non-empty sentence without its own name or In
 });
 
 test("the reason and failure lists in this test match the source", () => {
-  expect(new Set(reasons).size).toBe(18);
+  expect(new Set(reasons).size).toBe(19);
   expect(localFailures.length).toBe(18);
 });
 
@@ -172,6 +174,64 @@ test("specific wording and actions", () => {
     said(report({ outcome: "failed", reason: "local-command-failed" })).said,
   ).toBe(
     "The back end stopped with an error partway through. OpenBot's log has the details.",
+  );
+  // The CLI's resource check: which resource is short and where to raise it, on each engine.
+  const short = (shortfall: Partial<Shortfall>) =>
+    said(
+      report({
+        outcome: "failed",
+        reason: "resources-short",
+        shortfall: {
+          podman: false,
+          cpu: false,
+          memory: false,
+          disk: false,
+          ...shortfall,
+        },
+      }),
+    );
+  expect(short({ disk: true })).toEqual({
+    state: "blocked",
+    said: "Docker is out of disk space. OpenBot needs 40 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+    action: "retry",
+  });
+  expect(short({ cpu: true }).said).toBe(
+    "Docker doesn't have enough CPUs. OpenBot needs 4 free CPUs. Raise the CPU limit in Docker Desktop > Settings > Resources, then Retry.",
+  );
+  expect(short({ memory: true }).said).toBe(
+    "Docker doesn't have enough memory. OpenBot needs 4 GB of free memory. Raise the memory limit in Docker Desktop > Settings > Resources, then Retry.",
+  );
+  expect(short({ cpu: true, memory: true, disk: true }).said).toBe(
+    "Docker doesn't have enough CPUs, memory and disk space. OpenBot needs 4 free CPUs, 4 GB of free memory and 40 GB free. Raise the limits in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+  );
+  expect(short({ podman: true, disk: true }).said).toBe(
+    "Podman is out of disk space. OpenBot needs 40 GB free. Stop your Podman machine, run podman machine set --disk-size 160, start it again, then Retry.",
+  );
+  // With the CLI's own numbers, as `local_eval.rs` reads them from its error.
+  expect(
+    short({ disk: true, cpus: "9.8", memoryGb: "18.9", diskGb: "0" }).said,
+  ).toBe(
+    "Docker has 0 GB of free disk. OpenBot needs 40 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+  );
+  expect(
+    short({ cpu: true, cpus: "3.7", memoryGb: "5.2", diskGb: "51" }).said,
+  ).toBe(
+    "Docker has 3.7 free CPUs. OpenBot needs 4. Raise the CPU limit in Docker Desktop > Settings > Resources, then Retry.",
+  );
+  expect(short({ memory: true, memoryGb: "2.9" }).said).toBe(
+    "Docker has 2.9 GB of free memory. OpenBot needs 4 GB. Raise the memory limit in Docker Desktop > Settings > Resources, then Retry.",
+  );
+  expect(
+    short({ cpu: true, disk: true, cpus: "3.5", memoryGb: "6", diskGb: "12" })
+      .said,
+  ).toBe(
+    "Docker has 3.5 free CPUs and 12 GB of free disk. OpenBot needs 4 free CPUs and 40 GB of free disk. Raise the limits in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+  );
+  // A report that does not say which is still about resources, never "partway through".
+  expect(
+    said(report({ outcome: "failed", reason: "resources-short" })).said,
+  ).toBe(
+    "Docker doesn't have enough CPUs, memory or disk space for the back end. Raise them in Docker Desktop > Settings > Resources, then Retry.",
   );
   expect(said("unavailable").action).toBeUndefined();
   expect(said("unverified").action).toBe("repair");

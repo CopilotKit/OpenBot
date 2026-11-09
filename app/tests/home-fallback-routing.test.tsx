@@ -73,7 +73,7 @@ function queryClientWithAgents(agents: AgentProfile[]) {
   return queryClient;
 }
 
-function renderHome(queryClient: QueryClient) {
+function renderHome(queryClient: QueryClient, entry = "/") {
   // Home and the placeholder it opens on send, so a start that fails behind the placeholder comes
   // back to a freshly mounted home page, as it does in the app.
   const rootRoute = createRootRoute({ component: Outlet });
@@ -81,6 +81,7 @@ function renderHome(queryClient: QueryClient) {
     createRoute({
       getParentRoute: () => rootRoute,
       path: "/",
+      validateSearch: HomeRoute.options.validateSearch,
       component: HomeRoute.options.component,
     }),
     createRoute({
@@ -91,7 +92,7 @@ function renderHome(queryClient: QueryClient) {
   ]);
   const router = createRouter({
     routeTree,
-    history: createMemoryHistory({ initialEntries: ["/"] }),
+    history: createMemoryHistory({ initialEntries: [entry] }),
   });
   return Object.assign(
     render(
@@ -142,6 +143,31 @@ function installHomeRoutingFetch(options: {
     { preconnect: originalFetch.preconnect },
   );
 }
+
+// Teach a Bot's Try it, once a Bot learned a task from a recording: a new conversation with the task in the box.
+test("/ starts the box with the words a link hands over, and sends them only when the person does", async () => {
+  const own = agent({
+    id: "own-public",
+    mine: true,
+    name: "Own Public",
+    visibility: "public",
+  });
+  const starts: string[][] = [];
+  installHomeRoutingFetch({
+    routeResponse: Response.json({ error: "router down" }, { status: 503 }),
+    starts,
+  });
+  const view = renderHome(
+    queryClientWithAgents([own]),
+    "/?ask=Find%20my%20meeting",
+  );
+  const box = await view.findByRole("textbox", { name: "Message" });
+  await waitFor(() => expect(box.textContent).toBe("Find my meeting"));
+  expect(starts).toEqual([]);
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.click(await view.findByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(starts).toEqual([["own-public"]]));
+});
 
 test("/ fallback routing matches the server default when route selection is unavailable", async () => {
   const ownPublic = agent({

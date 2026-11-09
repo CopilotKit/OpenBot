@@ -214,6 +214,14 @@ export type ComposioApp = {
   classifiedCount: number | null;
   permissionCount: number | null;
   scopedActionCount: number | null;
+  /**
+   * How a person connects the app, as the server decided it off the broker's catalogue. `fields`
+   * is the one that asks for a key typed in; every other kind is a sign-in, or nothing at all.
+   * The directory says so on the row before anybody adds the app.
+   */
+  connection: {
+    kind: "consent" | "self-registering" | "fields" | "no-auth" | "unsupported";
+  };
   enabled: boolean;
 };
 
@@ -310,6 +318,7 @@ export const pluginKeys = {
   forAgent: (agentId: string) => ["plugins", "for-agent", agentId] as const,
   connections: () => ["plugins", "connections"] as const,
   siblings: (serverId: string) => ["plugins", "siblings", serverId] as const,
+  accounts: (serverId: string) => ["plugins", "accounts", serverId] as const,
   composioApps: (query: string) =>
     ["plugins", "composio", "apps", query] as const,
 };
@@ -559,6 +568,46 @@ export function agentPluginsQueryOptions(agentId: string) {
         { fallback: "Couldn't load this Bot's apps." },
       );
       return response.json();
+    },
+  });
+}
+
+/** One of the signed-in person's accounts at an app, as `/servers/:id/accounts` answers it. */
+export type BrokeredAccountRecord = {
+  /** Which account a Disconnect or Make default press is about. Opaque. */
+  id: string;
+  /** What the app says the account is: an email address or a login. Null where it said none. */
+  identity: string | null;
+  /** What the person and their Bots call it: the identity, or "account 2" where there is none. */
+  label: string;
+  /** The account a Bot uses when it doesn't name one. */
+  isDefault: boolean;
+  connectedAt: string | null;
+};
+
+export type BrokeredAccounts = {
+  accounts: BrokeredAccountRecord[];
+  /** Whether this app can take another account beside the ones listed. The server decides. */
+  canAddAnother: boolean;
+};
+
+/**
+ * The person's own accounts at one brokered app. The server asks the app each time, so an account
+ * connected or ended elsewhere is listed as it stands now.
+ */
+export function brokeredAccountsQueryOptions(serverId: string) {
+  return queryOptions({
+    queryKey: pluginKeys.accounts(serverId),
+    queryFn: async (): Promise<BrokeredAccounts> => {
+      const response = await client(
+        `/api/plugins/servers/${encodeURIComponent(serverId)}/accounts`,
+        { fallback: "Couldn't list your accounts. Reload the page." },
+      );
+      const body: Partial<BrokeredAccounts> = await response.json();
+      return {
+        accounts: Array.isArray(body.accounts) ? body.accounts : [],
+        canAddAnother: body.canAddAnother === true,
+      };
     },
   });
 }

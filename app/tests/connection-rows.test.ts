@@ -117,3 +117,29 @@ test("and the same for Arcade's GitHub app, which is the same vendor through the
     }).map((row) => row.key),
   ).toEqual(["arcade-gmail", "github"]);
 });
+
+/**
+ * A key app's tile says it takes a key before anybody opens it, so the form on its page is no
+ * surprise. Reported from OpenBot Desktop 0.3.3, where every key app read as one more sign-in.
+ * Once it is connected the tile goes back to the app's own line.
+ */
+test("a key app nobody has connected says it needs a key; a sign-in app does not", () => {
+  const keyed = (id: string, title: string, authScheme: string) =>
+    ({ ...app(id, title), authScheme }) as PluginServer;
+  const rows = connectionRows({
+    ...none,
+    brokered: [
+      keyed("composio-_1password", "1Password", "API_KEY"),
+      keyed("composio-mixpanel", "Mixpanel", "BASIC"),
+      keyed("composio-gmail", "Gmail", "OAUTH2"),
+      keyed("composio-posthog", "PostHog", "API_KEY"),
+    ],
+    connected: new Set(["composio-posthog"]),
+  });
+  expect(rows.map((row) => [row.key, row.summary])).toEqual([
+    ["composio-posthog", ""],
+    ["composio-_1password", "Needs a key from 1Password"],
+    ["composio-mixpanel", "Needs a key from Mixpanel"],
+    ["composio-gmail", ""],
+  ]);
+});

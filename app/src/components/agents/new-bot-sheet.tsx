@@ -120,7 +120,7 @@ export function NewBotSheet({
 const STEPS = ["about", "runtime", "endpoint"] as const;
 /**
  * The web list as it comes: the frameworks people look for first, and "An agent you already run"
- * last, so the row that peeks above the footer on the first screen is a framework they know.
+ * last, so the rows that show above the footer on the first screen are frameworks they know.
  */
 const CONNECTION_OPTIONS = WEB_HARNESSES;
 type Step = (typeof STEPS)[number];
@@ -438,7 +438,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         submit();
       }}
     >
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 pt-8 pb-6">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 pt-6 pb-6">
         <MotionConfig reducedMotion="user">
           {/* Shares its layout id with the orb on the created view, so it travels there. */}
           <div className="flex items-center gap-3">
@@ -467,7 +467,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 
           <motion.div
             animate={{ opacity: 1, x: 0 }}
-            className="mt-6"
+            className="mt-5"
             initial={{ opacity: 0, x: 24 * direction }}
             key={step}
             transition={{ duration: 0.2, ease: "easeOut" }}
@@ -701,7 +701,7 @@ function AboutStep({
   personal: boolean;
 }) {
   return (
-    <FieldGroup className="gap-7">
+    <FieldGroup className="gap-5">
       <Field>
         <FieldLabel className={SECTION_LABEL} htmlFor="new-bot-name">
           Name
@@ -776,7 +776,7 @@ function AboutStep({
       {personal ? (
         <EveryAppList turnedOn={turnedOn} />
       ) : apps.length > 0 ? (
-        <FieldSet>
+        <FieldSet className="gap-2">
           <FieldLegend className={SECTION_LABEL} variant="label">
             Apps it can use
           </FieldLegend>
@@ -786,7 +786,7 @@ function AboutStep({
           <div className="grid gap-x-4 sm:grid-cols-2">
             {apps.map((app) => (
               <label
-                className="flex items-center gap-3 py-1.5 text-sm"
+                className="flex items-center gap-3 py-1 text-sm"
                 htmlFor={`new-bot-app-${app.key}`}
                 key={app.key}
               >
@@ -820,7 +820,7 @@ function EveryAppList({ turnedOn }: { turnedOn: UseQueryResult<PluginsPage> }) {
   if (turnedOn.isPending) return null;
   const servers = turnedOn.data?.servers ?? [];
   return (
-    <FieldSet>
+    <FieldSet className="gap-2">
       <FieldLegend className={SECTION_LABEL} variant="label">
         Apps it can use
       </FieldLegend>
@@ -838,7 +838,7 @@ function EveryAppList({ turnedOn }: { turnedOn: UseQueryResult<PluginsPage> }) {
         >
           {servers.map((server) => (
             <li
-              className="flex items-center gap-3 py-1.5 text-sm"
+              className="flex items-center gap-3 py-1 text-sm"
               key={server.id}
             >
               <PluginLogo logo={server.logo} />
@@ -959,7 +959,7 @@ const SECTION_LABEL =
  * cards. The border is there but transparent until chosen, so choosing one never shifts the rows.
  */
 const OPTION_CLASSES =
-  "flex w-full items-center gap-3 rounded-lg border border-transparent bg-muted/50 p-3 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50 aria-pressed:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
+  "flex w-full items-center gap-3 rounded-lg border border-transparent bg-muted/50 px-3 py-2.5 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50 aria-pressed:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
 
 /**
  * Choose a custom framework and advance immediately to its connection settings.
@@ -990,7 +990,7 @@ const RUNTIME_HEADING =
  * Pressing one acts at once, so there is no chosen state to draw.
  */
 const FRAMEWORK_ROW_CLASSES =
-  "-mx-3 flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
+  "-mx-3 flex items-center gap-3 rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
 
 /** Every framework the sheet offers, one line each, name then summary; pressing one picks it. */
 function FrameworkRows({
@@ -1036,9 +1036,11 @@ function showCustom(reduceMotion: boolean | null) {
 
 /**
  * The first screen's second way to make a Bot, below the simple form: RuntimeStep's rows under a
- * section name like the form's own, without taking focus from Name. A wide gap sets it apart from the
- * form, and on a desktop sheet its name and first rows show above the footer before anything is
- * scrolled. Each row acts on its own press, so Create Bot stays the form's.
+ * section name like the form's own, without taking focus from Name. A wider gap than the form's own
+ * sets it apart. In an 800px-tall window (OpenBot Desktop's common height on a Mac) the four
+ * frameworks named first show above the footer before anything is scrolled, which is why the form
+ * above is spaced as tightly as it is; new-bot-sheet-fit.test.tsx measures it in Chromium. Each row
+ * acts on its own press, so Create Bot stays the form's.
  */
 function CustomAgents({
   disabled,
@@ -1050,11 +1052,11 @@ function CustomAgents({
   return (
     <section
       aria-labelledby={CUSTOM_HEADING_ID}
-      className="mt-12 flex scroll-mt-6 flex-col"
+      className="mt-8 flex scroll-mt-6 flex-col"
       id={CUSTOM_ID}
     >
       <h2
-        className={cn("mb-2 font-medium outline-none", SECTION_LABEL)}
+        className={cn("mb-1.5 font-medium outline-none", SECTION_LABEL)}
         id={CUSTOM_HEADING_ID}
         tabIndex={-1}
       >

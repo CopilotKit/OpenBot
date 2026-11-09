@@ -42,6 +42,7 @@ function app(overrides: Partial<ComposioApp> = {}): ComposioApp {
     classifiedCount: null,
     permissionCount: null,
     scopedActionCount: null,
+    connection: { kind: "consent" },
     enabled: false,
     ...overrides,
   };

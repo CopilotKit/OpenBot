@@ -225,6 +225,8 @@ type Deployment = {
   authScheme?: string;
   /** What the app publishes as the things a person types in, for the `API_KEY` schemes. */
   fields?: BrokerField[];
+  /** Where the key comes from, as the server answers it beside the fields. Absent by default. */
+  guide?: { steps: string; url: string | null };
   /** Whether a real call was ever made with this key and worked, as this deployment recorded it. */
   verified?: boolean;
   /** When that happened. Null wherever `verified` is false — a check that failed records no time. */
@@ -560,7 +562,11 @@ function installDeployment(deployment: Deployment): Server {
         );
       }
       if (SERVER_FIELD_SCHEMES.includes(state.authScheme)) {
-        return json({ fields: state.fields });
+        return json(
+          deployment.guide
+            ? { fields: state.fields, guide: deployment.guide }
+            : { fields: state.fields },
+        );
       }
       return json({ authorizationUrl: CONSENT_URL });
     }
@@ -940,6 +946,44 @@ test("a key app asks for what the app asked for, with its own help text", async 
   expect(view.queryByText(/starting with 'pplx-'/)).toBeTruthy();
 });
 
+/**
+ * THE DIALOG SAYS WHY IT ASKS FOR A KEY AND WHERE TO GET ONE, ABOVE THE BOXES.
+ *
+ * Reported from OpenBot Desktop 0.3.3: Connect on a key-only app opened a form with the provider's
+ * developer wording and nothing else, and the person, who expected a sign-in, had nowhere to go.
+ * The guide is the server's answer for 1Password (see `server/src/plugins/key-guides.ts`).
+ */
+test("a key app's dialog explains the key and links to the provider's page for it", async () => {
+  installDeployment({
+    authScheme: "API_KEY",
+    composioConfigured: true,
+    confirms: false,
+    fields: [PERPLEXITY_KEY],
+    guide: {
+      steps:
+        "1Password connects through a Connect server that your 1Password admin runs. They create it in 1Password.com under Developer, along with an access token for it.",
+      url: "https://www.1password.dev/connect/get-started",
+    },
+    recorded: false,
+  });
+
+  const view = renderAccountScreen(queryClient());
+  await userEvent.click(await view.findByRole("button", { name: "Connect" }));
+
+  const guide = await view.findByTestId("key-guide");
+  expect(guide.textContent).toContain(
+    "Gmail doesn't offer a sign-in here, so it connects with a key from your Gmail account.",
+  );
+  expect(guide.textContent).toContain("Connect server");
+  const link = view.getByRole("link", { name: /Get a key from Gmail/ });
+  expect(link.getAttribute("href")).toBe(
+    "https://www.1password.dev/connect/get-started",
+  );
+  expect(link.getAttribute("target")).toBe("_blank");
+  // The guide sits above the form, which still draws the app's own box.
+  expect(await view.findByLabelText("API Key")).toBeTruthy();
+});
+
 test("a key app nobody has connected says it will ask for a key, not send you off", async () => {
   installDeployment({
     authScheme: "API_KEY",
@@ -952,7 +996,9 @@ test("a key app nobody has connected says it will ask for a key, not send you of
   const view = renderAccountScreen(queryClient());
 
   expect(
-    await view.findByText(/Gmail connects with a key you already have/),
+    await view.findByText(
+      /Needs a key from Gmail\. Connect shows where to get one\./,
+    ),
   ).toBeTruthy();
   /*
    * The screen's own not-connected sentence is written for the kind that leaves, and pressing
@@ -975,7 +1021,12 @@ test("a key app nobody has connected keeps the screen's own reassurance", async 
 
   // The row's own sentence, which is the one the screen's cannot be: pressing Connect here opens a
   // form rather than leaving for a consent screen.
-  expect(await view.findByText(/Connect asks for it\./)).toBeTruthy();
+  expect(
+    await view.findByText(/Connect shows where to get one\./),
+  ).toBeTruthy();
+  // And the row above it no longer says there is nothing to paste.
+  expect(view.queryByText(/There is no token to paste/)).toBeNull();
+  expect(view.getByText(/with a key from the app/)).toBeTruthy();
   /*
    * And the half of the screen's line that survives it. Replacing the whole line took away the one
    * thing an administrator reading this row needs to know — that the connector is finished whether
@@ -1189,6 +1240,7 @@ function accountState(overrides: Partial<BrokeredAccount>): BrokeredAccount {
     disconnected: false,
     disconnecting: false,
     fields: null,
+    guide: null,
     /*
      * NULL BESIDE THE NULL `submissionError` BELOW, because these cases are about the sentences the
      * ROW carries and neither refusal is one of them: both belong to the dialog, which is drawn only
@@ -1217,6 +1269,13 @@ function accountState(overrides: Partial<BrokeredAccount>): BrokeredAccount {
     submittingFields: false,
     verified: false,
     verifiedAt: null,
+    serverId: "gmail",
+    fieldsSubmitted: false,
+    connectAnother: () => {},
+    connectingAnother: false,
+    makeDefault: () => {},
+    disconnectAccount: () => {},
+    changingAccount: null,
     ...overrides,
   };
 }
@@ -1224,13 +1283,15 @@ function accountState(overrides: Partial<BrokeredAccount>): BrokeredAccount {
 /** The row with both screens' arguments filled in, so only the account differs between cases. */
 function renderRow(account: BrokeredAccount) {
   return render(
-    <BrokeredAccountRow
-      account={account}
-      connectedDescription="A Bot granted its tools reads your Gmail as you."
-      disconnectedDescription="No Bot can read this as you."
-      provider="composio"
-      title="Gmail"
-    />,
+    <QueryClientProvider client={queryClient()}>
+      <BrokeredAccountRow
+        account={account}
+        connectedDescription="A Bot granted its tools reads your Gmail as you."
+        disconnectedDescription="No Bot can read this as you."
+        provider="composio"
+        title="Gmail"
+      />
+    </QueryClientProvider>,
   );
 }
 
@@ -2667,4 +2728,99 @@ test("a re-check that spent nothing leaves the rejection the record still names"
   expect(view.getByText(/Your account is still connected/)).toBeTruthy();
   // Never the absolution, which is the other app's state and not this one's.
   expect(view.queryByText(/hasn't been checked with Gmail/)).toBeNull();
+});
+
+/**
+ * A person's accounts at the app, as `/servers/:id/accounts` answers them, for the cases below.
+ * Every other request is a 404, so nothing here can be answered by accident.
+ */
+function answerAccounts(body: unknown) {
+  global.fetch = (async (input: RequestInfo | URL) => {
+    const requested = typeof input === "string" ? input : String(input);
+    const path = requested.split("?")[0] ?? requested;
+    if (path.endsWith("/accounts")) {
+      return new Response(JSON.stringify(body), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response(null, { status: 404 });
+  }) as typeof fetch;
+}
+
+test("several accounts are listed by name, each with its own Disconnect, and another can be connected", async () => {
+  answerAccounts({
+    accounts: [
+      {
+        id: "a1",
+        identity: "dana@work.example",
+        label: "dana@work.example",
+        isDefault: true,
+        connectedAt: "2026-10-01T09:00:00.000Z",
+      },
+      {
+        id: "a2",
+        identity: "dana.home@gmail.example",
+        label: "dana.home@gmail.example",
+        isDefault: false,
+        connectedAt: "2026-10-20T09:00:00.000Z",
+      },
+    ],
+    canAddAnother: true,
+  });
+  const pressed: string[] = [];
+  const view = renderRow(
+    accountState({
+      connected: true,
+      kind: "consent",
+      connectAnother: () => pressed.push("another"),
+      makeDefault: (id) => pressed.push(`default:${id}`),
+      disconnectAccount: (id) => pressed.push(`disconnect:${id}`),
+    }),
+  );
+
+  expect(await view.findByText("dana@work.example")).toBeTruthy();
+  expect(view.getByText("dana.home@gmail.example")).toBeTruthy();
+  expect(view.getByText("Your accounts")).toBeTruthy();
+  expect(
+    view.getByText(
+      "Default. Bots use this account unless you ask for another.",
+    ),
+  ).toBeTruthy();
+  // One Disconnect per account, and none for the app as a whole.
+  expect(view.getAllByRole("button", { name: "Disconnect" })).toHaveLength(2);
+  expect(view.getAllByRole("button", { name: "Make default" })).toHaveLength(1);
+
+  await userEvent.click(
+    view.getByRole("button", { name: /Connect another account/ }),
+  );
+  await userEvent.click(view.getByRole("button", { name: "Make default" }));
+  await userEvent.click(
+    view.getAllByRole("button", { name: "Disconnect" })[1] as HTMLElement,
+  );
+  expect(pressed).toEqual(["another", "default:a2", "disconnect:a2"]);
+});
+
+test("one account is named in the row, which keeps its Disconnect and offers another", async () => {
+  answerAccounts({
+    accounts: [
+      {
+        id: "a1",
+        identity: "dana@work.example",
+        label: "dana@work.example",
+        isDefault: true,
+        connectedAt: null,
+      },
+    ],
+    canAddAnother: true,
+  });
+  const view = renderRow(accountState({ connected: true, kind: "consent" }));
+
+  expect(
+    await view.findByText(/Signed in with Gmail as dana@work\.example\./),
+  ).toBeTruthy();
+  expect(view.getByText("Your account")).toBeTruthy();
+  expect(view.getAllByRole("button", { name: "Disconnect" })).toHaveLength(1);
+  expect(
+    view.getByRole("button", { name: /Connect another account/ }),
+  ).toBeTruthy();
 });

@@ -10,6 +10,7 @@ import type {
   PeopleProposals,
   PersonalLearningSharing,
   PersonalReview,
+  RecordingSkills,
   SharingRequest,
 } from "@openbot/shared/learning";
 import { queryOptions } from "@tanstack/react-query";
@@ -25,6 +26,8 @@ export const learningKeys = {
   sharingRequests: ["learning", "sharing-requests"] as const,
   personProposal: (userId: string, proposalId: string) =>
     ["learning", "person-proposal", { userId, proposalId }] as const,
+  recordingSkills: (title: string, since: number, revision: string) =>
+    ["learning", "recording-skills", { title, since, revision }] as const,
   personalProposal: (container: string, proposalId: string) =>
     ["learning", "personal-proposal", { container, proposalId }] as const,
   proposals: (agentId?: string) =>
@@ -304,5 +307,28 @@ export function sharingRequestsQueryOptions() {
       client("/api/admin/learning/sharing-requests", "requests", {
         fallback: "Couldn't load sharing requests. Try again.",
       }),
+  });
+}
+
+/**
+ * Teach a Bot, after a recording saves: the skills Learning proposed from it, named `title` and stopped at `since`
+ * (milliseconds). `revision` changes whenever the person's review does (a run moves on, a proposal is approved), which
+ * is when there can be something new to find.
+ */
+export function recordingSkillsQueryOptions(
+  title: string,
+  since: number,
+  revision: string,
+) {
+  return queryOptions({
+    queryKey: learningKeys.recordingSkills(title, since, revision),
+    retry: false,
+    queryFn: async (): Promise<RecordingSkills> =>
+      (
+        await client(
+          `/api/settings/learning/recording-skills?title=${encodeURIComponent(title)}&since=${since}`,
+          { fallback: "Couldn't read your skills just now. Try again." },
+        )
+      ).json(),
   });
 }

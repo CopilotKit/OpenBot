@@ -1,6 +1,7 @@
 import type { BrowserApiState } from "@openbot/shared/openbot-browser";
 import { IconArrowLeft, IconPlayerRecordFilled } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import { PageRows } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
@@ -10,9 +11,21 @@ import { Separator } from "@/components/ui/separator";
 import { openBrowserMutationOptions } from "@/lib/browser/mutations";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
+import {
+  LearningNextRow,
+  learningNextWords,
+  savedToLearning,
+  useLearningNext,
+  YOUR_SKILLS,
+} from "./learning-next";
 import { NativeNarrationRow } from "./narration";
 import { NarrationChoiceDialog, useNarrationChoice } from "./narration-choice";
-import { RecordingRow, StoppedRow, useRecording } from "./recording";
+import {
+  RecordingRow,
+  type Stopped,
+  StoppedRow,
+  useRecording,
+} from "./recording";
 
 /** Kept once the person has saved a recording: from then on the page opens on naming the task, past the introduction. */
 export const INTRODUCED_KEY = "openbot.teach-a-bot.introduced";
@@ -41,7 +54,7 @@ function rememberIntroduced() {
  * Teach a Bot where the person's browser is a window on their desktop (a host-side computer of people's browsers), as three steps on one stage:
  * what it does, naming the task (with narration), and opening the browser already recording. While a recording runs the
  * third step is the recording itself, with Show browser and Stop; once it stops it says what became of it, with Record
- * another. The introduction shows until the person has saved a recording, and Back always reaches it.
+ * another, and once it is saved, what Learning does with it next (`SavedStep`). The introduction shows until the person has saved a recording, and Back always reaches it.
  */
 export function TeachSteps({ state }: { state: BrowserApiState }) {
   const choice = useNarrationChoice();
@@ -181,6 +194,8 @@ export function TeachSteps({ state }: { state: BrowserApiState }) {
         </div>
       </Slide>
     );
+  } else if (recording.stopped && savedToLearning(recording.stopped)) {
+    body = <SavedStep stopped={recording.stopped} another={() => setStep(2)} />;
   } else if (recording.stopped) {
     const stopped = recording.stopped;
     body = (
@@ -236,6 +251,49 @@ function StepDots({ step }: { step: Step }) {
   );
 }
 
+/**
+ * The last step once a recording is saved: what it held, what Learning does with it next (Learn now, then Review or
+ * Try it once a skill from it is there), and the way on from here, to the skills in Settings, Learning or another
+ * recording. A saved recording is not a skill yet, so the step says what turns it into one.
+ */
+function SavedStep({
+  stopped,
+  another,
+}: {
+  stopped: Stopped;
+  another: () => void;
+}) {
+  const learning = useLearningNext(stopped);
+  const { heading, sentence } = learningNextWords(learning, stopped.title);
+  const learned = learning.next.kind === "learned";
+  return (
+    <Slide
+      title={heading}
+      description={sentence}
+      action={
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="outline" render={<Link to={YOUR_SKILLS} />}>
+            See your skills
+          </Button>
+          <Button variant={learned ? "outline" : "default"} onClick={another}>
+            Record another
+          </Button>
+        </div>
+      }
+    >
+      <PageRows className="mt-0 w-full max-w-md shadow-lg">
+        <StoppedRow stopped={stopped} />
+        {learning.loaded ? (
+          <>
+            <Separator />
+            <LearningNextRow learning={learning} title={stopped.title} />
+          </>
+        ) : null}
+      </PageRows>
+    </Slide>
+  );
+}
+
 /** One step: what it shows in the middle of the stage, and its heading, sentence and button along the bottom. */
 function Slide({
   title,
@@ -266,8 +324,9 @@ function Slide({
       <div className="flex flex-1 items-center justify-center px-6 pt-12 pb-4">
         {children}
       </div>
-      <div className="flex items-end justify-between gap-6 px-6 pb-6">
-        <div className="min-w-0">
+      {/* The buttons go under the words once the two can't share a line without squeezing the sentence. */}
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 px-6 pb-6">
+        <div className="min-w-64 flex-1">
           <h2 className="font-semibold text-lg">{title}</h2>
           <p className="mt-1 text-pretty text-foreground/75 text-sm">
             {description}

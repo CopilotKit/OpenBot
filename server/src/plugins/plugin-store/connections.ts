@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { createAuditStore, recordAuditEvent } from "../../audit";
 import type { Database } from "../../db/client";
 import {
+  brokeredAccounts,
   brokeredConnections,
   credentials as credentialRows,
   mcpServers,
@@ -30,7 +31,7 @@ import {
   sharedAccountOnly,
   sharedAccountOnlySentence,
 } from "../deployment-clients";
-import type { AccountRef } from "../shared-accounts";
+import { type AccountRef, filedUnderPerson } from "../shared-accounts";
 import type { StoreContext } from "./context";
 import {
   attemptNamed,
@@ -1365,6 +1366,25 @@ export function connectionMethods(context: StoreContext) {
       scopes: string[];
       authProvider: string;
     }): Promise<{ claimed: boolean }> {
+      /*
+       * A FURTHER ACCOUNT OF THE PERSON'S, FILED UNDER A FURTHER ID OF THEIRS (Arcade; see
+       * `anotherArcadeAccount`). The connection row keeps naming the person's own id, which is what
+       * a call with no account picked runs as, and the further account is recorded beside it as one
+       * of their accounts at the app.
+       */
+      const own =
+        input.account.holder === "person"
+          ? (await personAccountOf(input.account.userId)).vendorUserId
+          : input.account.vendorUserId;
+      const further =
+        input.account.holder === "person" &&
+        input.account.vendorUserId !== own &&
+        filedUnderPerson(input.account.vendorUserId, own)
+          ? input.account
+          : null;
+      const recorded: AccountRef = further
+        ? { ...further, vendorUserId: own }
+        : input.account;
       return await database.transaction(async (transaction) => {
         /*
          * ONE STATEMENT, AND THE FIRST ONE. `completed_at` is truncated to milliseconds for the
@@ -1389,7 +1409,7 @@ export function connectionMethods(context: StoreContext) {
         const [existing] = await transaction
           .select({ app: brokeredConnections.app })
           .from(brokeredConnections)
-          .where(accountRow(input.toolkit, input.account));
+          .where(accountRow(input.toolkit, recorded));
 
         const verifiedAt = new Date();
         const set = {
@@ -1429,7 +1449,7 @@ export function connectionMethods(context: StoreContext) {
             holder: input.account.holder,
             userId:
               input.account.holder === "person" ? input.account.userId : null,
-            vendorUserId: input.account.vendorUserId,
+            vendorUserId: recorded.vendorUserId,
             connectedBy,
             ...set,
           })
@@ -1451,11 +1471,13 @@ export function connectionMethods(context: StoreContext) {
                   // that refusal is how the card knows the Connect it offered has happened (see
                   // `AppAccess.connectedAt`). Left at the first consent, the card went on offering
                   // Reconnect over an account that now allowed the action.
-                  set: {
-                    ...set,
-                    vendorUserId: input.account.vendorUserId,
-                    connectedAt: verifiedAt,
-                  },
+                  set: further
+                    ? set
+                    : {
+                        ...set,
+                        vendorUserId: recorded.vendorUserId,
+                        connectedAt: verifiedAt,
+                      },
                 }
               : {
                   target: [
@@ -1471,6 +1493,19 @@ export function connectionMethods(context: StoreContext) {
                   },
                 },
           );
+
+        if (further) {
+          await transaction
+            .insert(brokeredAccounts)
+            .values({
+              provider: brokerProvider,
+              app: input.toolkit,
+              userId: further.userId,
+              vendorUserId: further.vendorUserId,
+              accountId: "",
+            })
+            .onConflictDoNothing();
+        }
 
         await recordAuditEvent(
           createAuditStore(transaction as unknown as Database),
@@ -3106,6 +3141,49 @@ export function connectionMethods(context: StoreContext) {
         account: input.account,
         toolkit: input.toolkit,
       });
+
+      /*
+       * AND EVERY FURTHER ACCOUNT OF THE PERSON'S AT THE APP, which a broker that keeps one account
+       * per user id holds under a further id of theirs (Arcade; see `anotherArcadeAccount`). The
+       * sweep above reaches only the person's own id. Then the account rows go: the connection they
+       * stood behind is ending.
+       */
+      if (input.account.holder === "person") {
+        const person = input.account;
+        const further = await database
+          .select({ vendorUserId: brokeredAccounts.vendorUserId })
+          .from(brokeredAccounts)
+          .where(
+            and(
+              eq(brokeredAccounts.provider, brokerProvider),
+              eq(brokeredAccounts.app, input.toolkit),
+              eq(brokeredAccounts.userId, person.userId),
+            ),
+          );
+        for (const vendorUserId of new Set(
+          further
+            .map((row) => row.vendorUserId)
+            .filter(
+              (id) =>
+                id !== person.vendorUserId &&
+                filedUnderPerson(id, person.vendorUserId),
+            ),
+        )) {
+          await broker.revoke({
+            account: { ...person, vendorUserId },
+            toolkit: input.toolkit,
+          });
+        }
+        await database
+          .delete(brokeredAccounts)
+          .where(
+            and(
+              eq(brokeredAccounts.provider, brokerProvider),
+              eq(brokeredAccounts.app, input.toolkit),
+              eq(brokeredAccounts.userId, person.userId),
+            ),
+          );
+      }
 
       const asked = claim(ended);
 

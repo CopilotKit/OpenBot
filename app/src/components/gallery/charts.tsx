@@ -244,6 +244,86 @@ function Legend({ items }: { items: { label: string; colour: string }[] }) {
   );
 }
 
+/**
+ * Longer than this, a label under a standing bar is cut to a few letters.
+ *
+ * Ten Hacker News stories drew as "2. Car unlo…" and "10. Goldm…", and nobody could tell which bar
+ * was which story. Short names (teams, months, quarters) still stand up as columns.
+ */
+const LONG_LABEL = 12;
+
+function isLongLabel(label: unknown): boolean {
+  return typeof label === "string" && label.trim().length > LONG_LABEL;
+}
+
+type BarPoint = { label?: string; value?: number; link?: string };
+
+/**
+ * Bars lying down, largest first, each named in full beside or above its bar.
+ *
+ * The name stacks over its bar in a chat column and sits in a column of its own when the card is
+ * wide, wrapping to two lines with the whole of it on hover. The figure sits at the end of its bar.
+ * One series, so one colour: a colour per bar would say the bars are different kinds of thing.
+ */
+function RankedBars({ points, max }: { points: BarPoint[]; max: number }) {
+  // Keyed by where each point arrived, so a bar keeps its node as it moves into its place.
+  const ranked = byPosition(points).sort(
+    (a, b) =>
+      (isValue(b.item.value) ? b.item.value : Number.NEGATIVE_INFINITY) -
+      (isValue(a.item.value) ? a.item.value : Number.NEGATIVE_INFINITY),
+  );
+  // Room after the longest bar for the longest figure, so the largest bar's figure is never cut.
+  const widest = Math.max(
+    ...points.map((entry) => formatNumber(entry.value).length),
+    1,
+  );
+  return (
+    <ol className="@container space-y-2.5">
+      {ranked.map(({ item: entry, key }) => {
+        const figure = formatNumber(entry.value);
+        return (
+          <li
+            key={key}
+            title={figure ? `${entry.label}: ${figure}` : entry.label}
+          >
+            <FigureLink
+              className="-m-1 grid gap-1 p-1 @md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] @md:items-center @md:gap-3"
+              href={entry.link}
+              name={`${entry.label}: ${figure}`}
+            >
+              <span className="line-clamp-2 text-sm leading-snug">
+                {entry.label}
+              </span>
+              <span
+                className="flex items-center gap-1.5 text-xs"
+                style={{ paddingRight: `calc(${widest}ch + 0.375rem)` }}
+              >
+                <span
+                  className={`h-3 shrink-0 rounded-r-[4px] transition-[width] motion-reduce:transition-none ${isValue(entry.value) ? "" : "bg-muted"}`}
+                  data-bar=""
+                  style={{
+                    // A bar whose number has not arrived holds a sliver in a muted tone.
+                    width:
+                      max > 0 && isValue(entry.value)
+                        ? `${Math.max((entry.value / max) * 100, 1)}%`
+                        : "2%",
+                    ...(isValue(entry.value)
+                      ? { background: seriesColour(0) }
+                      : {}),
+                  }}
+                />
+                <span className="shrink-0 tabular-nums text-muted-foreground">
+                  {figure}
+                </span>
+              </span>
+            </FigureLink>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 export const BarChartProps = z.object({
   ...common,
   points: z
@@ -269,6 +349,8 @@ export function BarChartCard({
     <GalleryFrame caption={caption} title={title}>
       {points.length === 0 ? (
         <Empty />
+      ) : points.some((entry) => isLongLabel(entry.label)) ? (
+        <RankedBars max={max} points={points} />
       ) : (
         // Columns stretch to full row height so percentage bar heights use the chart area.
         <div

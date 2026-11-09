@@ -9,8 +9,8 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { agentKeys } from "@/lib/agents/queries";
-import { auditKeys } from "@/lib/audit/queries";
 import { Route as AuditRoute } from "@/routes/_authed/admin/audit";
+import { seedAuditPage } from "./seed-audit-page";
 
 beforeAll(() => GlobalRegistrator.register());
 
@@ -34,7 +34,7 @@ async function exportWith(headers: Record<string, string>) {
       queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
     },
   });
-  queryClient.setQueryData([...auditKeys.all, ""], { events: [] });
+  seedAuditPage(queryClient, "", { events: [] });
   queryClient.setQueryData(agentKeys.list(false), []);
   const router = createRouter({
     routeTree: createRootRoute({ component: AuditRoute.options.component }),

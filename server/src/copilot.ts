@@ -96,6 +96,7 @@ import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
 import { observeModelConnection } from "./desktop-connection-failure";
 import { desktopTelemetryProperties } from "./desktop-telemetry";
+import { currentEdition } from "./edition";
 import { observeIntelligenceAuthentication } from "./intelligence-client";
 import { capturePassOrigin } from "./intelligence-gateway-proxy";
 import {
@@ -125,7 +126,11 @@ import {
   SELECTION_FLOOR,
   selectTools,
 } from "./plugins/selection";
-import { grantedToolGuidance, holdsWebSearch } from "./plugins/tools";
+import {
+  type BotApp,
+  grantedToolGuidance,
+  holdsWebSearch,
+} from "./plugins/tools";
 import { corsOrigin } from "./request-trust";
 import type { ProductTelemetry } from "./telemetry/product";
 import { productRuntimeHook } from "./telemetry/product-boundaries";
@@ -677,6 +682,11 @@ export function builtInAgentConfiguration(
    * store (`picked-skill.ts`). Absent when they picked none.
    */
   pickedSkill?: string,
+  /**
+   * The apps this Bot holds, as they stand for this person: connected, needing a connection, and so
+   * on. Absent says nothing about apps. See `grantedToolGuidance`.
+   */
+  apps?: readonly BotApp[],
 ): BuiltInAgentConfiguration {
   if (!apiKey && !planModel) {
     return {
@@ -765,11 +775,16 @@ export function builtInAgentConfiguration(
       APPROVAL_GUIDANCE,
       // How to read the untrusted-content envelope every outside result arrives in.
       UNTRUSTED_GUIDANCE,
-      ...(grantedToolGuidance(tools, connectedVendors, shown)
-        ? [grantedToolGuidance(tools, connectedVendors, shown)]
+      ...(grantedToolGuidance(tools, connectedVendors, shown, apps)
+        ? [grantedToolGuidance(tools, connectedVendors, shown, apps)]
         : []),
       ...(computerGuidance
-        ? [computerGuidance({ search: holdsWebSearch(tools) })]
+        ? [
+            computerGuidance({
+              search: holdsWebSearch(tools),
+              personal: currentEdition() === "personal",
+            }),
+          ]
         : []),
       ...(learnedSkills?.catalog ? [learnedSkills.catalog] : []),
       /*
@@ -920,6 +935,8 @@ export async function buildAgents(
   botNames: ReadonlyMap<string, string> = new Map(
     agents.map((agent) => [agent.id, agent.name]),
   ),
+  /** The apps each Bot holds, as they stand for the person asking. Absent says nothing about apps. */
+  loadApps?: LoadAppsForBot,
 ): Promise<Record<string, AbstractAgent>> {
   let vendors: readonly string[] = [];
   try {
@@ -980,6 +997,7 @@ export async function buildAgents(
           holdsTools,
           pickedModel,
           botNames,
+          loadApps,
         );
         if (loadPersonalMemory)
           built.use(new PersonalMemoryMiddleware(agent.id, loadPersonalMemory));
@@ -1258,12 +1276,28 @@ async function buildAgent(
   pickedModel?: PickedModel,
   /** Who answered, by Bot id, for another Bot's answer in this one's thread. See {@link buildAgents}. */
   botNames: ReadonlyMap<string, string> = new Map(),
+  /** The apps this Bot holds, as they stand for the person asking. See {@link buildAgents}. */
+  loadApps?: LoadAppsForBot,
 ): Promise<AbstractAgent> {
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
   }
 
   const granted = await loadTools(agent.id);
+  /*
+   * Best-effort, like the vendors: a failed read leaves the Bot told what its tools say, as before,
+   * and must not stop the run. Never log the thrown value: database errors can carry row contents.
+   */
+  let apps: readonly BotApp[] | undefined;
+  try {
+    apps = await loadApps?.(agent.id);
+  } catch {
+    console.error({
+      error: "bot_app_lookup_failed",
+      context: { operation: "loadApps", agentId: agent.id },
+      timestamp: new Date().toISOString(),
+    });
+  }
 
   /*
    * Whether narrowing can do anything here at all.
@@ -1438,6 +1472,7 @@ async function buildAgent(
         : undefined,
       refusingProvider(model),
       holdsInstructions ? pickedSkillFor : undefined,
+      apps,
     );
   }
 
@@ -1546,6 +1581,7 @@ async function buildAgent(
       undefined,
       timeZone,
       pickedSkill,
+      apps,
     );
     // What really waits: nothing, when the model could not be wrapped and is sent every tool.
     const held = searchesTools(
@@ -2098,6 +2134,8 @@ function remoteAgentWithStandingRole(
    * See `picked-skill.ts`.
    */
   pickedSkillFor?: (input: RunAgentInput) => string | undefined,
+  /** The apps this Bot holds, as they stand for the person asking. See `grantedToolGuidance`. */
+  apps?: readonly BotApp[],
 ) {
   const holds = (input: RunAgentInput) => !holdsTools || holdsTools(input);
   /*
@@ -2112,11 +2150,22 @@ function remoteAgentWithStandingRole(
    * prompt — a page about the browser that mentions connectors nowhere. That is the Bot that browsed
    * to drive.google.com holding four Drive tools.
    *
-   * Built from the tools this run was offered rather than from everything granted, so a narrowed
-   * run is never told it holds a system it cannot reach on this turn.
+   * Built from the tools this run was offered, so a narrowed run is never told it can call a tool it
+   * was not sent. What it holds and was not offered is counted beside its system as offered on a turn
+   * that needs it: left out, a Bot offered Parallel's feedback tool and not its search told the
+   * person it could not search and that an administrator could grant it.
    */
-  const holdingsMessageFor = (offered: GrantedTool[]) => {
-    const holdings = grantedToolGuidance(offered, connectedVendors);
+  const holdingsMessageFor = (offered: GrantedTool[], held: boolean) => {
+    const sent = new Set(offered.map((tool) => tool.name));
+    // A run the runtime makes for itself holds nothing, now or later. See `isAskedRun`.
+    const notOffered = held ? tools.filter((tool) => !sent.has(tool.name)) : [];
+    const holdings = grantedToolGuidance(
+      [...offered, ...notOffered],
+      connectedVendors,
+      undefined,
+      apps,
+      new Set(notOffered.map((tool) => tool.name)),
+    );
     return holdings
       ? {
           id: `${GRANTED_TOOLS_ID_PREFIX}${agent.id}`,
@@ -2131,7 +2180,7 @@ function remoteAgentWithStandingRole(
     input: RunAgentInput,
     next: AbstractAgent,
   ) => {
-    const holdingsMessage = holdingsMessageFor(tools);
+    const holdingsMessage = holdingsMessageFor(tools, holds(input));
     /*
      * Not signed for a run the runtime makes for itself: the statement is what the Bot hands back to
      * call a tool here, and that run holds none. See `isAskedRun`.
@@ -2562,6 +2611,8 @@ export async function resolveRuntimeAgents(
    * positional reason `loadInstructions` gives. Absent, every run uses the deployment's model.
    */
   pickedModel?: PickedModel,
+  /** Appended last for the positional reason `loadInstructions` gives. See {@link buildAgents}. */
+  loadApps?: LoadAppsForBot,
 ): Promise<Record<string, AbstractAgent>> {
   const all = await loadAgents();
   if (all.length === 0) {
@@ -2607,6 +2658,7 @@ export async function resolveRuntimeAgents(
     // Every Bot this person has, not only the one being built: an answer in its thread can be any
     // of theirs.
     new Map(all.map((agent) => [agent.id, agent.name])),
+    loadApps,
   );
 }
 
@@ -2707,6 +2759,12 @@ export function effortProviderOptions(
 
 /** What one Bot may call, for the person whose request this is. */
 export type LoadToolsForBot = (botId: string) => Promise<GrantedTool[]>;
+
+/**
+ * The apps one Bot holds, each as it stands for the person a run is for. Per person for the reason
+ * {@link LoadToolsForBot} is: whether Gmail is connected is that person's fact, not the Bot's.
+ */
+export type LoadAppsForBot = (botId: string) => Promise<readonly BotApp[]>;
 
 /**
  * Writes the row for a run refused before its model call because it would have sent more tools

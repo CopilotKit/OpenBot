@@ -689,6 +689,12 @@ details {
   margin-top: 4px;
 }
 
+/* Under a screen's buttons, its rule keeps the row's own gap rather than touching them. Zero
+   specificity, so a disclosure that sets its own margin (`.blocker-manual`) keeps it. */
+:where(.row) + details {
+  margin-top: 24px;
+}
+
 details > summary {
   cursor: pointer;
   font-size: var(--text-sm);

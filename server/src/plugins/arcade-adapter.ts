@@ -1916,6 +1916,39 @@ export function createArcadeClient(
       }
       return null;
     },
+    /*
+     * ONE ACCOUNT PER USER ID, WHICH IS ALL ARCADE KEEPS. Arcade holds one connection per user id
+     * and auth provider, so the accounts listed under one user id are at most the one live
+     * connection, named by the address or login the provider reported for it. A person's second
+     * account at an app is filed under a second user id of theirs (see `anotherArcadeAccount` in
+     * `./shared-accounts`) and is listed by asking about that id. No account id: a call picks an
+     * Arcade account by the user id it runs as.
+     */
+    accountsOf: async ({ account, toolkit }) => {
+      for (const row of await connectionsFor(
+        client,
+        account.vendorUserId,
+        toolkit,
+      )) {
+        if (!connectionIsLive(row)) continue;
+        const info = row.provider_user_info as
+          | { email?: unknown; name?: unknown; login?: unknown }
+          | null
+          | undefined;
+        return [
+          {
+            accountId: null,
+            identity:
+              textOf(info?.email) ??
+              textOf(info?.login) ??
+              textOf(info?.name) ??
+              null,
+            connectedAt: null,
+          },
+        ];
+      }
+      return [];
+    },
     // The mint. Stays a TOP-LEVEL member: the Composio connect flow calls it from routes.ts, so it
     // cannot move behind the nullable `authorizations` sub-surface.
     //
