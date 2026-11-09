@@ -171,6 +171,8 @@ deployment:
   host-grant-15407-… for shopper-bot".
 - An opened "Looked for a tool" step lists the tools the Bot found by name ("Send email on Gmail"),
   where it showed their ids and the descriptions the search returned to the Bot.
+- The marks for each turn on the left of a conversation no longer sit on the first letters of a
+  Bot's replies. They show only where the window leaves room for them beside the messages.
 
 ### Personal edition
 
