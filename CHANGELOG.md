@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Settings > Activity and Admin > Audit reach past the newest 50 events: "Show older events" under
+  the last row loads the next page, and the count says "Newest 50 events" until nothing is older.
 - OpenBot Desktop's updates download from downloads.copilotkit.ai too. The update feed there names
   that address for the Windows installer and the Mac update archives, instead of GitHub; every
   signature is unchanged, and the feed is only published once each of those files answers there.

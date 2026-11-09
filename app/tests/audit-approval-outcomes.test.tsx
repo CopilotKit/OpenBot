@@ -16,7 +16,7 @@ import {
   eventTypeFilter,
   REFUSED_EVENT_TYPES,
 } from "@/lib/audit/outcome";
-import { auditKeys } from "@/lib/audit/queries";
+import { seedAuditPage } from "./seed-audit-page";
 
 /**
  * Settings › Activity after a Bot was asked to write two files with "Ask before making changes" on,
@@ -140,7 +140,7 @@ async function renderActivity() {
       queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
     },
   });
-  queryClient.setQueryData([...auditKeys.all, ""], { events: ROWS });
+  seedAuditPage(queryClient, "", { events: ROWS });
   queryClient.setQueryData(agentKeys.list(false), []);
   const router = createRouter({
     routeTree: createRootRoute({ component: () => <AuditPage /> }),
