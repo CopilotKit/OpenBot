@@ -592,10 +592,12 @@ async def test_computer_calls_made_together_run_one_at_a_time_in_order(boundary)
     # and side by side the fields took the focus from each other; a click could overtake the typing.
     names = ["computer_type", "computer_click", "computer_key", "granted_lookup"]
     computer = names[:3]
-    running = {"now": 0, "most": 0, "lookup_beside": False}
+    running = {"now": 0, "most": 0}
+    spans = {}
     lock = Lock()
 
     def authorize(body, _token):
+        started = time.monotonic()
         with lock:
             if body["name"] in computer:
                 running["now"] += 1
@@ -605,8 +607,7 @@ async def test_computer_calls_made_together_run_one_at_a_time_in_order(boundary)
         with lock:
             if body["name"] in computer:
                 running["now"] -= 1
-            elif running["now"]:
-                running["lookup_beside"] = True
+            spans[body["name"]] = (started, time.monotonic())
         return 200
 
     boundary["callback_authorize"] = authorize
@@ -614,8 +615,13 @@ async def test_computer_calls_made_together_run_one_at_a_time_in_order(boundary)
     called = [each["body"]["name"] for each in boundary["callback"]]
     assert [name for name in called if name in computer] == computer
     assert running["most"] == 1
-    # Everything else still runs beside them.
-    assert running["lookup_beside"]
+    # Everything else still runs beside them: the lookup overlaps the computer's calls rather than waiting for them.
+    lookup_start, lookup_end = spans["granted_lookup"]
+    assert any(
+        start < lookup_end and lookup_start < end
+        for name, (start, end) in spans.items()
+        if name in computer
+    )
     # The model reads each answer against the call it made, in the order it made them.
     assert [
         m["toolCallId"] for m in snapshot(events) if m.get("role") == "tool"
