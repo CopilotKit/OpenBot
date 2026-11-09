@@ -129,10 +129,11 @@ test("the sign-in leads with OpenBot and says what signing in is for", async () 
   );
   await screen.findByRole("button", { name: "Sign in for a free license key" });
   expect(
-    screen.getByRole("heading", { name: "OpenBot by CopilotKit" }),
+    screen.getByRole("heading", { name: "OpenBot runs on this computer" }),
   ).toBeTruthy();
   expect(screen.getByText(/free local license key/)).toBeTruthy();
-  expect(screen.getByText(/CopilotKit doesn’t get them/)).toBeTruthy();
+  expect(screen.getByText(/Signing in gets the license key/)).toBeTruthy();
+  expect(screen.getByText("by CopilotKit")).toBeTruthy();
   expect(screen.queryByRole("img", { name: "CopilotKit" })).toBeNull();
 
   await userEvent.click(
@@ -177,7 +178,7 @@ test("after Accept, the step says it is setting up your apps, not to sign in", a
   ).toBeTruthy();
   expect(screen.getByText("Connecting your apps…")).toBeTruthy();
   expect(
-    screen.queryByRole("heading", { name: "OpenBot by CopilotKit" }),
+    screen.queryByRole("heading", { name: "OpenBot runs on this computer" }),
   ).toBeNull();
   expect(screen.queryByText(/free local license key/)).toBeNull();
   connected();

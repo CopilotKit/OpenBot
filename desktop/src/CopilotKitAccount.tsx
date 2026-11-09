@@ -200,9 +200,9 @@ export function CopilotKitAccount({
   return (
     <div className="sheet">
       {/* OpenBot is what is being set up, so its mark heads this step as it heads every other,
-          and the step leads with OpenBot by CopilotKit. CopilotKit's logotype here made the step read
-          as signing up for a CopilotKit product. */}
-      <Sections at="Account" />
+          and here it says "by CopilotKit" beside the name. CopilotKit's logotype here made the step
+          read as signing up for a CopilotKit product. */}
+      <Sections at="Account" byCopilotKit />
       <h1>
         {agreement
           ? "Accept the license agreement"
@@ -210,7 +210,7 @@ export function CopilotKitAccount({
             ? "Setting up your apps"
             : appsFailed
               ? "Connect your apps"
-              : "OpenBot by CopilotKit"}
+              : "OpenBot runs on this computer"}
       </h1>
       <p className="lede">
         {agreement
@@ -219,7 +219,7 @@ export function CopilotKitAccount({
             ? "OpenBot uses your CopilotKit account to set up apps like Gmail and Slack."
             : // Names CopilotKit Intelligence on this step alone: it is what the license key is
               // for, and the browser sign-in page that opens next says the same.
-              "OpenBot runs on this computer with CopilotKit Intelligence, which runs here too. Sign in to get a free local license key for it."}
+              "OpenBot needs CopilotKit Intelligence, which runs on this computer too. Sign in to CopilotKit to get a free local license key for it."}
       </p>
       {/* What the person gives up by signing in, and only what holds: conversations and files stay
           here, the sign-in fetches the license key and sets up apps, and what a Bot is asked goes to
@@ -228,15 +228,13 @@ export function CopilotKitAccount({
           network. */}
       {!agreement && !connecting && !appsFailed && (
         <ul className="blocker-steps">
+          <li>Your conversations and files stay on this computer.</li>
           <li>
-            Your conversations and files stay on this computer. CopilotKit
-            doesn’t get them.
+            Signing in gets the license key and lets OpenBot connect apps like
+            Gmail and Slack. It doesn’t send your conversations or files to
+            CopilotKit.
           </li>
-          <li>
-            Signing in gets your license key and lets OpenBot connect apps like
-            Gmail and Slack.
-          </li>
-          <li>What you ask goes to the AI provider you choose.</li>
+          <li>What you ask a Bot goes to the AI provider you choose.</li>
         </ul>
       )}
 
