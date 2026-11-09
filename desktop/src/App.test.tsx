@@ -444,6 +444,24 @@ test("the first screen is Install, with nothing to choose", async () => {
   expect(localCliCalls()).toEqual([]);
 });
 
+test("the first screen says what usage data OpenBot sends, before the CopilotKit sign-in links it", async () => {
+  setupRootConfiguration("/tmp/local-eval-welcome-usage", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({});
+  const view = await renderApp();
+  const notice = view.getByText(/OpenBot sends CopilotKit usage data/);
+  expect(notice.textContent).toBe(
+    "OpenBot sends CopilotKit usage data, linked to your CopilotKit account. It never sends your conversations, files or keys. You can turn this off in Settings. What OpenBot sends",
+  );
+  const link = view.getByRole("link", { name: "What OpenBot sends" });
+  expect(link.getAttribute("href")).toBe(
+    "https://github.com/CopilotKit/OpenBot/blob/main/desktop/TELEMETRY.md",
+  );
+  // Before anything is installed or signed in to: the notice comes first.
+  expect(localCliCalls()).toEqual([]);
+});
+
 test("Install prepares the default Bot in the default folder, with no Bot or folder screen", async () => {
   setupRootConfiguration("/tmp/local-eval-install", async () =>
     emptyConfiguration(),

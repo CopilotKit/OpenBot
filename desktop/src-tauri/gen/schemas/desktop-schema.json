@@ -3009,6 +3009,12 @@
           "markdownDescription": "Enables the restart command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_usage_data command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-set-usage-data",
+          "markdownDescription": "Enables the set_usage_data command without any pre-configured scope."
+        },
+        {
           "description": "Enables the speech_abort command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-speech-abort",
@@ -3049,6 +3055,12 @@
           "type": "string",
           "const": "openbot-desktop:allow-update-offer",
           "markdownDescription": "Enables the update_offer command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the usage_data command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-usage-data",
+          "markdownDescription": "Enables the usage_data command without any pre-configured scope."
         },
         {
           "description": "Enables the zoom command without any pre-configured scope.",
@@ -3123,6 +3135,12 @@
           "markdownDescription": "Denies the restart command without any pre-configured scope."
         },
         {
+          "description": "Denies the set_usage_data command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-set-usage-data",
+          "markdownDescription": "Denies the set_usage_data command without any pre-configured scope."
+        },
+        {
           "description": "Denies the speech_abort command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:deny-speech-abort",
@@ -3163,6 +3181,12 @@
           "type": "string",
           "const": "openbot-desktop:deny-update-offer",
           "markdownDescription": "Denies the update_offer command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the usage_data command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-usage-data",
+          "markdownDescription": "Denies the usage_data command without any pre-configured scope."
         },
         {
           "description": "Denies the zoom command without any pre-configured scope.",

@@ -1,0 +1,5 @@
+# The native opt-out wins even over a user override that enables server telemetry.
+services:
+  server:
+    environment:
+      COPILOTKIT_TELEMETRY_DISABLED: "1"

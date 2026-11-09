@@ -218,7 +218,10 @@ import {
 } from "./learning/personal-space";
 import { clearLearningRevisionFallback } from "./learning/runtime";
 import { learningScopes } from "./learning/scopes";
-import { createLearningSettingsStore } from "./learning/settings";
+import {
+  configuredLearningContainer,
+  createLearningSettingsStore,
+} from "./learning/settings";
 import {
   createLearningSharingStore,
   createOpenSkillIndex,
@@ -373,9 +376,13 @@ const prepareProductRunInput = productHeadlessBoundary(productTelemetry);
 const profileStore = createProfileStore(database);
 // Every dispatch point asks this database whether its person paused the Bot. See agents/lifecycle.ts.
 configureBotLifecycle({ database });
+// The environment's container, until the boot check finds this Intelligence has no such container
+// (learning/auto-assign.ts). A name left over from a setup against another Intelligence then gives
+// way to automatic assignment instead of failing every new thread.
+const configuredLearning = configuredLearningContainer(config.learning);
 const learningSettingsStore = createLearningSettingsStore(
   database,
-  config.learning,
+  configuredLearning,
 );
 // Its own client, like the self-host banner's: the constructor opens nothing.
 const learningProbeIntelligence = createIntelligenceClient(
@@ -419,6 +426,7 @@ const learningCredentials = (): LearningContainerCredentials => ({
 });
 const learningAutoAssign = createLearningAutoAssign({
   enabled: config.learningAutoAssign,
+  configured: configuredLearning,
   store: learningSettingsStore,
   probe: (containerId) =>
     probeLearningContainer(learningProbeIntelligence, containerId),
@@ -837,6 +845,20 @@ const chooseSkills = createSkillChooser(
 const reviewActions = createModelCompleter({
   model: runtimeModel,
   resolveApiKey: resolveDeploymentModelKey,
+});
+
+/**
+ * Writes a boundary from an admin's description, and reads it back (computer/policy-translate.ts).
+ * The deployment's own model, with longer to answer than the router: an admin pressed a button and
+ * is waiting for a rule, which is a longer answer than a router's one name, and a reasoning model
+ * spends seconds before it starts.
+ */
+const writeBoundaries = createModelCompleter({
+  model: runtimeModel,
+  resolveApiKey: resolveDeploymentModelKey,
+  timeoutMs: 45_000,
+  // Room for the thinking a current Claude model does before it answers, which counts against it.
+  maxTokens: 16_000,
 });
 
 /*
@@ -2240,6 +2262,10 @@ const copilotRuntime = mountCopilotRuntime(
       void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
     },
     learningSettings,
+    // The environment's container, or a saved default, that this Intelligence was found not to have.
+    learningContainerForgotten: (containerId) =>
+      configuredLearning.forgotten(containerId) ||
+      learningSettingsStore.isSetAside(containerId),
     personalSkills: {
       containerFor: personalLearningSpaces.containerFor,
       openSkills: () => openSkillIndex.sources(),
@@ -3172,6 +3198,7 @@ const app = createApp(
         }
       : {}),
     learningModel: learningModelEndpoint,
+    boundaryWriter: writeBoundaries,
     personalLearning: {
       store: learningSharingStore,
       ...(learningModelEndpoint?.calls
