@@ -9,7 +9,7 @@ import {
   IconSearch,
   IconX,
 } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import type { AuditEvent } from "@/components/audit/audit-cells";
 import { AuditTable } from "@/components/audit/audit-table";
@@ -18,10 +18,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useBotNames } from "@/lib/agents/bot-names";
 import {
+  CALLS_RECORDED_AS_CHANGES,
   COMPUTER_ACTION_EVENT_TYPES,
   DID_NOT_HAPPEN_EVENT_TYPES,
   eventTypeFilter,
-  CALLS_RECORDED_AS_CHANGES,
   OPENBOT_WORKING_EVENT_TYPES,
   oneRowPerAction,
   REFUSED_EVENT_TYPES,
@@ -146,14 +146,15 @@ export function AuditPage({
       ? withoutOpenBotWorking(withBot(view, bot))
       : withBot(view, bot);
   const [query, setQuery] = useState("");
-  const events = useQuery(auditEventsQueryOptions(search));
+  // A page at a time, newest first; "Show older events" under the last row asks for the next.
+  const events = useInfiniteQuery(auditEventsQueryOptions(search));
   // Activity names a skill by the title its page shows; the trail keeps only its slug.
   const skills = useQuery({
     ...pluginsPageQueryOptions(),
     enabled: edition === "personal",
   }).data?.skills;
   const rows = withSkillTitles(
-    oneRowPerAction((events.data?.events ?? []) as AuditEvent[]),
+    oneRowPerAction(events.data?.pages.flatMap((page) => page.events) ?? []),
     skills,
   );
   const nameFor = useBotNames();
@@ -211,7 +212,8 @@ export function AuditPage({
         <div
           className={children ? "flex h-[60vh] min-h-80 flex-col" : "contents"}
         >
-          {events.isPending ? null : events.isError ? (
+          {events.isPending ? null : events.isError &&
+            !events.isFetchNextPageError ? (
             <p className="px-4 text-destructive text-sm" role="alert">
               Couldn't load these events. Reload the page.
             </p>
@@ -219,6 +221,28 @@ export function AuditPage({
             <AuditTable
               deploymentName={paths.deploymentName}
               events={rows}
+              footer={
+                events.hasNextPage ? (
+                  <div className="flex flex-col items-center gap-2 py-3">
+                    {events.isFetchNextPageError ? (
+                      <p className="text-destructive text-sm" role="alert">
+                        Couldn't load older events. Try again.
+                      </p>
+                    ) : null}
+                    <Button
+                      disabled={events.isFetchingNextPage}
+                      onClick={() => events.fetchNextPage()}
+                      size="sm"
+                      variant="outline"
+                    >
+                      {events.isFetchingNextPage
+                        ? "Loading…"
+                        : "Show older events"}
+                    </Button>
+                  </div>
+                ) : null
+              }
+              moreToLoad={events.hasNextPage}
               nameFor={nameFor}
               query={query}
               storedNames={edition !== "personal"}

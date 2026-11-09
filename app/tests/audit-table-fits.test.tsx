@@ -11,7 +11,7 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AuditPage } from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
-import { auditKeys } from "@/lib/audit/queries";
+import { seedAuditPage } from "./seed-audit-page";
 
 /**
  * The Audit page in the Desktop's default window, about 1000px wide with Settings' own column
@@ -80,7 +80,7 @@ async function renderAudit() {
       queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
     },
   });
-  queryClient.setQueryData([...auditKeys.all, ""], { events: ROWS });
+  seedAuditPage(queryClient, "", { events: ROWS });
   queryClient.setQueryData(agentKeys.list(false), [
     { id: "bot-a", name: "Claude Agent SDK" },
   ]);
