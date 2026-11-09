@@ -611,9 +611,9 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   await installLocal(view);
   // The first step. OpenBot needs no account, so it installs behind it, exactly once; nothing
   // of Intelligence's runs before the agreement.
-  await view.findByRole("heading", { name: "OpenBot runs on this computer" });
+  await view.findByRole("heading", { name: "OpenBot by CopilotKit" });
   expect(
-    view.getByText("Your conversations and files stay on this computer."),
+    view.getByText(/Your conversations and files stay on this computer/),
   ).toBeTruthy();
   expect(stepLabel(view)).toBe("Account");
   await waitFor(() =>
@@ -623,7 +623,7 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   );
   expect(localSequence()).toEqual([]);
   await userEvent.click(
-    view.getByRole("button", { name: "Sign in to CopilotKit" }),
+    view.getByRole("button", { name: "Sign in for a free license key" }),
   );
   await view.findByRole("heading", { name: "Accept the license agreement" });
   expect(
@@ -680,7 +680,7 @@ test("the account step waits for a container engine Install is still setting up,
   await installLocal(view);
   await view.findByRole(
     "button",
-    { name: "Sign in to CopilotKit" },
+    { name: "Sign in for a free license key" },
     { timeout: 6000 },
   );
   expect(asked).toBe(2);
@@ -708,7 +708,7 @@ test("the account step says Docker Desktop is starting while Install waits on it
   });
   const view = await renderApp();
   await installLocal(view);
-  await view.findByRole("heading", { name: "OpenBot runs on this computer" });
+  await view.findByRole("heading", { name: "OpenBot by CopilotKit" });
 
   await emitProgress({
     step: "install-engine",
@@ -742,7 +742,7 @@ test("a line about OpenBot's own work is not said as a hand-off on the account s
   });
   const view = await renderApp();
   await installLocal(view);
-  await view.findByRole("heading", { name: "OpenBot runs on this computer" });
+  await view.findByRole("heading", { name: "OpenBot by CopilotKit" });
   await emitProgress({
     step: "install-engine",
     ok: true,

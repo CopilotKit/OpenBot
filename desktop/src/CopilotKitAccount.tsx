@@ -200,8 +200,8 @@ export function CopilotKitAccount({
   return (
     <div className="sheet">
       {/* OpenBot is what is being set up, so its mark heads this step as it heads every other,
-          and the step leads with OpenBot. CopilotKit's part is the licence for the back end, said
-          in one line: its logotype here made the step read as signing up for a CopilotKit product. */}
+          and the step leads with OpenBot by CopilotKit. CopilotKit's logotype here made the step read
+          as signing up for a CopilotKit product. */}
       <Sections at="Account" />
       <h1>
         {agreement
@@ -210,27 +210,33 @@ export function CopilotKitAccount({
             ? "Setting up your apps"
             : appsFailed
               ? "Connect your apps"
-              : "OpenBot runs on this computer"}
+              : "OpenBot by CopilotKit"}
       </h1>
       <p className="lede">
         {agreement
           ? `To run OpenBot on this computer, accept the CopilotKit license agreement for ${agreement.organizationName}.`
           : connecting || appsFailed
             ? "OpenBot uses your CopilotKit account to set up apps like Gmail and Slack."
-            : "Its back end, from CopilotKit, runs here too. Sign in to CopilotKit to get a free license for it."}
+            : // Names CopilotKit Intelligence on this step alone: it is what the license key is
+              // for, and the browser sign-in page that opens next says the same.
+              "OpenBot runs on this computer with CopilotKit Intelligence, which runs here too. Sign in to get a free local license key for it."}
       </p>
-      {/* What the person gives up by signing in, and only what holds: the sign-in fetches the
-          licence, the conversations and files stay here, and what a Bot is asked goes to the AI
-          provider chosen on the AI step. Nothing broader, such as "no data leaves this computer": setup
-          and usage telemetry, the AI provider and connected apps all reach the network. */}
+      {/* What the person gives up by signing in, and only what holds: conversations and files stay
+          here, the sign-in fetches the license key and sets up apps, and what a Bot is asked goes to
+          the AI provider chosen on the AI step. Nothing broader, such as "no data leaves this
+          computer": setup and usage telemetry, the AI provider and connected apps all reach the
+          network. */}
       {!agreement && !connecting && !appsFailed && (
         <ul className="blocker-steps">
-          <li>Your conversations and files stay on this computer.</li>
           <li>
-            Signing in only gets the license. It doesn’t send your conversations
-            or files to CopilotKit.
+            Your conversations and files stay on this computer. CopilotKit
+            doesn’t get them.
           </li>
-          <li>What you ask a Bot goes to the AI provider you choose.</li>
+          <li>
+            Signing in gets your license key and lets OpenBot connect apps like
+            Gmail and Slack.
+          </li>
+          <li>What you ask goes to the AI provider you choose.</li>
         </ul>
       )}
 
@@ -271,7 +277,7 @@ export function CopilotKitAccount({
       <div className="row">
         {seen.at === "signed-out" && (
           <button type="button" onClick={signIn}>
-            Sign in to CopilotKit
+            Sign in for a free license key
           </button>
         )}
         {agreement && (
