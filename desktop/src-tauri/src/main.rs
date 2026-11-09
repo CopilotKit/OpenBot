@@ -1329,20 +1329,48 @@ fn check_for_updates_from_menu(app: tauri::AppHandle) {
     });
 }
 
+/// A Check for Updates… answer, in a native alert. `answered` hears whether the first button was
+/// chosen, off the main thread.
+///
+/// On macOS, OpenBot's own alert, with OpenBot's icon (`native_alert`): the dialog plugin shows a
+/// message with no parent window in an alert the system draws, with its grey note icon. Elsewhere,
+/// the dialog plugin's message, which on Windows carries the information icon a message box should.
 fn show_prompt(
     app: &tauri::AppHandle,
     prompt: app_update::Prompt,
     answered: impl FnOnce(bool) + Send + 'static,
 ) {
-    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
-    let dialog = app.dialog().message(prompt.message).title(prompt.title);
-    let dialog = match prompt.buttons {
-        Some((yes, no)) => {
-            dialog.buttons(MessageDialogButtons::OkCancelCustom(yes.into(), no.into()))
+    #[cfg(target_os = "macos")]
+    {
+        let shown = app.run_on_main_thread(move || {
+            let Some(mtm) = objc2::MainThreadMarker::new() else {
+                log::error!("[app update] the update alert was not on the main thread");
+                return;
+            };
+            let ahead = openbot_desktop_lib::native_alert::ask(
+                mtm,
+                &prompt.title,
+                &prompt.message,
+                prompt.buttons,
+            );
+            std::thread::spawn(move || answered(ahead));
+        });
+        if let Err(error) = shown {
+            log::warn!("[app update] could not show the update alert: {error}");
         }
-        None => dialog,
-    };
-    dialog.show(answered);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+        let dialog = app.dialog().message(prompt.message).title(prompt.title);
+        let dialog = match prompt.buttons {
+            Some((yes, no)) => {
+                dialog.buttons(MessageDialogButtons::OkCancelCustom(yes.into(), no.into()))
+            }
+            None => dialog,
+        };
+        dialog.show(answered);
+    }
 }
 
 /// What the banner and the setup window offer: the newer version, unless this person closed it.
@@ -8974,6 +9002,27 @@ mod check_for_updates_tests {
             2
         );
         assert!(main.contains("app_update::MENU_ID => check_for_updates_from_menu(app.clone()),"));
+    }
+
+    /// Check for Updates…'s answers carry OpenBot's icon on the Mac. The dialog plugin shows a
+    /// message with no parent window through `CFUserNotificationDisplayAlert`, which draws the
+    /// system's grey note icon, so on macOS `show_prompt` runs OpenBot's own alert
+    /// (`native_alert`, tested in `tests/native_alert.rs`) and leaves the plugin to the others.
+    #[test]
+    fn the_update_answers_show_openbots_icon_on_the_mac() {
+        let main = include_str!("main.rs");
+        let shown = &main[main.find("\nfn show_prompt(").unwrap()..];
+        let shown = &shown[..shown.find("\n}\n").unwrap()];
+        let mac = &shown[shown.find("#[cfg(target_os = \"macos\")]").unwrap()..];
+        let mac = &mac[..mac.find("#[cfg(not(target_os = \"macos\"))]").unwrap()];
+        assert!(mac.contains("native_alert::ask("));
+        assert!(!mac.contains(".dialog()"));
+        for asked in [
+            "show_prompt(&app, app_update::prompt(&asked)",
+            "show_prompt(\n",
+        ] {
+            assert!(main.contains(asked), "{asked}");
+        }
     }
 }
 

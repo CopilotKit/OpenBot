@@ -1685,6 +1685,22 @@ describe("where a Bot says its answer came from", () => {
     expect(content).toContain(PROVENANCE_GUIDANCE);
   });
 
+  test("it writes to the person as 'you', never as 'the person'", () => {
+    /*
+     * These instructions call the user "the person" throughout, and a Bot said it back to them:
+     * "That's sufficient to answer without digging into turn-by-turn, which the person didn't ask
+     * for." Every Bot, remote ones included, carries this guidance.
+     */
+    const guidance = PROVENANCE_GUIDANCE.toLowerCase().replace(/\s+/g, " ");
+    expect(guidance).toContain(
+      "these instructions call the person you are working for 'the person'",
+    );
+    expect(guidance).toContain("when you write to them, call them 'you'");
+    expect(guidance).toContain(
+      "never narrate your own reasoning about what they asked for",
+    );
+  });
+
   test("it does not send the Bot hunting for a source", () => {
     /*
      * The failure mode of the first attempt at this, which never left a branch. Told to find a
