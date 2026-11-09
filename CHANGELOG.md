@@ -10,13 +10,24 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **Sign-in comes first, and macOS asks for your password only after OpenBot says why.** On a new
+  Mac the Account step waited for Install to put Podman in before any browser sign-in opened, and
+  the "osascript wants to make changes" password box came up by itself over it. The CopilotKit
+  sign-in now opens in your browser as soon as the Account step opens: the CLI's sign-in needs no
+  engine, and only the license agreement waits for one. Podman downloads meanwhile. Once you're
+  signed in, the step says "OpenBot installs Podman, which runs OpenBot's back end on this
+  computer. macOS asks for your password once to install it." and the password box comes up only
+  when you choose Continue. It now says "OpenBot needs your password to install Podman, which runs
+  OpenBot's back end." Closing it without a password offers Continue again instead of stopping
+  Install. Windows and Linux install as before.
 - **The Account step says when it is waiting for Install to set up the engine.** On a new Mac it
   said "Checking your CopilotKit account…" for minutes while Install put Podman in, because the
-  sign-in check needs a running engine. It now says "OpenBot is setting up the software it runs on.
-  Your CopilotKit sign-in comes next.", with what Install is doing ("Installing Podman.",
-  "Preparing the engine machine.", "Starting the engine machine."). The desktop log says each change
-  once as `[account]`: what the CLI's preflight answered, the install step, how long the wait took
-  and what the sign-in check answered, and how long the browser sign-in took.
+  license agreement check needs a running engine. It now says "You're signed in. OpenBot is setting
+  up the software it runs on. The license agreement comes next.", with what Install is doing
+  ("Downloading Podman.", "Preparing the engine machine.", "Starting the engine machine."). The
+  desktop log says each change once as `[account]`: what the CLI's preflight answered, the install
+  step, how long the wait took and what the sign-in check answered, and how long the browser
+  sign-in took.
 - **Connecting an app from OpenBot Desktop brings you back to OpenBot Desktop.** The app's sign-in
   opens in your browser, and when it finished, the browser showed OpenBot in a new tab while the
   window behind it still had the app as not connected. The browser now shows a short "Back to

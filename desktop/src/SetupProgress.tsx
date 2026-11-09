@@ -34,6 +34,11 @@ export type Progress = {
    * password prompt. That window is in front of this one. See `handOffNow`.
    */
   elsewhere?: boolean;
+  /**
+   * The step waits for the person's go-ahead in this window before it raises the system's password
+   * prompt (`install::GoAhead`). See `goAheadNow`.
+   */
+  asks?: boolean;
 };
 
 /**
@@ -66,7 +71,21 @@ export function engineNow(steps: Progress[]): string | null {
   const preparing = [...steps]
     .reverse()
     .find((step) => step.running && PREPARING.has(step.step) && step.detail);
+  // Waiting for the person is not work going on: `goAheadNow` says it, with its own button.
+  if (preparing?.asks) return null;
   return preparing?.detail ?? null;
+}
+
+/**
+ * The line of a step that waits for the person's go-ahead before macOS asks for their password
+ * ("Podman is downloaded and ready to install."), or null. The screens explain what comes next
+ * and offer Continue (`PodmanGoAhead`).
+ */
+export function goAheadNow(steps: Progress[]): string | null {
+  const asking = [...steps]
+    .reverse()
+    .find((step) => step.running && step.asks && step.detail);
+  return asking?.detail ?? null;
 }
 
 /** Where OpenBot's own icon is, as this computer names it: macOS has a menu bar, Windows a tray. */

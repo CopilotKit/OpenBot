@@ -25,12 +25,15 @@ sequenceDiagram
   participant W as Window (App.tsx)
   participant N as Native side (src-tauri)
   participant C as Intelligence CLI (bundled)
-  P->>W: Get started (Welcome)
+  P->>W: Install (Welcome)
   W->>N: prepare_installation (Install starts at once)
   N->>N: engine, deployment download, image pulls
-  P->>W: Sign in to CopilotKit (Account)
-  W->>N: sign_in_to_copilotkit, local_eval_terms
-  N->>C: local login, terms
+  W->>N: sign_in_to_copilotkit (Account opens)
+  N->>C: login (no engine needed; opens the browser)
+  P->>W: Continue (macOS only, when Podman needs installing)
+  W->>N: allow_podman_install (the password prompt comes up)
+  W->>N: local_eval_terms, once an engine answers
+  N->>C: onboard local-terms
   P->>W: Accept the evaluation agreement
   Note over W,N: Once the engine answers, Intelligence setup is queued
   W->>N: set_up_local_eval
@@ -46,8 +49,11 @@ sequenceDiagram
 
 1. **Welcome.** The first click starts Install in the default folder, `~/OpenBot`. Install needs
    no account, so it runs while the person signs in.
-2. **Account.** The person signs in to CopilotKit in the browser and accepts the local evaluation
-   agreement. Nothing licensed is set up before this acceptance.
+2. **Account.** The browser sign-in opens as soon as the step does: the CLI's `login` needs no
+   container engine, and answers at once for a sign-in it already has. Then the person accepts the
+   local evaluation agreement, which the CLI reads only once an engine answers (`onboard
+   local-terms` checks the engine first), so on a new computer the step waits for Install here and
+   says what Install is doing. Nothing licensed is set up before this acceptance.
 3. **Install.** The app makes a container engine answer, lays out the deployment, and pulls the
    images. The screen shows each image, its size and the download speed
    (`desktop/src/SetupProgress.tsx`, `src-tauri/src/pull_metrics.rs`). Intelligence setup starts
@@ -130,8 +136,16 @@ fill a gap. Three rules hold that boundary:
 
 ## Decisions and the reasons for them
 
-- **Install before sign-in.** Downloading software needs no account, and it is the slow part.
-  Starting it on the first click means the person signs in while it runs.
+- **Install before sign-in, sign-in before the engine.** Downloading software needs no account, and
+  it is the slow part. Starting it on the first click means the person signs in while it runs. The
+  sign-in waits for nothing: someone who leaves while Podman installs has still signed in.
+- **No password prompt without an explanation first.** On macOS, Podman's package needs an
+  administrator, so macOS asks for the person's password. Install downloads the package, then waits
+  (`install::GoAhead`) while the window says what comes next and why, with one Continue button, as
+  Apple's guidance for a screen before a system prompt asks. The prompt names OpenBot and Podman
+  (`do shell script ... with prompt`). Closing it without a password asks again. Windows installs
+  Podman for the person's own account with no prompt. When WSL is missing, the step says that
+  Windows asks for administrator approval before Podman's own installer raises it.
 - **Licence work after acceptance.** Intelligence setup waits for the evaluation agreement, and
   uses the version of the terms the person accepted.
 - **One engine for both.** OpenBot and Intelligence share one container engine. The app uses, in

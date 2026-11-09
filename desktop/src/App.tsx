@@ -27,8 +27,10 @@ import {
 } from "./ProviderPicker";
 import { Sections } from "./Sections";
 import { StartFresh } from "./StartFresh";
+import { PodmanGoAhead } from "./PodmanGoAhead";
 import {
   engineNow,
+  goAheadNow,
   handOffNow,
   INSTALL_BLURB,
   type Progress,
@@ -722,6 +724,10 @@ function Setup() {
     if (localAuto) local.start();
   }, [localAuto, resumingStart]);
 
+  // Install waits for the person before macOS asks for their password: whichever screen they are
+  // on says why, with Continue. See `install::GoAhead`.
+  const goAhead = goAheadNow(steps);
+
   // Quit outranks every screen: the app is closing, whatever was on it.
   const quitting = useQuitStatus(false);
   if (quitting) return <ShuttingDown status={quitting} />;
@@ -802,6 +808,8 @@ function Setup() {
             steps={plainInstallSteps(steps, busy)}
             showElapsed={false}
           />
+          {/* Install waits for the person before macOS asks for their password. Its row says so. */}
+          {goAhead && <PodmanGoAhead asking={goAhead} quiet />}
           {/* Intelligence sets itself up alongside, once the install has Docker answering. */}
           <LocalStatus sequence={local} />
           {displayedFailure && <Failure problem={displayedFailure} />}
@@ -856,6 +864,8 @@ function Setup() {
           // while the account check waits on the engine, it says what Install is doing about it.
           handOff={handOffNow(steps)}
           engine={engineNow(steps)}
+          // Once signed in, the step explains the password prompt Install waits to raise.
+          goAhead={goAhead}
           onDone={(acceptedVersion) => {
             if (acceptedVersion) local.acceptTerms(acceptedVersion);
             // Intelligence sets itself up once the install has Docker answering; see above. The
@@ -950,6 +960,7 @@ function Setup() {
               : "Your installation and saved connections are ready to reopen."}
           </p>
           <LocalIntelligence sequence={local} offerStart handOff={handOff} />
+          {goAhead && <PodmanGoAhead asking={goAhead} />}
           {updatingLine}
           {displayedFailure && <Failure problem={displayedFailure} />}
           {/* While a local step runs, its Cancel is the only control. */}
@@ -1024,6 +1035,7 @@ function Setup() {
             it’s ready. This can take a few minutes.
           </p>
           <LocalIntelligence sequence={local} offerStart handOff={handOff} />
+          {goAhead && <PodmanGoAhead asking={goAhead} />}
           {updatingLine}
           {/* Leftover data is a choice, offered above, not a failure to report here. */}
           {displayedFailure && leftoverVolumes.length === 0 && (
