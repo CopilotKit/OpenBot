@@ -17,6 +17,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   "Preparing the engine machine.", "Starting the engine machine."). The desktop log says each change
   once as `[account]`: what the CLI's preflight answered, the install step, how long the wait took
   and what the sign-in check answered, and how long the browser sign-in took.
+- **Connecting an app from OpenBot Desktop brings you back to OpenBot Desktop.** The app's sign-in
+  opens in your browser, and when it finished, the browser showed OpenBot in a new tab while the
+  window behind it still had the app as not connected. The browser now shows a short "Back to
+  OpenBot" page, which records the account and opens the Desktop window where you left it. An app's
+  page in the window checks the account again when the window is back in front. Apps that sign in
+  through Arcade, or by their own sign-in page, still return to the browser tab.
+- **On a Mac, the window's buttons share a row with OpenBot's name and +.** The sidebar's header
+  started below the close, minimise and zoom buttons, under an empty strip. The buttons now sit 20pt
+  in and level with the header's first row, and the name and + start just to their right.
+  With the sidebar hidden, the page starts below them, and so does onboarding.
 - **OpenBot Desktop says it sends usage data, and Settings turns it off.** The first setup screen
   now says that OpenBot sends CopilotKit usage data linked to your CopilotKit account, that it never
   sends your conversations, files or keys, and links what it sends (`desktop/TELEMETRY.md`). Earlier
@@ -113,6 +123,23 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   other, and values landed in the wrong field. A LangGraph Bot now runs its browser calls in the
   order the model made them. An action that never finishes gives way to the next after
   `BROWSER_TURN_LIMIT_MS` (50 seconds by default), and one stopped while it waits never runs.
+
+### Smaller changes
+
+- Onboarding's OpenBot for Business step says what OpenBot for Business is before it asks for a
+  demo: work sign-in, Bots shared in Slack and Microsoft Teams, and the controls and audit trail,
+  beside the picture of running OpenBot yourself that the step showed before. Book a demo then
+  opens the calendar in the step, and its cookie banner no longer covers it.
+- The sidebar is solid again, without the frosted glass and the orb's colours behind it, and the
+  app is set in Inter again rather than Atkinson Hyperlegible Next. Inter now loads as the page's
+  own font, where the page had asked for an installed Inter and so fell back to the system font on
+  a computer without one. The page's background is its earlier shade, and OpenBot's name at the top
+  of the sidebar highlights on hover again, without the orb beside it.
+- New Bot's first screen is as it was before 1.0.0: the simple Bot's form, with **Connect a custom
+  agent** opening the list of frameworks, in their earlier order. LangChain keeps its own name and
+  mark.
+- The OpenBot version sits to the right of your name at the foot of the sidebar, where it was a
+  line under it.
 
 ## 1.0.0
 

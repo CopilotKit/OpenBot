@@ -4319,7 +4319,17 @@ fn show_openbot_on<R: tauri::Runtime>(
     refresh_menus(&app);
     // Only the owned app itself.
     trust_owned_app(&app, &url);
-    let destination = url;
+    // A debug build may show a developer's own app in its place, on this installation's back end.
+    let destination = match dev_app_url() {
+        Some(dev) => {
+            trust_owned_app(&app, &dev);
+            log::info!(
+                "[show] showing the developer's app at {dev} in place of the installation's"
+            );
+            dev
+        }
+        None => url,
+    };
     log::info!("[show] navigating to the owned OpenBot app");
     let window = app
         .get_webview_window("main")
@@ -4531,6 +4541,18 @@ link in the booking calendar's frame, which the page's shim can't reach) opens i
 browser for a site outside OpenBot, and nowhere otherwise. Without one, macOS opened nothing and
 Windows opened a bare browser window of its own. The configuration says `"create": false`.
 */
+/**
+Where the main window's buttons sit on macOS: 20pt in from the left, and low enough that their middle
+lines up with the first row of OpenBot's sidebar header (its name and +), which the page
+moves right to clear them (app/src/styles.css, `data-desktop-titlebar`).
+
+Set on the builder, not per page, because tao keeps it and puts the buttons back after anything that
+moves them (a resize, leaving full screen), and Tauri 2.12 can't change it after the window exists.
+So the setup screens have the buttons here too, where nothing of theirs is near them.
+*/
+#[cfg(target_os = "macos")]
+const TRAFFIC_LIGHTS: tauri::LogicalPosition<f64> = tauri::LogicalPosition { x: 20.0, y: 35.0 };
+
 fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
     let Some(config) = app
         .config()
@@ -4543,7 +4565,12 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
         return Ok(());
     };
     let opener = app.clone();
-    let window = tauri::WebviewWindowBuilder::from_config(app, &config)?
+    let builder = tauri::WebviewWindowBuilder::from_config(app, &config)?;
+    // The window's buttons on the same row as the OpenBot name and + in the sidebar's header, rather
+    // than above them (`TRAFFIC_LIGHTS`, and the page's styles that make room beside them).
+    #[cfg(target_os = "macos")]
+    let builder = builder.traffic_light_position(TRAFFIC_LIGHTS);
+    let window = builder
         .on_new_window(move |destination, _features| {
             outside_links::new_window(&destination, |to| {
                 use tauri_plugin_opener::OpenerExt;
@@ -5878,6 +5905,40 @@ fn desktop_test_app_url() -> Option<String> {
 #[cfg(not(debug_assertions))]
 fn desktop_test_app_url() -> Option<String> {
     None
+}
+
+/// An OpenBot app a developer runs from source (`OPENBOT_DEV_APP_URL`, such as `cd app && SERVER_PORT=3001 bun run dev
+/// --port 3030`, whose `/api` goes to this installation's server), shown in place of the installation's own once it has
+/// started, so a change to the app shows in the real window as it is saved. Unlike `OPENBOT_DESKTOP_TEST_APP_URL` it
+/// waits for the installation: setup and Start run as they always do. Debug builds only: a release binary never reads
+/// the variable.
+///
+/// `localhost` is read as `127.0.0.1`. Only a loopback IP is trusted as OpenBot's own page
+/// (`intelligence_bridge::app_origin`), so at `localhost` the window drew the system's title bar over a page that never
+/// made room for the buttons.
+#[cfg(debug_assertions)]
+fn dev_app_url() -> Option<String> {
+    let address = std::env::var("OPENBOT_DEV_APP_URL")
+        .ok()
+        .filter(|url| !url.is_empty())?;
+    Some(loopback_ip(&address))
+}
+
+#[cfg(not(debug_assertions))]
+fn dev_app_url() -> Option<String> {
+    None
+}
+
+/// `address` with a `localhost` host written as `127.0.0.1`, and unchanged otherwise.
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+fn loopback_ip(address: &str) -> String {
+    match tauri::Url::parse(address) {
+        Ok(mut url) if url.host_str() == Some("localhost") => {
+            let _ = url.set_host(Some("127.0.0.1"));
+            url.into()
+        }
+        _ => address.to_owned(),
+    }
 }
 
 /// Trust `address` as this shell's OpenBot and show it, the way `show_openbot` shows a verified one.
@@ -12361,6 +12422,22 @@ mod tests {
             (Some(720.0), Some(560.0))
         );
         assert_eq!(window.label(), "main");
+    }
+
+    /// The developer's app is trusted only at a loopback IP, so `localhost` is read as `127.0.0.1`.
+    #[test]
+    fn the_developers_app_at_localhost_is_shown_at_127_0_0_1() {
+        assert_eq!(
+            loopback_ip("http://localhost:3030"),
+            "http://127.0.0.1:3030/"
+        );
+        assert_eq!(
+            loopback_ip("http://127.0.0.1:3030"),
+            "http://127.0.0.1:3030"
+        );
+        assert_eq!(loopback_ip("http://[::1]:3030"), "http://[::1]:3030");
+        assert!(intelligence_bridge::app_origin(&loopback_ip("http://localhost:3030")).is_some());
+        assert!(intelligence_bridge::app_origin("http://localhost:3030").is_none());
     }
 
     #[test]
