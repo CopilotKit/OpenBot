@@ -154,6 +154,12 @@ export type ApprovalRuleInput = {
   scope: string;
   behaviour: RuleBehaviour;
 };
+/**
+ * Where saved rules came from, when they were not typed into the form: a sentence in plain English
+ * that the deployment's model wrote them from, and the admin then saved. The boundary's own shape
+ * (`PolicyAuthoring` in computer/policy-store.ts).
+ */
+export type ApprovalRuleAuthoring = { source: "english"; text: string };
 export type ApprovalPreferences = {
   enabled: boolean;
   autoReview: boolean;
@@ -197,6 +203,21 @@ export type ApprovalPolicyStore = {
     input: Partial<ApprovalRuleInput>,
   ): Promise<ApprovalTeamRule>;
   revokeTeamRule(by: string, id: string): Promise<void>;
+  /**
+   * Several team rules saved as one change, as a description in English writes them: all or none,
+   * with one row on the trail naming who saved them, the team rules before and after, and the
+   * sentence they were written from. Optional so older fakes keep working.
+   */
+  createTeamRules?(
+    by: string,
+    input: readonly ApprovalRuleInput[],
+    authoring?: ApprovalRuleAuthoring,
+  ): Promise<ApprovalTeamRule[]>;
+  /**
+   * The newest requests across every person, for replaying candidate rules over what people were
+   * asked and what they answered. Admin reads only. Optional so older fakes keep working.
+   */
+  recentRequests?(limit: number): Promise<ApprovalRecord[]>;
   /** The newest request in this conversation for an equivalent action, other than this call. */
   findEquivalent(input: {
     ownerUserId: string;
@@ -228,6 +249,12 @@ export type ApprovalPolicyStore = {
     initiator?: AuditInitiator;
     /** What the action was aimed at, so the row can name the file or page it was about. */
     target?: unknown;
+    /**
+     * The call this verdict is about, where it came from a conversation. A request the gate opens
+     * for the same call carries the same two ids, so a replay counts the verdict and its request as
+     * the one action they are (approvals/rule-backtest.ts).
+     */
+    call?: { runId: string; toolCallId: string };
   }): Promise<void>;
 };
 export type ApprovalPermit = {

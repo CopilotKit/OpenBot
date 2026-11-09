@@ -607,8 +607,25 @@ export const auditEventTypes = [
   "approval.evaluated",
   "approval.person_decided",
   "approval.withdrawn",
+  /*
+   * A rule change carries who made it (the row's actor) and, for a team rule, the team rules `before`
+   * and `after`. Rules saved together from a description are one row, targeted `team`, with `added`
+   * and `authoring` (`{ source: "english", text }`).
+   */
   "approval.rule_changed",
   "approval.settings_changed",
+  /**
+   * An admin described team approval rules in English and the deployment's model wrote them as rule
+   * rows (approvals/rule-translate.ts).
+   *
+   * Nothing changed: the rows are a draft until the admin saves them, and the save is its own
+   * `approval.rule_changed` row. This one answers "who asked for these rules, in what words, and what
+   * came back", including rows that never checked and a request no model was set up to answer.
+   * Target `approval_rule`; payload `actor`, `text` (the admin's words), `outcome` (`written`,
+   * `did_not_check`, `no_model` or `model_failed`), and when rows came back `rules`, `summary`,
+   * `explanation`, `warning`, `checked`, `attempts` and, for rows that did not check, `error`.
+   */
+  "approval.rules_translated",
   /*
    * Enterprise controls (server/src/admin). Every switch an administrator flips is on the trail with
    * who flipped it, because the table only holds the current answer.
