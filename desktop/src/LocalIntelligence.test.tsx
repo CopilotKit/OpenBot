@@ -1,6 +1,6 @@
+import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -709,17 +709,19 @@ test("setup that needs a CopilotKit sign-in offers it in the window, then carrie
 });
 
 /**
- * A fresh Mac with a small Docker stopped at Start with "The back end stopped with an error
- * partway through": the CLI's resource check failed. Its report, as `local_eval.rs` reads the
- * CLI's `LOCAL_DOCKER_RESOURCES_SHORT`, now says what is short and where to raise it.
+ * A fresh Mac stopped at Start with "The back end stopped with an error partway through": Docker's
+ * disk was full, and the CLI's resource check failed. Its report, as `local_eval.rs` reads the
+ * CLI's `LOCAL_DOCKER_RESOURCES_SHORT` with "0 GiB free storage (requires 40)", now says the disk
+ * is short and where to raise it.
  */
-test("a setup refused for too few CPUs or too little memory says so, with Retry", async () => {
+test("a setup refused for a full Docker disk says so, with Retry", async () => {
   invokeHandler = answers({
     set_up_local_eval: [
       report({
         outcome: "failed",
         stack: null,
-        reason: "docker-resources-short",
+        reason: "resources-short",
+        shortfall: { podman: false, cpu: false, memory: false, disk: true },
       }),
     ],
     local_eval_download: [null],
@@ -729,7 +731,7 @@ test("a setup refused for too few CPUs or too little memory says so, with Retry"
   await screen.findByRole("button", { name: "Retry" });
   const setup = row(screen, SETUP).textContent;
   expect(setup).toContain(
-    "Docker doesn't have enough free CPUs or memory for the back end. It needs at least 4 free CPUs and 4 GB of free memory. Raise them in Docker Desktop > Settings > Resources, then Retry.",
+    "Docker is out of disk space. OpenBot needs 40 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   expect(setup).not.toContain("partway through");
 });

@@ -6,6 +6,7 @@ import {
   type LocalReason,
   type LocalReport,
   localFailures,
+  type Shortfall,
 } from "./localEvalCli";
 import { localReadiness, type ReadinessInput } from "./localReadiness";
 
@@ -27,8 +28,7 @@ const reasons: LocalReason[] = [
   "confirmation-required",
   "dashboard-unavailable",
   "browser-open-failed",
-  "docker-resources-short",
-  "podman-resources-short",
+  "resources-short",
   "unrecognized",
 ];
 
@@ -88,7 +88,7 @@ test("every failure gives a plain, non-empty sentence without its own name or In
 });
 
 test("the reason and failure lists in this test match the source", () => {
-  expect(new Set(reasons).size).toBe(20);
+  expect(new Set(reasons).size).toBe(19);
   expect(localFailures.length).toBe(18);
 });
 
@@ -175,17 +175,44 @@ test("specific wording and actions", () => {
   ).toBe(
     "The back end stopped with an error partway through. OpenBot's log has the details.",
   );
-  // The CLI's resource check: what is short and where to raise it, on each engine.
-  expect(
-    said(report({ outcome: "failed", reason: "docker-resources-short" })),
-  ).toEqual({
+  // The CLI's resource check: which resource is short and where to raise it, on each engine.
+  const short = (shortfall: Partial<Shortfall>) =>
+    said(
+      report({
+        outcome: "failed",
+        reason: "resources-short",
+        shortfall: {
+          podman: false,
+          cpu: false,
+          memory: false,
+          disk: false,
+          ...shortfall,
+        },
+      }),
+    );
+  expect(short({ disk: true })).toEqual({
     state: "blocked",
-    said: "Docker doesn't have enough free CPUs or memory for the back end. It needs at least 4 free CPUs and 4 GB of free memory. Raise them in Docker Desktop > Settings > Resources, then Retry.",
+    said: "Docker is out of disk space. OpenBot needs 40 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
     action: "retry",
   });
+  expect(short({ cpu: true }).said).toBe(
+    "Docker doesn't have enough CPUs. OpenBot needs 4 free CPUs. Raise the CPU limit in Docker Desktop > Settings > Resources, then Retry.",
+  );
+  expect(short({ memory: true }).said).toBe(
+    "Docker doesn't have enough memory. OpenBot needs 4 GB of free memory. Raise the memory limit in Docker Desktop > Settings > Resources, then Retry.",
+  );
+  expect(short({ cpu: true, memory: true, disk: true }).said).toBe(
+    "Docker doesn't have enough CPUs, memory and disk space. OpenBot needs 4 free CPUs, 4 GB of free memory and 40 GB free. Raise the limits in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+  );
+  expect(short({ podman: true, disk: true }).said).toBe(
+    "Podman is out of disk space. OpenBot needs 40 GB free. Stop your Podman machine, run podman machine set --disk-size 160, start it again, then Retry.",
+  );
+  // A report that does not say which is still about resources, never "partway through".
   expect(
-    said(report({ outcome: "failed", reason: "podman-resources-short" })).said,
-  ).toContain("podman machine set");
+    said(report({ outcome: "failed", reason: "resources-short" })).said,
+  ).toBe(
+    "Docker doesn't have enough CPUs, memory or disk space for the back end. Raise them in Docker Desktop > Settings > Resources, then Retry.",
+  );
   expect(said("unavailable").action).toBeUndefined();
   expect(said("unverified").action).toBe("repair");
   expect(said("invalid-json")).toEqual({

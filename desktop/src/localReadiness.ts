@@ -16,6 +16,7 @@ import {
   type LocalReason,
   licenceExpiresSoon,
   onInstalledRelease,
+  type Shortfall,
 } from "./localEvalCli";
 
 /**
@@ -95,20 +96,83 @@ const quitUnexplained = blocked(
   "restart-intelligence",
 );
 
-/**
- * The CLI's resource check wants 4 free CPUs and 4 GB of free memory in the engine, measured at
- * Start while OpenBot's own containers run. Said with where to raise them.
- */
-export const DOCKER_RESOURCES_SHORT =
-  "Docker doesn't have enough free CPUs or memory for the back end. It needs at least 4 free CPUs and 4 GB of free memory. Raise them in Docker Desktop > Settings > Resources, then Retry.";
-export const PODMAN_RESOURCES_SHORT =
-  "Podman doesn't have enough free CPUs or memory for the back end. It needs at least 4 free CPUs and 4 GB of free memory. Stop your Podman machine, raise them with podman machine set --cpus 6 --memory 8192, start it again, then Retry.";
+type Resource = "cpu" | "memory" | "disk";
 
-/** OpenBot's own check before Start: the engine's totals, with room for OpenBot's own containers. */
-export function engineTooSmallSaid(podman: boolean): string {
-  return podman
-    ? "Podman needs at least 6 CPUs and 8 GB of memory to run the back end. Stop your Podman machine, run podman machine set --cpus 6 --memory 8192, start it again, then Try again."
-    : "Docker needs at least 6 CPUs and 8 GB of memory to run the back end. Raise them in Docker Desktop > Settings > Resources, then Try again.";
+function listed(words: string[]): string {
+  return words.length < 2
+    ? (words[0] ?? "")
+    : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
+}
+
+const resourceName: Record<Resource, string> = {
+  cpu: "CPUs",
+  memory: "memory",
+  disk: "disk space",
+};
+const limitName: Record<Resource, string> = {
+  cpu: "CPU",
+  memory: "memory",
+  disk: "disk",
+};
+// What `podman machine set` raises each to, for the minimum below.
+const podmanFlag: Record<Resource, string> = {
+  cpu: "--cpus 6",
+  memory: "--memory 8192",
+  disk: "--disk-size 160",
+};
+
+/**
+ * Which resource is short and where to raise it. `needs` is what OpenBot needs of each: free, at
+ * Start, as the CLI measures it, or in total, before it. Disk alone is "out of disk space".
+ */
+function shortfallSaid(
+  shortfall: Shortfall,
+  needs: Record<Resource, string>,
+  then: string,
+): string {
+  const engine = shortfall.podman ? "Podman" : "Docker";
+  const short = (["cpu", "memory", "disk"] as const).filter(
+    (resource) => shortfall[resource],
+  );
+  if (short.length === 0) {
+    const fix = shortfall.podman
+      ? "Stop your Podman machine, raise them with podman machine set, start it again"
+      : "Raise them in Docker Desktop > Settings > Resources";
+    return `${engine} doesn't have enough CPUs, memory or disk space for the back end. ${fix}, then ${then}.`;
+  }
+  const fix = shortfall.podman
+    ? `Stop your Podman machine, run podman machine set ${short.map((resource) => podmanFlag[resource]).join(" ")}, start it again`
+    : `Raise the ${short.length === 1 ? `${limitName[short[0]]} limit` : "limits"} in Docker Desktop > Settings > Resources${shortfall.disk ? ", or free space in Docker" : ""}`;
+  const said =
+    short.length === 1 && short[0] === "disk"
+      ? `${engine} is out of disk space. OpenBot needs ${needs.disk}.`
+      : `${engine} doesn't have enough ${listed(short.map((resource) => resourceName[resource]))}. OpenBot needs ${listed(short.map((resource) => needs[resource]))}.`;
+  return `${said} ${fix}, then ${then}.`;
+}
+
+/**
+ * The CLI's resource check at Start: 4 free CPUs, 4 GB of free memory and 40 GB of free disk, with
+ * OpenBot's own containers running.
+ */
+export function resourcesShortSaid(shortfall: Shortfall): string {
+  return shortfallSaid(
+    shortfall,
+    {
+      cpu: "4 free CPUs",
+      memory: "4 GB of free memory",
+      disk: "40 GB free",
+    },
+    "Retry",
+  );
+}
+
+/** OpenBot's own check before Start: the engine's totals, with room for its own containers. */
+export function engineTooSmallSaid(shortfall: Shortfall): string {
+  return shortfallSaid(
+    shortfall,
+    { cpu: "6 CPUs", memory: "8 GB of memory", disk: "40 GB free" },
+    "Try again",
+  );
 }
 
 // Compiler-enforced: a new upstream reason or failure breaks the build here.
@@ -149,8 +213,16 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
     "retry",
   ),
   "browser-open-failed": blocked("Your browser did not open.", "retry"),
-  "docker-resources-short": blocked(DOCKER_RESOURCES_SHORT, "retry"),
-  "podman-resources-short": blocked(PODMAN_RESOURCES_SHORT, "retry"),
+  // Said with the resource when the report names it: see `intelligenceRow`.
+  "resources-short": blocked(
+    resourcesShortSaid({
+      podman: false,
+      cpu: false,
+      memory: false,
+      disk: false,
+    }),
+    "retry",
+  ),
   unrecognized: couldNotStart,
 };
 
@@ -239,6 +311,9 @@ function intelligenceRow(
         ? "The back end is ready. Its evaluation licence expires within 5 days."
         : "The back end is ready.",
     };
+  }
+  if (intelligence.reason === "resources-short" && intelligence.shortfall) {
+    return blocked(resourcesShortSaid(intelligence.shortfall), "retry");
   }
   if (intelligence.reason !== null) return reasonRows[intelligence.reason];
   if (intelligence.outcome !== "completed") return couldNotStart;

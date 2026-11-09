@@ -11701,6 +11701,7 @@ mod tests {
             licence_expires_at: None,
             update_to: None,
             checks_passed: false,
+            shortfall: None,
         }
     }
 

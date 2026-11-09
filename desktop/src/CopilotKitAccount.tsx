@@ -135,7 +135,7 @@ export function CopilotKitAccount({
         }
         waitingSince.current = null;
         if (terms.status === "engine-too-small")
-          setSeen({ at: "failed", said: engineTooSmallSaid(terms.podman) });
+          setSeen({ at: "failed", said: engineTooSmallSaid(terms) });
         else if (terms.status === "signed-out") setSeen({ at: "signed-out" });
         else if (terms.status === "required" && !terms.accepted)
           setSeen({ at: "agreement", terms });
