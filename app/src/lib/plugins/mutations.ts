@@ -433,27 +433,48 @@ export function connectAccountMutationOptions(
   returnTo: "settings" | "admin" = "settings",
 ) {
   return mutationOptions({
-    mutationFn: async (serverId: string): Promise<ConnectStart> => {
-      const fallback = "Couldn't connect that account.";
-      const response = await client(
-        `/api/plugins/servers/${encodeURIComponent(serverId)}/connect?returnTo=${returnTo}`,
-        { method: "POST", fallback },
-      );
-      // Read as `client` reads an envelope: a body that is not an object is a failed request.
-      const body = (await response.json().catch(() => null)) as unknown;
-      if (!body || typeof body !== "object" || Array.isArray(body)) {
-        throw new Error(fallback);
-      }
-      const answer = body as {
-        authorizationUrl?: unknown;
-        connected?: unknown;
-      };
-      if (answer.connected === true) return { connected: true };
-      return typeof answer.authorizationUrl === "string"
-        ? { authorizationUrl: answer.authorizationUrl }
-        : null;
-    },
+    mutationFn: (serverId: string): Promise<ConnectStart> =>
+      startConnect(serverId, returnTo, false),
   });
+}
+
+/**
+ * Connect one more account at an app the person already has an account at: a second mailbox, a
+ * work calendar beside a personal one. The same press as Connect, asking for another account
+ * rather than for more permissions on the one that stands.
+ */
+export function connectAnotherAccountMutationOptions(
+  returnTo: "settings" | "admin" = "settings",
+) {
+  return mutationOptions({
+    mutationFn: (serverId: string): Promise<ConnectStart> =>
+      startConnect(serverId, returnTo, true),
+  });
+}
+
+async function startConnect(
+  serverId: string,
+  returnTo: "settings" | "admin",
+  another: boolean,
+): Promise<ConnectStart> {
+  const fallback = "Couldn't connect that account.";
+  const response = await client(
+    `/api/plugins/servers/${encodeURIComponent(serverId)}/connect?returnTo=${returnTo}${another ? "&another=1" : ""}`,
+    { method: "POST", fallback },
+  );
+  // Read as `client` reads an envelope: a body that is not an object is a failed request.
+  const body = (await response.json().catch(() => null)) as unknown;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new Error(fallback);
+  }
+  const answer = body as {
+    authorizationUrl?: unknown;
+    connected?: unknown;
+  };
+  if (answer.connected === true) return { connected: true };
+  return typeof answer.authorizationUrl === "string"
+    ? { authorizationUrl: answer.authorizationUrl }
+    : null;
 }
 
 /**
@@ -532,6 +553,41 @@ export function disconnectBrokeredMutationOptions(queryClient: QueryClient) {
   });
 }
 
+const ACCOUNT_FALLBACK = "Couldn't change that account.";
+
+/** Make one of the person's accounts at an app the one their Bots use when they name none. */
+export function setDefaultBrokeredAccountMutationOptions(
+  queryClient: QueryClient,
+) {
+  return mutationOptions({
+    mutationFn: async (variables: { serverId: string; accountId: string }) => {
+      await client(
+        `/api/plugins/servers/${encodeURIComponent(variables.serverId)}/accounts/${encodeURIComponent(variables.accountId)}/default`,
+        { method: "POST", fallback: ACCOUNT_FALLBACK },
+      );
+    },
+    onSettled: () => invalidatePlugins(queryClient),
+  });
+}
+
+/**
+ * Disconnect one of the person's accounts at an app and keep the rest. The last one ends the
+ * connection, as Disconnect always has.
+ */
+export function disconnectBrokeredAccountMutationOptions(
+  queryClient: QueryClient,
+) {
+  return mutationOptions({
+    mutationFn: async (variables: { serverId: string; accountId: string }) => {
+      await client(
+        `/api/plugins/servers/${encodeURIComponent(variables.serverId)}/accounts/${encodeURIComponent(variables.accountId)}`,
+        { method: "DELETE", fallback: "Couldn't disconnect that account." },
+      );
+    },
+    onSettled: () => invalidatePlugins(queryClient),
+  });
+}
+
 export function removeSkillMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (slug: string) => {
@@ -580,19 +636,31 @@ export type BrokerField = {
  */
 export function brokeredConnectionFieldsMutationOptions() {
   return mutationOptions({
-    mutationFn: async (serverId: string): Promise<BrokerField[] | null> => {
-      const fields = await client<BrokerField[] | undefined>(
+    mutationFn: async (serverId: string): Promise<KeyForm | null> => {
+      const fallback = "Couldn't find out what this app needs.";
+      const response = await client(
         `/api/plugins/servers/${encodeURIComponent(serverId)}/connect`,
-        "fields",
-        {
-          method: "POST",
-          fallback: "Couldn't find out what this app needs.",
-        },
+        { method: "POST", fallback },
       );
-      return fields ?? null;
+      const body = (await response.json().catch(() => null)) as {
+        fields?: BrokerField[];
+        guide?: KeyGuide;
+      } | null;
+      if (!body || typeof body !== "object") throw new Error(fallback);
+      if (!body.fields) return null;
+      return { fields: body.fields, guide: body.guide ?? null };
     },
   });
 }
+
+/**
+ * Where a person gets the key an app asks for: what to do there, and the provider's own page for
+ * it. `url` is null where nobody has a page to point at; the steps are always there.
+ */
+export type KeyGuide = { steps: string; url: string | null };
+
+/** What the first press on a key app answers: the boxes to fill in, and where the key comes from. */
+export type KeyForm = { fields: BrokerField[]; guide: KeyGuide | null };
 
 /**
  * What handing a key over comes back with. Declared once, for the reason

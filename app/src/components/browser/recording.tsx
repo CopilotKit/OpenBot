@@ -37,6 +37,7 @@ import {
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import type { NarrationChoice } from "./narration-choice";
+import { useMicrophone } from "./use-microphone";
 
 /** The language narration is heard in: the person's own browser's. */
 export function narrationLanguage(): string {
@@ -130,7 +131,9 @@ export type RecordingStart = {
  *
  * Record asks the person whether to narrate when they have never said (`choice`, their account's preference, the same
  * in every browser they record in), in a dialog whose answer records and is kept, and tells the Recorder the answer
- * with every recording, so a microphone opens only for a person who chose to narrate.
+ * with every recording, so a microphone opens only for a person who chose to narrate. On a computer with no microphone
+ * there is nothing to narrate with, so it asks nothing and records without narration, the choice left unmade for when
+ * one is plugged in.
  */
 export function useRecordingWith<Started, Stopped>({
   recorder,
@@ -151,6 +154,7 @@ export function useRecordingWith<Started, Stopped>({
   const [finishing, setFinishing] = useState(false);
   /** The narration question is on screen, for the task named when Record was pressed. */
   const [asking, setAsking] = useState(false);
+  const noMicrophone = useMicrophone() === false;
   const start = useMutation(startOptions);
   const stop = useMutation(stopOptions);
   const phase = recorder?.phase ?? "idle";
@@ -198,11 +202,13 @@ export function useRecordingWith<Started, Stopped>({
       if (!name) return;
       // Asked only of a person who never chose: a choice the page has not heard yet is read first.
       const narration = await choice.read();
-      if (narration === null) {
+      // No microphone: the page already says narration is off, so nothing is offered that could not be heard.
+      if (narration === null && !noMicrophone) {
         setAsking(true);
         return;
       }
-      // Unreadable: recorded without narration, the microphone closed, and the choice left as it is.
+      // Unreadable, or never made on a computer with no microphone: recorded without narration, the microphone
+      // closed, and the choice left as it is.
       begin(name, narration === "on");
     },
     /** The narration question, while it is asked: its dialog's props. */

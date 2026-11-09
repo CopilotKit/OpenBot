@@ -2054,6 +2054,52 @@ test("Record asks whether to narrate before the first recording, keeps the answe
   expect(view.queryByRole("dialog")).toBeNull();
 });
 
+test("in the OpenBot Desktop window on a computer with no microphone, Record asks nothing about narration and records without it; with a microphone it still asks", async () => {
+  // Windows with no microphone: the page said "No microphone found. Narration is off." with its switch off, yet Start
+  // recording still asked "Narrate while you record?", offering Record with narration first.
+  narrationChoice = null;
+  state = screenState();
+  openAnswer = answerFor("screen");
+  installChrome(null);
+  installDesktopShell();
+  const devices = installDevices(["audioinput", "audiooutput"]);
+  try {
+    const view = draw(<BrowserPage />);
+    const user = userEvent.setup({ document });
+    await user.type(await taskField(view, user), "Submit an expense report");
+
+    // With a microphone, the first Record asks, exactly as before.
+    await pressRecord(view, user);
+    const question = await view.findByRole("dialog", {
+      name: "Narrate while you record?",
+    });
+    expect(
+      within(question).getByRole("button", { name: "Record with narration" }),
+    ).toBeTruthy();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+    expect(starts()).toEqual([]);
+
+    // The microphone unplugged: Record records at once, without narration, and the choice stays unmade.
+    devices.kinds = ["audiooutput"];
+    await act(async () => {
+      devices.dispatchEvent(new Event("devicechange"));
+    });
+    expect(
+      await view.findByText("No microphone found. Narration is off."),
+    ).toBeTruthy();
+    await pressRecord(view, user);
+    await waitFor(() => expect(starts()).toHaveLength(1));
+    expect(starts()[0]?.body).toMatchObject({ narrate: false });
+    expect(
+      view.queryByRole("dialog", { name: "Narrate while you record?" }),
+    ).toBeNull();
+    expect(preferenceWrites()).toEqual([]);
+  } finally {
+    delete (navigator as { mediaDevices?: unknown }).mediaDevices;
+  }
+});
+
 test("a choice still being read when Record is pressed is read, not asked again", async () => {
   // The person chose narration on long ago. Their preferences took a moment to arrive, and a Record pressed meanwhile
   // asked them again, as if they never had.

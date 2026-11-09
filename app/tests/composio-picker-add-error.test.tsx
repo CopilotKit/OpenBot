@@ -96,6 +96,8 @@ beforeEach(() => {
             logo: null,
             categories: [],
             actionCount: 167,
+            // What the server sends on every row; Slack and Gmail are both sign-in apps.
+            connection: { kind: "consent" },
             enabled: false,
           },
           {
@@ -105,6 +107,8 @@ beforeEach(() => {
             logo: null,
             categories: [],
             actionCount: 42,
+            // What the server sends on every row; Slack and Gmail are both sign-in apps.
+            connection: { kind: "consent" },
             enabled: false,
           },
         ],

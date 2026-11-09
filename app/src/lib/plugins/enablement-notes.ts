@@ -89,9 +89,47 @@ export function consentBreadth(
  * render; sorting it in place would rewrite what the cache holds. By name rather than by the
  * vendor's own order, which is popularity — useful for a landing page, useless for finding the one
  * app somebody typed half the name of.
+ *
+ * APPS YOU SIGN IN TO COME FIRST, THEN APPS THAT NEED A KEY, each half by name. Most of the
+ * catalogue only takes a key or a token typed in, and someone browsing expects a sign-in. Listing
+ * the sign-in apps first puts the ones anybody can connect at the top of every search, and each
+ * key app's row says so (see {@link keyNeededLine}).
  */
 export function matchingApps(apps: ComposioApp[]): ComposioApp[] {
-  return [...apps].sort((left, right) => left.name.localeCompare(right.name));
+  return [...apps].sort(
+    (left, right) =>
+      Number(needsKey(left)) - Number(needsKey(right)) ||
+      left.name.localeCompare(right.name),
+  );
+}
+
+/** The schemes whose secret a person types, which is the whole of what a key app means here. */
+const FIELD_SCHEMES = [
+  "API_KEY",
+  "BASIC",
+  "BEARER_TOKEN",
+  "BASIC_WITH_JWT",
+  "S2S_OAUTH2",
+];
+
+/** Whether an added app's recorded scheme is one a person types a key for. */
+export function schemeNeedsKey(authScheme: string | null): boolean {
+  return authScheme !== null && FIELD_SCHEMES.includes(authScheme);
+}
+
+/** Whether connecting this app means typing a key from it rather than signing in. */
+export function needsKey(app: Pick<ComposioApp, "connection">): boolean {
+  return app.connection.kind === "fields";
+}
+
+/**
+ * The line on a directory row that says, before anybody adds the app, that it takes a key.
+ * Null for an app you sign in to, or one that needs nothing.
+ */
+export function keyNeededLine(
+  app: Pick<ComposioApp, "connection" | "name">,
+): string | null {
+  return needsKey(app) ? `Needs a key from ${app.name}` : null;
 }
 
 /**

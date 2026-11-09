@@ -178,3 +178,38 @@ export function mintDeploymentVendorUserId(
   }
   return `${DEPLOYMENT_VENDOR_PREFIX}${named}:${random()}`;
 }
+
+/**
+ * What separates a person's own broker id from the id a further account of theirs is filed under.
+ *
+ * Arcade keeps one account per user id and auth provider, so a person's second Gmail there is filed
+ * under `<their id>~<suffix>`. The suffix is random and minted once, when they press Connect another
+ * account; every such id starts with their own id and this mark, which is how a call checks that an
+ * account it was pointed at is filed under the person in the session and nobody else.
+ */
+export const ANOTHER_ACCOUNT_MARK = "~";
+
+/** A fresh id to file one more of this person's accounts under, at a broker that needs one. */
+export function anotherArcadeAccount(
+  account: Extract<AccountRef, { holder: "person" }>,
+): Extract<AccountRef, { holder: "person" }> {
+  return {
+    ...account,
+    vendorUserId: `${account.vendorUserId}${ANOTHER_ACCOUNT_MARK}${randomBytes(4).toString("hex")}`,
+  };
+}
+
+/** Whether `vendorUserId` is this person's own broker id, or one of their further accounts' ids. */
+export function filedUnderPerson(
+  vendorUserId: string,
+  personVendorUserId: string,
+): boolean {
+  return (
+    vendorUserId === personVendorUserId ||
+    (vendorUserId.startsWith(`${personVendorUserId}${ANOTHER_ACCOUNT_MARK}`) &&
+      vendorUserId.length > personVendorUserId.length + 1 &&
+      !vendorUserId
+        .slice(personVendorUserId.length + 1)
+        .includes(ANOTHER_ACCOUNT_MARK))
+  );
+}
