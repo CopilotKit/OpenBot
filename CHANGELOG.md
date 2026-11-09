@@ -229,6 +229,8 @@ deployment:
 - Onboarding's Book a demo step has one button under the calendar, **Not now**, which moves on
   without booking. It had Continue beside Not now, which read as going on with the booking. Once
   you book a time in the calendar, Not now becomes **Continue**.
+- The "Browse Google Maps" starter task asks the Bot to list the walking directions from King's
+  Cross step by step, where a Bot could reply with only the walking time and distance.
 
 ## 0.3.4
 
