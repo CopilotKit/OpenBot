@@ -1123,6 +1123,7 @@ test("a relaunch whose start fails on a nearly full disk names the disk on its r
           diskGb: "30.5",
           nearlyFull: true,
           diskSizeGb: "1006.8",
+          wsl: true,
           drive: "C:",
         },
       });
@@ -1134,7 +1135,7 @@ test("a relaunch whose start fails on a nearly full disk names the disk on its r
   await screen.findByRole("button", { name: "Retry" });
   const waiting = row(screen, WAIT).textContent;
   expect(waiting).toContain(
-    "The back end's disk is nearly full. Podman has 30.5 GB free of 1006.8 GB. OpenBot needs 40 GB. Free space on drive C: or in Podman, then Retry.",
+    "The back end's disk is nearly full. Podman has 30.5 GB free of 1006.8 GB. OpenBot needs 40 GB. Free space on the drive that holds OpenBot's engine (C:), then Retry.",
   );
   expect(waiting).not.toContain("partway through");
   expect(commands()).toEqual(["run_local_eval:status", "run_local_eval:start"]);

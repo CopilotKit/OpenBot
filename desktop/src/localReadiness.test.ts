@@ -240,25 +240,32 @@ test("specific wording and actions", () => {
       diskGb: "30.5",
       nearlyFull: true,
       diskSizeGb: "1006.8",
+      wsl: true,
       drive: "C:",
     }).said,
   ).toBe(
-    "The back end's disk is nearly full. Podman has 30.5 GB free of 1006.8 GB. OpenBot needs 40 GB. Free space on drive C: or in Podman, then Retry.",
+    "The back end's disk is nearly full. Podman has 30.5 GB free of 1006.8 GB. OpenBot needs 40 GB. Free space on the drive that holds OpenBot's engine (C:), then Retry.",
   );
   expect(
-    short({ podman: true, disk: true, diskGb: "30", drive: "C:" }).said,
+    short({ podman: true, disk: true, diskGb: "30", wsl: true, drive: "C:" })
+      .said,
   ).toBe(
-    "Podman has 30 GB of free disk. OpenBot needs 40 GB. Free space on drive C: or in Podman, then Retry.",
+    "Podman has 30 GB of free disk. OpenBot needs 40 GB. Free space on the drive that holds OpenBot's engine (C:), then Retry.",
+  );
+  // On Windows, never `podman machine set --disk-size`: Podman refuses it for WSL machines, even
+  // when WSL did not say which drive holds the disk.
+  expect(short({ podman: true, disk: true, wsl: true }).said).toBe(
+    "Podman is out of disk space. OpenBot needs 40 GB free. Free space on the drive that holds OpenBot's engine, then Retry.",
   );
   expect(
     short({
       disk: true,
-      diskGb: "300",
+      diskGb: "160",
       nearlyFull: true,
       diskSizeGb: "1827.9",
     }).said,
   ).toBe(
-    "The back end's disk is nearly full. Docker has 300 GB free of 1827.9 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+    "The back end's disk is nearly full. Docker has 160 GB free of 1827.9 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   expect(
     short({
@@ -271,10 +278,14 @@ test("specific wording and actions", () => {
   ).toBe(
     "The back end's disk is nearly full. Podman has 8 GB free of 60 GB. OpenBot needs 40 GB. Stop your Podman machine, run podman machine set --disk-size 160, start it again, then Retry.",
   );
-  // Podman on Windows short of CPUs too: those are raised, the drive's space is freed.
-  expect(short({ podman: true, cpu: true, disk: true, drive: "C:" }).said).toBe(
-    "Podman doesn't have enough CPUs and disk space. OpenBot needs 4 free CPUs and 40 GB free. Stop your Podman machine, run podman machine set --cpus 6, start it again, and free space on drive C: or in Podman, then Retry.",
-  );
+  // Space was freed and k3s still says the disk is low: wait, rather than free more.
+  expect(
+    short({ podman: true, recovering: true, wsl: true, drive: "C:" }),
+  ).toEqual({
+    state: "blocked",
+    said: "The back end is recovering from low disk space. Wait a few minutes, then Retry.",
+    action: "retry",
+  });
   // The account step's check before a first setup, on Windows.
   expect(
     engineTooSmallSaid({
@@ -282,10 +293,11 @@ test("specific wording and actions", () => {
       cpu: false,
       memory: false,
       disk: true,
+      wsl: true,
       drive: "C:",
     }),
   ).toBe(
-    "Podman is out of disk space. OpenBot needs 40 GB free. Free space on drive C: or in Podman, then Try again.",
+    "Podman is out of disk space. OpenBot needs 40 GB free. Free space on the drive that holds OpenBot's engine (C:), then Try again.",
   );
   // A report that does not say which is still about resources, never "partway through".
   expect(

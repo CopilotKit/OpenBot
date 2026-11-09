@@ -277,8 +277,15 @@ pub struct Shortfall {
     /// How large that disk is, in GiB to one decimal, beside `disk_gb`, when it is nearly full.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disk_size_gb: Option<String>,
-    /// Podman on Windows: the drive that holds its machine's disk, `C:`. Space is freed there, not
-    /// raised with `podman machine set`.
+    /// The node still reports `DiskPressure` with the disk above both lines: k3s keeps the
+    /// condition for five minutes after space is freed, and the back end recovers by itself.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub recovering: bool,
+    /// Podman on Windows, whose machine runs in WSL: `podman machine set` changes none of its
+    /// resources there, and its disk is freed on the drive that holds it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub wsl: bool,
+    /// That drive, `C:`, when WSL says where the machine's disk is.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub drive: Option<String>,
 }
@@ -292,7 +299,7 @@ fn shown(value: f64) -> String {
 
 impl Shortfall {
     fn named(&self) -> bool {
-        self.cpu || self.memory || self.disk
+        self.cpu || self.memory || self.disk || self.recovering
     }
 }
 
@@ -857,7 +864,9 @@ pub enum Terms {
         cpu: bool,
         memory: bool,
         disk: bool,
-        /// Podman on Windows: the drive that holds its machine's disk (`Shortfall::drive`).
+        /// Podman on Windows, in WSL (`Shortfall::wsl`), and the drive that holds its disk.
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        wsl: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         drive: Option<String>,
     },
@@ -1375,10 +1384,34 @@ impl EngineCheck {
     85). A relaunched back end runs none yet, so that is when it loses them.
     */
     fn nearly_full(&self) -> bool {
-        self.pressure == Some(true)
-            || self
-                .disk
-                .is_some_and(|disk| u128::from(disk.free) * 100 < u128::from(disk.size) * 15)
+        self.pressure == Some(true) && !self.recovering() || self.below_image_line()
+    }
+
+    /// Less than 15% of the node's disk free: the kubelet removes images it is not running.
+    fn below_image_line(&self) -> bool {
+        self.disk
+            .is_some_and(|disk| u128::from(disk.free) * 100 < u128::from(disk.size) * 15)
+    }
+
+    /// Below the CLI's 40 GiB, or below the kubelet's image line.
+    fn low_on_disk(&self) -> bool {
+        self.free_disk()
+            .is_some_and(|free| free < MIN_ENGINE_FREE_DISK_BYTES)
+            || self.below_image_line()
+    }
+
+    /**
+    The node still says `DiskPressure`, but the disk is above both lines: space was freed, and k3s
+    keeps the condition for five minutes after (`evictionPressureTransitionPeriod`). The back end
+    recovers by itself, and a Retry in those minutes only fails again.
+    */
+    fn recovering(&self) -> bool {
+        self.pressure == Some(true) && self.free_disk().is_some() && !self.low_on_disk()
+    }
+
+    /// Podman on Windows, whose machine runs in WSL.
+    fn wsl(&self) -> bool {
+        self.podman && (cfg!(target_os = "windows") || self.drive.is_some())
     }
 
     /// What is short, with the numbers. Anything not measured is not judged.
@@ -1387,6 +1420,8 @@ impl EngineCheck {
         let free = self.free_disk();
         let mut short = engine_shortfall(cpus, memory, free);
         short.podman = self.podman;
+        short.wsl = self.wsl();
+        short.recovering = self.recovering();
         short.nearly_full = self.nearly_full();
         short.disk |= short.nearly_full;
         if short.disk {
@@ -1442,7 +1477,10 @@ impl EngineCheck {
                 "disk (OpenBot needs 40 GiB free)"
             });
         }
-        let verdict = if !verdict.is_empty() {
+        let verdict = if short.recovering && verdict.is_empty() {
+            "recovering: the node still reports disk pressure with the disk above both lines"
+                .to_owned()
+        } else if !verdict.is_empty() {
             format!("short of {}", verdict.join(", "))
         } else if self.size.is_none() && self.free_disk().is_none() {
             "not measured".to_owned()
@@ -1483,6 +1521,7 @@ pub fn engine_size_terms() -> Option<Terms> {
         cpu: short.cpu,
         memory: short.memory,
         disk: short.disk,
+        wsl: check.wsl(),
         drive: check.drive.and_then(|drive| drive.drive),
     })
 }
@@ -6997,6 +7036,7 @@ overlay 164506208 20481024 135620148 14% /
                 cpu: false,
                 memory: false,
                 disk: true,
+                wsl: false,
                 drive: None,
             })
             .unwrap(),
@@ -7008,10 +7048,11 @@ overlay 164506208 20481024 135620148 14% /
                 cpu: false,
                 memory: false,
                 disk: true,
+                wsl: true,
                 drive: Some("C:".into()),
             })
             .unwrap(),
-            json!({ "status": "engine-too-small", "podman": true, "cpu": false, "memory": false, "disk": true, "drive": "C:" })
+            json!({ "status": "engine-too-small", "podman": true, "cpu": false, "memory": false, "disk": true, "wsl": true, "drive": "C:" })
         );
     }
 
@@ -7454,7 +7495,8 @@ fn main() {
             wire["shortfall"],
             json!({
                 "podman": true, "cpu": false, "memory": false, "disk": true,
-                "diskGb": "30.5", "nearlyFull": true, "diskSizeGb": "1006.8", "drive": "C:"
+                "diskGb": "30.5", "nearlyFull": true, "diskSizeGb": "1006.8",
+                "wsl": true, "drive": "C:"
             })
         );
         assert_eq!(
@@ -7484,12 +7526,12 @@ fn main() {
             "WARN [local check] after local start failed: 10 CPUs and 20.5 GiB of memory, 30 GiB free of 64 GiB in a container, no disk pressure; short of disk (OpenBot needs 40 GiB free)"
         );
 
-        // 300 GiB free of a 1.8 TiB disk is above both lines, but the node still says
-        // DiskPressure: k3s holds it for five minutes after the kubelet freed space.
+        // Docker on a 1.8 TiB disk with 160 GiB free, its node under DiskPressure: nearly full
+        // by k3s's own line, though above the CLI's 40 GiB.
         lab.engine(
             crate::engine::Engine::Docker,
             DOCKER_INFO,
-            &df(1_916_694_008, 300 * KIB_PER_GIB),
+            &df(1_916_694_008, 160 * KIB_PER_GIB),
             Some(&nodes(true)),
             None,
         );
@@ -7499,8 +7541,45 @@ fn main() {
             wire["shortfall"],
             json!({
                 "podman": false, "cpu": false, "memory": false, "disk": true,
-                "diskGb": "300", "nearlyFull": true, "diskSizeGb": "1827.9"
+                "diskGb": "160", "nearlyFull": true, "diskSizeGb": "1827.9"
             })
+        );
+        checks_logged();
+    }
+
+    /**
+    Windows, once space was freed: k3s keeps its DiskPressure condition for five minutes after, and
+    a Retry in those minutes failed again, three times over six minutes. A start that fails while
+    the node still says DiskPressure, with the disk above both lines, says the back end is
+    recovering, so the card can say to wait rather than to free more space.
+    */
+    #[test]
+    fn a_start_that_fails_while_the_node_recovers_from_low_disk_says_so() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_start_that_fails_while_the_node_recovers_from_low_disk_says_so",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("start-recovering");
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 941 * KIB_PER_GIB),
+            Some(&nodes(true)),
+            drive(1200),
+        );
+        let wire = serde_json::to_value(lab.start(&format!("1\n{}", start_failed()))).unwrap();
+        assert_eq!(wire["reason"], json!("resources-short"));
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": true, "cpu": false, "memory": false, "disk": false,
+                "recovering": true, "wsl": true, "drive": "C:"
+            })
+        );
+        assert_eq!(
+            checks_logged().last().unwrap(),
+            "WARN [local check] after local start failed: 4 CPUs and 5.8 GiB of memory, 941 GiB free of 1006.8 GiB in a container, 120 GiB free on C:, the node reports disk pressure; recovering: the node still reports disk pressure with the disk above both lines"
         );
     }
 
@@ -7531,7 +7610,7 @@ fn main() {
             wire["shortfall"],
             json!({
                 "podman": true, "cpu": false, "memory": false, "disk": true,
-                "diskGb": "30", "drive": "C:"
+                "diskGb": "30", "wsl": true, "drive": "C:"
             })
         );
         assert_eq!(
@@ -7545,7 +7624,7 @@ fn main() {
             serde_json::to_value(engine_size_terms()).unwrap(),
             json!({
                 "status": "engine-too-small", "podman": true, "cpu": false, "memory": false,
-                "disk": true, "drive": "C:"
+                "disk": true, "wsl": true, "drive": "C:"
             })
         );
     }

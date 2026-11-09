@@ -96,7 +96,14 @@ export type Shortfall = {
    */
   nearlyFull?: boolean;
   diskSizeGb?: string;
-  /** Podman on Windows: the drive that holds its machine's disk, `C:`. */
+  /**
+   * The node still reports low disk with the disk above both lines: space was freed, and the
+   * back end recovers by itself within minutes.
+   */
+  recovering?: boolean;
+  /** Podman on Windows, in WSL: `podman machine set` changes nothing there. */
+  wsl?: boolean;
+  /** The drive that holds its machine's disk, `C:`. */
   drive?: string;
 };
 

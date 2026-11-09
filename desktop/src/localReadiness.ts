@@ -134,6 +134,10 @@ function shortfallSaid(
   const short = (["cpu", "memory", "disk"] as const).filter(
     (resource) => shortfall[resource],
   );
+  // Space was freed, and k3s still says the disk is low for a few minutes after.
+  if (shortfall.recovering && short.length === 0) {
+    return `The back end is recovering from low disk space. Wait a few minutes, then ${then}.`;
+  }
   if (short.length === 0) {
     const fix = shortfall.podman
       ? "Stop your Podman machine, raise them with podman machine set, start it again"
@@ -141,7 +145,7 @@ function shortfallSaid(
     return `${engine} doesn't have enough CPUs, memory or disk space for the back end. ${fix}, then ${then}.`;
   }
   const fix = shortfall.podman
-    ? podmanFix(short, shortfall.drive)
+    ? podmanFix(short, shortfall)
     : `Raise the ${short.length === 1 ? `${limitName[short[0]]} limit` : "limits"} in Docker Desktop > Settings > Resources${shortfall.disk ? ", or free space in Docker" : ""}`;
   // OpenBot's own check after a start that failed: k3s itself is short of disk.
   if (shortfall.nearlyFull && short.length === 1) {
@@ -177,18 +181,21 @@ function shortfallSaid(
 }
 
 /**
- * Where Podman raises what is short. On Windows its machine's disk is a sparse virtual disk on
- * `drive`, and `podman machine set` does not change it, so space is freed there instead.
+ * Where Podman raises what is short. On Windows its machine runs in WSL, where `podman machine set`
+ * refuses to change its disk ("changing disk size not supported for WSL machines"), and the disk
+ * is a sparse virtual disk on `drive`, so space is freed on that drive instead.
  */
-function podmanFix(short: Resource[], drive: string | undefined): string {
-  const raised = short.filter((resource) => !(drive && resource === "disk"));
+function podmanFix(short: Resource[], shortfall: Shortfall): string {
+  const raised = short.filter(
+    (resource) => !(shortfall.wsl && resource === "disk"),
+  );
   const set =
     raised.length > 0 &&
     `Stop your Podman machine, run podman machine set ${raised.map((resource) => podmanFlag[resource]).join(" ")}, start it again`;
   const freed =
-    drive &&
+    shortfall.wsl &&
     short.includes("disk") &&
-    `free space on drive ${drive} or in Podman`;
+    `free space on the drive that holds OpenBot's engine${shortfall.drive ? ` (${shortfall.drive})` : ""}`;
   if (set && freed) return `${set}, and ${freed}`;
   if (freed) return freed.charAt(0).toUpperCase() + freed.slice(1);
   return set || "";
