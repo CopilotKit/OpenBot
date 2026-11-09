@@ -62,6 +62,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Conversations
 
+- **A Bot whose whole answer is something it drew now raises its "replied" notification.**
 - **A Claude plan has a model picker in the conversation again.** Signed in with a Claude plan,
   the picker never showed, because the server asked Anthropic for the plan's models with
   OpenBot's own harness token instead of the plan's sign-in, Anthropic answered 401
