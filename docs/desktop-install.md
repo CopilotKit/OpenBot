@@ -65,8 +65,8 @@ first screen and keeps its finished install.
 
 ## Account attribution in telemetry
 
-After CopilotKit sign-in and before starting OpenBot, the native shell calls the bundled
-CLI's `telemetry link --installation-id <UUID> --json` command. The CLI uses its verified
+After successful CopilotKit sign-in or an existing-account check, the native shell schedules the bundled
+CLI's `telemetry link --installation-id <UUID> --json` command on a background worker. Start retries it before handing the UUID to the runtime. The CLI uses its verified
 Ops session to return an opaque account fingerprint. Desktop saves that binding before
 calling again with `--account-id <hash>`. Ops emits the existing identity-link event;
 the telemetry sink aliases the desktop UUID to the Clerk person in PostHog. The desktop
@@ -76,13 +76,13 @@ The first account keeps the existing installation UUID, so its anonymous setup h
 can join the account. A different account gets a new UUID before linking. A signed-out CLI result clears a
 previous binding and rotates the UUID. Queued events
 keep the UUID they were recorded under, including queues written by older desktop versions.
-The runtime receives the current UUID through `CPK_TELEMETRY_ID` before it starts.
+The personal-edition runtime receives the current UUID through `CPK_TELEMETRY_ID` before it starts. Only the native desktop launch selects the separate telemetry Compose override; shared Compose and Enterprise charts are unchanged. The handoff adds no readable PII or user content. Opaque account linking is pseudonymous, not anonymous.
 
 Desktop opt-out suppresses the call. CLI opt-out, CI and development-build rules still apply.
 An offline, signed-out or old CLI cannot prevent opening OpenBot. Sign-in does not wait
 for telemetry. Start overlaps linking with preparation and joins before handing the UUID
 to the runtime. Each of at most two CLI calls has an eight-second budget plus 250 ms kill
-grace; failure logs a fixed deferred message and retries on the next Start.
+grace; failure logs a fixed deferred message and retries at the next successful account check, sign-in or Start.
 A successful CLI response means Ops accepted the authenticated verify request. Aliases
 are best-effort and require the Ops telemetry sink to be enabled. Terminal logout takes
 effect at the next Start handshake, not inside an already-running runtime.

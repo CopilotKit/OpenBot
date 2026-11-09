@@ -226,11 +226,19 @@ function runLangGraphAguiModelProbe(
   }
 }
 
-function runComposeConfig(env: Record<string, string>) {
+function runComposeConfig(env: Record<string, string>, desktop = false) {
   const output = execFileSync(
     "docker",
     [
       "compose",
+      ...(desktop
+        ? [
+            "-f",
+            "docker-compose.yml",
+            "-f",
+            "desktop/src-tauri/telemetry.compose.yml",
+          ]
+        : []),
       "--env-file",
       "/dev/null",
       "--profile",
@@ -262,6 +270,67 @@ function runComposeConfig(env: Record<string, string>) {
     >;
   };
 }
+
+test("passes desktop identity, metadata and opt-out into the server container", () => {
+  const telemetry = {
+    CPK_TELEMETRY_ID: "12345678-1234-4123-8123-123456789012",
+    COPILOTKIT_TELEMETRY_SAMPLE_RATE: "1",
+    COPILOTKIT_TELEMETRY_URL: "http://127.0.0.1:4321/ingest",
+    OPENBOT_DISTRIBUTION: "desktop",
+    OPENBOT_VERSION: "1.0.0",
+    OPENBOT_PLATFORM: "macos",
+    OPENBOT_ARCH: "aarch64",
+    OPENBOT_OS_VERSION: "26.0",
+    OPENBOT_ENGINE: "docker",
+    COPILOTKIT_TELEMETRY_DISABLED: "true",
+    DO_NOT_TRACK: "1",
+    OPENBOT_PRODUCT_TELEMETRY: "0",
+  };
+  const enterprise = runComposeConfig(telemetry).services;
+  for (const key of Object.keys(telemetry)) {
+    expect(enterprise.server.environment[key]).toBeUndefined();
+  }
+  const services = runComposeConfig(
+    {
+      ...telemetry,
+      OPENBOT_ACCOUNT_EMAIL: "synthetic@example.invalid",
+      OPENBOT_PROMPT: "synthetic private content",
+    },
+    true,
+  ).services;
+  for (const [key, value] of Object.entries(telemetry)) {
+    expect(services.server.environment[key]).toBe(value);
+    expect(services["agent-computer"].environment[key]).toBeUndefined();
+  }
+  expect(services.server.environment.OPENBOT_ACCOUNT_EMAIL).toBeUndefined();
+  expect(services.server.environment.OPENBOT_PROMPT).toBeUndefined();
+  const overlay = parse(
+    readFileSync(
+      join(import.meta.dir, "../desktop/src-tauri/telemetry.compose.yml"),
+      "utf8",
+    ),
+  );
+  expect(Object.keys(overlay.services)).toEqual(["server"]);
+  expect(Object.keys(overlay.services.server.environment).sort()).toEqual(
+    Object.keys(telemetry).sort(),
+  );
+  // Telemetry configuration must not change the local server's runtime mode.
+  expect(services.server.environment.NODE_ENV).toBe("");
+});
+
+test("leaves optional telemetry settings absent for ordinary Compose startup", () => {
+  const env = runComposeConfig({}).services.server.environment;
+  for (const key of [
+    "CPK_TELEMETRY_ID",
+    "COPILOTKIT_TELEMETRY_URL",
+    "OPENBOT_DISTRIBUTION",
+    "OPENBOT_PRODUCT_TELEMETRY",
+    "COPILOTKIT_TELEMETRY_DISABLED",
+    "DO_NOT_TRACK",
+  ]) {
+    expect(env[key] ?? undefined).toBeUndefined();
+  }
+});
 
 // `docker compose config` pays a one-off cold start on the first call in a process — the Compose
 // plugin initialising and resolving every image reference — which is several seconds on a loaded CI

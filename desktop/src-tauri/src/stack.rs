@@ -791,6 +791,19 @@ fn harness_port_overlay(root: &Path, ipv4_only: bool) -> Result<Option<String>, 
     Ok(Some(overlay))
 }
 
+const DESKTOP_TELEMETRY_FILE: &str = ".openbot-desktop-telemetry.yml";
+const DESKTOP_TELEMETRY: &str = include_str!("../telemetry.compose.yml");
+
+/// The native personal edition alone may hand its installation identity to its server.
+fn uses_desktop_telemetry(root: &Path, secrets: &Secrets) -> bool {
+    let settings = crate::env::already_set(&root.join(".env"), &["OPENBOT_EDITION"]);
+    settings.get("OPENBOT_EDITION").map(String::as_str) == Some("personal")
+        && (secrets.get("OPENBOT_DISTRIBUTION").map(String::as_str) == Some("desktop")
+            || secrets
+                .get("COPILOTKIT_TELEMETRY_DISABLED")
+                .is_some_and(|value| matches!(value.as_str(), "1" | "true")))
+}
+
 /// Only service creation needs the Mac Podman port overlay. In particular, `run migrate` can
 /// create its Postgres dependency, so it must use the same configuration as `up`.
 fn compose_start_command(
@@ -802,7 +815,8 @@ fn compose_start_command(
     let mut command = compose_command(engine, root, secrets);
     let macos_podman = os == "macos" && engine.engine == crate::engine::Engine::Podman;
     let harness_ports = harness_port_overlay(root, macos_podman)?;
-    if !macos_podman && harness_ports.is_none() {
+    let desktop_telemetry = uses_desktop_telemetry(root, secrets);
+    if !macos_podman && harness_ports.is_none() && !desktop_telemetry {
         return Ok(command);
     }
 
@@ -836,6 +850,10 @@ fn compose_start_command(
             macos_podman.then_some(MACOS_PODMAN_PORTS),
         ),
         (HARNESS_PORT_FILE, harness_ports.as_deref()),
+        (
+            DESKTOP_TELEMETRY_FILE,
+            desktop_telemetry.then_some(DESKTOP_TELEMETRY),
+        ),
     ] {
         if let Some(contents) = contents {
             let overlay = root.join(file);
@@ -8152,6 +8170,92 @@ fn main() {
         let patience = std::time::Duration::from_secs(3);
         wait_for_ports_to_clear(&[port], patience);
         assert!(started.elapsed() < patience, "a released port kept waiting");
+    }
+
+    #[test]
+    fn telemetry_overlay_requires_native_identity_and_the_personal_edition() {
+        let root = temp_root("telemetry-edition-policy");
+        std::fs::create_dir_all(&root).unwrap();
+        let desktop = Secrets::from([("OPENBOT_DISTRIBUTION".into(), "desktop".into())]);
+        let opted_out = Secrets::from([("COPILOTKIT_TELEMETRY_DISABLED".into(), "1".into())]);
+        for edition in ["", "OPENBOT_EDITION=team\n", "OPENBOT_EDITION=enterprise\n"] {
+            std::fs::write(root.join(".env"), edition).unwrap();
+            assert!(!uses_desktop_telemetry(&root, &desktop));
+            assert!(!uses_desktop_telemetry(&root, &opted_out));
+        }
+        std::fs::write(root.join(".env"), "OPENBOT_EDITION=personal\n").unwrap();
+        assert!(!uses_desktop_telemetry(&root, &Secrets::new()));
+        assert!(uses_desktop_telemetry(&root, &desktop));
+        assert!(uses_desktop_telemetry(&root, &opted_out));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn desktop_telemetry_is_selected_only_by_personal_native_startup() {
+        if crate::test_support::isolated_process(
+            "stack::tests::desktop_telemetry_is_selected_only_by_personal_native_startup",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("macos-podman-start");
+        let (root, _) = computer_stop_root(&path, "telemetry-start", "{}");
+        std::fs::write(root.join("docker-compose.override.yml"), "services: {}\n").unwrap();
+        let settings = "OPENBOT_EDITION=personal\n";
+        std::fs::write(root.join(".env"), settings).unwrap();
+        for secrets in [
+            Secrets::from([
+                ("OPENBOT_DISTRIBUTION".into(), "desktop".into()),
+                (
+                    "CPK_TELEMETRY_ID".into(),
+                    "12345678-1234-4123-8123-123456789012".into(),
+                ),
+            ]),
+            Secrets::from([("COPILOTKIT_TELEMETRY_DISABLED".into(), "1".into())]),
+        ] {
+            for os in ["macos", "windows", "linux"] {
+                let command = compose_start_command(
+                    &Address::new(crate::engine::Engine::Docker, None),
+                    &root,
+                    &secrets,
+                    os,
+                )
+                .unwrap();
+                let args: Vec<_> = command
+                    .get_args()
+                    .map(|arg| arg.to_string_lossy().into_owned())
+                    .collect();
+                assert_eq!(
+                    args,
+                    [
+                        "compose",
+                        "-f",
+                        "docker-compose.yml",
+                        "-f",
+                        "docker-compose.override.yml",
+                        "-f",
+                        DESKTOP_TELEMETRY_FILE
+                    ]
+                );
+                assert_eq!(
+                    std::fs::read_to_string(root.join(DESKTOP_TELEMETRY_FILE)).unwrap(),
+                    DESKTOP_TELEMETRY
+                );
+                assert_eq!(
+                    std::fs::read_to_string(root.join(".env")).unwrap(),
+                    settings
+                );
+            }
+        }
+        // A file left from a personal launch is never auto-selected for the team edition.
+        std::fs::write(root.join(".env"), "OPENBOT_EDITION=team\n").unwrap();
+        let command = compose_start_command(
+            &Address::new(crate::engine::Engine::Docker, None),
+            &root,
+            &Secrets::from([("OPENBOT_DISTRIBUTION".into(), "desktop".into())]),
+            "linux",
+        )
+        .unwrap();
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["compose"]);
     }
 
     #[test]

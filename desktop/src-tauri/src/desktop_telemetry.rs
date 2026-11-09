@@ -118,11 +118,61 @@ pub fn link_account<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Some(state) = app.try_state::<DesktopTelemetry>() else {
         return;
     };
-    let Ok(_link) = state.identity_link.lock() else {
-        return;
-    };
     if link_account_with(&state, local_eval::link_telemetry_installed).is_err() {
-        eprintln!("[telemetry] account link deferred until the next launch");
+        log::warn!("[telemetry] account link deferred until sign-in or Start");
+    }
+}
+
+/// A restored account has already passed the CLI's account check, even before Start.
+pub fn finish_account_check<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    result: Result<local_eval::Terms, local_eval::Failure>,
+) -> Result<local_eval::Terms, local_eval::Failure> {
+    let app = app.clone();
+    finish_account_check_with(result, move || link_account(&app))
+}
+
+fn finish_account_check_with(
+    result: Result<local_eval::Terms, local_eval::Failure>,
+    link: impl FnOnce() + Send + 'static,
+) -> Result<local_eval::Terms, local_eval::Failure> {
+    if matches!(
+        &result,
+        Ok(local_eval::Terms::Required { .. } | local_eval::Terms::NotRequired)
+    ) {
+        spawn_link(link);
+    }
+    result
+}
+
+/// Successful login is an attribution opportunity before the person reaches Start.
+pub fn finish_sign_in<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    result: Result<local_eval::AccountSignIn, local_eval::Failure>,
+) -> Result<local_eval::AccountSignIn, local_eval::Failure> {
+    let app = app.clone();
+    finish_sign_in_with(result, move || link_account(&app))
+}
+
+/// Return the sign-in result without waiting for optional attribution.
+fn finish_sign_in_with(
+    result: Result<local_eval::AccountSignIn, local_eval::Failure>,
+    link: impl FnOnce() + Send + 'static,
+) -> Result<local_eval::AccountSignIn, local_eval::Failure> {
+    if result.as_ref().is_ok_and(|signed| signed.signed_in) {
+        spawn_link(link);
+    }
+    result
+}
+
+/// Detach optional telemetry work; failures leave the next lifecycle attempt free to retry.
+fn spawn_link(link: impl FnOnce() + Send + 'static) {
+    if std::thread::Builder::new()
+        .name("openbot-account-link".into())
+        .spawn(link)
+        .is_err()
+    {
+        log::warn!("[telemetry] account link deferred until sign-in or Start");
     }
 }
 
@@ -134,6 +184,8 @@ fn link_account_with(
         Option<&str>,
     ) -> Result<local_eval::TelemetryIdentity, local_eval::Failure>,
 ) -> Result<(), ()> {
+    // Launch, sign-in and Start must never interleave binding writes with permanent aliases.
+    let _link = state.identity_link.lock().map_err(|_| ())?;
     for _ in 0..2 {
         let Some(id) = state.emitter.install_id() else {
             return Ok(());
@@ -281,6 +333,167 @@ mod tests {
             emitter,
             identity_link: Mutex::new(()),
         }
+    }
+
+    #[test]
+    fn successful_sign_in_returns_while_attribution_is_still_blocked() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let state = Arc::new(identity_state(true));
+        let worker_state = Arc::clone(&state);
+        let (entered, waiting) = mpsc::channel();
+        let (release, proceed) = mpsc::channel();
+        let (finished, completed) = mpsc::channel();
+        let account = "a".repeat(64);
+        let expected = account.clone();
+        let signed = finish_sign_in_with(
+            Ok(local_eval::AccountSignIn { signed_in: true }),
+            move || {
+                entered.send(()).unwrap();
+                if proceed.recv_timeout(Duration::from_secs(5)).is_err() {
+                    return;
+                }
+                let result = link_account_with(&worker_state, |_, bound| {
+                    Ok(if bound.is_some() {
+                        local_eval::TelemetryIdentity::Linked {
+                            account_id: account.clone(),
+                        }
+                    } else {
+                        local_eval::TelemetryIdentity::Account {
+                            account_id: account.clone(),
+                        }
+                    })
+                });
+                finished.send(result).unwrap();
+            },
+        );
+        assert_eq!(signed, Ok(local_eval::AccountSignIn { signed_in: true }));
+        let started = waiting.recv_timeout(Duration::from_secs(2));
+        release.send(()).ok();
+        assert!(
+            started.is_ok(),
+            "successful sign-in never scheduled attribution"
+        );
+        assert_eq!(
+            completed.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Ok(())
+        );
+        assert_eq!(state.emitter.bound_account(), Some(expected));
+    }
+
+    #[test]
+    fn unsuccessful_sign_in_preserves_its_result_without_linking() {
+        for result in [
+            Ok(local_eval::AccountSignIn { signed_in: false }),
+            Err(local_eval::Failure::UnexpectedExit),
+        ] {
+            let expected = result;
+            let (sent, received) = std::sync::mpsc::channel();
+            assert_eq!(
+                finish_sign_in_with(result, move || sent.send(()).unwrap()),
+                expected
+            );
+            assert!(received
+                .recv_timeout(std::time::Duration::from_millis(100))
+                .is_err());
+        }
+    }
+
+    #[test]
+    fn restored_account_links_before_start_but_other_account_checks_do_not() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        for terms in [
+            local_eval::Terms::NotRequired,
+            local_eval::Terms::Required {
+                accepted: false,
+                version: "1".into(),
+                url: "https://example.invalid/terms".into(),
+                organization_name: "Synthetic".into(),
+            },
+        ] {
+            let (sent, received) = mpsc::channel();
+            let expected = terms.clone();
+            assert_eq!(
+                finish_account_check_with(Ok(terms), move || sent.send(()).unwrap()),
+                Ok(expected)
+            );
+            received.recv_timeout(Duration::from_secs(2)).unwrap();
+        }
+        for result in [
+            Ok(local_eval::Terms::SignedOut),
+            Ok(local_eval::Terms::EngineNotReady),
+            Ok(local_eval::Terms::Unavailable),
+            Err(local_eval::Failure::UnexpectedExit),
+        ] {
+            let expected = result.clone();
+            let (sent, received) = mpsc::channel();
+            assert_eq!(
+                finish_account_check_with(result, move || sent.send(()).unwrap()),
+                expected
+            );
+            assert!(received.recv_timeout(Duration::from_millis(100)).is_err());
+        }
+    }
+
+    #[test]
+    fn concurrent_links_serialize_aliases_and_rotate_before_the_next_account() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let state = Arc::new(identity_state(true));
+        let original_id = state.emitter.install_id().unwrap();
+        let first_state = Arc::clone(&state);
+        let (entered, waiting) = mpsc::channel();
+        let (release, proceed) = mpsc::channel();
+        let first = std::thread::spawn(move || {
+            link_account_with(&first_state, |_, bound| {
+                if bound.is_none() {
+                    entered.send(()).unwrap();
+                    proceed.recv_timeout(Duration::from_secs(5)).unwrap();
+                    Ok(local_eval::TelemetryIdentity::Account {
+                        account_id: "a".repeat(64),
+                    })
+                } else {
+                    Ok(local_eval::TelemetryIdentity::Linked {
+                        account_id: "a".repeat(64),
+                    })
+                }
+            })
+        });
+        waiting.recv_timeout(Duration::from_secs(2)).unwrap();
+        let second_state = Arc::clone(&state);
+        let (second_entered, second_waiting) = mpsc::channel();
+        let second = std::thread::spawn(move || {
+            link_account_with(&second_state, |installation, bound| {
+                second_entered.send(()).unwrap();
+                if bound == Some("b".repeat(64).as_str()) {
+                    assert_ne!(installation.as_str(), original_id);
+                    Ok(local_eval::TelemetryIdentity::Linked {
+                        account_id: "b".repeat(64),
+                    })
+                } else {
+                    assert_eq!(bound, Some("a".repeat(64).as_str()));
+                    Ok(local_eval::TelemetryIdentity::Account {
+                        account_id: "b".repeat(64),
+                    })
+                }
+            })
+        });
+        let interleaved = second_waiting
+            .recv_timeout(Duration::from_millis(100))
+            .is_ok();
+        release.send(()).unwrap();
+        assert_eq!(first.join().unwrap(), Ok(()));
+        assert_eq!(second.join().unwrap(), Ok(()));
+        assert!(
+            !interleaved,
+            "another handshake entered before the first alias completed"
+        );
+        assert_eq!(state.emitter.bound_account(), Some("b".repeat(64)));
+        assert_eq!(
+            state.runtime_env.lock().unwrap().get("CPK_TELEMETRY_ID"),
+            state.emitter.install_id().as_ref()
+        );
     }
 
     #[test]

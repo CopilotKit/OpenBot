@@ -6397,12 +6397,13 @@ async fn sign_in_to_copilotkit(
     attempt: String,
 ) -> Result<local_eval::AccountSignIn, local_eval::Failure> {
     let root = selected_root_or_default(&app);
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         know_cli_engine(&root);
         local_eval::account_sign_in_installed(&attempt)
     })
     .await
-    .map_err(|_| local_eval::Failure::Spawn)?
+    .map_err(|_| local_eval::Failure::Spawn)?;
+    desktop_telemetry::finish_sign_in(&app, result)
 }
 
 /// The approval page and code `sign_in_to_copilotkit`'s `attempt` is waiting on, once the CLI has
@@ -6426,7 +6427,7 @@ async fn local_eval_terms(
     attempt: String,
 ) -> Result<local_eval::Terms, local_eval::Failure> {
     let root = selected_root_or_default(&app);
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         // The CLI checks its engine before it answers. See `know_cli_engine`.
         know_cli_engine(&root);
         // An engine too small for local setup is said here, before Start fails on it.
@@ -6436,7 +6437,8 @@ async fn local_eval_terms(
         local_eval::terms_installed(&attempt)
     })
     .await
-    .map_err(|_| local_eval::Failure::Spawn)?
+    .map_err(|_| local_eval::Failure::Spawn)?;
+    desktop_telemetry::finish_account_check(&app, result)
 }
 
 /// The folder this window is installing into, or the default one.

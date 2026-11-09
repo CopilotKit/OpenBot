@@ -3947,9 +3947,19 @@ mod tests {
             let response = serde_json::json!({ "type": kind, "account_id": account });
             assert!(normalize_telemetry_identity(0, response.to_string().as_bytes()).is_ok());
             assert!(normalize_telemetry_identity(1, response.to_string().as_bytes()).is_err());
-            let mut extra = response.clone();
-            extra["email"] = serde_json::json!("private@example.com");
-            assert!(normalize_telemetry_identity(0, extra.to_string().as_bytes()).is_err());
+            for field in [
+                "email",
+                "name",
+                "prompt",
+                "response",
+                "recording",
+                "filename",
+                "url",
+            ] {
+                let mut extra = response.clone();
+                extra[field] = serde_json::json!("synthetic private content");
+                assert!(normalize_telemetry_identity(0, extra.to_string().as_bytes()).is_err());
+            }
         }
         assert_eq!(
             normalize_telemetry_identity(0, br#"{"type":"skipped"}"#),

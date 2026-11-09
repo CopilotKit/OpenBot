@@ -6,15 +6,21 @@ The native emitter starts before credentials are available. It persists a random
 
 ## Account attribution
 
-When Start runs, the desktop asks the bundled CopilotKit CLI to verify its signed-in account. The desktop saves an opaque SHA-256 account fingerprint before requesting the alias through authenticated Ops. Credentials, email and Clerk identifiers stay outside the desktop event payload. The telemetry sink can then associate the installation UUID, including its earlier anonymous activity, with the signed-in PostHog person.
+After a successful CopilotKit sign-in or an existing account check, the desktop asks the bundled CLI to verify its signed-in account on a background worker. Start retries the same handshake before handing the identity to the server. The desktop saves an opaque SHA-256 account fingerprint before requesting the alias through authenticated Ops. Credentials, email and Clerk identifiers stay outside the desktop event payload. The telemetry sink can then associate the installation UUID, including its earlier anonymous activity, with the signed-in PostHog person.
 
 A different account rotates the UUID before linking. A CLI `signed_out` result rotates a previously bound UUID and clears the binding. Queued events keep the UUID they were recorded under. The runtime receives the resulting UUID before it starts. Terminal logout is observed at the next Start handshake; it does not change an already-running runtime's environment. Opt-out deletes the local binding along with the UUID and queue. Suppressed CLI telemetry returns `skipped` and leaves the desktop binding unchanged.
 
-Sign-in does not wait for attribution. Start runs the handshake alongside preparation and joins it before passing the runtime environment. Each of at most two CLI calls has an eight-second budget, including waiting for the CLI lock, plus up to 250 ms for termination. Failures defer linking to the next Start. A `linked` response means Ops accepted the authenticated request; alias delivery is best-effort and requires an enabled Ops telemetry sink.
+Sign-in and account-check responses do not wait for attribution. Only a successful sign-in or a required/not-required agreement result schedules the background check; signed-out, failed and engine-blocked checks do not. Start runs the handshake alongside preparation and joins it before passing the runtime environment. All handshakes share one lock so account binding and alias requests cannot interleave. Each of at most two CLI calls has an eight-second budget, including waiting for the CLI lock, plus up to 250 ms for termination. Failures defer linking to the next successful account check, sign-in or Start. A `linked` response means Ops accepted the authenticated request; alias delivery is best-effort and requires an enabled Ops telemetry sink.
 
 Release requires a bundled CLI with `telemetry link` and `signed_out` support, built with `CLI_ENV=production`, followed by live PostHog checks for sign-in, task use, restart and account switching. The existing pin predates this command. Measure cold and warm handshake times on macOS and Windows with that final pin; fake-process tests do not establish real account-link latency. Product/privacy review of the desktop disclosure and account-attribution copy remains a release follow-up; this document does not establish that approval.
 
 The added state fields are not readable by older desktop releases because their parsers reject unknown fields. After a downgrade, those releases disable native telemetry until a compatible version reads the state again. Do not treat a downgrade as proof that telemetry is still active.
+
+## Desktop-only boundary
+
+The account bridge runs only in the native desktop shell. The shell starts the personal edition; it does not identify Enterprise application users. Its server handoff uses a separate `.openbot-desktop-telemetry.yml` override, selected only when the native launch supplies desktop telemetry context (or opt-out) and the installation is personal. The shared Compose file and Enterprise deployment charts are unchanged. Ordinary Compose startup does not load the override.
+
+The override forwards only the installation UUID, sampling/suppression settings, sink address and closed desktop version/platform metadata. It contains variable names, not account data or credentials. No email, name, prompt, response, recording, filename or user URL is added. The configured sink address is transport configuration, not captured browsing content. The CLI protocol rejects extra fields. Opaque account linking remains pseudonymous identification; it is not anonymous collection. This change adds no content collection or new product event names.
 
 ## Event allowlist
 
@@ -30,7 +36,7 @@ All desktop event names begin with `oss.desktop.`. The Rust `EventData` enum and
 | `windows_stage` | Windows prerequisite outcome enum |
 | `image_pull` | Outcome enum, milliseconds, optional observed download bytes |
 | `setup_failed` | Setup step and error-class enums |
-| `activated` | No properties; first successful setup Bot answer |
+| `activated` | No properties; OpenBot started successfully |
 | `setup_abandoned` | Last setup step enum |
 
 For `model_chosen`, providers are `openai`, `anthropic`, `google`, `xai`, `compatible`, or `none`; credential paths are `subscription`, `api_key`, `oauth`, or `none`. OpenAI and Anthropic plan sign-ins use `subscription`. Google and xAI native sign-ins use their named provider with `oauth`; their API-key routes use `compatible`, matching the picker’s endpoint choice. A compatible endpoint uses `api_key` only when a nonblank key is supplied or its saved key is explicitly selected; keyless endpoints use `none`. Skipping model setup uses provider and credential path `none`. `custom_base_url` records only whether a nonblank base URL was selected, never its value.

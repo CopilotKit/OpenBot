@@ -1,0 +1,17 @@
+# Applied only by the native desktop launcher to its personal-edition server.
+# Null entries take the shell's values and remain unset when absent. No credentials or content.
+services:
+  server:
+    environment:
+      CPK_TELEMETRY_ID:
+      COPILOTKIT_TELEMETRY_SAMPLE_RATE:
+      COPILOTKIT_TELEMETRY_URL:
+      COPILOTKIT_TELEMETRY_DISABLED:
+      DO_NOT_TRACK:
+      OPENBOT_PRODUCT_TELEMETRY:
+      OPENBOT_DISTRIBUTION:
+      OPENBOT_VERSION:
+      OPENBOT_PLATFORM:
+      OPENBOT_ARCH:
+      OPENBOT_OS_VERSION:
+      OPENBOT_ENGINE:
