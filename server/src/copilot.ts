@@ -2923,6 +2923,8 @@ export function mountCopilotRuntime(
     basePath?: string;
     onRunBusy?: (input: { threadId: string; busy: boolean }) => void;
     learningSettings?: LearningSettingsStore;
+    /** The environment's Learning container, found missing on this Intelligence. See learning/runtime.ts. */
+    learningContainerForgotten?: (containerId: string) => boolean;
     /**
      * Each person's own Learning space and everyone's opened Skills, which join the Bot's own in every run
      * (learning/runtime.ts). Absent, a run gets only the Bot's own learned Skills.
@@ -2945,6 +2947,7 @@ export function mountCopilotRuntime(
     basePath = "/api/copilotkit",
     onRunBusy,
     learningSettings,
+    learningContainerForgotten,
     personalSkills,
     trajectoryCapture,
   } = options;
@@ -3025,6 +3028,9 @@ export function mountCopilotRuntime(
         store: learningSettings,
         client: intelligenceClient,
         ...(personalSkills ? { people: personalSkills } : {}),
+        ...(learningContainerForgotten
+          ? { forgotten: learningContainerForgotten }
+          : {}),
       })
     : undefined;
 

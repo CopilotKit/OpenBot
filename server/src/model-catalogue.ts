@@ -338,7 +338,8 @@ export function modelsUrl(
 /**
  * Where a source's listing is read, and how. xAI is asked for `/language-models`, its own richer
  * listing, which carries each model's efforts, default effort, modalities and price; everything else
- * answers on `/models`. A ChatGPT plan is asked of the harness that holds its credential.
+ * answers on `/models`. A ChatGPT plan is asked of the harness that holds its credential; a Claude
+ * plan's harness has no listing, so Anthropic is asked with the plan's own OAuth token.
  */
 function listingRequest(
   model: RuntimeModel,
@@ -355,12 +356,17 @@ function listingRequest(
     };
   }
   if (source === "claude") {
-    const plan = model.plan;
-    if (!plan) return null;
+    /*
+     * The plan's own OAuth token, the one `claude setup-token` minted and the harness runs on. Not
+     * `plan.token`: that is MANAGED_AGENT_TOKEN, which proves the server to its harness, and sent
+     * here Anthropic answered 401, nothing was listed, and no Claude plan had a model picker.
+     */
+    const oauth = environment.CLAUDE_CODE_OAUTH_TOKEN?.trim();
+    if (!model.plan || !oauth) return null;
     return {
       url: modelsUrl("anthropic", environment),
       headers: {
-        authorization: `Bearer ${plan.token}`,
+        authorization: `Bearer ${oauth}`,
         "anthropic-version": ANTHROPIC_VERSION,
         "anthropic-beta": ANTHROPIC_OAUTH_BETA,
       },
@@ -382,6 +388,28 @@ function listingRequest(
         : url,
     headers: key ? { authorization: `Bearer ${key}` } : {},
   };
+}
+
+/**
+ * Whether a listing request would carry OpenBot's own harness token anywhere but the plan's harness.
+ * `MANAGED_AGENT_TOKEN` (a plan's `token`) is what the server proves itself to the harness it
+ * started with, and no provider, gateway or catalogue is ever sent it, whatever a listing asks for.
+ */
+function sendsHarnessTokenAway(
+  model: RuntimeModel,
+  environment: Record<string, string | undefined>,
+  asked: { url: string; headers: Record<string, string> },
+): boolean {
+  const tokens = [model.plan?.token, environment.MANAGED_AGENT_TOKEN]
+    .map((token) => token?.trim())
+    .filter((token): token is string => !!token);
+  const carried = Object.values(asked.headers).some((value) =>
+    tokens.some((token) => value.includes(token)),
+  );
+  if (!carried) return false;
+  return (
+    !model.plan || new URL(asked.url).origin !== model.plan.endpoint.origin
+  );
 }
 
 /** Efforts in the order every provider documents them, duplicates and blanks dropped. */
@@ -659,6 +687,16 @@ export function createModelCatalogue(options: {
           : await options.apiKey();
       const asked = listingRequest(options.model, source, environment, key);
       if (!asked) return null;
+      if (sendsHarnessTokenAway(options.model, environment, asked)) {
+        log(
+          JSON.stringify({
+            type: "model-list-unreadable",
+            source,
+            reason: "harness-token-elsewhere",
+          }),
+        );
+        return null;
+      }
       const response = await request(asked.url, {
         headers: asked.headers,
         redirect: "error",

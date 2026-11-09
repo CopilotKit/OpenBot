@@ -539,6 +539,55 @@ mod stop_ipc {
         );
     }
 
+    /// Settings' Change on the AI model row: OpenBot stops, the window goes to setup, and setup
+    /// is told once to open at its AI screen. A Stop that failed tells it nothing: OpenBot may
+    /// still be running, and setup shows the failure with Start, as after any failed Stop.
+    #[test]
+    fn change_ai_connection_from_settings_stops_then_opens_the_ai_screen_once() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::change_ai_connection_from_settings_stops_then_opens_the_ai_screen_once",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new();
+        let setup = "tauri://localhost/change-ai-connection";
+        *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
+        let compose = fixture.compose_barrier();
+
+        change_ai_connection_from_settings(fixture.app.handle().clone());
+        // Nothing to open at until OpenBot has stopped.
+        assert!(!take_ai_connection_change(fixture.app.handle().clone()));
+        await_compose(&compose).write_all(&[0]).unwrap();
+
+        wait_until(|| fixture.window.url().unwrap().as_str() == setup);
+        assert_compose_down_ran_under(&fixture.root.join("commands.log"), &fixture.root);
+        assert!(take_ai_connection_change(fixture.app.handle().clone()));
+        assert!(
+            !take_ai_connection_change(fixture.app.handle().clone()),
+            "a later visit to setup opens at Start"
+        );
+    }
+
+    #[test]
+    fn change_ai_connection_after_a_failed_stop_opens_setup_as_usual() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::change_ai_connection_after_a_failed_stop_opens_setup_as_usual",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new();
+        let setup = "tauri://localhost/change-ai-connection-failed";
+        *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
+        let compose = fixture.compose_barrier();
+
+        change_ai_connection_from_settings(fixture.app.handle().clone());
+        await_compose(&compose).write_all(&[71]).unwrap();
+
+        wait_until(|| fixture.window.url().unwrap().as_str() == setup);
+        assert!(!take_ai_connection_change(fixture.app.handle().clone()));
+        assert!(last_failure_now(fixture.app.handle()).is_some());
+    }
+
     #[test]
     fn stop_ipc_reports_shutdown_worker_panics() {
         if crate::test_support::isolated_process(

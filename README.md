@@ -9,17 +9,30 @@
 A modular, self-hostable workspace for AI coworkers.<br>
 Choose your models. Bring your agents. Own your infrastructure.
 
-[Mac / Apple silicon](https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg) · [Mac / Intel](https://downloads.copilotkit.ai/latest/OpenBot-mac-x64.dmg) · [Windows](https://downloads.copilotkit.ai/latest/OpenBot-windows-x64-setup.exe)
+[open.bot](https://open.bot) · [Docs](docs/README.md) · [Deploy on Kubernetes](#deploy-on-kubernetes) · [Run from source](#run-from-source)
 
-[iOS](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=ios&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Android](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=android&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Slack](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=slack&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Teams](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=teams&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access)
+[![GitHub Trending: #3 Repository Of The Day](https://trendshift.io/api/badge/repositories/175080)](https://trendshift.io/repositories/175080)
+[![Trendshift: #3 Repository Of The Day](https://trendshift.io/api/badge/trendshift/repositories/175080/daily)](https://trendshift.io/repositories/175080)
 
-[Kubernetes](#deploy-on-kubernetes)
+<br>
 
-[**OpenBot for Business · Get early access →**](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=business&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [**Docs**](docs/README.md)
+[![Download for Mac (Apple silicon)](https://img.shields.io/github/v/release/CopilotKit/OpenBot?style=for-the-badge&labelColor=3A3466&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTExIDNoMnYxMC4ybDMuNi0zLjZMMTggMTFsLTYgNi02LTYgMS40LTEuNCAzLjYgMy42ek01IDE5aDE0djJINXoiLz48L3N2Zz4%3D&label=Download%20for%20Mac%20%28Apple%20silicon%29&color=6E6AE0)](https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg)
+[![Download for Mac (Intel)](https://img.shields.io/github/v/release/CopilotKit/OpenBot?style=for-the-badge&labelColor=3A3466&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTExIDNoMnYxMC4ybDMuNi0zLjZMMTggMTFsLTYgNi02LTYgMS40LTEuNCAzLjYgMy42ek01IDE5aDE0djJINXoiLz48L3N2Zz4%3D&label=Download%20for%20Mac%20%28Intel%29&color=4A7CC8)](https://downloads.copilotkit.ai/latest/OpenBot-mac-x64.dmg)
+[![Download for Windows](https://img.shields.io/github/v/release/CopilotKit/OpenBot?style=for-the-badge&labelColor=3A3466&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTExIDNoMnYxMC4ybDMuNi0zLjZMMTggMTFsLTYgNi02LTYgMS40LTEuNCAzLjYgMy42ek01IDE5aDE0djJINXoiLz48L3N2Zz4%3D&label=Download%20for%20Windows&color=9A5CC6)](https://downloads.copilotkit.ai/latest/OpenBot-windows-x64-setup.exe)
 
-From [CopilotKit](https://www.copilotkit.ai), creators of [AG-UI](https://github.com/ag-ui-protocol/ag-ui).
+<sub>Notarized .dmg for Apple silicon and Intel Macs · signed installer for Windows x64 · no terminal or developer tools needed · [Release notes](https://github.com/CopilotKit/OpenBot/releases/latest)</sub>
+
+<br>
+
+[![OpenBot for Business: get early access](https://img.shields.io/badge/OpenBot_for_Business-Get_early_access_%E2%86%92-D14B9C?style=for-the-badge&labelColor=3A3466)](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=business&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access)
+
+<sub>From [CopilotKit](https://www.copilotkit.ai), creators of [AG-UI](https://github.com/ag-ui-protocol/ag-ui).</sub>
 
 </div>
+
+https://github.com/user-attachments/assets/c60f07da-8b6d-46eb-a573-17fc1e65a644
+
+<p align="center"><sub>Watch a Bot use its browser and tools, answer with interactive results, and wait for your approval before it sends. Take over when it needs you, and connect the agents you already run.</sub></p>
 
 ## Getting started
 
@@ -42,12 +55,6 @@ The easiest way to get started is with the fully self-contained app that runs on
 ### Web, mobile, and chat
 
 [Web](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=web&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [iOS](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=ios&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Android](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=android&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Slack](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=slack&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Teams](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=teams&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access)
-
-## See it in action
-
-https://github.com/user-attachments/assets/535ef7ee-1631-4a69-b839-564c56cf90b4
-
-Watch a Bot use its browser and tools, review interactive results, and take over when it needs you. Teach it repeatable tasks through feedback and demonstrations.
 
 ## Your workspace. Your stack.
 
@@ -588,9 +595,6 @@ Use `bash scripts/start.sh` for the whole stack and `bash scripts/stop.sh` to ta
 [![security](https://github.com/CopilotKit/openbot/actions/workflows/security_zizmor.yml/badge.svg)](https://github.com/CopilotKit/openbot/actions/workflows/security_zizmor.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Latest OpenBot release](https://img.shields.io/github/v/release/CopilotKit/OpenBot?label=release&color=blue)](https://github.com/CopilotKit/OpenBot/releases/latest)
-
-[![GitHub Trending: #5 Repository Of The Day](https://trendshift.io/api/badge/repositories/175080)](https://trendshift.io/repositories/175080)
-[![Trendshift: #3 Repository Of The Day](https://trendshift.io/api/badge/trendshift/repositories/175080/daily)](https://trendshift.io/repositories/175080)
 
 ## Documentation
 
