@@ -5435,7 +5435,8 @@ test("with several accounts, an identity a model puts in the arguments still ope
   expect(reached).toEqual([]);
 
   // The asker's own second account by name: their own id, that account's id, and the model's
-  // other arguments passed through whole, minus the account choice itself.
+  // other arguments passed through whole, minus the account choice itself. A Gmail listing also
+  // carries the lean-listing defaults every GMAIL_FETCH_EMAILS call gets (composio-shapes.ts).
   await store.callTool({
     ref: "gmail/GMAIL_FETCH_EMAILS",
     args: {
@@ -5457,6 +5458,9 @@ test("with several accounts, an identity a model puts in the arguments still ope
         user_id: strangerId,
         entityId: strangerId,
         query: "is:unread",
+        include_payload: false,
+        verbose: false,
+        max_results: 20,
       },
     },
   ]);
