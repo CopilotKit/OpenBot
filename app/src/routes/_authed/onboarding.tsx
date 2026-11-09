@@ -150,11 +150,16 @@ function welcomeStep(computer: boolean): OnboardingStep {
  * `localEvaluation` in RouteComponent). None of it is said to an organization's own people, who
  * already have OpenBot.
  *
- * THE CALENDAR IS THE STEP. It books a demo, or a call to scope a proof of concept, in place, so
- * Continue moves on and Not now skips; once a call is booked there is nothing left to skip, and Not
- * now goes. A calendar that can't load (offline, blocked, silent) gives the step back its picture
- * and Book a call, which opens the OpenBot for Business page in a new tab (on the Desktop, in the
- * person's browser).
+ * THE CALENDAR IS THE STEP. It books a demo, or a call to scope a proof of concept, in place.
+ *
+ * ONE BUTTON AT A TIME. Until a call is booked the only way on is Not now: a Continue beside it read
+ * as going on with the booking. Once the calendar says a call is booked there is nothing left to
+ * skip, and Not now becomes Continue, in the same place. No place is kept for a second button,
+ * which would lift Continue above where Not now was.
+ *
+ * A calendar that can't load (offline, blocked, silent) gives the step back its picture and Book a
+ * call, which opens the OpenBot for Business page in a new tab (on the Desktop, in the person's
+ * browser), with Not now beside it.
  */
 function useBookDemoStep(): OnboardingStep {
   const [failed, setFailed] = React.useState(false);
@@ -178,13 +183,14 @@ function useBookDemoStep(): OnboardingStep {
       ) : (
         <BookingCalendar onBooked={book} onFailed={fail} />
       ),
-    optional: true,
+    primaryHidden: !booked,
     secondary: booked ? undefined : { label: "Not now" },
   };
   if (!failed) return step;
   return {
     ...step,
     // A new tab, so booking doesn't cost the place in onboarding, and then on to the next step.
+    primaryHidden: false,
     primaryLabel: "Book a call",
     onPrimary: (next) => {
       window.open(BUSINESS_URL, "_blank", "noopener,noreferrer");
@@ -382,7 +388,7 @@ function RouteComponent() {
   };
   /*
    * Without the name step, the last step's buttons finish onboarding where they would have moved
-   * on: Get started on Welcome, and Continue, Book a call or Not now on Book a demo.
+   * on: Get started on Welcome, and Get started (once booked), Book a call or Not now on Book a demo.
    */
   const lastId = ids[ids.length - 1];
   const steps: OnboardingStep[] = ids.map((id) => {
