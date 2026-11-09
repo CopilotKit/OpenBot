@@ -221,6 +221,26 @@ fi
 cat "$file"
 `;
 
+/**
+ * `curl --head --write-out '%{http_code}' <url>` against downloads.copilotkit.ai, answered as
+ * CloudFront answers from the pretend bucket: 200 for an object it holds, 403 for a key it does not
+ * (CloudFront cannot list the bucket), and 403 for a key `refuse` names, as a stale cached error.
+ */
+const CURL = `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "curl $*" >> "$FAKE_LOG"
+url="\${!#}"
+case "$url" in
+  https://downloads.copilotkit.ai/*) key="\${url#https://downloads.copilotkit.ai/}" ;;
+  *) echo "fake curl: unexpected URL $url" >&2; exit 6 ;;
+esac
+if [ -f "$FAKE_STATE/s3/$DOWNLOADS_BUCKET/$key" ] && ! grep -qxF "$key" "$FAKE_STATE/refused"; then
+  printf 200
+else
+  printf 403
+fi
+`;
+
 export type S3Object = {
   content: string;
   cacheControl: string;
@@ -247,6 +267,8 @@ export type FakeDownloads = {
   remove(key: string): void;
   /** From now on every read of the bucket is refused, as it is for credentials without access. */
   deny(): void;
+  /** From now on CloudFront answers 403 for this key, whatever the bucket holds. */
+  refuse(key: string): void;
   /** Each invalidation, as "<distribution> <paths>". */
   invalidations(): string[];
   cleanup(): void;
@@ -266,11 +288,14 @@ export function fakeDownloads(): FakeDownloads {
   writeFileSync(join(bin, "gh"), GH);
   writeFileSync(join(bin, "aws"), AWS);
   writeFileSync(join(bin, "crane"), CRANE);
+  writeFileSync(join(bin, "curl"), CURL);
   chmodSync(join(bin, "gh"), 0o755);
   chmodSync(join(bin, "aws"), 0o755);
   chmodSync(join(bin, "crane"), 0o755);
+  chmodSync(join(bin, "curl"), 0o755);
   writeFileSync(join(state, "latest"), "");
   writeFileSync(join(state, "invalidations"), "");
+  writeFileSync(join(state, "refused"), "");
   const log = join(dir, "calls.log");
   writeFileSync(log, "");
   const objects = join(state, "s3", BUCKET);
@@ -362,6 +387,8 @@ export function fakeDownloads(): FakeDownloads {
       rmSync(join(metas, `${key}.json`));
     },
     deny: () => writeFileSync(join(state, "denied"), ""),
+    refuse: (key) =>
+      writeFileSync(join(state, "refused"), `${key}\n`, { flag: "a" }),
     invalidations: () =>
       readFileSync(join(state, "invalidations"), "utf8")
         .split("\n")
