@@ -69,6 +69,35 @@ export function shardCountFile({ index, count }: Shard): string {
   return `shard-${index}-of-${count}.json`;
 }
 
+/**
+ * How long each test file takes, in bun's `--timings` format, which CI's shards are balanced by.
+ * Relative to the repository root, where the suite runs. A file it does not name is counted as the
+ * median, so it only needs refreshing when the balance drifts: the `tests` job of every CI run
+ * uploads a fresh one as the `test-timings` artifact, to download over this file.
+ */
+export const TEST_TIMINGS = "scripts/test-timings.json";
+
+/** The file one shard records its own files' durations to, next to its count. */
+export function shardTimingsFile({ index, count }: Shard): string {
+  return `timings-${index}-of-${count}.json`;
+}
+
+/**
+ * The shards' duration records as one, sorted by path so a refresh diffs cleanly. Each shard
+ * records only the files it ran, so together they cover the suite once.
+ */
+export function mergeTimings(texts: string[]): string {
+  const files: Record<string, number> = {};
+  for (const text of texts) {
+    const parsed = JSON.parse(text) as { files?: Record<string, number> };
+    Object.assign(files, parsed.files ?? {});
+  }
+  const sorted = Object.fromEntries(
+    Object.entries(files).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+  );
+  return `${JSON.stringify({ version: 1, files: sorted }, null, 2)}\n`;
+}
+
 export type Verdict =
   | { pass: true; total: number; report: string }
   | { pass: false; report: string };

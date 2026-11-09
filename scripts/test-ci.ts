@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -7,6 +8,8 @@ import {
   type Shard,
   type ShardCount,
   shardCountFile,
+  shardTimingsFile,
+  TEST_TIMINGS,
   testsRan,
 } from "./test-floor";
 
@@ -19,8 +22,9 @@ import {
  * which adds the shards up in the `tests` check.
  *
  * The shard comes from `--shard=<index>/<count>` or from TEST_SHARD, and is passed through to
- * `bun test --shard`, which sorts the files by path and deals them out. With TEST_COUNT_DIR set, the
- * shard's count is written there as JSON, one file per shard.
+ * `bun test --shard`, balanced by the per-file durations in scripts/test-timings.json. With
+ * TEST_COUNT_DIR set, the shard's count, and how long each of its files took, are written there,
+ * one file each per shard.
  */
 
 async function writeStderr(text: string) {
@@ -45,6 +49,25 @@ if (shardValue) {
   }
 }
 
+const countDirectory = process.env.TEST_COUNT_DIR?.trim();
+
+// Shards are cut by time rather than by file count when there is a record of how long each file
+// takes, because a few files take a minute each and dealt round-robin they land on the same runner.
+// Bun reads every --timings file as one table and writes --update-timings to the first, so with a
+// count directory the shard also records how long its own files took, for refreshing the record.
+const timings: string[] = [];
+if (shard) {
+  const measured = countDirectory
+    ? join(countDirectory, shardTimingsFile(shard))
+    : undefined;
+  if (measured) {
+    await mkdir(countDirectory as string, { recursive: true });
+    timings.push(`--timings=${measured}`);
+  }
+  if (existsSync(TEST_TIMINGS)) timings.push(`--timings=${TEST_TIMINGS}`);
+  if (measured) timings.push("--update-timings");
+}
+
 // `bun run test` rather than `bun test`, so the pretest hook fires and the generated application
 // config exists before route imports need it.
 const proc = Bun.spawn(
@@ -53,6 +76,7 @@ const proc = Bun.spawn(
     "run",
     "test",
     ...(shard ? [`--shard=${shard.index}/${shard.count}`] : []),
+    ...timings,
   ],
   {
     stdout: "inherit",
@@ -76,7 +100,6 @@ if (exitStatus !== 0) {
     );
     process.exitCode = 1;
   } else if (shard) {
-    const countDirectory = process.env.TEST_COUNT_DIR?.trim();
     if (countDirectory) {
       const record: ShardCount = {
         shard: shard.index,

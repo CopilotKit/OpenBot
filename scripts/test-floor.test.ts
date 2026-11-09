@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -265,14 +272,17 @@ describe("scripts/test-ci.ts on a shard", () => {
     expect((await readdir(counts)).sort()).toEqual([
       "shard-1-of-2.json",
       "shard-2-of-2.json",
+      "timings-1-of-2.json",
+      "timings-2-of-2.json",
     ]);
     expect(
       JSON.parse(await readFile(join(counts, "shard-1-of-2.json"), "utf8")),
     ).toEqual({ shard: 1, of: 2, tests: 5 });
 
     // Ten tests in all is below the floor, which only the total can see.
+    const merged = join(project, "test-timings.json");
     const total = await run(
-      ["bun", join(import.meta.dir, "test-ci-aggregate.ts"), counts],
+      ["bun", join(import.meta.dir, "test-ci-aggregate.ts"), counts, merged],
       project,
       cleanEnvironment({ SHARDS_RESULT: "success" }),
     );
@@ -280,6 +290,54 @@ describe("scripts/test-ci.ts on a shard", () => {
     expect(total.stderr).toContain(
       `10 tests ran across 2 shards, and at least ${MINIMUM_TESTS} were expected.`,
     );
+
+    // Each shard recorded only its own files, and together they are the suite, once.
+    const timings = JSON.parse(await readFile(merged, "utf8"));
+    expect(timings.version).toBe(1);
+    expect(Object.keys(timings.files)).toEqual([
+      "a.test.ts",
+      "b.test.ts",
+      "c.test.ts",
+    ]);
+  });
+
+  test("with a record of how long files take, shards are cut by time instead", async () => {
+    const project = await projectWithTests({
+      "a.test.ts": 3,
+      "b.test.ts": 5,
+      "c.test.ts": 2,
+      "d.test.ts": 4,
+    });
+    // c takes three times as long as any other file. Bun keeps neighbouring files together, so the
+    // even cut by time is a and b (8 tests) against c and d (6). Round-robin would deal a and c
+    // (5 tests) against b and d (9).
+    await mkdir(join(project, "scripts"));
+    await writeFile(
+      join(project, "scripts/test-timings.json"),
+      JSON.stringify({
+        version: 1,
+        files: {
+          "a.test.ts": 1000,
+          "b.test.ts": 1000,
+          "c.test.ts": 3000,
+          "d.test.ts": 1000,
+        },
+      }),
+    );
+    for (const [shard, expected] of [
+      ["1/2", 8],
+      ["2/2", 6],
+    ] as const) {
+      const result = await run(
+        ["bun", join(import.meta.dir, "test-ci.ts")],
+        project,
+        cleanEnvironment({ TEST_SHARD: shard }),
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toContain(
+        `${expected} tests ran in shard ${shard}`,
+      );
+    }
   });
 
   test("the shard can be passed as an argument", async () => {
@@ -306,7 +364,8 @@ describe("scripts/test-ci.ts on a shard", () => {
       cleanEnvironment({ TEST_SHARD: "2/2", TEST_COUNT_DIR: counts }),
     );
     expect(result.exitCode).not.toBe(0);
-    expect(await readdir(counts).catch(() => [])).toEqual([]);
+    const written = await readdir(counts).catch(() => [] as string[]);
+    expect(written.filter((name) => name.startsWith("shard-"))).toEqual([]);
   });
 
   test("a shard that is not one is refused before anything runs", async () => {
