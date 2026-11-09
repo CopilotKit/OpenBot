@@ -8162,13 +8162,15 @@ fn main() {
             engine: engine_in_use(),
         });
 
+        // `~/.copilotkit/cli.log`, with Windows' separators on Windows.
+        let cli_log = format!("~{0}.copilotkit{0}cli.log", std::path::MAIN_SEPARATOR);
         for expected in [
             "Failed: The back end could not start.",
             "Container engine: docker 28.5.1. 10 CPUs and 20.5 GiB of memory, 0 GiB free of 1006.8 GiB in a container; short of disk (nearly full).",
             "$ docker system df\nTYPE",
             "Images          14        3         18.2GB    12.1GB (66%)",
             "[local setup] failed after 88.1s: exit 1",
-            "~/.copilotkit/cli.log",
+            &cli_log,
             "no space left on device",
             r#""email":"[email]","organizationId":"[id]","userId":"[id]""#,
         ] {
