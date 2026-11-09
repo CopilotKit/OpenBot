@@ -31,6 +31,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **Troubleshooting logs in one click.** Every setup failure, the Status window, and a new Get
+  Troubleshooting Logs… item in the OpenBot menu and the tray now offer Copy logs and Save to a
+  file. Both give one block of text: the version and build, the system, what failed, the container
+  engine's version, CPUs, memory and disk use, and the end of OpenBot Desktop's log and the back
+  end CLI's log (`~/.copilotkit/cli.log`). Keys, tokens, passwords and email addresses are removed,
+  along with account, organisation, user and installation ids, and the home folder is written as
+  `~`. The card suggests pasting the logs into the AI assistant you use. Saved files go in the log
+  folder as `openbot-troubleshooting-<time>.txt`.
 - **A back end setup that stops says why.** OpenBot's log now records how every back end setup,
   start, update and stop ended: how long it took, its exit code, what its report says went wrong
   and the end of its error output. A setup that stopped used to leave nothing in the log. The card

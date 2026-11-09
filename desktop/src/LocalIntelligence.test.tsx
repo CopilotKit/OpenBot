@@ -1201,6 +1201,13 @@ test("the screen in front hears nothing while Intelligence works, and a stop int
   expect(stopped.textContent).toContain("Back end setup stopped");
   expect(stopped.textContent).toContain("A port the back end needs is in use.");
   expect(within(stopped).getByRole("button", { name: "Retry" })).toBeTruthy();
+  // The logs to paste into an AI assistant, beside the card that says it stopped.
+  expect(
+    within(stopped).getByRole("button", { name: "Copy logs" }),
+  ).toBeTruthy();
+  expect(
+    within(stopped).getByRole("button", { name: "Save to a file" }),
+  ).toBeTruthy();
   cleanup();
   invokeCalls = [];
 

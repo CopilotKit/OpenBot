@@ -37,6 +37,7 @@ pub mod speech;
 pub mod stack;
 pub mod telemetry;
 pub mod tray;
+pub mod troubleshooting;
 pub mod upgrade;
 pub mod vault;
 pub mod windows;

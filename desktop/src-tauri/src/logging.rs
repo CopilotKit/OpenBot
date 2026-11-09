@@ -186,7 +186,7 @@ pub fn line(
 }
 
 /// The person's home folder, written as `~` in the log: it names them.
-fn home_folder() -> Option<String> {
+pub fn home_folder() -> Option<String> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
     let home = home
         .to_string_lossy()
