@@ -144,6 +144,28 @@ function useScale(largest: number, max: number | undefined) {
  * The colours are the gallery's series colours, so a part reads the same as a slice of a donut
  * chart. `items` is writable: bound to the data model, every edit is written back there.
  */
+
+/**
+ * Each part's share of the total as a whole percent, adding up to exactly 100: every share rounded
+ * down, then the points left over go to the parts that lost the most to rounding (the largest
+ * remainder method). Rounding each share on its own can show 24 + 48 + 29 = 101%.
+ */
+function wholeShares(amounts: number[], shown: number): number[] {
+  if (shown <= 0) return amounts.map(() => 0);
+  const exact = amounts.map((amount) => (Math.max(0, amount) / shown) * 100);
+  const shares = exact.map(Math.floor);
+  let left = 100 - shares.reduce((sum, share) => sum + share, 0);
+  const byRemainder = exact
+    .map((value, index) => ({ index, rest: value - Math.floor(value) }))
+    .sort((a, b) => b.rest - a.rest);
+  for (const { index, rest } of byRemainder) {
+    if (left <= 0 || rest <= 0) break;
+    shares[index] = (shares[index] ?? 0) + 1;
+    left -= 1;
+  }
+  return shares;
+}
+
 export function A2UIBreakdown({
   items: given,
   setItems,
@@ -167,8 +189,7 @@ export function A2UIBreakdown({
       items.map((entry, at) => (at === index ? { ...entry, amount } : entry)),
     );
   };
-  const share = (amount: number) =>
-    shown > 0 ? Math.round((Math.max(0, amount) / shown) * 100) : 0;
+  const shares = wholeShares(amounts, shown);
 
   return (
     <div
@@ -243,7 +264,7 @@ export function A2UIBreakdown({
                   {label}
                 </label>
                 <span className="w-9 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                  {`${share(amount)}%`}
+                  {`${shares[index] ?? 0}%`}
                 </span>
                 <InputGroup className="h-8 w-28 shrink-0">
                   {affix ? (

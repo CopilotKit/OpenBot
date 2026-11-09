@@ -157,6 +157,35 @@ test("editing a part of a budget updates its share of the bar, the total and the
   expect(lodgingSlider.getAttribute("aria-valuetext")).toBe("$250");
 });
 
+/** Each part's share as the row shows it, in order: "24%" read as 24. */
+function shares(container: HTMLElement) {
+  return [...container.querySelectorAll("li")]
+    .map((row) =>
+      [...row.querySelectorAll("span")].find((span) =>
+        /^\d+%$/.test(span.textContent ?? ""),
+      ),
+    )
+    .map((span) => Number(span?.textContent?.replace("%", "")));
+}
+
+test("the shares a budget shows always add up to 100%", async () => {
+  const view = draw();
+  const food = (await view.findByRole("spinbutton", {
+    name: "Food",
+  })) as HTMLInputElement;
+
+  // Food at 120 is the case a tester hit: 100, 200 and 120 of 420 round to 24 + 48 + 29 = 101%.
+  const user = userEvent.setup({ document });
+  await user.clear(food);
+  await user.type(food, "120");
+
+  expect(total(view.container)).toBe("$420");
+  expect(shares(view.container)).toEqual([24, 48, 28]);
+  expect(shares(view.container).reduce((sum, share) => sum + share, 0)).toBe(
+    100,
+  );
+});
+
 test("a part's slider changes the total, and a part at nothing leaves the bar", async () => {
   const view = draw();
   await view.findByRole("spinbutton", { name: "Food" });
