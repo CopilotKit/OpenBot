@@ -134,6 +134,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- An interface a Bot draws in a card, such as the "Build a trip budget" starter task, has one frame
+  in the conversation. It had a second border around the card, with a gap between the two.
 - **A Bot calls you "you".** Its instructions call the user "the person", and a Bot said that back,
   such as "which the person didn't ask for". Every Bot is now told to write "you".
 - **A budget a Bot draws is in colour, with a bar of how the total splits.** Amounts that add up to
