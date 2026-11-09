@@ -104,6 +104,39 @@ export function summaryFor(harness: Harness): string {
 }
 
 /**
+ * Names the catalogue gave a framework before its current one, by harness id.
+ *
+ * A Bot an earlier version seeded under one of these is still named after its framework: the
+ * installer moves it like one under the current name, and its subtitle reads the current name.
+ */
+export const EARLIER_HARNESS_NAMES: Readonly<
+  Record<string, readonly string[]>
+> = {
+  langgraph: ["LangGraph", "LangChain (LangGraph)"],
+};
+
+/**
+ * A subtitle with any "Powered by <earlier name>" read as the framework's current name.
+ *
+ * OpenBot wrote that part itself, when it seeded the Bot or when New Bot made it, so it is said
+ * the way the catalogue says it now. Only that phrase changes; the person's own words around it
+ * stay as they wrote them.
+ */
+export function withCurrentFrameworkNames(title: string): string {
+  let current = title;
+  for (const harness of HARNESSES) {
+    for (const earlier of EARLIER_HARNESS_NAMES[harness.id] ?? []) {
+      const escaped = earlier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      current = current.replace(
+        new RegExp(`Powered by ${escaped}(?![\\w(])`, "g"),
+        `Powered by ${harness.name}`,
+      );
+    }
+  }
+  return current;
+}
+
+/**
  * What a Bot that runs inside OpenBot is powered by: its subtitle's "Powered by OpenBot", and the
  * framework it is told it runs on.
  */

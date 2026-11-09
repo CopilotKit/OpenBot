@@ -132,6 +132,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- A Bot whose subtitle OpenBot wrote before LangChain's rename reads "Powered by LangChain", and
+  is told that too. The Personal Assistant on an existing install kept "Powered by LangChain
+  (LangGraph)" after an upgrade. Nothing stored changes, and words a person wrote stay theirs.
 - The sidebar floats as frosted glass over the colours of OpenBot's orb, the orb sits beside
   OpenBot's name, and the app is set in Atkinson Hyperlegible Next. The glass turns off with the
   system's reduce transparency or increase contrast setting, and a skin keeps its own look.

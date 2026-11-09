@@ -306,3 +306,24 @@ describe("the framework New Bot sends", () => {
       ).toMatchObject({ ok: false });
   });
 });
+
+/**
+ * The Personal Assistant on an install seeded before LangChain was renamed kept "Powered by
+ * LangChain (LangGraph)" in its stored subtitle, and told itself that in its standing role. It is
+ * told the framework's current name, the same as its profile reads.
+ */
+test("a subtitle stored under LangChain's earlier name is told to the Bot as LangChain", () => {
+  const bot = registeredAgentFromRow({
+    id: "picked-harness",
+    name: "Personal Assistant",
+    type: "remote_ag_ui",
+    configuration: { endpoint: "http://agent-harness.test:4206" },
+    title: "Everyday life. Powered by LangChain (LangGraph).",
+    roleDescription: "Help with everyday errands.",
+  });
+  if (!bot || bot.type === "built_in") throw new Error("the Bot did not parse");
+  expect(bot.standingMessage.content).toContain(
+    "Everyday life. Powered by LangChain.",
+  );
+  expect(bot.standingMessage.content).not.toContain("LangGraph");
+});

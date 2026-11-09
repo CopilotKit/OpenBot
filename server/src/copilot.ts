@@ -21,6 +21,7 @@ import {
   PROVENANCE_GUIDANCE,
   todayGuidance,
 } from "@openbot/shared/bot-prompt";
+import { withCurrentFrameworkNames } from "@openbot/shared/harnesses";
 import {
   defaultModelFor,
   requiresResponsesApi,
@@ -518,8 +519,10 @@ type RuntimeAgentRow = {
 };
 
 export function registeredAgentFromRow(
-  row: RuntimeAgentRow,
+  stored: RuntimeAgentRow,
 ): RegisteredAgent | null {
+  // A subtitle OpenBot seeded under a framework's earlier name is told to the Bot by its current one.
+  const row = { ...stored, title: withCurrentFrameworkNames(stored.title) };
   if (!isPlainObject(row.configuration)) {
     return null;
   }

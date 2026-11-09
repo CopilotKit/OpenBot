@@ -333,6 +333,24 @@ describe("agent profile store integration", () => {
     expect(row.configuration.endpoint).toBeUndefined();
   });
 
+  test("a subtitle stored under LangChain's earlier name reads as LangChain", async () => {
+    const owner = await createUser();
+    const withoutManaged = createAgentProfileStore(database, undefined);
+    const created = await withoutManaged.create(owner, {
+      name: "Seeded Before The Rename",
+      title: "Everyday life. Powered by LangChain (LangGraph).",
+      roleDescription: "Help with everyday errands.",
+      visibility: "private",
+      systemPrompt: "Help with everyday errands.",
+    });
+    createdAgentIds.push(created.id);
+
+    // Stored as written; read by the framework's current name.
+    expect((await withoutManaged.get(owner, created.id))?.title).toBe(
+      "Everyday life. Powered by LangChain.",
+    );
+  });
+
   test("an edit moves the instruction such a coworker actually runs on", async () => {
     const owner = await createUser();
     const withoutManaged = createAgentProfileStore(database, undefined);

@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  EARLIER_HARNESS_NAMES,
   HARNESSES,
   type Harness,
   OPENBOT_HARNESS_NAME,
@@ -843,15 +844,6 @@ const PERSONAL_PACKAGE_PATH = fileURLToPath(
 );
 const PERSONAL_ASSISTANT = "personal-assistant";
 const PICKED_HARNESS = "picked-harness";
-
-/**
- * Names the catalogue gave a framework before its current one. A Bot an earlier version seeded under
- * one of these is still named after its framework, so it follows a change of harness like one under
- * the current name.
- */
-const EARLIER_HARNESS_NAMES: Readonly<Record<string, readonly string[]>> = {
-  langgraph: ["LangGraph", "LangChain (LangGraph)"],
-};
 
 function catalogueNamesOf(harness: Harness): string[] {
   return [harness.name, ...(EARLIER_HARNESS_NAMES[harness.id] ?? [])];
