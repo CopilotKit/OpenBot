@@ -330,6 +330,29 @@ export function createApprovalStore(database: Database): ApprovalStore {
   };
 }
 
+/** A team rule as the trail records it: what it matches and does, without its bookkeeping. */
+function ruleRow(rule: typeof approvalTeamRules.$inferSelect) {
+  return {
+    id: rule.id,
+    botId: rule.botId,
+    toolRef: rule.toolRef,
+    effect: rule.effect,
+    scope: rule.scope,
+    behaviour: rule.behaviour,
+  };
+}
+
+/** The team rules in force, as the trail records them before and after a save. */
+async function teamRuleRows(executor: Database) {
+  if (currentEdition() === "personal") return [];
+  const rows = await executor
+    .select()
+    .from(approvalTeamRules)
+    .where(isNull(approvalTeamRules.revokedAt))
+    .orderBy(desc(approvalTeamRules.createdAt));
+  return rows.map(ruleRow);
+}
+
 function createPolicyStore(database: Database): ApprovalPolicyStore {
   const audit = createAuditStore(database);
   const preferences = async (owner: string): Promise<ApprovalPreferences> => {
@@ -429,6 +452,7 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
       return row;
     },
     async createTeamRule(by, input) {
+      const before = await teamRuleRows(database);
       const [row] = await database
         .insert(approvalTeamRules)
         .values({ id: crypto.randomUUID(), createdBy: by, ...input })
@@ -439,9 +463,59 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
         targetType: "approval_rule",
         targetId: row.id,
         actorUserId: by,
-        payload: { change: "created", layer: "team", rule: input },
+        payload: {
+          change: "created",
+          layer: "team",
+          rule: input,
+          before,
+          after: await teamRuleRows(database),
+        },
       });
       return row;
+    },
+    /*
+     * One save, one row on the trail: the rules a description was written into are added together or
+     * not at all, and the row says who saved them, the team rules either side, and the sentence.
+     */
+    async createTeamRules(by, inputs, authoring) {
+      return database.transaction(async (tx) => {
+        const executor = tx as unknown as Database;
+        const before = await teamRuleRows(executor);
+        const rows = inputs.length
+          ? await tx
+              .insert(approvalTeamRules)
+              .values(
+                inputs.map((input) => ({
+                  id: crypto.randomUUID(),
+                  createdBy: by,
+                  ...input,
+                })),
+              )
+              .returning()
+          : [];
+        await recordAuditEvent(createAuditStore(executor), {
+          eventType: "approval.rule_changed",
+          targetType: "approval_rule",
+          targetId: TEAM,
+          actorUserId: by,
+          payload: {
+            change: "created",
+            layer: "team",
+            added: rows.map(ruleRow),
+            before,
+            after: await teamRuleRows(executor),
+            ...(authoring ? { authoring } : {}),
+          },
+        });
+        return rows;
+      });
+    },
+    async recentRequests(limit) {
+      return database
+        .select()
+        .from(approvalRequests)
+        .orderBy(desc(approvalRequests.createdAt))
+        .limit(limit);
     },
     async updateRule(owner, id, input) {
       const [row] = await database
@@ -466,6 +540,7 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
       return row;
     },
     async updateTeamRule(by, id, input) {
+      const before = await teamRuleRows(database);
       const [row] = await database
         .update(approvalTeamRules)
         .set(input)
@@ -482,11 +557,18 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
         targetType: "approval_rule",
         targetId: id,
         actorUserId: by,
-        payload: { change: "updated", layer: "team", changed: input },
+        payload: {
+          change: "updated",
+          layer: "team",
+          changed: input,
+          before,
+          after: await teamRuleRows(database),
+        },
       });
       return row;
     },
     async revokeTeamRule(by, id) {
+      const before = await teamRuleRows(database);
       const rows = await database
         .update(approvalTeamRules)
         .set({ revokedAt: sql`now()` })
@@ -503,7 +585,12 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
         targetType: "approval_rule",
         targetId: id,
         actorUserId: by,
-        payload: { change: "revoked", layer: "team" },
+        payload: {
+          change: "revoked",
+          layer: "team",
+          before,
+          after: await teamRuleRows(database),
+        },
       });
     },
     async findEquivalent(input) {
@@ -597,6 +684,7 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
           scope: input.scope,
           ...targetSubject(input.target),
           outcome: input.outcome,
+          ...(input.call ? { call: input.call } : {}),
         },
       });
     },

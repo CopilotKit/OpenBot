@@ -23,6 +23,8 @@ import { Command } from "./WindowsBlocker";
 
 type Seen =
   | { at: "checking" }
+  /** No engine answers yet, so the CLI can't check the account. Install is bringing one up. */
+  | { at: "waiting-for-engine" }
   | { at: "signed-out" }
   | { at: "signing-in"; attempt: string }
   | { at: "agreement"; terms: Extract<LocalTerms, { status: "required" }> }
@@ -33,6 +35,8 @@ type Seen =
   | { at: "unsupported-engine"; said: string; switchEngine: boolean };
 
 const COULD_NOT_CHECK = "Couldn’t check your CopilotKit account. Try again.";
+const SETTING_UP_ENGINE =
+  "OpenBot is setting up the software it runs on. Your CopilotKit sign-in comes next.";
 const ENGINE_REFUSED =
   "OpenBot's back end can't run on the container engine this computer uses.";
 const BLOCKED = "OpenBot's back end can't run on this computer as it's set up.";
@@ -67,6 +71,7 @@ export function CopilotKitAccount({
   onDone,
   failure,
   handOff = null,
+  engine = null,
 }: {
   /** The installation folder the apps are connected for. */
   root: string;
@@ -75,6 +80,12 @@ export function CopilotKitAccount({
    * starting, or a password prompt. See `handOffNow`.
    */
   handOff?: string | null;
+  /**
+   * What Install, behind this step, is doing to bring the engine up, as its own row says it
+   * ("Preparing the engine machine."), the hand-off included. See `engineNow`. Said while the
+   * account check waits for an engine.
+   */
+  engine?: string | null;
   /** Signed in and agreed: the version accepted here, or null when nothing needed accepting. */
   onDone: (acceptedVersion: string | null) => void;
   /** A failure from setup itself, shown inside this card rather than under it. */
@@ -120,7 +131,8 @@ export function CopilotKitAccount({
   const waitingSince = useRef<number | null>(null);
   const askAgain = useRef<ReturnType<typeof setTimeout> | null>(null);
   const check = useCallback(() => {
-    setSeen({ at: "checking" });
+    // While it waits for the engine, each check asked again keeps saying what it waits on.
+    if (waitingSince.current === null) setSeen({ at: "checking" });
     const started = localEvalTerms();
     attempt.current = started.attempt;
     started.terms.then(
@@ -128,10 +140,12 @@ export function CopilotKitAccount({
         if (attempt.current !== started.attempt) return;
         attempt.current = null;
         if (terms.status === "engine-not-ready") {
-          // Install is still bringing the engine up: keep checking rather than fail.
+          // Install is still bringing the engine up: keep checking rather than fail, and say so.
+          // On a new Mac that is minutes of Podman installing, under "Checking your account".
           const since = waitingSince.current ?? Date.now();
           waitingSince.current = since;
           if (Date.now() - since < ENGINE_WAIT_LIMIT_MS) {
+            setSeen({ at: "waiting-for-engine" });
             askAgain.current = setTimeout(
               () => checkAgain.current(),
               ENGINE_WAIT_MS,
@@ -171,6 +185,7 @@ export function CopilotKitAccount({
       () => {
         if (attempt.current !== started.attempt) return;
         attempt.current = null;
+        waitingSince.current = null;
         setSeen({ at: "failed", said: COULD_NOT_CHECK });
       },
     );
@@ -220,6 +235,7 @@ export function CopilotKitAccount({
   const connecting = seen.at === "apps";
   const appsFailed = seen.at === "apps-failed";
   const refused = seen.at === "unsupported-engine" ? seen : null;
+  const waitingForEngine = seen.at === "waiting-for-engine";
   return (
     <div className="sheet">
       {/* OpenBot is what is being set up, so its mark heads this step as it heads every other.
@@ -246,7 +262,9 @@ export function CopilotKitAccount({
             ? "OpenBot uses your CopilotKit account to set up apps like Gmail and Slack."
             : refused
               ? refused.said
-              : "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the license agreement."}
+              : waitingForEngine
+                ? SETTING_UP_ENGINE
+                : "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the license agreement."}
       </p>
       {refused?.switchEngine && (
         <ol className="blocker-steps">
@@ -272,9 +290,17 @@ export function CopilotKitAccount({
         </p>
       )}
 
-      {/* The account check waits on the engine too. While Docker Desktop starts, this says what
-          it waits on and what the person may have to do in Docker's window. */}
-      {handOff && <StatusLine>{handOff}</StatusLine>}
+      {/* The account check waits on the engine too. While it does, this says what Install is doing
+          to bring it up, as Install's own row says it. While Docker Desktop starts or a password
+          prompt is up, it says what the person may have to do in that window, whatever the step
+          is at. */}
+      {waitingForEngine ? (
+        <StatusLine>
+          {engine ?? handOff ?? "Preparing this computer…"}
+        </StatusLine>
+      ) : (
+        handOff && <StatusLine>{handOff}</StatusLine>
+      )}
       {seen.at === "checking" && !handOff && (
         <StatusLine>Checking your CopilotKit account…</StatusLine>
       )}

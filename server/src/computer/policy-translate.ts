@@ -309,8 +309,8 @@ function compileRule(rule: string): RuleCompile {
   return checkPolicyRule(rule);
 }
 
-/** The JSON object in a model's answer, wherever the model put it. */
-function objectIn(text: string): unknown {
+/** The JSON object in a model's answer, wherever the model put it. Approval rules read theirs the same way. */
+export function objectIn(text: string): unknown {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start === -1 || end < start) return null;
@@ -400,11 +400,18 @@ export async function translatePolicyRule(input: {
   };
 }
 
-/** One call. A missing model stays itself; any other failure becomes "the model didn't answer". */
-async function ask(
+/**
+ * One call. A missing model stays itself; any other failure becomes "the model didn't answer", in
+ * `unreachable`'s words where the caller has its own: approval rules are not written in CEL.
+ */
+export async function ask(
   complete: ModelCompleter,
   prompt: string,
-  options: { schema: ModelAnswerSchema; signal: AbortSignal | undefined },
+  options: {
+    schema: ModelAnswerSchema;
+    signal: AbortSignal | undefined;
+    unreachable?: string;
+  },
 ): Promise<string> {
   try {
     return await complete(prompt, options.signal, { schema: options.schema });
@@ -420,13 +427,14 @@ async function ask(
       }),
     );
     throw new PolicyTranslationError(
-      "Couldn't reach the model to write the rule. Try again, or write the rule in CEL.",
+      options.unreachable ??
+        "Couldn't reach the model to write the rule. Try again, or write the rule in CEL.",
     );
   }
 }
 
 /** A description longer than this is not one rule. */
-const TEXT_LIMIT = 1000;
+export const TEXT_LIMIT = 1000;
 
 /**
  * `POST /api/computers/policy-translate`: `{ text }` in, `{ rule, effect, explanation, compile }` out.

@@ -1,10 +1,13 @@
 import {
   IconChecklist,
+  IconChevronRight,
   IconEyeCheck,
+  IconSparkles,
   IconTerminal2,
   IconUserCog,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { Fragment } from "react";
 import {
   PageEmpty,
@@ -154,6 +157,21 @@ export function TeamApprovalSettings() {
               <Separator />
             </Fragment>
           ))}
+          <Item render={<Link to="/admin/approvals/describe" />} size="sm">
+            <ItemMedia variant="icon">
+              <IconSparkles />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Describe it in words</ItemTitle>
+              <ItemDescription>
+                Say what Bots should do, and your model writes the rules.
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <IconChevronRight className="size-4 text-muted-foreground" />
+            </ItemActions>
+          </Item>
+          <Separator />
           <RuleForm label="Add a team rule" save={addTeamRule} />
         </PageRows>
       </PageSection>

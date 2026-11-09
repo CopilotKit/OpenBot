@@ -8,6 +8,13 @@ import {
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TeamApprovalSettings } from "@/components/approvals/team-settings";
@@ -109,14 +116,25 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
+/** On Admin → Approvals, inside a router: the screen links on to describing rules in words. */
 function draw() {
+  const root = createRootRoute({ component: TeamApprovalSettings });
+  const describe = createRoute({
+    path: "/admin/approvals/describe",
+    getParentRoute: () => root,
+    component: () => null,
+  });
+  const router = createRouter({
+    routeTree: root.addChildren([describe]),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
   return render(
     <QueryClientProvider
       client={
         new QueryClient({ defaultOptions: { queries: { retry: false } } })
       }
     >
-      <TeamApprovalSettings />
+      <RouterProvider router={router as never} />
     </QueryClientProvider>,
   );
 }

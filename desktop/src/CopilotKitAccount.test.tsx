@@ -153,6 +153,95 @@ test("an engine local setup doesn't run on is said at once, with how to switch",
   );
 });
 
+/**
+ * What `local_eval_terms` answers while no engine answers yet: the CLI's preflight found no Podman
+ * (`onboard-local-terms-no-engine.json`), as `local_eval.rs` normalizes and checks it.
+ */
+const noEngine = JSON.parse(
+  readFileSync(
+    new URL(
+      "../src-tauri/test-fixtures/local-eval/local-eval-terms-no-engine.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+);
+
+/** A status line, with the rows' spinner, that says exactly `said`. */
+function expectWorking(screen: ReturnType<typeof render>, said: string) {
+  const status = screen
+    .getAllByRole("status")
+    .find((line) => line.textContent === said);
+  expect(status?.textContent).toBe(said);
+  expect(status?.querySelector(".step-spinner")).not.toBeNull();
+}
+
+/**
+ * 1.0.0 on a new Mac said only "Checking your CopilotKit account…" for minutes while Install put
+ * Podman in behind this step. It says what it is waiting on, in Install's own words as Install
+ * moves on, and that sign-in comes next. Then it goes on to sign-in by itself.
+ */
+test("while Install sets up the engine, the account step says so, then goes on to sign-in", async () => {
+  let asked = 0;
+  let answerSecond!: (terms: unknown) => void;
+  invokeHandler = async ({ command }) => {
+    if (command === "local_eval_terms") {
+      asked += 1;
+      if (asked === 1) return noEngine;
+      if (asked === 2)
+        return new Promise((resolve) => {
+          answerSecond = resolve;
+        });
+      return { status: "signed-out" };
+    }
+    throw new Error(`unexpected ${command}`);
+  };
+  const account = (engine: string) => (
+    <CopilotKitAccount
+      root="/tmp/account-no-engine"
+      onDone={() => {}}
+      engine={engine}
+    />
+  );
+  const screen = render(
+    account(
+      "Installing Podman. Enter your Mac password when macOS asks for it.",
+    ),
+  );
+  await screen.findByText(
+    "OpenBot is setting up the software it runs on. Your CopilotKit sign-in comes next.",
+  );
+  expectWorking(
+    screen,
+    "Installing Podman. Enter your Mac password when macOS asks for it.",
+  );
+  expect(screen.queryByText("Checking your CopilotKit account…")).toBeNull();
+
+  // Install moves on, and so does what the step says. Asking again, it still says it.
+  screen.rerender(account("Preparing the engine machine."));
+  expectWorking(screen, "Preparing the engine machine.");
+  await waitFor(() => expect(asked).toBe(2), { timeout: 3000 });
+  expectWorking(screen, "Preparing the engine machine.");
+  expect(screen.queryByText("Checking your CopilotKit account…")).toBeNull();
+  answerSecond(noEngine);
+
+  // The engine answers: the step is about signing in again.
+  expect(
+    await screen.findByRole(
+      "button",
+      { name: "Sign in to CopilotKit" },
+      { timeout: 5000 },
+    ),
+  ).toBeTruthy();
+  expect(asked).toBe(3);
+  expect(screen.queryByText("Preparing the engine machine.")).toBeNull();
+  expect(
+    screen.getByText(
+      "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the license agreement.",
+    ),
+  ).toBeTruthy();
+}, 15000);
+
 /** A refusal with no sentence of the CLI's own still says what is wrong, and is not waited out. */
 test("a refused engine with no sentence from the CLI says so in OpenBot's words", async () => {
   invokeHandler = async ({ command }) => {
