@@ -158,6 +158,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- An interface a Bot draws in a card, such as the "Build a trip budget" starter task, has one frame
+  in the conversation. It had a second border around the card, with a gap between the two.
 - Onboarding's OpenBot for Business step says what OpenBot for Business is before it asks for a
   demo: work sign-in, Bots shared in Slack and Microsoft Teams, and the controls and audit trail,
   beside the picture of running OpenBot yourself that the step showed before. Book a demo then
