@@ -10,6 +10,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **A back end update that was stopped partway no longer breaks every later Start.** Quitting
+  while the back end updated could leave it half updated, and every Start after that failed with
+  "Local update-quiesce failed (exit 1)". OpenBot now lets an update finish once it has begun
+  changing the back end ("Finishing the back end update" on the Shutting down screen), repairs a
+  back end an earlier update left half done, rolls back one Helm left mid-upgrade, uncordons a
+  back end node left unschedulable, and tries the update once more. While it runs, the row names
+  the step it is waiting on and for how long, and a failed database job is said as soon as it
+  fails. A failed update says the step it stopped at, and that your data is kept.
 - **Connecting an app from OpenBot Desktop brings you back to OpenBot Desktop.** The app's sign-in
   opens in your browser, and when it finished, the browser showed OpenBot in a new tab while the
   window behind it still had the app as not connected. The browser now shows a short "Back to

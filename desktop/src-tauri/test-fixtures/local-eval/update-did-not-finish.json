@@ -15,7 +15,8 @@
       "unfinishedUpdate": {
         "to": "0.16.0-rc.9",
         "prepared": true,
-        "stoppedDownloading": true
+        "stoppedDownloading": true,
+        "failedStep": "image-download"
       },
       "observed": {
         "running": true,
@@ -76,7 +77,8 @@
       "unfinishedUpdate": {
         "to": "0.16.0-rc.9",
         "prepared": true,
-        "stoppedDownloading": true
+        "stoppedDownloading": true,
+        "failedStep": "image-download"
       },
       "observed": {
         "running": true,
@@ -137,7 +139,8 @@
       "unfinishedUpdate": {
         "to": "0.16.0-rc.9",
         "prepared": true,
-        "stoppedDownloading": true
+        "stoppedDownloading": true,
+        "failedStep": "image-download"
       },
       "observed": {
         "running": false,
