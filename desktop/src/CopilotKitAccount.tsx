@@ -5,7 +5,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { CopilotKitLogo } from "./CopilotKitLogo";
 import { CopilotKitSignInWait } from "./CopilotKitSignInWait";
 import { ExternalLink } from "./ExternalLink";
 import {
@@ -200,10 +199,10 @@ export function CopilotKitAccount({
   const appsFailed = seen.at === "apps-failed";
   return (
     <div className="sheet">
-      {/* OpenBot is what is being set up, so its mark heads this step as it heads every other.
-          The account is CopilotKit's, so its logotype leads the step itself. */}
+      {/* OpenBot is what is being set up, so its mark heads this step as it heads every other,
+          and the step leads with OpenBot. CopilotKit's part is the licence for the back end, said
+          in one line: its logotype here made the step read as signing up for a CopilotKit product. */}
       <Sections at="Account" />
-      <CopilotKitLogo />
       <h1>
         {agreement
           ? "Accept the license agreement"
@@ -211,20 +210,28 @@ export function CopilotKitAccount({
             ? "Setting up your apps"
             : appsFailed
               ? "Connect your apps"
-              : "Sign in to CopilotKit"}
+              : "OpenBot runs on this computer"}
       </h1>
       <p className="lede">
         {agreement
           ? `To run OpenBot on this computer, accept the CopilotKit license agreement for ${agreement.organizationName}.`
           : connecting || appsFailed
             ? "OpenBot uses your CopilotKit account to set up apps like Gmail and Slack."
-            : "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the license agreement."}
+            : "Its back end, from CopilotKit, runs here too. Sign in to CopilotKit to get a free license for it."}
       </p>
+      {/* What the person gives up by signing in, and only what holds: the sign-in fetches the
+          licence, the conversations and files stay here, and what a Bot is asked goes to the AI
+          provider chosen on the AI step. Nothing broader, such as "no data leaves this computer": setup
+          and usage telemetry, the AI provider and connected apps all reach the network. */}
       {!agreement && !connecting && !appsFailed && (
-        <p className="footnote">
-          Your conversations and files are stored on this computer. Signing in
-          does not send them to CopilotKit.
-        </p>
+        <ul className="blocker-steps">
+          <li>Your conversations and files stay on this computer.</li>
+          <li>
+            Signing in only gets the license. It doesn’t send your conversations
+            or files to CopilotKit.
+          </li>
+          <li>What you ask a Bot goes to the AI provider you choose.</li>
+        </ul>
       )}
 
       {/* The account check waits on the engine too. While Docker Desktop starts, this says what

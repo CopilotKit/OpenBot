@@ -114,39 +114,32 @@ test("Cancel stops the CLI's sign-in and goes back to the start of the step", as
   ).toBeNull();
 });
 
-/** CopilotKit's logotype, light, with the reversed wordmark for a dark window. */
-function expectCopilotKitLogo(screen: ReturnType<typeof render>) {
-  const logo = screen.getByRole("img", { name: "CopilotKit" });
-  expect(logo.getAttribute("src")).toBe("/copilotkit-logo.svg");
-  expect(
-    logo
-      .closest("picture")
-      ?.querySelector('source[media="(prefers-color-scheme: dark)"]')
-      ?.getAttribute("srcset"),
-  ).toBe("/copilotkit-logo-dark.svg");
-}
-
 /*
- * The step signs in to a CopilotKit account, so it shows CopilotKit's logotype, signed out and
- * while the sign-in waits. It showed OpenBot's mark alone.
+ * The step is OpenBot's, so it leads with OpenBot, not CopilotKit's logotype, and says what signing
+ * in is for and what it does not send.
  */
-test("the CopilotKit sign-in shows CopilotKit's logotype, before and while it waits", async () => {
+test("the sign-in leads with OpenBot and says what signing in is for", async () => {
   waitingSignIn();
   const screen = render(
     <CopilotKitAccount root="/tmp/account-sign-in" onDone={() => {}} />,
   );
   await screen.findByRole("button", { name: "Sign in to CopilotKit" });
-  expectCopilotKitLogo(screen);
+  expect(
+    screen.getByRole("heading", { name: "OpenBot runs on this computer" }),
+  ).toBeTruthy();
+  expect(screen.getByText(/free license/)).toBeTruthy();
+  expect(screen.getByText(/Signing in only gets the license/)).toBeTruthy();
+  expect(screen.queryByRole("img", { name: "CopilotKit" })).toBeNull();
 
   await userEvent.click(
     screen.getByRole("button", { name: "Sign in to CopilotKit" }),
   );
   await screen.findByText(PAGE.userCode);
-  expectCopilotKitLogo(screen);
+  expect(screen.queryByRole("img", { name: "CopilotKit" })).toBeNull();
 });
 
 test("after Accept, the step says it is setting up your apps, not to sign in", async () => {
-  // Seen on Windows: Accept was followed for two seconds by "Sign in to CopilotKit" and its
+  // Seen on Windows: Accept was followed for two seconds by the sign-in heading and its
   // sign-in lede, over "Connecting your apps…", for a person already signed in and agreed.
   let connected!: () => void;
   invokeHandler = async ({ command }) => {
@@ -180,9 +173,9 @@ test("after Accept, the step says it is setting up your apps, not to sign in", a
   ).toBeTruthy();
   expect(screen.getByText("Connecting your apps…")).toBeTruthy();
   expect(
-    screen.queryByRole("heading", { name: "Sign in to CopilotKit" }),
+    screen.queryByRole("heading", { name: "OpenBot runs on this computer" }),
   ).toBeNull();
-  expect(screen.queryByText(/Sign in, then accept/)).toBeNull();
+  expect(screen.queryByText(/free license/)).toBeNull();
   connected();
   await waitFor(() => expect(done).toBe("developer-edition-2026-10-01-web"));
 });

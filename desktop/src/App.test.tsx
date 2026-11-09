@@ -611,11 +611,9 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   await installLocal(view);
   // The first step. OpenBot needs no account, so it installs behind it, exactly once; nothing
   // of Intelligence's runs before the agreement.
-  await view.findByRole("heading", { name: "Sign in to CopilotKit" });
+  await view.findByRole("heading", { name: "OpenBot runs on this computer" });
   expect(
-    view.getByText(
-      "Your conversations and files are stored on this computer. Signing in does not send them to CopilotKit.",
-    ),
+    view.getByText("Your conversations and files stay on this computer."),
   ).toBeTruthy();
   expect(stepLabel(view)).toBe("Account");
   await waitFor(() =>
@@ -710,7 +708,7 @@ test("the account step says Docker Desktop is starting while Install waits on it
   });
   const view = await renderApp();
   await installLocal(view);
-  await view.findByRole("heading", { name: "Sign in to CopilotKit" });
+  await view.findByRole("heading", { name: "OpenBot runs on this computer" });
 
   await emitProgress({
     step: "install-engine",
@@ -744,7 +742,7 @@ test("a line about OpenBot's own work is not said as a hand-off on the account s
   });
   const view = await renderApp();
   await installLocal(view);
-  await view.findByRole("heading", { name: "Sign in to CopilotKit" });
+  await view.findByRole("heading", { name: "OpenBot runs on this computer" });
   await emitProgress({
     step: "install-engine",
     ok: true,
