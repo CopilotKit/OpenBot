@@ -952,6 +952,7 @@ const DECISIONS: Record<string, string> = {
   "component.published": "Published. Every Bot can use it",
   "component.unpublished": "Unpublished. No Bot can use it",
   "component.draft_saved": "Draft saved, not yet published",
+  "component.description_updated": "Description updated to this version's",
   "component.refused": "Refused",
   "component.function_granted": "Can read this",
   "component.function_revoked": "Can no longer read this",

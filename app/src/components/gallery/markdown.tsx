@@ -5,6 +5,7 @@ import {
   markdownPlugins,
   replyRemarkPlugins,
 } from "@/lib/markdown";
+import { cn } from "@/lib/utils";
 import { GalleryStreamingContext } from "./streaming";
 
 /**
@@ -19,6 +20,9 @@ import { GalleryStreamingContext } from "./streaming";
  * as a Bot's reply in the transcript, so a link is the same link (a new tab, no referrer, which
  * OpenBot Desktop hands to the person's own browser), a connected document is the same chip, and raw
  * HTML is dropped by the same sanitising. Nothing here can drift from the transcript.
+ *
+ * A LONG LINK WRAPS. A card is narrower than a reply and clips what runs past its edge, so a long
+ * URL or path in its text breaks across lines rather than losing its end. Code blocks still scroll.
  *
  * FOR PROSE ONLY. A card's title, caption and labels stay plain: they are one line, cut to fit.
  *
@@ -40,7 +44,7 @@ export function GalleryMarkdown({
   if (!children) return null;
   return (
     <Streamdown
-      className={className}
+      className={cn("break-words", className)}
       components={markdownComponents}
       mode={mode}
       plugins={markdownPlugins}

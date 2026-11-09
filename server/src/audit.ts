@@ -417,6 +417,8 @@ export const auditEventTypes = [
   "component.published",
   "component.unpublished",
   "component.draft_saved",
+  // A build's own description, replaced by a newer build's where nobody here had edited it.
+  "component.description_updated",
   "component.refused",
 
   /*

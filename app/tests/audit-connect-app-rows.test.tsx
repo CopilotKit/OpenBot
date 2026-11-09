@@ -37,7 +37,7 @@ const REF = "composio-gmail/GMAIL_FETCH_EMAILS";
 
 /** What Activity asks the server to leave out, as the page writes it into its query. */
 const LEAVE_OUT =
-  "excludeEventType=mcp.tools_discovered%2Cchannel.routed%2Ccomponent.published%2Ccomputer.policy_loaded%2Ccomputer.isolation_loaded&excludeCalls=routines%2Fcreate_routine%2Croutines%2Fupdate_routine%2Croutines%2Fdelete_routine";
+  "excludeEventType=mcp.tools_discovered%2Cchannel.routed%2Ccomponent.published%2Ccomponent.description_updated%2Ccomputer.policy_loaded%2Ccomputer.isolation_loaded&excludeCalls=routines%2Fcreate_routine%2Croutines%2Fupdate_routine%2Croutines%2Fdelete_routine";
 
 /** An `mcp.call_failed` row as `callTool` writes it when the call's credential was refused. */
 function failedCall(id: string, minute: number, failure: string) {

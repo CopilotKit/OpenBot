@@ -64,6 +64,31 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Home says which Bot is working, with a way to it, and a conversation says "Working" in the
   sidebar while its Bot works. A Bot's browsing reads "Browsed example.com", where it read "Browsed
   1 page".
+- Bots answer ordinary questions, summaries and short lists directly in Markdown by default. A
+  notice card is kept for a distinct alert that needs you to act, or for when you ask for one, and
+  other components for when a chart, table or card makes the answer easier to use. A Bot asked for
+  its top emails used to wrap the list in a notice.
+- A component description nobody has edited now follows OpenBot's own when you upgrade, so the new
+  Notice, Checklist, Record, Headline figures, Data table, Bar chart, Donut chart and Progress
+  against target descriptions reach an existing deployment. The text comes from OpenBot itself,
+  never from a browser. A description an admin has saved, or a component an admin has published or
+  unpublished, keeps what they chose. Each update is one row in Admin → Audit, started by OpenBot.
+- A notice card's supporting point that is itself a list is drawn as that list, without a stray dot
+  and an extra indent beside it.
+- A long link in a card's text (a notice, a checklist, a quotation, an approval, a choice's
+  options) wraps, where it ran under the card's edge and lost its end.
+- A choice card's summary is drawn as Markdown, as an approval's is, where it showed the raw
+  markers, such as `**two**`.
+- A Bot can link a bar, a progress row, a headline figure or a donut chart's legend row to where
+  the figure came from, such as the record or the search, when it has that address. Clicking it
+  opens the page in a new tab, as a source under a chart does. Only web addresses become links, and
+  a figure without one draws as before.
+- A chart whose figures are still arriving shimmers with "Drawing the chart…" at its own height,
+  where it said "There is no data to chart." until its first figure came in. A chart that was
+  stopped, or that finished with no figures, still says there is no data.
+- A bar chart whose figures don't fit their bars, such as ten bars on a phone, writes them
+  compactly ("15K", "3.7K"), where they ran into one another. The exact figure stays in the
+  tooltip and is what a screen reader reads.
 
 ### Personal edition
 

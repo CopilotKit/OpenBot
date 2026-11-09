@@ -185,7 +185,6 @@ export function ChoiceCard(props: Waiting<ChoiceArgs>) {
             : { label: "Answered", note: chosen.answer, tone: "positive" }
           : undefined
       }
-      caption={args.summary}
       onSubmit={async (value, text) => {
         if (!respond) return;
         setSending(true);
@@ -206,7 +205,12 @@ export function ChoiceCard(props: Waiting<ChoiceArgs>) {
       other={{ placeholder: "Answer something else…" }}
       submitting={sending || !respond}
       title={args.title}
-    />
+    >
+      {/* Drawn as the approval's summary is: a Bot writes it in markdown, which a caption shows raw. */}
+      {args.summary ? (
+        <GalleryMarkdown className="text-sm">{args.summary}</GalleryMarkdown>
+      ) : null}
+    </DecisionCard>
   );
 }
 
