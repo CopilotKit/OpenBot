@@ -1040,7 +1040,6 @@ function Setup() {
   return (
     <main>
       <div className="sheet connection-sheet">
-        {returningToInstallation && appUpdates}
         {/* A failure outranks `running`. The supervisor gives up on a process and sends the window
           back here, and a heading that still says everything is running while the box underneath
           names the process that stopped is a screen arguing with itself. */}
@@ -1095,6 +1094,9 @@ function Setup() {
             Stop OpenBot
           </button>
         </div>
+        {/* Under the buttons, as on the stopped screen. A disclosure draws a rule above itself, and
+          first in the card it opened the card on a line with nothing above it. */}
+        {returningToInstallation && appUpdates}
       </div>
     </main>
   );

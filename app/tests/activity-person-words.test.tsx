@@ -8,15 +8,15 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render } from "@testing-library/react";
+import { ServerToolLine } from "@/components/channels/chat-transcript";
 import {
   AuditPage,
   withoutOpenBotWorking,
 } from "@/components/manage/audit-page";
-import { ServerToolLine } from "@/components/channels/chat-transcript";
 import { agentKeys } from "@/lib/agents/queries";
-import { auditKeys } from "@/lib/audit/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { pluginKeys } from "@/lib/plugins/queries";
+import { seedAuditPage } from "./seed-audit-page";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -137,8 +137,9 @@ async function renderAs(edition: "team" | "personal") {
     localEvaluation: edition === "personal",
     edition,
   });
-  queryClient.setQueryData(
-    [...auditKeys.all, edition === "personal" ? withoutOpenBotWorking("") : ""],
+  seedAuditPage(
+    queryClient,
+    edition === "personal" ? withoutOpenBotWorking("") : "",
     { events: ROWS },
   );
   queryClient.setQueryData(pluginKeys.page(), {
