@@ -70,6 +70,14 @@ const WITHOUT_SEARCH_LINES = [
   "names but cannot search.",
 ];
 
+/** The same, for the personal edition: one person, no administrator, and the card offers the step. */
+const WITHOUT_SEARCH_PERSONAL_LINES = [
+  ...WITHOUT_SEARCH_LINES.slice(0, 6),
+  `If you hold ${SHOW_APP_ACCESS_TOOL}, call it once in the conversation with the name of one search`,
+  `app (${RESEARCH_APP_NAMES.join(", ")}): the card offers the step that turns it on.`,
+  ...WITHOUT_SEARCH_LINES.slice(-2),
+];
+
 /**
  * The order of operations that makes the computer tools usable.
  *
@@ -150,6 +158,8 @@ function asParagraphs(lines: readonly string[]): string {
 export type ComputerHolding = {
   /** Whether this run was offered a tool that finds sources, from any research provider. */
   search: boolean;
+  /** The personal edition, which has no administrator to send anybody to. */
+  personal?: boolean;
 };
 
 /**
@@ -164,7 +174,11 @@ export function computerGuidance(holding: ComputerHolding): string {
   return asParagraphs([
     ...OPENING_A_PAGE_LINES,
     "",
-    ...(holding.search ? WITH_SEARCH_LINES : WITHOUT_SEARCH_LINES),
+    ...(holding.search
+      ? WITH_SEARCH_LINES
+      : holding.personal
+        ? WITHOUT_SEARCH_PERSONAL_LINES
+        : WITHOUT_SEARCH_LINES),
     "",
     ...ACTING_LINES,
   ]);

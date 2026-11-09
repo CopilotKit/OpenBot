@@ -9,6 +9,7 @@ import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { SEARCH_TOOLS, systemOf } from "../agents/tool-search";
 import { ApprovalRefusedError } from "../approvals/types";
 import type { AuditInitiator } from "../audit";
+import { currentEdition } from "../edition";
 import { markUntrusted } from "../untrusted-content";
 import { withAccountArgument } from "./account-argument";
 import type { AppAccess, AppAccessState } from "./app-access";
@@ -121,6 +122,14 @@ export function grantedToolGuidance(
    * Absent where nobody asked, which says nothing about apps; empty says the Bot has none.
    */
   apps?: readonly BotApp[],
+  /**
+   * Tools this Bot holds that this run was not offered, for an endpoint sent only what a run's
+   * message needs (`selectTools`, `fitToolLimit`). Counted per system like `waiting`, and never
+   * listed as callable: there is no search to find them on that path, only a later turn that needs
+   * them. Without these a Bot offered Parallel's feedback tool and not its search said it could not
+   * search and that an administrator could grant it.
+   */
+  later: ReadonlySet<string> = new Set(),
 ): string {
   /*
    * THE CARD TOOL IS NOT A SYSTEM. It is offered to every Bot so a missing app can be put in front of
@@ -140,10 +149,29 @@ export function grantedToolGuidance(
   // A system is named by its app's own name where it is known: "Gmail", not `composio-gmail`.
   const nameOf = new Map(apps?.map((app) => [app.key, app.displayName]));
   const named = (system: string) => nameOf.get(system) ?? system;
+  const personal = currentEdition() === "personal";
+
+  /*
+   * AN APP THE PERSON CANNOT USE YET IS NOT A SYSTEM THEY REACH. Its tools are still held, and its
+   * standing is said once, beside its name, in the apps line.
+   *
+   * FOUND IN 1.0.0-rc.4. A Bot holding Gmail, which the person had never connected, was told
+   * "Gmail (needs connecting)" and then, a line later, "You can reach these systems directly, as the
+   * person asking, with their own access: - Gmail: GMAIL_SEND_EMAIL, ...". It believed the second
+   * and told the person Gmail was ready to read and send their mail.
+   */
+  const notReady = new Set(
+    apps?.filter((app) => app.state !== "ready").map((app) => app.key),
+  );
+  const heldSystems = new Set(reaching.map((tool) => systemOf(tool.name)));
+  const callable = reaching.filter(
+    (tool) => !notReady.has(systemOf(tool.name)),
+  );
 
   const bySystem = new Map<string, string[]>();
   const waitingBySystem = new Map<string, number>();
-  for (const tool of reaching) {
+  const laterBySystem = new Map<string, number>();
+  for (const tool of callable) {
     // `mcp__server__tool`, which is the shape the model is offered.
     const system = systemOf(tool.name);
     const parts = tool.name.replace(/^mcp__/, "").split("__");
@@ -151,29 +179,45 @@ export function grantedToolGuidance(
     if (!bySystem.has(system)) bySystem.set(system, []);
     if (waiting.has(tool.name))
       waitingBySystem.set(system, (waitingBySystem.get(system) ?? 0) + 1);
+    else if (later.has(tool.name))
+      laterBySystem.set(system, (laterBySystem.get(system) ?? 0) + 1);
     else bySystem.get(system)?.push(rest);
   }
 
-  const held = [...bySystem.keys()];
+  /*
+   * ONE REASON PER APP. An app the apps line names already says where it stands; listed here too,
+   * a Notion that needed connecting was also "connected elsewhere, not granted to me".
+   */
   const missing = connectedButNotHeld.filter(
-    (system) => !held.includes(system),
+    (system) => !heldSystems.has(system) && !nameOf.has(system),
   );
 
-  const research = researchProviders(reaching);
+  // Only what this run can call: a provider waiting for a later turn is not one it can use now.
+  const research = researchProviders(
+    callable.filter((tool) => !later.has(tool.name)),
+  );
 
   return [
     ...appsGuidance(apps, waiting.size > 0, showsCards),
-    ...(apps !== undefined && reaching.length > 0 ? [""] : []),
-    ...(reaching.length > 0
+    ...(apps !== undefined && callable.length > 0 ? [""] : []),
+    ...(callable.length > 0
       ? [
           "You can reach these systems directly, as the person asking, with their own access:",
         ]
       : []),
     ...[...bySystem.entries()].map(([system, names]) => {
       const more = waitingBySystem.get(system) ?? 0;
-      if (more === 0) return `- ${named(system)}: ${names.join(", ")}`;
-      const found = `${more} ${names.length > 0 ? "more " : ""}tools you find with ${SEARCH_TOOLS}`;
-      return `- ${named(system)}: ${[...names, found].join(", ")}`;
+      const after = laterBySystem.get(system) ?? 0;
+      const extra = names.length > 0 ? "more " : "";
+      return `- ${named(system)}: ${[
+        ...names,
+        ...(more > 0
+          ? [`${more} ${extra}tools you find with ${SEARCH_TOOLS}`]
+          : []),
+        ...(after > 0
+          ? [`${after} ${extra}tools offered on a turn that needs them`]
+          : []),
+      ].join(", ")}`;
     }),
     ...(waiting.size > 0
       ? [
@@ -183,16 +227,23 @@ export function grantedToolGuidance(
           "tool missing.",
         ]
       : []),
-    ...(reaching.length > 0
+    ...(callable.length > 0
       ? [
           "Use them for anything about those systems. Do NOT browse to one of their websites instead: your",
           "browser is signed in as nobody, so it sees less than these tools do and will meet a sign-in wall",
           "that connecting an account has already solved.",
-          "If one of these systems is involved and no tool above covers the part you need, that is a",
-          "missing grant and not something to work around. Say so plainly, name the capability you would",
-          "need, and say an administrator can grant it on that connector. Do not reach for the browser, do",
-          "not ask the person to sign in, and do not ask them to fetch it for you: they already have the",
-          "access, and the thing that is missing is yours, not theirs.",
+          ...(laterBySystem.size > 0
+            ? [
+                "A tool offered on a turn that needs it is one you hold: never say you lack it or that it",
+                "has to be granted.",
+              ]
+            : []),
+          `If one of these systems is involved and no tool you hold covers the part you need${waiting.size > 0 ? ` (search with ${SEARCH_TOOLS} first)` : ""},`,
+          personal
+            ? "say so plainly and name the capability you would need."
+            : "that is a missing grant. Say so plainly, name the capability you would need, and say an administrator can grant it on that connector.",
+          "Do not reach for the browser, do not ask the person to sign in, and do not ask them to fetch it",
+          "for you.",
         ]
       : []),
     ...researchGuidance(research),
@@ -205,9 +256,16 @@ export function grantedToolGuidance(
      * person asking, and the container's browser is signed in as nobody, so browsing there abandons
      * the per-person path and lands on a login wall by construction.
      */
-    ...(missing.length > 0
+    /*
+     * NOT IN THE PERSONAL EDITION, where every tool an app lists goes to every Bot: an app a Bot
+     * holds nothing for there is one that has listed nothing, because the person has not connected
+     * it. Said to be "connected" with an administrator to ask, a Bot sent the one person to an
+     * administrator there is none of, about an app nobody had connected. The card line below names
+     * it instead, with the step the card itself offers.
+     */
+    ...(missing.length > 0 && !personal
       ? [
-          ...(reaching.length > 0 ? [""] : []),
+          ...(callable.length > 0 ? [""] : []),
           `This deployment also connects to: ${missing.map(named).join(", ")}. You hold none of their tools.`,
           ...(showsCards
             ? [
@@ -232,15 +290,36 @@ export function grantedToolGuidance(
      */
     ...(showsCards
       ? [
-          ...(reaching.length > 0 || missing.length > 0 || apps?.length
+          ...(callable.length > 0 ||
+          (missing.length > 0 && !personal) ||
+          apps?.length
             ? [""]
             : []),
           `If the person needs a work app that is not named here at all${notNamedExamples(apps)}, call`,
           `${SHOW_APP_ACCESS_TOOL} with its name before saying you cannot reach it: the card tells them whether it`,
-          "can be switched on and lets them ask an administrator. Do not browse to its website instead.",
+          personal
+            ? "is connected and offers the step that connects it. Do not browse to its website instead."
+            : "can be switched on and lets them ask an administrator. Do not browse to its website instead.",
         ]
       : []),
   ].join("\n");
+}
+
+/**
+ * The apps this deployment really connects to, by server id, for `grantedToolGuidance`'s
+ * `connectedButNotHeld`: the ones whose tools were listed.
+ *
+ * AN APP WITH NOTHING LISTED IS NOT CONNECTED. Its sign-in never finished (a first-party app with
+ * only its OAuth client, and a connect error where its tools would be), so there is nothing a grant
+ * could give. Named as one "this deployment also connects to", with an administrator to ask, it
+ * read to a Bot as connected for everybody and missing only for itself.
+ */
+export function connectedSystems(
+  servers: readonly { id: string; tools: readonly unknown[] }[],
+): string[] {
+  return servers
+    .filter((server) => server.tools.length > 0)
+    .map((server) => server.id);
 }
 
 /** One app a Bot holds, as it stands for one person. */
@@ -260,6 +339,12 @@ const APP_STANDING: Record<AppAccessState, string> = {
   disabled: "switched off",
   not_granted: "not given to you",
   owner_grantable: "not given to you",
+};
+
+/** The personal edition has no administrator: the one person connects a shared account too. */
+const PERSONAL_STANDING: Partial<Record<AppAccessState, string>> = {
+  shared_not_connected: "needs connecting",
+  shared_not_approved: "not approved for you",
 };
 
 /**
@@ -282,10 +367,13 @@ function appsGuidance(
   if (apps === undefined) return [];
   if (apps.length === 0)
     return ["You have no apps turned on for the person you are working with."];
+  const personal = currentEdition() === "personal";
   const standing = (app: BotApp) =>
     app.state === "ready" && app.account === "deployment"
       ? "ready"
-      : APP_STANDING[app.state];
+      : personal
+        ? (PERSONAL_STANDING[app.state] ?? APP_STANDING[app.state])
+        : APP_STANDING[app.state];
   const unconnected = apps.some(
     (app) => app.state === "not_connected" || app.state === "reconnect",
   );

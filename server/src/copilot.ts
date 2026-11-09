@@ -96,6 +96,7 @@ import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
 import { observeModelConnection } from "./desktop-connection-failure";
 import { desktopTelemetryProperties } from "./desktop-telemetry";
+import { currentEdition } from "./edition";
 import { observeIntelligenceAuthentication } from "./intelligence-client";
 import { capturePassOrigin } from "./intelligence-gateway-proxy";
 import {
@@ -778,7 +779,12 @@ export function builtInAgentConfiguration(
         ? [grantedToolGuidance(tools, connectedVendors, shown, apps)]
         : []),
       ...(computerGuidance
-        ? [computerGuidance({ search: holdsWebSearch(tools) })]
+        ? [
+            computerGuidance({
+              search: holdsWebSearch(tools),
+              personal: currentEdition() === "personal",
+            }),
+          ]
         : []),
       ...(learnedSkills?.catalog ? [learnedSkills.catalog] : []),
       /*
@@ -2144,15 +2150,21 @@ function remoteAgentWithStandingRole(
    * prompt — a page about the browser that mentions connectors nowhere. That is the Bot that browsed
    * to drive.google.com holding four Drive tools.
    *
-   * Built from the tools this run was offered rather than from everything granted, so a narrowed
-   * run is never told it holds a system it cannot reach on this turn.
+   * Built from the tools this run was offered, so a narrowed run is never told it can call a tool it
+   * was not sent. What it holds and was not offered is counted beside its system as offered on a turn
+   * that needs it: left out, a Bot offered Parallel's feedback tool and not its search told the
+   * person it could not search and that an administrator could grant it.
    */
-  const holdingsMessageFor = (offered: GrantedTool[]) => {
+  const holdingsMessageFor = (offered: GrantedTool[], held: boolean) => {
+    const sent = new Set(offered.map((tool) => tool.name));
+    // A run the runtime makes for itself holds nothing, now or later. See `isAskedRun`.
+    const notOffered = held ? tools.filter((tool) => !sent.has(tool.name)) : [];
     const holdings = grantedToolGuidance(
-      offered,
+      [...offered, ...notOffered],
       connectedVendors,
       undefined,
       apps,
+      new Set(notOffered.map((tool) => tool.name)),
     );
     return holdings
       ? {
@@ -2168,7 +2180,7 @@ function remoteAgentWithStandingRole(
     input: RunAgentInput,
     next: AbstractAgent,
   ) => {
-    const holdingsMessage = holdingsMessageFor(tools);
+    const holdingsMessage = holdingsMessageFor(tools, holds(input));
     /*
      * Not signed for a run the runtime makes for itself: the statement is what the Bot hands back to
      * call a tool here, and that run holds none. See `isAskedRun`.
