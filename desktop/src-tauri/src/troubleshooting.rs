@@ -49,6 +49,9 @@ pub struct Facts {
     pub failure: Option<String>,
     /// Each engine command and what it printed, or why it printed nothing.
     pub engine: Vec<(String, String)>,
+    /// Free bytes on the engine's own disk, from `local_eval::engine_disk`: `df -Pk /` in a
+    /// container of an image the engine already has. None when it could not be measured.
+    pub engine_free: Option<u64>,
     /// The newest log file of this app, and its end.
     pub desktop_log: Option<(PathBuf, String)>,
     /// The CLI's log file and its end, or None when there is none on this computer.
@@ -118,7 +121,7 @@ pub fn summary(facts: &Facts) -> String {
         }
         lines.push(format!("Failed: {said}"));
     }
-    if let Some(engine) = engine_summary(&facts.engine) {
+    if let Some(engine) = engine_summary(&facts.engine, facts.engine_free) {
         lines.push(engine);
     }
     lines.join("\n") + "\n"
@@ -126,7 +129,7 @@ pub fn summary(facts: &Facts) -> String {
 
 /// `docker 28.5.1, 8 CPUs, 8.2 GB memory. Docker disk: 0.0 GB free.`, from
 /// the engine commands' own answers. None when nothing answered.
-fn engine_summary(engine: &[(String, String)]) -> Option<String> {
+fn engine_summary(engine: &[(String, String)], free: Option<u64>) -> Option<String> {
     static SIZE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"(\d+) CPUs, (\d+) bytes memory").expect("the size pattern compiles")
     });
@@ -163,63 +166,11 @@ fn engine_summary(engine: &[(String, String)]) -> Option<String> {
     } else {
         "Docker"
     };
-    let free = engine
-        .iter()
-        .find(|(command, said)| command.contains("--entrypoint df") && answered(said))
-        .and_then(|(_, said)| free_bytes(said));
     let disk = match free {
         Some(bytes) => format!("{disk_name} disk: {:.1} GB free.", bytes as f64 / 1e9),
         None => format!("{disk_name} disk: free space not measured; see system df below."),
     };
     Some(format!("Container engine: {}. {disk}", parts.join(", ")))
-}
-
-/// The image to measure the engine's disk from: one already on this computer, so nothing is
-/// downloaded (a download is what fails when that disk is full). OpenBot's own first, then
-/// CopilotKit's, from `images --format {{.Repository}}:{{.Tag}}`.
-pub fn probe_image(listing: &str) -> Option<String> {
-    let images: Vec<&str> = listing
-        .lines()
-        .map(str::trim)
-        .filter(|image| !image.is_empty() && !image.contains("<none>"))
-        .collect();
-    ["openbot", "copilotkit"].iter().find_map(|wanted| {
-        images
-            .iter()
-            .find(|image| image.to_ascii_lowercase().contains(wanted))
-            .map(|image| (*image).to_owned())
-    })
-}
-
-/// `run` arguments that print the engine's disk as `df` sees it from inside a container, the way
-/// the back end CLI's own capacity check does: never pulled, no network, removed after.
-pub fn disk_probe_arguments(image: &str) -> Vec<String> {
-    [
-        "run",
-        "--rm",
-        "--pull",
-        "never",
-        "--network",
-        "none",
-        "--entrypoint",
-        "df",
-        image,
-        "-Pk",
-        "/",
-    ]
-    .map(str::to_owned)
-    .to_vec()
-}
-
-/// The bytes free in POSIX `df -Pk` output: the Available column of its first filesystem line.
-pub fn free_bytes(df: &str) -> Option<u64> {
-    let line = df.lines().find(|line| {
-        line.split_whitespace()
-            .nth(3)
-            .is_some_and(|available| available.parse::<u64>().is_ok())
-    })?;
-    let kilobytes: u64 = line.split_whitespace().nth(3)?.parse().ok()?;
-    Some(kilobytes * 1024)
 }
 
 /// A named account identifier: `"organizationId":"org_…"`, `user_id=…`, `installationId: …`.
@@ -425,6 +376,7 @@ mod tests {
                 "docker version --format {{.Server.Version}}".into(),
                 "27.3.1\n".into(),
             )],
+            engine_free: None,
             desktop_log: Some((
                 PathBuf::from(
                     "/Users/alice/Library/Logs/ai.copilotkit.openbot.desktop/openbot-desktop.log",
@@ -498,50 +450,25 @@ mod tests {
     /// The case this bundle has to make obvious: CPUs and memory fine, the engine's disk full.
     #[test]
     fn a_full_engine_disk_is_in_the_summary() {
-        let df = "Filesystem     1024-blocks      Used Available Capacity Mounted on\noverlay           61255492  61255492         0     100% /\n";
-        let facts = Facts {
-            engine: vec![
-                ("docker version --format x".into(), "28.5.1".into()),
-                ("docker info --format y".into(), "Docker Desktop aarch64, 8 CPUs, 8217473024 bytes memory, storage overlayfs at /var/lib/docker".into()),
-                (format!("docker {}", disk_probe_arguments("ghcr.io/copilotkit/openbot-server:1.0.0").join(" ")), df.into()),
-            ],
+        let engine = vec![
+            ("docker version --format x".into(), "28.5.1".into()),
+            ("docker info --format y".into(), "Docker Desktop aarch64, 8 CPUs, 8217473024 bytes memory, storage overlayfs at /var/lib/docker".into()),
+        ];
+        let full = Facts {
+            engine: engine.clone(),
+            engine_free: Some(0),
             ..Facts::default()
         };
-        assert!(summary(&facts).ends_with(
+        assert!(summary(&full).ends_with(
             "Container engine: docker 28.5.1, 8 CPUs, 8.2 GB memory. Docker disk: 0.0 GB free.\n"
-        ), "{}", summary(&facts));
-        assert_eq!(free_bytes("Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 100 40 60 40% /"), Some(60 * 1024));
-        assert_eq!(free_bytes("no such image"), None);
-        // A probe that failed (no image, a refused run) leaves it unmeasured.
-        let failed = Facts {
-            engine: vec![(
-                "docker run --rm --pull never x df -Pk /".into(),
-                "failed (exit status: 125): No such image".into(),
-            )],
+        ), "{}", summary(&full));
+        // `engine_disk` found no image to measure from, or the run failed.
+        let unmeasured = Facts {
+            engine,
+            engine_free: None,
             ..Facts::default()
         };
-        assert!(summary(&failed).contains("Docker disk: free space not measured"));
-    }
-
-    #[test]
-    fn the_disk_is_measured_from_an_image_already_here_and_never_pulled() {
-        let listing = "postgres:16\n<none>:<none>\nghcr.io/copilotkit/intelligence-cli:0.16.0\nghcr.io/copilotkit/openbot-server:1.0.0-rc.3\n";
-        assert_eq!(
-            probe_image(listing).as_deref(),
-            Some("ghcr.io/copilotkit/openbot-server:1.0.0-rc.3")
-        );
-        assert_eq!(
-            probe_image("ghcr.io/copilotkit/intelligence-cli:0.16.0\n").as_deref(),
-            Some("ghcr.io/copilotkit/intelligence-cli:0.16.0")
-        );
-        assert_eq!(probe_image("postgres:16\nredis:7\n"), None);
-        let arguments = disk_probe_arguments("img:1");
-        assert!(arguments.windows(2).any(|pair| pair == ["--pull", "never"]));
-        assert!(arguments
-            .windows(2)
-            .any(|pair| pair == ["--network", "none"]));
-        assert!(arguments.contains(&"--rm".to_owned()));
-        assert!(arguments.ends_with(&["img:1".to_owned(), "-Pk".to_owned(), "/".to_owned()]));
+        assert!(summary(&unmeasured).contains("Docker disk: free space not measured"));
     }
 
     #[test]

@@ -1354,7 +1354,7 @@ The engine's disk inside a container, the way the CLI measures it: `df -Pk /` in
 image the engine already has, so nothing is downloaded. An engine with no image that has a shell
 gives no answer, and disk is then not judged.
 */
-fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
+pub fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
     let images = engine_output(
         address,
         &["image", "ls", "--quiet", "--no-trunc"],

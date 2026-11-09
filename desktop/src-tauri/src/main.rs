@@ -5701,30 +5701,25 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
                     troubleshooting::run_bounded(command, troubleshooting::ENGINE_TIMEOUT),
                 )
             };
-            let mut said: Vec<(String, String)> =
-                troubleshooting::engine_commands(running.binary() == "podman")
-                    .into_iter()
-                    .map(|arguments| {
-                        run(&arguments
-                            .iter()
-                            .map(|argument| (*argument).to_owned())
-                            .collect::<Vec<_>>())
-                    })
-                    .collect();
-            // Free space on the engine's own disk, as `df` sees it from inside a container started
-            // from an image already here. Left unmeasured when there is none.
-            let (_, images) = run(&[
-                "images".to_owned(),
-                "--format".to_owned(),
-                "{{.Repository}}:{{.Tag}}".to_owned(),
-            ]);
-            if let Some(image) = troubleshooting::probe_image(&images) {
-                said.push(run(&troubleshooting::disk_probe_arguments(&image)));
-            }
-            said
+            troubleshooting::engine_commands(running.binary() == "podman")
+                .into_iter()
+                .map(|arguments| {
+                    run(&arguments
+                        .iter()
+                        .map(|argument| (*argument).to_owned())
+                        .collect::<Vec<_>>())
+                })
+                .collect()
         }
         None => Vec::new(),
     };
+    // Free space on the engine's own disk, measured the way the back end check measures it.
+    let engine_free = found
+        .address
+        .as_ref()
+        .filter(|_| found.responding)
+        .and_then(local_eval::engine_disk)
+        .map(|disk| disk.free);
     let read = |path: PathBuf, bytes: u64| {
         troubleshooting::tail(&path, bytes)
             .ok()
@@ -5743,6 +5738,7 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
         system: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
         failure,
         engine,
+        engine_free,
         desktop_log: logging::folder(app)
             .ok()
             .and_then(|folder| troubleshooting::newest_log(&folder))
