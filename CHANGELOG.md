@@ -71,6 +71,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the browser only while recording, or to say "No microphone found. Narration is off." on a
   computer with none, which keeps your narration choice for when there is one.
 - Your recordings links to Settings → Learning ("See what your Bots learned").
+- On a computer with no microphone, Record no longer asks "Narrate while you record?". It records
+  without narration and asks the first time you record with a microphone.
 
 ### Conversations
 
