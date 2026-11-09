@@ -44,6 +44,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Conversations
 
+- **A Claude plan has a model picker in the conversation again.** Signed in with a Claude plan,
+  the picker never showed, because the server asked Anthropic for the plan's models with
+  OpenBot's own harness token instead of the plan's sign-in, Anthropic answered 401
+  (`{"type":"model-list-unreadable","source":"claude","status":401}` in the server log), and only
+  the default model was known. The list is now asked for with the plan's own token, and the
+  harness token is never sent anywhere but the harness.
 - **A message that couldn't reach the back end says so in plain words.** The conversation showed
   the raw request failure in red, such as `REST run request failed: {"error":"Failed to resolve
   Learning Container"}`. It now says "OpenBot couldn't reach its back end, so your message wasn't
