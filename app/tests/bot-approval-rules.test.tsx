@@ -94,17 +94,19 @@ test("only this Bot's own rules can be changed, and the team rules that reach it
   serving();
   const view = draw();
   expect(
-    await view.findByRole("combobox", { name: "Behaviour for mcp/gmail/*" }),
+    await view.findByRole("combobox", {
+      name: "Behaviour for Any action on Gmail",
+    }),
   ).toBeTruthy();
   expect(
-    view.queryByRole("combobox", { name: "Behaviour for mcp/drive/*" }),
+    view.queryByRole("combobox", { name: "Behaviour for Any action on Drive" }),
   ).toBeNull();
   expect(
-    view.queryByRole("combobox", { name: "Behaviour for mcp/slack/*" }),
+    view.queryByRole("combobox", { name: "Behaviour for Any action on Slack" }),
   ).toBeNull();
-  expect(view.getByText("mcp/drive/share")).toBeTruthy();
-  expect(view.getByText(/^computer_click/)).toBeTruthy();
-  expect(view.queryByText(/^host\/\*/)).toBeNull();
+  expect(view.getByText("Share on Drive")).toBeTruthy();
+  expect(view.getByText("Click")).toBeTruthy();
+  expect(view.queryByText("Any action in your folders")).toBeNull();
 });
 
 test("a rule added here is for this Bot, with no Bot to type", async () => {
@@ -146,6 +148,8 @@ test("a personal rule whose Bot is a pattern matching this Bot is shown and can 
   }) as unknown as typeof fetch;
   const view = draw();
   expect(
-    await view.findByRole("combobox", { name: "Behaviour for mcp/linear/*" }),
+    await view.findByRole("combobox", {
+      name: "Behaviour for Any action on Linear",
+    }),
   ).toBeTruthy();
 });

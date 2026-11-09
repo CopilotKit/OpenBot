@@ -105,6 +105,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   computer is named by its path, and its save step reads "Saved a file".
 - An opened "Looked for a tool" step lists the tools the Bot found by name ("Send email on Gmail"),
   where it showed their ids and the descriptions the search returned to the Bot.
+- A browser action waiting for your approval is named the way its card names it. A Bot's Activity
+  row read "Approve computer_click" with "write" beside it, and now reads "Click the link “Python”
+  on en.wikipedia.org". The Needs you card names the link too and lists what the action would send
+  by label, without the page handles a click carried as raw JSON. An approval in Slack says it the
+  same way ("Research Bot wants to click the link “Python” on en.wikipedia.org"), and a saved rule
+  is titled "Click" or "Send email on Gmail" instead of its tool id. The line under it names the
+  folder and the Bot by name and the kind of action in words ("changes in share for Shop"), where
+  it read "write on host-grant-15407-… for shopper-bot".
 
 ### Personal edition
 

@@ -765,7 +765,7 @@ test("an approval preview shows what will be typed, written or sent, and still h
     approvalFields(
       approvalPreview({ channel: "C1", text: "We are shipping today" }),
     ),
-  ).toContainEqual({ label: "text", value: "We are shipping today" });
+  ).toContainEqual({ label: "Text", value: "We are shipping today" });
   // Secrets stay hidden by key and inside values.
   expect(
     approvalPreview({
