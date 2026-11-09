@@ -28,6 +28,7 @@ import {
   channelKeys,
 } from "@/lib/channels/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
+import { OPENBOT_UI } from "@/lib/copilot/a2ui";
 import { GALLERY_COMPONENTS } from "@/lib/copilot/gallery-registry";
 import { CopilotProvider } from "@/lib/copilot/provider";
 import { deploymentKeys } from "@/lib/deployment/queries";
@@ -73,6 +74,63 @@ const BUDGET = {
   jsFunctions: "function total() { return 380; }",
 };
 
+/**
+ * The same budget drawn from the A2UI catalog with `render_ui`, as the runtime offers it: three
+ * number fields under a heading, and a total the Bot computes. See `a2ui.test.tsx`.
+ */
+const field = (key: string, label: string) => ({
+  id: key,
+  component: "TextField",
+  label,
+  variant: "number",
+  value: { "@path": `/${key}` },
+});
+const RENDERED_BUDGET = {
+  target: "chat",
+  operations: [
+    {
+      version: "1.0",
+      createSurface: {
+        surfaceId: "budget",
+        catalogId: OPENBOT_UI.id,
+        dataModel: { transport: 100, lodging: 200, food: 80 },
+      },
+    },
+    {
+      version: "1.0",
+      updateComponents: {
+        surfaceId: "budget",
+        components: [
+          { id: "root", component: "Card", child: "fields" },
+          {
+            id: "fields",
+            component: "Column",
+            children: ["heading", "transport", "lodging", "food", "total"],
+          },
+          field("transport", "Transport ($)"),
+          field("lodging", "Lodging ($)"),
+          field("food", "Food ($)"),
+          {
+            id: "total",
+            component: "Text",
+            text: {
+              "@call": "calc",
+              args: {
+                expression: "'Total $' + (transport + lodging + food)",
+                transport: { "@path": "/transport" },
+                lodging: { "@path": "/lodging" },
+                food: { "@path": "/food" },
+              },
+            },
+          },
+          // Listed last and shown first: the line is read in the order the surface shows it.
+          { id: "heading", component: "Text", text: "## Weekend trip budget" },
+        ],
+      },
+    },
+  ],
+};
+
 /** The real Record card, registered as Vite would have; see `off-screen-tool-calls.test.tsx`. */
 const RECORD = CARDS.find((candidate) => candidate.name === "showRecord");
 if (!RECORD) throw new Error("The Record card is not in the gallery.");
@@ -83,6 +141,8 @@ let call: Call;
 /** What the run carrying the call's result says, when it says anything. */
 let closing: string | null = null;
 let runs: RunAgentInput[] = [];
+/** Holds the Bot's first run until the person has had the chance to switch away. */
+let arrive: Promise<void> = Promise.resolve();
 let stored: Message[] = [];
 /** Every line the conversation reported to the roster, as `POST /api/channels/:id/activity`. */
 let reported: { agentId: string | null; text: string }[] = [];
@@ -184,6 +244,57 @@ function runEvents(input: RunAgentInput): unknown[] {
     ],
   };
   stored = [...input.messages, assistant];
+  if (call.name === "render_ui") {
+    // The runtime draws it and answers the call itself, in the same run: there is no run after it.
+    const result = {
+      id: `result-${input.runId}`,
+      role: "tool" as const,
+      toolCallId: id,
+      content: JSON.stringify({
+        status: "rendered",
+        applied: 2,
+        calls: 0,
+        rejected: [],
+      }),
+    };
+    stored = [...stored, result];
+    return [
+      started,
+      {
+        type: "TOOL_CALL_START",
+        toolCallId: id,
+        toolCallName: call.name,
+        parentMessageId: assistant.id,
+      },
+      {
+        type: "TOOL_CALL_ARGS",
+        toolCallId: id,
+        delta: JSON.stringify(call.args),
+      },
+      { type: "TOOL_CALL_END", toolCallId: id },
+      {
+        type: "ACTIVITY_SNAPSHOT",
+        messageId: "genui:budget",
+        activityType: "generative-ui-surface",
+        content: {
+          surfaceId: "budget",
+          target: "chat",
+          catalogId: OPENBOT_UI.id,
+          operations: RENDERED_BUDGET.operations,
+          status: "ready",
+          rejected: [],
+        },
+        replace: true,
+      },
+      {
+        type: "TOOL_CALL_RESULT",
+        messageId: result.id,
+        toolCallId: id,
+        content: result.content,
+      },
+      finished,
+    ];
+  }
   const drawing =
     call.name === "generateSandboxedUi"
       ? [
@@ -308,6 +419,7 @@ async function serve(url: URL, request: Request): Promise<Response> {
   if (path.endsWith("/run")) {
     const body = RunAgentInputSchema.parse(await request.json());
     runs.push(body);
+    if (body.messages.at(-1)?.role !== "tool") await arrive;
     return sse(runEvents(body));
   }
   if (path === `/api/threads/${channel.threadId}/messages`)
@@ -428,9 +540,13 @@ function openConversation() {
 
 /**
  * The person asks, and then, if `away`, switches to another app straight away. Resolves once the
- * turn is over: both runs have gone, and the conversation has taken its working dot down.
+ * turn is over: its `runs` have gone, and the conversation has taken its working dot down.
  */
-async function ask(away: boolean) {
+async function ask(away: boolean, turnRuns = 2) {
+  let release = () => {};
+  arrive = new Promise((resolve) => {
+    release = resolve;
+  });
   const view = openConversation();
   const user = userEvent.setup({ document: view.container.ownerDocument });
   await user.type(
@@ -438,8 +554,10 @@ async function ask(away: boolean) {
     ASK,
   );
   await user.click(view.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(runs).toHaveLength(1), { timeout: 5000 });
   if (away) focused = false;
-  await waitFor(() => expect(runs).toHaveLength(2), { timeout: 5000 });
+  release();
+  await waitFor(() => expect(runs).toHaveLength(turnRuns), { timeout: 5000 });
   await waitFor(
     () =>
       expect(view.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
@@ -454,6 +572,19 @@ async function ask(away: boolean) {
 test("a turn whose whole answer is an interface the Bot drew raises one notice while OpenBot is out of sight, over the interface's title", async () => {
   call = { name: "generateSandboxedUi", args: BUDGET };
   await ask(true);
+
+  expect(shown).toEqual([
+    {
+      title: "Trip Planner replied",
+      body: "Weekend trip budget",
+      tag: `openbot-${channel.id}`,
+    },
+  ]);
+});
+
+test("a turn whose whole answer is an interface drawn from the A2UI catalog raises one notice, over its heading", async () => {
+  call = { name: "render_ui", args: RENDERED_BUDGET };
+  await ask(true, 1);
 
   expect(shown).toEqual([
     {

@@ -21,6 +21,11 @@ export type RunReply = {
 
 /** The SDK's own tool for drawing an interface the Bot wrote; see `chat-messages.ts`. */
 const GENERATE_SANDBOXED_UI = "generateSandboxedUi";
+/**
+ * The runtime's tool for drawing an A2UI interface from the catalog in `lib/copilot/a2ui.ts`. The
+ * runtime answers it itself, so a turn that draws with it is one run with no words.
+ */
+const RENDER_UI = "render_ui";
 
 /** The line for a drawing whose title can't be read. */
 export const DREW_SOMETHING = "Open the conversation to see what it drew.";
@@ -68,6 +73,7 @@ function drawnLine(
   const args = argumentsOf(call?.function?.arguments);
   if (name === GENERATE_SANDBOXED_UI)
     return headingOf(args.html) ?? DREW_SOMETHING;
+  if (name === RENDER_UI) return surfaceLine(args.operations);
   const component = GALLERY_COMPONENTS.find((each) => each.name === name);
   // A decision asks the person something. That turn is waiting on them, and says so itself.
   if (component && component.kind !== "decision")
@@ -76,16 +82,99 @@ function drawnLine(
   return null;
 }
 
-function argumentsOf(raw: unknown): Record<string, unknown> {
-  if (typeof raw !== "string") return {};
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parsed(raw: string): unknown {
   try {
-    const parsed: unknown = JSON.parse(raw);
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : {};
+    return JSON.parse(raw);
   } catch {
-    return {};
+    return undefined;
   }
+}
+
+function argumentsOf(raw: unknown): Record<string, unknown> {
+  const args = typeof raw === "string" ? parsed(raw) : undefined;
+  return isRecord(args) ? args : {};
+}
+
+/**
+ * What a `render_ui` call drew, as a line: the surface's title, or its first words, or the sentence
+ * that says there is something to see. Null when the call drew nothing, such as one that only runs
+ * an app function.
+ *
+ * The components come inline in `createSurface` or in `updateComponents`, and are read in the order
+ * they are shown, from `root` down. A model sometimes sends the operations as one JSON string, which
+ * the runtime reads too.
+ */
+function surfaceLine(raw: unknown): string | null {
+  const operations = typeof raw === "string" ? parsed(raw) : raw;
+  if (!Array.isArray(operations)) return null;
+  const drawing = operations
+    .filter(isRecord)
+    .flatMap((operation) =>
+      [operation.createSurface, operation.updateComponents].filter(isRecord),
+    );
+  if (drawing.length === 0) return null;
+  const components = shownOrder(
+    drawing.flatMap((part) =>
+      Array.isArray(part.components) ? part.components.filter(isRecord) : [],
+    ),
+  );
+  const words = (component: Record<string, unknown>) =>
+    typeof component.text === "string" ? firstLine(component.text) : null;
+  const heading = components
+    .map((component) =>
+      component.component === "Title"
+        ? words(component)
+        : typeof component.title === "string"
+          ? oneLine(component.title)
+          : typeof component.text === "string" && /^\s*#/.test(component.text)
+            ? words(component)
+            : null,
+    )
+    .find((line) => line !== null);
+  const text = components
+    .filter((component) => component.component === "Text")
+    .map(words)
+    .find((line) => line !== null);
+  return heading ?? text ?? DREW_SOMETHING;
+}
+
+/** The components from `root` down, each child in its place, then any that nothing places. */
+function shownOrder(
+  components: readonly Record<string, unknown>[],
+): Record<string, unknown>[] {
+  const byId = new Map(
+    components
+      .filter((component) => typeof component.id === "string")
+      .map((component) => [component.id as string, component]),
+  );
+  const shown: Record<string, unknown>[] = [];
+  const seen = new Set<Record<string, unknown>>();
+  const visit = (id: unknown) => {
+    const component = typeof id === "string" ? byId.get(id) : undefined;
+    if (!component || seen.has(component)) return;
+    seen.add(component);
+    shown.push(component);
+    visit(component.child);
+    if (Array.isArray(component.children)) component.children.forEach(visit);
+    if (Array.isArray(component.tabs))
+      for (const tab of component.tabs) if (isRecord(tab)) visit(tab.child);
+  };
+  visit("root");
+  return [...shown, ...components.filter((component) => !seen.has(component))];
+}
+
+/** A text's first line, without the marks that make it a Markdown heading. */
+function firstLine(text: string): string | null {
+  const line = text
+    .trim()
+    .split("\n")[0]
+    ?.replace(/^#{1,6}\s+/, "")
+    .replace(/\*\*/g, "");
+  return oneLine(line);
 }
 
 function oneLine(text: string | null | undefined): string | null {
