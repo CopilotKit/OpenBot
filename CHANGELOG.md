@@ -21,6 +21,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `latest/`), and each scheduled run copies the images of every prerelease newer than Latest from
   the last 30 days. Drafts are never copied.
 
+### Smaller changes
+
+- Welcome's permissions section is a few lines: "Choose when Bots ask", one sentence saying Bots
+  always ask before they delete, send, share or post in your apps or on websites and that the
+  switch adds every change, the switch, and where to change it later. Payments and a Bot's own
+  workspace are still explained in Settings → Approvals. The switch and its default are unchanged.
+
 ## 1.0.0
 
 **Before upgrading.** Two migrations run at start, and the database moves to
@@ -214,10 +221,6 @@ deployment:
 
 ### Smaller changes
 
-- Welcome's permissions section is a few lines: "Choose when Bots ask", one sentence saying Bots
-  always ask before they delete, send, share or post in your apps or on websites and that the
-  switch adds every change, the switch, and where to change it later. Payments and a Bot's own
-  workspace are still explained in Settings → Approvals. The switch and its default are unchanged.
 - The sidebar floats as frosted glass over the colours of OpenBot's orb, the orb sits beside
   OpenBot's name, and the app is set in Atkinson Hyperlegible Next. The glass turns off with the
   system's reduce transparency or increase contrast setting, and a skin keeps its own look.
