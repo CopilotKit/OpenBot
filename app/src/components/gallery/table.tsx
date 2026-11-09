@@ -235,7 +235,7 @@ export const GALLERY: GalleryComponent[] = [
     summary:
       "Shows a table you can sort by any column, for comparing records side by side.",
     description:
-      "Show a sortable table to compare records, plans, or other structured facts. Supply up to eight columns and 100 rows, with exactly one cell per column. Use numbers for quantities so sorting is numeric. Show only data you have; do not invent rows.",
+      "Show a sortable table to compare records, plans, or other structured facts. Use when there are enough rows or fields that a Markdown list would be hard to compare. Supply up to eight columns and 100 rows, with exactly one cell per column. Use numbers for quantities so sorting is numeric. Show only data you have; do not invent rows.",
     parameters: DataTableProps,
     Component: DataTable,
     confirmation: "The sortable table is now on screen for the person.",

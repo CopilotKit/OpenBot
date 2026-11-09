@@ -82,7 +82,7 @@ export type AgentProfile = {
    */
   instructions?: string | null;
   /**
-   * What runs it, by the name a person reads ("LangChain (LangGraph)", "OpenBot"). Absent when
+   * What runs it, by the name a person reads ("LangChain", "OpenBot"). Absent when
    * OpenBot doesn't know, such as an agent connected by address with no framework named.
    */
   framework?: string;

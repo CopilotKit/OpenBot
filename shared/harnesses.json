@@ -45,8 +45,8 @@
     },
     {
       "id": "langgraph",
-      "name": "LangChain (LangGraph)",
-      "summary": "Graphs you can change, from LangChain.",
+      "name": "LangChain",
+      "summary": "Agents built with LangChain, on any model.",
       "webSummary": null,
       "image": "agent-langgraph-agui",
       "port": 4206,

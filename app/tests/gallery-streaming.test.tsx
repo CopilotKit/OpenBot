@@ -128,3 +128,53 @@ test("a complete table with a short last row is still refused", () => {
   expect(view.queryByText(/Waiting for complete table data/)).toBeNull();
   expect(view.queryByRole("table")).toBeNull();
 });
+
+/*
+ * Ten bars on a phone ran their figures together, and cutting them to "14,…" made each one a wrong
+ * number. A figure that does not fit its bar is written compactly instead, and its exact value stays
+ * in the accessible name and the tooltip. Layout is faked: the page has none here.
+ */
+test("a bar whose figure does not fit writes it compactly, and keeps the exact value", () => {
+  const fake = (property: "scrollWidth" | "clientWidth", width: number) => {
+    const real = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      property,
+    );
+    Object.defineProperty(HTMLElement.prototype, property, {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.hasAttribute("data-exact-figure") ? width : 0;
+      },
+    });
+    return () => {
+      if (real) Object.defineProperty(HTMLElement.prototype, property, real);
+    };
+  };
+  // Forty pixels of figure in a twenty-pixel bar.
+  const restore = [fake("scrollWidth", 40), fake("clientWidth", 20)];
+  try {
+    const view = render(
+      <BarChartCard
+        points={[
+          { label: "Support", value: 14808 },
+          { label: "Billing", value: 6170 },
+        ]}
+      />,
+    );
+    const text = view.container.textContent ?? "";
+    expect(text).toContain("15K");
+    expect(text).not.toContain("…");
+    const exact = view.getByText("14,808", { selector: ".sr-only" });
+    expect(exact.parentElement?.getAttribute("title")).toBe("14,808");
+  } finally {
+    for (const undo of restore) undo();
+  }
+});
+
+test("a bar whose figure fits writes it exactly", () => {
+  const view = render(
+    <BarChartCard points={[{ label: "Support", value: 14808 }]} />,
+  );
+  expect(view.container.textContent).not.toContain("15K");
+  expect(view.queryByText("14,808", { selector: ".sr-only" })).toBeNull();
+});

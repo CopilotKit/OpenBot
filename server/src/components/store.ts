@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import type { Database } from "../db/client";
 import {
   componentExclusions,
@@ -76,12 +76,27 @@ export type ComponentStore = {
   /**
    * Learn about components this deployment has not seen before.
    *
-   * Additive, never overwriting. A row that already exists belongs to the deployment: its published
-   * wording, its grants and whether it is published at all were decided here, and an upgrade that
-   * quietly reset any of them would be this function undoing an administrator\'s work on every boot.
-   * Safe to call on every page load for that reason.
+   * Additive, never overwriting. Any signed-in person's browser announces the catalogue, so nothing
+   * it sends may change a row that already exists: its wording, its grants and whether it is
+   * published were decided here, or are the build's own and kept up to date by
+   * {@link ComponentStore.followBuild}. Safe to call on every page load for that reason.
    */
   syncCatalogue(entries: CatalogueEntry[]): Promise<{ added: string[] }>;
+  /**
+   * Bring the rows nobody here has touched up to the build's own title and description.
+   *
+   * `defaults` is the server's own copy of what this build ships (`HEADLESS_COMPONENTS`), never a
+   * page's announcement: a description is what the model reads in every Bot, and a person's browser
+   * is not a source of it. A row an administrator has touched (a draft, a publish, an unpublish set
+   * `updatedBy` to them) is never overwritten. Grants, functions and the published flag are never
+   * touched. A release that rewords a description, as one did when the notice stopped being offered
+   * for every list, reaches the deployments that never chose wording of their own.
+   *
+   * Answers with the rows this call changed, so the caller writes one row per change.
+   */
+  followBuild(
+    defaults: readonly { name: string; title: string; description: string }[],
+  ): Promise<string[]>;
   list(): Promise<ComponentRecord[]>;
   /** What this Bot may answer with: everything published, less whatever it has been held back from. */
   listForAgent(agentId: string): Promise<GrantedComponent[]>;
@@ -128,6 +143,13 @@ export type ComponentStore = {
 const iso = (value: Date | string | null): string | null =>
   value === null ? null : value instanceof Date ? value.toISOString() : value;
 
+/**
+ * Who a row says last changed it when nobody here has: the build that announced it. Every edit an
+ * administrator makes (a draft, a publish, an unpublish) writes their own name instead, which is how
+ * `followBuild` tells a row it may keep up to date from one it must leave alone.
+ */
+export const BUILD = "the build";
+
 export function createComponentStore(database: Database): ComponentStore {
   async function requireComponent(name: string) {
     const [row] = await database
@@ -162,7 +184,7 @@ export function createComponentStore(database: Database): ComponentStore {
             publishedDescription: entry.description,
             published: true,
             publishedAt: new Date(),
-            updatedBy: "the build",
+            updatedBy: BUILD,
           })),
         )
         // Two browsers announcing the same new component at once is ordinary, not a fault: whichever
@@ -176,6 +198,70 @@ export function createComponentStore(database: Database): ComponentStore {
         .returning({ name: components.name });
 
       return { added: inserted.map((row) => row.name) };
+    },
+
+    async followBuild(defaults) {
+      if (defaults.length === 0) return [];
+      const rows = await database
+        .select({
+          name: components.name,
+          title: components.title,
+          draftDescription: components.draftDescription,
+          publishedDescription: components.publishedDescription,
+          updatedBy: components.updatedBy,
+        })
+        .from(components)
+        .where(
+          and(
+            inArray(
+              components.name,
+              defaults.map((entry) => entry.name),
+            ),
+            eq(components.updatedBy, BUILD),
+          ),
+        );
+      const current = new Map(rows.map((row) => [row.name, row]));
+      // Read only to skip the statements that would change nothing. The decision is the UPDATE's own
+      // WHERE below, so a row an administrator edits after this read is still left alone.
+      const stale = defaults.filter((entry) => {
+        const row = current.get(entry.name);
+        return (
+          row !== undefined &&
+          (row.title !== entry.title ||
+            row.draftDescription !== entry.description ||
+            row.publishedDescription !== entry.description)
+        );
+      });
+
+      const refreshed: string[] = [];
+      for (const entry of stale) {
+        // One conditional statement per component. Two replicas starting at once both run it, and
+        // only the first changes the row: the second finds nothing different and returns nothing, so
+        // the trail names the change once.
+        const changed = await database
+          .update(components)
+          .set({
+            title: entry.title,
+            draftDescription: entry.description,
+            publishedDescription: entry.description,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(components.name, entry.name),
+              eq(components.updatedBy, BUILD),
+              or(
+                ne(components.title, entry.title),
+                ne(components.draftDescription, entry.description),
+                ne(components.publishedDescription, entry.description),
+                isNull(components.publishedDescription),
+              ),
+            ),
+          )
+          .returning({ name: components.name });
+        refreshed.push(...changed.map((row) => row.name));
+      }
+      return refreshed;
     },
 
     async list() {

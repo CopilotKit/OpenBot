@@ -6,7 +6,7 @@ import {
   NoticeCard,
   RecordCard,
 } from "@/components/gallery/cards";
-import { ApprovalCard } from "@/components/gallery/decisions";
+import { ApprovalCard, ChoiceCard } from "@/components/gallery/decisions";
 import { QuoteCard } from "@/components/gallery/quote";
 import { DataTable } from "@/components/gallery/table";
 import { settleReactWork } from "./settle-react-work";
@@ -192,6 +192,22 @@ test("an approval's summary and detail values draw markdown", () => {
   expect(container.querySelector(BOLD)?.textContent).toBe("Contoso");
 });
 
+test("a choice's summary draws markdown", () => {
+  const { container } = render(
+    <ChoiceCard
+      args={{
+        title: "Which one should I archive?",
+        summary: LINE,
+        options: [{ id: "contoso", label: "Contoso" }],
+      }}
+      respond={async () => {}}
+      result={undefined}
+      status="executing"
+    />,
+  );
+  expectOneLink(container);
+});
+
 test("a table's text cells draw markdown and its number cells stay numbers", () => {
   const { container } = render(
     <DataTable
@@ -202,4 +218,83 @@ test("a table's text cells draw markdown and its number cells stay numbers", () 
   );
   expectOneLink(container);
   expect(container.querySelector("td.tabular-nums")?.textContent).toBe("25");
+});
+
+/*
+ * A notice's supporting point that is itself a Markdown list drew the notice's `·` and then an
+ * indented list beside it. The point hides its `·` and the list's indent through selectors on the
+ * `<li>` that read the shape Streamdown draws (the point's text, then a list as its first child), so
+ * the shape is pinned here as well as the classes.
+ */
+test("a notice point that is a list draws without the notice's dot or a second indent", () => {
+  const { container } = render(
+    <NoticeCard
+      points={["- Contoso\n- Fabrikam", "One plain point"]}
+      title="Replies"
+    />,
+  );
+  const points = [...container.querySelectorAll("ul.mt-2 > li")];
+  expect(points).toHaveLength(2);
+  const [list, plain] = points as HTMLElement[];
+  for (const point of points)
+    expect(point.className).toContain(
+      "[&:has(>div>:is(ol,ul):first-child)>span]:hidden",
+    );
+  expect(list?.querySelector(":scope > div > ul:first-child")).not.toBeNull();
+  expect(
+    [...(list?.querySelectorAll(":scope > div > ul > li") ?? [])].map(
+      (item) => item.textContent,
+    ),
+  ).toEqual(["Contoso", "Fabrikam"]);
+  // A plain point keeps its dot: nothing in it matches the selector.
+  expect(
+    plain?.querySelector(":scope > div > :is(ol,ul):first-child"),
+  ).toBeNull();
+  expect(plain?.querySelector(":scope > span")?.textContent).toBe("·");
+});
+
+/*
+ * A card is narrower than a reply and clips what runs past its edge, so a bare long URL in a card's
+ * text lost its end. Every card draws its prose through `GalleryMarkdown`, which always wraps.
+ */
+const LONG_URL =
+  "https://mail.google.com/mail/u/0/#inbox/1a1b9a5fcb357c40a1b9a5fcb357c40a1b9a5fcb357c40a1b9a5fcb357c40";
+
+test("a long link in a card's text wraps instead of running past the card's edge", () => {
+  const cards = [
+    <NoticeCard body={LONG_URL} key="n" points={[LONG_URL]} title="Link" />,
+    <ChecklistCard
+      items={[{ text: LONG_URL, done: false }]}
+      key="c"
+      title="Link"
+    />,
+    <QuoteCard attribution="Inbox" key="q" quote={LONG_URL} />,
+  ];
+  for (const card of cards) {
+    const { container, unmount } = render(card);
+    const holders = [...container.querySelectorAll("*")].filter(
+      (element) =>
+        element.textContent?.includes(LONG_URL) &&
+        element.className.toString().split(/\s+/).includes("break-words"),
+    );
+    expect(holders.length).toBeGreaterThan(0);
+    unmount();
+  }
+});
+
+test("a choice's options can shrink to the card, so a long link in one wraps", () => {
+  const { container } = render(
+    <ChoiceCard
+      args={{
+        title: "Which one?",
+        options: [{ id: "a", label: "Contoso", description: LONG_URL }],
+      }}
+      respond={async () => {}}
+      result={undefined}
+      status="executing"
+    />,
+  );
+  expect(container.querySelector("fieldset")?.className.split(/\s+/)).toContain(
+    "min-w-0",
+  );
 });

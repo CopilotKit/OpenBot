@@ -54,7 +54,7 @@ const BOT = "personal-assistant";
 
 /** Every query Activity sends, as the page writes it. */
 const ACTIVITY_QUERY =
-  "?excludeEventType=mcp.tools_discovered%2Cchannel.routed%2Ccomponent.published%2Ccomputer.policy_loaded%2Ccomputer.isolation_loaded&excludeCalls=routines%2Fcreate_routine%2Croutines%2Fupdate_routine%2Croutines%2Fdelete_routine";
+  "?excludeEventType=mcp.tools_discovered%2Cchannel.routed%2Ccomponent.published%2Ccomponent.description_updated%2Ccomputer.policy_loaded%2Ccomputer.isolation_loaded&excludeCalls=routines%2Fcreate_routine%2Croutines%2Fupdate_routine%2Croutines%2Fdelete_routine";
 
 function row(
   id: string,
