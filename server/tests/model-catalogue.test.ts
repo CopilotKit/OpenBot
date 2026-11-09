@@ -457,7 +457,7 @@ describe("the default and the thinking levels, from the providers' own data", ()
    * does at boot. `plan.token` is MANAGED_AGENT_TOKEN, the harness's own secret: sent to Anthropic as
    * the bearer, the listing came back 401 and no Claude plan ever had a model picker.
    */
-  const OAUTH = "sk-ant-oat01-synthetic-claude-plan-token";
+  const OAUTH = "synthetic-claude-plan-oauth-token";
   const MANAGED = "managed-agent-token-for-the-harness-only";
   const claudePlanEnvironment = {
     CLAUDE_CODE_OAUTH_TOKEN: OAUTH,
