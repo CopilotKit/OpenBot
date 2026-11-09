@@ -1704,6 +1704,75 @@ test("the running screen shows none of Start's own steps, and names the system t
   }
 });
 
+/*
+ * Seen on Windows: with Start's rows gone from the running screen, the card opened on a divider
+ * and "Updates", with nothing above the line, and "OpenBot is running" under them. The heading
+ * comes first; Updates sits under the buttons, as on the stopped screen.
+ */
+test("the running screen opens on its heading, with Updates under the buttons, with and without a failure", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-running-order",
+    localStatus("ready", "valid"),
+  );
+  let showFails = false;
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "show_openbot" && showFails)
+      throw "OpenBot is not answering on port 3010 yet, so there is nothing to show.";
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await waitFor(() => expect(localSequence()).toContain("start_stack"));
+  await emitProgress({ step: "env", ok: true, detail: "Saved." });
+  await emitProgress({
+    step: "services",
+    ok: true,
+    running: true,
+    detail: "Starting OpenBot's services.",
+  });
+
+  /** The card's own children in order, by what each one is. */
+  const order = (sheet: Element) =>
+    [...sheet.children].map((child) =>
+      child.tagName === "H1"
+        ? "heading"
+        : child.tagName === "DETAILS"
+          ? `details:${child.querySelector("summary")?.textContent}`
+          : child.getAttribute("aria-label") === "Setup progress"
+            ? "rows"
+            : child.classList.contains("row")
+              ? "buttons"
+              : child.tagName.toLowerCase(),
+    );
+
+  const heading = await view.findByRole("heading", {
+    name: "OpenBot is running",
+  });
+  const sheet = heading.closest(".sheet") as HTMLElement;
+  expect(order(sheet)).toEqual(["heading", "p", "buttons", "details:Updates"]);
+  expect(sheet.firstElementChild === heading).toBe(true);
+  expect(view.queryByRole("list", { name: "Setup progress" })).toBeNull();
+
+  showFails = true;
+  await userEvent.click(view.getByRole("button", { name: "Show OpenBot" }));
+  const stopped = await view.findByRole("heading", { name: "OpenBot stopped" });
+  const failedSheet = stopped.closest(".sheet") as HTMLElement;
+  // The rows still show where it stopped, between the heading and the buttons.
+  const rows = view.getByRole("list", { name: "Setup progress" });
+  expect(within(rows).getAllByRole("listitem").length).toBeGreaterThan(0);
+  expect(order(failedSheet)).toEqual([
+    "heading",
+    "rows",
+    expect.any(String),
+    "buttons",
+    "details:Updates",
+  ]);
+  expect(failedSheet.firstElementChild === stopped).toBe(true);
+  expect(view.getByRole("alert").textContent).toContain(
+    "OpenBot is not answering on port 3010 yet",
+  );
+});
+
 test("relaunch says when Docker Desktop did not start, and Retry opens it again", async () => {
   setupConnectedLocalStack(
     "/tmp/local-eval-docker-never",

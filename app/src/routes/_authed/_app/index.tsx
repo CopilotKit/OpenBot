@@ -4,8 +4,10 @@ import {
   Link,
   useNavigate,
   useRouter,
+  useSearch,
 } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import { z } from "zod";
 import { AgentCard } from "@/components/agents/agent-card";
 import {
   Composer,
@@ -45,6 +47,11 @@ import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
 const EXPLORE_SHOWN = 4;
 
 export const Route = createFileRoute("/_authed/_app/")({
+  /*
+   * `ask`: words to start the box with, as Teach a Bot's Try it hands over a task a Bot just learned. Only put in the
+   * box: nothing is sent until the person sends it.
+   */
+  validateSearch: z.object({ ask: z.string().max(2000).optional() }),
   // The edition decides whether there is an Explore section at all, so it is read before the page draws and the
   // composer never moves when it arrives.
   beforeLoad: async ({ context }) => {
@@ -76,6 +83,9 @@ function RouteComponent() {
   // under it, the way a failed send always left them. Taken on mount, and again whenever one fails
   // while this page is open (somebody who came back here before it failed is looking at it).
   const [restored, setRestored] = useState(takeFailedStart);
+  // Read once, as the box reads its words once: the words a link handed over (`ask`).
+  const ask = useSearch({ strict: false }).ask;
+  const [asked] = useState(ask);
   const [restores, setRestores] = useState(0);
   const [error, setError] = useState<string | null>(restored?.error ?? null);
   /*
@@ -203,7 +213,11 @@ function RouteComponent() {
             // The box reads its words once, when it mounts; a start that fails while this page is
             // open is a new box with them in it.
             key={restores}
-            {...(restored ? { initialValue: restored.text } : {})}
+            {...(restored
+              ? { initialValue: restored.text }
+              : asked
+                ? { initialValue: asked, autoFocus: true }
+                : {})}
             onSubmit={async (draft) => {
               // The conversation opens NOW, as a placeholder showing the message, and the Bot is
               // picked and the channel made behind it; see `pending-start.ts`. Waiting here for

@@ -1,0 +1,1 @@
+ALTER TABLE "approval_rules" ADD COLUMN "account" text;

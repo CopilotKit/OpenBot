@@ -41,9 +41,33 @@ export function globMatches(pattern: string, value: string): boolean {
 type AnyRule = Pick<
   ApprovalRule,
   "id" | "botId" | "toolRef" | "effect" | "scope" | "behaviour"
->;
+> & { account?: string | null };
 
-export function ruleMatches(rule: AnyRule, candidate: ApprovalCandidate) {
+/**
+ * Whether a rule is about this action.
+ *
+ * WHICH ACCOUNT, where the person holds several at the app. A rule saved for one account (the card
+ * named it when "Always allow here" was pressed) is about that account and no other. A personal rule
+ * that names no account still asks, hands off or holds for every account, which is the strict
+ * direction; but it no longer ALLOWS a call that names an account, because it was written before the
+ * person had a second one to tell apart, so it cannot be read as consent for a mailbox it never saw.
+ * A team rule is the admin's policy for the app and holds whichever account a call runs in.
+ */
+export function ruleMatches(
+  rule: AnyRule,
+  candidate: ApprovalCandidate,
+  layer: "team_rule" | "personal_rule" = "personal_rule",
+) {
+  const ruleAccount = rule.account?.trim().toLowerCase() || null;
+  const callAccount = candidate.account?.trim().toLowerCase() || null;
+  if (ruleAccount !== null && ruleAccount !== callAccount) return false;
+  if (
+    ruleAccount === null &&
+    callAccount !== null &&
+    layer === "personal_rule" &&
+    (rule.behaviour === "allow" || rule.behaviour === "pre_approved")
+  )
+    return false;
   return (
     globMatches(rule.botId, candidate.botId) &&
     globMatches(rule.toolRef, candidate.toolRef) &&
@@ -64,7 +88,7 @@ export function strictestRule(
     ["personal_rule", personal],
   ] as const) {
     for (const rule of rules) {
-      if (!ruleMatches(rule, candidate)) continue;
+      if (!ruleMatches(rule, candidate, layer)) continue;
       if (!best || RANK[rule.behaviour] > RANK[best.rule.behaviour])
         best = { rule, layer };
     }

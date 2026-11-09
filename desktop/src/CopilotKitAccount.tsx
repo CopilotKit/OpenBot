@@ -14,6 +14,7 @@ import {
   localEvalTerms,
   signInToCopilotKit,
 } from "./localEvalCli";
+import { engineTooSmallSaid } from "./localReadiness";
 import { InlineFailure, type Problem } from "./Problem";
 import { Sections } from "./Sections";
 import { StatusLine } from "./SetupProgress";
@@ -132,7 +133,9 @@ export function CopilotKitAccount({
           }
         }
         waitingSince.current = null;
-        if (terms.status === "signed-out") setSeen({ at: "signed-out" });
+        if (terms.status === "engine-too-small")
+          setSeen({ at: "failed", said: engineTooSmallSaid(terms) });
+        else if (terms.status === "signed-out") setSeen({ at: "signed-out" });
         else if (terms.status === "required" && !terms.accepted)
           setSeen({ at: "agreement", terms });
         else if (terms.status === "unavailable")

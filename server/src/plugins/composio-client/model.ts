@@ -465,7 +465,7 @@ export type ComposioVendor = {
     link(
       userId: string,
       authConfigId: string,
-      options: { callbackUrl: string },
+      options: { callbackUrl: string; allowMultiple?: boolean },
     ): Promise<{ redirectUrl?: unknown }>;
     /**
      * Create one person's account from the secret they typed, WITHOUT a consent screen anywhere.

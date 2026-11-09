@@ -71,6 +71,33 @@ async function startSigningIn() {
   return screen;
 }
 
+/** OpenBot's own engine check: a Docker with a full disk is caught here, before Start fails on it. */
+test("an engine short of disk says how to raise it, and Try again checks again", async () => {
+  invokeHandler = async ({ command }) => {
+    if (command === "local_eval_terms")
+      return {
+        status: "engine-too-small",
+        podman: false,
+        cpu: false,
+        memory: false,
+        disk: true,
+      };
+    throw new Error(`unexpected ${command}`);
+  };
+  const screen = render(
+    <CopilotKitAccount root="/tmp/account-engine" onDone={() => {}} />,
+  );
+  await screen.findByText(
+    "Docker is out of disk space. OpenBot needs 40 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Try again.",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() =>
+    expect(
+      invokeCalls.filter((call) => call.command === "local_eval_terms"),
+    ).toHaveLength(2),
+  );
+});
+
 test("a sign-in waiting on the browser shows its code and a way back to the page", async () => {
   waitingSignIn();
   const screen = await startSigningIn();
