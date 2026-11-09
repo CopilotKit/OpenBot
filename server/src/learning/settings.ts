@@ -35,6 +35,19 @@ export type LearningSettingsStore = {
    * only holds automatic approval, say) still takes the target, keeping its other keys.
    */
   adoptDefault(target: LearningTarget): Promise<boolean>;
+  /** The default container as saved, whether or not it is set aside here. Null when none is saved. */
+  savedDefault(): Promise<LearningTarget | null>;
+  /**
+   * The saved default container is not on the Intelligence this server talks to
+   * (learning/auto-assign.ts). It stays saved, for the Intelligence it was chosen on, but reads here
+   * as `standIn`, or as no container until assignment finds one. Writing back what was read keeps
+   * the saved choice beneath it; writing another container replaces it, as any save does.
+   */
+  setAside(containerId: string, standIn?: LearningTarget): void;
+  /** The set-aside container is there after all (made since): it reads as saved again. */
+  restore(): void;
+  /** Whether `containerId` is the saved default set aside on this Intelligence. */
+  isSetAside(containerId: string): boolean;
   bindThread(input: {
     userId: string;
     threadId: string;
@@ -211,7 +224,12 @@ export function createLearningSettingsStore(
   let current = fallback();
   let written = false;
   const bindings = new Map<string, string | null>();
-  const stored = async (): Promise<LearningSettings> => {
+  /** The saved default this Intelligence does not have, and what reads in its place. */
+  let aside:
+    | { containerId: string; standIn: LearningTarget | null }
+    | undefined;
+  /** As saved: what `write` keeps and `savedDefault` reports. */
+  const saved = async (): Promise<LearningSettings> => {
     if (!database) return structuredClone(written ? current : fallback());
     const [row] = await database
       .select()
@@ -223,7 +241,33 @@ export function createLearningSettingsStore(
     if (!parsed.ok) throw new Error("Stored learning settings are invalid.");
     return parsed.settings;
   };
+  /** As read: a set-aside default replaced by its stand-in. */
+  const stored = async (): Promise<LearningSettings> => {
+    const settings = await saved();
+    if (aside && settings.defaultTarget?.containerId === aside.containerId)
+      return { ...settings, defaultTarget: structuredClone(aside.standIn) };
+    return settings;
+  };
+  const sameTarget = (a: LearningTarget | null, b: LearningTarget | null) =>
+    a?.containerId === b?.containerId && a?.revision === b?.revision;
   return {
+    async savedDefault() {
+      return (await saved()).defaultTarget;
+    },
+    setAside(containerId, standIn) {
+      aside = {
+        containerId,
+        standIn: standIn
+          ? { containerId: standIn.containerId }
+          : aside?.containerId === containerId
+            ? aside.standIn
+            : null,
+      };
+    },
+    restore() {
+      aside = undefined;
+    },
+    isSetAside: (containerId) => aside?.containerId === containerId,
     async saved() {
       const personal = currentEdition() === "personal";
       if (!database)
@@ -286,16 +330,29 @@ export function createLearningSettingsStore(
     async write(settings) {
       const parsed = parseLearningSettings(settings);
       if (!parsed.ok) throw new TypeError(parsed.error);
+      /*
+       * Saving what was read (Admin's whole page, or who approves Skills) carries the stand-in back.
+       * That is not a new choice of container, so the one saved for another Intelligence stays.
+       */
+      let next = parsed.settings;
+      if (aside && sameTarget(next.defaultTarget, aside.standIn)) {
+        const before = await saved().then(
+          (settings) => settings.defaultTarget,
+          () => null,
+        );
+        if (before?.containerId === aside.containerId)
+          next = { ...next, defaultTarget: before };
+      }
       if (database) {
         await database
           .insert(learningSettings)
-          .values({ id: "current", settings: parsed.settings })
+          .values({ id: "current", settings: next })
           .onConflictDoUpdate({
             target: learningSettings.id,
-            set: { settings: parsed.settings, updatedAt: new Date() },
+            set: { settings: next, updatedAt: new Date() },
           });
       } else {
-        current = structuredClone(parsed.settings);
+        current = structuredClone(next);
         written = true;
       }
       return structuredClone(parsed.settings);

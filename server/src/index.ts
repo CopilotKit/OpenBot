@@ -2262,7 +2262,10 @@ const copilotRuntime = mountCopilotRuntime(
       void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
     },
     learningSettings,
-    learningContainerForgotten: configuredLearning.forgotten,
+    // The environment's container, or a saved default, that this Intelligence was found not to have.
+    learningContainerForgotten: (containerId) =>
+      configuredLearning.forgotten(containerId) ||
+      learningSettingsStore.isSetAside(containerId),
     personalSkills: {
       containerFor: personalLearningSpaces.containerFor,
       openSkills: () => openSkillIndex.sources(),

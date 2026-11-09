@@ -347,6 +347,10 @@ type Server = {
    * longer publishes is a 400 on the whole connection, however tidy the screen looked.
    */
   submitted: Record<string, string>[];
+  /** How many times the vendor was asked about the account (`/connection/confirm`). */
+  confirmsAsked: number;
+  /** What the vendor answers about the account from now on: a consent finished elsewhere. */
+  answer: (confirms: boolean) => void;
 };
 
 /**
@@ -394,6 +398,10 @@ function installDeployment(deployment: Deployment): Server {
       state.refusesFields = refusal;
     },
     submitted: [],
+    confirmsAsked: 0,
+    answer: (confirms) => {
+      state.confirms = confirms;
+    },
   };
 
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -453,6 +461,7 @@ function installDeployment(deployment: Deployment): Server {
       });
     }
     if (path.endsWith("/connection/confirm") && method === "POST") {
+      server.confirmsAsked += 1;
       // What the route answers with no key at all: nothing to ask, and no answer invented.
       if (!state.composioConfigured) {
         return new Response(
@@ -1156,6 +1165,46 @@ test("a consent app's Connect leaves for the vendor's own page", async () => {
     await waitFor(() => expect(watched.navigations).toEqual([CONSENT_URL]));
   } finally {
     watched.restore();
+  }
+});
+
+test("in OpenBot Desktop, the page asks again once the window is back in front", async () => {
+  /*
+   * The window sends the sign-in to the person's browser and this page stays where it is, so it
+   * never arrives here again to confirm on load. The browser hands the person back to the window
+   * when the sign-in is done, and the focus that brings is when the account is asked about.
+   */
+  const server = installDeployment({
+    authScheme: "OAUTH2",
+    composioConfigured: true,
+    confirms: false,
+    recorded: false,
+  });
+  (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+    invoke: async () => null,
+    transformCallback: () => 0,
+  };
+  const watched = watchNavigation();
+
+  try {
+    const view = renderAccountScreen(queryClient());
+    await userEvent.click(await view.findByRole("button", { name: "Connect" }));
+    await waitFor(() => expect(watched.navigations).toEqual([CONSENT_URL]));
+    const before = server.confirmsAsked;
+
+    server.answer(true);
+    window.dispatchEvent(new Event("focus"));
+
+    await waitFor(() => expect(server.confirmsAsked).toBe(before + 1));
+    expect(
+      await view.findByRole("button", { name: "Disconnect" }),
+    ).toBeTruthy();
+    // Once per sign-in: a later focus asks nothing more.
+    window.dispatchEvent(new Event("focus"));
+    expect(server.confirmsAsked).toBe(before + 1);
+  } finally {
+    watched.restore();
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
   }
 });
 

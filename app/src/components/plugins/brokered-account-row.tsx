@@ -1,6 +1,6 @@
 import { IconArrowUpRight, IconUser } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ConnectionFields } from "@/components/plugins/connection-fields";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +19,8 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { desktopShell } from "@/lib/desktop/shell";
+import { schemeNeedsKey } from "@/lib/plugins/enablement-notes";
 import {
   type BrokerField,
   brokeredConnectionFieldsMutationOptions,
@@ -34,14 +36,13 @@ import {
   recheckBrokeredConnectionMutationOptions,
   setDefaultBrokeredAccountMutationOptions,
 } from "@/lib/plugins/mutations";
-import { schemeNeedsKey } from "@/lib/plugins/enablement-notes";
-import { brokeredAccountsQueryOptions } from "@/lib/plugins/queries";
 import {
   type BrokeredAccountKind,
   brokeredKeyMissing,
   type Edition,
   type PluginsProvider,
 } from "@/lib/plugins/provider-vocabulary";
+import { brokeredAccountsQueryOptions } from "@/lib/plugins/queries";
 
 /**
  * One person's own brokered account, on whichever screen is asking.
@@ -378,6 +379,31 @@ export function useBrokeredAccount(input: {
   }, [brokered, configured, serverId, confirmAccount]);
 
   /*
+   * ASKED AGAIN WHEN OPENBOT DESKTOP'S WINDOW IS BACK IN FRONT. The window sends the sign-in to the
+   * person's browser and this page stays where it is, so it never arrives on this page and the
+   * question above is never asked again. The browser hands the person back to the window when the
+   * sign-in is done (`/desktop-return`), and the focus that brings is when there is an answer.
+   * Once per sign-in, and gone with the page.
+   */
+  const pendingReturn = useRef<(() => void) | null>(null);
+  const confirmOnReturn = useCallback(() => {
+    if (!desktopShell() || pendingReturn.current) return;
+    const asked = () => {
+      pendingReturn.current = null;
+      confirmAccount(serverId);
+    };
+    pendingReturn.current = asked;
+    window.addEventListener("focus", asked, { once: true });
+  }, [confirmAccount, serverId]);
+  useEffect(
+    () => () => {
+      if (pendingReturn.current)
+        window.removeEventListener("focus", pendingReturn.current);
+    },
+    [],
+  );
+
+  /*
    * Find out whether the key still works, when somebody presses for it and at no other time.
    *
    * Deliberately not a second effect beside the confirm above. Composio never re-checks a key once
@@ -450,6 +476,7 @@ export function useBrokeredAccount(input: {
         );
         return;
       }
+      confirmOnReturn();
       window.location.href = start.authorizationUrl;
     },
   });
@@ -615,6 +642,7 @@ export function useBrokeredAccount(input: {
         );
         return;
       }
+      confirmOnReturn();
       window.location.href = start.authorizationUrl;
     },
   });

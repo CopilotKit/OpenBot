@@ -16,6 +16,9 @@
 //! OpenBot starts with, never a key, and Change, which stops OpenBot and opens the setup window at
 //! its AI screen.
 //!
+//! And Settings' Share usage data row (`usage_data`, `set_usage_data`): the opt-out the
+//! environment variables give, as a switch kept for the next launch.
+//!
 //! And Quit (`quit`), for Ctrl+Q in the window on Windows (`QUIT_SHORTCUT_PAGE`), and Zoom
 //! (`zoom`), for the zoom keys no menu carries (`zoom::SHORTCUT_PAGE`). The setup and Status pages
 //! are granted both too (`capabilities/default.json`).
@@ -29,7 +32,7 @@ pub const PLUGIN: &str = "openbot-desktop";
 pub const QUIT_SHORTCUT_PAGE: &str = include_str!("quit-shortcut.js");
 
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 19] = [
+pub const PERMISSIONS: [&str; 21] = [
     "openbot-desktop:allow-appearance",
     "openbot-desktop:allow-status",
     "openbot-desktop:allow-restart",
@@ -47,6 +50,8 @@ pub const PERMISSIONS: [&str; 19] = [
     "openbot-desktop:allow-notify",
     "openbot-desktop:allow-ai-connection",
     "openbot-desktop:allow-change-ai-connection",
+    "openbot-desktop:allow-usage-data",
+    "openbot-desktop:allow-set-usage-data",
     "openbot-desktop:allow-quit",
     "openbot-desktop:allow-zoom",
 ];
@@ -212,6 +217,24 @@ async fn change_ai_connection(app: tauri::AppHandle) {
     crate::change_ai_connection_from_settings(app);
 }
 
+/// Settings' Share usage data: whether this installation shares, and whether the app's own
+/// environment turned it off.
+#[tauri::command]
+async fn usage_data() -> crate::desktop_telemetry::UsageData {
+    crate::desktop_telemetry::usage_data_now()
+}
+
+/// Settings' Share usage data, switched. Off is the same opt-out as `COPILOTKIT_TELEMETRY_DISABLED`,
+/// kept for the next launch. The desktop's own events and the CLI follow at once; the server, the
+/// next time OpenBot starts. Refused when the environment turned sharing off.
+#[tauri::command]
+async fn set_usage_data(
+    app: tauri::AppHandle,
+    share: bool,
+) -> Result<crate::desktop_telemetry::UsageData, String> {
+    crate::desktop_telemetry::set_usage_data(&app, share)
+}
+
 /// Quit, by the same path as the tray's Quit: Ctrl+Q in the window on Windows, where no menu
 /// carries the shortcut.
 #[tauri::command]
@@ -246,6 +269,8 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             notify,
             ai_connection,
             change_ai_connection,
+            usage_data,
+            set_usage_data,
             quit,
             zoom
         ])
