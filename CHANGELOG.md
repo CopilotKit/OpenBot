@@ -13,6 +13,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   signature is unchanged, and the feed is only published once each of those files answers there.
 ### OpenBot Desktop
 
+- "OpenBot is running" opens on its heading again. Its Updates disclosure, and the line above it,
+  sit under Show OpenBot and Stop OpenBot, as on the stopped screen, instead of at the top of the
+  card with nothing above the line.
 - **An update the mirror cannot send comes from GitHub.** When downloading the new version from
   downloads.copilotkit.ai fails, OpenBot reads GitHub's update feed and downloads the same signed
   version from there once, instead of failing until the mirror is fixed. The log says which one it
