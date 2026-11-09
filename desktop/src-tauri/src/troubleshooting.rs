@@ -59,6 +59,8 @@ pub struct Facts {
 pub fn bundle(facts: &Facts, home: Option<&str>) -> String {
     let mut out = String::new();
     out.push_str("# OpenBot troubleshooting logs\n\n");
+    out.push_str(&summary(facts));
+    out.push_str(&format!("\n{REDACTED_NOTE}\n\n"));
     out.push_str(&format!("{}\n", facts.desktop));
     out.push_str(&format!("System: {}\n", facts.system));
     out.push_str("\n## What failed\n\n");
@@ -92,6 +94,74 @@ pub fn bundle(facts: &Facts, home: Option<&str>) -> String {
     file(&mut out, "OpenBot Desktop log (end)", &facts.desktop_log);
     file(&mut out, "Back end CLI log (end)", &facts.cli_log);
     redact(&out, home).into_owned()
+}
+
+/// What the bundle says was taken out, so a person knows it is safe to paste.
+pub const REDACTED_NOTE: &str = "Redacted on this computer before copying: API keys, tokens, \
+passwords, cookies, email addresses, and account, organisation, user and installation ids. The \
+home folder is written as ~.";
+
+/// The headline, for whoever reads the bundle first: which build, what failed, and the engine's
+/// size. One to three lines.
+pub fn summary(facts: &Facts) -> String {
+    let mut lines = vec![format!("Summary: {} on {}.", facts.desktop, facts.system)];
+    if let Some(failure) = facts.failure.as_deref().filter(|f| !f.trim().is_empty()) {
+        let said: Vec<&str> = failure
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .take(2)
+            .collect();
+        let mut said = said.join(" / ");
+        if said.chars().count() > 300 {
+            said = said.chars().take(300).collect::<String>() + "…";
+        }
+        lines.push(format!("Failed: {said}"));
+    }
+    if let Some(engine) = engine_summary(&facts.engine) {
+        lines.push(engine);
+    }
+    lines.join("\n") + "\n"
+}
+
+/// `docker 28.5.1, 8 CPUs, 8.2 GB memory. Free disk is not measured; see system df below.`, from
+/// the engine commands' own answers. None when nothing answered.
+fn engine_summary(engine: &[(String, String)]) -> Option<String> {
+    static SIZE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(\d+) CPUs, (\d+) bytes memory").expect("the size pattern compiles")
+    });
+    let answered = |said: &str| {
+        !(said.starts_with("failed (")
+            || said.starts_with("no answer within")
+            || said.starts_with("could not"))
+    };
+    let name = engine.first()?.0.split(' ').next()?.to_owned();
+    let mut parts = vec![name];
+    let version = engine
+        .iter()
+        .find(|(command, _)| command.contains(" version"))
+        .map(|(_, said)| said.trim())
+        .filter(|said| !said.is_empty() && answered(said));
+    if let Some(version) = version {
+        parts[0] = format!("{} {version}", parts[0]);
+    }
+    let size = engine
+        .iter()
+        .find(|(command, said)| command.contains(" info") && answered(said))
+        .and_then(|(_, said)| SIZE.captures(said));
+    match size {
+        Some(size) => {
+            let bytes: f64 = size[2].parse().unwrap_or_default();
+            parts.push(format!("{} CPUs", &size[1]));
+            parts.push(format!("{:.1} GB memory", bytes / 1e9));
+        }
+        None if version.is_none() => parts.push("not answering".into()),
+        None => {}
+    }
+    Some(format!(
+        "Container engine: {}. Free disk is not measured; see system df below.",
+        parts.join(", ")
+    ))
 }
 
 /// A named account identifier: `"organizationId":"org_…"`, `user_id=…`, `installationId: …`.
@@ -323,10 +393,48 @@ mod tests {
         }
         assert!(!text.contains("/Users/alice"));
 
+        // The headline comes first, then what was taken out.
+        assert!(text.starts_with(
+            "# OpenBot troubleshooting logs\n\nSummary: OpenBot Desktop 1.0.0 (Built 2026-11-08 06:40 UTC from 52ea4b5) on macos aarch64.\nFailed: The back end could not start. / exit 1\nContainer engine: docker 27.3.1. Free disk is not measured; see system df below.\n\nRedacted on this computer"
+        ), "{text}");
+
         let empty = bundle(&Facts::default(), None);
         assert!(empty.contains("Nothing reported a failure."));
         assert!(empty.contains("No container engine is answering."));
         assert_eq!(empty.matches("Not found on this computer.").count(), 2);
+    }
+
+    #[test]
+    fn the_summary_says_the_engines_size_or_that_it_did_not_answer() {
+        let facts = Facts {
+            engine: vec![
+                ("docker version --format x".into(), "28.5.1".into()),
+                (
+                    "docker info --format y".into(),
+                    "Docker Desktop aarch64, 8 CPUs, 8217473024 bytes memory, storage overlayfs at /var/lib/docker".into(),
+                ),
+                ("docker system df".into(), "no answer within 5s".into()),
+            ],
+            ..Facts::default()
+        };
+        assert!(summary(&facts).ends_with(
+            "Container engine: docker 28.5.1, 8 CPUs, 8.2 GB memory. Free disk is not measured; see system df below.\n"
+        ));
+        let silent = Facts {
+            engine: vec![
+                (
+                    "podman version --format x".into(),
+                    "no answer within 5s".into(),
+                ),
+                (
+                    "podman info --format y".into(),
+                    "failed (exit status: 125): boom".into(),
+                ),
+            ],
+            ..Facts::default()
+        };
+        assert!(summary(&silent).contains("Container engine: podman, not answering."));
+        assert!(!summary(&Facts::default()).contains("Failed:"));
     }
 
     #[test]
