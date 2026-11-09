@@ -2754,6 +2754,7 @@ dependencies = [
  "libc",
  "log",
  "objc2",
+ "objc2-app-kit",
  "objc2-av-foundation",
  "objc2-avf-audio",
  "objc2-foundation",

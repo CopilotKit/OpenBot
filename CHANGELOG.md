@@ -20,6 +20,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   started below the close, minimise and zoom buttons, under an empty strip. The buttons now sit 20pt
   in and level with the header's first row, and the name and + start just to their right.
   With the sidebar hidden, the page starts below them, and so does onboarding.
+- **Check for Updates… on the Mac answers with OpenBot's icon.** "OpenBot is up to date", the offer
+  of a newer version, and "couldn't check" or "couldn't install" showed the system's grey note icon,
+  because the alert was drawn by macOS rather than by OpenBot. They are now OpenBot's own alerts.
 - **OpenBot Desktop says it sends usage data, and Settings turns it off.** The first setup screen
   now says that OpenBot sends CopilotKit usage data linked to your CopilotKit account, that it never
   sends your conversations, files or keys, and links what it sends (`desktop/TELEMETRY.md`). Earlier
