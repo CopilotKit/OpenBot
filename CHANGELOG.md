@@ -137,14 +137,12 @@ deployment:
 ### Conversations
 
 - **A Bot is told which apps it can use from its first message.** Its instructions name each app it
-  holds and where it stands for you, such as "Gmail (connected), Notion (needs connecting)", and
-  tell it to look an app's tools up rather than say it has no access. Bots are also told to say
-  what they did in plain words ("I checked your Gmail profile") and never to name a tool, such as
-  `GMAIL_GET_PROFILE`.
-- **A Bot says where each app stands the way its page does.** An app that's on but that you haven't
-  connected is "needs connecting", never ready. An app nobody connected isn't called connected,
-  each app gets one reason, and a tool a Bot holds but wasn't offered on that turn isn't called
-  missing. In the personal edition a Bot never mentions an admin.
+  holds and where it stands for you the way the app's page does, such as "Gmail (connected), Notion
+  (needs connecting)". An app you haven't connected is never listed as one it can reach, and a tool
+  it holds but isn't offered on a turn isn't called missing. It is told to look an app's tools up
+  rather than say it has no access, and in the personal edition never to mention an admin. Bots are
+  also told to say what they did in plain words ("I checked your Gmail profile") and never to name a
+  tool, such as `GMAIL_GET_PROFILE`.
 - **Bots answer in Markdown by default.** Ordinary questions, explanations, summaries and short
   lists come back as a reply. A notice card is kept for an alert that needs you to act, or for when
   you ask for one, and a chart, table or card is drawn when it makes the answer easier to use. Bots
