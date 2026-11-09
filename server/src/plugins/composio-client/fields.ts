@@ -446,6 +446,37 @@ export function fieldMethods(context: ClientContext) {
     },
 
     /**
+     * The provider's page for making this app's key, where Composio publishes one.
+     *
+     * Two places can carry it: `auth_hint_url` on the connection mode the app was added with, and
+     * `auth_guide_url` on the app. Both are empty for nearly every app, so null is the ordinary
+     * answer. Anything that is not text is read as no link: this is a link shown beside a form,
+     * and a shape this file cannot read is no reason to refuse the form a person came for.
+     */
+    async connectionGuideUrl({ toolkit, authScheme }): Promise<string | null> {
+      const detail = await askVendor(
+        {
+          outcome: `where to get ${toolkit}'s key could not be read`,
+          app: toolkit,
+        },
+        () => vendor.toolkits.retrieve(toolkit),
+      );
+      if (typeof detail !== "object" || detail === null) return null;
+      const modes = Array.isArray(detail.auth_config_details)
+        ? detail.auth_config_details
+        : [];
+      const mode = modes.find(
+        (entry: unknown) =>
+          typeof entry === "object" &&
+          entry !== null &&
+          textOf((entry as { mode?: unknown }).mode) === authScheme,
+      ) as { auth_hint_url?: unknown } | undefined;
+      return (
+        textOf(mode?.auth_hint_url) ?? textOf(detail.auth_guide_url) ?? null
+      );
+    },
+
+    /**
      * One person's account made from what they typed, and the ONE call here that drops its error.
      *
      * THIS IS THE SINGLE PLACE THIS FILE'S CAUSE-CARRYING RULE REVERSES, AND IT SAYS SO ON PURPOSE.
@@ -677,5 +708,10 @@ export function fieldMethods(context: ClientContext) {
 
       return { accountId };
     },
-  } satisfies Pick<ComposioBroker, "connectionFields" | "connectWithFields">;
+  } satisfies Required<
+    Pick<
+      ComposioBroker,
+      "connectionFields" | "connectionGuideUrl" | "connectWithFields"
+    >
+  >;
 }

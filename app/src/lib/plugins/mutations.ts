@@ -580,19 +580,31 @@ export type BrokerField = {
  */
 export function brokeredConnectionFieldsMutationOptions() {
   return mutationOptions({
-    mutationFn: async (serverId: string): Promise<BrokerField[] | null> => {
-      const fields = await client<BrokerField[] | undefined>(
+    mutationFn: async (serverId: string): Promise<KeyForm | null> => {
+      const fallback = "Couldn't find out what this app needs.";
+      const response = await client(
         `/api/plugins/servers/${encodeURIComponent(serverId)}/connect`,
-        "fields",
-        {
-          method: "POST",
-          fallback: "Couldn't find out what this app needs.",
-        },
+        { method: "POST", fallback },
       );
-      return fields ?? null;
+      const body = (await response.json().catch(() => null)) as {
+        fields?: BrokerField[];
+        guide?: KeyGuide;
+      } | null;
+      if (!body || typeof body !== "object") throw new Error(fallback);
+      if (!body.fields) return null;
+      return { fields: body.fields, guide: body.guide ?? null };
     },
   });
 }
+
+/**
+ * Where a person gets the key an app asks for: what to do there, and the provider's own page for
+ * it. `url` is null where nobody has a page to point at; the steps are always there.
+ */
+export type KeyGuide = { steps: string; url: string | null };
+
+/** What the first press on a key app answers: the boxes to fill in, and where the key comes from. */
+export type KeyForm = { fields: BrokerField[]; guide: KeyGuide | null };
 
 /**
  * What handing a key over comes back with. Declared once, for the reason

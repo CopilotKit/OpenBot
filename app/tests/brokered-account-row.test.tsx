@@ -225,6 +225,8 @@ type Deployment = {
   authScheme?: string;
   /** What the app publishes as the things a person types in, for the `API_KEY` schemes. */
   fields?: BrokerField[];
+  /** Where the key comes from, as the server answers it beside the fields. Absent by default. */
+  guide?: { steps: string; url: string | null };
   /** Whether a real call was ever made with this key and worked, as this deployment recorded it. */
   verified?: boolean;
   /** When that happened. Null wherever `verified` is false — a check that failed records no time. */
@@ -560,7 +562,11 @@ function installDeployment(deployment: Deployment): Server {
         );
       }
       if (SERVER_FIELD_SCHEMES.includes(state.authScheme)) {
-        return json({ fields: state.fields });
+        return json(
+          deployment.guide
+            ? { fields: state.fields, guide: deployment.guide }
+            : { fields: state.fields },
+        );
       }
       return json({ authorizationUrl: CONSENT_URL });
     }
@@ -940,6 +946,44 @@ test("a key app asks for what the app asked for, with its own help text", async 
   expect(view.queryByText(/starting with 'pplx-'/)).toBeTruthy();
 });
 
+/**
+ * THE DIALOG SAYS WHY IT ASKS FOR A KEY AND WHERE TO GET ONE, ABOVE THE BOXES.
+ *
+ * Reported from OpenBot Desktop 0.3.3: Connect on a key-only app opened a form with the provider's
+ * developer wording and nothing else, and the person, who expected a sign-in, had nowhere to go.
+ * The guide is the server's answer for 1Password (see `server/src/plugins/key-guides.ts`).
+ */
+test("a key app's dialog explains the key and links to the provider's page for it", async () => {
+  installDeployment({
+    authScheme: "API_KEY",
+    composioConfigured: true,
+    confirms: false,
+    fields: [PERPLEXITY_KEY],
+    guide: {
+      steps:
+        "1Password connects through a Connect server that your 1Password admin runs. They create it in 1Password.com under Developer, along with an access token for it.",
+      url: "https://www.1password.dev/connect/get-started",
+    },
+    recorded: false,
+  });
+
+  const view = renderAccountScreen(queryClient());
+  await userEvent.click(await view.findByRole("button", { name: "Connect" }));
+
+  const guide = await view.findByTestId("key-guide");
+  expect(guide.textContent).toContain(
+    "Gmail doesn't offer a sign-in here, so it connects with a key from your Gmail account.",
+  );
+  expect(guide.textContent).toContain("Connect server");
+  const link = view.getByRole("link", { name: /Get a key from Gmail/ });
+  expect(link.getAttribute("href")).toBe(
+    "https://www.1password.dev/connect/get-started",
+  );
+  expect(link.getAttribute("target")).toBe("_blank");
+  // The guide sits above the form, which still draws the app's own box.
+  expect(await view.findByLabelText("API Key")).toBeTruthy();
+});
+
 test("a key app nobody has connected says it will ask for a key, not send you off", async () => {
   installDeployment({
     authScheme: "API_KEY",
@@ -952,7 +996,9 @@ test("a key app nobody has connected says it will ask for a key, not send you of
   const view = renderAccountScreen(queryClient());
 
   expect(
-    await view.findByText(/Gmail connects with a key you already have/),
+    await view.findByText(
+      /Needs a key from Gmail\. Connect shows where to get one\./,
+    ),
   ).toBeTruthy();
   /*
    * The screen's own not-connected sentence is written for the kind that leaves, and pressing
@@ -975,7 +1021,12 @@ test("a key app nobody has connected keeps the screen's own reassurance", async 
 
   // The row's own sentence, which is the one the screen's cannot be: pressing Connect here opens a
   // form rather than leaving for a consent screen.
-  expect(await view.findByText(/Connect asks for it\./)).toBeTruthy();
+  expect(
+    await view.findByText(/Connect shows where to get one\./),
+  ).toBeTruthy();
+  // And the row above it no longer says there is nothing to paste.
+  expect(view.queryByText(/There is no token to paste/)).toBeNull();
+  expect(view.getByText(/with a key from the app/)).toBeTruthy();
   /*
    * And the half of the screen's line that survives it. Replacing the whole line took away the one
    * thing an administrator reading this row needs to know — that the connector is finished whether
@@ -1189,6 +1240,7 @@ function accountState(overrides: Partial<BrokeredAccount>): BrokeredAccount {
     disconnected: false,
     disconnecting: false,
     fields: null,
+    guide: null,
     /*
      * NULL BESIDE THE NULL `submissionError` BELOW, because these cases are about the sentences the
      * ROW carries and neither refusal is one of them: both belong to the dialog, which is drawn only

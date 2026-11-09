@@ -1,4 +1,4 @@
-import { IconPlug, IconSearch } from "@tabler/icons-react";
+import { IconKey, IconPlug, IconSearch } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import * as React from "react";
 import {
@@ -24,6 +24,7 @@ import { useManagePaths } from "@/lib/manage-paths";
 import {
   consentBreadth,
   coverageWarning,
+  keyNeededLine,
   matchingApps,
 } from "@/lib/plugins/enablement-notes";
 import {
@@ -228,6 +229,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
                       <ItemContent>
                         <ItemTitle>{entry.name}</ItemTitle>
                         <ItemDescription>{entry.description}</ItemDescription>
+                        <KeyNeededNote app={entry} />
                         {entry.enabled ? null : <CoverageNote app={entry} />}
                         {entry.enabled ? null : <BreadthNote app={entry} />}
                       </ItemContent>
@@ -267,6 +269,25 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
         )}
       </PageSection>
     </PageShell>
+  );
+}
+
+/**
+ * "Needs a key from 1Password" on an app that takes a key typed in, so nobody who expected a
+ * sign-in is surprised at Connect. Drawn whether or not the app is added: the person connecting
+ * reads this list too. Draws nothing for an app you sign in to.
+ */
+export function KeyNeededNote({ app }: { app: ComposioApp }) {
+  const line = keyNeededLine(app);
+  if (!line) return null;
+  return (
+    <p
+      className="flex items-center gap-1 text-muted-foreground text-xs"
+      data-testid="key-needed"
+    >
+      <IconKey aria-hidden="true" className="size-3.5 shrink-0" />
+      {line}
+    </p>
   );
 }
 
