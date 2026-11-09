@@ -1,5 +1,5 @@
 import { offersStandingRule } from "@openbot/shared/standing-rule";
-import { approvalWords } from "@openbot/shared/tool-name";
+import { approvalPhrase } from "@openbot/shared/tool-name";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useState } from "react";
@@ -95,8 +95,8 @@ export function InlineApproval({
             : []),
           "deny",
         ];
-  const words = request ? approvalWords(request.action) : undefined;
-  const title = words ? `${words.action} on ${words.place}` : "";
+  // In the words the step and Activity use for the same action: "Save a file todo.txt in share".
+  const title = request ? approvalPhrase(request.action) : "";
   return (
     <>
       {/* The card leaves by folding away; what is left behind is the tool's own line. */}

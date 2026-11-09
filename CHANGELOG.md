@@ -25,6 +25,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - The first Bot to need you after OpenBot Desktop starts raises its notification. It used to raise
   nothing while the app was still checking that notifications were on, so the first question after
   each launch, asked while OpenBot was minimised or behind another window, went unannounced.
+- A Bot with no folders, as every Bot has after OpenBot restarts, now says so in plain words: it
+  has no folders it can read, access ends when you stop OpenBot, and Choose folder in Settings →
+  Computer gives it one. It said "No host folders are granted to this Bot.", and the Bot told you
+  an administrator could restore it.
 
 - **CopilotKit Intelligence 0.16.0-rc.10.** OpenBot Desktop's back end and the Helm chart move to
   Intelligence 0.16.0-rc.10 (CLI `copilotkit@647a03b`). A first back end setup now downloads its
@@ -80,6 +84,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Settings → General lists your answers as rows that open a dialog. Settings → Notifications shows
   a switch only for channels that are set up, and says how to set them up, or that your admin does.
   In OpenBot Desktop it says those channels need OpenBot running on a server.
+- **Activity, approvals and a Bot's page say things the way a person would.** Activity names a skill
+  by its title ("Write a skill", not "Skill creator"), says "Set up an app's sign-in" for "Register
+  an OAuth client", and says an app the personal edition gave a Bot on Connect was "Allowed
+  automatically" where it read as a person's approval. A file save's approval card reads "Save a
+  file todo.txt in share", as its step and its Activity row do, and an opened "Looked for a tool"
+  names the tools it found in words. A Bot's Your skills lists each skill by its title, and an app's
+  page names the "Always ask before making changes" setting by its name.
 
 ## 0.3.4
 
