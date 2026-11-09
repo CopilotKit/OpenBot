@@ -9,6 +9,7 @@
  * EVERY QUERY IS NARROWED TO THE PERSON FIRST. A public Bot works for many people; this screen shows
  * the work done in the caller's name and nothing of anybody else's.
  */
+import { approvalPhrase } from "@openbot/shared/tool-name";
 import {
   and,
   desc,
@@ -447,12 +448,15 @@ export function createActivityStore(database: Database) {
       const approvalChannels = await channelsForThreads(
         approvals.map((approval) => approval.action.threadId),
       );
-      for (const approval of approvals)
+      for (const approval of approvals) {
+        // In the words its card uses: "Click the link “Python” on en.wikipedia.org", never the
+        // tool's id and its effect ("Approve computer_click", "write").
+        const phrase = approvalPhrase(approval.action);
         activity.inProgress.push({
           id: `approval:${approval.id}`,
           kind: "approval",
-          title: `Approve ${approval.action.toolRef}`,
-          detail: approval.action.effect,
+          title: phrase.charAt(0).toUpperCase() + phrase.slice(1),
+          detail: approval.action.policy?.reason ?? null,
           status: "waiting for you",
           at: iso(approval.createdAt),
           channelId: approvalChannels.get(approval.action.threadId) ?? null,
@@ -460,6 +464,7 @@ export function createActivityStore(database: Database) {
           stoppable: false,
           cancellable: false,
         });
+      }
 
       // Questions this Bot asked this person and is waiting on.
       const questions = await database
