@@ -41,7 +41,9 @@ import { cn } from "@/lib/utils";
  *
  * AN OPTIONAL STEP HAS A SECOND BUTTON. "Not now" goes beside the primary (under it on a phone, the
  * same size and shape, outlined), and its place is kept when it goes (`reserveSecondary`), so the
- * primary does not move mid-step. A footnote, where a step has one, sits just above the buttons.
+ * primary does not move mid-step. A step can also have no primary at all, and then "Not now" is
+ * the only way on: it takes the primary's place and keeps its outline on a desktop too, so it never
+ * reads as a link. A footnote, where a step has one, sits just above the buttons.
  */
 export function OnboardingFrame({
   titles,
@@ -66,7 +68,8 @@ export function OnboardingFrame({
   reached: number;
   onBack: () => void;
   onPick: (index: number) => void;
-  primary: {
+  /** The way forward. Absent on a step whose only way on is the second button. */
+  primary?: {
     label: string;
     onClick: () => void;
     disabled?: boolean;
@@ -201,39 +204,43 @@ export function OnboardingFrame({
                 Back
               </button>
             ) : null}
-            <button
-              aria-busy={primary.pending ? true : undefined}
-              className={cn(
-                buttonVariants({ size: "lg" }),
-                shape,
-                // Last on a desktop, so the way forward is the rightmost button; first on a phone.
-                "motion-reduce:transition-none lg:order-last",
-                primary.done &&
-                  "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10",
-              )}
-              data-done={primary.done ? "" : undefined}
-              data-onboarding-primary=""
-              data-pending={primary.pending ? "" : undefined}
-              disabled={primary.disabled}
-              form={primary.form}
-              onClick={primary.form ? undefined : primary.onClick}
-              type={primary.form ? "submit" : "button"}
-            >
-              {primary.done ? <IconCheck className="size-4.5" /> : null}
-              {primary.pending ? (
-                <span
-                  aria-hidden
-                  className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent motion-reduce:animate-none"
-                />
-              ) : null}
-              {primary.label}
-            </button>
+            {primary ? (
+              <button
+                aria-busy={primary.pending ? true : undefined}
+                className={cn(
+                  buttonVariants({ size: "lg" }),
+                  shape,
+                  // Last on a desktop, so the way forward is the rightmost button; first on a phone.
+                  "motion-reduce:transition-none lg:order-last",
+                  primary.done &&
+                    "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10",
+                )}
+                data-done={primary.done ? "" : undefined}
+                data-onboarding-primary=""
+                data-pending={primary.pending ? "" : undefined}
+                disabled={primary.disabled}
+                form={primary.form}
+                onClick={primary.form ? undefined : primary.onClick}
+                type={primary.form ? "submit" : "button"}
+              >
+                {primary.done ? <IconCheck className="size-4.5" /> : null}
+                {primary.pending ? (
+                  <span
+                    aria-hidden
+                    className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent motion-reduce:animate-none"
+                  />
+                ) : null}
+                {primary.label}
+              </button>
+            ) : null}
             {secondary ? (
               <button
                 className={cn(
                   buttonVariants({ variant: "outline", size: "lg" }),
                   shape,
-                  "lg:min-w-0 lg:border-transparent lg:bg-transparent lg:shadow-none lg:dark:border-transparent lg:dark:bg-transparent",
+                  // Quiet beside a primary; outlined like a button where it is the only one.
+                  primary &&
+                    "lg:min-w-0 lg:border-transparent lg:bg-transparent lg:shadow-none lg:dark:border-transparent lg:dark:bg-transparent",
                 )}
                 data-onboarding-secondary=""
                 onClick={secondary.onClick}
