@@ -165,6 +165,7 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "person.deprovisioned": "Remove a person",
   "person.reprovisioned": "Add a person back",
   "audit.exported": "Export events",
+  "audit.asked": "Ask the audit trail",
   "session.signed_in": "Sign in",
   "session.refused": "Sign in",
   "session.break_glass": "Use emergency sign-in",
@@ -333,4 +334,24 @@ export function auditEventWords(eventType: string): string {
           .replace(/^agent\./, "bot.")
           .replace(/\./g, " "),
       );
+}
+
+/**
+ * The rows an admin filters for most often, in the words the Audit page's views use: "Computer
+ * actions" and "App calls", then how they ended. The event words above say what a
+ * row was for a person reading one row ("Use the computer"); a filter is about a kind of row.
+ */
+const TYPE_WORDS: Record<string, string> = {
+  "computer.action_allowed": "Computer actions, allowed",
+  "computer.action_refused": "Computer actions, blocked",
+  "computer.action_failed": "Computer actions, failed",
+  "computer.action_stopped": "Computer actions, stopped",
+  "mcp.call_succeeded": "App calls, done",
+  "mcp.call_rejected": "App calls, blocked",
+  "mcp.call_failed": "App calls, failed",
+};
+
+/** One event type as a filter names it: a kind of row, then how it ended where that matters. */
+export function auditTypeWords(type: string): string {
+  return TYPE_WORDS[type] ?? auditEventWords(type);
 }

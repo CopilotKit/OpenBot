@@ -12,9 +12,18 @@ import {
   ne,
   notInArray,
   or,
+  type SQL,
   sql,
 } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
+import {
+  actorCondition,
+  appCondition,
+  effectCondition,
+  intentCondition,
+  ruleCondition,
+  toolCondition,
+} from "./audit-filters";
 import type { Database } from "./db/client";
 import { auditEvents } from "./db/schema";
 import { parsePageLimit } from "./paging";
@@ -477,6 +486,18 @@ export const auditEventTypes = [
    * it, under which filter, belongs on it too.
    */
   "audit.exported",
+  /**
+   * An admin asked the trail a question in plain English, and the deployment's model turned it into
+   * filters (`audit-ask.ts`).
+   *
+   * Nothing changed and nothing left: the answer is the trail's own rows under those filters, drawn
+   * on the admin's screen. Recorded because a question names what somebody went looking for, and the
+   * filters say what they were shown. Target `audit_trail`; payload `actor`, `question`, `outcome`
+   * (`answered`, `partly_answered`, `unanswerable`, `not_valid`, `no_model` or `model_failed`), and
+   * when there was an answer `filters`, `reading`, `unanswered` and `attempts`; `problems` when the
+   * model's filters could not be used.
+   */
+  "audit.asked",
   /*
    * Getting in, and being turned away.
    *
@@ -838,12 +859,28 @@ export type AuditEventQuery = {
   targetType?: string;
   targetId?: string;
   /**
-   * One Bot's rows: what it did (`payload.bot`) and what was done to it (an `agent` target), the
-   * same two the audit page's Bot column reads. Asked of the server, so a Bot's actions older than
+   * One Bot's rows, or several Bots' separated by commas: what each did (`payload.bot`) and what was
+   * done to it (an `agent` target), the same two the audit page's Bot column reads. Asked of the server, so a Bot's actions older than
    * the newest page are found too. A folder given to a Bot before its row said `bot` named it as
    * `botId`, and is that Bot's row too.
    */
   bot?: string;
+  /**
+   * App calls (`mcp.call_*`) to these apps, separated by commas, matched by `appKey` so
+   * `composio-gmail`, `arcade-Gmail` and `gmail` are one app. See `audit-filters.ts`.
+   */
+  app?: string;
+  /** App calls of these tools, separated by commas, by the name the row records, in any case. */
+  tool?: string;
+  /** App calls that only read (`read`) or change something (`write`). */
+  effect?: string;
+  /**
+   * What an action did, separated by commas, in the boundary's own words (`run_command`,
+   * `navigate`, `write_tool`), derived from the row's tool and key as the gateway derives it.
+   */
+  intent?: string;
+  /** Refusals by this boundary rule, its text exactly as recorded. One: a rule can hold commas. */
+  rule?: string;
   from?: string;
   to?: string;
 };
@@ -1118,6 +1155,33 @@ function notRequested(column: PgColumn, values: string[] | undefined) {
   return values && values.length > 0 ? notInArray(column, values) : undefined;
 }
 
+/**
+ * The rows of any of these Bots: what each did (`payload.bot`) and what was done to it. A folder
+ * given to a Bot before its row said `bot` named it as `botId`, and a routine is its Bot's,
+ * whoever made it.
+ */
+function botCondition(bots: string[] | undefined) {
+  if (!bots) return undefined;
+  if (bots.length === 0) return sql`false`;
+  const named = (column: SQL<string>) =>
+    bots.length === 1 ? eq(column, bots[0] as string) : inArray(column, bots);
+  return or(
+    named(sql<string>`${auditEvents.payload} ->> 'bot'`),
+    and(
+      eq(auditEvents.targetType, "agent"),
+      named(sql<string>`${auditEvents.targetId}`),
+    ),
+    and(
+      eq(auditEvents.targetType, "host_access"),
+      named(sql<string>`${auditEvents.payload} ->> 'botId'`),
+    ),
+    and(
+      eq(auditEvents.targetType, "routine"),
+      named(sql<string>`${auditEvents.payload} ->> 'agentId'`),
+    ),
+  );
+}
+
 export function createAuditReader(database: Database): AuditReader {
   return {
     list: async (query) => {
@@ -1131,9 +1195,7 @@ export function createAuditReader(database: Database): AuditReader {
           requestedValues(query.excludeEventType),
         ),
         notSucceededCall(requestedValues(query.excludeCalls)),
-        query.actorUserId
-          ? eq(auditEvents.actorUserId, query.actorUserId)
-          : undefined,
+        actorCondition(query.actorUserId),
         matchesRequested(
           auditEvents.initiatorKind,
           requestedValues(query.initiatorKind),
@@ -1143,27 +1205,12 @@ export function createAuditReader(database: Database): AuditReader {
           requestedValues(query.targetType),
         ),
         query.targetId ? eq(auditEvents.targetId, query.targetId) : undefined,
-        query.bot
-          ? or(
-              eq(sql<string>`${auditEvents.payload} ->> 'bot'`, query.bot),
-              and(
-                eq(auditEvents.targetType, "agent"),
-                eq(auditEvents.targetId, query.bot),
-              ),
-              and(
-                eq(auditEvents.targetType, "host_access"),
-                eq(sql<string>`${auditEvents.payload} ->> 'botId'`, query.bot),
-              ),
-              // A routine is its Bot's, whoever made it.
-              and(
-                eq(auditEvents.targetType, "routine"),
-                eq(
-                  sql<string>`${auditEvents.payload} ->> 'agentId'`,
-                  query.bot,
-                ),
-              ),
-            )
-          : undefined,
+        botCondition(requestedValues(query.bot)),
+        appCondition(requestedValues(query.app)),
+        toolCondition(requestedValues(query.tool)),
+        effectCondition(query.effect?.trim()),
+        intentCondition(requestedValues(query.intent)),
+        ruleCondition(query.rule),
         query.from
           ? gt(auditEvents.createdAt, new Date(query.from))
           : undefined,
@@ -1270,6 +1317,11 @@ export function auditQueryFromUrl(url: URL): AuditEventQuery {
     targetType: optional("targetType"),
     targetId: optional("targetId"),
     bot: optional("bot"),
+    app: optional("app"),
+    tool: optional("tool"),
+    effect: optional("effect"),
+    intent: optional("intent"),
+    rule: optional("rule"),
     from,
     to,
   };

@@ -1,0 +1,34 @@
+{
+  "about": "Real answers to the prompts in server/src/audit-ask.ts, from OpenAI Chat Completions with response_format json_schema, asked of the deployment in audit-ask-vocabulary.json. Each string is the assistant message content exactly as the model returned it, recorded 2026-11-09. gpt-5.6-terra is the default model. gpt-4o-mini is an older, smaller model, and is where the check earns its keep: its first answer asked for delivery rows beside Slack's app calls, which no row is both.",
+  "answered": {
+    "model": "gpt-5.6-terra",
+    "text": "Show me every Gmail write by a routine last week",
+    "writer": [
+      "{\"notes\":\"Filters for Gmail app calls that changed something, started by a routine, during last week.\",\"answerable\":\"yes\",\"unanswered\":\"\",\"eventTypes\":[],\"bot\":\"\",\"person\":\"\",\"initiatorKinds\":[\"routine\"],\"apps\":[\"gmail\"],\"tools\":[],\"effect\":\"write\",\"intents\":[],\"rule\":\"\",\"from\":\"2026-11-02T00:00:00-08:00\",\"to\":\"2026-11-09T00:00:00-08:00\"}"
+    ],
+    "reader": "{\"reading\":\"App calls, started by a routine, to Gmail, that change something, from 2 November to 8 November.\"}"
+  },
+  "unanswerable": {
+    "model": "gpt-5.6-terra",
+    "text": "Who received the email the Research Bot sent yesterday?",
+    "writer": [
+      "{\"notes\":\"The trail does not record email recipients, which are tool arguments.\",\"answerable\":\"no\",\"unanswered\":\"The trail doesn't record who an email went to. A tool's arguments are left out on purpose.\",\"eventTypes\":[],\"bot\":\"\",\"person\":\"\",\"initiatorKinds\":[],\"apps\":[],\"tools\":[],\"effect\":\"\",\"intents\":[],\"rule\":\"\",\"from\":\"\",\"to\":\"\"}"
+    ]
+  },
+  "partly": {
+    "model": "gpt-5.6-terra",
+    "text": "What did the research Bot do in Salesforce yesterday, and what did it change?",
+    "writer": [
+      "{\"notes\":\"Filter for the Research Bot's Salesforce app calls yesterday. Include both read and write calls so the trail can show all recorded Salesforce activity.\",\"answerable\":\"partly\",\"unanswered\":\"The trail does not record what Salesforce records or fields were changed. Tool arguments and results are left out on purpose.\",\"eventTypes\":[],\"bot\":\"4b1f7c2e-research\",\"person\":\"\",\"initiatorKinds\":[],\"apps\":[\"salesforce\"],\"tools\":[],\"effect\":\"\",\"intents\":[],\"rule\":\"\",\"from\":\"2026-11-08T00:00:00-08:00\",\"to\":\"2026-11-09T00:00:00-08:00\"}"
+    ],
+    "reader": "{\"reading\":\"App calls, Bot Research, Salesforce, from 8 November 12:00 AM to 9 November 12:00 AM.\"}"
+  },
+  "fixedOnRetry": {
+    "model": "gpt-4o-mini",
+    "text": "Show me the Slack messages Bots posted yesterday",
+    "writer": [
+      "{\"notes\":\"Filtering for Slack messages posted by the Bots yesterday. The relevant event type for messages sent is 'delivery.sent'.\",\"answerable\":\"yes\",\"unanswered\":\"\",\"eventTypes\":[\"delivery.sent\"],\"bot\":\"\",\"person\":\"\",\"initiatorKinds\":[],\"apps\":[\"slack\"],\"tools\":[],\"effect\":\"\",\"intents\":[],\"rule\":\"\",\"from\":\"2026-11-08T00:00:00-08:00\",\"to\":\"2026-11-09T00:00:00-08:00\"}",
+      "{\"notes\":\"Filtering for Slack messages posted by Bots yesterday. The relevant event type for messages sent is 'delivery.sent'.\",\"answerable\":\"no\",\"unanswered\":\"The trail doesn't record who sent messages. The event type for messages sent isn't available in the records.\",\"eventTypes\":[],\"bot\":\"\",\"person\":\"\",\"initiatorKinds\":[],\"apps\":[\"slack\"],\"tools\":[],\"effect\":\"\",\"intents\":[],\"rule\":\"\",\"from\":\"2026-11-08T00:00:00-08:00\",\"to\":\"2026-11-09T00:00:00-08:00\"}"
+    ]
+  }
+}
