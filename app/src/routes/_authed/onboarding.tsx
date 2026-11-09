@@ -26,11 +26,11 @@ import { Button } from "@/components/ui/button";
 import { currentUserQueryOptions, needsOnboarding } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
-import { BUSINESS_URL } from "@/lib/openbot-for-business";
 import {
   advanceOnboardingMutationOptions,
   completeOnboardingMutationOptions,
 } from "@/lib/onboarding/mutations";
+import { BUSINESS_URL } from "@/lib/openbot-for-business";
 import { setupChecklistQueryOptions } from "@/lib/setup/queries";
 import { queryClient } from "@/query-client";
 
@@ -40,7 +40,7 @@ const PRODUCT = appConfig.brand.productName;
  * Every step, by id, with the number the server stores for it.
  *
  * `POST /api/me/onboarding` keeps a step as an integer, so each id has a number of its own. A
- * number per id, never a position in the list: Book a demo joins the list only for somebody trying
+ * number per id, never a position in the list: OpenBot for Business joins the list only for somebody trying
  * OpenBot alone, and the name step leaves it for somebody whose name is known, so a position would
  * mean different steps to different people. 0 is the server's "not started".
  */
@@ -89,7 +89,7 @@ export const Route = createFileRoute("/_authed/onboarding")({
 });
 
 /*
- * THREE CLICKS AT MOST INTO THE APP. Welcome, then Book a demo for somebody trying OpenBot alone,
+ * THREE CLICKS AT MOST INTO THE APP. Welcome, then OpenBot for Business for somebody trying OpenBot alone,
  * then the name. Everything else waits for the app: the setup checklist lives in Settings → Setup,
  * apps are connected from Connections when a Bot needs one, and notifications are offered once the
  * first task has started (`NotifyPrompt`), when what they are for is plain.
@@ -146,64 +146,79 @@ function welcomeStep(computer: boolean): OnboardingStep {
 }
 
 /*
- * BOOK A DEMO IS FOR SOMEBODY TRYING OPENBOT ON THEIR OWN MACHINE, and only they see it (see
+ * OPENBOT FOR BUSINESS IS FOR SOMEBODY TRYING OPENBOT ON THEIR OWN MACHINE, and only they see it (see
  * `localEvaluation` in RouteComponent). None of it is said to an organization's own people, who
  * already have OpenBot.
  *
- * THE CALENDAR IS THE STEP. It books a demo, or a call to scope a proof of concept, in place.
+ * WHAT IT IS COMES BEFORE ASKING FOR A CALL. The step opens on what OpenBot for Business adds, beside
+ * the picture of running OpenBot yourself (on this computer, with the agents you already have, for
+ * your organization), with Book a demo and Not now. Somebody who has never heard of it has no reason
+ * to book anything until they know what they would be booking.
  *
- * ONE BUTTON AT A TIME. Until a call is booked the only way on is Not now: a Continue beside it read
- * as going on with the booking. Once the calendar says a call is booked there is nothing left to
- * skip, and Not now becomes Continue, in the same place. No place is kept for a second button,
- * which would lift Continue above where Not now was.
+ * BOOK A DEMO OPENS THE CALENDAR IN THE STEP, in the picture's place, to book a demo or a call to
+ * scope a proof of concept. Until a call is booked the only way on is Not now: a Continue beside it
+ * read as going on with the booking. Once the calendar says a call is booked, Not now becomes
+ * Continue, in the same place.
  *
- * A calendar that can't load (offline, blocked, silent) gives the step back its picture and Book a
- * call, which opens the OpenBot for Business page in a new tab (on the Desktop, in the person's
- * browser), with Not now beside it.
+ * A calendar that can't load (offline, blocked, silent) puts the picture back, with Book a call, which
+ * opens the OpenBot for Business page in a new tab (on the Desktop, in the person's browser).
  */
 function useBookDemoStep(): OnboardingStep {
+  const [calendar, setCalendar] = React.useState(false);
   const [failed, setFailed] = React.useState(false);
   const [booked, setBooked] = React.useState(false);
   const fail = React.useCallback(() => setFailed(true), []);
   const book = React.useCallback(() => setBooked(true), []);
-  const step: OnboardingStep = {
+  const value: OnboardingStep = {
     id: "selfhost",
-    title: "Book a demo",
+    title: "OpenBot for Business",
     intro: () => (
       <StepIntro>
         <p>
-          Thinking about {PRODUCT} for your team? Pick a time to see a demo or
-          scope a proof of concept with us.
+          Bring {PRODUCT} to your whole team, on your own servers. Everyone
+          signs in with their work account and shares Bots in Slack and
+          Microsoft Teams. Admins get the controls and audit trail your company
+          needs.
         </p>
       </StepIntro>
     ),
-    demo: () =>
-      failed ? (
-        <SelfHostDemo />
-      ) : (
-        <BookingCalendar onBooked={book} onFailed={fail} />
+    demo: () => <SelfHostDemo />,
+    primaryLabel: "Book a demo",
+    onPrimary: () => setCalendar(true),
+    secondary: { label: "Not now" },
+  };
+  if (!calendar) return value;
+  if (failed) {
+    return {
+      ...value,
+      // A new tab, so booking doesn't cost the place in onboarding, and then on to the next step.
+      primaryLabel: "Book a call",
+      onPrimary: (next) => {
+        window.open(BUSINESS_URL, "_blank", "noopener,noreferrer");
+        next();
+      },
+      notice: (
+        <p
+          className="text-sm text-center text-muted-foreground lg:text-left"
+          role="status"
+        >
+          Couldn't load the calendar. Book a call opens it in your browser.
+        </p>
       ),
+    };
+  }
+  return {
+    ...value,
+    intro: () => (
+      <StepIntro>
+        <p>Pick a time to see a demo or scope a proof of concept with us.</p>
+      </StepIntro>
+    ),
+    demo: () => <BookingCalendar onBooked={book} onFailed={fail} />,
+    primaryLabel: undefined,
+    onPrimary: undefined,
     primaryHidden: !booked,
     secondary: booked ? undefined : { label: "Not now" },
-  };
-  if (!failed) return step;
-  return {
-    ...step,
-    // A new tab, so booking doesn't cost the place in onboarding, and then on to the next step.
-    primaryHidden: false,
-    primaryLabel: "Book a call",
-    onPrimary: (next) => {
-      window.open(BUSINESS_URL, "_blank", "noopener,noreferrer");
-      next();
-    },
-    notice: (
-      <p
-        className="text-sm text-center text-muted-foreground lg:text-left"
-        role="status"
-      >
-        Couldn't load the calendar. Book a call opens it in your browser.
-      </p>
-    ),
   };
 }
 
@@ -217,7 +232,7 @@ function RouteComponent() {
   const me = useQuery(currentUserQueryOptions());
 
   /*
-   * Book a demo is for somebody evaluating OpenBot locally, never for an organization's people: the
+   * OpenBot for Business is for somebody evaluating OpenBot locally, never for an organization's people: the
    * server says single-user mode, which an organization's deployment, always behind sign-in, cannot
    * be in. Until the answer arrives it is left out, and Welcome's button waits for it, so a slow or
    * failed request never shows an organization's employees a page about booking a call, and an
@@ -257,7 +272,7 @@ function RouteComponent() {
 
   /*
    * The step on screen: the address's, else the one the server saved, else the first. A step not in
-   * this person's list (Book a demo for an organization's person, the name step once it is known)
+   * this person's list (OpenBot for Business for an organization's person, the name step once it is known)
    * reads as the last one they have, once the answer that decides it is in. Arriving without a step
    * writes it into the address in place, so the entry the person lands on already names its step.
    */
@@ -279,7 +294,7 @@ function RouteComponent() {
   const { mutate: save } = advance;
   React.useEffect(() => {
     if (savedStep === undefined || savedStep === STEP_NUMBER[current]) return;
-    // Book a demo waits for the answer that says whether this person has one.
+    // OpenBot for Business waits for the answer that says whether this person has one.
     if (current === "selfhost" && !capabilities) return;
     /*
      * A save that fails is tried again on the next move, since the saved step still differs. It is
@@ -388,7 +403,8 @@ function RouteComponent() {
   };
   /*
    * Without the name step, the last step's buttons finish onboarding where they would have moved
-   * on: Get started on Welcome, and Get started (once booked), Book a call or Not now on Book a demo.
+   * on: Get started on Welcome, and Book a demo, Continue (once booked), Book a call or Not now on
+   * OpenBot for Business.
    */
   const lastId = ids[ids.length - 1];
   const steps: OnboardingStep[] = ids.map((id) => {
@@ -400,10 +416,9 @@ function RouteComponent() {
       primaryLabel: finished ? "All set" : (step.primaryLabel ?? "Get started"),
       primaryDone: finished,
       primaryPending: complete.isPending,
-      onPrimary: () => {
-        step.onPrimary?.(() => undefined);
-        out();
-      },
+      // A step's own primary decides whether it moves on: Book a call does, so it finishes;
+      // Book a demo opens the calendar in the step and stays.
+      onPrimary: step.onPrimary ? () => step.onPrimary?.(out) : out,
       secondary: step.secondary
         ? { label: step.secondary.label, onClick: out }
         : undefined,
@@ -411,7 +426,7 @@ function RouteComponent() {
     };
   });
 
-  // A Book a demo step in the address waits for the answer that puts it in the list, rather than
+  // An OpenBot for Business step in the address waits for the answer that puts it in the list, rather than
   // drawing Welcome for a moment and then jumping.
   const waiting = askingCapabilities && current === "selfhost";
 

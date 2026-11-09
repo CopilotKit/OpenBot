@@ -1,0 +1,28 @@
+{
+  "about": "Real answers from OpenAI Chat Completions to the prompts in server/src/computer/policy-translate.ts, with response_format json_schema. Each string is the assistant message content exactly as the model returned it. Writer answers recorded 2026-11-09; reader answers recorded again the same day when the reading gained its one-line summary. gpt-4o-mini is an older, smaller model: it is where the compiler gate earns its keep, because the default model wrote a compiling rule for every description tried.",
+  "compilesFirstTime": {
+    "model": "gpt-5.6-terra",
+    "text": "Bots may not visit social media sites",
+    "writer": [
+      "{\"notes\":\"This denies browser navigation to widely known social media domains and their subdomains, using page.host.\",\"rule\":\"intent == \\\"navigate\\\" && (page.host == \\\"facebook.com\\\" || matches(page.host, \\\"[.]facebook[.]com$\\\") || page.host == \\\"instagram.com\\\" || matches(page.host, \\\"[.]instagram[.]com$\\\") || page.host == \\\"x.com\\\" || matches(page.host, \\\"[.]x[.]com$\\\") || page.host == \\\"twitter.com\\\" || matches(page.host, \\\"[.]twitter[.]com$\\\") || page.host == \\\"linkedin.com\\\" || matches(page.host, \\\"[.]linkedin[.]com$\\\") || page.host == \\\"tiktok.com\\\" || matches(page.host, \\\"[.]tiktok[.]com$\\\") || page.host == \\\"reddit.com\\\" || matches(page.host, \\\"[.]reddit[.]com$\\\") || page.host == \\\"snapchat.com\\\" || matches(page.host, \\\"[.]snapchat[.]com$\\\") || page.host == \\\"pinterest.com\\\" || matches(page.host, \\\"[.]pinterest[.]com$\\\") || page.host == \\\"tumblr.com\\\" || matches(page.host, \\\"[.]tumblr[.]com$\\\") || page.host == \\\"threads.net\\\" || matches(page.host, \\\"[.]threads[.]net$\\\") || page.host == \\\"mastodon.social\\\" || matches(page.host, \\\"[.]mastodon[.]social$\\\"))\",\"effect\":\"deny\"}"
+    ],
+    "reader": "{\"summary\":\"Stops a Bot navigating to listed social-media domains and their dotted subdomains.\",\"explanation\":\"Stops a Bot navigating to facebook.com, instagram.com, x.com, twitter.com, linkedin.com, tiktok.com, reddit.com, snapchat.com, pinterest.com, tumblr.com, threads.net, or mastodon.social, including hosts ending in .facebook.com, .instagram.com, and so on for each listed domain. It also catches any such subdomain, but not lookalike hosts such as facebook.com.evil.example, composio-facebook, or hosts with ports such as facebook.com:8443; it does not stop actions other than navigation.\"}"
+  },
+  "fixedOnRetry": {
+    "model": "gpt-4o-mini",
+    "text": "Refuse downloads from hosts whose names are IP addresses",
+    "writer": [
+      "{\"notes\":\"This rule checks if the page host is formatted as an IP address by using a regular expression pattern for matching. If the host matches the pattern for an IP address, it will deny the download action.\",\"rule\":\"intent == 'download_file' && matches(page.host, '^(\\\\d{1,3}\\\\.){3}\\\\d{1,3}$')\",\"effect\":\"deny\"}",
+      "{\"notes\":\"This rule checks if the intent is to download a file and if the page host matches the pattern for an IP address using numeric segments and dots.\",\"rule\":\"intent == 'download_file' && matches(page.host, '^([0-9]{1,3}[.]){3}[0-9]{1,3}$')\",\"effect\":\"deny\"}"
+    ],
+    "reader": "{\"summary\":\"Stops a Bot downloading files from IP addresses.\",\"explanation\":\"Stops a Bot from downloading files when the host matches a specific format of an IP address (e.g., '192.168.1.1'). This rule is specifically targeted at any host that is in the format of four sets of numbers separated by dots, with each number ranging from 0 to 255. It does not match typical domain names or URLs since they have a different structure, meaning legitimate sites will not be blocked. The rule does not cover requests to well-known paths or domains, focusing only on IP addresses.\"}"
+  },
+  "neverCompiles": {
+    "model": "gpt-4o-mini",
+    "text": "Block any URL with a query string longer than 200 characters",
+    "writer": [
+      "{\"notes\":\"The rule checks the length of the query string in the page URL to deny actions when it exceeds 200 characters. It uses the page.url variable for the query string length check.\",\"rule\":\"intent != \\\"navigate\\\" || (page.url != \\\"\\\" && !(page.url.split(\\\"?\\\")[1] != undefined && page.url.split(\\\"?\\\")[1].length > 200))\",\"effect\":\"deny\"}",
+      "{\"notes\":\"This rule checks if the page.url contains a query string and verifies its length to be within the allowed limit. It denies navigation if the query string exceeds 200 characters.\",\"rule\":\"intent == \\\"navigate\\\" && (page.url != \\\"\\\" && (contains(page.url, \\\"?\\\") && (page.url[page.url.indexOf('?') + 1:].length > 200)))\",\"effect\":\"deny\"}"
+    ]
+  }
+}

@@ -968,6 +968,8 @@ const DECISIONS: Record<string, string> = {
   "agent.tool_limit_refused": "Too many tools for its model",
   "computer.policy_loaded": "Boundary at start-up",
   "computer.policy_changed": "Boundaries saved",
+  // A draft for the admin to read. Not "Allowed": nothing was decided and nothing changed.
+  "computer.policy_translated": "Drafted, not saved",
   "computer.isolation_loaded": "Isolation at start-up",
   "computer.control_taken": "A person took control",
   "computer.control_released": "Control went back to the Bot",

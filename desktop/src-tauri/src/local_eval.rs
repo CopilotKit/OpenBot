@@ -12,8 +12,9 @@
 //! - **Arguments are fixed.** Only `status`, `start`, `stop` and `login`, a validated stack id and
 //!   `--json`, plus the constant `list`, `setup`, `connect` and `login --help` lists and the sign-in's
 //!   `--mode openbot`, and `integrations composio provision` with a validated installation id and
-//!   a file OpenBot made, and `local setup --model-config` with a model file OpenBot made, as
-//!   separate arguments with no shell. The CLI's `resumeCommand` strings
+//!   a file OpenBot made, `local setup --model-config` with a model file OpenBot made, and
+//!   `telemetry link` with validated installation and account IDs, as separate arguments with
+//!   no shell. The CLI's `resumeCommand` strings
 //!   are text for a terminal user; they are dropped here and never executed.
 //! - **Only allowlisted facts leave.** Raw stdout, stderr, error messages and recovery text never
 //!   cross IPC. Failures are static categories with no payload. The one place CLI words go is the
@@ -2470,6 +2471,10 @@ fn cli_environment(
             command.env(name, value);
         }
     }
+    // Share usage data turned off in Settings is the same opt-out as the variable.
+    if crate::usage_data::off() {
+        command.env("COPILOTKIT_TELEMETRY_DISABLED", "1");
+    }
     // Docker's configuration without the person's credential helper, which macOS stops to ask
     // about when OpenBot runs it, so the chart and image downloads never wait on a dialog. See
     // `docker_config`. The person's own configuration is what it mirrors.
@@ -3187,6 +3192,46 @@ impl Drop for Attempt {
 /// Held by the one call that is running. The CLI refuses a second `local` command while one is in
 /// progress (`local_command_busy`), so a start racing a stop would fail one of them for nothing.
 static CALLS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static REQUIRED_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static BACKGROUND_TELEMETRY: std::sync::Mutex<Option<Cancel>> = std::sync::Mutex::new(None);
+
+/// Required CLI work cancels optional attribution before waiting for the process slot.
+struct RequiredCliCall;
+
+impl RequiredCliCall {
+    fn begin() -> Self {
+        REQUIRED_CALLS.fetch_add(1, Ordering::SeqCst);
+        cancel_background_telemetry();
+        Self
+    }
+}
+
+impl Drop for RequiredCliCall {
+    fn drop(&mut self) {
+        REQUIRED_CALLS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Start may also need the native identity lock held by the background handshake.
+pub fn cancel_background_telemetry() {
+    let active = BACKGROUND_TELEMETRY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(cancel) = active.as_ref() {
+        cancel.cancel();
+    }
+}
+
+/// Clear the optional process before releasing its CLI slot, including after an error.
+struct BackgroundTelemetryCall;
+
+impl Drop for BackgroundTelemetryCall {
+    fn drop(&mut self) {
+        *BACKGROUND_TELEMETRY
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    }
+}
 
 /**
 Run `call` once every earlier call has finished, with what is left of `limits.timeout`.
@@ -3200,6 +3245,7 @@ fn one_at_a_time<T>(
     limits: Limits,
     call: impl FnOnce(Limits) -> Result<T, Failure>,
 ) -> Result<T, Failure> {
+    let _priority = RequiredCliCall::begin();
     let deadline = Instant::now() + limits.timeout;
     let _turn = loop {
         if cancel.requested() {
@@ -3670,6 +3716,104 @@ pub fn account_sign_in_installed(attempt: &str) -> Result<AccountSignIn, Failure
     })
 }
 
+/// Closed output of the CLI's authenticated desktop identity handshake.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TelemetryIdentity {
+    Account { account_id: String },
+    Linked { account_id: String },
+    SignedOut,
+    Skipped,
+}
+
+/// Background attribution never queues ahead of required CLI work, and yields if it arrives.
+fn background_telemetry_call<T>(
+    call: impl FnOnce(&Cancel, Limits) -> Result<T, Failure>,
+) -> Result<T, Failure> {
+    let cancel = Cancel::default();
+    let mut active = BACKGROUND_TELEMETRY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if REQUIRED_CALLS.load(Ordering::SeqCst) != 0 {
+        return Err(Failure::Cancelled);
+    }
+    let _turn = match CALLS.try_lock() {
+        Ok(turn) => turn,
+        Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return Err(Failure::Cancelled),
+    };
+    *active = Some(cancel.clone());
+    drop(active);
+    let _cleanup = BackgroundTelemetryCall;
+    call(&cancel, telemetry_link_limits())
+}
+
+/// Use the same verified CLI contract, but let required account/setup calls preempt it.
+pub fn link_telemetry_background_installed(
+    installation: &Installation,
+    account: Option<&str>,
+) -> Result<TelemetryIdentity, Failure> {
+    background_telemetry_call(|cancel, limits| {
+        let cli = installed()?;
+        link_telemetry(&cli, installation, account, limits, cancel)
+    })
+}
+
+/// Bound the optional handshake separately from product CLI operations.
+fn telemetry_link_limits() -> Limits {
+    Limits {
+        timeout: Duration::from_secs(8),
+        grace: Duration::from_millis(250),
+        output: MAX_OUTPUT,
+    }
+}
+
+/// Execute the fixed identity command through the same bounded process boundary as setup.
+fn link_telemetry(
+    cli: &PinnedCli,
+    installation: &Installation,
+    account: Option<&str>,
+    limits: Limits,
+    cancel: &Cancel,
+) -> Result<TelemetryIdentity, Failure> {
+    if account.is_some_and(|value| !crate::telemetry::is_account_id(value)) {
+        return Err(Failure::ContractMismatch);
+    }
+    let mut arguments = vec![
+        "telemetry",
+        "link",
+        "--installation-id",
+        installation.as_str(),
+        "--json",
+    ];
+    if let Some(account) = account {
+        arguments.extend(["--account-id", account]);
+    }
+    let (code, bytes) = execute(cli, &arguments, None, limits, cancel)?;
+    normalize_telemetry_identity(code, &bytes)
+}
+
+/// Refuse unexpected or private fields before returning anything to the shell.
+pub fn normalize_telemetry_identity(code: i32, bytes: &[u8]) -> Result<TelemetryIdentity, Failure> {
+    if code != 0 {
+        return Err(Failure::UnexpectedExit);
+    }
+    if bytes.len() > MAX_OUTPUT {
+        return Err(Failure::OutputLimit);
+    }
+    let result: TelemetryIdentity =
+        serde_json::from_slice(bytes).map_err(|_| Failure::InvalidJson)?;
+    match &result {
+        TelemetryIdentity::Account { account_id } | TelemetryIdentity::Linked { account_id }
+            if !crate::telemetry::is_account_id(account_id) =>
+        {
+            return Err(Failure::ContractMismatch)
+        }
+        _ => {}
+    }
+    Ok(result)
+}
+
 /// The approval page each waiting account sign-in has shown, by attempt id.
 static SIGN_IN_PAGES: std::sync::Mutex<Vec<(String, SignInPage)>> =
     std::sync::Mutex::new(Vec::new());
@@ -3860,6 +4004,39 @@ mod tests {
     /// The 0.16.0-rc.9 CLI (copilotkit 4.34.0-pre.48a3863), as its bundle names the release its
     /// `local setup` and `local update` install.
     const PINNED_CLI: &str = r#"async function resolveDefaultLocalRelease(directory2, dependencies = {}) {   const pinnedVersion = false ? "" : "0.16.0-rc.9";   const support = supportSchema.parse("#;
+
+    #[test]
+    fn telemetry_link_accepts_only_the_closed_account_handshake() {
+        let account = "a".repeat(64);
+        for kind in ["account", "linked"] {
+            let response = serde_json::json!({ "type": kind, "account_id": account });
+            assert!(normalize_telemetry_identity(0, response.to_string().as_bytes()).is_ok());
+            assert!(normalize_telemetry_identity(1, response.to_string().as_bytes()).is_err());
+            for field in [
+                "email",
+                "name",
+                "prompt",
+                "response",
+                "recording",
+                "filename",
+                "url",
+            ] {
+                let mut extra = response.clone();
+                extra[field] = serde_json::json!("synthetic private content");
+                assert!(normalize_telemetry_identity(0, extra.to_string().as_bytes()).is_err());
+            }
+        }
+        assert_eq!(
+            normalize_telemetry_identity(0, br#"{"type":"skipped"}"#),
+            Ok(TelemetryIdentity::Skipped)
+        );
+        assert!(normalize_telemetry_identity(
+            0,
+            br#"{"type":"account","account_id":"private@example.com"}"#
+        )
+        .is_err());
+        assert!(normalize_telemetry_identity(0, b"not json").is_err());
+    }
 
     #[test]
     fn the_release_a_cli_installs_is_read_out_of_the_cli_itself() {
@@ -5096,6 +5273,42 @@ mod tests {
     }
 
     #[test]
+    fn required_cli_work_preempts_background_attribution() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::required_cli_work_preempts_background_attribution",
+        ) {
+            return;
+        }
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let background = std::thread::spawn(move || {
+            background_telemetry_call(|cancel, _| {
+                entered.send(()).unwrap();
+                let deadline = Instant::now() + Duration::from_secs(2);
+                while !cancel.requested() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Ok(cancel.requested())
+            })
+        });
+        waiting.recv_timeout(Duration::from_secs(3)).unwrap();
+        let started = Instant::now();
+        assert_eq!(
+            one_at_a_time(
+                &Cancel::default(),
+                Limits::for_action(Action::Status),
+                |_| Ok(())
+            ),
+            Ok(())
+        );
+        let cancelled = background.join().unwrap().unwrap();
+        assert!(
+            cancelled,
+            "required account checks waited for optional telemetry"
+        );
+        assert!(started.elapsed() < Duration::from_millis(500));
+    }
+
+    #[test]
     fn calls_run_one_at_a_time() {
         let active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let most = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -5869,7 +6082,7 @@ fn main() {
     std::fs::write(dir.join("argv"), args.join("\n")).unwrap();
     std::fs::write(dir.join("cwd"), std::env::current_dir().unwrap().display().to_string()).unwrap();
     let inherited = |name: &str| format!("{name}={}", std::env::var(name).is_ok());
-    std::fs::write(dir.join("env"), [inherited("NODE_OPTIONS"), inherited("HOME"), inherited("DO_NOT_TRACK")].join("\n")).unwrap();
+    std::fs::write(dir.join("env"), [inherited("NODE_OPTIONS"), inherited("HOME"), inherited("DO_NOT_TRACK"), inherited("COPILOTKIT_TELEMETRY_DISABLED")].join("\n")).unwrap();
     let scenario = std::fs::read_to_string(dir.join("scenario")).unwrap();
     let (mode, body) = scenario.split_once('\n').unwrap_or((scenario.as_str(), ""));
     match mode {
@@ -5907,6 +6120,12 @@ fn main() {
             std::fs::write(dir.join("grandchild.tmp"), grandchild.id().to_string()).unwrap();
             std::fs::rename(dir.join("grandchild.tmp"), dir.join("grandchild")).unwrap();
             std::thread::sleep(std::time::Duration::from_secs(60));
+        }
+        // A valid machine response can precede the CLI's bounded telemetry flush.
+        "flush" => {
+            print!("{body}");
+            std::io::stdout().flush().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(2300));
         }
         "flood" => {
             let chunk = vec![b' '; 65536];
@@ -6103,6 +6322,12 @@ fn main() {{
             let root = temp_root(label);
             std::fs::create_dir_all(&root).unwrap();
             let program = root.join(format!("cli{}", std::env::consts::EXE_SUFFIX));
+            // On Linux, another test's fork can inherit fs::copy's writable descriptor
+            // until exec, even after copy returns. Executing that inode then fails ETXTBSY.
+            // The fixture binary is immutable; link it without opening a new write handle.
+            #[cfg(target_os = "linux")]
+            std::fs::hard_link(compiled(), &program).unwrap();
+            #[cfg(not(target_os = "linux"))]
             std::fs::copy(compiled(), &program).unwrap();
             std::fs::write(root.join("scenario"), scenario).unwrap();
             assert!(warm_copied_program(&program).success());
@@ -6189,6 +6414,171 @@ fn main() {{
             grace: Duration::from_millis(500),
             output: MAX_OUTPUT,
         }
+    }
+
+    #[test]
+    fn fixture_executables_keep_scenarios_and_cleanup_independent() {
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        let signed_out = Fixture::new(
+            "telemetry-fixture-signed-out",
+            "0\n{\"type\":\"signed_out\"}",
+        );
+        let skipped = Fixture::new("telemetry-fixture-skipped", "0\n{\"type\":\"skipped\"}");
+        assert_eq!(
+            link_telemetry(
+                &signed_out.cli(),
+                &installation,
+                None,
+                telemetry_link_limits(),
+                &Cancel::default()
+            ),
+            Ok(TelemetryIdentity::SignedOut)
+        );
+        drop(signed_out);
+        assert_eq!(
+            link_telemetry(
+                &skipped.cli(),
+                &installation,
+                None,
+                telemetry_link_limits(),
+                &Cancel::default()
+            ),
+            Ok(TelemetryIdentity::Skipped)
+        );
+        assert!(compiled().is_file());
+    }
+
+    #[test]
+    fn telemetry_process_uses_fixed_arguments_and_ignores_stderr() {
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        let account = "a".repeat(64);
+        for bound in [None, Some(account.as_str())] {
+            let fixture = Fixture::new(
+                "telemetry-process",
+                &format!("0\n{{\"type\":\"account\",\"account_id\":\"{account}\"}}\n"),
+            );
+            assert_eq!(
+                link_telemetry(
+                    &fixture.cli(),
+                    &installation,
+                    bound,
+                    telemetry_link_limits(),
+                    &Cancel::default()
+                ),
+                Ok(TelemetryIdentity::Account {
+                    account_id: account.clone()
+                })
+            );
+            let mut expected = format!(
+                "telemetry\nlink\n--installation-id\n{}\n--json",
+                installation.as_str()
+            );
+            if let Some(bound) = bound {
+                expected.push_str(&format!("\n--account-id\n{bound}"));
+            }
+            assert_eq!(fixture.argv(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn telemetry_process_refuses_failed_and_old_cli_without_exposing_output() {
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        for body in ["private upstream failure", "Unknown telemetry subcommand"] {
+            let fixture = Fixture::new("telemetry-old-cli", &format!("1\n{body}"));
+            assert_eq!(
+                link_telemetry(
+                    &fixture.cli(),
+                    &installation,
+                    None,
+                    telemetry_link_limits(),
+                    &Cancel::default()
+                ),
+                Err(Failure::UnexpectedExit)
+            );
+        }
+    }
+
+    #[test]
+    fn telemetry_process_keeps_a_valid_response_while_cli_finishes_flushing() {
+        let fixture = Fixture::new("telemetry-flush", "flush\n{\"type\":\"signed_out\"}");
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        assert_eq!(
+            link_telemetry(
+                &fixture.cli(),
+                &installation,
+                None,
+                telemetry_link_limits(),
+                &Cancel::default()
+            ),
+            Ok(TelemetryIdentity::SignedOut)
+        );
+    }
+
+    #[test]
+    fn required_cli_work_stops_a_real_background_process_tree() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::required_cli_work_stops_a_real_background_process_tree",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new("telemetry-preempt", "stubborn");
+        let cli = fixture.cli();
+        let worker = std::thread::spawn(move || {
+            background_telemetry_call(|cancel, limits| {
+                link_telemetry(
+                    &cli,
+                    &Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap(),
+                    None,
+                    limits,
+                    cancel,
+                )
+            })
+        });
+        Fixture::wait_for_grandchild(&fixture.root);
+        let started = Instant::now();
+        assert_eq!(
+            one_at_a_time(
+                &Cancel::default(),
+                Limits::for_action(Action::Status),
+                |_| Ok(())
+            ),
+            Ok(())
+        );
+        assert_eq!(worker.join().unwrap(), Err(Failure::Cancelled));
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "required work waited for the eight-second telemetry timeout"
+        );
+        #[cfg(unix)]
+        assert!(fixture.grandchild_stops());
+    }
+
+    #[test]
+    fn background_telemetry_defers_instead_of_queueing_behind_required_work() {
+        let _turn = hold_turn();
+        assert_eq!(
+            background_telemetry_call::<()>(|_, _| panic!("busy CLI must not run telemetry")),
+            Err(Failure::Cancelled)
+        );
+    }
+
+    #[test]
+    fn telemetry_process_bounds_startup_wait_and_kills_a_hung_cli() {
+        let limits = telemetry_link_limits();
+        // Each call remains bounded while leaving room for cold start, Ops and CLI flush.
+        assert!(limits.timeout + limits.grace <= Duration::from_millis(8250));
+        let fixture = Fixture::new("telemetry-timeout", "stubborn");
+        let cli = fixture.cli();
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        let started = Instant::now();
+        assert_eq!(
+            link_telemetry(&cli, &installation, None, limits, &Cancel::default()),
+            Err(Failure::Timeout)
+        );
+        // Allow scheduler overhead beyond the eight-second budget and kill grace.
+        assert!(started.elapsed() < Duration::from_secs(10));
+        #[cfg(unix)]
+        assert!(fixture.grandchild_stops());
     }
 
     #[test]
@@ -6426,6 +6816,33 @@ fn main() {{
             std::env::var_os("HOME").is_some(),
             "{env}"
         );
+    }
+
+    /// Share usage data turned off in Settings reaches the CLI as the variable it reads, though
+    /// nothing in the app's own environment set it.
+    #[test]
+    fn usage_data_turned_off_in_settings_reaches_the_cli_as_its_opt_out() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::usage_data_turned_off_in_settings_reaches_the_cli_as_its_opt_out",
+        ) {
+            return;
+        }
+        std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
+        let fixture = Fixture::new("local-eval-usage-data", &format!("0\n{}", envelope()));
+        let run = || {
+            fixture
+                .run(
+                    Action::Status,
+                    Limits::for_action(Action::Status),
+                    &Cancel::default(),
+                )
+                .unwrap();
+            std::fs::read_to_string(fixture.root.join("env")).unwrap()
+        };
+        assert!(run().contains("COPILOTKIT_TELEMETRY_DISABLED=false"));
+        crate::usage_data::set_off(true);
+        let env = run();
+        assert!(env.contains("COPILOTKIT_TELEMETRY_DISABLED=true"), "{env}");
     }
 
     fn listing(stacks: Value) -> Value {
