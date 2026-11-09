@@ -508,7 +508,6 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                   <CustomAgents
                     disabled={busy}
                     onChoose={(chosen) => connectCustom(chosen)}
-                    reduceMotion={reduceMotion}
                   />
                 ) : (
                   <p className="mt-3 text-sm text-muted-foreground">
@@ -655,25 +654,14 @@ function CreatedView({ name }: { name: string }) {
 
 type Visibility = AgentFormValues["visibility"];
 
-/** The two ways a Bot can be seen, in the words the old wizard used for them. */
+/** The two ways a Bot can be seen: a word and an icon each, which say enough between them. */
 const VISIBILITY_OPTIONS: Array<{
   value: Visibility;
   title: string;
-  description: string;
   icon: typeof IconLock;
 }> = [
-  {
-    value: "private",
-    title: "Private",
-    description: "Only you can see it and talk to it.",
-    icon: IconLock,
-  },
-  {
-    value: "public",
-    title: "Public",
-    description: "Everyone in your company can find and use it.",
-    icon: IconUsers,
-  },
+  { value: "private", title: "Private", icon: IconLock },
+  { value: "public", title: "Public", icon: IconUsers },
 ];
 
 /**
@@ -776,14 +764,7 @@ function AboutStep({
                     type="button"
                   >
                     <Icon className="size-5 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0">
-                      <span className="block font-medium text-sm">
-                        {option.title}
-                      </span>
-                      <span className="block text-pretty text-muted-foreground text-xs">
-                        {option.description}
-                      </span>
-                    </span>
+                    <span className="font-medium text-sm">{option.title}</span>
                   </button>
                 );
               })}
@@ -889,9 +870,9 @@ type IsolationChoice = {
  * needs nothing and costs nothing more; Isolated is the exception somebody opts into. What it means
  * is in the tooltip beside it, and for a public Bot that includes who else ends up on that computer.
  *
- * NEVER HIDDEN. Where it cannot be ticked it is drawn disabled with the reason in place of its
- * summary, so somebody who heard about Isolated Bots finds out here why they cannot have one rather
- * than wondering where it went.
+ * NEVER HIDDEN. Where it cannot be ticked it is drawn disabled with the reason below it, so
+ * somebody who heard about Isolated Bots finds out here why they cannot have one rather than
+ * wondering where it went.
  *
  * A label for the word only, not the whole tile, so the tooltip's button beside it does not tick the
  * box when pressed.
@@ -915,7 +896,7 @@ function IsolatedOption({
       </FieldLegend>
       <div className="flex items-start gap-3">
         <Checkbox
-          aria-describedby="new-bot-isolated-summary"
+          aria-describedby={reason ? "new-bot-isolated-reason" : undefined}
           checked={checked && reason === null}
           className="mt-0.5"
           disabled={reason !== null}
@@ -952,12 +933,14 @@ function IsolatedOption({
               </TooltipContent>
             </Tooltip>
           </div>
-          <p
-            className="text-pretty text-muted-foreground text-xs"
-            id="new-bot-isolated-summary"
-          >
-            {reason ?? "A computer of its own, instead of sharing yours."}
-          </p>
+          {reason && (
+            <p
+              className="text-pretty text-muted-foreground text-xs"
+              id="new-bot-isolated-reason"
+            >
+              {reason}
+            </p>
+          )}
         </div>
       </div>
     </FieldSet>
@@ -989,8 +972,8 @@ function RuntimeStep({ onChoose }: { onChoose: (runtime: Runtime) => void }) {
   useEffect(() => heading.current?.focus(), []);
 
   return (
-    <div className="flex flex-col gap-2">
-      <h2 className={cn("mb-2", RUNTIME_HEADING)} ref={heading} tabIndex={-1}>
+    <div className="flex flex-col">
+      <h2 className={cn("mb-3", RUNTIME_HEADING)} ref={heading} tabIndex={-1}>
         Connect a custom agent
       </h2>
       <FrameworkRows onChoose={onChoose} />
@@ -1002,7 +985,14 @@ function RuntimeStep({ onChoose }: { onChoose: (runtime: Runtime) => void }) {
 const RUNTIME_HEADING =
   "break-words font-semibold text-lg tracking-tight outline-none";
 
-/** Every framework the sheet offers, one row each; pressing one picks it. */
+/**
+ * A framework row: no fill until hovered, so the list reads as a list and not as a stack of tiles.
+ * Pressing one acts at once, so there is no chosen state to draw.
+ */
+const FRAMEWORK_ROW_CLASSES =
+  "-mx-3 flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
+
+/** Every framework the sheet offers, one line each, name then summary; pressing one picks it. */
 function FrameworkRows({
   disabled,
   onChoose,
@@ -1012,16 +1002,16 @@ function FrameworkRows({
 }) {
   return CONNECTION_OPTIONS.map((harness) => (
     <button
-      className={OPTION_CLASSES}
+      className={FRAMEWORK_ROW_CLASSES}
       disabled={disabled}
       key={harness.id}
       onClick={() => onChoose({ kind: "managed", harness: harness.id })}
       type="button"
     >
       <HarnessMark id={harness.mark} name={harness.name} />
-      <span className="min-w-0">
-        <span className="block font-medium text-sm">{harness.name}</span>
-        <span className="block text-pretty text-muted-foreground text-xs">
+      <span className="min-w-0 truncate text-sm">
+        <span className="font-medium">{harness.name}</span>
+        <span className="ml-2 text-muted-foreground">
           {summaryFor(harness)}
         </span>
       </span>
@@ -1045,44 +1035,31 @@ function showCustom(reduceMotion: boolean | null) {
 }
 
 /**
- * The first screen's second way to make a Bot, below the simple form: RuntimeStep's heading and rows,
- * without taking focus from Name. A wide gap sets it apart from the form, and on a desktop sheet its
- * heading and first row show above the footer before anything is scrolled; the chevron beside the
- * heading brings the list up. Each row acts on its own press, so Create Bot stays the form's.
+ * The first screen's second way to make a Bot, below the simple form: RuntimeStep's rows under a
+ * section name like the form's own, without taking focus from Name. A wide gap sets it apart from the
+ * form, and on a desktop sheet its name and first rows show above the footer before anything is
+ * scrolled. Each row acts on its own press, so Create Bot stays the form's.
  */
 function CustomAgents({
   disabled,
   onChoose,
-  reduceMotion,
 }: {
   disabled: boolean;
   onChoose: (runtime: Runtime) => void;
-  reduceMotion: boolean | null;
 }) {
   return (
     <section
       aria-labelledby={CUSTOM_HEADING_ID}
-      className="mt-14 flex scroll-mt-6 flex-col gap-2"
+      className="mt-12 flex scroll-mt-6 flex-col"
       id={CUSTOM_ID}
     >
-      <div className="flex items-center gap-1">
-        <h2 className={RUNTIME_HEADING} id={CUSTOM_HEADING_ID} tabIndex={-1}>
-          Connect a custom agent
-        </h2>
-        <Button
-          aria-label="Show custom agents"
-          className="text-muted-foreground"
-          onClick={() => showCustom(reduceMotion)}
-          size="icon-xs"
-          type="button"
-          variant="ghost"
-        >
-          <IconChevronDown className="size-4" />
-        </Button>
-      </div>
-      <p className="mb-2 text-pretty text-muted-foreground text-sm">
-        Already run an agent? Pick its framework, then add its address.
-      </p>
+      <h2
+        className={cn("mb-2 font-medium outline-none", SECTION_LABEL)}
+        id={CUSTOM_HEADING_ID}
+        tabIndex={-1}
+      >
+        Connect a custom agent
+      </h2>
       <FrameworkRows disabled={disabled} onChoose={onChoose} />
     </section>
   );

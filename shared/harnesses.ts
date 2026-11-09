@@ -120,7 +120,7 @@ export function declaredHarness(id: unknown): Harness | undefined {
 
 /**
  * The harness an image reference runs, by the directory a release builds it from:
- * `ghcr.io/copilotkit/openbot-agent-langgraph-agui@sha256:…` is LangChain (LangGraph). Undefined for
+ * `ghcr.io/copilotkit/openbot-agent-langgraph-agui@sha256:…` is LangChain. Undefined for
  * an image OpenBot does not publish.
  */
 export function harnessForImage(reference: string): Harness | undefined {

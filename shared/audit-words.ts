@@ -148,6 +148,7 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "component.published": "Publish a component",
   "component.unpublished": "Unpublish a component",
   "component.draft_saved": "Save a component draft",
+  "component.description_updated": "Update a component's description",
   "component.refused": "Show a component",
   "component.function_granted": "Let a component read data",
   "component.function_revoked": "Stop a component reading data",
