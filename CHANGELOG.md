@@ -86,6 +86,10 @@ deployment:
   step says "Setting up your apps" while they connect, where it flashed "Sign in to CopilotKit".
   Opening OpenBot after a restart says "Starting the engine machine." while it starts OpenBot's
   Podman machine, and Start's steps say "OpenBot's services" where they said "Containers".
+- **Install's bar is full only when it is done.** Once every byte has arrived and the last items are
+  still unpacking, the bar keeps moving without filling and the line says "1.1 GB downloaded ·
+  Unpacking the last item", where it showed a full bar beside "1.1 GB of 1.1 GB · 1 of 5 items
+  remaining".
 - The screen shown while OpenBot runs opens on "OpenBot is running", with its Updates section under
   Show OpenBot and Stop OpenBot, as on the stopped screen, where it sat above the heading.
 - **App updates download from downloads.copilotkit.ai.** The update feed there names
@@ -221,6 +225,7 @@ deployment:
   everything.
 - Apps the broker lists in lowercase are named with capitals in Browse apps and when added, such as
   "1Password" where it said "1password". An app added before the upgrade keeps its name.
+- Onboarding's Welcome says "Give work to Bots in plain words.", where it said "Hand work to Bots".
 
 ## 0.3.4
 
