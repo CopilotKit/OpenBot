@@ -1,6 +1,6 @@
 {
   "$schema": "./shared/release-policy.schema.json",
-  "version": "v1.0.0-rc.1",
+  "version": "v1.0.0-rc.2",
   "compatibility": {
     "launcherApi": 1,
     "configSchema": 1,
@@ -11,7 +11,7 @@
         "0082_routine_goal",
         "0077_channel_opening"
       ],
-      "to": "0083_learning_skill_approvals",
+      "to": "0085_approval_rule_account",
       "rollbackCompatible": false
     },
     "intelligenceCapabilities": []
