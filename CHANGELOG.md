@@ -71,6 +71,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the browser only while recording, or to say "No microphone found. Narration is off." on a
   computer with none, which keeps your narration choice for when there is one.
 - Your recordings links to Settings → Learning ("See what your Bots learned").
+- On a computer with no microphone, Record no longer asks "Narrate while you record?". It records
+  without narration and asks the first time you record with a microphone.
 
 ### Conversations
 
@@ -130,6 +132,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- Settings > Activity and Admin > Audit reach past the newest 50 events: "Show older events" under
+  the last row loads the next page, and the count says "Newest 50 events" until nothing is older.
+- "OpenBot is running" opens on its heading again. Its Updates disclosure, and the line above it,
+  sit under Show OpenBot and Stop OpenBot, as on the stopped screen, instead of at the top of the
+  card with nothing above the line.
 - The sidebar floats as frosted glass over the colours of OpenBot's orb, the orb sits beside
   OpenBot's name, and the app is set in Atkinson Hyperlegible Next. The glass turns off with the
   system's reduce transparency or increase contrast setting, and a skin keeps its own look.
@@ -160,6 +167,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   first screen, below the form, one line each with its logo, Claude Agent SDK, LangChain, Google ADK
   and AWS Strands first. Choosing one goes straight to its address, and Back returns to the list.
   They were behind a Connect a custom agent button.
+- In an 800px-tall window, OpenBot Desktop's usual height on a Mac, New Bot's first screen shows all
+  four of those frameworks above Cancel and Create Bot before you scroll, where only Claude Agent
+  SDK did.
 - LangChain is called **LangChain**, with LangChain's own mark, where it said "LangChain
   (LangGraph)": in New Bot, a Bot's "Powered by" subtitle and its Runs on row, and OpenBot Desktop's
   note under a ChatGPT plan.

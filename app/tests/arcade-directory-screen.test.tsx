@@ -63,6 +63,9 @@ function airtableFromFixture() {
     classifiedCount: tools.filter((tool) => tool.metadata?.behavior).length,
     permissionCount: new Set(sets.map((s) => [...s].sort().join(" "))).size,
     scopedActionCount: sets.length,
+    // Arcade has no per-person key form: an app with an authorization block is a sign-in, as
+    // `connectionOf` in `arcade-adapter.ts` reads it, and AirtableApi has one.
+    connection: { kind: sets.length > 0 ? "consent" : "no-auth" },
     enabled: false,
   };
 }
@@ -164,6 +167,8 @@ test("the Arcade directory renders the coverage warning and the breadth line on 
   expect(row.textContent).toContain(
     "This app uses 1 separate permission across 2 actions. A further 1 requests no permission of its own and becomes callable with any approval here.",
   );
+  // Arcade signs a person in to its apps and never asks them for a key, so no row says one.
+  expect(row.textContent).not.toContain("Needs a key");
 });
 
 test("the Arcade directory redirects on a Composio deployment", async () => {

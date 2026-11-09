@@ -21,6 +21,7 @@ import {
   sharedAccountOnly,
   sharedAccountOnlySentence,
 } from "../deployment-clients";
+import { connectionGuide, fieldsForPerson } from "../key-guides";
 import {
   authorizationUrlFor,
   type ConnectOrigin,
@@ -412,7 +413,31 @@ export function mountConnectionRoutes({
           return context.json({ error: refusal.error }, refusal.status);
         }
 
-        if (submitted === null) return context.json({ fields: published });
+        /*
+         * THE FIRST PRESS ANSWERS THE FORM A PERSON CAN FOLLOW: the same boxes under the same
+         * names, labelled and explained in their words, and a guide saying where the key comes
+         * from. The names are untouched, so the second press is checked against `published`
+         * exactly as before. The broker's own link is asked for and a failure there costs only the
+         * link: the form is what the person came for, and `./key-guides` has the fallback.
+         */
+        if (submitted === null) {
+          const guideUrl = composio.broker.connectionGuideUrl?.bind(
+            composio.broker,
+          );
+          const link = guideUrl
+            ? await withVendorDeadline(() =>
+                guideUrl({ toolkit, authScheme }),
+              ).catch(() => null)
+            : null;
+          return context.json({
+            fields: fieldsForPerson(toolkit, published),
+            guide: connectionGuide({
+              toolkit,
+              title: row.title,
+              published: link,
+            }),
+          });
+        }
 
         /*
          * AN APP WITH NO BOXES CANNOT BE CONNECTED BY SOMEBODY TYPING, WHICH IS THE ONLY WAY THIS

@@ -202,10 +202,14 @@ export function brokeredConnectionDescription(
  * authorization URL), so OpenBot never holds the password; a key app takes a key you paste, so
  * that sentence promises nothing about passwords; and an app with no account has nothing to sign
  * in to.
+ *
+ * `takesKey` is the team edition's key app, read by the same page. "There is no token to paste"
+ * was said on those too, right above a Connect that asks for one.
  */
 export function brokeredReach(
   _provider: PluginsProvider,
   personal?: BrokeredApp,
+  takesKey = false,
 ): {
   description: string;
   badge: string;
@@ -213,8 +217,9 @@ export function brokeredReach(
   const badge = "Through OpenBot";
   if (!personal) {
     return {
-      description:
-        "This deployment holds one key for every app like this. Each person connects their own account, and a Bot sees only what that person can see. There is no token to paste.",
+      description: takesKey
+        ? "Each person connects their own account with a key from the app, and a Bot sees only what that person can see."
+        : "This deployment holds one key for every app like this. Each person connects their own account, and a Bot sees only what that person can see. There is no token to paste.",
       badge,
     };
   }

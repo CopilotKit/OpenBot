@@ -1,4 +1,5 @@
 import { itsAppPage } from "../edition";
+import { displayName } from "./app-names";
 import {
   BrokerAccountGoneError,
   BrokerAccountHeldError,
@@ -147,6 +148,11 @@ export type VendorToolkit = {
  */
 export type VendorToolkitDetail = {
   auth_config_details?: unknown;
+  /**
+   * The app's own page about connecting it, where Composio publishes one. Read by
+   * {@link ComposioBroker.connectionGuideUrl} alone, and only ever as a link to show a person.
+   */
+  auth_guide_url?: unknown;
 };
 
 /**
@@ -1094,7 +1100,8 @@ export function appOf(row: VendorToolkit, position: number): BrokerApp {
 
   return {
     slug,
-    name,
+    // The brand's own spelling where the catalogue lowercased it. See `./app-names`.
+    name: displayName(slug, name),
     description,
     logo,
     categories,

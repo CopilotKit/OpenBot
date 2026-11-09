@@ -16,10 +16,10 @@ import {
   withoutOpenBotWorking,
 } from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
-import { auditKeys } from "@/lib/audit/queries";
 import { authKeys } from "@/lib/auth/queries";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { seedAuditPage } from "./seed-audit-page";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -41,7 +41,7 @@ async function renderWith(
   options: {
     edition: "personal" | "team";
     role: "admin" | "user";
-    audit?: Record<string, unknown>;
+    audit?: Record<string, unknown[]>;
     ready?: string;
   },
 ) {
@@ -67,7 +67,7 @@ async function renderWith(
     { id: BOT, name: "Claude Agent SDK" },
   ]);
   for (const [search, events] of Object.entries(options.audit ?? {}))
-    queryClient.setQueryData([...auditKeys.all, search], { events });
+    seedAuditPage(queryClient, search, { events });
   const router = createRouter({
     routeTree: createRootRoute({ component: () => ui }),
     history: createMemoryHistory({ initialEntries: ["/"] }),

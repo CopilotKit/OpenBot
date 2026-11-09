@@ -29,9 +29,12 @@ import {
   disconnectBrokeredAccountMutationOptions,
   disconnectBrokeredMutationOptions,
   invalidatePlugins,
+  type KeyForm,
+  type KeyGuide,
   recheckBrokeredConnectionMutationOptions,
   setDefaultBrokeredAccountMutationOptions,
 } from "@/lib/plugins/mutations";
+import { schemeNeedsKey } from "@/lib/plugins/enablement-notes";
 import { brokeredAccountsQueryOptions } from "@/lib/plugins/queries";
 import {
   type BrokeredAccountKind,
@@ -66,15 +69,6 @@ import {
  */
 export type { BrokeredAccountKind };
 
-/** The schemes whose secret a person types, which is the whole of what `fields` means here. */
-const FIELD_SCHEMES = [
-  "API_KEY",
-  "BASIC",
-  "BEARER_TOKEN",
-  "BASIC_WITH_JWT",
-  "S2S_OAUTH2",
-];
-
 /**
  * Which of the three a recorded scheme is.
  *
@@ -85,9 +79,7 @@ const FIELD_SCHEMES = [
  */
 function kindOf(authScheme: string | null): BrokeredAccountKind {
   if (authScheme === "NO_AUTH") return "no-auth";
-  return authScheme !== null && FIELD_SCHEMES.includes(authScheme)
-    ? "fields"
-    : "consent";
+  return schemeNeedsKey(authScheme) ? "fields" : "consent";
 }
 
 /** The row's state and the things it can do, from {@link useBrokeredAccount}. */
@@ -220,6 +212,8 @@ export type BrokeredAccount = {
    * so reading the request would make this null on every open — see the hook for what that cost.
    */
   fields: BrokerField[] | null;
+  /** Where the key comes from, as the same answer gave it. Null beside a null `fields`. */
+  guide: KeyGuide | null;
   /** Ask the app what it needs, which is the first press on a `fields` app. */
   requestFields: () => void;
   /**
@@ -539,7 +533,7 @@ export function useBrokeredAccount(input: {
    * list away, which a `??` could not. A REFUSAL leaves the list alone, because a refusal is not an
    * answer about the app; what the dialog does about it is decided where the dialog is drawn.
    */
-  const [published, setPublished] = useState<BrokerField[] | null>(null);
+  const [published, setPublished] = useState<KeyForm | null>(null);
   if (fieldsRequest.isSuccess && fieldsRequest.data !== published) {
     setPublished(fieldsRequest.data);
   }
@@ -727,7 +721,8 @@ export function useBrokeredAccount(input: {
      */
     disconnected: disconnect.isSuccess,
     kind: kindOf(authScheme),
-    fields: published,
+    fields: published?.fields ?? null,
+    guide: published?.guide ?? null,
     requestFields: () => {
       report(null);
       /*
@@ -912,7 +907,7 @@ function accountSentence(input: {
      * way this app is connected, and a row that replaced the whole line took it away with the trip
      * it was right to drop.
      */
-    const asked = `${title.charAt(0).toUpperCase()}${title.slice(1)} connects with a key you already have. Connect asks for it.`;
+    const asked = `Needs a key from ${title}. Connect shows where to get one.`;
     return disconnectedReassurance
       ? `${asked} ${disconnectedReassurance}`
       : asked;
@@ -926,6 +921,41 @@ function accountSentence(input: {
   return account.connected
     ? `Signed in with ${title}${identity ? ` as ${identity}` : ""}. ${connectedDescription}`
     : disconnectedDescription;
+}
+
+/**
+ * Above the form: why this app asks for a key, what to do at the provider, and a link to its page.
+ *
+ * Most apps in the directory have no sign-in, and a person who pressed Connect expecting one meets
+ * a form. This is what tells them that is expected and where the key comes from, before the boxes.
+ */
+function KeyGuideNote({
+  guide,
+  title,
+}: {
+  guide: KeyGuide | null;
+  title: string;
+}) {
+  return (
+    <div className="mb-3 flex flex-col gap-1.5 text-sm" data-testid="key-guide">
+      <p>
+        {title} doesn't offer a sign-in here, so it connects with a key from
+        your {title} account.
+      </p>
+      {guide ? <p className="text-muted-foreground">{guide.steps}</p> : null}
+      {guide?.url ? (
+        <a
+          className="inline-flex items-center gap-1 self-start font-medium underline underline-offset-4"
+          href={guide.url}
+          rel="noopener noreferrer"
+          target="_blank"
+        >
+          Get a key from {title}
+          <IconArrowUpRight aria-hidden="true" className="size-3.5" />
+        </a>
+      ) : null}
+    </div>
+  );
 }
 
 /**
@@ -1210,7 +1240,8 @@ export function BrokeredAccountRow({
                 )}
               </>
             ) : (
-              /* The arrow says this leaves OpenBot for the vendor's consent page. It does. */
+              /* The arrow says this leaves OpenBot for the vendor's consent page. It does, for
+                 every app but a key app. */
               <Button
                 disabled={account.connecting}
                 onClick={() => {
@@ -1231,7 +1262,8 @@ export function BrokeredAccountRow({
                 variant="outline"
               >
                 Connect
-                <IconArrowUpRight />
+                {/* A key app opens a form here and leaves for nowhere, so no arrow. */}
+                {account.kind === "fields" ? null : <IconArrowUpRight />}
               </Button>
             )}
           </ItemActions>
@@ -1293,11 +1325,14 @@ export function BrokeredAccountRow({
                 {account.fieldsError}
               </p>
             ) : account.fields ? (
-              <ConnectionFields
-                busy={account.submittingFields}
-                fields={account.fields}
-                onSubmit={account.submitFields}
-              />
+              <>
+                <KeyGuideNote guide={account.guide} title={title} />
+                <ConnectionFields
+                  busy={account.submittingFields}
+                  fields={account.fields}
+                  onSubmit={account.submitFields}
+                />
+              </>
             ) : account.requestingFields ? (
               <p className="text-muted-foreground text-sm">
                 Checking what the app needs…

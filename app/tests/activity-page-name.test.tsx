@@ -12,11 +12,11 @@ import type { ComponentType } from "react";
 import { withoutOpenBotWorking } from "@/components/manage/audit-page";
 import { settingsSidebarItems } from "@/components/settings/settings-sidebar";
 import { agentKeys } from "@/lib/agents/queries";
-import { auditKeys } from "@/lib/audit/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { managePaths } from "@/lib/manage-paths";
 import { Route as AdminAuditRoute } from "@/routes/_authed/admin/audit";
 import { Route as ActivityRoute } from "@/routes/_authed/settings/_personal/activity";
+import { seedAuditPage } from "./seed-audit-page";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -45,8 +45,9 @@ async function renderAs(edition: "team" | "personal", Page: ComponentType) {
     edition,
   });
   // Activity asks without OpenBot's own working; Admin asks for everything.
-  queryClient.setQueryData(
-    [...auditKeys.all, edition === "personal" ? withoutOpenBotWorking("") : ""],
+  seedAuditPage(
+    queryClient,
+    edition === "personal" ? withoutOpenBotWorking("") : "",
     { events: [] },
   );
   queryClient.setQueryData(agentKeys.list(false), []);
