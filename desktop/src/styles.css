@@ -1568,7 +1568,7 @@ a:hover {
 
 /* Get troubleshooting logs, under a failure and in the Status window: one line, two buttons. */
 .troubleshooting {
-  margin-top: 12px;
+  margin-top: 16px;
 }
 
 .troubleshooting p {
