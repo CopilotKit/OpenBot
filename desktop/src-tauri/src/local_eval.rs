@@ -1166,16 +1166,16 @@ fn on_podman() -> bool {
 const GIB: u64 = 1024 * 1024 * 1024;
 
 /**
-The smallest engine OpenBot asks for before local setup: 6 CPUs, 8 GB of memory and 40 GiB of free
-disk.
+The smallest engine OpenBot lets through before local setup: 4 CPUs, 4 GiB of memory and 40 GiB of
+free disk.
 
-The CLI's own check wants 4 free CPUs and 4 GiB of free memory inside a container, measured while
-OpenBot's own containers run, so an engine of exactly that size fails it at Start. Memory is
-compared at 7 GiB, since an engine set to 8 GB reports a little under 8 GiB. Free disk is the CLI's
-own 40 GiB, measured as it measures it, inside a container.
+The CLI's own check wants 4 free CPUs and 4 GiB of free memory inside a container, so an engine
+below those totals can never pass it. Anything larger is left to the CLI at Start: OpenBot's own
+Podman machine is 4 CPUs and 6 GiB and passes there, so a stricter total here would stop every
+Podman install. Free disk is the CLI's own 40 GiB, measured as it measures it, inside a container.
 */
-pub const MIN_ENGINE_CPUS: u64 = 6;
-pub const MIN_ENGINE_MEMORY_BYTES: u64 = 7 * GIB;
+pub const MIN_ENGINE_CPUS: u64 = 4;
+pub const MIN_ENGINE_MEMORY_BYTES: u64 = 4 * GIB;
 pub const MIN_ENGINE_FREE_DISK_BYTES: u64 = 40 * GIB;
 
 /// What an engine of this size is short of for local setup. Free disk that could not be measured
@@ -6558,18 +6558,38 @@ fn main() {{
             .is_none());
     }
 
-    /// The onboarding check asks for 6 CPUs, 8 GB and 40 GiB of free disk, so an engine that would
-    /// fail the CLI's check at Start, with OpenBot's own containers running beside it, is caught
-    /// first. Free disk is measured as the CLI measures it, with `df -Pk /` in a container.
+    /// The onboarding check stops only an engine that can never pass the CLI's check at Start:
+    /// fewer than 4 CPUs, under 4 GiB of memory, or under 40 GiB of free disk. OpenBot's own
+    /// 4 CPU, 6 GiB Podman machine passes. Free disk is measured as the CLI measures it, with
+    /// `df -Pk /` in a container.
     #[test]
     fn a_small_or_full_engine_is_caught_before_local_setup() {
         const GB: u64 = 1_000_000_000;
         let roomy = Some(100 * GB);
         // `docker info --format '{{.NCPU}} {{.MemTotal}}'` on Docker Desktop.
         for (said, free, cpu, memory, disk) in [
+            // OpenBot's own Podman machine: 4 CPUs and 6144 MiB, as `podman info` reports it. The
+            // CLI's check passes on it, so this check must too.
+            (
+                "4 6262661120
+",
+                roomy,
+                false,
+                false,
+                false,
+            ),
             // 4 CPUs and 8 GB, as Docker Desktop reports an 8 GB limit.
             (
                 "4 8217473024
+",
+                roomy,
+                false,
+                false,
+                false,
+            ),
+            // Fewer than 4 CPUs can never leave the CLI 4 free ones.
+            (
+                "3 8217473024
 ",
                 roomy,
                 true,

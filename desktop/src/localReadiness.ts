@@ -195,7 +195,7 @@ export function resourcesShortSaid(shortfall: Shortfall): string {
 export function engineTooSmallSaid(shortfall: Shortfall): string {
   return shortfallSaid(
     shortfall,
-    { cpu: "6 CPUs", memory: "8 GB of memory", disk: "40 GB free" },
+    { cpu: "4 CPUs", memory: "4 GB of memory", disk: "40 GB free" },
     "Try again",
   );
 }
