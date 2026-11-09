@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 1.0.0
+
 **Before upgrading.** Two migrations run at start, and the database moves to
 `0085_approval_rule_account`. `0084_brokered_accounts` creates a new, empty `brokered_accounts`
 table, which fills as people open an app's page in Connections. `0085_approval_rule_account` adds
