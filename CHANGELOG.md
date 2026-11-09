@@ -10,6 +10,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **The window zooms, as a browser does.** The text was too small and nothing made it bigger.
+  Command (Ctrl on Windows) with + or = zooms in, with - zooms out, and with 0 goes back to actual
+  size, from 90% to 200%. On a Mac the View menu has Zoom In, Zoom Out and Actual Size. The level
+  applies to every window, from setup to OpenBot itself, and is kept for the next launch.
 - **Docker Desktop 29 pulls OpenBot's images from downloads.copilotkit.ai.** Its pulls there
   failed with 403 and went to GitHub, because the copy held only each image's Linux amd64 and arm64
   manifests, and Docker 29 also fetches the image's attestations and asks which artifacts refer to
