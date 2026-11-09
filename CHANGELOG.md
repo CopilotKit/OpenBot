@@ -45,6 +45,11 @@ deployment:
   to Gmail. Disconnect it first if you want to connect a different one." With several accounts the
   page lists each by its address, with **Make default** and a Disconnect that ends only that
   account. An app whose team account is shared still has one account.
+- **A Bot knows which apps it can use from its first message.** Its instructions name each app it
+  holds and where it stands for you, such as "Gmail (connected), Notion (needs connecting)", and tell
+  it to look an app's tools up rather than say it has no access. A new Bot holding Gmail you had
+  connected used to say it had no email connected until asked to check. It also says what it did in
+  plain words, such as "I checked your Gmail profile", where it named a tool like `GMAIL_GET_PROFILE`.
 - **A Bot can use the account a request is about.** It is told the addresses of your accounts at
   that app; with none named it uses your default, the first you connected until you pick another.
   A name that isn't one of your accounts is refused, and nothing is sent.

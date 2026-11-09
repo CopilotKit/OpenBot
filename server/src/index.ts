@@ -2175,6 +2175,18 @@ const actorAgentResolver = createActorAgentResolver({
       ),
       checkInScope,
     ),
+  /*
+   * Which apps each Bot can use for this person, by name and connection state, so a Bot holding
+   * Gmail the person connected says so from its first message instead of finding out by searching.
+   */
+  loadAppsForActor: (actorId) => (botId) =>
+    pluginStore.appAccessForBot({
+      userId: actorId,
+      agentId: botId,
+      composioConfigured: Boolean(composio),
+      ...(composio ? { directory: () => composio.broker.listApps() } : {}),
+      sharedAudience: sharedUseStore.admitsPerson,
+    }),
   signRunForActor,
   computerGuidance: config.computer ? computerGuidance : undefined,
   loadVendors,

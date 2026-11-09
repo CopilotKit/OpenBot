@@ -200,11 +200,16 @@ export type ComputerGuidance = typeof computerGuidance;
  * A search tool is the exception, and the line that says so is what lets one be used. Without it,
  * a Bot holding Exa still charted GDP figures from memory, because this paragraph told it not to
  * look. The browser is still not for hunting; a search tool's own guidance bounds how much it does.
+ *
+ * Citing is in words, not tool ids: a Bot answered "Confirmed via `GMAIL_GET_PROFILE`", which tells
+ * the person nothing and reads as a debug log.
  */
 const PROVENANCE_GUIDANCE_LINES = [
   "Say where an answer came from. When you read it with one of your tools, cite what you read.",
   "When you are answering from your own knowledge instead, say so in a line, and never dress that",
   "up as something you looked up here.",
+  "Say what you did in plain words, such as 'I checked your Gmail profile'. Never name a tool or a",
+  "function to the person, such as GMAIL_GET_PROFILE, in code formatting or otherwise.",
   "",
   "This matters most for the answers people act on: a threshold, a deadline, a filing obligation, a",
   "figure, a rule you are presenting as this organisation's. Never state one of those as established",

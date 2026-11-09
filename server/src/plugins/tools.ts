@@ -11,6 +11,7 @@ import { ApprovalRefusedError } from "../approvals/types";
 import type { AuditInitiator } from "../audit";
 import { markUntrusted } from "../untrusted-content";
 import { withAccountArgument } from "./account-argument";
+import type { AppAccess, AppAccessState } from "./app-access";
 import {
   type CatalogueEntry,
   catalogueEntry,
@@ -115,6 +116,11 @@ export function grantedToolGuidance(
    * hundreds of tools for.
    */
   waiting: ReadonlySet<string> = new Set(),
+  /**
+   * The apps this Bot holds, as they stand for the person this run is for (`appAccessForBot`).
+   * Absent where nobody asked, which says nothing about apps; empty says the Bot has none.
+   */
+  apps?: readonly BotApp[],
 ): string {
   /*
    * THE CARD TOOL IS NOT A SYSTEM. It is offered to every Bot so a missing app can be put in front of
@@ -124,8 +130,16 @@ export function grantedToolGuidance(
    */
   const showsCards = tools.some((tool) => tool.name === SHOW_APP_ACCESS_TOOL);
   const reaching = tools.filter((tool) => tool.name !== SHOW_APP_ACCESS_TOOL);
-  if (reaching.length === 0 && connectedButNotHeld.length === 0 && !showsCards)
+  if (
+    reaching.length === 0 &&
+    connectedButNotHeld.length === 0 &&
+    !showsCards &&
+    apps === undefined
+  )
     return "";
+  // A system is named by its app's own name where it is known: "Gmail", not `composio-gmail`.
+  const nameOf = new Map(apps?.map((app) => [app.key, app.displayName]));
+  const named = (system: string) => nameOf.get(system) ?? system;
 
   const bySystem = new Map<string, string[]>();
   const waitingBySystem = new Map<string, number>();
@@ -148,6 +162,8 @@ export function grantedToolGuidance(
   const research = researchProviders(reaching);
 
   return [
+    ...appsGuidance(apps, waiting.size > 0, showsCards),
+    ...(apps !== undefined && reaching.length > 0 ? [""] : []),
     ...(reaching.length > 0
       ? [
           "You can reach these systems directly, as the person asking, with their own access:",
@@ -155,9 +171,9 @@ export function grantedToolGuidance(
       : []),
     ...[...bySystem.entries()].map(([system, names]) => {
       const more = waitingBySystem.get(system) ?? 0;
-      if (more === 0) return `- ${system}: ${names.join(", ")}`;
+      if (more === 0) return `- ${named(system)}: ${names.join(", ")}`;
       const found = `${more} ${names.length > 0 ? "more " : ""}tools you find with ${SEARCH_TOOLS}`;
-      return `- ${system}: ${[...names, found].join(", ")}`;
+      return `- ${named(system)}: ${[...names, found].join(", ")}`;
     }),
     ...(waiting.size > 0
       ? [
@@ -192,7 +208,7 @@ export function grantedToolGuidance(
     ...(missing.length > 0
       ? [
           ...(reaching.length > 0 ? [""] : []),
-          `This deployment also connects to: ${missing.join(", ")}. You hold none of their tools.`,
+          `This deployment also connects to: ${missing.map(named).join(", ")}. You hold none of their tools.`,
           ...(showsCards
             ? [
                 `If a question needs one of them, call ${SHOW_APP_ACCESS_TOOL} with its name: that puts a card in`,
@@ -216,13 +232,86 @@ export function grantedToolGuidance(
      */
     ...(showsCards
       ? [
-          ...(reaching.length > 0 || missing.length > 0 ? [""] : []),
-          `If the person needs a work app that is not named here at all (Gmail, Slack, Salesforce), call`,
+          ...(reaching.length > 0 || missing.length > 0 || apps?.length
+            ? [""]
+            : []),
+          `If the person needs a work app that is not named here at all${notNamedExamples(apps)}, call`,
           `${SHOW_APP_ACCESS_TOOL} with its name before saying you cannot reach it: the card tells them whether it`,
           "can be switched on and lets them ask an administrator. Do not browse to its website instead.",
         ]
       : []),
   ].join("\n");
+}
+
+/** One app a Bot holds, as it stands for one person. */
+export type BotApp = Pick<
+  AppAccess,
+  "key" | "displayName" | "state" | "account"
+>;
+
+/** How each state is said beside an app's name. "ready" is said "connected" where an account is. */
+const APP_STANDING: Record<AppAccessState, string> = {
+  ready: "connected",
+  not_connected: "needs connecting",
+  reconnect: "needs reconnecting",
+  shared_not_connected: "waiting for an administrator to connect it",
+  shared_not_approved:
+    "waiting for an administrator to approve it for this Bot",
+  disabled: "switched off",
+  not_granted: "not given to you",
+  owner_grantable: "not given to you",
+};
+
+/**
+ * Which apps this Bot can use for this person, said by name before anything else about its tools.
+ *
+ * FOUND IN 1.0.0-rc.1. A new Bot holding Gmail, which the person had connected, told them it had no
+ * email connected and offered to "check" their inbox; asked to check, it searched, found Gmail's
+ * tools and said Gmail was connected and working. Its instructions named the app only by its server
+ * id (`composio-gmail`), said nothing about whether the person had connected it, and ended by
+ * giving Gmail as the example of an app "not named here at all". With an app's tools waiting
+ * behind {@link SEARCH_TOOLS}, nothing in front of the model said Gmail at all.
+ *
+ * One line, named and not listed by tool, so it costs a few tokens however many tools an app has.
+ */
+function appsGuidance(
+  apps: readonly BotApp[] | undefined,
+  searching: boolean,
+  showsCards: boolean,
+): string[] {
+  if (apps === undefined) return [];
+  if (apps.length === 0)
+    return ["You have no apps turned on for the person you are working with."];
+  const standing = (app: BotApp) =>
+    app.state === "ready" && app.account === "deployment"
+      ? "ready"
+      : APP_STANDING[app.state];
+  const unconnected = apps.some(
+    (app) => app.state === "not_connected" || app.state === "reconnect",
+  );
+  return [
+    `You can use these apps for the person you are working with: ${apps
+      .map((app) => `${app.displayName} (${standing(app)})`)
+      .join(", ")}.`,
+    `When a request involves one of them, use its tools${searching ? `, finding them with ${SEARCH_TOOLS} when they are not in front of you` : ""}.`,
+    "Never tell the person you have no access to an app named here as connected or ready, and do not",
+    "offer to check it: check it.",
+    ...(unconnected && showsCards
+      ? [
+          `For one that needs connecting or reconnecting, call ${SHOW_APP_ACCESS_TOOL} with its name: the card`,
+          "in front of the person offers Connect.",
+        ]
+      : []),
+  ];
+}
+
+/** The examples of an app this Bot was not given, leaving out any it holds. */
+function notNamedExamples(apps: readonly BotApp[] | undefined): string {
+  const held = new Set(apps?.map((app) => app.displayName.toLowerCase()));
+  const examples = ["Gmail", "Slack", "Salesforce"].filter(
+    (name) => !held.has(name.toLowerCase()),
+  );
+  return examples.length > 0 ? ` (${examples.join(", ")})` : "";
 }
 
 type ResearchProvider = {
