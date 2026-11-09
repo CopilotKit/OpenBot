@@ -28,6 +28,7 @@ import {
   challengeFor,
   connectedAccountsUrlFor,
   createVerifier,
+  desktopReturnUrlFor,
   redirectUriFor,
   sealConnectState,
 } from "../oauth";
@@ -862,6 +863,7 @@ export function mountConnectionRoutes({
         serverId,
         returnTo,
         `Couldn't start connecting ${row.title}. Try again, or ask an admin if it keeps happening.`,
+        context.req.query("from") === "desktop",
       );
       if ("refusal" in back) {
         return context.json({ error: back.refusal.error }, back.refusal.status);
@@ -1639,16 +1641,25 @@ export function mountConnectionRoutes({
     },
   );
 
+  /*
+   * `fromDesktop` is the press's own `?from=desktop`: the sign-in was started in OpenBot Desktop's
+   * window and runs in the person's browser, so it comes back to the page that hands them back to the
+   * window ({@link desktopReturnUrlFor}). Anybody can send it, and all it changes is which of this
+   * OpenBot's own pages the browser lands on.
+   */
   const consentReturnUrl = (
     appUrl: string,
     serverId: string,
     returnTo: ConnectOrigin,
     refused: string,
+    fromDesktop: boolean,
   ): { returnUrl: string } | { refusal: ReturnType<typeof personRefusal> } => {
     try {
       return {
         returnUrl: brokerReturnUrl(
-          connectedAccountsUrlFor(appUrl, { serverId }, returnTo),
+          fromDesktop
+            ? desktopReturnUrlFor(appUrl, serverId)
+            : connectedAccountsUrlFor(appUrl, { serverId }, returnTo),
           activeProvider,
         ),
       };
@@ -2093,6 +2104,7 @@ export function mountConnectionRoutes({
       serverId,
       returnTo,
       "Couldn't build the address to bring you back to, so nothing was started.",
+      context.req.query("from") === "desktop",
     );
     if ("refusal" in back) {
       return context.json({ error: back.refusal.error }, back.refusal.status);

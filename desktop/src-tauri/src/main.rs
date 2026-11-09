@@ -2648,6 +2648,8 @@ async fn start_stack_now<R: tauri::Runtime>(
     // Setup is done once OpenBot starts: the window hands over to it at once. Recorded once.
     if started.is_ok() {
         desktop_telemetry::record(&menus, telemetry::EventData::Activated);
+        // Attribution after Start, in the background: OpenBot is already open.
+        desktop_telemetry::link_account_after_start(&menus);
     }
     started
 }
@@ -2963,6 +2965,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
                 secrets.insert(key.into(), value.clone());
             }
         }
+        // The identity as it stands: Start never waits for `telemetry link`, which runs after it.
         // Handed to Compose with the rest; a service receives only what the Compose file names.
         secrets.extend(desktop_telemetry::runtime_env(&app));
         // After the credential store has been written, so the token never is. See where it is
@@ -4316,7 +4319,17 @@ fn show_openbot_on<R: tauri::Runtime>(
     refresh_menus(&app);
     // Only the owned app itself.
     trust_owned_app(&app, &url);
-    let destination = url;
+    // A debug build may show a developer's own app in its place, on this installation's back end.
+    let destination = match dev_app_url() {
+        Some(dev) => {
+            trust_owned_app(&app, &dev);
+            log::info!(
+                "[show] showing the developer's app at {dev} in place of the installation's"
+            );
+            dev
+        }
+        None => url,
+    };
     log::info!("[show] navigating to the owned OpenBot app");
     let window = app
         .get_webview_window("main")
@@ -4528,6 +4541,18 @@ link in the booking calendar's frame, which the page's shim can't reach) opens i
 browser for a site outside OpenBot, and nowhere otherwise. Without one, macOS opened nothing and
 Windows opened a bare browser window of its own. The configuration says `"create": false`.
 */
+/**
+Where the main window's buttons sit on macOS: 20pt in from the left, and low enough that their middle
+lines up with the first row of OpenBot's sidebar header (its name and +), which the page
+moves right to clear them (app/src/styles.css, `data-desktop-titlebar`).
+
+Set on the builder, not per page, because tao keeps it and puts the buttons back after anything that
+moves them (a resize, leaving full screen), and Tauri 2.12 can't change it after the window exists.
+So the setup screens have the buttons here too, where nothing of theirs is near them.
+*/
+#[cfg(target_os = "macos")]
+const TRAFFIC_LIGHTS: tauri::LogicalPosition<f64> = tauri::LogicalPosition { x: 20.0, y: 35.0 };
+
 fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
     let Some(config) = app
         .config()
@@ -4540,7 +4565,12 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
         return Ok(());
     };
     let opener = app.clone();
-    let window = tauri::WebviewWindowBuilder::from_config(app, &config)?
+    let builder = tauri::WebviewWindowBuilder::from_config(app, &config)?;
+    // The window's buttons on the same row as the OpenBot name and + in the sidebar's header, rather
+    // than above them (`TRAFFIC_LIGHTS`, and the page's styles that make room beside them).
+    #[cfg(target_os = "macos")]
+    let builder = builder.traffic_light_position(TRAFFIC_LIGHTS);
+    let window = builder
         .on_new_window(move |destination, _features| {
             outside_links::new_window(&destination, |to| {
                 use tauri_plugin_opener::OpenerExt;
@@ -5877,6 +5907,40 @@ fn desktop_test_app_url() -> Option<String> {
     None
 }
 
+/// An OpenBot app a developer runs from source (`OPENBOT_DEV_APP_URL`, such as `cd app && SERVER_PORT=3001 bun run dev
+/// --port 3030`, whose `/api` goes to this installation's server), shown in place of the installation's own once it has
+/// started, so a change to the app shows in the real window as it is saved. Unlike `OPENBOT_DESKTOP_TEST_APP_URL` it
+/// waits for the installation: setup and Start run as they always do. Debug builds only: a release binary never reads
+/// the variable.
+///
+/// `localhost` is read as `127.0.0.1`. Only a loopback IP is trusted as OpenBot's own page
+/// (`intelligence_bridge::app_origin`), so at `localhost` the window drew the system's title bar over a page that never
+/// made room for the buttons.
+#[cfg(debug_assertions)]
+fn dev_app_url() -> Option<String> {
+    let address = std::env::var("OPENBOT_DEV_APP_URL")
+        .ok()
+        .filter(|url| !url.is_empty())?;
+    Some(loopback_ip(&address))
+}
+
+#[cfg(not(debug_assertions))]
+fn dev_app_url() -> Option<String> {
+    None
+}
+
+/// `address` with a `localhost` host written as `127.0.0.1`, and unchanged otherwise.
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+fn loopback_ip(address: &str) -> String {
+    match tauri::Url::parse(address) {
+        Ok(mut url) if url.host_str() == Some("localhost") => {
+            let _ = url.set_host(Some("127.0.0.1"));
+            url.into()
+        }
+        _ => address.to_owned(),
+    }
+}
+
 /// Trust `address` as this shell's OpenBot and show it, the way `show_openbot` shows a verified one.
 fn show_test_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>, address: &str) {
     let (Some(window), Ok(url)) = (
@@ -6463,12 +6527,13 @@ async fn sign_in_to_copilotkit(
     attempt: String,
 ) -> Result<local_eval::AccountSignIn, local_eval::Failure> {
     let root = selected_root_or_default(&app);
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         know_cli_engine(&root);
         local_eval::account_sign_in_installed(&attempt)
     })
     .await
-    .map_err(|_| local_eval::Failure::Spawn)?
+    .map_err(|_| local_eval::Failure::Spawn)?;
+    desktop_telemetry::finish_sign_in(&app, result)
 }
 
 /// The approval page and code `sign_in_to_copilotkit`'s `attempt` is waiting on, once the CLI has
@@ -6492,7 +6557,7 @@ async fn local_eval_terms(
     attempt: String,
 ) -> Result<local_eval::Terms, local_eval::Failure> {
     let root = selected_root_or_default(&app);
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         // The CLI checks its engine before it answers. See `know_cli_engine`.
         know_cli_engine(&root);
         // An engine too small for local setup is said here, before Start fails on it.
@@ -6502,7 +6567,8 @@ async fn local_eval_terms(
         local_eval::terms_installed(&attempt)
     })
     .await
-    .map_err(|_| local_eval::Failure::Spawn)?
+    .map_err(|_| local_eval::Failure::Spawn)?;
+    desktop_telemetry::finish_account_check(&app, result)
 }
 
 /// The folder this window is installing into, or the default one.
@@ -6520,14 +6586,19 @@ Only adds a key, and never fails the sign-in: the window offers Continue without
 Start tries again. `attempt` lets `cancel_local_eval` stop the CLI call.
 */
 #[tauri::command]
-async fn connect_copilotkit_apps(attempt: String, root: String) -> Result<(), Problem> {
+async fn connect_copilotkit_apps<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    attempt: String,
+    root: String,
+) -> Result<(), Problem> {
     let root = stack::root_from(&root);
     if !root.is_absolute() {
         return Err(apps_unavailable());
     }
-    tauri::async_runtime::spawn_blocking(move || connect_apps(&root, &attempt))
+    let result = tauri::async_runtime::spawn_blocking(move || connect_apps(&root, &attempt))
         .await
-        .map_err(|_| apps_unavailable())?
+        .map_err(|_| apps_unavailable())?;
+    desktop_telemetry::finish_account_setup(&app, result)
 }
 
 /// Ask CopilotKit for this installation's Composio project through the CLI, and keep its key.
@@ -12316,6 +12387,22 @@ mod tests {
         assert_eq!(window.label(), "main");
     }
 
+    /// The developer's app is trusted only at a loopback IP, so `localhost` is read as `127.0.0.1`.
+    #[test]
+    fn the_developers_app_at_localhost_is_shown_at_127_0_0_1() {
+        assert_eq!(
+            loopback_ip("http://localhost:3030"),
+            "http://127.0.0.1:3030/"
+        );
+        assert_eq!(
+            loopback_ip("http://127.0.0.1:3030"),
+            "http://127.0.0.1:3030"
+        );
+        assert_eq!(loopback_ip("http://[::1]:3030"), "http://[::1]:3030");
+        assert!(intelligence_bridge::app_origin(&loopback_ip("http://localhost:3030")).is_some());
+        assert!(intelligence_bridge::app_origin("http://localhost:3030").is_none());
+    }
+
     #[test]
     fn about_openbot_names_the_commit_branch_and_build_time() {
         assert_eq!(utc_minute(0), "1970-01-01 00:00 UTC");
@@ -15227,6 +15314,83 @@ fn main() {
         );
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
+    }
+
+    /// Start never waits for account attribution. A CLI that takes longer than the handshake's
+    /// eight-second budget to answer `telemetry link` must not show in how long Start takes: the
+    /// runtime is handed the identity as it stands, and the link runs after Start, in the
+    /// background.
+    #[test]
+    fn start_does_not_wait_for_a_slow_telemetry_link() {
+        if crate::test_support::isolated_process(
+            "tests::start_does_not_wait_for_a_slow_telemetry_link",
+        ) {
+            return;
+        }
+        std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
+        std::env::remove_var("DO_NOT_TRACK");
+        let cli = desktop_telemetry::fake_cli::FakeCli::pinned("openbot-slow-link-cli", true);
+        let root = temp_root("openbot-slow-link-start");
+        write_installed_deployment(&root);
+        remember_local_intelligence_key(&root);
+        let record = temp_root("openbot-slow-link-record").join("commands.log");
+        std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
+        let _path = SerializedPath::set_only_with("docker", "dead-service");
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .manage(desktop_telemetry::DesktopTelemetry::for_tests(
+                temp_root("openbot-slow-link-telemetry"),
+                true,
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+
+        let asked = std::time::Instant::now();
+        let problem = tauri::async_runtime::block_on(start_stack_inner(
+            app.handle().clone(),
+            root.clone(),
+            "https://intelligence.example.test".into(),
+            "wss://gateway.example.test".into(),
+            ChosenModel {
+                provider: "openai".into(),
+                login: "api-key".into(),
+                api_key: Some("synthetic-openai-key".into()),
+                base_url: None,
+                container_base_url: None,
+                model: None,
+                token: None,
+                saved: Some(false),
+            },
+            None,
+        ))
+        .expect_err("the fixture's dead service fails Start after the identity handoff");
+        let took = asked.elapsed();
+
+        assert_eq!(problem.said, "Part of OpenBot stopped during startup.");
+        let commands = std::fs::read_to_string(&record).expect("command record");
+        assert!(
+            commands.contains(
+                "\tcompose up -d --no-build --pull never postgres agent-computer server worker\n"
+            ),
+            "Start reached the runtime handoff: {commands}"
+        );
+        // Not on Start's path at all: when Start returns, the link has not been asked for. (Before,
+        // Start ran it and joined it, so the call was there and Start took its 8-second budget.)
+        // How long Start itself takes depends on the platform's fake engine, so that is bounded
+        // only by the fake CLI's own 30 seconds.
+        assert_eq!(
+            cli.calls(),
+            "",
+            "Start ran `telemetry link` and waited {took:?} for it"
+        );
+        assert!(
+            took < std::time::Duration::from_secs(30),
+            "Start waited {took:?} on a slow telemetry link"
+        );
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
+        let _ = std::fs::remove_dir_all(&cli.dir);
     }
 
     /// The personal edition raises no bundled Bot, so one an earlier Start left exited is neither
