@@ -120,6 +120,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   other, and values landed in the wrong field. A LangGraph Bot now runs its browser calls in the
   order the model made them. An action that never finishes gives way to the next after
   `BROWSER_TURN_LIMIT_MS` (50 seconds by default), and one stopped while it waits never runs.
+- **The words that say a Bot is working pulse slowly instead of flashing.** "Thinking", a running
+  step such as "Drew an interface" and "Asking Ana…" now fade gently to a little over half strength
+  and back every 2.4 seconds, where a quick band used to flicker across them. With reduced motion
+  turned on they stay still.
 
 ### Smaller changes
 
