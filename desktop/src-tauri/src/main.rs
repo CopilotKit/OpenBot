@@ -5553,20 +5553,38 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
         Some(running) => {
             let program =
                 engine::program(running).unwrap_or_else(|| PathBuf::from(running.binary()));
-            troubleshooting::engine_commands(running.binary() == "podman")
-                .into_iter()
-                .map(|arguments| {
-                    let mut command = quiet::command(&program);
-                    command.args(&arguments);
-                    if let Some(path) = engine::path_with_docker() {
-                        command.env("PATH", path);
-                    }
-                    (
-                        format!("{} {}", running.binary(), arguments.join(" ")),
-                        troubleshooting::run_bounded(command, troubleshooting::ENGINE_TIMEOUT),
-                    )
-                })
-                .collect()
+            let run = |arguments: &[String]| {
+                let mut command = quiet::command(&program);
+                command.args(arguments);
+                if let Some(path) = engine::path_with_docker() {
+                    command.env("PATH", path);
+                }
+                (
+                    format!("{} {}", running.binary(), arguments.join(" ")),
+                    troubleshooting::run_bounded(command, troubleshooting::ENGINE_TIMEOUT),
+                )
+            };
+            let mut said: Vec<(String, String)> =
+                troubleshooting::engine_commands(running.binary() == "podman")
+                    .into_iter()
+                    .map(|arguments| {
+                        run(&arguments
+                            .iter()
+                            .map(|argument| (*argument).to_owned())
+                            .collect::<Vec<_>>())
+                    })
+                    .collect();
+            // Free space on the engine's own disk, as `df` sees it from inside a container started
+            // from an image already here. Left unmeasured when there is none.
+            let (_, images) = run(&[
+                "images".to_owned(),
+                "--format".to_owned(),
+                "{{.Repository}}:{{.Tag}}".to_owned(),
+            ]);
+            if let Some(image) = troubleshooting::probe_image(&images) {
+                said.push(run(&troubleshooting::disk_probe_arguments(&image)));
+            }
+            said
         }
         None => Vec::new(),
     };
