@@ -260,10 +260,15 @@ function showsDownload({ bytes, size, total }: Downloads): boolean {
 /**
  * The bytes downloaded out of the whole download, with a bar driven by the bytes. Until the size
  * is known the line says so and the bar is indeterminate: it claims no fraction it cannot know.
+ *
+ * Once every byte is in and items are still being unpacked, the bar is indeterminate again. A full
+ * bar beside "1 of 5 items remaining" read as nothing left to do while the last image was still
+ * being unpacked and tagged.
  */
 function DownloadProgress({ downloads }: { downloads: Downloads }) {
   const summary = downloadSummary(downloads);
-  const known = downloads.size != null && downloads.size > 0;
+  const known =
+    downloads.size != null && downloads.size > 0 && !unpacking(downloads);
   return (
     <div className="downloads">
       {known ? (
@@ -281,13 +286,32 @@ function DownloadProgress({ downloads }: { downloads: Downloads }) {
   );
 }
 
-/** "1.2 GB of 3.4 GB · 1 of 5 items remaining", or what is known of it. */
-export function downloadSummary({
-  bytes,
-  size,
-  done,
-  total,
-}: Downloads): string {
+/**
+ * Every byte is in, and some items are still being unpacked, imported or tagged. That brings no
+ * more bytes, so the bytes alone would say the step is done.
+ */
+function unpacking({ bytes, size, done, total }: Downloads): boolean {
+  return (
+    size != null &&
+    size > 0 &&
+    bytes >= size &&
+    total != null &&
+    (done ?? 0) < total
+  );
+}
+
+/**
+ * "1.2 GB of 3.4 GB · 1 of 5 items remaining", or what is known of it. Once every byte is in:
+ * "3.4 GB downloaded · Unpacking the last item".
+ */
+export function downloadSummary(downloads: Downloads): string {
+  const { bytes, size, done, total } = downloads;
+  if (unpacking(downloads)) {
+    const remaining = (total ?? 0) - (done ?? 0);
+    return `${formatDownloadBytes(bytes)} downloaded · Unpacking ${
+      remaining === 1 ? "the last item" : `the last ${remaining} items`
+    }`;
+  }
   const parts: string[] = [];
   if (size != null) {
     if (size > 0)

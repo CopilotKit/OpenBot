@@ -315,6 +315,18 @@ test("arriving without a step writes the first one into the address, in place", 
   expect(view.history.length).toBe(1);
 });
 
+// "Hand work to Bots" was read with "Hand" as a noun. "Give" can only be the verb.
+test("Welcome says to give work to Bots in plain words", async () => {
+  const view = open("/onboarding?step=welcome");
+  await heading(view, "Welcome to OpenBot");
+  expect(
+    view.getByText(
+      "Give work to Bots in plain words. They tell you when it's done.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText(/Hand work to Bots/)).toBeNull();
+});
+
 test("Continue adds a step to the address and to history, and saves it", async () => {
   const view = open("/onboarding?step=welcome");
   await heading(view, "Welcome to OpenBot");
