@@ -71,7 +71,7 @@ describe("headless components mirror the compiled gallery", () => {
       );
       expect(mirror?.title).toBe(entry.title);
       // The words a catalogue row nobody edited is kept up to date with. See `followBuild`.
-      expect(mirror?.description).toBe(entry.description);
+      expect(mirror?.buildDescription).toBe(entry.description);
       expect(z.toJSONSchema(mirror?.parameters as z.ZodType)).toEqual(
         z.toJSONSchema(entry.parameters as z.ZodType),
       );

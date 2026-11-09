@@ -169,7 +169,7 @@ describe("a build announcing what it can draw", () => {
     expect(followed).toHaveLength(1);
     expect(
       followed[0]?.find((spec) => spec.name === "showNotice")?.description,
-    ).toBe(notice?.description);
+    ).toBe(notice?.buildDescription);
     expect(
       followed.flat().some((spec) => spec.description.includes("Ignore")),
     ).toBeFalse();

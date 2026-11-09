@@ -192,7 +192,13 @@ export function createComponentRoutes(
     }
     // A description nobody here had edited, brought up to this server's own copy of the build's.
     // Only rows this call changed are named, so two page loads at once write one row each.
-    for (const name of await store.followBuild(HEADLESS_COMPONENTS)) {
+    for (const name of await store.followBuild(
+      HEADLESS_COMPONENTS.map(({ name, title, buildDescription }) => ({
+        name,
+        title,
+        description: buildDescription,
+      })),
+    )) {
       await audit(
         context,
         "component.description_updated",
