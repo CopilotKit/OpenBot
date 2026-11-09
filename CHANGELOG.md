@@ -160,6 +160,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   first screen, below the form, one line each with its logo, Claude Agent SDK, LangChain, Google ADK
   and AWS Strands first. Choosing one goes straight to its address, and Back returns to the list.
   They were behind a Connect a custom agent button.
+- In an 800px-tall window, OpenBot Desktop's usual height on a Mac, New Bot's first screen shows all
+  four of those frameworks above Cancel and Create Bot before you scroll, where only Claude Agent
+  SDK did.
 - LangChain is called **LangChain**, with LangChain's own mark, where it said "LangChain
   (LangGraph)": in New Bot, a Bot's "Powered by" subtitle and its Runs on row, and OpenBot Desktop's
   note under a ChatGPT plan.
