@@ -321,7 +321,7 @@ test("a subtitle stored under LangChain's earlier name is told to the Bot as Lan
     title: "Everyday life. Powered by LangChain (LangGraph).",
     roleDescription: "Help with everyday errands.",
   });
-  if (!bot || bot.type === "built_in") throw new Error("the Bot did not parse");
+  if (bot?.type !== "remote_ag_ui") throw new Error("the Bot did not parse");
   expect(bot.standingMessage.content).toContain(
     "Everyday life. Powered by LangChain.",
   );
