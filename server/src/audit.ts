@@ -386,6 +386,17 @@ export const auditEventTypes = [
    */
   "computer.policy_changed",
   /**
+   * An admin described a boundary in English and the deployment's model wrote it as a rule.
+   *
+   * Nothing changed: the rule is a draft until the admin saves it, and the save is its own row. This
+   * one answers "who asked for this rule, in what words, and what came back", including a rule that
+   * never compiled and a request no model was set up to answer. Target `policy`; payload `actor`,
+   * `text` (the admin's words), `outcome` (`written`, `did_not_compile`, `no_model` or
+   * `model_failed`), and when a rule came back `rule`, `effect`, `explanation`, `warning`,
+   * `compiled`, `attempts` and, for one that did not compile, `error`.
+   */
+  "computer.policy_translated",
+  /**
    * Whether this deployment gives each Bot a computer of its own, said out loud at boot.
    *
    * Without a supervisor every Bot shares one browser, which is a legitimate way to run on a laptop

@@ -78,6 +78,31 @@ export function ruleLabel(policy: ActionPolicy, rule: string): RuleLabel {
   return { name: "Custom rule", description: "" };
 }
 
+/**
+ * The policy with one rule rewritten in place, keeping its position and taking its name with it.
+ *
+ * A template's rule has no stored label, only the template's own, so that one is stored under the
+ * new text: edited, it no longer matches the template, and would otherwise read as "Custom rule".
+ */
+export function withRuleReplaced(
+  policy: ActionPolicy,
+  rule: string,
+  next: string,
+): ActionPolicy {
+  const { [rule]: own, ...labels } = policy.labels ?? {};
+  const template = RULE_TEMPLATES.find((one) => one.rule === rule);
+  const label =
+    own ??
+    (template
+      ? { name: template.name, description: template.description }
+      : undefined);
+  return {
+    ...policy,
+    deny: policy.deny.map((one) => (one === rule ? next : one)),
+    labels: label ? { ...labels, [next]: label } : labels,
+  };
+}
+
 /** The policy without one rule, and without that rule's label. */
 export function withoutRule(policy: ActionPolicy, rule: string): ActionPolicy {
   const { [rule]: _removed, ...labels } = policy.labels ?? {};

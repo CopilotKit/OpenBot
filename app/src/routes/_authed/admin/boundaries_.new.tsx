@@ -1,14 +1,23 @@
-import { IconCheck, IconCode, IconShieldX } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconCode,
+  IconShieldX,
+  IconSparkles,
+} from "@tabler/icons-react";
 import {
   keepPreviousData,
-  type UseQueryResult,
   useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { DryRunChanges } from "@/components/boundaries/dry-run-changes";
+import {
+  DescribeRule,
+  type WrittenRule,
+} from "@/components/boundaries/describe-rule";
+import { RulePreview } from "@/components/boundaries/rule-preview";
+import { RuleReading } from "@/components/boundaries/rule-reading";
 import {
   PageCard,
   PageRows,
@@ -43,7 +52,6 @@ import { saveActionPolicyMutationOptions } from "@/lib/computers/mutations";
 import {
   type ActionPolicy,
   actionPolicyQueryOptions,
-  type DryRunReport,
   policyDryRunQueryOptions,
 } from "@/lib/computers/queries";
 
@@ -59,29 +67,44 @@ const BACK = {
 /** How long the rule has to rest before it is replayed, so typing it is not a request per keystroke. */
 const PREVIEW_DELAY_MS = 400;
 
+type Start = RuleTemplate | "describe" | "custom";
+
 /**
- * Adding a rule: pick a template or write one, see what it would have stopped, then add it.
+ * Adding a rule: describe it, pick a template or write one, see what it would have stopped, then
+ * add it.
  *
  * A template fills the form rather than adding itself, so its name, its cost and the rule it is
- * made of are all read before it applies to every Bot. What the rule would have stopped is worked
- * out as it is written, over a Bot's computer actions and its app calls alike, so its reach is on
- * screen before Add rule rather than behind a button somebody may never press.
+ * made of are all read before it applies to every Bot. A description does the same: the model's rule
+ * lands in the CEL field beside an independent reading of it, and only Add rule saves it. What the
+ * rule would have stopped is worked out as it is written, over a Bot's computer actions and its app
+ * calls alike, so its reach is on screen before Add rule rather than behind a button somebody may
+ * never press.
  */
 function NewRulePage() {
   const navigate = Route.useNavigate();
   const queryClient = useQueryClient();
   const stored = useQuery(actionPolicyQueryOptions());
   const savePolicy = useMutation(saveActionPolicyMutationOptions(queryClient));
-  const [chosen, setChosen] = useState<RuleTemplate | "custom" | null>(null);
+  const [chosen, setChosen] = useState<Start | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [rule, setRule] = useState("");
+  const [written, setWritten] = useState<WrittenRule | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
   const policy = stored.data;
   const trimmed = rule.trim();
   const duplicate = Boolean(policy?.deny.includes(trimmed));
-  const ready = Boolean(policy && name.trim() && trimmed && !duplicate);
+  /*
+   * The model's rule, unedited, that the compiler refused. Its error is already under the rule, from
+   * the writing, so it is neither replayed nor offered to Add rule.
+   */
+  const broken = Boolean(
+    written && !written.compile.ok && written.rule.trim() === trimmed,
+  );
+  const ready = Boolean(
+    policy && name.trim() && trimmed && !duplicate && !broken,
+  );
 
   /*
    * The rule as it stood a moment ago, debounced as People's search is. A template's rule arrives
@@ -104,7 +127,7 @@ function NewRulePage() {
    * labels are left out too: nothing evaluates them, and a renamed rule needs no new answer.
    */
   const candidate: ActionPolicy | null =
-    policy && settled && !policy.deny.includes(settled)
+    policy && settled && !policy.deny.includes(settled) && !broken
       ? { mode: policy.mode, deny: [settled], allow: ["true"] }
       : null;
   const preview = useQuery({
@@ -116,10 +139,11 @@ function NewRulePage() {
     placeholderData: keepPreviousData,
   });
 
-  const choose = (next: RuleTemplate | "custom") => {
+  const choose = (next: Start) => {
     setChosen(next);
     setProblem(null);
-    if (next === "custom") {
+    setWritten(null);
+    if (next === "custom" || next === "describe") {
       setName("");
       setDescription("");
       setRule("");
@@ -128,6 +152,13 @@ function NewRulePage() {
       setDescription(next.description);
       setRule(next.rule);
     }
+  };
+
+  /* The model's rule goes into the CEL field, where the preview picks it up as it would any rule. */
+  const takeWritten = (next: WrittenRule) => {
+    setWritten(next);
+    setRule(next.rule);
+    if (!name.trim()) setName(next.text.slice(0, 80));
   };
 
   const add = () => {
@@ -141,6 +172,9 @@ function NewRulePage() {
           ...policy.labels,
           [trimmed]: { name: name.trim(), description: description.trim() },
         },
+        ...(written
+          ? { authoring: { source: "english" as const, text: written.text } }
+          : {}),
       },
       {
         onError: (thrown: Error) => setProblem(thrown.message),
@@ -149,7 +183,8 @@ function NewRulePage() {
     );
   };
 
-  const options: { key: string; value: RuleTemplate | "custom" }[] = [
+  const options: { key: string; value: Start }[] = [
+    { key: "describe", value: "describe" },
     ...RULE_TEMPLATES.map((template) => ({
       key: template.rule,
       value: template,
@@ -167,7 +202,9 @@ function NewRulePage() {
         <PageRows>
           {options.map((option, index) => {
             const custom = option.value === "custom";
-            const template = custom ? null : (option.value as RuleTemplate);
+            const describe = option.value === "describe";
+            const template =
+              custom || describe ? null : (option.value as RuleTemplate);
             const selected = chosen === option.value;
             const taken = template
               ? policy?.deny.includes(template.rule)
@@ -181,18 +218,30 @@ function NewRulePage() {
                   size="sm"
                 >
                   <ItemMedia variant="icon">
-                    {custom ? <IconCode /> : <IconShieldX />}
+                    {describe ? (
+                      <IconSparkles />
+                    ) : custom ? (
+                      <IconCode />
+                    ) : (
+                      <IconShieldX />
+                    )}
                   </ItemMedia>
                   <ItemContent>
                     <ItemTitle>
-                      {template ? template.name : "Write your own"}
+                      {template
+                        ? template.name
+                        : describe
+                          ? "Describe it in words"
+                          : "Write your own"}
                     </ItemTitle>
                     <ItemDescription>
                       {template
                         ? taken
                           ? "Already one of your rules."
                           : template.description
-                        : "Describe the action yourself, in CEL."}
+                        : describe
+                          ? "Say what no Bot may do, and your model writes the rule."
+                          : "Describe the action yourself, in CEL."}
                     </ItemDescription>
                   </ItemContent>
                   {selected ? (
@@ -245,6 +294,9 @@ function NewRulePage() {
               }
             >
               <FieldGroup>
+                {chosen === "describe" ? (
+                  <DescribeRule onWritten={takeWritten} />
+                ) : null}
                 <Field>
                   <FieldLabel htmlFor="rule-name">Name</FieldLabel>
                   <Input
@@ -290,10 +342,13 @@ function NewRulePage() {
                       This rule is already in place.
                     </p>
                   ) : null}
-                  {chosen !== "custom" ? (
+                  {chosen !== "custom" && chosen !== "describe" ? (
                     <p className="text-amber-600 text-sm dark:text-amber-500">
                       {chosen.cost}
                     </p>
+                  ) : null}
+                  {written ? (
+                    <RuleReading rule={rule} written={written} />
                   ) : null}
                   <RuleReference />
                 </Field>
@@ -349,44 +404,5 @@ function RuleReference() {
         .
       </p>
     </details>
-  );
-}
-
-/**
- * What the rule would have stopped, worked out as it is written: a Bot's computer actions and its
- * app calls, in one list. A rule that can't be evaluated says why here, under the rule, and nothing
- * is replayed. The first answer arrives into an empty space, with no placeholder before it.
- */
-function RulePreview({ preview }: { preview: UseQueryResult<DryRunReport> }) {
-  if (preview.isPending) return null;
-  return (
-    <Field aria-labelledby="rule-preview" aria-live="polite">
-      <FieldLabel id="rule-preview">On recent activity</FieldLabel>
-      {preview.error ? (
-        <p className="text-destructive text-sm" role="alert">
-          {preview.error.message}
-        </p>
-      ) : preview.data.scanned === 0 ? (
-        <FieldDescription>
-          No recorded actions to test against yet. You'll see what this rule
-          stops once Bots have acted.
-        </FieldDescription>
-      ) : (
-        <div>
-          <FieldDescription>
-            {preview.data.wouldRefuse === 0
-              ? `Of the last ${preview.data.scanned} recorded actions, this rule would have stopped none. It may still stop future ones.`
-              : `Of the last ${preview.data.scanned} recorded actions, this rule would have stopped ${preview.data.wouldRefuse}.`}
-          </FieldDescription>
-          <DryRunChanges
-            changes={preview.data.changes.filter(
-              (change) => change.would === "refused",
-            )}
-            total={preview.data.wouldRefuse}
-            verdict="Would stop"
-          />
-        </div>
-      )}
-    </Field>
   );
 }
