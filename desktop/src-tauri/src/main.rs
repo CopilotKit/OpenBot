@@ -3385,6 +3385,9 @@ const SHUTTING_DOWN_FRAGMENT: &str = "shutting-down";
 /// A row on the Shutting down screen. Fixed ids and fixed words: nothing the CLI said reaches it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum QuitStep {
+    /// A back end update past the point it can stop safely, let finish first
+    /// (`local_eval::close_for_quit_reporting`).
+    FinishUpdate,
     /// Host processes, Compose down, and on Linux the Podman API.
     OpenBot,
     /// The local Intelligence stack OpenBot created.
@@ -3394,8 +3397,19 @@ enum QuitStep {
 impl QuitStep {
     fn id(self) -> &'static str {
         match self {
+            QuitStep::FinishUpdate => "finish-update",
             QuitStep::OpenBot => "stop-openbot",
             QuitStep::Intelligence => "stop-intelligence",
+        }
+    }
+
+    /// What the row says while it runs.
+    fn running_detail(self) -> &'static str {
+        match self {
+            QuitStep::FinishUpdate => {
+                "Finishing the back end update, so the back end is not left half updated."
+            }
+            QuitStep::OpenBot | QuitStep::Intelligence => "",
         }
     }
 }
@@ -3438,7 +3452,11 @@ impl QuitStatus {
         let row = Progress {
             step: step.id().into(),
             ok: state != QuitStepState::Failed,
-            detail: String::new(),
+            detail: if state == QuitStepState::Running {
+                step.running_detail().into()
+            } else {
+                String::new()
+            },
             running: state == QuitStepState::Running,
             download_bytes: None,
             downloads: None,
@@ -4138,7 +4156,13 @@ where
     I: FnOnce(&Path) -> Result<(), String>,
     P: FnMut(QuitStep, QuitStepState),
 {
-    local_eval::close_for_quit();
+    // A back end update that has begun changing the release is let finish, and its row says so:
+    // stopping it there left a back end no later update could get past.
+    if local_eval::close_for_quit_reporting(|| {
+        progress(QuitStep::FinishUpdate, QuitStepState::Running)
+    }) {
+        progress(QuitStep::FinishUpdate, QuitStepState::Complete);
+    }
     progress(QuitStep::OpenBot, QuitStepState::Running);
     shell
         .start_generation
@@ -4537,6 +4561,11 @@ enum WindowPage {
 fn outside_links_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::<R>::new("outside-links")
         .on_navigation(|webview, destination| {
+            // A file dropped where nothing takes it opens nowhere (`outside_links::opens_a_file`).
+            if webview.label() == "main" && outside_links::opens_a_file(destination) {
+                log::info!("[window] kept the page; a dropped file does not replace it");
+                return false;
+            }
             if webview.label() != "main"
                 || !outside_links::leaves(destination)
                 || outside_links::loads_in_a_frame(destination)
@@ -6671,6 +6700,15 @@ fn local_eval_download(attempt: String) -> Option<openbot_desktop_lib::local_ima
     local_eval::downloading(&attempt)
 }
 
+/// The step the back end update `attempt` is in and for how long, once it is in one that waits,
+/// so a step that takes minutes is never a silent row. A fixed step name and seconds only.
+#[tauri::command]
+fn local_eval_update_step(
+    attempt: String,
+) -> Option<openbot_desktop_lib::local_update::UpdateStep> {
+    local_eval::update_step(&attempt)
+}
+
 /// The evaluation agreement local setup needs accepted, for the window to show before Accept.
 #[tauri::command]
 async fn local_eval_terms(
@@ -8728,6 +8766,7 @@ fn main() {
             sign_in_to_copilotkit,
             copilotkit_sign_in_page,
             local_eval_download,
+            local_eval_update_step,
             local_eval_terms,
             connect_copilotkit_apps,
             connect_local_eval,
@@ -8984,6 +9023,30 @@ mod background_launch_tests {
         assert_eq!(
             main.background_throttling,
             Some(BackgroundThrottlingPolicy::Disabled),
+        );
+    }
+
+    /// A screenshot dragged onto a conversation attached nothing: the cursor showed a plus, the
+    /// drop vanished, and the Bot never saw the image. Tauri's own drag-and-drop handler, on by
+    /// default, takes every file dropped on the window to raise its `DragDropEvent`s (on macOS it
+    /// answers WebKit's dragging calls itself and never passes them on; on Windows it replaces
+    /// WebView2's drop target), so the page's HTML `drop` never fires and the composer never sees
+    /// the file. Nothing in this app listens for those events; the page handles drops itself, as it
+    /// does in a browser. The window's configuration, as compiled into the app, must leave them to it.
+    #[test]
+    fn main_window_leaves_dropped_files_to_the_page() {
+        let context: tauri::Context<tauri::test::MockRuntime> =
+            tauri::generate_context!(test = true);
+        let main = context
+            .config()
+            .app
+            .windows
+            .iter()
+            .find(|window| window.label == "main")
+            .expect("tauri.conf.json declares the main window");
+        assert!(
+            !main.drag_drop_enabled,
+            "Tauri's drag-and-drop handler is on, so a file dropped on the composer never reaches it"
         );
     }
 }
@@ -12541,7 +12604,8 @@ mod tests {
             "minHeight": 560,
             "resizable": true,
             "titleBarStyle": "Transparent",
-            "backgroundThrottling": "disabled"
+            "backgroundThrottling": "disabled",
+            "dragDropEnabled": false
         });
         let config: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();

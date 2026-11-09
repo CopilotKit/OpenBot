@@ -27,6 +27,18 @@ pub fn leaves(destination: &tauri::Url) -> bool {
         })
 }
 
+/// Whether `destination` is a file on this computer, which the window never shows in place of OpenBot.
+///
+/// The page handles a dropped file itself (the composer attaches it), so Tauri's own drag-and-drop
+/// handler is off (`dragDropEnabled` in `tauri.conf.json`). With it off, a file let go over a page
+/// that does not take it is the webview's to handle. WebView2 on Windows is Chromium, whose default
+/// is to open the file in place, leaving OpenBot or the setup screen (WKWebView on macOS refuses the
+/// drop instead). OpenBot's own page refuses such a drop (`useUnclaimedDropGuard`), but the setup
+/// screens and older OpenBot releases do not, so the window refuses the navigation and stays put.
+pub fn opens_a_file(destination: &tauri::Url) -> bool {
+    destination.scheme() == "file"
+}
+
 /// Whether `destination` is the booking calendar OpenBot embeds, or a frame that calendar embeds:
 /// Calendly, its reCAPTCHA (served from recaptcha.net) and its Stripe frames. Over https only.
 pub fn loads_in_a_frame(destination: &tauri::Url) -> bool {
@@ -78,6 +90,28 @@ mod tests {
         assert!(!leaves(&url("http://dashboard.localhost:8080/")));
         assert!(!leaves(&url("tauri://localhost/")));
         assert!(!leaves(&url("about:blank")));
+    }
+
+    #[test]
+    fn a_dropped_file_never_replaces_the_page_in_the_window() {
+        assert!(opens_a_file(&url(
+            "file:///Users/someone/Desktop/Screenshot%202026-11-09%20at%2014.20.00.png"
+        )));
+        assert!(opens_a_file(&url(
+            "file:///C:/Users/someone/Pictures/shot.png"
+        )));
+        assert!(!opens_a_file(&url("http://127.0.0.1:3010/channel/abc")));
+        assert!(!opens_a_file(&url("tauri://localhost/")));
+        assert!(!opens_a_file(&url("http://tauri.localhost/")));
+        let main = include_str!("main.rs");
+        let guard = main
+            .find("outside_links::opens_a_file(destination)")
+            .unwrap();
+        let first_check = main.find("outside_links::leaves(destination)").unwrap();
+        assert!(
+            guard < first_check,
+            "the file check runs before a navigation is let through"
+        );
     }
 
     #[test]
