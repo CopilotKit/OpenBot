@@ -16,8 +16,9 @@
 //! OpenBot starts with, never a key, and Change, which stops OpenBot and opens the setup window at
 //! its AI screen.
 //!
-//! And Quit (`quit`), for Ctrl+Q in the window on Windows (`QUIT_SHORTCUT_PAGE`). The setup and
-//! Status pages are granted it too (`capabilities/default.json`).
+//! And Quit (`quit`), for Ctrl+Q in the window on Windows (`QUIT_SHORTCUT_PAGE`), and Zoom
+//! (`zoom`), for the zoom keys no menu carries (`zoom::SHORTCUT_PAGE`). The setup and Status pages
+//! are granted both too (`capabilities/default.json`).
 
 use openbot_desktop_lib::{app_update, local_eval, local_eval_state, speech, stack};
 use tauri::Manager;
@@ -28,7 +29,7 @@ pub const PLUGIN: &str = "openbot-desktop";
 pub const QUIT_SHORTCUT_PAGE: &str = include_str!("quit-shortcut.js");
 
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 18] = [
+pub const PERMISSIONS: [&str; 19] = [
     "openbot-desktop:allow-appearance",
     "openbot-desktop:allow-status",
     "openbot-desktop:allow-restart",
@@ -47,6 +48,7 @@ pub const PERMISSIONS: [&str; 18] = [
     "openbot-desktop:allow-ai-connection",
     "openbot-desktop:allow-change-ai-connection",
     "openbot-desktop:allow-quit",
+    "openbot-desktop:allow-zoom",
 ];
 
 /**
@@ -217,6 +219,13 @@ async fn quit(app: tauri::AppHandle) {
     crate::chose(&app, "quit");
 }
 
+/// Zoom In, Zoom Out or Actual Size, by the same path as the View menu's: the zoom keys no menu
+/// carries, every one on Windows and Command and + on macOS (`zoom-shortcut.js`).
+#[tauri::command]
+async fn zoom(app: tauri::AppHandle, step: crate::zoom::Step) {
+    crate::zoom_windows(&app, step);
+}
+
 pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new(PLUGIN)
         .invoke_handler(tauri::generate_handler![
@@ -237,7 +246,8 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             notify,
             ai_connection,
             change_ai_connection,
-            quit
+            quit,
+            zoom
         ])
         .build()
 }

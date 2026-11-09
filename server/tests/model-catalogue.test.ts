@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
+import { planModelForEnvironment } from "../src/agents/plan-model";
 import type { AppVariables } from "../src/auth/guards";
 import {
   chatModelIds,
@@ -451,31 +452,103 @@ describe("the default and the thinking levels, from the providers' own data", ()
     });
   });
 
-  test("a Claude plan is listed with its own token, the way Claude Code sends it", async () => {
-    const { fetcher, calls } = web({
-      "https://api.anthropic.com/v1/models?limit=1000": await fixture(
-        "anthropic-models.json",
-      ),
-      [MODELS_DEV]: await fixture("models-dev-api.json"),
-    });
+  /*
+   * The environment OpenBot Desktop writes for a Claude plan, turned into the plan the way the server
+   * does at boot. `plan.token` is MANAGED_AGENT_TOKEN, the harness's own secret: sent to Anthropic as
+   * the bearer, the listing came back 401 and no Claude plan ever had a model picker.
+   */
+  const OAUTH = "synthetic-claude-plan-oauth-token";
+  const MANAGED = "managed-agent-token-for-the-harness-only";
+  const claudePlanEnvironment = {
+    CLAUDE_CODE_OAUTH_TOKEN: OAUTH,
+    PICKED_HARNESS_IMAGE: "ghcr.io/copilotkit/openbot-agent-claude-sdk:1.0.0",
+    PICKED_HARNESS_URL: "http://agent-harness:4206",
+    MANAGED_AGENT_TOKEN: MANAGED,
+  };
+
+  /** Anthropic as it answers a bearer: the listing for the plan's OAuth token, 401 for anything else. */
+  async function anthropicForPlan() {
+    const listing = await fixture("anthropic-models.json");
+    const site = web({ [MODELS_DEV]: await fixture("models-dev-api.json") });
+    const fetcher = (async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const answer = await site.fetcher(url, init);
+      if (!String(url).startsWith("https://api.anthropic.com/")) return answer;
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      return headers.authorization === `Bearer ${OAUTH}` &&
+        headers["anthropic-beta"]?.includes("oauth-2025-04-20")
+        ? Response.json(listing)
+        : Response.json(
+            {
+              type: "error",
+              error: {
+                type: "authentication_error",
+                message: "Invalid bearer token",
+              },
+            },
+            { status: 401 },
+          );
+    }) as typeof fetch;
+    return { fetcher, calls: site.calls };
+  }
+
+  test("a Claude plan's models are listed with the plan's OAuth token, so there is a model to pick", async () => {
+    const plan = planModelForEnvironment(claudePlanEnvironment);
+    const { fetcher, calls } = await anthropicForPlan();
+    const lines: string[] = [];
     const catalogue = createModelCatalogue({
-      model: {
-        provider: "anthropic",
-        defaultModel: "claude-sonnet-5-5",
-        plan: {
-          provider: "claude",
-          endpoint: new URL("http://agent-harness:4206/model"),
-          token: "plan-oauth-token",
-        },
-      },
+      model: { provider: "anthropic", defaultModel: "claude-sonnet-5-5", plan },
       apiKey: async () => null,
-      environment: {},
+      environment: claudePlanEnvironment,
       fetch: fetcher,
+      log: (line) => lines.push(line),
     });
-    expect((await catalogue.read()).default).toBe("claude-sonnet-5-5");
-    const asked = calls.find((call) => call.url.includes("anthropic.com"));
-    expect(asked?.headers.authorization).toBe("Bearer plan-oauth-token");
-    expect(asked?.headers["anthropic-beta"]).toBe("oauth-2025-04-20");
+    const read = await catalogue.read();
+    expect(read.source).toBe("claude");
+    // More than one model is what shows the conversation's model picker.
+    expect(read.models.length).toBeGreaterThan(1);
+    expect(read.default).toBe("claude-sonnet-5-5");
+    expect(lines.filter((line) => line.includes("model-list"))).toEqual([]);
+    const asked = calls.filter((call) => call.url.includes("anthropic.com"));
+    expect(asked.length).toBeGreaterThan(0);
+    for (const call of asked) {
+      expect(call.headers.authorization).toBe(`Bearer ${OAUTH}`);
+      expect(call.headers["anthropic-beta"]).toBe("oauth-2025-04-20");
+      expect(JSON.stringify(call.headers)).not.toContain(MANAGED);
+    }
+  });
+
+  test("OpenBot's harness token never leaves for Anthropic, even where it is all there is", async () => {
+    // A mis-written environment whose only token is the harness's own: nothing is asked at all.
+    const environment = {
+      ...claudePlanEnvironment,
+      CLAUDE_CODE_OAUTH_TOKEN: MANAGED,
+    };
+    const plan = planModelForEnvironment(environment);
+    const { fetcher, calls } = await anthropicForPlan();
+    const lines: string[] = [];
+    const catalogue = createModelCatalogue({
+      model: { provider: "anthropic", defaultModel: "claude-sonnet-5-5", plan },
+      apiKey: async () => null,
+      environment,
+      fetch: fetcher,
+      log: (line) => lines.push(line),
+    });
+    await catalogue.read();
+    for (const call of calls)
+      expect(JSON.stringify(call.headers)).not.toContain(MANAGED);
+    expect(calls.some((call) => call.url.includes("anthropic.com"))).toBe(
+      false,
+    );
+    expect(lines).toContain(
+      JSON.stringify({
+        type: "model-list-unreadable",
+        source: "claude",
+        reason: "harness-token-elsewhere",
+      }),
+    );
   });
 
   test("a model nothing describes yet is still listed, on its own default effort", async () => {

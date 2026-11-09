@@ -15,6 +15,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   an API key, a Google or xAI account, or your own address), and the model when setup named one.
   Never the key. Change AI connection stops OpenBot and opens the setup window at its AI screen,
   and OpenBot starts again with the new choice.
+- **The window zooms, as a browser does.** The text was too small and nothing made it bigger.
+  Command (Ctrl on Windows) with + or = zooms in, with - zooms out, and with 0 goes back to actual
+  size, from 90% to 200%. On a Mac the View menu has Zoom In, Zoom Out and Actual Size. The level
+  applies to every window, from setup to OpenBot itself, and is kept for the next launch.
 - **Docker Desktop 29 pulls OpenBot's images from downloads.copilotkit.ai.** Its pulls there
   failed with 403 and went to GitHub, because the copy held only each image's Linux amd64 and arm64
   manifests, and Docker 29 also fetches the image's attestations and asks which artifacts refer to
@@ -46,6 +50,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   The engine check before it (`docker info`, `docker image ls` and the container that measures
   free disk) now gives up on a command after 15 to 20 seconds, so an engine that stops answering
   no longer leaves the step on "Checking your CopilotKit account…" for good.
+
+### Conversations
+
+- **A Claude plan has a model picker in the conversation again.** Signed in with a Claude plan,
+  the picker never showed, because the server asked Anthropic for the plan's models with
+  OpenBot's own harness token instead of the plan's sign-in, Anthropic answered 401
+  (`{"type":"model-list-unreadable","source":"claude","status":401}` in the server log), and only
+  the default model was known. The list is now asked for with the plan's own token, and the
+  harness token is never sent anywhere but the harness.
+- **A message that couldn't reach the back end says so in plain words.** The conversation showed
+  the raw request failure in red, such as `REST run request failed: {"error":"Failed to resolve
+  Learning Container"}`. It now says "OpenBot couldn't reach its back end, so your message wasn't
+  sent. Try again, or quit and reopen OpenBot." The original text goes to the browser console.
 
 ## 1.0.0
 
