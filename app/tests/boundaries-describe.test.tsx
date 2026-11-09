@@ -67,6 +67,7 @@ afterEach(() => {
 const SOCIAL: PolicyTranslation = {
   rule: 'intent == "navigate" && (page.host == "facebook.com" || matches(page.host, "[.]facebook[.]com$"))',
   effect: "deny",
+  summary: "Stops a Bot opening Facebook.",
   explanation:
     "Stops a Bot from navigating to facebook.com, including its subdomains.",
   compile: { ok: true },
@@ -232,7 +233,7 @@ test("a description fills the rule, shows its reading and compile result, replay
     labels: {
       [SOCIAL.rule]: {
         name: "Bots may not visit social media sites",
-        description: "",
+        description: "Stops a Bot opening Facebook.",
       },
     },
     authoring: {
@@ -269,11 +270,45 @@ test("editing the written rule by hand is allowed and called out", async () => {
   ).toBe(false);
 });
 
+test("What it stops is filled from the reading when empty, and what the admin typed there is kept", async () => {
+  serving({ mode: "enforce", deny: [], allow: ["true"] });
+  translation = SOCIAL;
+  const { view } = open("/admin/boundaries/new");
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+
+  fireEvent.click(await view.findByText("Describe it in words"));
+  await describeRule(view, "Bots may not visit social media sites");
+  await view.findByText(SOCIAL.explanation as string);
+  const stops = view.getByLabelText("What it stops") as HTMLInputElement;
+  expect(stops.value).toBe("Stops a Bot opening Facebook.");
+
+  // Written again, the field still holds only what the last rule put there, so it is replaced.
+  translation = { ...SOCIAL, summary: "Stops a Bot opening Facebook or X." };
+  await user.click(view.getByRole("button", { name: "Write rule" }));
+  await waitFor(() =>
+    expect(stops.value).toBe("Stops a Bot opening Facebook or X."),
+  );
+
+  // Once the admin writes their own, a new rule never overwrites it.
+  await user.clear(stops);
+  await user.type(stops, "Keeps Bots off social sites.");
+  translation = { ...SOCIAL, summary: "Stops a Bot opening Reddit." };
+  await user.click(view.getByRole("button", { name: "Write rule" }));
+  await waitFor(() => expect(described).toHaveLength(3));
+  // Back to "Write rule" once the answer has been taken in.
+  await view.findByRole("button", { name: "Write rule" });
+  expect((view.getByLabelText("Rule") as HTMLTextAreaElement).value).toBe(
+    SOCIAL.rule,
+  );
+  expect(stops.value).toBe("Keeps Bots off social sites.");
+});
+
 test("a rule that never compiled is shown with the error and can't be added as written", async () => {
   serving({ mode: "enforce", deny: [], allow: ["true"] });
   translation = {
     rule: "intent == \"navigate\" && (page.url[page.url.indexOf('?') + 1:].length > 200)",
     effect: "deny",
+    summary: null,
     explanation: null,
     compile: {
       ok: false,

@@ -392,7 +392,7 @@ export const auditEventTypes = [
    * one answers "who asked for this rule, in what words, and what came back", including a rule that
    * never compiled and a request no model was set up to answer. Target `policy`; payload `actor`,
    * `text` (the admin's words), `outcome` (`written`, `did_not_compile`, `no_model` or
-   * `model_failed`), and when a rule came back `rule`, `effect`, `explanation`, `warning`,
+   * `model_failed`), and when a rule came back `rule`, `effect`, `summary`, `explanation`, `warning`,
    * `compiled`, `attempts` and, for one that did not compile, `error`.
    */
   "computer.policy_translated",

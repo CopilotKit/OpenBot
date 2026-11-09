@@ -90,6 +90,11 @@ function NewRulePage() {
   const [description, setDescription] = useState("");
   const [rule, setRule] = useState("");
   const [written, setWritten] = useState<WrittenRule | null>(null);
+  /*
+   * What a written rule last put in Name and What it stops. A field still holding it is ours to
+   * replace when the rule is written again; anything else in it is the admin's, and stays.
+   */
+  const [filled, setFilled] = useState({ name: "", description: "" });
   const [problem, setProblem] = useState<string | null>(null);
 
   const policy = stored.data;
@@ -143,6 +148,7 @@ function NewRulePage() {
     setChosen(next);
     setProblem(null);
     setWritten(null);
+    setFilled({ name: "", description: "" });
     if (next === "custom" || next === "describe") {
       setName("");
       setDescription("");
@@ -158,7 +164,19 @@ function NewRulePage() {
   const takeWritten = (next: WrittenRule) => {
     setWritten(next);
     setRule(next.rule);
-    if (!name.trim()) setName(next.text.slice(0, 80));
+    const ours = (value: string, last: string) =>
+      !value.trim() || value === last;
+    const nextName = next.text.slice(0, 80);
+    const nextDescription = next.summary?.slice(0, 300) ?? "";
+    const takeName = ours(name, filled.name);
+    const takeDescription =
+      Boolean(nextDescription) && ours(description, filled.description);
+    if (takeName) setName(nextName);
+    if (takeDescription) setDescription(nextDescription);
+    setFilled({
+      name: takeName ? nextName : filled.name,
+      description: takeDescription ? nextDescription : filled.description,
+    });
   };
 
   const add = () => {

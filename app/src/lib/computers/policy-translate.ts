@@ -8,11 +8,13 @@ export type RuleCompile = { ok: true } | { ok: false; error: string };
  *
  * `explanation` is a second reading of `rule` by a call that never saw the description, so it says
  * what the rule does rather than what was asked for. Null when the rule does not compile.
- * `warning` is set when the rule answers the same for every action.
+ * `summary` is the same reading in one sentence, for the "What it stops" line. `warning` is set when
+ * the rule answers the same for every action.
  */
 export type PolicyTranslation = {
   rule: string;
   effect: "deny" | "allow";
+  summary: string | null;
   explanation: string | null;
   compile: RuleCompile;
   warning: string | null;

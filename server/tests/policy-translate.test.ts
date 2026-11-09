@@ -152,9 +152,12 @@ describe("POST /api/computers/policy-translate", () => {
     const body = await response.json();
     const written = JSON.parse(recording.writer[0] as string);
     const reading = JSON.parse(recording.reader);
+    // A one-line summary for "What it stops", from the same reading, in the words the list uses.
+    expect(reading.summary).toStartWith("Stops a Bot");
     expect(body).toEqual({
       rule: written.rule,
       effect: "deny",
+      summary: reading.summary,
       explanation: reading.explanation,
       compile: { ok: true },
       warning: null,
@@ -188,6 +191,7 @@ describe("POST /api/computers/policy-translate", () => {
           outcome: "written",
           rule: written.rule,
           effect: "deny",
+          summary: reading.summary,
           explanation: reading.explanation,
           warning: null,
           compiled: true,
@@ -213,6 +217,7 @@ describe("POST /api/computers/policy-translate", () => {
     expect(body.rule).toBe(fixed);
     expect(body.compile).toEqual({ ok: true });
     expect(body.explanation).toBe(JSON.parse(recording.reader).explanation);
+    expect(body.summary).toBe(JSON.parse(recording.reader).summary);
 
     const asked = prompts();
     expect(asked).toHaveLength(3);
@@ -244,6 +249,7 @@ describe("POST /api/computers/policy-translate", () => {
     expect(body).toEqual({
       rule: last,
       effect: "deny",
+      summary: null,
       explanation: null,
       compile: compiled,
       warning: null,

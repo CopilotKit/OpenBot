@@ -137,12 +137,15 @@ const WRITER_SCHEMA: ModelAnswerSchema = {
   },
 };
 
-const READER_SCHEMA: ModelAnswerSchema = {
+export const READER_SCHEMA: ModelAnswerSchema = {
   name: "boundary_rule_reading",
   schema: {
     type: "object",
-    properties: { explanation: { type: "string" } },
-    required: ["explanation"],
+    properties: {
+      summary: { type: "string" },
+      explanation: { type: "string" },
+    },
+    required: ["summary", "explanation"],
     additionalProperties: false,
   },
 };
@@ -151,7 +154,14 @@ const writerAnswer = z.object({
   rule: z.string().trim().min(1),
   effect: z.enum(["deny", "allow"]),
 });
-const readerAnswer = z.object({ explanation: z.string().trim().min(1) });
+const readerAnswer = z.object({
+  // Optional so a reading without one, from a plan with no schema to hold it to, still stands.
+  summary: z.string().trim().min(1).optional(),
+  explanation: z.string().trim().min(1),
+});
+
+/** The longest summary kept: the "What it stops" field takes 300 characters. */
+const SUMMARY_LIMIT = 300;
 
 /** The admin's description as the writer receives it, and what it was told on a second attempt. */
 export function writerPrompt(
@@ -215,8 +225,12 @@ export function readerPrompt(rule: string, effect: "deny" | "allow"): string {
     "- Then the edges a reader would not expect: what else it catches, and what it misses.",
     '- Say "Bot" for the AI. No CEL, no field names, no em dashes.',
     "",
+    effect === "deny"
+      ? 'summary: the same rule in one short sentence of at most 15 words, for its line in the list of rules, such as "Stops a Bot changing anything in Salesforce." Start with "Stops a Bot". No edges, no CEL, no em dashes.'
+      : 'summary: the same rule in one short sentence of at most 15 words, for its line in the list of rules. Start with "Lets a Bot". No edges, no CEL, no em dashes.',
+    "",
     "Answer with one JSON object and nothing else:",
-    '{"explanation": string}',
+    '{"summary": string, "explanation": string}',
   ].join("\n");
 }
 
@@ -237,6 +251,12 @@ export type RuleCompile = { ok: true } | { ok: false; error: string };
 export type PolicyTranslation = {
   rule: string;
   effect: "deny" | "allow";
+  /**
+   * What the rule does in one sentence, for the "What it stops" line in the list. From the same
+   * reading as `explanation`, so it too describes the rule and not the request. Null when the rule
+   * does not compile, or the reading came back without one.
+   */
+  summary: string | null;
   /** What the rule does, read from the rule alone. Null when the rule does not compile. */
   explanation: string | null;
   compile: RuleCompile;
@@ -349,6 +369,7 @@ export async function translatePolicyRule(input: {
     return {
       rule: written.rule,
       effect: written.effect,
+      summary: null,
       explanation: null,
       compile,
       warning: null,
@@ -371,6 +392,7 @@ export async function translatePolicyRule(input: {
   return {
     rule: written.rule,
     effect: written.effect,
+    summary: reading.data.summary?.slice(0, SUMMARY_LIMIT) ?? null,
     explanation: reading.data.explanation,
     compile,
     warning: ruleWarning(written.rule, written.effect),
@@ -463,6 +485,7 @@ export function createPolicyTranslateRoutes(options: {
         outcome: translation.compile.ok ? "written" : "did_not_compile",
         rule: translation.rule,
         effect: translation.effect,
+        summary: translation.summary,
         explanation: translation.explanation,
         warning: translation.warning,
         compiled: translation.compile.ok,
