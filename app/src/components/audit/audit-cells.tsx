@@ -12,11 +12,19 @@ import {
 } from "@openbot/shared/connect-prompt";
 import { isOpenBotActor } from "@openbot/shared/openbot-actor";
 import { connectorName, humanise, inFolder } from "@openbot/shared/tool-name";
-import { Fragment, type ReactNode } from "react";
+import {
+  Fragment,
+  type ReactNode,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { type AuditOutcome, outcomeOf } from "@/lib/audit/outcome";
 import { silenceOf } from "@/lib/audit/silence";
 import { galleryComponent } from "@/lib/copilot/gallery-registry";
 import { atStart } from "@/lib/manage-paths";
+import { cn } from "@/lib/utils";
 
 /** One row as the API returns it. */
 export type AuditEvent = {
@@ -642,22 +650,63 @@ const COMPONENT_REFUSALS: Record<string, string> = {
   "component.function_refused": "It isn't allowed to read that data.",
 };
 
+type RecordedDecision = {
+  allowed?: boolean;
+  mode?: string;
+  rule?: string | null;
+  /** The rule's name on the Boundaries page. Absent on rows written before rows carried it. */
+  ruleName?: string;
+  carriedOut?: boolean;
+};
+
+function decisionOf(event: AuditEvent): RecordedDecision {
+  return (event.payload?.decision ?? {}) as RecordedDecision;
+}
+
+/**
+ * The policy rule that decided a row, as its CEL, for Admin only. Undefined for the default `true`
+ * allow rule, which says nothing, and on a page anybody can open, where it is an admin's expression.
+ */
+function ruleExpression(
+  event: AuditEvent,
+  storedNames = true,
+): string | undefined {
+  const rule = decisionOf(event).rule;
+  return storedNames && typeof rule === "string" && rule && rule !== "true"
+    ? rule
+    : undefined;
+}
+
+/**
+ * The deciding rule by its name, where the row recorded one: "Stopped by: Bots may not visit social
+ * media sites". A trial-mode refusal went ahead, so it says the rule would have stopped it.
+ */
+function ruleNameLine(event: AuditEvent, storedNames: boolean): string | null {
+  const { allowed, mode, ruleName } = decisionOf(event);
+  if (
+    !ruleExpression(event, storedNames) ||
+    typeof ruleName !== "string" ||
+    !ruleName.trim()
+  )
+    return null;
+  if (allowed !== false) return `Allowed by: ${ruleName}`;
+  return mode === "dry-run"
+    ? `Would be stopped by: ${ruleName}`
+    : `Stopped by: ${ruleName}`;
+}
+
 /**
  * Every reason line under the decision, in the order the cell draws them. Admin (`storedNames`)
  * reads each as recorded; a page anybody can open says a component's refusal in words and leaves
- * out the policy rule that decided an action, which is an admin's expression.
+ * out the policy rule that decided an action, which is an admin's expression. The rule's own CEL is
+ * not one of these lines: the cell draws it last and clamped ({@link ruleExpression}).
  */
 export function decisionDetails(
   event: AuditEvent,
   storedNames = true,
 ): string[] {
   const payload = event.payload ?? {};
-  const decision = (payload.decision ?? {}) as {
-    allowed?: boolean;
-    mode?: string;
-    rule?: string | null;
-    carriedOut?: boolean;
-  };
+  const decision = decisionOf(event);
   const failed = outcomeOf(event) === "did-not-happen";
   const lines: string[] = [];
   const refused =
@@ -738,9 +787,13 @@ export function decisionDetails(
   if (silence) lines.push(silence);
   if (event.eventType === "computer.policy_changed")
     lines.push(...policyChangeLines(payload));
-  // Show concrete policy rules, but suppress the uninformative default `true` allow rule.
-  if (storedNames && decision.rule && decision.rule !== "true")
-    lines.push(decision.rule);
+  /*
+   * The rule that decided, by the name an admin gave it. A rule written from a sentence is a
+   * thousand characters of CEL, and printed whole as a reason line it made a Blocked row hundreds of
+   * pixels tall and named nothing. The expression is still drawn, clamped, under these lines.
+   */
+  const named = ruleNameLine(event, storedNames);
+  if (named) lines.push(named);
   if (
     decision.mode === "dry-run" &&
     decision.allowed === false &&
@@ -772,6 +825,8 @@ export function searchTextOf(
     // Both ways a reason is said, as for the subject above.
     ...decisionDetails(event),
     ...decisionDetails(event, false),
+    // The rule's CEL, clamped on screen and found whole.
+    ruleExpression(event) ?? "",
   ]
     .join(" ")
     .toLowerCase();
@@ -891,6 +946,7 @@ export function DecisionCell({
   storedNames?: boolean;
 }) {
   const outcome = outcomeOf(event);
+  const expression = ruleExpression(event, storedNames);
   return (
     <>
       <span
@@ -911,13 +967,72 @@ export function DecisionCell({
          * column what is left, the sentence wraps inside it, and a long unbroken word (a URL a
          * router quoted) breaks rather than widening the table.
          */
-        <div
-          className="mt-0.5 max-w-[22rem] text-muted-foreground text-xs [overflow-wrap:anywhere]"
-          key={line}
-        >
+        <div className={DETAIL_LINE} key={line}>
           {line}
         </div>
       ))}
+      {expression ? <RuleExpression expression={expression} /> : null}
+    </>
+  );
+}
+
+const DETAIL_LINE =
+  "mt-0.5 max-w-[22rem] text-muted-foreground text-xs [overflow-wrap:anywhere]";
+
+/**
+ * The rule's CEL, two lines at most until somebody asks for the rest.
+ *
+ * A rule written from a sentence runs to a thousand characters, and drawn whole it made one Blocked
+ * row taller than the window. Mono, like the other identifiers on a row, and muted, because the
+ * rule's name above it is what a person reads; the expression is there to check it against. The
+ * whole text stays in the row, so it is found by search and copied whole.
+ *
+ * The control appears only when the clamp hides something, measured on the drawn line: how much
+ * fits in two lines depends on how wide the table left the column, which nothing here can know.
+ */
+function RuleExpression({ expression }: { expression: string }) {
+  const [open, setOpen] = useState(false);
+  const [cut, setCut] = useState(false);
+  const text = useRef<HTMLDivElement>(null);
+  const id = useId();
+
+  useLayoutEffect(() => {
+    const element = text.current;
+    // Open, nothing is hidden to measure; the control stays, to close it again.
+    if (!element || open) return;
+    const measure = () =>
+      setCut(element.scrollHeight > element.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [open]);
+
+  return (
+    <>
+      <div
+        className={cn(
+          DETAIL_LINE,
+          "font-mono",
+          // Text the clamp hides is still read out, so a screen reader hears the rule whole.
+          !open && "line-clamp-2",
+        )}
+        id={id}
+        ref={text}
+      >
+        {expression}
+      </div>
+      {cut ? (
+        <button
+          aria-controls={id}
+          aria-expanded={open}
+          className="mt-0.5 rounded-sm text-muted-foreground text-xs underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          onClick={() => setOpen((was) => !was)}
+          type="button"
+        >
+          {open ? "Show less" : "Show full rule"}
+        </button>
+      ) : null}
     </>
   );
 }
