@@ -13,15 +13,18 @@ import { buildAGUITextResponse, LLMock } from "@copilotkit/aimock";
 import { AGUIMock } from "@copilotkit/aimock/agui";
 import { CopilotRuntime } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
-import type { GrantedTool } from "@openbot/toolkit/granted-tool";
+import { type GrantedTool, parametersFor } from "@openbot/toolkit/granted-tool";
 import { z } from "zod";
 import {
   buildAgents,
   type RegisteredAgent,
   type RuntimeModel,
 } from "../src/copilot";
+import { classifyTool } from "../src/plugins/catalogue";
+import { effectOf } from "../src/plugins/composio";
 import type { Selection } from "../src/plugins/selection";
 import { createModelCompleter } from "../src/routing/model";
+import gmailCatalogue from "./fixtures/composio-gmail-catalogue.json";
 
 declare global {
   var __SRA009_AFTER_TOOL_SELECTION_RESTORE__:
@@ -1387,6 +1390,88 @@ describe("a remote Bot past what one request may carry", () => {
     running.addMessage({ id: "m-crowded", role: "user", content: "hello" });
     await running.runAgent({ tools: crowded });
     expect((sentToRemote.at(-1)?.tools ?? []).length).toBeLessThanOrEqual(128);
+  });
+
+  /*
+   * FOUND IN 1.0.0. The personal starter Bot held every Gmail action and was sent eleven:
+   * DELETE_MESSAGE, GET_PROFILE, LIST_LABELS, three SEND_AS settings, SEND_DRAFT, SEND_EMAIL and the
+   * POP settings. It told the person it could not read a subject or a body, and that an administrator
+   * had to add a tool. Composio's own Gmail catalogue, as `grantedTools` hands it over (each action's
+   * read label decided by the rule a call is gated with), on a run with room for eleven of them.
+   */
+  test("a Bot holding Gmail is sent the actions that read mail, whatever the request's words", async () => {
+    const gmail: GrantedTool[] = gmailCatalogue.gmail.map((row) => ({
+      ref: `composio-gmail/${row.slug}`,
+      name: `mcp__composio-gmail__${row.slug}`,
+      description: row.description,
+      parameters: parametersFor(row.input_parameters),
+      execute: async () => "ok",
+      searchable: true as const,
+      ...(classifyTool(null, row.slug, true, effectOf(row.tags).effect) ===
+      "read"
+        ? { reads: true as const }
+        : {}),
+    }));
+    const held = [...ownTools, ...routines, ...gmail];
+    // The browser offers enough that eleven of Gmail's actions fit, as in the report.
+    const crowded = Array.from(
+      { length: 128 - ownTools.length - routines.length - 11 },
+      (_, index) => ({
+        name: `surface_tool_${index}`,
+        description: `Surface tool ${index}`,
+        parameters: { type: "object", properties: {} },
+      }),
+    );
+    const agents = await buildAgents(
+      [remoteAgent()],
+      model,
+      "test-key",
+      undefined,
+      async () => held,
+    );
+    const sentFor = async (text: string) => {
+      const running = (
+        agents.risk as never as { clone: () => never }
+      ).clone() as unknown as {
+        addMessage: (message: unknown) => void;
+        runAgent: (parameters: { tools: unknown[] }) => Promise<unknown>;
+      };
+      running.addMessage({ id: `m-${text}`, role: "user", content: text });
+      await running.runAgent({ tools: crowded });
+      return (sentToRemote.at(-1)?.tools ?? [])
+        .filter((name) => name.startsWith("mcp__composio-gmail__"))
+        .map((name) => name.slice("mcp__composio-gmail__".length));
+    };
+
+    // The request that was answered with "I can only send".
+    const sending = await sentFor(
+      "Send an email to Sam saying I'm running late",
+    );
+    expect(sending).toHaveLength(11);
+    expect(sending).toContain("GMAIL_SEND_EMAIL");
+    expect(sending).toContain("GMAIL_FETCH_EMAILS");
+
+    const reading = await sentFor(
+      "Find the emails I got about the offsite and read me their subjects and what they say",
+    );
+    expect(reading).toContain("GMAIL_FETCH_EMAILS");
+    expect(reading).toContain("GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID");
+
+    const thread = await sentFor(
+      "What did Sam say in the thread about the offsite?",
+    );
+    expect(thread).toContain("GMAIL_LIST_THREADS");
+    expect(thread).toContain("GMAIL_FETCH_MESSAGE_BY_THREAD_ID");
+
+    // A follow-up that names nothing is sent the reads first.
+    const followUp = await sentFor("yes please, go ahead");
+    for (const action of [
+      "GMAIL_FETCH_EMAILS",
+      "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID",
+      "GMAIL_FETCH_MESSAGE_BY_THREAD_ID",
+    ])
+      expect(followUp).toContain(action);
+    expect(followUp).not.toContain("GMAIL_DELETE_MESSAGE");
   });
 
   test("the row says how many it was sent, and that the offer was cut", async () => {

@@ -97,6 +97,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Conversations
 
+- **A Bot that runs its own agent reads your Gmail again.** Such a Bot, like the personal starter
+  Bot, can be sent only some of an app's actions in one request, and they were picked by matching
+  the words of your message. With Gmail connected it could be sent sending and settings actions and
+  nothing that fetches a message, so it said it could not read your mail and that an administrator
+  had to add a tool. Each app's actions that read now come first, alongside the ones your message
+  asks for, so a Bot can always search, list and read messages and threads. Sending and deleting
+  still ask you first. In OpenBot Personal a Bot is also told plainly that every action an app offers
+  is already its own.
 - **A Claude plan has a model picker in the conversation again.** Signed in with a Claude plan,
   the picker never showed, because the server asked Anthropic for the plan's models with
   OpenBot's own harness token instead of the plan's sign-in, Anthropic answered 401
