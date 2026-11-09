@@ -442,7 +442,7 @@ describe("a Bot on a harness this deployment runs", () => {
   test.each([
     [
       "ghcr.io/copilotkit/openbot-agent-langgraph-agui@sha256:0123",
-      "LangChain (LangGraph)",
+      "LangChain",
       { provider: "openai", defaultModel: "gpt-5.5" },
       "GPT-6.1 Terra",
       "gpt-6.1-sol",
@@ -485,7 +485,7 @@ describe("a Bot on a harness this deployment runs", () => {
     const model: RuntimeModel = { provider: "openai", defaultModel: "gpt-5.5" };
     const [role] = await standingRoles(
       PICKED,
-      "LangChain (LangGraph)",
+      "LangChain",
       model,
       catalogueFor(model),
       [null],
