@@ -2898,6 +2898,64 @@ test("an interrupted shutdown restores saved setup for explicit recovery", async
   expect(invokeCalls).toContainEqual({ command: "show_openbot" });
 });
 
+/*
+ * The report: somebody on 1.0.0 could not find which AI they had signed in with, or change it.
+ * Settings' AI model row has a Change, which stops OpenBot and brings this window back. It opens at
+ * the AI screen, the one Change AI connection opens, and the new choice is what starts OpenBot.
+ */
+test("Settings' Change AI connection opens setup at the AI screen and starts with the new choice", async () => {
+  setupConnectedLocalStack(
+    "/tmp/settings-change-ai-connection",
+    localStatus("ready", "valid"),
+    // Stopped in this session, as the Change from Settings leaves it.
+    { autoStart: false },
+  );
+  const previous = invokeHandler;
+  let asked = true;
+  invokeHandler = async (command, args) => {
+    if (command === "take_ai_connection_change") {
+      const answer = asked;
+      asked = false;
+      return answer;
+    }
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await view.findByLabelText("OpenAI API key");
+  expect(
+    view.queryByRole("heading", { name: "OpenBot is stopped" }),
+  ).toBeNull();
+  expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+    false,
+  );
+  await userEvent.type(view.getByLabelText("OpenAI API key"), "new-model-key");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await waitFor(() =>
+    expect(invokeCalls).toContainEqual({ command: "show_openbot" }),
+  );
+  expect(getStartStackPayload()).toMatchObject({
+    model: { apiKey: "new-model-key" },
+  });
+});
+
+test("Back from Settings' Change AI connection shows the stopped screen with Start", async () => {
+  setupConnectedLocalStack(
+    "/tmp/settings-change-ai-connection-back",
+    localStatus("ready", "valid"),
+    { autoStart: false },
+  );
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) =>
+    command === "take_ai_connection_change" ? true : previous(command, args);
+  const view = await renderApp();
+  await view.findByLabelText("OpenAI API key");
+  await userEvent.click(view.getByRole("button", { name: "Back" }));
+  await view.findByRole("heading", { name: "OpenBot is stopped" });
+  expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+    false,
+  );
+});
+
 test("changing the saved model during recovery still opens OpenBot after Start", async () => {
   useInterruptedShutdownSetup();
   const view = await renderApp();

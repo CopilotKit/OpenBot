@@ -12,6 +12,10 @@
 //! And Open log folder (`open_logs`): the folder of this app's log file, in the system's file
 //! manager. The page never names a path; the shell opens its own log folder and nothing else.
 //!
+//! And Settings' AI model row (`ai_connection`, `change_ai_connection`): which provider and sign-in
+//! OpenBot starts with, never a key, and Change, which stops OpenBot and opens the setup window at
+//! its AI screen.
+//!
 //! And Quit (`quit`), for Ctrl+Q in the window on Windows (`QUIT_SHORTCUT_PAGE`). The setup and
 //! Status pages are granted it too (`capabilities/default.json`).
 
@@ -24,7 +28,7 @@ pub const PLUGIN: &str = "openbot-desktop";
 pub const QUIT_SHORTCUT_PAGE: &str = include_str!("quit-shortcut.js");
 
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 16] = [
+pub const PERMISSIONS: [&str; 18] = [
     "openbot-desktop:allow-appearance",
     "openbot-desktop:allow-status",
     "openbot-desktop:allow-restart",
@@ -40,6 +44,8 @@ pub const PERMISSIONS: [&str; 16] = [
     "openbot-desktop:allow-speech-abort",
     "openbot-desktop:allow-open-logs",
     "openbot-desktop:allow-notify",
+    "openbot-desktop:allow-ai-connection",
+    "openbot-desktop:allow-change-ai-connection",
     "openbot-desktop:allow-quit",
 ];
 
@@ -190,6 +196,20 @@ async fn notify(
     )
 }
 
+/// Settings' AI model row: the provider and sign-in OpenBot starts with, the model when one was
+/// named, and a custom address's host. Never a key or a token.
+#[tauri::command]
+async fn ai_connection(app: tauri::AppHandle) -> openbot_desktop_lib::ai_connection::AiConnection {
+    crate::ai_connection_now(&app)
+}
+
+/// The AI model row's Change: Stop, then the setup window at its AI screen, the one its Change AI
+/// connection opens. The page asking goes with OpenBot, as with Stop.
+#[tauri::command]
+async fn change_ai_connection(app: tauri::AppHandle) {
+    crate::change_ai_connection_from_settings(app);
+}
+
 /// Quit, by the same path as the tray's Quit: Ctrl+Q in the window on Windows, where no menu
 /// carries the shortcut.
 #[tauri::command]
@@ -215,6 +235,8 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             speech_abort,
             open_logs,
             notify,
+            ai_connection,
+            change_ai_connection,
             quit
         ])
         .build()

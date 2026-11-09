@@ -10,6 +10,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **Settings shows which AI OpenBot uses, and changes it.** Settings > General has an AI model
+  section in OpenBot Desktop: the provider and how OpenBot signs in to it (a Claude or ChatGPT plan,
+  an API key, a Google or xAI account, or your own address), and the model when setup named one.
+  Never the key. Change AI connection stops OpenBot and opens the setup window at its AI screen,
+  and OpenBot starts again with the new choice.
 - **Docker Desktop 29 pulls OpenBot's images from downloads.copilotkit.ai.** Its pulls there
   failed with 403 and went to GitHub, because the copy held only each image's Linux amd64 and arm64
   manifests, and Docker 29 also fetches the image's attestations and asks which artifacts refer to

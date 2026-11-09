@@ -32,6 +32,16 @@ export function stopOpenBotMutationOptions() {
 }
 
 /**
+ * Change the AI connection. The desktop app stops OpenBot and its window shows setup at the AI
+ * screen, where the new choice starts OpenBot again. Like Stop, this page goes with it.
+ */
+export function changeAiConnectionMutationOptions() {
+  return mutationOptions({
+    mutationFn: (): Promise<void> => invokeDesktop("change_ai_connection"),
+  });
+}
+
+/**
  * Check for updates now. The desktop app reads its update feed and keeps the answer, so the banner
  * reads it too. Rejects with the app's own sentence when the feed couldn't be read.
  */

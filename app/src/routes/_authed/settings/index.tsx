@@ -6,6 +6,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { AiModelSection } from "@/components/settings/ai-connection";
 import { MessageListPreference } from "@/components/settings/message-list-preference";
 import { NameRow } from "@/components/settings/profile";
 import { StandingInstructionsRow } from "@/components/settings/standing-instructions";
@@ -54,6 +55,8 @@ function RouteComponent() {
           <StandingInstructionsRow />
         </PageRows>
       </PageSection>
+      {/* Only in OpenBot Desktop, which holds the AI connection and changes it in its own window. */}
+      <AiModelSection />
       <PageSection title="Appearance">
         <PageRows>
           <Item size="sm">
