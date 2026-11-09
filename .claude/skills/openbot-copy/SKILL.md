@@ -46,7 +46,7 @@ end. Try again." Name a feature by what it does (Automatic learning, Memory, Ski
 docs under `docs/` and `charts/` are not shown to a person and may name it.
 `tests/no-intelligence-in-user-copy.test.ts` fails on a shown string that says it.
 
-**One exception: OpenBot Desktop's Account step.** Its lede says "OpenBot needs CopilotKit
+**One exception: OpenBot Desktop's Account step.** Its lede says "It works with CopilotKit
 Intelligence, which runs on this computer too. Sign in to CopilotKit to get a free local license key
 for it."
 That screen asks the person to sign in to another company's account, and the name is what makes

@@ -219,23 +219,20 @@ export function CopilotKitAccount({
             ? "OpenBot uses your CopilotKit account to set up apps like Gmail and Slack."
             : // Names CopilotKit Intelligence on this step alone: it is what the license key is
               // for, and the browser sign-in page that opens next says the same.
-              "OpenBot needs CopilotKit Intelligence, which runs on this computer too. Sign in to CopilotKit to get a free local license key for it."}
+              "It works with CopilotKit Intelligence, which runs on this computer too. Sign in to CopilotKit to get a free local license key for it."}
       </p>
       {/* What the person gives up by signing in, and only what holds: conversations and files stay
-          here, the sign-in fetches the license key and sets up apps, and what a Bot is asked goes to
-          the AI provider chosen on the AI step. Nothing broader, such as "no data leaves this
+          here, the sign-in fetches the license key, and what a Bot is asked goes to the AI provider
+          chosen on the AI step. Never "only gets the license key": once signed in, this step also
+          sets up apps. Nothing broader, such as "no data leaves this
           computer": setup and usage telemetry, the AI provider and connected apps all reach the
           network. */}
       {!agreement && !connecting && !appsFailed && (
-        <ul className="blocker-steps">
-          <li>Your conversations and files stay on this computer.</li>
-          <li>
-            Signing in gets the license key and lets OpenBot connect apps like
-            Gmail and Slack. It doesn’t send your conversations or files to
-            CopilotKit.
-          </li>
-          <li>What you ask a Bot goes to the AI provider you choose.</li>
-        </ul>
+        <p className="footnote">
+          Your conversations and files stay on this computer. Signing in gets
+          your license key and doesn’t send them to CopilotKit. What you ask a
+          Bot goes to the AI provider you choose.
+        </p>
       )}
 
       {/* The account check waits on the engine too. While Docker Desktop starts, this says what

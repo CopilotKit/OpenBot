@@ -33,8 +33,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 - **The Account step leads with OpenBot.** Its header reads "OpenBot by CopilotKit" and its
   heading "OpenBot runs on this computer". It says that signing in to CopilotKit gets a free local
-  license key for CopilotKit Intelligence, which runs on this computer too, and what signing in
-  does and doesn't send. The button reads "Sign in for a free license key", and CopilotKit's logo
+  license key for CopilotKit Intelligence, which runs on this computer too, that signing in doesn't
+  send your conversations or files to CopilotKit, and that what you ask goes to your AI provider. The button reads "Sign in for a free license key", and CopilotKit's logo
   no longer heads the step.
 - **A back end setup that stops says why.** OpenBot's log now records how every back end setup,
   start, update and stop ended: how long it took, its exit code, what its report says went wrong

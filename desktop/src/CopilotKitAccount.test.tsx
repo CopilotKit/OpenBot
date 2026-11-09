@@ -132,7 +132,8 @@ test("the sign-in leads with OpenBot and says what signing in is for", async () 
     screen.getByRole("heading", { name: "OpenBot runs on this computer" }),
   ).toBeTruthy();
   expect(screen.getByText(/free local license key/)).toBeTruthy();
-  expect(screen.getByText(/Signing in gets the license key/)).toBeTruthy();
+  expect(screen.getByText(/doesn’t send them to CopilotKit/)).toBeTruthy();
+  expect(screen.queryByText(/Gmail/)).toBeNull();
   expect(screen.getByText("by CopilotKit")).toBeTruthy();
   expect(screen.queryByRole("img", { name: "CopilotKit" })).toBeNull();
 
