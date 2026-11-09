@@ -4540,7 +4540,7 @@ Windows opened a bare browser window of its own. The configuration says `"create
 */
 /**
 Where the main window's buttons sit on macOS: 20pt in from the left, and low enough that their middle
-lines up with the first row of OpenBot's sidebar header (its name, its mark and +), which the page
+lines up with the first row of OpenBot's sidebar header (its name and +), which the page
 moves right to clear them (app/src/styles.css, `data-desktop-titlebar`).
 
 Set on the builder, not per page, because tao keeps it and puts the buttons back after anything that
@@ -5909,16 +5909,33 @@ fn desktop_test_app_url() -> Option<String> {
 /// started, so a change to the app shows in the real window as it is saved. Unlike `OPENBOT_DESKTOP_TEST_APP_URL` it
 /// waits for the installation: setup and Start run as they always do. Debug builds only: a release binary never reads
 /// the variable.
+///
+/// `localhost` is read as `127.0.0.1`. Only a loopback IP is trusted as OpenBot's own page
+/// (`intelligence_bridge::app_origin`), so at `localhost` the window drew the system's title bar over a page that never
+/// made room for the buttons.
 #[cfg(debug_assertions)]
 fn dev_app_url() -> Option<String> {
-    std::env::var("OPENBOT_DEV_APP_URL")
+    let address = std::env::var("OPENBOT_DEV_APP_URL")
         .ok()
-        .filter(|url| !url.is_empty())
+        .filter(|url| !url.is_empty())?;
+    Some(loopback_ip(&address))
 }
 
 #[cfg(not(debug_assertions))]
 fn dev_app_url() -> Option<String> {
     None
+}
+
+/// `address` with a `localhost` host written as `127.0.0.1`, and unchanged otherwise.
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+fn loopback_ip(address: &str) -> String {
+    match tauri::Url::parse(address) {
+        Ok(mut url) if url.host_str() == Some("localhost") => {
+            let _ = url.set_host(Some("127.0.0.1"));
+            url.into()
+        }
+        _ => address.to_owned(),
+    }
 }
 
 /// Trust `address` as this shell's OpenBot and show it, the way `show_openbot` shows a verified one.
@@ -12358,6 +12375,22 @@ mod tests {
             (Some(720.0), Some(560.0))
         );
         assert_eq!(window.label(), "main");
+    }
+
+    /// The developer's app is trusted only at a loopback IP, so `localhost` is read as `127.0.0.1`.
+    #[test]
+    fn the_developers_app_at_localhost_is_shown_at_127_0_0_1() {
+        assert_eq!(
+            loopback_ip("http://localhost:3030"),
+            "http://127.0.0.1:3030/"
+        );
+        assert_eq!(
+            loopback_ip("http://127.0.0.1:3030"),
+            "http://127.0.0.1:3030"
+        );
+        assert_eq!(loopback_ip("http://[::1]:3030"), "http://[::1]:3030");
+        assert!(intelligence_bridge::app_origin(&loopback_ip("http://localhost:3030")).is_some());
+        assert!(intelligence_bridge::app_origin("http://localhost:3030").is_none());
     }
 
     #[test]

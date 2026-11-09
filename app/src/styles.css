@@ -21,7 +21,7 @@
  * the top-left corner and the sidebar runs to the top edge, as in Mac apps with a sidebar. The
  * desktop marks the page (`data-desktop-titlebar`) and makes the sidebar's header the drag handle.
  * It draws the buttons 20px in, on the middle of the header's row (`TRAFFIC_LIGHTS` in the
- * desktop's main.rs), so here the row starts to their right: OpenBot's mark, its name and + share
+ * desktop's main.rs), so here the row starts to their right: OpenBot's name and + share
  * one line with them. With the sidebar collapsed the buttons are over the main column instead, so
  * that moves down below them. The main column is the shell's own `<main>`; the primitive's
  * `SidebarInset`, which an earlier rule aimed at, is used by no shell. Outside the desktop nothing
