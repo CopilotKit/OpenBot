@@ -92,6 +92,7 @@ elif [ "$(jq -r '.isPrerelease' <<<"$release")" = true ] &&
     exit 1
   fi
   release_cache="$latest_cache"
+  prerelease=true
 elif [ "$(jq -r '.isPrerelease' <<<"$release")" != false ] ||
   [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "::error::$tag is a prerelease, a draft or a candidate, not a stable release. Nothing was mirrored."
@@ -108,8 +109,12 @@ fixed_names=()
 while IFS= read -r name; do
   fixed_names+=("$name")
 done < <("$root/scripts/release-download-names.sh" --all)
+# The update feed marks a signed stable release. A candidate or a beta has none: it is never offered
+# as an update, so only its installers are required.
+required=(latest.json)
+if [ "${prerelease:-false}" = true ]; then required=(); fi
 missing=()
-for name in latest.json "${fixed_names[@]}"; do
+for name in ${required[@]+"${required[@]}"} "${fixed_names[@]}"; do
   if ! grep -qxF "$name" <<<"$names"; then
     missing+=("$name")
   fi

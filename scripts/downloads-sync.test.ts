@@ -50,6 +50,16 @@ function signed(version: string) {
   };
 }
 
+/** A candidate as its release really carries it: signed installers and the image list, but no
+ * update feed or updater archives, because a candidate is never offered as an update. */
+function candidate(version: string) {
+  const files: Record<string, string> = signed(version);
+  delete files["latest.json"];
+  delete files["OpenBot-darwin-aarch64.app.tar.gz"];
+  delete files["OpenBot-darwin-aarch64.app.tar.gz.sig"];
+  return files;
+}
+
 function run(fake: FakeDownloads, env: Record<string, string> = {}) {
   const result = Bun.spawnSync(["bash", sync], {
     cwd: root,
@@ -445,7 +455,7 @@ test("a release with no latest.json, or whose versioned installer is not the sig
 test("a prerelease never touches latest/, and asked for by tag mirrors its releases/<tag>/; a draft is refused", () => {
   const fake = downloads();
   fake.release("v0.3.0", signed("0.3.0"));
-  fake.release("v0.4.0-rc.1", signed("0.4.0-rc.1"), { prerelease: true });
+  fake.release("v0.4.0-rc.1", candidate("0.4.0-rc.1"), { prerelease: true });
   fake.setLatest("v0.3.0");
   expect(run(fake).code).toBe(0);
   expect(
@@ -468,7 +478,6 @@ test("a prerelease never touches latest/, and asked for by tag mirrors its relea
       .filter((key) => key.includes("0.4.0"))
       .sort(),
   ).toEqual([
-    "releases/v0.4.0-rc.1/OpenBot-darwin-aarch64.app.tar.gz",
     "releases/v0.4.0-rc.1/OpenBot_0.4.0-rc.1_aarch64.dmg",
     "releases/v0.4.0-rc.1/OpenBot_0.4.0-rc.1_x64-setup.exe",
     "releases/v0.4.0-rc.1/OpenBot_0.4.0-rc.1_x64.dmg",
