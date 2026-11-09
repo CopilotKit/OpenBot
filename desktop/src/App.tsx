@@ -336,6 +336,14 @@ function Setup() {
           configured?.localEval && installed
             ? recordedModel({ ...configured.values, saved: configured.saved })
             : null;
+        /*
+         * Settings' Change on the AI model row stopped OpenBot to come here: open at the AI screen,
+         * as this window's own Change AI connection does. Asked every load, and answered once.
+         */
+        const changeAiConnection = await invoke<boolean>(
+          "take_ai_connection_change",
+        ).catch(() => false);
+        if (!active) return;
         if (installed) {
           const key = installationKeyFor(found, installed.harness);
           setHarness(installed.harness);
@@ -343,7 +351,7 @@ function Setup() {
           if (configured?.localEval) {
             setModel(resumedModel);
             if (configured.launch) savedLaunch.current = key;
-            setStep(resumedModel ? "connect" : "model");
+            setStep(resumedModel && !changeAiConnection ? "connect" : "model");
           }
         }
         if (interrupted?.connection) {
@@ -371,7 +379,9 @@ function Setup() {
         )
           return;
         // An interrupted run needs an explicit Start, with its saved setup still available.
-        if (interrupted || configured.autoStart === false) return;
+        // Nor one asked to change the AI connection: the new choice is what starts it.
+        if (interrupted || configured.autoStart === false || changeAiConnection)
+          return;
         // Intelligence must report ready and licensed first, which only its screen asks.
         if (configured.localEval.connected) setLocalAutoStart(true);
       })

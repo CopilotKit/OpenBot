@@ -61,6 +61,9 @@ struct Shell {
     starting: std::sync::atomic::AtomicBool,
     /// An explicit Stop must survive setup navigation; a new app session may resume again.
     stopped_in_session: std::sync::atomic::AtomicBool,
+    /// Settings asked to change the AI connection, and the Stop it asked for finished: the setup
+    /// page opens at its AI screen, once, instead of at Start.
+    change_ai_connection: std::sync::atomic::AtomicBool,
     /// Quit keeps the event loop alive until one background cleanup attempt finishes.
     quit: std::sync::Arc<QuitState>,
     /// Why the stack stopped, kept for the screen that has not loaded yet.
@@ -7506,6 +7509,50 @@ fn publish_quit_notice_failure<R: tauri::Runtime>(app: tauri::AppHandle<R>, erro
 /// Stop in the background, then the setup window: the menu's Stop, and the Status window's and
 /// Settings > This computer's, which `from` tells apart in the log.
 fn stop_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>, from: AskedFrom) {
+    stop_then_show_setup(app, from, false);
+}
+
+/// Settings' Change on the AI model row: the same Stop, then the setup window at its AI screen,
+/// where the setup window's own Change AI connection goes. A Stop that failed shows setup as any
+/// failed Stop does, with its failure and Start, since OpenBot may still be running.
+pub(crate) fn change_ai_connection_from_settings<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    stop_then_show_setup(app, AskedFrom::Settings, true);
+}
+
+/// The setup page's one question on load: was it opened to change the AI connection? Answered
+/// once, so a later visit to setup opens at Start as usual.
+#[tauri::command]
+fn take_ai_connection_change<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> bool {
+    take_change_ai_connection(&app.state::<Shell>())
+}
+
+fn take_change_ai_connection(shell: &Shell) -> bool {
+    shell
+        .change_ai_connection
+        .swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Asked for only once everything stopped: the AI screen then starts OpenBot with the new choice.
+fn settle_change_ai_connection(shell: &Shell, stopped: bool, change_ai_connection: bool) {
+    shell.change_ai_connection.store(
+        stopped && change_ai_connection,
+        std::sync::atomic::Ordering::SeqCst,
+    );
+}
+
+/// What Settings' AI model row says: the provider and sign-in this installation starts with.
+pub(crate) fn ai_connection_now<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> openbot_desktop_lib::ai_connection::AiConnection {
+    let root = cleanup_root(&app.state::<Shell>(), &stack::default_root());
+    openbot_desktop_lib::ai_connection::read(&root)
+}
+
+fn stop_then_show_setup<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    from: AskedFrom,
+    change_ai_connection: bool,
+) {
     std::thread::spawn(move || {
         let asked = std::time::Instant::now();
         let root = stack::default_root();
@@ -7518,6 +7565,7 @@ fn stop_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>, from: AskedFrom) 
             Some(problem) => Err(problem),
         };
         logging::outcome("stop", asked, &settled);
+        settle_change_ai_connection(&shell, settled.is_ok(), change_ai_connection);
         match settled {
             Ok(()) => report(&app, "stopped", true, "OpenBot has been stopped"),
             // Said rather than swallowed. A menu item that fails silently is worse than one
@@ -8420,6 +8468,7 @@ fn main() {
             show_setup,
             already_running,
             last_failure,
+            take_ai_connection_change,
             default_root,
             selected_root,
             providers,

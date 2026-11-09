@@ -2943,10 +2943,22 @@
           "markdownDescription": "Denies the show command without any pre-configured scope."
         },
         {
+          "description": "Enables the ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-ai-connection",
+          "markdownDescription": "Enables the ai_connection command without any pre-configured scope."
+        },
+        {
           "description": "Enables the appearance command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-appearance",
           "markdownDescription": "Enables the appearance command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the change_ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-change-ai-connection",
+          "markdownDescription": "Enables the change_ai_connection command without any pre-configured scope."
         },
         {
           "description": "Enables the check_update command without any pre-configured scope.",
@@ -3045,10 +3057,22 @@
           "markdownDescription": "Enables the zoom command without any pre-configured scope."
         },
         {
+          "description": "Denies the ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-ai-connection",
+          "markdownDescription": "Denies the ai_connection command without any pre-configured scope."
+        },
+        {
           "description": "Denies the appearance command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:deny-appearance",
           "markdownDescription": "Denies the appearance command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the change_ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-change-ai-connection",
+          "markdownDescription": "Denies the change_ai_connection command without any pre-configured scope."
         },
         {
           "description": "Denies the check_update command without any pre-configured scope.",
