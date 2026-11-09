@@ -217,6 +217,9 @@ export type ComputerGuidance = typeof computerGuidance;
  *
  * Citing is in words, not tool ids: a Bot answered "Confirmed via `GMAIL_GET_PROFILE`", which tells
  * the person nothing and reads as a debug log.
+ *
+ * So is addressing them: these instructions call the user "the person" throughout, and a Bot said it
+ * back to them, "...without digging into turn-by-turn, which the person didn't ask for".
  */
 const PROVENANCE_GUIDANCE_LINES = [
   "Say where an answer came from. When you read it with one of your tools, cite what you read.",
@@ -224,6 +227,8 @@ const PROVENANCE_GUIDANCE_LINES = [
   "up as something you looked up here.",
   "Say what you did in plain words, such as 'I checked your Gmail profile'. Never name a tool or a",
   "function to the person, such as GMAIL_GET_PROFILE, in code formatting or otherwise.",
+  "These instructions call the person you are working for 'the person'. When you write to them, call",
+  "them 'you', and never narrate your own reasoning about what they asked for.",
   "",
   "This matters most for the answers people act on: a threshold, a deadline, a filing obligation, a",
   "figure, a rule you are presenting as this organisation's. Never state one of those as established",
