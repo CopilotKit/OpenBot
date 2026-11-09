@@ -460,14 +460,16 @@ mod tests {
         let temp = std::env::temp_dir().display().to_string();
         let user = home.rsplit('\\').next().unwrap().to_owned();
         let forms = crate::logging::home_forms(&home);
-        if !forms.iter().any(|form| temp.starts_with(form.as_str())) {
-            // TEMP is somewhere else on this machine; nothing of the home folder is in it.
-            assert!(
-                !temp.contains(&user),
-                "{temp} names {user} outside {forms:?}"
-            );
+        let users = home.rsplit_once('\\').map(|(users, _)| users).unwrap();
+        if !temp.starts_with(users) {
+            // TEMP is outside every profile on this machine; nothing of the home folder is in it.
             return;
         }
+        // Under C:\Users, TEMP is in this account's profile, by whichever name Windows gave it.
+        assert!(
+            forms.iter().any(|form| temp.starts_with(form.as_str())),
+            "{temp} is under none of {forms:?}"
+        );
         let redacted = redact(&temp, Some(&home));
         assert!(redacted.starts_with('~'), "{temp} became {redacted}");
         assert!(!redacted.contains(&user), "{redacted}");
