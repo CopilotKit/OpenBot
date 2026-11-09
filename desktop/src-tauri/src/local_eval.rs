@@ -559,6 +559,54 @@ its own (contract request 8).
 */
 pub const CONNECT_ARGUMENTS: [&str; 4] = ["local", "connect", "--approve-connection", "--json"];
 
+/// Where the CLI records which stack an app folder uses, relative to that folder.
+pub const LOCAL_REFERENCE: &str = ".copilotkit/local.json";
+
+/// A stack the CLI recorded for a folder that contains an installation, found by
+/// `enclosing_reference`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnclosingReference {
+    /// The folder the stack was set up for: an ancestor of the installation.
+    pub directory: PathBuf,
+    /// The stack it names, when the file names one this app can pass back to the CLI.
+    pub stack: Option<StackId>,
+}
+
+/**
+The stack another folder's `local setup` left in charge of `installation`, if one is.
+
+`local setup` and `local connect` do not only look in the folder they run in: they look for
+`.copilotkit/local.json` there and then in every folder above it, and take the first one they
+find as this folder's own. So a stack set up earlier for a folder that contains the installation,
+such as the home folder, is resumed by setup and connected by connect. Connect then writes that
+folder's `.env`, never the installation's.
+
+`None` when the installation has a reference of its own (the CLI stops there), or no folder above
+it has one. Only the reference file is read; nothing of the CLI's private configuration is.
+*/
+pub fn enclosing_reference(installation: &std::path::Path) -> Option<EnclosingReference> {
+    // The CLI resolves symbolic links before it looks, so this does too.
+    let start = std::fs::canonicalize(installation).unwrap_or_else(|_| installation.to_path_buf());
+    if start.join(LOCAL_REFERENCE).exists() {
+        return None;
+    }
+    let directory = start
+        .ancestors()
+        .skip(1)
+        .find(|folder| folder.join(LOCAL_REFERENCE).exists())?
+        .to_path_buf();
+    let stack = std::fs::read_to_string(directory.join(LOCAL_REFERENCE))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|reference| {
+            reference
+                .get("stackId")
+                .and_then(Value::as_str)
+                .and_then(|id| StackId::parse(id).ok())
+        });
+    Some(EnclosingReference { directory, stack })
+}
+
 /**
 `local login` signs the browser in to the stack's dashboard with no code to approve.
 
@@ -6277,5 +6325,77 @@ fn main() {{
         assert!(option_env!("OPENBOT_BUNDLED_CLI_PROGRAM_SHA256").is_none());
         assert!(bundled_cli().is_none());
         assert!(bundled_cli_root().is_some());
+    }
+
+    /// A fresh folder with a canonical path, so the lookup's answer compares by value.
+    fn reference_root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "openbot-local-reference-{name}-{}-{:016x}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::canonicalize(root).unwrap()
+    }
+
+    fn write_reference(folder: &std::path::Path, stack: &str) {
+        std::fs::create_dir_all(folder.join(".copilotkit")).unwrap();
+        std::fs::write(
+            folder.join(LOCAL_REFERENCE),
+            serde_json::json!({ "stackId": stack, "appPath": folder }).to_string(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_stack_set_up_for_a_containing_folder_is_found() {
+        // Found trying OpenBot Desktop on a machine where the CLI had been tested in the home
+        // folder: the CLI took that stack as the installation's own.
+        let home = reference_root("enclosing");
+        let installation = home.join("OpenBot");
+        std::fs::create_dir_all(&installation).unwrap();
+        write_reference(&home, "local-9e636d796eff89a28e631942");
+        assert_eq!(
+            enclosing_reference(&installation),
+            Some(EnclosingReference {
+                directory: home.clone(),
+                stack: Some(StackId::parse("local-9e636d796eff89a28e631942").unwrap()),
+            })
+        );
+        // A folder that does not exist yet is looked up from where it would be.
+        assert_eq!(
+            enclosing_reference(&installation.join("not-yet")).map(|found| found.directory),
+            Some(home.clone())
+        );
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn an_installation_with_its_own_stack_or_none_above_it_has_no_enclosing_one() {
+        let home = reference_root("own");
+        let installation = home.join("OpenBot");
+        std::fs::create_dir_all(&installation).unwrap();
+        assert_eq!(enclosing_reference(&installation), None);
+        write_reference(&home, "local-abc123");
+        write_reference(&installation, "local-def456");
+        assert_eq!(enclosing_reference(&installation), None);
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn an_unreadable_enclosing_reference_is_still_found_without_a_stack() {
+        let home = reference_root("unreadable");
+        let installation = home.join("OpenBot");
+        std::fs::create_dir_all(home.join(".copilotkit")).unwrap();
+        std::fs::create_dir_all(&installation).unwrap();
+        std::fs::write(home.join(LOCAL_REFERENCE), "{\"stackId\":\"--force\"}").unwrap();
+        assert_eq!(
+            enclosing_reference(&installation),
+            Some(EnclosingReference {
+                directory: home.clone(),
+                stack: None
+            })
+        );
+        let _ = std::fs::remove_dir_all(home);
     }
 }
