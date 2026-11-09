@@ -34,7 +34,9 @@
  *   GITHUB_REPOSITORY and GH_TOKEN  for `gh`
  *   DOWNLOADS_BUCKET                the bucket behind the distribution
  *   DOWNLOADS_DISTRIBUTION_ID       the CloudFront distribution
- *   DOWNLOADS_TAG                   copy this stable release's images (default: the Latest release)
+ *   DOWNLOADS_TAG                   copy this release's images, a candidate or beta included (default:
+ *                                   the Latest release, and every prerelease newer than it from
+ *                                   the last 30 days)
  *   DOWNLOADS_IMAGES_FILE           copy the images this list names instead of a release's, for a
  *                                   release published before it carried one
  *   DOWNLOADS_PREFIX                put every key under this prefix, such as `smoketest/`
@@ -257,32 +259,36 @@ export async function main(env: Env = process.env): Promise<number> {
     join(env.RUNNER_TEMP || tmpdir(), "downloads-images-"),
   );
   try {
-    const listed = await readList(env, work);
-    if (verifyOnly) {
-      const refs = listed.images.flatMap(
-        (image) => imageRef(image, source) ?? [],
-      );
-      return await verify(refs, {
-        address,
+    for (const tag of await releasesToCopy(env)) {
+      const listed = await readList(env, work, tag);
+      if (verifyOnly) {
+        const refs = listed.images.flatMap(
+          (image) => imageRef(image, source) ?? [],
+        );
+        await verify(refs, {
+          address,
+          prefix,
+          parallel,
+          env,
+          label: listed.label,
+        });
+        continue;
+      }
+      const files = await releaseFiles(listed.tag, env, github, work, prefix);
+      await copy({
+        ...listed,
+        files,
+        bucket,
+        distribution,
         prefix,
+        address,
         parallel,
+        source,
+        work,
         env,
-        label: listed.label,
       });
     }
-    const files = await releaseFiles(listed.tag, env, github, work, prefix);
-    return await copy({
-      ...listed,
-      files,
-      bucket,
-      distribution,
-      prefix,
-      address,
-      parallel,
-      source,
-      work,
-      env,
-    });
+    return 0;
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -371,31 +377,79 @@ async function releaseFiles(
   return files;
 }
 
+const stableTag = /^v\d+\.\d+\.\d+$/;
+const releaseTag = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+
+/**
+ * The releases to copy: the one DOWNLOADS_TAG names, which may be a candidate or a beta; or else
+ * the Latest stable release, and every published prerelease newer than it that is under 30 days
+ * old, so a candidate's installs find their images here within a scheduled run of publishing.
+ */
+async function releasesToCopy(env: Env): Promise<string[]> {
+  const repository =
+    env.GITHUB_REPOSITORY ||
+    fail("GITHUB_REPOSITORY must name the repository.");
+  if (env.DOWNLOADS_TAG) return [env.DOWNLOADS_TAG];
+  const latest = await run([
+    "gh",
+    "api",
+    `repos/${repository}/releases/latest`,
+    "--jq",
+    ".tag_name",
+  ]);
+  if (latest.code !== 0) {
+    fail(
+      `Could not read the Latest release, so no image was copied: ${latest.stderr.trim()}`,
+    );
+  }
+  const tag = new TextDecoder().decode(latest.stdout).trim();
+  // A list given by hand is for one release.
+  if (env.DOWNLOADS_IMAGES_FILE || !stableTag.test(tag)) return [tag];
+  const listed = await run([
+    "gh",
+    "release",
+    "list",
+    "-R",
+    repository,
+    "--json",
+    "tagName,isDraft,isPrerelease,createdAt",
+    "--limit",
+    "100",
+  ]);
+  if (listed.code !== 0) {
+    fail(`Could not list the releases: ${listed.stderr.trim()}`);
+  }
+  const since = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const newer = (
+    JSON.parse(new TextDecoder().decode(listed.stdout)) as {
+      tagName: string;
+      isDraft: boolean;
+      isPrerelease: boolean;
+      createdAt: string;
+    }[]
+  )
+    .filter(
+      (release) =>
+        release.isPrerelease &&
+        !release.isDraft &&
+        releaseTag.test(release.tagName) &&
+        Date.parse(release.createdAt) >= since &&
+        Bun.semver.order(release.tagName.slice(1), tag.slice(1)) > 0,
+    )
+    .map((release) => release.tagName)
+    .sort((a, b) => Bun.semver.order(a.slice(1), b.slice(1)));
+  return [tag, ...newer];
+}
+
 /** The release, and the images to copy for it. */
 async function readList(
   env: Env,
   work: string,
+  tag: string,
 ): Promise<{ tag: string; label: string; images: string[] }> {
   const repository =
     env.GITHUB_REPOSITORY ||
     fail("GITHUB_REPOSITORY must name the repository.");
-  let tag = env.DOWNLOADS_TAG ?? "";
-  const asked = tag !== "";
-  if (!asked) {
-    const latest = await run([
-      "gh",
-      "api",
-      `repos/${repository}/releases/latest`,
-      "--jq",
-      ".tag_name",
-    ]);
-    if (latest.code !== 0) {
-      fail(
-        `Could not read the Latest release, so no image was copied: ${latest.stderr.trim()}`,
-      );
-    }
-    tag = new TextDecoder().decode(latest.stdout).trim();
-  }
   const viewed = await run([
     "gh",
     "release",
@@ -413,17 +467,18 @@ async function readList(
     isPrerelease: boolean;
     assets: { name: string; digest?: string }[];
   };
-  if (
-    release.isDraft ||
-    release.isPrerelease ||
-    !/^v\d+\.\d+\.\d+$/.test(tag)
-  ) {
+  // A candidate or a beta is copied too, so its installs find their images here; a draft is not
+  // published, and nothing installs it.
+  if (release.isDraft || !releaseTag.test(tag)) {
+    fail(`${tag} is a draft or not a release version. No image was copied.`);
+  }
+  if (!release.isPrerelease && !stableTag.test(tag)) {
     fail(
-      `${tag} is a prerelease, a draft or a candidate, not a stable release. No image was copied.`,
+      `${tag} names a candidate but is not marked a prerelease. No image was copied.`,
     );
   }
-  const dir = join(work, "release");
-  mkdirSync(dir);
+  const dir = join(work, "release", tag);
+  mkdirSync(dir, { recursive: true });
   /** A release asset's text, checked against the digest GitHub reports, or `undefined`. */
   const asset = async (name: string) => {
     const found = release.assets.find((candidate) => candidate.name === name);
@@ -852,7 +907,7 @@ async function copy(options: Copy): Promise<number> {
     return await verify(copied, options);
   }
 
-  mkdirSync(join(work, "objects"));
+  mkdirSync(join(work, "objects"), { recursive: true });
   let n = 0;
   const put = async (item: Planned) => {
     const file = item.path ?? join(work, "objects", `${n++}`);

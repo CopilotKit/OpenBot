@@ -682,7 +682,18 @@ To run it by hand, from `main`:
 ```sh
 gh workflow run downloads-sync.yml --ref main              # the Latest release
 gh workflow run downloads-sync.yml --ref main -f tag=v0.3.0  # releases/v0.3.0/ only
+gh workflow run downloads-sync.yml --ref main -f tag=v1.0.0-rc.1  # a candidate or beta
 ```
+
+A candidate or beta is mirrored too, so its installs download from this address: asked for by tag,
+its images and its `releases/<tag>/` files (cached for five minutes, since its signing runs may
+still replace an installer), and never `latest/`, which stays the Latest stable release's. Each
+scheduled or Latest run also copies the images, source archive and pinned tools of every published
+prerelease newer than Latest and under 30 days old, so a candidate is covered within six hours of
+publishing without anyone dispatching a run. A draft is never mirrored. The publish workflow does
+not dispatch the sync for a prerelease: it runs from the release branch's own copy of
+`publish-release.yml`, so that would have to land on each release branch; dispatch it by hand to
+cover a candidate sooner.
 
 Behind the address, in AWS account `604598162673`: a private, versioned S3 bucket
 `copilotkit-openbot-downloads` (us-east-1), read only by CloudFront distribution `EQ4EH8L79LPGX`
