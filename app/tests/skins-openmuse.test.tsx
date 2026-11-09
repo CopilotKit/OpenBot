@@ -872,7 +872,9 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
     // OpenBot's Needs you section, under the Bot's name, with its approval's details always shown.
     expect(await page().findByText("Open url")).toBeTruthy();
     expect(page().getAllByText("Muse").length).toBeGreaterThan(0);
-    expect(page().getByText(/"url": "https:\/\/example.com"/)).toBeTruthy();
+    // Labelled, as the card in OpenBot lists what it would send: the URL is the target and the value.
+    expect(page().getByText("URL")).toBeTruthy();
+    expect(page().getAllByText("https://example.com").length).toBe(2);
     // OpenBot's activity sections for the Bot.
     expect(await page().findByText("Morning briefing")).toBeTruthy();
     expect(page().getByText("Draft the launch post")).toBeTruthy();
@@ -935,7 +937,8 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
     const sheet = within(await page().findByRole("dialog"));
     expect(await sheet.findByText("Muse wants to open url")).toBeTruthy();
     // What it will send is always on screen, as in OpenBot.
-    expect(sheet.getByText(/"url": "https:\/\/example.com"/)).toBeTruthy();
+    expect(sheet.getByText("URL")).toBeTruthy();
+    expect(sheet.getAllByText("https://example.com").length).toBe(2);
     expect(sheet.queryByText(/send email/)).toBeNull();
     fireEvent.click(sheet.getByRole("button", { name: "Allow once" }));
     await waitFor(() =>

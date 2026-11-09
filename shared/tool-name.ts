@@ -198,6 +198,12 @@ function approvalParts(action: {
     };
   }
   /*
+   * A browser action on the site it acts on, with the control it presses when the page named one:
+   * "click the link “Python” on en.wikipedia.org". Activity said "Approve computer_click".
+   */
+  const browser = browserAction(action.toolRef, action.target);
+  if (browser) return { action: browser, place: action.scope, joiner: "on" };
+  /*
    * A computer's or a folder's own action in the words its step and its Activity row use. The card
    * said "write file on todo.txt in share" above a step that read "Save a file todo.txt in share".
    */
@@ -226,6 +232,136 @@ function approvalParts(action: {
   const path = computerFile(action.target);
   if (path) return { action: words, place: path, joiner: "" };
   return { action: words, place: action.scope, joiner: "on" };
+}
+
+/** Handles the model cites and the run carries, which name nothing a person could check. */
+const INTERNAL_ARGS = new Set(["ref", "snapshotId", "toolCallId", "signal"]);
+
+/**
+ * What an approval would send, as labelled lines for its card: "Text: hello", "To: sam@example.test".
+ * The card showed the arguments as JSON, and a click read `{ "ref": "f3e43", "snapshotId": 4 }`, two
+ * handles to a page snapshot nobody can see. Those are left out, so a click has nothing to add to its
+ * title and shows no lines at all. Everything else stays whole: nobody allows what they were not shown.
+ */
+export function approvalDetails(
+  args: unknown,
+): { label: string; value: string }[] {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return [];
+  return Object.entries(args).flatMap(([key, value]) => {
+    if (INTERNAL_ARGS.has(key) || value === undefined || value === null)
+      return [];
+    const text =
+      typeof value === "string"
+        ? value
+        : typeof value === "boolean"
+          ? value
+            ? "Yes"
+            : "No"
+          : typeof value === "number"
+            ? String(value)
+            : Array.isArray(value) &&
+                value.every((entry) => typeof entry === "string")
+              ? value.join(", ")
+              : JSON.stringify(value, null, 2);
+    const words = wordsOf(key)
+      .map((word) => ACRONYMS[word] ?? word)
+      .join(" ");
+    const label = words ? words.charAt(0).toUpperCase() + words.slice(1) : key;
+    return [{ label, value: text }];
+  });
+}
+
+/** Argument words a person reads in capitals. */
+const ACRONYMS: Record<string, string> = { url: "URL", id: "ID" };
+
+/**
+ * A saved approval rule's title, in the words its approval card used for the action it covers:
+ * "Click", "Send email on Gmail", "Any action on Gmail". The list titled each rule by its tool id
+ * ("computer_click", "mcp/gmail/*"). `place` is true when the title already names where the rule
+ * applies, so the line under it need not say "on composio-gmail" again. A pattern a person typed
+ * that matches several actions some other way is kept as they wrote it.
+ */
+export function ruleTitle(rule: { toolRef: string; scope: string }): {
+  title: string;
+  place: boolean;
+} {
+  const upper = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+  if (rule.toolRef === "*") return { title: "Any action", place: false };
+  if (rule.toolRef === "host/*")
+    return { title: "Any action in your folders", place: false };
+  const ref = rule.toolRef.replace(/^mcp\//, "");
+  const slash = ref.indexOf("/");
+  if (slash > 0 && !ref.startsWith("host/")) {
+    const app = ref.slice(0, slash);
+    const tool = ref.slice(slash + 1);
+    if (app.includes("*")) return { title: rule.toolRef, place: false };
+    const named = rule.scope === "*" || rule.scope === app;
+    if (tool === "*")
+      return { title: `Any action on ${connectorName(app)}`, place: named };
+    if (tool.includes("*")) return { title: rule.toolRef, place: false };
+    const { action, place } = approvalWords({ toolRef: ref, scope: app });
+    return { title: `${upper(action)} on ${place}`, place: named };
+  }
+  if (ref.includes("*")) return { title: rule.toolRef, place: false };
+  return {
+    title: upper(approvalWords({ toolRef: ref, scope: rule.scope }).action),
+    place: false,
+  };
+}
+
+/** What a browser action asks to do, said as its step says it. */
+const BROWSER_ACTIONS: Record<string, string> = {
+  computer_navigate: "open a page",
+  computer_click: "click",
+  computer_type: "fill in a field",
+  computer_key: "press a key",
+  computer_scroll: "scroll the page",
+};
+
+/** A page control's role in the words a person uses for it. */
+const CONTROL_WORDS: Record<string, string> = {
+  link: "link",
+  button: "button",
+  checkbox: "checkbox",
+  radio: "option",
+  option: "option",
+  tab: "tab",
+  menuitem: "menu item",
+  switch: "switch",
+  textbox: "field",
+  searchbox: "search field",
+  combobox: "list",
+};
+
+/**
+ * A browser action in words, naming the control it presses from the label the server resolved
+ * (`target.element`), never the ref and snapshot the model cited. Undefined for any other action.
+ */
+function browserAction(toolRef: string, target: unknown): string | undefined {
+  const base = BROWSER_ACTIONS[toolRef];
+  if (!base) return undefined;
+  const element =
+    target && typeof target === "object"
+      ? (target as { element?: { role?: unknown; name?: unknown } }).element
+      : undefined;
+  const name =
+    typeof element?.name === "string"
+      ? element.name.replace(/\s+/g, " ").trim()
+      : "";
+  const role =
+    typeof element?.role === "string" ? CONTROL_WORDS[element.role] : undefined;
+  if (toolRef === "computer_click") {
+    if (name) return `click ${role ? `the ${role} ` : ""}“${clipName(name)}”`;
+    return role ? `click ${/^[aeiou]/.test(role) ? "an" : "a"} ${role}` : base;
+  }
+  if (toolRef === "computer_type" && name) return `fill in “${clipName(name)}”`;
+  return base;
+}
+
+/** A control's label, short enough for a title. */
+function clipName(name: string): string {
+  const chars = Array.from(name);
+  return chars.length > 60 ? `${chars.slice(0, 59).join("")}…` : name;
 }
 
 /** The path a file action on the Bot's own computer names (`target.filePath`), or undefined. */
