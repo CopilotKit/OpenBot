@@ -45,11 +45,6 @@ deployment:
   to Gmail. Disconnect it first if you want to connect a different one." With several accounts the
   page lists each by its address, with **Make default** and a Disconnect that ends only that
   account. An app whose team account is shared still has one account.
-- **A Bot knows which apps it can use from its first message.** Its instructions name each app it
-  holds and where it stands for you, such as "Gmail (connected), Notion (needs connecting)", and tell
-  it to look an app's tools up rather than say it has no access. A new Bot holding Gmail you had
-  connected used to say it had no email connected until asked to check. It also says what it did in
-  plain words, such as "I checked your Gmail profile", where it named a tool like `GMAIL_GET_PROFILE`.
 - **A Bot can use the account a request is about.** It is told the addresses of your accounts at
   that app; with none named it uses your default, the first you connected until you pick another.
   A name that isn't one of your accounts is refused, and nothing is sent.
@@ -77,18 +72,17 @@ deployment:
   and the end of its error output. A setup that stopped used to leave nothing in the log. The card
   says whether the back end stopped with an error partway, quit without saying why, or could not
   be run, where all three said "The back end could not start."
-- **A Docker short of disk, CPUs or memory says which, and where to raise it.** A setup the back
-  end refuses for its resources said "The back end stopped with an error partway through." It now
-  names the resource with the back end's own numbers: a full Docker disk says "Docker has 0 GB of
-  free disk. OpenBot needs 40 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or
-  free space in Docker, then Retry.", and too few free CPUs or too little free memory say so the
-  same way. On Podman it names `podman machine set` instead. The CopilotKit account step now checks the engine first, and one
-  with fewer than 4 CPUs, less than 4 GB of memory or less than 40 GB of free disk stops there with
-  the same advice, before Start.
 - When OpenBot Desktop is signed in with a model Learning can't use, Learn now in Settings →
   Learning says "Learning can't run on the model you signed in with. To use it, sign OpenBot in with
   an OpenAI or Anthropic API key, or a Claude or ChatGPT plan.", where it told you to give the back
   end's Learning agent a model and key.
+- **A Docker short of CPUs, memory or disk says which, and where to raise it.** When the back end
+  refuses to set up for its resources, OpenBot Desktop names what is short with the back end's own
+  numbers, such as "Docker has 0 GB of free disk. OpenBot needs 40 GB. Raise the disk limit in
+  Docker Desktop > Settings > Resources, or free space in Docker, then Retry.", or the `podman
+  machine set` command to run on Podman, where it said "The back end could not start." Setup's
+  CopilotKit account step checks the engine first, and one with fewer than 4 CPUs, less than 4 GB of
+  memory or less than 40 GB of free disk stops there with the same advice.
 - **The first notification after OpenBot Desktop starts is raised**, for a Bot that needs you or
   replies while OpenBot is minimised or behind another window. The first one after each launch used
   to raise nothing, because the app was still checking that notifications were on. OpenBot's log
@@ -142,6 +136,11 @@ deployment:
 
 ### Conversations
 
+- **A Bot is told which apps it can use from its first message.** Its instructions name each app it
+  holds and where it stands for you, such as "Gmail (connected), Notion (needs connecting)", and
+  tell it to look an app's tools up rather than say it has no access. Bots are also told to say
+  what they did in plain words ("I checked your Gmail profile") and never to name a tool, such as
+  `GMAIL_GET_PROFILE`.
 - **Bots answer in Markdown by default.** Ordinary questions, explanations, summaries and short
   lists come back as a reply. A notice card is kept for an alert that needs you to act, or for when
   you ask for one, and a chart, table or card is drawn when it makes the answer easier to use. Bots
