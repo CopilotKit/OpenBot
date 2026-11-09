@@ -3,8 +3,9 @@
 //!
 //! Before this, finding out why a fresh install said "The back end could not start" took asking for
 //! two files by path, the version, and Docker's details, one message at a time. Now one action
-//! gathers them: which build, on what, what failed, what the container engine reports about itself
-//! and its disk, the end of this app's newest log file and the end of the back end CLI's own log.
+//! gathers them: which build, on what, what failed, the container engine's version and size as the
+//! back end's own engine check measures it (`local_eval::measured_engine`), and the end of this app's
+//! newest log file and of the back end CLI's log.
 //!
 //! EVERY LINE IS REDACTED, because the point is that a person pastes this into a third-party AI.
 //! This app's own log is scrubbed as it is written (`logging::scrub`), but the CLI's is not: it logs
@@ -16,9 +17,7 @@
 use std::borrow::Cow;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::LazyLock;
-use std::time::{Duration, Instant};
 
 use regex::Regex;
 
@@ -28,9 +27,8 @@ pub const DESKTOP_TAIL_BYTES: u64 = 192 * 1024;
 /// How much of the end of the CLI's log goes in. It writes far less than the shell does.
 pub const CLI_TAIL_BYTES: u64 = 64 * 1024;
 
-/// How long one engine command may take before it is left out: an engine whose disk is full, or
-/// that is starting, can hang on `system df`.
-pub const ENGINE_TIMEOUT: Duration = Duration::from_secs(5);
+/// The most of what failed that goes in: the window passes it, and only its start says anything.
+pub const FAILURE_BYTES: usize = 16 * 1024;
 
 /// The name of a saved bundle: `openbot-troubleshooting-<when>.txt`, in the log folder.
 pub const SAVED_PREFIX: &str = "openbot-troubleshooting-";
@@ -38,7 +36,20 @@ pub const SAVED_PREFIX: &str = "openbot-troubleshooting-";
 /// Written in place of an account, organisation, user or installation identifier.
 pub const ID: &str = "[id]";
 
-/// What goes into one bundle, gathered by the app and laid out by `bundle`.
+/// The container engine as the bundle reports it.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Engine {
+    /// `docker` or `podman`.
+    pub name: String,
+    /// The engine's own version, from its `info`, when it said.
+    pub version: Option<String>,
+    /// `EngineCheck::said`: CPUs, memory, free disk and what is short, as `[local check]` logs it.
+    pub measured: String,
+    /// `system df`: what images, containers and volumes use of its disk, when it answered.
+    pub disk_use: Option<String>,
+}
+
+/// What goes into one bundle, gathered by `gather` and laid out by `bundle`.
 #[derive(Debug, Default)]
 pub struct Facts {
     /// `OpenBot Desktop 1.0.0 (Built … from …)`, as the launch line says it.
@@ -47,36 +58,102 @@ pub struct Facts {
     pub system: String,
     /// What the person was told, and what lay beneath, when something failed.
     pub failure: Option<String>,
-    /// Each engine command and what it printed, or why it printed nothing.
-    pub engine: Vec<(String, String)>,
+    /// The engine OpenBot runs on, or None when none is answering.
+    pub engine: Option<Engine>,
     /// The newest log file of this app, and its end.
     pub desktop_log: Option<(PathBuf, String)>,
     /// The CLI's log file and its end, or None when there is none on this computer.
     pub cli_log: Option<(PathBuf, String)>,
 }
 
+/// Where `gather` finds what goes into a bundle.
+pub struct Sources<'a> {
+    pub desktop: String,
+    pub failure: Option<String>,
+    /// This app's log folder (`logging::folder`).
+    pub log_folder: Option<&'a Path>,
+    /// The home folder the CLI runs with, which also holds its log. Written as `~`.
+    pub home: Option<&'a str>,
+    /// The engine to measure: the one the back end runs on, or the one answering.
+    pub engine: Option<crate::engine::Address>,
+}
+
+/// Gather a bundle and lay it out, redacted.
+pub fn gather(sources: Sources) -> String {
+    let read = |path: PathBuf, bytes: u64| tail(&path, bytes).ok().map(|tail| (path, tail));
+    let facts = Facts {
+        desktop: sources.desktop,
+        system: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+        failure: sources.failure,
+        engine: sources.engine.as_ref().map(measure_engine),
+        desktop_log: sources
+            .log_folder
+            .and_then(newest_log)
+            .and_then(|path| read(path, DESKTOP_TAIL_BYTES)),
+        cli_log: sources
+            .home
+            .and_then(|home| read(cli_log(Path::new(home)), CLI_TAIL_BYTES)),
+    };
+    bundle(&facts, sources.home)
+}
+
+/// The engine's version, size and disk use, asked at once: each within the engine check's own
+/// limits, so a hung engine holds the bundle no longer than it holds the check.
+pub fn measure_engine(address: &crate::engine::Address) -> Engine {
+    let format = match address.engine {
+        crate::engine::Engine::Podman => "{{.Version.Version}}",
+        crate::engine::Engine::Docker => "{{.ServerVersion}}",
+    };
+    std::thread::scope(|scope| {
+        let version =
+            scope.spawn(|| crate::local_eval::engine_query(address, &["info", "--format", format]));
+        let disk_use = scope.spawn(|| crate::local_eval::engine_query(address, &["system", "df"]));
+        let measured = crate::local_eval::measured_engine(address);
+        let said = |answer: Option<String>| {
+            answer
+                .map(|said| said.trim().to_owned())
+                .filter(|said| !said.is_empty())
+        };
+        Engine {
+            name: address.engine.binary().to_owned(),
+            version: said(version.join().ok().flatten()),
+            measured,
+            disk_use: said(disk_use.join().ok().flatten()),
+        }
+    })
+}
+
 /// The bundle as text, redacted. `home` is written as `~`.
 pub fn bundle(facts: &Facts, home: Option<&str>) -> String {
+    let failure = facts
+        .failure
+        .as_deref()
+        .map(|failure| bounded(failure.trim(), FAILURE_BYTES))
+        .filter(|failure| !failure.is_empty());
     let mut out = String::new();
     out.push_str("# OpenBot troubleshooting logs\n\n");
-    out.push_str(&summary(facts));
+    out.push_str(&summary(facts, failure));
     out.push_str(&format!("\n{REDACTED_NOTE}\n\n"));
     out.push_str(&format!("{}\n", facts.desktop));
     out.push_str(&format!("System: {}\n", facts.system));
     out.push_str("\n## What failed\n\n");
-    match &facts.failure {
-        Some(failure) if !failure.trim().is_empty() => {
-            out.push_str(failure.trim_end());
+    match failure {
+        Some(failure) => {
+            out.push_str(failure);
             out.push('\n');
         }
-        _ => out.push_str("Nothing reported a failure.\n"),
+        None => out.push_str("Nothing reported a failure.\n"),
     }
     out.push_str("\n## Container engine\n\n");
-    if facts.engine.is_empty() {
-        out.push_str("No container engine is answering.\n");
-    }
-    for (command, said) in &facts.engine {
-        out.push_str(&format!("$ {command}\n{}\n\n", said.trim_end()));
+    match &facts.engine {
+        Some(engine) => {
+            out.push_str(&format!("{}\n", engine_name(engine)));
+            out.push_str(&format!("Measured: {}\n", engine.measured));
+            if let Some(disk_use) = &engine.disk_use {
+                out.push_str(&format!("\n$ {} system df\n{disk_use}\n", engine.name));
+            }
+        }
+        None => out.push_str("No container engine is answering.\n"),
     }
     let file = |out: &mut String, title: &str, found: &Option<(PathBuf, String)>| {
         out.push_str(&format!("\n## {title}\n\n"));
@@ -101,11 +178,19 @@ pub const REDACTED_NOTE: &str = "Redacted on this computer before copying: API k
 passwords, cookies, email addresses, and account, organisation, user and installation ids. The \
 home folder is written as ~.";
 
+/// `docker 28.5.1`, or `docker` when it did not say its version.
+fn engine_name(engine: &Engine) -> String {
+    match &engine.version {
+        Some(version) => format!("{} {version}", engine.name),
+        None => engine.name.clone(),
+    }
+}
+
 /// The headline, for whoever reads the bundle first: which build, what failed, and the engine's
-/// size. One to three lines.
-pub fn summary(facts: &Facts) -> String {
+/// size and disk. One to three lines.
+fn summary(facts: &Facts, failure: Option<&str>) -> String {
     let mut lines = vec![format!("Summary: {} on {}.", facts.desktop, facts.system)];
-    if let Some(failure) = facts.failure.as_deref().filter(|f| !f.trim().is_empty()) {
+    if let Some(failure) = failure {
         let said: Vec<&str> = failure
             .lines()
             .map(str::trim)
@@ -118,114 +203,33 @@ pub fn summary(facts: &Facts) -> String {
         }
         lines.push(format!("Failed: {said}"));
     }
-    if let Some(engine) = engine_summary(&facts.engine) {
-        lines.push(engine);
-    }
+    lines.push(match &facts.engine {
+        Some(engine) => format!(
+            "Container engine: {}. {}.",
+            engine_name(engine),
+            engine.measured
+        ),
+        None => "Container engine: none is answering.".to_owned(),
+    });
     lines.join("\n") + "\n"
 }
 
-/// `docker 28.5.1, 8 CPUs, 8.2 GB memory. Docker disk: 0.0 GB free.`, from
-/// the engine commands' own answers. None when nothing answered.
-fn engine_summary(engine: &[(String, String)]) -> Option<String> {
-    static SIZE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(\d+) CPUs, (\d+) bytes memory").expect("the size pattern compiles")
-    });
-    let answered = |said: &str| {
-        !(said.starts_with("failed (")
-            || said.starts_with("no answer within")
-            || said.starts_with("could not"))
-    };
-    let name = engine.first()?.0.split(' ').next()?.to_owned();
-    let mut parts = vec![name];
-    let version = engine
-        .iter()
-        .find(|(command, _)| command.contains(" version"))
-        .map(|(_, said)| said.trim())
-        .filter(|said| !said.is_empty() && answered(said));
-    if let Some(version) = version {
-        parts[0] = format!("{} {version}", parts[0]);
+/// At most `max` bytes of `text`, cut at a character.
+fn bounded(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text;
     }
-    let size = engine
-        .iter()
-        .find(|(command, said)| command.contains(" info") && answered(said))
-        .and_then(|(_, said)| SIZE.captures(said));
-    match size {
-        Some(size) => {
-            let bytes: f64 = size[2].parse().unwrap_or_default();
-            parts.push(format!("{} CPUs", &size[1]));
-            parts.push(format!("{:.1} GB memory", bytes / 1e9));
-        }
-        None if version.is_none() => parts.push("not answering".into()),
-        None => {}
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
     }
-    let disk_name = if engine[0].0.starts_with("podman") {
-        "Podman"
-    } else {
-        "Docker"
-    };
-    let free = engine
-        .iter()
-        .find(|(command, said)| command.contains("--entrypoint df") && answered(said))
-        .and_then(|(_, said)| free_bytes(said));
-    let disk = match free {
-        Some(bytes) => format!("{disk_name} disk: {:.1} GB free.", bytes as f64 / 1e9),
-        None => format!("{disk_name} disk: free space not measured; see system df below."),
-    };
-    Some(format!("Container engine: {}. {disk}", parts.join(", ")))
+    &text[..end]
 }
 
-/// The image to measure the engine's disk from: one already on this computer, so nothing is
-/// downloaded (a download is what fails when that disk is full). OpenBot's own first, then
-/// CopilotKit's, from `images --format {{.Repository}}:{{.Tag}}`.
-pub fn probe_image(listing: &str) -> Option<String> {
-    let images: Vec<&str> = listing
-        .lines()
-        .map(str::trim)
-        .filter(|image| !image.is_empty() && !image.contains("<none>"))
-        .collect();
-    ["openbot", "copilotkit"].iter().find_map(|wanted| {
-        images
-            .iter()
-            .find(|image| image.to_ascii_lowercase().contains(wanted))
-            .map(|image| (*image).to_owned())
-    })
-}
-
-/// `run` arguments that print the engine's disk as `df` sees it from inside a container, the way
-/// the back end CLI's own capacity check does: never pulled, no network, removed after.
-pub fn disk_probe_arguments(image: &str) -> Vec<String> {
-    [
-        "run",
-        "--rm",
-        "--pull",
-        "never",
-        "--network",
-        "none",
-        "--entrypoint",
-        "df",
-        image,
-        "-Pk",
-        "/",
-    ]
-    .map(str::to_owned)
-    .to_vec()
-}
-
-/// The bytes free in POSIX `df -Pk` output: the Available column of its first filesystem line.
-pub fn free_bytes(df: &str) -> Option<u64> {
-    let line = df.lines().find(|line| {
-        line.split_whitespace()
-            .nth(3)
-            .is_some_and(|available| available.parse::<u64>().is_ok())
-    })?;
-    let kilobytes: u64 = line.split_whitespace().nth(3)?.parse().ok()?;
-    Some(kilobytes * 1024)
-}
-
-/// A named account identifier: `"organizationId":"org_…"`, `user_id=…`, `installationId: …`.
+/// A named account identifier: `"organizationId":"org_…"`, `user_id=…`, `"subjectId":"usr_…"`.
 static IDENTIFIER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r#"(?i)(?P<name>\b(?:organi[sz]ation|org|user|account|installation|install|tenant|workspace|team|customer|member|distinct)[_\-]?id)(?P<sep>["']?\s*[:=]\s*["']?)[^\s"'&,;}\]\)]+"#,
+        r#"(?i)(?P<name>[A-Za-z0-9_]*?(?:organi[sz]ation|org|user|account|subject|installation|install|tenant|workspace|team|customer|member|distinct)[_\-]?id)(?P<sep>["']?\s*[:=]\s*["']?)(?:\[[a-z]+\]|[^\s"'&,;}\]\)]+)"#,
     )
     .expect("the identifier pattern compiles")
 });
@@ -284,69 +288,6 @@ pub fn tail(path: &Path, max_bytes: u64) -> std::io::Result<String> {
     })
 }
 
-/// The engine commands that are cheap to answer and say what support asks for: its version, its
-/// CPUs, memory and storage, and how much of its disk is used.
-pub fn engine_commands(podman: bool) -> Vec<Vec<&'static str>> {
-    if podman {
-        vec![
-            vec!["version", "--format", "{{.Server.Version}}"],
-            vec![
-                "info",
-                "--format",
-                "{{.Host.OS}} {{.Host.Arch}}, {{.Host.Cpus}} CPUs, {{.Host.MemTotal}} bytes memory, storage {{.Store.GraphDriverName}} at {{.Store.GraphRoot}}",
-            ],
-            vec!["system", "df"],
-        ]
-    } else {
-        vec![
-            vec!["version", "--format", "{{.Server.Version}}"],
-            vec![
-                "info",
-                "--format",
-                "{{.OperatingSystem}} {{.Architecture}}, {{.NCPU}} CPUs, {{.MemTotal}} bytes memory, storage {{.Driver}} at {{.DockerRootDir}}",
-            ],
-            vec!["system", "df"],
-        ]
-    }
-}
-
-/// Run a command for at most `timeout`, and say what it printed: its output, its error output when
-/// it failed, or that it did not answer in time.
-pub fn run_bounded(mut command: Command, timeout: Duration) -> String {
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = match command.spawn() {
-        Ok(child) => child,
-        Err(error) => return format!("could not run: {error}"),
-    };
-    let until = Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() < until => std::thread::sleep(Duration::from_millis(50)),
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return format!("no answer within {}s", timeout.as_secs_f32());
-            }
-            Err(error) => return format!("could not wait for it: {error}"),
-        }
-    }
-    match child.wait_with_output() {
-        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
-            .trim_end()
-            .to_owned(),
-        Ok(output) => format!(
-            "failed ({}): {}",
-            output.status,
-            crate::quiet::said(&output.stderr).trim_end()
-        ),
-        Err(error) => format!("could not read it: {error}"),
-    }
-}
-
 /// Save a bundle in `folder` as `openbot-troubleshooting-<stamp>.txt`, and say where.
 pub fn save(folder: &Path, text: &str, stamp: &str) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(folder)?;
@@ -359,44 +300,114 @@ pub fn save(folder: &Path, text: &str, stamp: &str) -> std::io::Result<PathBuf> 
 mod tests {
     use super::*;
     use crate::test_support::temp_root;
+    use std::time::Duration;
 
-    /// Lines the CLI and the shell really write, each with something a third-party AI must not get.
+    // Built at run time, so no key-shaped literal sits in the source for a scanner to stop.
+    fn fake(prefix: &str, body: &str, times: usize) -> String {
+        format!("{prefix}{}", body.repeat(times))
+    }
+
+    /**
+    Lines as the logs really write them, each holding something a third-party AI must not get: the
+    CLI's JSON lines (sign-in with email, organisation, user and subject ids; a license check), this
+    app's own lines, an `.env` file's lines (quoted values with spaces among them), `Authorization`
+    headers, provider keys (`sk-proj-`, `sk-ant-api03-`), a Claude sign-in token (`sk-ant-oat01-`),
+    an OAuth callback and an OAuth token answer.
+    */
     #[test]
-    fn account_details_tokens_and_the_home_folder_are_redacted() {
-        let token = format!(
+    fn keys_tokens_secrets_emails_and_ids_from_real_log_lines_are_redacted() {
+        let jwt = format!(
             "eyJ{}.eyJ{}.{}",
-            "hbGciOi".repeat(3),
-            "zdWIiOi".repeat(3),
-            "Sfl"
+            fake("", "hbGciOi", 3),
+            fake("", "zdWIiOi", 3),
+            "Sfl9xQ"
         );
-        let key = format!("sk-ant-api03-{}", "Ab9_".repeat(12));
-        let lines = [
-            r#"2026-11-08T10:12:01.004Z info auth: signed in {"email":"alice.smith@example.com","organizationId":"org_2xK9pQ7vLm","userId":"user_31aZ"}"#.to_owned(),
-            format!(r#"2026-11-08T10:12:01.010Z debug api: GET /v1/projects Authorization: Bearer {token}"#),
-            format!("2026-11-08T10:12:03.551Z info license: ANTHROPIC_API_KEY={key}"),
-            "2026-11-08T10:12:04.000Z info telemetry: installation_id=8c0f4a52-7e0b-4d1e-9a5f-3b2c1d0e9f8a".to_owned(),
-            "2026-11-08T10:12:05.000Z info config: wrote /Users/alice/.copilotkit/project.json".to_owned(),
-            r#"{"level":"info","msg":"project linked","accountId":"acct_77","orgId":"o-1"}"#.to_owned(),
+        let openai = fake("sk-proj-", "Ab9_x7Qz", 6);
+        let anthropic = fake("sk-ant-api03-", "Ab9_", 12);
+        let oauth = fake("sk-ant-oat01-", "Zq3-Kp8_", 8);
+        let license = fake("ck_lic_", "q7Rt2Xw9", 4);
+        let google_secret = fake("GOCSPX-", "aB3dE5", 4);
+        let refresh = fake("1//0g", "Lm7Np2Qr", 5);
+        let composio = fake("ak_", "x7k2m9p4", 3);
+        let encryption = fake("", "Qm9vYmFy", 4) + "==";
+        let code = fake("4/0Aean", "S9kLm2", 5);
+        let cases: Vec<(String, Vec<&str>)> = vec![
+            // The CLI's JSON lines (`~/.copilotkit/cli.log`).
+            (
+                r#"{"level":30,"time":"2026-11-08T10:12:01.004Z","event":"auth.signed_in","email":"dana.rivera@acme-robotics.io","organizationId":"org_2xK9pQ7vLm","userId":"user_31aZ","subjectId":"usr_01JD8ZK3Q4M7N2P5R8T0V"}"#.to_owned(),
+                vec!["dana.rivera@acme-robotics.io", "org_2xK9pQ7vLm", "user_31aZ", "usr_01JD8ZK3Q4M7N2P5R8T0V"],
+            ),
+            (
+                format!(r#"{{"level":30,"time":"2026-11-08T10:12:02.551Z","msg":"license.verified","licenseToken":"{license}","token":"{jwt}"}}"#),
+                vec![license.as_str(), jwt.as_str()],
+            ),
+            (
+                r#"{"level":30,"time":"2026-11-08T10:12:03.000Z","msg":"telemetry.sink.succeeded","posthog_distinct_id":"8c0f4a52-7e0b-4d1e-9a5f-3b2c1d0e9f8a"}"#.to_owned(),
+                vec!["8c0f4a52-7e0b-4d1e-9a5f-3b2c1d0e9f8a"],
+            ),
+            // This app's lines (`openbot-desktop.log`).
+            (
+                format!("2026-11-08T10:12:01.010Z INFO  [provider] GET https://api.anthropic.com/v1/models Authorization: Bearer {oauth}"),
+                vec![oauth.as_str()],
+            ),
+            (
+                format!("2026-11-08T10:12:01.011Z WARN  [provider] the key {anthropic} was refused (401)"),
+                vec![anthropic.as_str()],
+            ),
+            (
+                format!("2026-11-08T10:12:01.012Z INFO  [oauth] callback http://127.0.0.1:43117/callback?code={code}&state=Xy7kQ2mN9pL4"),
+                vec![code.as_str(), "Xy7kQ2mN9pL4"],
+            ),
+            (
+                format!(r#"2026-11-08T10:12:01.013Z INFO  [oauth] token answer {{"access_token":"{jwt}","refresh_token":"{refresh}","client_secret":"{google_secret}"}}"#),
+                vec![jwt.as_str(), refresh.as_str(), google_secret.as_str()],
+            ),
+            (
+                "2026-11-08T10:12:05.000Z INFO  [config] wrote /Users/dana/OpenBot/.env".to_owned(),
+                vec!["/Users/dana"],
+            ),
+            // An `.env` file, as a person might paste it into a failure or a log.
+            (format!("OPENAI_API_KEY={openai}"), vec![openai.as_str()]),
+            (format!("ANTHROPIC_API_KEY=\"{anthropic}\""), vec![anthropic.as_str()]),
+            (format!("CLAUDE_CODE_OAUTH_TOKEN={oauth}"), vec![oauth.as_str()]),
+            (format!("COPILOTKIT_LICENSE_TOKEN={license}"), vec![license.as_str()]),
+            (format!("COMPOSIO_API_KEY={composio}"), vec![composio.as_str()]),
+            (format!("KEY_ENCRYPTION_KEY={encryption}"), vec![encryption.as_str()]),
+            ("BETTER_AUTH_SECRET=\"correct horse battery staple\"".to_owned(), vec!["correct", "horse", "battery", "staple"]),
+            ("export WORKER_SHARED_SECRET='two words'".to_owned(), vec!["two", "words"]),
+            ("DATABASE_URL=postgres://openbot:hunter2pass@127.0.0.1:5432/openbot".to_owned(), vec!["hunter2pass"]),
         ];
-        let text = lines.join("\n");
-        let redacted = redact(&text, Some("/Users/alice"));
-        for secret in [
-            "alice.smith@example.com",
-            "org_2xK9pQ7vLm",
-            "user_31aZ",
-            token.as_str(),
-            key.as_str(),
-            "8c0f4a52-7e0b-4d1e-9a5f-3b2c1d0e9f8a",
-            "/Users/alice",
-            "acct_77",
-            "o-1",
-        ] {
-            assert!(!redacted.contains(secret), "{secret} survived:\n{redacted}");
+        for (line, secrets) in &cases {
+            let redacted = redact(line, Some("/Users/dana"));
+            for secret in secrets {
+                assert!(
+                    !redacted.contains(secret),
+                    "{secret} survived in\n{line}\nas\n{redacted}"
+                );
+            }
         }
-        assert!(redacted.contains(r#""email":"[email]","organizationId":"[id]","userId":"[id]""#));
-        assert!(redacted.contains("installation_id=[id]"));
-        assert!(redacted.contains("wrote ~/.copilotkit/project.json"));
-        assert!(redacted.contains("ANTHROPIC_API_KEY=[redacted]"));
+        // What stays says what was there.
+        let said = |line: &str| redact(line, Some("/Users/dana")).into_owned();
+        assert!(
+            said(&cases[0].0).contains(
+                r#""email":"[email]","organizationId":"[id]","userId":"[id]","subjectId":"[id]""#
+            ),
+            "{}",
+            said(&cases[0].0)
+        );
+        assert_eq!(
+            said(&cases[3].0),
+            "2026-11-08T10:12:01.010Z INFO  [provider] GET https://api.anthropic.com/v1/models Authorization: Bearer [redacted]"
+        );
+        assert_eq!(
+            said("BETTER_AUTH_SECRET=\"correct horse battery staple\""),
+            "BETTER_AUTH_SECRET=[redacted]"
+        );
+        assert_eq!(
+            said(&cases[7].0),
+            "2026-11-08T10:12:05.000Z INFO  [config] wrote ~/OpenBot/.env"
+        );
+        assert_eq!(said(&cases[8].0), "OPENAI_API_KEY=[redacted]");
     }
 
     /// What the bundle is for has to survive: steps, exit codes, sizes, versions and the stack's name.
@@ -409,39 +420,50 @@ mod tests {
             "Images          14        3         18.2GB    12.1GB (66%)",
             "27.3.1",
             "[launch] OpenBot Desktop 1.0.0-rc.1 (Built 2026-11-08 06:40 UTC from 52ea4b5) on macos aarch64",
+            "WARN [local check] before local start: 8 CPUs and 7.7 GiB of memory, 0.0 GiB free of 58.4 GiB in a container; short of disk (nearly full)",
+            r#"{"level":30,"time":"2026-11-08T10:12:03.000Z","event":"consent.state.invalid","flowId":"setup-abc","runId":"run-7"}"#,
             "stack local-7f3a2c is starting",
         ] {
-            assert_eq!(redact(line, Some("/Users/alice")), line);
+            assert_eq!(redact(line, Some("/Users/dana")), line);
+        }
+    }
+
+    fn full_engine() -> Engine {
+        Engine {
+            name: "docker".into(),
+            version: Some("28.5.1".into()),
+            measured: "8 CPUs and 7.7 GiB of memory, 0.0 GiB free of 58.4 GiB in a container; short of disk (nearly full)".into(),
+            disk_use: Some("TYPE   TOTAL  ACTIVE  SIZE  RECLAIMABLE\nImages 14  3  18.2GB  12.1GB (66%)".into()),
         }
     }
 
     #[test]
-    fn a_bundle_has_every_section_and_is_redacted() {
+    fn a_bundle_opens_with_a_summary_and_has_every_section_redacted() {
         let facts = Facts {
             desktop: "OpenBot Desktop 1.0.0 (Built 2026-11-08 06:40 UTC from 52ea4b5)".into(),
             system: "macos aarch64".into(),
             failure: Some("The back end could not start.\nexit 1".into()),
-            engine: vec![(
-                "docker version --format {{.Server.Version}}".into(),
-                "27.3.1\n".into(),
-            )],
+            engine: Some(full_engine()),
             desktop_log: Some((
                 PathBuf::from(
-                    "/Users/alice/Library/Logs/ai.copilotkit.openbot.desktop/openbot-desktop.log",
+                    "/Users/dana/Library/Logs/ai.copilotkit.openbot.desktop/openbot-desktop.log",
                 ),
                 "2026-11-08T10:15:40.003Z ERROR [local setup] failed after 88.1s: exit 1\n".into(),
             )),
             cli_log: Some((
-                PathBuf::from("/Users/alice/.copilotkit/cli.log"),
+                PathBuf::from("/Users/dana/.copilotkit/cli.log"),
                 r#"signed in {"email":"a@b.co","organizationId":"org_1"}"#.into(),
             )),
         };
-        let text = bundle(&facts, Some("/Users/alice"));
+        let text = bundle(&facts, Some("/Users/dana"));
+        assert!(text.starts_with(
+            "# OpenBot troubleshooting logs\n\nSummary: OpenBot Desktop 1.0.0 (Built 2026-11-08 06:40 UTC from 52ea4b5) on macos aarch64.\nFailed: The back end could not start. / exit 1\nContainer engine: docker 28.5.1. 8 CPUs and 7.7 GiB of memory, 0.0 GiB free of 58.4 GiB in a container; short of disk (nearly full).\n\nRedacted on this computer"
+        ), "{text}");
         for expected in [
-            "OpenBot Desktop 1.0.0 (Built",
             "System: macos aarch64",
             "## What failed\n\nThe back end could not start.\nexit 1\n",
-            "$ docker version --format {{.Server.Version}}\n27.3.1\n",
+            "## Container engine\n\ndocker 28.5.1\nMeasured: 8 CPUs",
+            "$ docker system df\nTYPE",
             "~/Library/Logs/ai.copilotkit.openbot.desktop/openbot-desktop.log",
             "[local setup] failed after 88.1s: exit 1",
             "~/.copilotkit/cli.log",
@@ -449,99 +471,20 @@ mod tests {
         ] {
             assert!(text.contains(expected), "missing {expected:?} in\n{text}");
         }
-        assert!(!text.contains("/Users/alice"));
-
-        // The headline comes first, then what was taken out.
-        assert!(text.starts_with(
-            "# OpenBot troubleshooting logs\n\nSummary: OpenBot Desktop 1.0.0 (Built 2026-11-08 06:40 UTC from 52ea4b5) on macos aarch64.\nFailed: The back end could not start. / exit 1\nContainer engine: docker 27.3.1. Docker disk: free space not measured; see system df below.\n\nRedacted on this computer"
-        ), "{text}");
+        assert!(!text.contains("/Users/dana"));
 
         let empty = bundle(&Facts::default(), None);
+        assert!(empty.contains("Container engine: none is answering."));
         assert!(empty.contains("Nothing reported a failure."));
         assert!(empty.contains("No container engine is answering."));
         assert_eq!(empty.matches("Not found on this computer.").count(), 2);
-    }
 
-    #[test]
-    fn the_summary_says_the_engines_size_or_that_it_did_not_answer() {
-        let facts = Facts {
-            engine: vec![
-                ("docker version --format x".into(), "28.5.1".into()),
-                (
-                    "docker info --format y".into(),
-                    "Docker Desktop aarch64, 8 CPUs, 8217473024 bytes memory, storage overlayfs at /var/lib/docker".into(),
-                ),
-                ("docker system df".into(), "no answer within 5s".into()),
-            ],
+        // A window that passes a huge failure does not make a huge bundle.
+        let huge = Facts {
+            failure: Some("x".repeat(FAILURE_BYTES * 4)),
             ..Facts::default()
         };
-        assert!(summary(&facts).ends_with(
-            "Container engine: docker 28.5.1, 8 CPUs, 8.2 GB memory. Docker disk: free space not measured; see system df below.\n"
-        ));
-        let silent = Facts {
-            engine: vec![
-                (
-                    "podman version --format x".into(),
-                    "no answer within 5s".into(),
-                ),
-                (
-                    "podman info --format y".into(),
-                    "failed (exit status: 125): boom".into(),
-                ),
-            ],
-            ..Facts::default()
-        };
-        assert!(summary(&silent).contains("Container engine: podman, not answering."));
-        assert!(!summary(&Facts::default()).contains("Failed:"));
-    }
-
-    /// The case this bundle has to make obvious: CPUs and memory fine, the engine's disk full.
-    #[test]
-    fn a_full_engine_disk_is_in_the_summary() {
-        let df = "Filesystem     1024-blocks      Used Available Capacity Mounted on\noverlay           61255492  61255492         0     100% /\n";
-        let facts = Facts {
-            engine: vec![
-                ("docker version --format x".into(), "28.5.1".into()),
-                ("docker info --format y".into(), "Docker Desktop aarch64, 8 CPUs, 8217473024 bytes memory, storage overlayfs at /var/lib/docker".into()),
-                (format!("docker {}", disk_probe_arguments("ghcr.io/copilotkit/openbot-server:1.0.0").join(" ")), df.into()),
-            ],
-            ..Facts::default()
-        };
-        assert!(summary(&facts).ends_with(
-            "Container engine: docker 28.5.1, 8 CPUs, 8.2 GB memory. Docker disk: 0.0 GB free.\n"
-        ), "{}", summary(&facts));
-        assert_eq!(free_bytes("Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 100 40 60 40% /"), Some(60 * 1024));
-        assert_eq!(free_bytes("no such image"), None);
-        // A probe that failed (no image, a refused run) leaves it unmeasured.
-        let failed = Facts {
-            engine: vec![(
-                "docker run --rm --pull never x df -Pk /".into(),
-                "failed (exit status: 125): No such image".into(),
-            )],
-            ..Facts::default()
-        };
-        assert!(summary(&failed).contains("Docker disk: free space not measured"));
-    }
-
-    #[test]
-    fn the_disk_is_measured_from_an_image_already_here_and_never_pulled() {
-        let listing = "postgres:16\n<none>:<none>\nghcr.io/copilotkit/intelligence-cli:0.16.0\nghcr.io/copilotkit/openbot-server:1.0.0-rc.3\n";
-        assert_eq!(
-            probe_image(listing).as_deref(),
-            Some("ghcr.io/copilotkit/openbot-server:1.0.0-rc.3")
-        );
-        assert_eq!(
-            probe_image("ghcr.io/copilotkit/intelligence-cli:0.16.0\n").as_deref(),
-            Some("ghcr.io/copilotkit/intelligence-cli:0.16.0")
-        );
-        assert_eq!(probe_image("postgres:16\nredis:7\n"), None);
-        let arguments = disk_probe_arguments("img:1");
-        assert!(arguments.windows(2).any(|pair| pair == ["--pull", "never"]));
-        assert!(arguments
-            .windows(2)
-            .any(|pair| pair == ["--network", "none"]));
-        assert!(arguments.contains(&"--rm".to_owned()));
-        assert!(arguments.ends_with(&["img:1".to_owned(), "-Pk".to_owned(), "/".to_owned()]));
+        assert!(bundle(&huge, None).len() < FAILURE_BYTES + 2048);
     }
 
     #[test]
@@ -561,8 +504,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(folder);
     }
 
+    /// Only the end of each log goes in, starting at a whole line, however long the log has grown.
     #[test]
-    fn a_tail_starts_at_a_whole_line() {
+    fn a_tail_is_bounded_and_starts_at_a_whole_line() {
         let folder = temp_root("troubleshooting-tail");
         std::fs::create_dir_all(&folder).unwrap();
         let path = folder.join("cli.log");
@@ -573,18 +517,23 @@ mod tests {
         );
         assert_eq!(tail(&path, 16).unwrap(), "third line\n");
         assert!(tail(&folder.join("missing.log"), 16).is_err());
+        let line = "2026-11-08T10:12:01.004Z INFO  [step engine] docker is answering.\n";
+        std::fs::write(&path, line.repeat(20_000)).unwrap();
+        let end = tail(&path, CLI_TAIL_BYTES).unwrap();
+        assert!(end.len() as u64 <= CLI_TAIL_BYTES);
+        assert!(end.starts_with("2026-11-08T"));
         let _ = std::fs::remove_dir_all(folder);
     }
 
     #[test]
     fn the_cli_log_is_under_the_home_folder_on_every_platform() {
         assert_eq!(
-            cli_log(Path::new("/Users/alice")),
-            Path::new("/Users/alice/.copilotkit/cli.log")
+            cli_log(Path::new("/Users/dana")),
+            Path::new("/Users/dana/.copilotkit/cli.log")
         );
         assert_eq!(
-            cli_log(Path::new(r"C:\Users\alice")),
-            Path::new(r"C:\Users\alice")
+            cli_log(Path::new(r"C:\Users\dana")),
+            Path::new(r"C:\Users\dana")
                 .join(".copilotkit")
                 .join("cli.log")
         );
@@ -602,28 +551,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(folder.parent().unwrap());
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn an_engine_command_that_hangs_is_cut_off() {
-        let mut slow = Command::new("sh");
-        slow.args(["-c", "sleep 5"]);
-        assert_eq!(
-            run_bounded(slow, Duration::from_millis(200)),
-            "no answer within 0.2s"
-        );
-        let mut fails = Command::new("sh");
-        fails.args([
-            "-c",
-            "echo 'Cannot connect to the Docker daemon' >&2; exit 1",
-        ]);
-        let said = run_bounded(fails, ENGINE_TIMEOUT);
-        assert!(said.starts_with("failed ("), "{said}");
-        assert!(
-            said.contains("Cannot connect to the Docker daemon"),
-            "{said}"
-        );
-        let mut answers = Command::new("sh");
-        answers.args(["-c", "echo 27.3.1"]);
-        assert_eq!(run_bounded(answers, ENGINE_TIMEOUT), "27.3.1");
-    }
 }

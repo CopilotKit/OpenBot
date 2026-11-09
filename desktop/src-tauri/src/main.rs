@@ -5673,7 +5673,8 @@ fn save_troubleshooting_logs_now<R: tauri::Runtime>(
         ))
         .unwrap_or_default();
     let saved = troubleshooting::save(&folder, &text, &stamp)
-        .map_err(|error| format!("could not save the logs: {error}"))?;
+        .map_err(|error| format!("could not save the logs: {error}"))
+        .inspect_err(|error| log::warn!("[logs] {error}"))?;
     log::info!("[logs] saved troubleshooting logs as {}", saved.display());
     tauri_plugin_opener::reveal_item_in_dir(&saved)
         .map_err(|error| error.to_string())
@@ -5685,52 +5686,13 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
     failure: Option<String>,
 ) -> String {
     let home = logging::home_folder();
-    let found = engine::detect();
-    let engine = match found.engine.filter(|_| found.responding) {
-        Some(running) => {
-            let program =
-                engine::program(running).unwrap_or_else(|| PathBuf::from(running.binary()));
-            let run = |arguments: &[String]| {
-                let mut command = quiet::command(&program);
-                command.args(arguments);
-                if let Some(path) = engine::path_with_docker() {
-                    command.env("PATH", path);
-                }
-                (
-                    format!("{} {}", running.binary(), arguments.join(" ")),
-                    troubleshooting::run_bounded(command, troubleshooting::ENGINE_TIMEOUT),
-                )
-            };
-            let mut said: Vec<(String, String)> =
-                troubleshooting::engine_commands(running.binary() == "podman")
-                    .into_iter()
-                    .map(|arguments| {
-                        run(&arguments
-                            .iter()
-                            .map(|argument| (*argument).to_owned())
-                            .collect::<Vec<_>>())
-                    })
-                    .collect();
-            // Free space on the engine's own disk, as `df` sees it from inside a container started
-            // from an image already here. Left unmeasured when there is none.
-            let (_, images) = run(&[
-                "images".to_owned(),
-                "--format".to_owned(),
-                "{{.Repository}}:{{.Tag}}".to_owned(),
-            ]);
-            if let Some(image) = troubleshooting::probe_image(&images) {
-                said.push(run(&troubleshooting::disk_probe_arguments(&image)));
-            }
-            said
-        }
-        None => Vec::new(),
-    };
-    let read = |path: PathBuf, bytes: u64| {
-        troubleshooting::tail(&path, bytes)
-            .ok()
-            .map(|tail| (path, tail))
-    };
-    let facts = troubleshooting::Facts {
+    let folder = logging::folder(app).ok();
+    // The engine the back end runs on; before setup has chosen one, whichever is answering.
+    let engine = local_eval::engine_in_use().or_else(|| {
+        let found = engine::detect();
+        found.address.filter(|_| found.responding)
+    });
+    let text = troubleshooting::gather(troubleshooting::Sources {
         desktop: format!(
             "OpenBot Desktop {} ({})",
             desktop_version(app),
@@ -5740,22 +5702,13 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
                 env!("OPENBOT_BUILD_TIME").parse().unwrap_or_default(),
             )
         ),
-        system: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
         failure,
+        log_folder: folder.as_deref(),
+        home: home.as_deref(),
         engine,
-        desktop_log: logging::folder(app)
-            .ok()
-            .and_then(|folder| troubleshooting::newest_log(&folder))
-            .and_then(|path| read(path, troubleshooting::DESKTOP_TAIL_BYTES)),
-        cli_log: home.as_deref().and_then(|home| {
-            read(
-                troubleshooting::cli_log(Path::new(home)),
-                troubleshooting::CLI_TAIL_BYTES,
-            )
-        }),
-    };
+    });
     log::info!("[logs] gathered troubleshooting logs");
-    troubleshooting::bundle(&facts, home.as_deref())
+    text
 }
 
 /**

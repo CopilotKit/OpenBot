@@ -237,6 +237,9 @@ fn opaque(candidate: &str) -> bool {
         && candidate.chars().any(|c| c.is_ascii_digit())
 }
 
+/// The name of anything that holds a credential: `OPENAI_API_KEY`, `refresh_token`, `x-api-key`.
+const CREDENTIAL_NAME: &str = r"[A-Za-z0-9_.\-]*(?:api[_\-]?key|apikey|[_\-]key\b|secret|token|password|passwd|pwd|cookie|authorization|credential|private[_\-]?key|access[_\-]?key|session[_\-]?id)[A-Za-z0-9_.\-]*";
+
 /// In order: a rule after another sees what the earlier one left.
 static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
     let rule = |pattern: &str, keep: &'static str| Rule {
@@ -258,12 +261,20 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
         // `Authorization: Bearer <token>`, `Basic <base64>`.
         rule(r"(?i)\b(?P<scheme>bearer)\s+[^\s\x22',;]+", "${scheme} [redacted]"),
         rule(r"\b(?P<scheme>Basic)\s+[A-Za-z0-9+/]{12,}={0,2}", "${scheme} [redacted]"),
+        // A credential's quoted value in an `.env` file, spaces and all:
+        // `BETTER_AUTH_SECRET="correct horse battery staple"`. The rule after stops at a space.
+        rule(
+            &format!(
+                r#"(?i)(?P<name>{CREDENTIAL_NAME})(?P<sep>\s*=\s*)(?:"[^"\r\n]*"|'[^'\r\n]*')"#
+            ),
+            "${name}${sep}[redacted]",
+        ),
         // Anything named as a credential, with its value: `OPENAI_API_KEY=…`, `"refresh_token": "…"`,
         // `x-api-key: …`, `password=…`. The name stays, so the line still says what was there.
         Rule {
-            pattern: Regex::new(
-                r#"(?i)(?P<name>[A-Za-z0-9_.\-]*(?:api[_\-]?key|apikey|[_\-]key\b|secret|token|password|passwd|pwd|cookie|authorization|credential|private[_\-]?key|access[_\-]?key|session[_\-]?id)[A-Za-z0-9_.\-]*)(?P<sep>["']?\s*[:=]\s*["']?)[^\s"'&,;}\]\[][^\s"'&,;}\]]*"#,
-            )
+            pattern: Regex::new(&format!(
+                r#"(?i)(?P<name>{CREDENTIAL_NAME})(?P<sep>["']?\s*[:=]\s*["']?)[^\s"'&,;}}\]\[][^\s"'&,;}}\]]*"#
+            ))
             .expect("a redaction pattern compiles"),
             keep: "${name}${sep}[redacted]",
             secret: named_value,

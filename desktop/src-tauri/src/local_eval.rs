@@ -1574,6 +1574,22 @@ impl EngineCheck {
     }
 }
 
+/// The engine the back end runs on, when the app has said: the one troubleshooting logs measure.
+pub fn engine_in_use() -> Option<crate::engine::Address> {
+    cli_engine()
+}
+
+/// The engine measured as `[local check]` logs it (`EngineCheck::said`): CPUs and memory, free disk
+/// inside a container and on the drive under a Podman machine, and what is short.
+pub fn measured_engine(address: &crate::engine::Address) -> String {
+    EngineCheck::of(address).said()
+}
+
+/// `args` on the engine within the check's limit for a query: its stdout when it succeeded.
+pub fn engine_query(address: &crate::engine::Address, args: &[&str]) -> Option<String> {
+    engine_output(address, args, ENGINE_QUERY_LIMIT)
+}
+
 /// Log a check: `[local check] before local start: ...`. A shortfall is a warning.
 fn log_check(when: &str, check: &EngineCheck) {
     let level = if check.shortfall().named() {
@@ -7782,6 +7798,8 @@ fn main() {
     }
     let a: Vec<&str> = args.iter().map(String::as_str).collect();
     let file = match a.as_slice() {
+        ["info", "--format", format] if format.contains("Version") => "version",
+        ["system", "df"] => "system-df",
         ["info", "--format", _] => "info",
         ["image", "ls", "--quiet", "--no-trunc"] => "images",
         ["run", "--rm", "--pull=never", "--network=none", "--entrypoint", "/bin/sh", _, "-c", "df -Pk /"] => "df",
@@ -8087,6 +8105,78 @@ fn main() {
                 drive: None,
             })
         );
+    }
+
+    /**
+    Troubleshooting logs from a Mac whose Docker disk is full, the case they were made for: the
+    engine's version and its numbers as `[local check]` measures them, both log tails, and the CLI's
+    sign-in line with its email and ids taken out.
+    */
+    #[test]
+    fn troubleshooting_logs_carry_both_log_tails_and_the_engines_numbers() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::troubleshooting_logs_carry_both_log_tails_and_the_engines_numbers",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("troubleshooting-logs");
+        lab.engine(
+            crate::engine::Engine::Docker,
+            DOCKER_INFO,
+            &df(WSL_DISK, 0),
+            None,
+            None,
+        );
+        std::fs::write(lab.bin.join("version"), "28.5.1\n").unwrap();
+        std::fs::write(
+            lab.bin.join("system-df"),
+            "TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE\nImages          14        3         18.2GB    12.1GB (66%)\n",
+        )
+        .unwrap();
+        let home = lab.fixture.root.join("home");
+        std::fs::create_dir_all(home.join(".copilotkit")).unwrap();
+        std::fs::write(
+            home.join(".copilotkit").join("cli.log"),
+            concat!(
+                r#"{"level":30,"time":"2026-11-08T10:12:01.004Z","event":"auth.signed_in","email":"dana.rivera@acme-robotics.io","organizationId":"org_2xK9pQ7vLm","userId":"user_31aZ"}"#,
+                "\n",
+                r#"{"level":50,"time":"2026-11-08T10:15:39.900Z","event":"local.step.failed","step":"stack-images","message":"write /var/lib/docker/tmp/GetImageBlob123: no space left on device"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+        let logs = lab.fixture.root.join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(
+            logs.join("openbot-desktop.log"),
+            "2026-11-08T10:15:40.003Z ERROR [local setup] failed after 88.1s: exit 1\n",
+        )
+        .unwrap();
+        let home = home.to_string_lossy().into_owned();
+
+        let text = crate::troubleshooting::gather(crate::troubleshooting::Sources {
+            desktop: "OpenBot Desktop 1.0.0 (Built 2026-11-08 06:40 UTC from 52ea4b5)".into(),
+            failure: Some("The back end could not start.".into()),
+            log_folder: Some(&logs),
+            home: Some(&home),
+            engine: engine_in_use(),
+        });
+
+        for expected in [
+            "Failed: The back end could not start.",
+            "Container engine: docker 28.5.1. 10 CPUs and 20.5 GiB of memory, 0 GiB free of 1006.8 GiB in a container; short of disk (nearly full).",
+            "$ docker system df\nTYPE",
+            "Images          14        3         18.2GB    12.1GB (66%)",
+            "[local setup] failed after 88.1s: exit 1",
+            "~/.copilotkit/cli.log",
+            "no space left on device",
+            r#""email":"[email]","organizationId":"[id]","userId":"[id]""#,
+        ] {
+            assert!(text.contains(expected), "missing {expected:?} in\n{text}");
+        }
+        for secret in ["dana.rivera@acme-robotics.io", "org_2xK9pQ7vLm", "user_31aZ", &home] {
+            assert!(!text.contains(secret), "{secret} survived in\n{text}");
+        }
     }
 
     /// Windows' answer for drive C: with `tenths` tenths of a GiB free, and a little more.
