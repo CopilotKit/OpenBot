@@ -4,12 +4,11 @@ import {
   AUDIT_INTENT_WORDS,
   AUDIT_INTENTS,
   type AuditEffect,
-  type AuditFilterKey,
   type AuditFilters,
   auditFilterParams,
   hasAuditFilters,
 } from "@openbot/shared/audit-filters";
-import { auditEventWords } from "@openbot/shared/audit-words";
+import { auditTypeWords } from "@openbot/shared/audit-words";
 import { connectorName, humanise } from "@openbot/shared/tool-name";
 import { IconChevronDown, IconCirclePlus, IconX } from "@tabler/icons-react";
 import { type ReactElement, type ReactNode, useState } from "react";
@@ -35,6 +34,7 @@ import {
 } from "@/components/ui/popover";
 import type { AuditFilterLabels } from "@/lib/audit/ask";
 import {
+  type AuditOutcome,
   COMPUTER_ACTION_EVENT_TYPES,
   DID_NOT_HAPPEN_EVENT_TYPES,
   REFUSED_EVENT_TYPES,
@@ -42,16 +42,51 @@ import {
 import type { AuditVocabulary } from "@/lib/audit/queries";
 
 /**
- * The trail's filters as chips: what the server is asked for, beside the saved views.
+ * Admin's filters on the trail, as chips: the one place a filter is set, beside the search.
  *
  * An answer to a question arrives as chips, and the same chips are added by hand from Add filter, so
- * a filter the model chose is one an admin can read, change and remove like any other. Unlike the
- * Outcome, Bot and Started by buttons beside the search, which narrow the rows already loaded, these
- * are asked of the server and reach the whole trail, and the export carries them.
+ * a filter the model chose is one an admin can read, change and remove like any other. Every chip is
+ * asked of the server, so it reaches the whole trail and not only the rows loaded, and the export
+ * carries it. Outcome, Bot and Started by are chips too: as separate buttons beside these they set
+ * the same thing twice, once on the loaded rows and once on the server.
  */
 
 /** Two filters that each name event types, or each name one value, both have to hold. */
 const MATCHES_NOTHING = "none";
+
+/**
+ * The trail's own filters and the outcome, which the page asks for by event type: Blocked and Did
+ * not happen are the lists the saved views are built from, and Allowed is everything else.
+ */
+export type ChipFilters = AuditFilters & { outcome?: AuditOutcome[] };
+
+type ChipKey = keyof ChipFilters;
+
+const OUTCOMES: { value: AuditOutcome; label: string }[] = [
+  { value: "allowed", label: "Allowed" },
+  { value: "refused", label: "Blocked" },
+  { value: "did-not-happen", label: "Did not happen" },
+];
+
+const OUTCOME_TYPES: Record<
+  Exclude<AuditOutcome, "allowed">,
+  readonly string[]
+> = {
+  refused: REFUSED_EVENT_TYPES,
+  "did-not-happen": DID_NOT_HAPPEN_EVENT_TYPES,
+};
+
+/** Several Bots travel as one `bot` value, separated by commas, the way the server reads them. */
+const botsOf = (bot: string | undefined) =>
+  bot ? bot.split(",").filter(Boolean) : [];
+
+/** Where a set of event types is already asked for, the two sets have to hold together. */
+function narrowed(existing: string | null, values: readonly string[]): string {
+  if (!existing) return values.join(",");
+  const have = new Set(existing.split(","));
+  const both = values.filter((item) => have.has(item));
+  return both.length > 0 ? both.join(",") : MATCHES_NOTHING;
+}
 
 /**
  * A view's query with the chips' filters asked for too, for the table and the export alike.
@@ -60,32 +95,43 @@ const MATCHES_NOTHING = "none";
  * is the app calls that were blocked. Two sets with nothing in common, or two different Bots, ask for
  * a value no row carries, so the table says No matches rather than quietly dropping one of them.
  */
-export function withFilters(search: string, filters: AuditFilters): string {
-  if (!hasAuditFilters(filters)) return search;
+export function withFilters(search: string, filters: ChipFilters): string {
+  const { outcome = [], ...trail } = filters;
+  const outcomes = OUTCOMES.length > outcome.length ? outcome : [];
+  if (!hasAuditFilters(trail) && outcomes.length === 0) return search;
   const params = new URLSearchParams(
     search.startsWith("?") ? search.slice(1) : search,
   );
-  for (const [key, value] of auditFilterParams(filters)) {
+  for (const [key, value] of auditFilterParams(trail)) {
     const existing = params.get(key);
-    if (existing && (key === "eventType" || key === "initiatorKind")) {
-      const have = new Set(existing.split(","));
-      const both = value.split(",").filter((item) => have.has(item));
-      params.set(key, both.length > 0 ? both.join(",") : MATCHES_NOTHING);
-    } else if (existing && key === "bot") {
-      params.set(key, existing === value ? value : MATCHES_NOTHING);
+    if (key === "eventType" || key === "initiatorKind" || key === "bot")
+      params.set(key, narrowed(existing, value.split(",")));
+    else params.set(key, value);
+  }
+  if (outcomes.length > 0) {
+    if (!outcomes.includes("allowed")) {
+      const types = outcomes.flatMap(
+        (chosen) => OUTCOME_TYPES[chosen as Exclude<AuditOutcome, "allowed">],
+      );
+      params.set("eventType", narrowed(params.get("eventType"), types));
     } else {
-      params.set(key, value);
+      // Allowed is every row that is neither of the others, so it is asked as what to leave out.
+      const left = (["refused", "did-not-happen"] as const)
+        .filter((other) => !outcomes.includes(other))
+        .flatMap((other) => OUTCOME_TYPES[other]);
+      const already = params.get("excludeEventType")?.split(",") ?? [];
+      params.set(
+        "excludeEventType",
+        [...new Set([...already, ...left])].join(","),
+      );
     }
   }
   return `?${params.toString()}`;
 }
 
 /** Whether two sets of filters ask the server the same thing. */
-export function sameFilters(a: AuditFilters, b: AuditFilters): boolean {
-  return (
-    JSON.stringify(auditFilterParams(a)) ===
-    JSON.stringify(auditFilterParams(b))
-  );
+export function sameFilters(a: ChipFilters, b: ChipFilters): boolean {
+  return withFilters("", a) === withFilters("", b);
 }
 
 const STARTED_BY: Record<string, string> = {
@@ -116,22 +162,8 @@ const TYPE_GROUPS: { label: string; types: readonly string[] }[] = [
   },
 ];
 
-const OUTCOME_OF_TYPE: Record<string, string> = {
-  ...Object.fromEntries(REFUSED_EVENT_TYPES.map((type) => [type, "blocked"])),
-  ...Object.fromEntries(
-    DID_NOT_HAPPEN_EVENT_TYPES.map((type) => [type, "did not happen"]),
-  ),
-  "mcp.call_succeeded": "done",
-  "computer.action_allowed": "allowed",
-};
-
-/** One event type in words, with its outcome where its words share it with its siblings. */
-function typeWords(type: string): string {
-  const outcome = OUTCOME_OF_TYPE[type];
-  return outcome
-    ? `${auditEventWords(type)}, ${outcome}`
-    : auditEventWords(type);
-}
+/** One event type in words: the same words the reading is given (`auditTypeWords`). */
+const typeWords = auditTypeWords;
 
 /** Several values in one chip: the first two, then how many more. */
 function some(values: string[]): string {
@@ -184,13 +216,15 @@ function ruleName(rule: string, names: Names): string {
 
 /** What a chip says: the filter, then its values in words. */
 export function chipText(
-  key: AuditFilterKey,
-  filters: AuditFilters,
+  key: ChipKey,
+  filters: ChipFilters,
   names: Names,
 ): string {
   switch (key) {
+    case "outcome":
+      return `Outcome: ${some((filters.outcome ?? []).map((value) => OUTCOMES.find((entry) => entry.value === value)?.label ?? value))}`;
     case "bot":
-      return `Bot: ${names.labels.bots[filters.bot as string] ?? names.nameFor(filters.bot as string) ?? filters.bot}`;
+      return `Bot: ${some(botsOf(filters.bot).map((id) => names.labels.bots[id] ?? (names.nameFor(id) || id)))}`;
     case "actorUserId":
       return `Person: ${personName(filters.actorUserId as string, names)}`;
     case "initiatorKind":
@@ -221,21 +255,41 @@ export function chipText(
   }
 }
 
-function without(filters: AuditFilters, key: AuditFilterKey): AuditFilters {
+function without(filters: ChipFilters, key: ChipKey): ChipFilters {
   const next = { ...filters };
   delete next[key];
   return next;
 }
 
+type ListKey =
+  | "outcome"
+  | "bot"
+  | "eventType"
+  | "initiatorKind"
+  | "app"
+  | "tool"
+  | "intent";
+
+/** The values a list filter holds. */
+function listOf(filters: ChipFilters, key: ListKey): string[] {
+  return key === "bot"
+    ? botsOf(filters.bot)
+    : ((filters[key] ?? []) as string[]);
+}
+
 /** A list filter with one value added or taken away, and gone when it names nothing. */
-function toggled<
-  K extends "eventType" | "initiatorKind" | "app" | "tool" | "intent",
->(filters: AuditFilters, key: K, value: string, on: boolean): AuditFilters {
-  const current = (filters[key] ?? []) as string[];
+function toggled(
+  filters: ChipFilters,
+  key: ListKey,
+  value: string,
+  on: boolean,
+): ChipFilters {
+  const current = listOf(filters, key);
   const next = on
     ? [...new Set([...current, value])]
     : current.filter((item) => item !== value);
-  return next.length > 0 ? { ...filters, [key]: next } : without(filters, key);
+  if (next.length === 0) return without(filters, key);
+  return { ...filters, [key]: key === "bot" ? next.join(",") : next };
 }
 
 /** The values one filter can take, as menu items: ticks for a list, a choice for one value. */
@@ -245,19 +299,15 @@ function FilterOptions({
   onChange,
   names,
 }: {
-  filterKey: AuditFilterKey;
-  filters: AuditFilters;
-  onChange: (next: AuditFilters) => void;
+  filterKey: ChipKey;
+  filters: ChipFilters;
+  onChange: (next: ChipFilters) => void;
   names: Names;
 }) {
   const vocabulary = names.vocabulary;
-  const tick = (
-    key: "eventType" | "initiatorKind" | "app" | "tool" | "intent",
-    value: string,
-    label: string,
-  ) => (
+  const tick = (key: ListKey, value: string, label: string) => (
     <DropdownMenuCheckboxItem
-      checked={((filters[key] ?? []) as string[]).includes(value)}
+      checked={listOf(filters, key).includes(value)}
       key={value}
       onCheckedChange={(on) => onChange(toggled(filters, key, value, on))}
     >
@@ -265,7 +315,7 @@ function FilterOptions({
     </DropdownMenuCheckboxItem>
   );
   const choose = (
-    key: "bot" | "actorUserId" | "effect" | "rule",
+    key: "actorUserId" | "effect" | "rule",
     options: { value: string; label: string }[],
   ) => (
     <DropdownMenuRadioGroup
@@ -286,12 +336,13 @@ function FilterOptions({
   );
 
   switch (filterKey) {
+    case "outcome":
+      return OUTCOMES.map((outcome) =>
+        tick("outcome", outcome.value, outcome.label),
+      );
     case "bot":
       return vocabulary?.bots.length
-        ? choose(
-            "bot",
-            vocabulary.bots.map((bot) => ({ value: bot.id, label: bot.name })),
-          )
+        ? vocabulary.bots.map((bot) => tick("bot", bot.id, bot.name))
         : loading;
     case "actorUserId":
       return vocabulary?.people.length
@@ -368,10 +419,11 @@ function FilterOptions({
   }
 }
 
-const FILTER_TITLES: Record<AuditFilterKey, string> = {
+const FILTER_TITLES: Record<ChipKey, string> = {
+  outcome: "Outcome",
   bot: "Bot",
-  actorUserId: "Person",
   initiatorKind: "Started by",
+  actorUserId: "Person",
   eventType: "Type",
   app: "App",
   tool: "Tool",
@@ -390,9 +442,9 @@ function Chip({
   onOpen,
   names,
 }: {
-  filterKey: AuditFilterKey;
-  filters: AuditFilters;
-  onChange: (next: AuditFilters) => void;
+  filterKey: ChipKey;
+  filters: ChipFilters;
+  onChange: (next: ChipFilters) => void;
   onOpen: () => void;
   names: Names;
 }) {
@@ -460,8 +512,8 @@ function DateFilter({
   children,
 }: {
   filterKey: "from" | "to";
-  filters: AuditFilters;
-  onChange: (next: AuditFilters) => void;
+  filters: ChipFilters;
+  onChange: (next: ChipFilters) => void;
   trigger: ReactElement;
   children: ReactNode;
 }) {
@@ -527,21 +579,19 @@ export function AuditFilterChips({
   vocabulary,
   nameFor,
 }: {
-  filters: AuditFilters;
-  onChange: (next: AuditFilters) => void;
+  filters: ChipFilters;
+  onChange: (next: ChipFilters) => void;
   onOpen: () => void;
   labels: AuditFilterLabels;
   vocabulary: AuditVocabulary | undefined;
   nameFor: (botId: string) => string;
 }) {
   const names: Names = { labels, vocabulary, nameFor };
-  const present = (Object.keys(FILTER_TITLES) as AuditFilterKey[]).filter(
-    (key) => {
-      const value = filters[key];
-      return Array.isArray(value) ? value.length > 0 : Boolean(value);
-    },
-  );
-  const addable = (Object.keys(FILTER_TITLES) as AuditFilterKey[]).filter(
+  const present = (Object.keys(FILTER_TITLES) as ChipKey[]).filter((key) => {
+    const value = filters[key];
+    return Array.isArray(value) ? value.length > 0 : Boolean(value);
+  });
+  const addable = (Object.keys(FILTER_TITLES) as ChipKey[]).filter(
     (key) => !present.includes(key) && key !== "from" && key !== "to",
   );
   return (

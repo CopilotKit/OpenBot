@@ -9,10 +9,14 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { withFilters } from "@/components/audit/audit-filters";
+import { chipText, withFilters } from "@/components/audit/audit-filters";
 import { AuditPage } from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
-import { eventTypeFilter, REFUSED_EVENT_TYPES } from "@/lib/audit/outcome";
+import {
+  DID_NOT_HAPPEN_EVENT_TYPES,
+  eventTypeFilter,
+  REFUSED_EVENT_TYPES,
+} from "@/lib/audit/outcome";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -232,4 +236,83 @@ test("chips narrow a saved view, and two sets with nothing in common ask for a v
   // No chips, no change: every saved view keeps the query it always had.
   expect(withFilters(blocked, {})).toBe(blocked);
   expect(withFilters("", {})).toBe("");
+});
+
+/*
+ * FOUND IN THE COMBINED STACK'S REVIEW: the chips and Add filter sat under Ask, and the toolbar kept
+ * its own Outcome, Bot and Started by buttons beside the search, so a Bot or an initiator could be
+ * set in two places that filtered two different things. Admin has one set of filters now.
+ */
+test("Admin's Audit page has one control for each filter, in the toolbar beside the search", async () => {
+  const { view } = renderAsk([]);
+  await view.findByText("2 events");
+  const user = userEvent.setup({ document });
+  await user.click(view.getByRole("button", { name: "Add filter" }));
+  await view.findByRole("menuitem", { name: "Bot" });
+
+  for (const name of ["Outcome", "Bot", "Started by"]) {
+    const controls = [
+      ...view.queryAllByRole("button", { name }),
+      ...view.queryAllByRole("menuitem", { name }),
+    ];
+    expect([name, controls.length]).toEqual([name, 1]);
+  }
+  // Add filter sits in the toolbar's row, with the search and the count.
+  const search = view.getByLabelText("Search events");
+  const row = search.closest(".flex-wrap") as HTMLElement;
+  expect(row.textContent).toContain("Add filter");
+  expect(row.querySelector("[data-audit-count]")).not.toBeNull();
+});
+
+test("Outcome and several Bots are asked of the server, as the views and the Bot filter ask them", () => {
+  const blocked = new URLSearchParams(
+    withFilters("", { outcome: ["refused"] }),
+  );
+  expect(blocked.get("eventType")).toBe(REFUSED_EVENT_TYPES.join(","));
+  // Allowed is everything that is neither blocked nor didn't happen.
+  const allowed = new URLSearchParams(
+    withFilters("", { outcome: ["allowed", "refused"] }),
+  );
+  expect(allowed.get("eventType")).toBeNull();
+  expect(allowed.get("excludeEventType")).toBe(
+    DID_NOT_HAPPEN_EVENT_TYPES.join(","),
+  );
+  // All three is no filter at all.
+  expect(
+    withFilters("", { outcome: ["allowed", "refused", "did-not-happen"] }),
+  ).toBe("");
+  expect(
+    new URLSearchParams(withFilters("", { bot: "inbox,research" })).get("bot"),
+  ).toBe("inbox,research");
+});
+
+/*
+ * FOUND IN THE COMBINED STACK'S REVIEW: "What did the social media rule block today?" drew the chip
+ * "Type: Use the computer, blocked", the words a single row says for itself, where the Audit page's
+ * views say "Computer actions".
+ */
+test("a type chip names its rows in the words of the Audit page's views", () => {
+  const filters = {
+    eventType: ["computer.action_refused"],
+    rule: 'intent == "navigate" && contains(page.host, "facebook")',
+    from: "2026-11-09T08:00:00.000Z",
+    to: "2026-11-09T22:00:00.000Z",
+  };
+  const names = {
+    labels: {
+      bots: {},
+      people: {},
+      apps: {},
+      rules: { [filters.rule]: "Bots may not visit social media sites" },
+    },
+    vocabulary: undefined,
+    nameFor: () => "",
+  };
+  const chip = chipText("eventType", filters, names);
+  expect(chip).toBe("Type: Computer actions, blocked");
+  expect(chip).not.toContain("Use the computer");
+  expect(chip).not.toMatch(/\bBot\b/);
+  expect(chipText("rule", filters, names)).toBe(
+    "Rule: Bots may not visit social media sites",
+  );
 });

@@ -30,7 +30,7 @@ import {
   hasAuditFilters,
   RULE_REFUSAL_EVENT_TYPES,
 } from "@openbot/shared/audit-filters";
-import { auditEventWords } from "@openbot/shared/audit-words";
+import { auditTypeWords } from "@openbot/shared/audit-words";
 import { connectorName } from "@openbot/shared/tool-name";
 import { asc, sql } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
@@ -444,7 +444,7 @@ export function askPrompt(
     "- tools: tool names, from TOOLS. App calls only. Prefer apps and effect unless the question names one action.",
     '- effect: "read" for app calls that only read, "write" for app calls that change something (send, create, update, delete, post). App calls only.',
     `- intents: what a computer action did. ${AUDIT_INTENTS.map((intent) => `"${intent}" is ${INTENT_MEANINGS[intent]}`).join("; ")}.`,
-    '- rule: one boundary rule\'s text exactly as it appears in RULES, when the question names a rule. Only refusals carry a rule. Every refusal row shows the rule that refused it, so "which rule" needs no rule filter.',
+    '- rule: one boundary rule from RULES, by its name, or by its exact text when it has no name, when the question names a rule. Only refusals carry a rule. Every refusal row shows the rule that refused it, so "which rule" needs no rule filter.',
     '- from, to: ISO 8601 with the admin\'s offset, such as "2026-11-02T00:00:00-08:00". A row must be after from and before to. Leave both "" when the question names no time.',
     "",
     "TIME",
@@ -455,7 +455,7 @@ export function askPrompt(
     ...recentMidnights(asked).map((day) => `${day.name}: ${day.iso}`),
     "",
     "EVENT TYPES (type: what it is)",
-    ...auditEventTypes.map((type) => `${type}: ${auditEventWords(type)}`),
+    ...auditEventTypes.map((type) => `${type}: ${auditTypeWords(type)}`),
     "",
     "BOTS (id: name)",
     ...(vocabulary.bots.length > 0
@@ -482,10 +482,11 @@ export function askPrompt(
       ? [...toolsByApp].map(([app, names]) => `${app}: ${names.join(", ")}`)
       : ["(none)"]),
     "",
-    "RULES (one per line: the rule's exact text, then its name)",
+    "RULES (one per line: the rule's name, then its text)",
     ...(vocabulary.rules.length > 0
       ? vocabulary.rules.map(
-          (rule) => `${rule.rule}    # ${rule.name ?? "no name"}`,
+          (rule) =>
+            `${rule.name ? `"${rule.name}"` : "(no name)"}: ${rule.rule}`,
         )
       : ["(none)"]),
     "",
@@ -670,13 +671,17 @@ export function checkAskAnswer(
 
   const rule = answer.rule.trim();
   if (rule) {
-    const match = vocabulary.rules.find(
-      (entry) => entry.rule === rule || entry.rule.trim() === rule,
-    );
+    // By its name, which is short enough to copy, or by its text; quoted or not.
+    const named = rule.replace(/^"(.*)"$/, "$1").toLowerCase();
+    const match =
+      vocabulary.rules.find(
+        (entry) => entry.rule === rule || entry.rule.trim() === rule,
+      ) ??
+      vocabulary.rules.find((entry) => entry.name?.toLowerCase() === named);
     if (match) filters.rule = match.rule;
     else
       problems.push(
-        'rule must be one rule\'s text exactly as it appears in RULES, or "".',
+        'rule must be one rule\'s name, or its exact text, as it appears in RULES, or "".',
       );
   }
 
@@ -825,6 +830,11 @@ export function describeFilters(
   timeZone: string,
 ): string[] {
   const lines: string[] = [];
+  // The kind of row first, in the words the Audit page's views use, so the reading starts there.
+  if (filters.eventType)
+    lines.push(
+      `Kind of row, any of: ${filters.eventType.map(auditTypeWords).join("; ")}`,
+    );
   if (filters.bot)
     lines.push(`Bot: ${labels.bots[filters.bot] ?? filters.bot}`);
   if (filters.actorUserId)
@@ -834,10 +844,6 @@ export function describeFilters(
   if (filters.initiatorKind)
     lines.push(
       `Started by any of: ${filters.initiatorKind.map((kind) => STARTERS[kind] ?? kind).join("; ")}`,
-    );
-  if (filters.eventType)
-    lines.push(
-      `Event type, any of: ${filters.eventType.map((type) => `${type} (${auditEventWords(type)})`).join("; ")}`,
     );
   if (filters.app)
     lines.push(
@@ -853,13 +859,18 @@ export function describeFilters(
     lines.push(
       `Actions that, any of: ${filters.intent.map((intent) => AUDIT_INTENT_WORDS[intent].toLowerCase()).join("; ")}`,
     );
-  // By its name where it has one: the name is what the Boundaries page lists it by.
-  if (filters.rule)
+  /*
+   * By its name where it has one: the name is what the Boundaries page lists it by. A kind of row
+   * already says "blocked", and a second one read back as "Computer actions, blocked, blocked by".
+   */
+  if (filters.rule) {
+    const by = filters.eventType ? "By" : "Blocked by";
     lines.push(
       labels.rules[filters.rule]
-        ? `Refused by the boundary rule named "${labels.rules[filters.rule]}"`
-        : `Refused by the boundary rule: ${filters.rule}`,
+        ? `${by} the rule "${labels.rules[filters.rule]}"`
+        : `${by} the rule written as: ${filters.rule}`,
     );
+  }
   if (filters.from)
     lines.push(`After: ${spokenTime(new Date(filters.from), timeZone)}`);
   if (filters.to)
@@ -879,7 +890,8 @@ export function readingPrompt(described: string[], timeZone: string): string {
     "</filters>",
     "",
     `Times are in ${timeZone}.`,
-    "Write one line of at most 25 words. Say what kind of rows they are first, then each condition above, and nothing that is not above: a filter that is not listed does not narrow the rows. With only a time, say every event in that time. When you mention the AI, call it a Bot. Name apps, Bots, people and rules as written above, and dates as days and months. No ids, no event type names, no rule code, no field names, no em dashes.",
+    "Write one plain sentence of at most 25 words. Start with the kind of row exactly as written above, or with every event when no kind is given, then each other filter, then the time. Use only the words above for what the filters name, and add nothing they don't say: no subject, actor or app that isn't listed. Write a rule's name in quotes, dates as day and month, and times on a 12-hour clock. No ids, no rule code, no field names, no em dashes.",
+    `Such as: "Computer actions, blocked by the rule "No file sharing", from 2 November to 8 November."`,
     "",
     "Answer with one JSON object and nothing else:",
     '{"reading": string}',

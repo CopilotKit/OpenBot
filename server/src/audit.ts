@@ -12,6 +12,7 @@ import {
   ne,
   notInArray,
   or,
+  type SQL,
   sql,
 } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
@@ -858,8 +859,8 @@ export type AuditEventQuery = {
   targetType?: string;
   targetId?: string;
   /**
-   * One Bot's rows: what it did (`payload.bot`) and what was done to it (an `agent` target), the
-   * same two the audit page's Bot column reads. Asked of the server, so a Bot's actions older than
+   * One Bot's rows, or several Bots' separated by commas: what each did (`payload.bot`) and what was
+   * done to it (an `agent` target), the same two the audit page's Bot column reads. Asked of the server, so a Bot's actions older than
    * the newest page are found too. A folder given to a Bot before its row said `bot` named it as
    * `botId`, and is that Bot's row too.
    */
@@ -1154,6 +1155,33 @@ function notRequested(column: PgColumn, values: string[] | undefined) {
   return values && values.length > 0 ? notInArray(column, values) : undefined;
 }
 
+/**
+ * The rows of any of these Bots: what each did (`payload.bot`) and what was done to it. A folder
+ * given to a Bot before its row said `bot` named it as `botId`, and a routine is its Bot's,
+ * whoever made it.
+ */
+function botCondition(bots: string[] | undefined) {
+  if (!bots) return undefined;
+  if (bots.length === 0) return sql`false`;
+  const named = (column: SQL<string>) =>
+    bots.length === 1 ? eq(column, bots[0] as string) : inArray(column, bots);
+  return or(
+    named(sql<string>`${auditEvents.payload} ->> 'bot'`),
+    and(
+      eq(auditEvents.targetType, "agent"),
+      named(sql<string>`${auditEvents.targetId}`),
+    ),
+    and(
+      eq(auditEvents.targetType, "host_access"),
+      named(sql<string>`${auditEvents.payload} ->> 'botId'`),
+    ),
+    and(
+      eq(auditEvents.targetType, "routine"),
+      named(sql<string>`${auditEvents.payload} ->> 'agentId'`),
+    ),
+  );
+}
+
 export function createAuditReader(database: Database): AuditReader {
   return {
     list: async (query) => {
@@ -1177,27 +1205,7 @@ export function createAuditReader(database: Database): AuditReader {
           requestedValues(query.targetType),
         ),
         query.targetId ? eq(auditEvents.targetId, query.targetId) : undefined,
-        query.bot
-          ? or(
-              eq(sql<string>`${auditEvents.payload} ->> 'bot'`, query.bot),
-              and(
-                eq(auditEvents.targetType, "agent"),
-                eq(auditEvents.targetId, query.bot),
-              ),
-              and(
-                eq(auditEvents.targetType, "host_access"),
-                eq(sql<string>`${auditEvents.payload} ->> 'botId'`, query.bot),
-              ),
-              // A routine is its Bot's, whoever made it.
-              and(
-                eq(auditEvents.targetType, "routine"),
-                eq(
-                  sql<string>`${auditEvents.payload} ->> 'agentId'`,
-                  query.bot,
-                ),
-              ),
-            )
-          : undefined,
+        botCondition(requestedValues(query.bot)),
         appCondition(requestedValues(query.app)),
         toolCondition(requestedValues(query.tool)),
         effectCondition(query.effect?.trim()),

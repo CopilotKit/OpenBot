@@ -9,13 +9,17 @@ import {
   IconSearch,
   IconX,
 } from "@tabler/icons-react";
-import type { AuditFilters } from "@openbot/shared/audit-filters";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { type ReactNode, useState } from "react";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useQuery,
+} from "@tanstack/react-query";
+import { type ReactNode, useEffect, useState } from "react";
 import { AskTheTrail, AuditAnswerNote } from "@/components/audit/ask-the-trail";
 import type { AuditEvent } from "@/components/audit/audit-cells";
 import {
   AuditFilterChips,
+  type ChipFilters,
   sameFilters,
   withFilters,
 } from "@/components/audit/audit-filters";
@@ -163,8 +167,24 @@ export function AuditPage({
 } = {}) {
   const paths = useManagePaths();
   const [view, setView] = useState<string>(FILTERS[0].search);
-  // The chips: asked of the server beside the view, from an answer or added by hand.
-  const [chips, setChips] = useState<AuditFilters>({});
+  /*
+   * Admin's filters, as chips: asked of the server beside the view, from an answer or added by hand.
+   * A Bot's own Activity page links here with `bot`, which arrives as that Bot's chip, so the one Bot
+   * filter there is the chip, and taking it off takes it out of the address too.
+   */
+  const [chips, setChipState] = useState<ChipFilters>(() =>
+    ask && bot ? { bot } : {},
+  );
+  useEffect(() => {
+    if (ask && bot)
+      setChipState((current) =>
+        current.bot === bot ? current : { ...current, bot },
+      );
+  }, [ask, bot]);
+  const setChips = (next: ChipFilters) => {
+    setChipState(next);
+    if (bot && next.bot !== bot) onClearBot?.();
+  };
   const [answer, setAnswer] = useState<
     (AuditAnswer & { question: string }) | null
   >(null);
@@ -177,11 +197,18 @@ export function AuditPage({
   // The stored event names and OpenBot's own working are Admin's to read; the personal edition's
   // Activity is anybody's page. Its route has the edition loaded before this draws.
   const edition = useQuery(deploymentCapabilitiesQueryOptions()).data?.edition;
-  const asked = withFilters(withBot(view, bot), ask ? chips : {});
+  const asked = ask ? withFilters(view, chips) : withBot(view, bot);
   const search = edition === "personal" ? withoutOpenBotWorking(asked) : asked;
   const [query, setQuery] = useState("");
   // A page at a time, newest first; "Show older events" under the last row asks for the next.
-  const events = useInfiniteQuery(auditEventsQueryOptions(search));
+  /*
+   * The rows already shown stay while the next filters' rows load, so the toolbar and the chip menu
+   * open in it are not taken down and drawn again on every tick. Only the first load draws nothing.
+   */
+  const events = useInfiniteQuery({
+    ...auditEventsQueryOptions(search),
+    placeholderData: keepPreviousData,
+  });
   // Activity names a skill by the title its page shows; the trail keeps only its slug.
   const skills = useQuery({
     ...pluginsPageQueryOptions(),
@@ -247,8 +274,8 @@ export function AuditPage({
           className={children ? "flex h-[60vh] min-h-80 flex-col" : "contents"}
         >
           {/*
-           * Above the table rather than in its toolbar, which is drawn again whenever the filters
-           * change: a question being typed, an answer and an open chip menu outlast the reload.
+           * Above the table rather than in its toolbar: a question being typed and its answer outlast
+           * anything the table draws again. The answer's chips are the toolbar's, beside the search.
            */}
           {ask ? (
             <div className="flex shrink-0 flex-col gap-2 px-4 pb-3">
@@ -270,17 +297,6 @@ export function AuditPage({
                   }
                 />
               ) : null}
-              {/* The chips are the answer's proof: the filters the rows below were asked with. */}
-              <div className="flex flex-wrap items-center gap-1.5">
-                <AuditFilterChips
-                  filters={chips}
-                  labels={answer?.labels ?? NO_LABELS}
-                  nameFor={nameFor}
-                  onChange={setChips}
-                  onOpen={() => setVocabularyWanted(true)}
-                  vocabulary={vocabulary}
-                />
-              </div>
             </div>
           ) : null}
           {events.isPending ? null : events.isError &&
@@ -366,7 +382,7 @@ export function AuditPage({
                       />
                     </div>
                     {/* Beside the other filters, on the row that wraps: it narrows what is asked for. */}
-                    {bot ? (
+                    {bot && !ask ? (
                       <Button
                         aria-label={`Show every Bot, not only ${nameFor(bot)}`}
                         onClick={onClearBot}
@@ -377,7 +393,22 @@ export function AuditPage({
                         <IconX />
                       </Button>
                     ) : null}
-                    {filters}
+                    {/*
+                     * Admin's one set of filters: the answer's chips and Add filter, asked of the
+                     * server. Anywhere else, the buttons that narrow the rows already loaded.
+                     */}
+                    {ask ? (
+                      <AuditFilterChips
+                        filters={chips}
+                        labels={answer?.labels ?? NO_LABELS}
+                        nameFor={nameFor}
+                        onChange={setChips}
+                        onOpen={() => setVocabularyWanted(true)}
+                        vocabulary={vocabulary}
+                      />
+                    ) : (
+                      filters
+                    )}
                     <span
                       className="ml-1 text-muted-foreground text-xs tabular-nums"
                       data-audit-count

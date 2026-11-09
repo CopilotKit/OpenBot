@@ -13,6 +13,8 @@ import {
   type AskAnswer,
   type AuditVocabulary,
   checkAskAnswer,
+  describeFilters,
+  readingPrompt,
   recentMidnights,
 } from "../src/audit-ask";
 import { loadConfig } from "../src/config";
@@ -274,20 +276,19 @@ describe("POST /api/admin/audit-events/ask", () => {
 
     expect(response.status).toBe(200);
     const body = await response.json();
-    // "Who received the email": the sends are on the trail, their recipients are not.
+    // "What did it change": the calls are on the trail, the records and fields they changed are not.
     expect(body.answerable).toBe("partly");
     expect(body.unanswered).toBe(
-      "The trail doesn't record who an email went to. A tool's arguments are left out on purpose.",
+      JSON.parse(recording.writer[0] as string).unanswered,
     );
+    expect(body.unanswered).toContain("Salesforce");
     expect(body.filters).toEqual({
-      eventType: ["mcp.call_succeeded"],
       bot: "4b1f7c2e-research",
-      app: ["gmail"],
-      tool: ["GMAIL_SEND_EMAIL"],
-      effect: "write",
+      app: ["salesforce"],
       from: "2026-11-08T08:00:00.000Z",
       to: "2026-11-09T08:00:00.000Z",
     });
+    expect(body.reading).toBe(JSON.parse(recording.reader as string).reading);
     expect(body.labels.bots).toEqual({ "4b1f7c2e-research": "Research" });
     expect(audit[0]?.payload).toMatchObject({ outcome: "partly_answered" });
   });
@@ -485,6 +486,14 @@ describe("the check on the model's filters", () => {
       app: ["gmail", "googledrive"],
       tool: ["GMAIL_SEND_EMAIL"],
     });
+    /*
+     * A rule by its name. FOUND ON THE REAL PAGE: asked to copy a long rule's text, the default model
+     * got it wrong twice and the question was refused.
+     */
+    for (const named of ["Social media", '"social media"'])
+      expect(
+        checkAskAnswer(answer({ rule: named }), vocabulary, asked).filters.rule,
+      ).toBe(vocabulary.rules[0]?.rule);
     expect(
       checkAskAnswer(answer({ bot: "finance" }), vocabulary, asked).problems,
     ).toEqual([
@@ -525,4 +534,35 @@ test("each recent midnight carries the offset in force that day, across a change
       timeZone: "Pacific/Auckland",
     })[0]?.iso,
   ).toBe("2026-11-10T00:00:00+13:00");
+});
+
+/*
+ * FOUND IN THE COMBINED STACK'S REVIEW: "What did the social media rule block today?" read back as
+ * "Bot Use the computer refusals refused by Bots may not visit social media sites". The reader was
+ * handed `computer.action_refused (Use the computer)`, a row's own words, and told to call the AI a
+ * Bot whether or not any filter named one. It is handed the Audit page's words for the kind of row
+ * now, and nothing that invites a subject the filters don't name.
+ */
+test("the reading is given the kind of row in the Audit page's words, and no Bot the filters don't name", () => {
+  const rule = 'intent == "navigate" && contains(page.host, "facebook")';
+  const ruleName = "Bots may not visit social media sites";
+  const lines = describeFilters(
+    {
+      eventType: ["computer.action_refused"],
+      rule,
+      from: "2026-11-09T08:00:00.000Z",
+      to: "2026-11-09T22:00:00.000Z",
+    },
+    { bots: {}, people: {}, apps: {}, rules: { [rule]: ruleName } },
+    "America/Los_Angeles",
+  );
+  expect(lines[0]).toBe("Kind of row, any of: Computer actions, blocked");
+  expect(lines[1]).toBe(`By the rule "${ruleName}"`);
+  const prompt = readingPrompt(lines, "America/Los_Angeles");
+  for (const text of [lines.join("\n"), prompt]) {
+    expect(text).not.toContain("Use the computer");
+    expect(text).not.toContain("computer.action_refused");
+    // The rule's own name says "Bots"; nothing else may bring one in.
+    expect(text.replaceAll(ruleName, "")).not.toMatch(/\bBots?\b/);
+  }
 });

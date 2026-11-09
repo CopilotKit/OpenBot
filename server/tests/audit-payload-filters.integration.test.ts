@@ -340,6 +340,15 @@ describe("app, tool and effect, on app calls", () => {
     expect(rows[0]?.initiatorId).toBe(`routine-${run}`);
   });
 
+  test("several Bots, separated by commas, are each Bot's rows, as the Bot chip asks for them", async () => {
+    expect(
+      tools(await list(`bot=${RESEARCH},${SALES}&app=salesforce`)),
+    ).toEqual(["SALESFORCE_QUERY", "SALESFORCE_UPDATE_RECORD"]);
+    expect(tools(await list(`bot=${SALES}&app=salesforce`))).toEqual([
+      "SALESFORCE_QUERY",
+    ]);
+  });
+
   test("the person filter finds the app calls made with their accounts, which name them only in the payload", async () => {
     const rows = await list(`actorUserId=${DANA}&bot=${RESEARCH}`);
     expect(

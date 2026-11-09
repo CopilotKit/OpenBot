@@ -4,31 +4,31 @@
     "model": "gpt-5.6-terra",
     "text": "Show me every Gmail write by a routine last week",
     "writer": [
-      "{\"notes\":\"Filters for Gmail app calls that changed something, started by a scheduled routine, during last week.\",\"answerable\":\"yes\",\"unanswered\":\"\",\"eventTypes\":[],\"bot\":\"\",\"person\":\"\",\"initiatorKinds\":[\"routine\"],\"apps\":[\"gmail\"],\"tools\":[],\"effect\":\"write\",\"intents\":[],\"rule\":\"\",\"from\":\"2026-11-02T00:00:00-08:00\",\"to\":\"2026-11-09T00:00:00-08:00\"}"
+      "{\"notes\":\"Filters for Gmail app calls that changed something, started by a routine, during last week.\",\"answerable\":\"yes\",\"unanswered\":\"\",\"eventTypes\":[],\"bot\":\"\",\"person\":\"\",\"initiatorKinds\":[\"routine\"],\"apps\":[\"gmail\"],\"tools\":[],\"effect\":\"write\",\"intents\":[],\"rule\":\"\",\"from\":\"2026-11-02T00:00:00-08:00\",\"to\":\"2026-11-09T00:00:00-08:00\"}"
     ],
-    "reader": "{\"reading\":\"Rows of Bot activity started by a routine, calling Gmail to change something, from 2 November through 8 November.\"}"
+    "reader": "{\"reading\":\"App calls, started by a routine, to Gmail, that change something, from 2 November to 8 November.\"}"
   },
   "unanswerable": {
     "model": "gpt-5.6-terra",
-    "text": "What did the Inbox triage Bot write in the emails it sent yesterday?",
+    "text": "Who received the email the Research Bot sent yesterday?",
     "writer": [
-      "{\"notes\":\"\",\"answerable\":\"no\",\"unanswered\":\"The trail does not record email text. Tool arguments and message contents are left out on purpose.\",\"eventTypes\":[],\"bot\":\"\",\"person\":\"\",\"initiatorKinds\":[],\"apps\":[],\"tools\":[],\"effect\":\"\",\"intents\":[],\"rule\":\"\",\"from\":\"\",\"to\":\"\"}"
+      "{\"notes\":\"The trail does not record email recipients, which are tool arguments.\",\"answerable\":\"no\",\"unanswered\":\"The trail doesn't record who an email went to. A tool's arguments are left out on purpose.\",\"eventTypes\":[],\"bot\":\"\",\"person\":\"\",\"initiatorKinds\":[],\"apps\":[],\"tools\":[],\"effect\":\"\",\"intents\":[],\"rule\":\"\",\"from\":\"\",\"to\":\"\"}"
     ]
   },
   "partly": {
     "model": "gpt-5.6-terra",
-    "text": "Who received the email the Research Bot sent yesterday?",
+    "text": "What did the research Bot do in Salesforce yesterday, and what did it change?",
     "writer": [
-      "{\"notes\":\"The trail can identify email-sending Gmail calls by the Research Bot yesterday, but it does not record recipients.\",\"answerable\":\"partly\",\"unanswered\":\"The trail doesn't record who an email went to. A tool's arguments are left out on purpose.\",\"eventTypes\":[\"mcp.call_succeeded\"],\"bot\":\"4b1f7c2e-research\",\"person\":\"\",\"initiatorKinds\":[],\"apps\":[\"gmail\"],\"tools\":[\"GMAIL_SEND_EMAIL\"],\"effect\":\"write\",\"intents\":[],\"rule\":\"\",\"from\":\"2026-11-08T00:00:00-08:00\",\"to\":\"2026-11-09T00:00:00-08:00\"}"
+      "{\"notes\":\"Filter for the Research Bot's Salesforce app calls yesterday. Include both read and write calls so the trail can show all recorded Salesforce activity.\",\"answerable\":\"partly\",\"unanswered\":\"The trail does not record what Salesforce records or fields were changed. Tool arguments and results are left out on purpose.\",\"eventTypes\":[],\"bot\":\"4b1f7c2e-research\",\"person\":\"\",\"initiatorKinds\":[],\"apps\":[\"salesforce\"],\"tools\":[],\"effect\":\"\",\"intents\":[],\"rule\":\"\",\"from\":\"2026-11-08T00:00:00-08:00\",\"to\":\"2026-11-09T00:00:00-08:00\"}"
     ],
-    "reader": "{\"reading\":\"Successful Gmail send email app calls that changed something by Bot Research on 8 November.\"}"
+    "reader": "{\"reading\":\"App calls, Bot Research, Salesforce, from 8 November 12:00 AM to 9 November 12:00 AM.\"}"
   },
   "fixedOnRetry": {
     "model": "gpt-4o-mini",
     "text": "Show me the Slack messages Bots posted yesterday",
     "writer": [
-      "{\"notes\":\"The question asks for Slack messages posted by Bots yesterday. The filters reflect the relevant time frame and the tool used for sending Slack messages.\",\"answerable\":\"yes\",\"unanswered\":\"\",\"eventTypes\":[\"delivery.sent\"],\"bot\":\"\",\"person\":\"\",\"initiatorKinds\":[],\"apps\":[\"slack\"],\"tools\":[\"SLACK_SEND_MESSAGE\"],\"effect\":\"\",\"intents\":[],\"rule\":\"\",\"from\":\"2026-11-08T00:00:00-08:00\",\"to\":\"2026-11-09T00:00:00-08:00\"}",
-      "{\"notes\":\"The question asks for Slack messages posted by Bots yesterday. The filters capture the relevant time frame and the event indicating messages sent.\",\"answerable\":\"no\",\"unanswered\":\"The trail does not record Slack messages sent by Bots. It does not include the contents of messages or other details.\",\"eventTypes\":[],\"bot\":\"\",\"person\":\"\",\"initiatorKinds\":[],\"apps\":[\"slack\"],\"tools\":[],\"effect\":\"\",\"intents\":[],\"rule\":\"\",\"from\":\"2026-11-08T00:00:00-08:00\",\"to\":\"2026-11-09T00:00:00-08:00\"}"
+      "{\"notes\":\"Filtering for Slack messages posted by the Bots yesterday. The relevant event type for messages sent is 'delivery.sent'.\",\"answerable\":\"yes\",\"unanswered\":\"\",\"eventTypes\":[\"delivery.sent\"],\"bot\":\"\",\"person\":\"\",\"initiatorKinds\":[],\"apps\":[\"slack\"],\"tools\":[],\"effect\":\"\",\"intents\":[],\"rule\":\"\",\"from\":\"2026-11-08T00:00:00-08:00\",\"to\":\"2026-11-09T00:00:00-08:00\"}",
+      "{\"notes\":\"Filtering for Slack messages posted by Bots yesterday. The relevant event type for messages sent is 'delivery.sent'.\",\"answerable\":\"no\",\"unanswered\":\"The trail doesn't record who sent messages. The event type for messages sent isn't available in the records.\",\"eventTypes\":[],\"bot\":\"\",\"person\":\"\",\"initiatorKinds\":[],\"apps\":[\"slack\"],\"tools\":[],\"effect\":\"\",\"intents\":[],\"rule\":\"\",\"from\":\"2026-11-08T00:00:00-08:00\",\"to\":\"2026-11-09T00:00:00-08:00\"}"
     ]
   }
 }
