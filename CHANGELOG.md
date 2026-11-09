@@ -32,6 +32,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the back end still reports low disk, a start that fails, or a Retry that finds the back end
   running but not healthy, says "The back end is recovering from low disk space. Wait a few
   minutes, then Retry." where Retry said "The back end is running but not healthy."
+- **An engine the back end doesn't run on is said at once on the Account step.** On a Mac whose
+  Docker is another engine, such as OrbStack, the step checked again every 2 seconds for 15
+  minutes, then said only "Couldn't check your CopilotKit account." It now says straight away what
+  the back end needs, in its own words ("Docker Desktop or rootful Podman is required on macOS.
+  This machine runs OrbStack."), with how to switch to Docker Desktop (`docker context use
+  desktop-linux`) or Podman, and Try again. Only an engine that isn't running yet is waited for.
+  The engine check before it (`docker info`, `docker image ls` and the container that measures
+  free disk) now gives up on a command after 15 to 20 seconds, so an engine that stops answering
+  no longer leaves the step on "Checking your CopilotKit account…" for good.
 
 ## 1.0.0
 

@@ -835,7 +835,8 @@ pub fn normalize_account_sign_in(exit_code: i32, stdout: &[u8]) -> Result<Accoun
     Ok(AccountSignIn { signed_in })
 }
 
-/// The evaluation agreement the licence needs, as the window shows it. No CLI prose is kept.
+/// The evaluation agreement the licence needs, as the window shows it. No CLI prose is kept but
+/// the one sentence of a preflight that blocked (`Blocked`).
 ///
 /// The window reads the CLI's own status words (`signed-out`) and camelCase fields
 /// (`organizationName`). A variant named in camelCase reaches it as `signedOut`, which it does not
@@ -859,6 +860,17 @@ pub enum Terms {
     /// The CLI answers nothing about the agreement until a container engine answers it. On a new
     /// Windows computer Install is still putting Podman in while the person signs in.
     EngineNotReady,
+    /// The CLI's preflight refused this computer for a reason waiting does not change: an engine
+    /// local setup does not run on, such as OrbStack on a Mac, or too few CPUs. `said` is the CLI's
+    /// own sentence for it, when it is one plain line.
+    Blocked {
+        reason: Reason,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        said: Option<String>,
+        /// The engine itself is refused: the fix is Docker Desktop or Podman instead.
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        switch_engine: bool,
+    },
     /// The engine has fewer CPUs or less memory than local setup needs (`engine_size_terms`).
     /// Not a CLI answer: OpenBot's own check, so a small engine is caught before Start.
     EngineTooSmall {
@@ -893,15 +905,7 @@ pub fn normalize_terms(exit_code: i32, stdout: &[u8]) -> Result<Terms, Failure> 
         Some("not-required") => Ok(Terms::NotRequired),
         Some("unavailable") => Ok(Terms::Unavailable),
         Some("signed-out") => Ok(Terms::SignedOut),
-        Some("blocked")
-            if wire
-                .get("preflight")
-                .and_then(|preflight| preflight.get("status"))
-                .and_then(Value::as_str)
-                == Some("fail") =>
-        {
-            Ok(Terms::EngineNotReady)
-        }
+        Some("blocked") => preflight_terms(wire.get("preflight")),
         Some("required") => {
             let url = wire
                 .get("url")
@@ -936,6 +940,46 @@ pub fn normalize_terms(exit_code: i32, stdout: &[u8]) -> Result<Terms, Failure> 
         }
         _ => Err(Failure::InvalidStatus),
     }
+}
+
+/**
+`onboard local-terms` blocked by its preflight (`preflight.status` "fail").
+
+Only an engine that is not there yet is waited for: one that does not answer (`docker_unavailable`),
+or, while Install is still choosing the engine, a Docker address that answers with Podman
+(`engine_mismatch`). Anything else is said at once, since trying again every few seconds cannot
+change it.
+*/
+fn preflight_terms(preflight: Option<&Value>) -> Result<Terms, Failure> {
+    let field = |name: &str| {
+        preflight
+            .and_then(|preflight| preflight.get(name))
+            .and_then(Value::as_str)
+    };
+    if field("status") != Some("fail") {
+        return Err(Failure::InvalidStatus);
+    }
+    let reason = field("reason").unwrap_or("");
+    let detail = field("failureDetail");
+    if reason == "docker_unavailable"
+        || reason == "unsupported_engine" && detail == Some("engine_mismatch")
+    {
+        return Ok(Terms::EngineNotReady);
+    }
+    Ok(Terms::Blocked {
+        reason: Reason::from_wire(reason),
+        // Shown as the CLI wrote it, so only as one bounded line of plain text.
+        said: field("detail")
+            .map(str::trim)
+            .filter(|said| {
+                !said.is_empty()
+                    && said.chars().count() <= 400
+                    && !said.chars().any(char::is_control)
+            })
+            .map(str::to_owned),
+        switch_engine: reason == "unsupported_engine"
+            && detail == Some("engine_not_docker_desktop"),
+    })
 }
 
 /**
@@ -1248,6 +1292,48 @@ pub fn parse_free_disk(output: &str) -> Option<u64> {
     parse_disk(output).map(|disk| disk.free)
 }
 
+/**
+How long each engine command of the check may take: `info` and `image ls`, and the `run` that
+measures disk, which starts a container. An engine that does not answer within it is not measured,
+as one that fails is, so a hung engine never holds the account step or a Start.
+*/
+const ENGINE_QUERY_LIMIT: Duration = Duration::from_secs(15);
+const ENGINE_RUN_LIMIT: Duration = Duration::from_secs(20);
+/// The most of an engine command's output the check reads: a long image list, at most.
+const ENGINE_OUTPUT_CAP: usize = 1024 * 1024;
+
+/// What a test sets the engine check's limits to.
+#[cfg(test)]
+static ENGINE_CHECK_LIMIT_FOR_TESTS: std::sync::Mutex<Option<Duration>> =
+    std::sync::Mutex::new(None);
+
+/// `args` on the engine, within `limit`: whether it succeeded, and its stdout. Nothing when it did
+/// not finish in time or could not run.
+fn engine_answer(
+    address: &crate::engine::Address,
+    args: &[&str],
+    limit: Duration,
+) -> Option<(bool, String)> {
+    #[cfg(test)]
+    let limit = ENGINE_CHECK_LIMIT_FOR_TESTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .unwrap_or(limit);
+    let mut command = address.command();
+    command.args(args);
+    let (succeeded, stdout) = crate::local_images::run_within(command, limit, ENGINE_OUTPUT_CAP)?;
+    Some((succeeded, String::from_utf8_lossy(&stdout).into_owned()))
+}
+
+/// `args` on the engine, within `limit`: its stdout when it succeeded, or nothing.
+fn engine_output(
+    address: &crate::engine::Address,
+    args: &[&str],
+    limit: Duration,
+) -> Option<String> {
+    engine_answer(address, args, limit).and_then(|(succeeded, stdout)| succeeded.then_some(stdout))
+}
+
 /// The engine's CPUs and memory from its `info`.
 fn engine_size(address: &crate::engine::Address) -> Option<(u64, u64)> {
     let format = if address.engine == crate::engine::Engine::Podman {
@@ -1255,13 +1341,11 @@ fn engine_size(address: &crate::engine::Address) -> Option<(u64, u64)> {
     } else {
         "{{.NCPU}} {{.MemTotal}}"
     };
-    let output = address
-        .command()
-        .args(["info", "--format", format])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())?;
-    parse_engine_size(&String::from_utf8_lossy(&output.stdout))
+    parse_engine_size(&engine_output(
+        address,
+        &["info", "--format", format],
+        ENGINE_QUERY_LIMIT,
+    )?)
 }
 
 /**
@@ -1270,13 +1354,11 @@ image the engine already has, so nothing is downloaded. An engine with no image 
 gives no answer, and disk is then not judged.
 */
 fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
-    let images = address
-        .command()
-        .args(["image", "ls", "--quiet", "--no-trunc"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())?;
-    let images = String::from_utf8_lossy(&images.stdout).into_owned();
+    let images = engine_output(
+        address,
+        &["image", "ls", "--quiet", "--no-trunc"],
+        ENGINE_QUERY_LIMIT,
+    )?;
     let mut tried = Vec::new();
     for image in images.lines().map(str::trim).filter(|id| !id.is_empty()) {
         if tried.contains(&image) {
@@ -1286,9 +1368,10 @@ fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
             break;
         }
         tried.push(image);
-        let measured = address
-            .command()
-            .args([
+        // No answer in time is an engine that hangs: another image would only hang too.
+        let (succeeded, measured) = engine_answer(
+            address,
+            &[
                 "run",
                 "--rm",
                 "--pull=never",
@@ -1298,14 +1381,11 @@ fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
                 image,
                 "-c",
                 "df -Pk /",
-            ])
-            .output();
-        let disk = measured
-            .ok()
-            .filter(|output| output.status.success())
-            .and_then(|output| parse_disk(&String::from_utf8_lossy(&output.stdout)));
-        if disk.is_some() {
-            return disk;
+            ],
+            ENGINE_RUN_LIMIT,
+        )?;
+        if let Some(disk) = succeeded.then(|| parse_disk(&measured)).flatten() {
+            return Some(disk);
         }
     }
     None
@@ -7116,6 +7196,76 @@ overlay 164506208 20481024 135620148 14% /
         );
     }
 
+    /**
+    1.0.0 on a Mac whose Docker is OrbStack: the CLI's preflight refuses the engine on every try,
+    and the account step waited 15 minutes for an engine that was already running, then said only
+    that it couldn't check the account. A refusal waiting cannot change is said at once, in the
+    CLI's own sentence. `local-eval-terms-orbstack.json` is what the window's own test is given.
+    */
+    #[test]
+    fn terms_blocked_on_an_engine_local_setup_does_not_run_on_say_so_at_once() {
+        let wire = include_str!("../test-fixtures/local-eval/onboard-local-terms-orbstack.json");
+        let window: Value = serde_json::from_str(include_str!(
+            "../test-fixtures/local-eval/local-eval-terms-orbstack.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(normalize_terms(0, wire.as_bytes()).unwrap()).unwrap(),
+            window
+        );
+
+        let blocked = |preflight: Value| {
+            let wire = json!({ "command": "onboard local-terms", "status": "blocked", "preflight": preflight });
+            serde_json::to_value(normalize_terms(0, wire.to_string().as_bytes()).unwrap()).unwrap()
+        };
+        // An engine setting the CLI names its own fix for is not told to switch engines.
+        assert_eq!(
+            blocked(json!({
+                "status": "fail",
+                "reason": "unsupported_engine",
+                "failureDetail": "rootless",
+                "detail": "Rootless Podman is not supported. Switch to rootful Podman (podman machine stop; podman machine set --rootful; podman machine start), then retry."
+            })),
+            json!({
+                "status": "blocked",
+                "reason": "unsupported-engine",
+                "said": "Rootless Podman is not supported. Switch to rootful Podman (podman machine stop; podman machine set --rootful; podman machine start), then retry."
+            })
+        );
+        // Too few CPUs is not waited out either. A reason this build does not know stays unknown.
+        assert_eq!(
+            blocked(json!({
+                "status": "fail",
+                "reason": "cpu_short",
+                "detail": "Docker has 2 CPUs. Local evaluation needs 4."
+            })),
+            json!({
+                "status": "blocked",
+                "reason": "unrecognized",
+                "said": "Docker has 2 CPUs. Local evaluation needs 4."
+            })
+        );
+        // A sentence that is not one plain line is not shown; the window says its own.
+        assert_eq!(
+            blocked(json!({
+                "status": "fail",
+                "reason": "unsupported_engine",
+                "failureDetail": "engine_not_docker_desktop",
+                "detail": "Docker Desktop is required.\u{1b}[31m"
+            })),
+            json!({ "status": "blocked", "reason": "unsupported-engine", "switchEngine": true })
+        );
+        assert_eq!(
+            blocked(json!({
+                "status": "fail",
+                "reason": "unsupported_engine",
+                "failureDetail": "engine_not_docker_desktop",
+                "detail": "x".repeat(401)
+            })),
+            json!({ "status": "blocked", "reason": "unsupported-engine", "switchEngine": true })
+        );
+    }
+
     #[test]
     fn terms_keep_the_agreement_and_nothing_the_cli_says_around_it() {
         let required = r#"{"command":"onboard local-terms","status":"required","accepted":false,"version":"developer-edition-2026-10-01-web","url":"https://copilotkit.ai/legal/developer-edition","organizationId":"org_1","organizationName":"CopilotKit🪁","next":"Ask the developer to accept."}"#
@@ -7222,6 +7372,10 @@ fn main() {
         ["machine", "inspect", "openbot"] => "inspect",
         _ => "",
     };
+    // An engine that hangs: `<file>.hang` beside it, and that answer never comes.
+    if !file.is_empty() && dir.join(format!("{file}.hang")).exists() {
+        std::thread::sleep(std::time::Duration::from_secs(120));
+    }
     if let Some(bytes) = (!file.is_empty()).then(|| std::fs::read(dir.join(file)).ok()).flatten() {
         std::io::stdout().write_all(&bytes).unwrap();
         return;
@@ -7459,6 +7613,63 @@ fn main() {
             );
             report
         }
+    }
+
+    /**
+    An engine that stops answering, on the account step. `docker info`, `docker image ls` and the
+    `docker run` that measures disk had no time limit, so a hung engine left the step on
+    "Checking your CopilotKit account…" for good. Each has its own limit now, and what did not
+    answer is not measured, as when nothing answers at all: the CLI is asked next.
+    */
+    #[test]
+    fn an_engine_that_hangs_is_not_measured_and_does_not_hold_the_account_step() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::an_engine_that_hangs_is_not_measured_and_does_not_hold_the_account_step",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("engine-check-hangs");
+        lab.engine(
+            crate::engine::Engine::Docker,
+            DOCKER_INFO,
+            &df(WSL_DISK, 500 * KIB_PER_GIB),
+            None,
+            None,
+        );
+        // Long enough for the fake engine to answer on a busy test machine, far short of a hang.
+        *ENGINE_CHECK_LIMIT_FOR_TESTS.lock().unwrap() = Some(Duration::from_secs(3));
+        let checked = |hangs: &[&str]| {
+            for file in ["info", "images", "df"] {
+                let _ = std::fs::remove_file(lab.bin.join(format!("{file}.hang")));
+            }
+            for file in hangs {
+                std::fs::write(lab.bin.join(format!("{file}.hang")), "").unwrap();
+            }
+            let (sender, received) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = sender.send(engine_size_terms());
+            });
+            received
+                .recv_timeout(Duration::from_secs(30))
+                .unwrap_or_else(|_| {
+                    panic!("the engine check waited on an engine hung in {hangs:?}")
+                })
+        };
+        // Nothing answers, so nothing is measured and nothing stops the step.
+        assert_eq!(checked(&["info", "images"]), None);
+        // Its disk check hangs: a small engine is still said small, from what it did answer.
+        std::fs::write(lab.bin.join("info"), "2 22011707392\n").unwrap();
+        assert_eq!(
+            checked(&["df"]),
+            Some(Terms::EngineTooSmall {
+                podman: false,
+                cpu: true,
+                memory: false,
+                disk: false,
+                wsl: false,
+                drive: None,
+            })
+        );
     }
 
     /// Windows' answer for drive C: with `tenths` tenths of a GiB free, and a little more.

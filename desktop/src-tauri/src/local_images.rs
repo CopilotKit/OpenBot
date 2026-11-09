@@ -502,33 +502,8 @@ done"#;
     /// An engine command, to its end or `limit`. Its exit status and at most `cap` bytes of stdout.
     fn run(&self, args: &[&str], limit: Duration, cap: usize) -> Option<(bool, Vec<u8>)> {
         let mut command = (self.engine)();
-        command
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        let mut child = command.spawn().ok()?;
-        let stdout = child.stdout.take()?;
-        let (sender, received) = mpsc::channel();
-        std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            let _ = stdout.take(cap as u64).read_to_end(&mut bytes);
-            let _ = sender.send(bytes);
-        });
-        let until = Instant::now() + limit;
-        let status = loop {
-            if let Some(status) = child.try_wait().ok()? {
-                break status;
-            }
-            if Instant::now() >= until {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        };
-        let bytes = received.recv_timeout(Duration::from_secs(5)).ok()?;
-        Some((status.success(), bytes))
+        command.args(args);
+        run_within(command, limit, cap)
     }
 
     /// `args` run in the node.
@@ -716,6 +691,41 @@ pub fn disk_pressure_of(json: &[u8]) -> Option<bool> {
         })
         .collect();
     (!said.is_empty()).then(|| said.contains(&true))
+}
+
+/// An engine command, to its end or `limit`: its exit status and at most `cap` bytes of stdout.
+/// One still running at `limit` is killed and gives no answer.
+pub(crate) fn run_within(
+    mut command: Command,
+    limit: Duration,
+    cap: usize,
+) -> Option<(bool, Vec<u8>)> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = command.spawn().ok()?;
+    let stdout = child.stdout.take()?;
+    let (sender, received) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stdout.take(cap as u64).read_to_end(&mut bytes);
+        let _ = sender.send(bytes);
+    });
+    let until = Instant::now() + limit;
+    let status = loop {
+        if let Some(status) = child.try_wait().ok()? {
+            break status;
+        }
+        if Instant::now() >= until {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let bytes = received.recv_timeout(Duration::from_secs(5)).ok()?;
+    Some((status.success(), bytes))
 }
 
 /// What every k3d node on the engine says of `DiskPressure` (`Node::disk_pressure`): true when

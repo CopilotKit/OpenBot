@@ -336,6 +336,17 @@ export type LocalTerms =
   | { status: "not-required" | "unavailable" | "signed-out" }
   /** No container engine answers yet, so the CLI says nothing about the account. */
   | { status: "engine-not-ready" }
+  /**
+   * The CLI's preflight refused this computer for a reason waiting does not change, such as
+   * OrbStack on a Mac. `said` is the CLI's own sentence, when it gave one; `switchEngine` when the
+   * engine itself is refused and Docker Desktop or Podman is the fix.
+   */
+  | {
+      status: "blocked";
+      reason: LocalReason;
+      said?: string;
+      switchEngine?: boolean;
+    }
   /** OpenBot's own check: the engine has fewer CPUs or less memory than local setup needs. */
   | ({ status: "engine-too-small" } & Shortfall);
 
