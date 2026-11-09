@@ -202,6 +202,103 @@ function byPerson(outcome: ComputerOutcome): boolean {
   return outcome.doneByPerson === true;
 }
 
+/** The site a navigation was asked to open, as its line names it: "x.com", not the whole address. */
+function siteOf(url: unknown): string | undefined {
+  if (typeof url !== "string" || !url.trim()) return undefined;
+  try {
+    return new URL(url.trim()).hostname.replace(/^www\./, "") || url.trim();
+  } catch {
+    return url.trim();
+  }
+}
+
+/**
+ * A navigation in the conversation: the screen while it runs, and the page it opened once it is over.
+ *
+ * ONE LINE, NOT A SCREEN, FOR A NAVIGATION THAT OPENED NOTHING. Refused by a boundary, failed,
+ * stopped, or turned away by a computer still starting, it has no page to show, and its screen used
+ * to stay on as a grey box the width of the conversation saying only "This turn did not open a page."
+ * It is drawn as every other step that did not happen is drawn: "Blocked: Open x.com", in the words
+ * and colours of the lines around it. A step with nothing to report yet, such as one held for the
+ * person's approval, draws nothing here: its approval card says what it is waiting for.
+ */
+function NavigationStep({
+  computerId,
+  url,
+  result,
+  status,
+  toolCallId,
+}: {
+  computerId: string;
+  /** The address the Bot asked for, as it wrote it. */
+  url: unknown;
+  result: string | undefined;
+  status: string;
+  toolCallId: string | undefined;
+}) {
+  /*
+   * A RESULT IS WHAT MAKES A TURN OVER, not the status.
+   *
+   * A restored tool call arrives with its result already in hand and a status that is briefly
+   * something other than complete, so keying on the status alone made every reopened turn look
+   * like one still running: the tile polled the live screen, put today's page under yesterday's
+   * answer, and only then restored the frame it should have shown from the start.
+   */
+  const finished = status === "complete" || result !== undefined;
+  const said = finished ? readOutcome(result) : null;
+  const outcome = (said ?? {}) as ComputerOutcome;
+  /*
+   * The page this turn left open, so reopening the conversation shows what it browsed rather than
+   * what the Bot has open now. Only once the turn is finished: while it runs, the live frames are
+   * its own.
+   */
+  const page =
+    typeof outcome.url === "string"
+      ? {
+          url: outcome.url,
+          ...(typeof outcome.title === "string"
+            ? { title: outcome.title }
+            : {}),
+        }
+      : undefined;
+
+  if (finished && !page) {
+    if (!said) return null;
+    return (
+      <ActionLine
+        label="Opened"
+        attempted="Open"
+        /*
+         * The site alone, even for a refusal. The Bot's answer right after says why it could not go,
+         * and a boundary's reason is the sentence written for the model, rule and all.
+         */
+        detail={siteOf(url)}
+        refused={outcome.refused === true}
+        failed={didNotWork(outcome)}
+        notYet={stillStarting(outcome)}
+        byYou={byPerson(outcome)}
+      />
+    );
+  }
+
+  return (
+    <div className="my-2">
+      <ComputerView
+        computerId={computerId}
+        active={!finished}
+        /*
+         * FINISHED, NOT "GOT SOMEWHERE". The tile used to count a turn as history only once it had a
+         * page, so a navigation that was refused, failed or stopped never settled: it kept polling
+         * the live screen under a turn that was over, and offered control of it.
+         */
+        finished={finished}
+        {...(page ? { page } : {})}
+        {...(toolCallId ? { toolCallId } : {})}
+      />
+    </div>
+  );
+}
+
 /**
  * Who is offered each computer tool: a Bot this person may drive, as far as this deployment's
  * switches allow. Not offered to a Team Bot's teammates, nor where a switch would refuse it; see
@@ -256,50 +353,15 @@ export function ComputerTools() {
       if (result.ok) noteBrowsed(computerId);
       return result;
     },
-    render: ({ result, status, toolCallId }) => {
-      /*
-       * The page this turn left open, so reopening the conversation shows what it browsed rather
-       * than what the Bot has open now. Only once the turn is finished: while it runs, the live
-       * frames are its own.
-       */
-      /*
-       * A RESULT IS WHAT MAKES A TURN OVER, not the status.
-       *
-       * A restored tool call arrives with its result already in hand and a status that is briefly
-       * something other than complete, so keying on the status alone made every reopened turn look
-       * like one still running: the tile polled the live screen, put today's page under yesterday's
-       * answer, and only then restored the frame it should have shown from the start.
-       */
-      const finished = status === "complete" || result !== undefined;
-      const outcome = finished ? outcomeOf(result) : {};
-      const page =
-        typeof outcome.url === "string"
-          ? {
-              url: outcome.url,
-              ...(typeof outcome.title === "string"
-                ? { title: outcome.title }
-                : {}),
-            }
-          : undefined;
-      return (
-        <div className="my-2">
-          <ComputerView
-            computerId={bot.current}
-            active={!finished}
-            /*
-             * FINISHED, NOT "GOT SOMEWHERE". The tile used to count a turn as history only once it
-             * had a page, so a navigation that was refused, failed or stopped never settled: it kept
-             * polling the live screen under a turn that was over, and offered control of it. Those
-             * are the turns most worth freezing, because the thing on screen has nothing to do with
-             * what the person is reading.
-             */
-            finished={finished}
-            {...(page ? { page } : {})}
-            {...(toolCallId ? { toolCallId } : {})}
-          />
-        </div>
-      );
-    },
+    render: ({ args, result, status, toolCallId }) => (
+      <NavigationStep
+        computerId={bot.current}
+        url={args?.url}
+        result={result}
+        status={status}
+        toolCallId={toolCallId}
+      />
+    ),
   });
 
   useFrontendTool({

@@ -89,6 +89,28 @@ describe("parseAriaSnapshot, against captured output", () => {
     expect(elements[1]?.value).toBeUndefined();
   });
 
+  test("reads what was typed in a field that shows a placeholder, and not the placeholder", () => {
+    // As Playwright 1.62 writes a filled field with a placeholder, an empty one, and a textarea. Read as text alone,
+    // every field like these looked empty after a Bot filled it, and the Bot typed the values in again.
+    const { elements } = parseAriaSnapshot(
+      [
+        '- textbox "Website" [ref=e5]:',
+        "  - /placeholder: company.com",
+        "  - text: halvorsen.com",
+        '- textbox "Headquarters" [ref=e6]:',
+        "  - /placeholder: City, State",
+        '- textbox "Notes" [active] [ref=e7]:',
+        "  - /placeholder: Why it fits",
+        "  - text: Strong fit",
+      ].join("\n"),
+    );
+    expect(elements.map((each) => [each.name, each.value])).toEqual([
+      ["Website", "halvorsen.com"],
+      ["Headquarters", undefined],
+      ["Notes", "Strong fit"],
+    ]);
+  });
+
   test("reports checked AND unchecked for things that can be checked", () => {
     const byName = new Map(
       parseAriaSnapshot(CAPTURED).elements.map((e) => [e.name, e]),

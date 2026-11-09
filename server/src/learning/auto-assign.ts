@@ -2,6 +2,7 @@ import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import {
   AUTOMATIC_LEARNING_CONTAINER_ID,
   type LearningAutoAssignState,
+  type LearningTarget,
 } from "@openbot/shared/learning";
 import {
   type AuditStore,
@@ -12,7 +13,10 @@ import {
   askWhileIntelligenceStarts,
   type StartupClock,
 } from "../intelligence-startup";
-import type { LearningSettingsStore } from "./settings";
+import type {
+  ConfiguredLearningContainer,
+  LearningSettingsStore,
+} from "./settings";
 
 /**
  * What asking Intelligence about one container found. `learning_off`: Intelligence answered and has
@@ -273,7 +277,11 @@ const MIN_INTERVAL_MS = 60_000;
  * for every deployment whose Intelligence project already has the container:
  *
  * - It never overrides a choice. A saved Admin setting of any kind, including a saved off, and a
- *   container named in the environment both mean there is nothing to do.
+ *   container named in the environment both mean there is nothing to do, once Intelligence says it
+ *   has the container named. One it does not have is a stale name, not a choice: it is logged,
+ *   forgotten, and assignment goes ahead as though nothing was named (see `configured`). A saved
+ *   default container it does not have is logged and set aside the same way, but stays saved, for
+ *   the Intelligence it was chosen on: what assignment finds is used in its place, here only.
  * - It creates the container only through `create`, with a credential that can (the runtime key on
  *   an Intelligence that allows it, a service token on a local evaluation install, or a CopilotKit
  *   CLI login on this machine; see learning/ensure-container.ts), once per process unless Admin asks
@@ -286,9 +294,19 @@ const MIN_INTERVAL_MS = 60_000;
  *   when the startup window closes.
  */
 export function createLearningAutoAssign(options: {
-  /** False when the operator switched this off or the environment names a container. */
+  /** False when the operator switched this off (`OPENBOT_LEARNING_AUTO_ASSIGN`). */
   enabled: boolean;
-  store: Pick<LearningSettingsStore, "saved" | "adoptDefault">;
+  /**
+   * The container the environment names, checked first. There, and there is nothing to assign.
+   * Absent on this Intelligence, and it is forgotten and assignment runs as though it was never
+   * named. The Intelligence a server talks to is fixed for its life, and pointing it at another one
+   * restarts it, so a check per process is a check per Intelligence.
+   */
+  configured?: ConfiguredLearningContainer;
+  store: Pick<LearningSettingsStore, "saved" | "adoptDefault"> &
+    Partial<
+      Pick<LearningSettingsStore, "savedDefault" | "setAside" | "restore">
+    >;
   probe: (containerId: string) => Promise<ContainerProbe>;
   /** Create the container with a credential that can. Absent when this deployment holds none. */
   create?: () => Promise<ContainerCreation>;
@@ -307,7 +325,10 @@ export function createLearningAutoAssign(options: {
   const now = options.now ?? Date.now;
   const minIntervalMs = options.minIntervalMs ?? MIN_INTERVAL_MS;
   const log = options.log ?? ((entry) => console.warn(JSON.stringify(entry)));
-  let current: LearningAutoAssignState = options.enabled
+  /** Whether there is anything to check: assignment, or a container the environment names. */
+  const active = () =>
+    options.enabled || options.configured?.target() !== undefined;
+  let current: LearningAutoAssignState = active()
     ? { state: "pending" }
     : { state: "off" };
   let running: Promise<LearningAutoAssignState> | undefined;
@@ -398,10 +419,79 @@ export function createLearningAutoAssign(options: {
     ...(createError ? { createError } : {}),
   });
 
+  /**
+   * Whether the environment's container is there. "stands": it is, or Intelligence answered without
+   * saying it is not (Learning off, or not licensed), so the choice stands as it always did.
+   * "forgotten": Intelligence says it has no such container, so it no longer names the default.
+   */
+  const checkConfigured = async (
+    target: LearningTarget,
+  ): Promise<"stands" | "forgotten" | "unavailable"> => {
+    const found = await options.probe(target.containerId);
+    if (found === "unavailable") return "unavailable";
+    if (found !== "absent") return "stands";
+    options.configured?.forget();
+    once("configured_absent", {
+      containerId: target.containerId,
+      variable: "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID",
+      message: `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID is "${target.containerId}", but this Intelligence has no Learning container with that ID, so OpenBot ignores it${options.enabled ? ` and assigns "${containerId}" instead` : ""}. Remove it from the environment, or set it to a container this Intelligence has.`,
+    });
+    return "forgotten";
+  };
+
+  /**
+   * Whether the saved default container is there. "stands": it is, none is saved, or Intelligence
+   * answered without saying it is not. "set_aside": Intelligence says it has no such container. The
+   * saved choice is kept (switching back to the Intelligence it was made on brings it back), but it
+   * no longer names the default here (`LearningSettingsStore.setAside`).
+   */
+  const checkSaved = async (): Promise<
+    | { checked: "stands" }
+    | { checked: "unavailable" }
+    | { checked: "set_aside"; containerId: string }
+  > => {
+    const saved = await options.store.savedDefault?.();
+    if (!saved || !options.store.setAside) return { checked: "stands" };
+    const found = await options.probe(saved.containerId);
+    if (found === "unavailable") return { checked: "unavailable" };
+    if (found !== "absent") {
+      options.store.restore?.();
+      return { checked: "stands" };
+    }
+    options.store.setAside(saved.containerId);
+    once("saved_absent", {
+      containerId: saved.containerId,
+      message: `The saved default Learning container is "${saved.containerId}", but this Intelligence has no Learning container with that ID, so OpenBot ignores it here${options.enabled ? ` and uses "${containerId}" instead` : ""}. The saved choice is kept, for an Intelligence that has it. Saving another default container replaces it.`,
+    });
+    return { checked: "set_aside", containerId: saved.containerId };
+  };
+
   const run = async (): Promise<LearningAutoAssignState> => {
     unsaid = false;
-    if (!options.enabled) return { state: "off" };
-    if (await options.store.saved()) return { state: "saved" };
+    if (!active()) return { state: "off" };
+    /** The saved default this Intelligence does not have: what is found is used in its place, not saved. */
+    let setAside: string | undefined;
+    if (await options.store.saved()) {
+      const saved = await checkSaved();
+      if (saved.checked === "unavailable") {
+        if (starting) unsaid = true;
+        else sayUnavailable();
+        return { state: "unavailable" };
+      }
+      if (saved.checked === "stands") return { state: "saved" };
+      if (!options.enabled) return { state: "off" };
+      setAside = saved.containerId;
+    }
+    const configured = setAside ? undefined : options.configured?.target();
+    if (configured) {
+      const checked = await checkConfigured(configured);
+      if (checked === "unavailable") {
+        if (starting) unsaid = true;
+        else sayUnavailable();
+        return { state: "unavailable" };
+      }
+      if (checked === "stands" || !options.enabled) return { state: "off" };
+    }
     let found = await options.probe(containerId);
     if (found === "absent") {
       const created = await tryCreate();
@@ -432,6 +522,16 @@ export function createLearningAutoAssign(options: {
       if (starting) unsaid = true;
       else sayUnavailable();
       return { state: "unavailable" };
+    }
+    if (setAside) {
+      options.store.setAside?.(setAside, { containerId });
+      log({
+        type: "learning-auto-assign",
+        outcome: "assigned",
+        containerId,
+        message: `Uses the "${containerId}" Learning container on this Intelligence in place of the saved "${setAside}", which it does not have. The saved choice is kept.`,
+      });
+      return { state: "assigned", containerId };
     }
     if (!(await options.store.adoptDefault({ containerId })))
       return { state: "saved" };
@@ -517,7 +617,7 @@ export function createLearningAutoAssign(options: {
     },
     state: () => current,
     start() {
-      if (!options.enabled) return;
+      if (!active()) return;
       void startup();
       timer = setInterval(() => void check(), options.retryMs ?? RETRY_MS);
       // Never keep the process alive for this alone.
@@ -546,8 +646,9 @@ export function withLearningAutoAssign<T extends LearningSettingsStore>(
     ...store,
     async read() {
       const settings = await store.read();
-      if (settings.enabled && settings.defaultTarget === null)
-        autoAssign.kick();
+      // With a default too, until the check settles: that default may be the environment's
+      // container, not yet confirmed on this Intelligence. Once settled, `kick` does nothing.
+      if (settings.enabled) autoAssign.kick();
       return settings;
     },
   };

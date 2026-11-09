@@ -3,41 +3,64 @@
  *
  * A boundary is written blind: an administrator types a CEL rule, saves it, and finds out what it
  * actually matches from the refusals it produces. The trail already holds everything needed to do
- * better — every computer action is recorded with the same facts the gateway judged it on — so a
- * candidate policy can be replayed over that history and answer, before it is saved, "these are the
- * actions you would have decided differently."
+ * better — every computer action and every app call is recorded with the facts the boundary judged it
+ * on — so a candidate policy can be replayed over that history and answer, before it is saved, "these
+ * are the actions you would have decided differently."
  *
  * Replay, not simulation: the context handed to `evaluateActionPolicy` here is rebuilt from the
- * audit row exactly as the gateway built it at decision time, through the same helpers. A rule that
- * behaves one way here and another way live would make this feature worse than absent.
+ * audit row exactly as the gateway or `callTool` built it at decision time, through the same helpers.
+ * A rule that behaves one way here and another way live would make this feature worse than absent.
+ *
+ * Both surfaces, because one policy governs both. Replaying computer actions alone answered "this rule
+ * changes nothing" about `mcp.server == "salesforce" && mcp.effect == "write"`, a rule that refuses
+ * every write to Salesforce, and that answer is believed.
  */
 
 import type { AuditEvent, AuditInitiator } from "../audit";
+import {
+  APP_CALL_EVENT_TYPES,
+  appCallFromAuditRow,
+  appCallPolicyContext,
+  initiatorFromColumns,
+} from "../plugins/plugin-store/call-policy";
 import { describeFile, hostOf, intentOf } from "./gateway";
 import {
   type ActionPolicy,
   evaluateActionPolicy,
   type PolicyContext,
+  type PolicyDecision,
   policyInitiator,
 } from "./policy";
 
 /**
- * The event types that record a policy DECISION about a computer action. In one place, for the query.
+ * The event types that record a policy DECISION about an action. In one place, for the query.
  *
  * Not `computer.action_failed`: the gateway writes that beside the decision row when a permitted
  * action is attempted and does not succeed, so it is a second row for an action already recorded
  * here, not a decision of its own. Replaying it too would score the action twice — see
  * {@link dryRunAgainstHistory}.
+ *
+ * All three app-call rows, because an app call's decision is recorded on whichever row it ends with:
+ * a permitted call writes one row, succeeded, failed or rejected by a later check, and that row is
+ * its decision. The second row a trial-mode refusal writes is paired with its first in
+ * {@link dryRunAgainstHistory}.
  */
 export const REPLAYABLE_EVENT_TYPES = [
   "computer.action_allowed",
   "computer.action_refused",
+  ...APP_CALL_EVENT_TYPES,
 ] as const;
+
+/** The target types those rows are filed under, so the query reads no folder action's rows. */
+export const REPLAYABLE_TARGET_TYPES = ["computer", "mcp_tool"] as const;
 
 /** One action the candidate policy would have decided differently. */
 export type DryRunChange = {
   id: string;
   createdAt: string;
+  /** Which surface the action was on: a Bot's computer, or a tool on an app. */
+  kind: "computer" | "app";
+  /** The computer's tool (`computer_click`), or the app's tool as `<app>/<tool>`. */
   action: string;
   bot: string;
   page: string;
@@ -45,6 +68,8 @@ export type DryRunChange = {
   element: { role: string; name: string } | null;
   command: string | null;
   file: string | null;
+  /** What started the run, as the rule's `initiator` saw it. */
+  initiator: PolicyContext["initiator"];
   /** What the policy in force decided, from the action's decision row. */
   was: "allowed" | "refused";
   would: "allowed" | "refused";
@@ -97,6 +122,11 @@ function initiatorFromPayload(value: unknown): AuditInitiator | undefined {
 
 export function contextFromAuditPayload(
   payload: Record<string, unknown>,
+  /**
+   * The initiator from the row's own columns, which is where the gateway writes it. Absent, as for a
+   * payload read on its own, the payload's `initiator` is read instead.
+   */
+  recorded?: AuditInitiator,
 ): PolicyContext | null {
   const action = payload.action;
   const bot = payload.bot;
@@ -138,13 +168,115 @@ export function contextFromAuditPayload(
     command: text(payload.command),
     mcp: { server: "", tool: "", effect: "" },
     /*
-     * Read off the row when it is there, neutral when it is not. The rows this replays are computer
-     * actions, which carry no initiator today, so in practice this is a person — but reading it
-     * rather than hardcoding it means a replay stays honest the day those rows do carry one, and a
-     * rule being tested against history is judged on what actually happened.
+     * Read off the row, neutral when it says nothing. The gateway writes the run's initiator into
+     * the row's columns, never its payload, and this read only the payload: every routine's click and
+     * command replayed as a person's, so `initiator.kind == "routine" && intent == "run_command"`
+     * previewed as stopping nothing on a deployment whose routines run commands nightly.
      */
-    initiator: policyInitiator(initiatorFromPayload(payload.initiator)),
+    initiator: policyInitiator(
+      recorded ?? initiatorFromPayload(payload.initiator),
+    ),
   };
+}
+
+/** A change, as the report lists it, from the context the candidate judged. */
+function changeOf(
+  event: AuditEvent,
+  kind: DryRunChange["kind"],
+  action: string,
+  context: PolicyContext,
+  was: DryRunChange["was"],
+  decision: PolicyDecision,
+): DryRunChange {
+  return {
+    id: event.id,
+    createdAt: event.createdAt,
+    kind,
+    action,
+    bot: context.bot.id,
+    page: context.page.url,
+    element:
+      context.element?.role || context.element?.name
+        ? {
+            role: context.element.role,
+            name: context.element.name,
+          }
+        : null,
+    command: context.command || null,
+    file: context.file?.path || null,
+    initiator: context.initiator,
+    was,
+    would: decision.allowed ? "allowed" : "refused",
+    rule: decision.matched,
+    reason: decision.reason,
+  };
+}
+
+/**
+ * The action one row records, ready to be judged again, or null when the row is not one to judge.
+ *
+ * Null for a row with nothing to replay, and for a row about an action already counted: the outcome
+ * row of a computer action, and the second row of an app call. `attempts` holds the app calls seen.
+ */
+function replayable(
+  event: AuditEvent,
+  attempts: Set<string>,
+): {
+  kind: DryRunChange["kind"];
+  action: string;
+  context: PolicyContext;
+  was: DryRunChange["was"];
+} | null {
+  if (event.eventType.startsWith("mcp.call_")) {
+    const call = appCallFromAuditRow(event);
+    /*
+     * One call, one score. A trial-mode refusal is recorded refused and then recorded again with
+     * what became of the call it let through, both carrying the refused decision; only the first is
+     * the decision. A call written since rows carried an `attempt` is also counted once by it, which
+     * holds for any second row a call writes.
+     */
+    if (!call?.decisionRow) return null;
+    if (call.attempt) {
+      if (attempts.has(call.attempt)) return null;
+      attempts.add(call.attempt);
+    }
+    return {
+      kind: "app",
+      action: call.ref,
+      context: appCallPolicyContext(call),
+      was: call.allowed ? "allowed" : "refused",
+    };
+  }
+
+  // Both carry a decision row already in this history, so scoring the outcome row would count the
+  // action twice; a stop is skipped for the same reason a failure is.
+  if (
+    event.eventType === "computer.action_failed" ||
+    event.eventType === "computer.action_stopped"
+  )
+    return null;
+  const context = contextFromAuditPayload(
+    event.payload,
+    initiatorFromColumns(event),
+  );
+  if (!context) return null;
+
+  /*
+   * The policy's own verdict where the row records one. A refused row is not always the policy's
+   * refusal: the person can deny an action the policy allowed, and that row keeps the policy's
+   * `allowed: true`. Scored by its event type it would read as a refusal no rule made.
+   */
+  const recorded = (event.payload.decision as { allowed?: unknown } | undefined)
+    ?.allowed;
+  const was =
+    typeof recorded === "boolean"
+      ? recorded
+        ? "allowed"
+        : "refused"
+      : event.eventType === "computer.action_refused"
+        ? "refused"
+        : "allowed";
+  return { kind: "computer", action: context.tool.name, context, was };
 }
 
 /**
@@ -162,6 +294,8 @@ export function contextFromAuditPayload(
  * policy made. The decision is on the decision row; the failure row only says it did not finish.
  * Callers should exclude it from the query too ({@link REPLAYABLE_EVENT_TYPES}); this guards the
  * function against being handed one regardless.
+ *
+ * An app call is scored once, from its decision row, for the same reason: see `replayable`.
  */
 export function dryRunAgainstHistory(
   policy: ActionPolicy,
@@ -174,39 +308,17 @@ export function dryRunAgainstHistory(
     unchanged: 0,
     changes: [],
   };
+  const attempts = new Set<string>();
 
   for (const event of events) {
-    // Both carry a decision row already in this history, so scoring the outcome row would count the
-    // action twice; a stop is skipped for the same reason a failure is.
-    if (
-      event.eventType === "computer.action_failed" ||
-      event.eventType === "computer.action_stopped"
-    )
-      continue;
-    const context = contextFromAuditPayload(event.payload);
-    if (!context) continue;
+    const action = replayable(event, attempts);
+    if (!action) continue;
     report.scanned += 1;
 
-    /*
-     * The policy's own verdict where the row records one. A refused row is not always the policy's
-     * refusal: the person can deny an action the policy allowed, and that row keeps the policy's
-     * `allowed: true`. Scored by its event type it would read as a refusal no rule made.
-     */
-    const recorded = (
-      event.payload.decision as { allowed?: unknown } | undefined
-    )?.allowed;
-    const was =
-      typeof recorded === "boolean"
-        ? recorded
-          ? "allowed"
-          : "refused"
-        : event.eventType === "computer.action_refused"
-          ? "refused"
-          : "allowed";
-    const decision = evaluateActionPolicy(policy, context);
+    const decision = evaluateActionPolicy(policy, action.context);
     const would = decision.allowed ? "allowed" : "refused";
 
-    if (was === would) {
+    if (action.was === would) {
       report.unchanged += 1;
       continue;
     }
@@ -214,26 +326,16 @@ export function dryRunAgainstHistory(
     else report.wouldAllow += 1;
 
     if (report.changes.length >= CHANGES_CAP) continue;
-    report.changes.push({
-      id: event.id,
-      createdAt: event.createdAt,
-      action: context.tool.name,
-      bot: context.bot.id,
-      page: context.page.url,
-      element:
-        context.element?.role || context.element?.name
-          ? {
-              role: context.element.role,
-              name: context.element.name,
-            }
-          : null,
-      command: context.command || null,
-      file: context.file?.path || null,
-      was,
-      would,
-      rule: decision.matched,
-      reason: decision.reason,
-    });
+    report.changes.push(
+      changeOf(
+        event,
+        action.kind,
+        action.action,
+        action.context,
+        action.was,
+        decision,
+      ),
+    );
   }
 
   return report;

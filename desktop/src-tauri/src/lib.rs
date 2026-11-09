@@ -1,5 +1,6 @@
 //! The parts of the shell that are worth testing without a window around them.
 pub mod acquire;
+pub mod ai_connection;
 pub mod app_update;
 pub mod cli_release;
 pub mod composio;
@@ -18,6 +19,8 @@ pub mod local_eval;
 pub mod local_eval_state;
 pub mod local_images;
 pub mod logging;
+#[cfg(target_os = "macos")]
+pub mod native_alert;
 pub mod paths;
 pub mod plan;
 pub mod preparation;
@@ -39,6 +42,7 @@ pub mod telemetry;
 pub mod tray;
 pub mod troubleshooting;
 pub mod upgrade;
+pub mod usage_data;
 pub mod vault;
 pub mod windows;
 

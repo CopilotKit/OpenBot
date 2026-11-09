@@ -78,6 +78,7 @@ import type { ComponentStore } from "./components/store";
 import type { ComputerGateway } from "./computer/gateway";
 import type { PageFrameStore } from "./computer/page-frames";
 import type { PolicyStore } from "./computer/policy-store";
+import { createPolicyTranslateRoutes } from "./computer/policy-translate";
 import { createComputerRoutes } from "./computer/routes";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import {
@@ -162,6 +163,7 @@ import type { ResponsibilityStore } from "./responsibilities/types";
 import { createRoutineRoutes, type RoutineStore } from "./routines/routes";
 import type { RoutineRunner } from "./routines/runner";
 import type { IntentRouter } from "./routing/classify";
+import type { ModelCompleter } from "./routing/model";
 import { createRoutingRoutes } from "./routing/routes";
 import { createCoworkerRoutingService } from "./routing/service";
 import type { SelfHostBanner } from "./self-host-banner";
@@ -506,6 +508,11 @@ export function createApp(
      * learning/model-endpoint.ts. Absent, nothing is mounted.
      */
     learningModel?: LearningModelEndpoint;
+    /**
+     * The deployment's own model, for writing a boundary from an admin's description
+     * (computer/policy-translate.ts). Absent, `/api/computers/policy-translate` is not mounted.
+     */
+    boundaryWriter?: ModelCompleter;
   },
   /**
    * Whether to offer help self-hosting, which also hides it from a deployment that pays for
@@ -1543,8 +1550,20 @@ export function createApp(
                 : {}),
             })
           : undefined,
+        auditStore,
       ),
     );
+    // Beside `/policy` and named in DEPLOYMENT_ROUTES with it: the computer router's Bot guard
+    // steps aside for the name, and this answers it.
+    if (coworker?.boundaryWriter)
+      app.route(
+        "/api/computers",
+        createPolicyTranslateRoutes({
+          requireUser,
+          complete: coworker.boundaryWriter,
+          ...(auditStore ? { auditStore } : {}),
+        }),
+      );
   }
 
   if (hostAccessBroker) {

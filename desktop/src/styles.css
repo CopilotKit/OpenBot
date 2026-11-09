@@ -986,6 +986,14 @@ a:hover {
   overflow-wrap: anywhere;
 }
 
+/* The block is the box: a command in a list of steps is not also boxed as inline code. */
+.blocker-steps .command code {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: inherit;
+}
+
 .command button {
   position: absolute;
   top: 8px;

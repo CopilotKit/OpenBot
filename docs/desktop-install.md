@@ -63,6 +63,49 @@ A return visit with a recorded local stack goes straight to Start. Any other sav
 including an installation that an earlier app connected to a hosted Intelligence, starts at the
 first screen and keeps its finished install.
 
+## Usage data and account attribution
+
+The first setup screen says that OpenBot sends CopilotKit usage data linked to the person's
+CopilotKit account, that it never sends conversations, files or keys, and links
+[Desktop telemetry](../desktop/TELEMETRY.md). **Settings > General > Privacy > Share usage data**
+turns it off. Off is the same opt-out as launching with `COPILOTKIT_TELEMETRY_DISABLED=1`: it is
+kept for the next launch, the desktop's own events and identity are deleted at once, every CLI call
+gets the variable, no `telemetry link` runs, and the server gets it the next time OpenBot starts.
+With `COPILOTKIT_TELEMETRY_DISABLED` or `DO_NOT_TRACK` set at launch, the switch shows off and
+cannot be turned on.
+
+After a successful CopilotKit sign-in, an existing-account check, app setup, or a successful Start,
+the native shell runs the bundled CLI's `telemetry link --installation-id <UUID> --json` on a
+background worker. The CLI uses its verified Ops session to return an opaque account fingerprint.
+Desktop saves that binding before calling again with `--account-id <hash>`. Ops emits the existing
+identity-link event; the telemetry sink aliases the desktop UUID to the Clerk person in PostHog. The
+desktop never reads CLI credential files or adds email addresses to product events.
+
+The first account keeps the existing installation UUID, so its anonymous setup history can join the
+account. A different account gets a new UUID before linking. A signed-out CLI result clears a
+previous binding and rotates the UUID. Queued events keep the UUID they were recorded under,
+including queues written by older desktop versions. The personal-edition runtime receives the
+current UUID through `CPK_TELEMETRY_ID` when it starts. Only the native desktop launch selects the
+separate telemetry Compose override; shared Compose and Enterprise charts are unchanged. The handoff
+adds no readable PII or user content. Opaque account linking is pseudonymous, not anonymous.
+
+Nothing here can keep OpenBot from opening. Sign-in and Start never wait for `telemetry link`: Start
+hands the runtime the identity as it stands and links afterwards, so an account change found then
+reaches the runtime at the next Start. Required CLI calls preempt optional linking, and duplicate
+hooks do not queue. Each of at most two CLI calls has an eight-second budget plus 250 ms kill grace;
+a failure logs a fixed deferred message and retries at the next hook. Once a link is confirmed for
+an installation and account, later hooks in the same launch skip it until the next sign-in, which
+keeps the CLI's own analytics to one link per account per launch; a terminal logout is noticed at the
+next sign-in or launch. If the optional Compose settings probe fails or a telemetry override cannot
+be written, Start logs it and continues without the override, opted out or not.
+
+A successful CLI response means Ops accepted the authenticated verify request. Aliases are
+best-effort and require the Ops telemetry sink to be enabled. The bundled CLI is pinned to a
+`CLI_ENV=production` build that includes `telemetry link` (`desktop/intelligence-cli.json`).
+Validate a real sign-in, task and restart under one PostHog person, then switch accounts and verify
+that the second person's activity remains separate. Production delivery has not been established by
+the local tests.
+
 ## Who owns what
 
 | Owner | Owns |

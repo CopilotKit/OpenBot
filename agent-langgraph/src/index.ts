@@ -21,6 +21,7 @@ import {
   keyVariableFor,
   requiresResponsesApi,
 } from "../../shared/model-providers";
+import { answerInOrder } from "./browser-order";
 import { toLangChainMessages } from "./history";
 import { readReasoningEffort } from "./model-options";
 import { streamRun } from "./stream";
@@ -342,26 +343,26 @@ function buildGraph(input: RunAgentInput) {
     }))
     .addNode("tools", async (state) => {
       const last = state.messages.at(-1) as AIMessage;
-      const results = await Promise.all(
+      // The computer's calls one after another, in the order the model made them (browser-order.ts).
+      const results = await answerInOrder(
         /*
          * Only this deployment's own tools. A component is drawn by the surface, and a decision is
          * answered there by a person, so neither is executed here and neither gets a result invented
          * here. The run ends instead, and the surface starts the next one carrying what it produced.
          */
-        (last.tool_calls ?? [])
-          .filter((call) => ours.has(call.name))
-          .map(async (call) => {
-            const text = await callTool(
-              run,
-              call.name,
-              (call.args ?? {}) as Record<string, unknown>,
-            );
-            return new ToolMessage({
-              content: text,
-              tool_call_id: call.id ?? call.name,
-              name: call.name,
-            });
-          }),
+        (last.tool_calls ?? []).filter((call) => ours.has(call.name)),
+        async (call) => {
+          const text = await callTool(
+            run,
+            call.name,
+            (call.args ?? {}) as Record<string, unknown>,
+          );
+          return new ToolMessage({
+            content: text,
+            tool_call_id: call.id ?? call.name,
+            name: call.name,
+          });
+        },
       );
       return { messages: results };
     })

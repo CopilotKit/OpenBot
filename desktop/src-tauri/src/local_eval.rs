@@ -12,8 +12,9 @@
 //! - **Arguments are fixed.** Only `status`, `start`, `stop` and `login`, a validated stack id and
 //!   `--json`, plus the constant `list`, `setup`, `connect` and `login --help` lists and the sign-in's
 //!   `--mode openbot`, and `integrations composio provision` with a validated installation id and
-//!   a file OpenBot made, and `local setup --model-config` with a model file OpenBot made, as
-//!   separate arguments with no shell. The CLI's `resumeCommand` strings
+//!   a file OpenBot made, `local setup --model-config` with a model file OpenBot made, and
+//!   `telemetry link` with validated installation and account IDs, as separate arguments with
+//!   no shell. The CLI's `resumeCommand` strings
 //!   are text for a terminal user; they are dropped here and never executed.
 //! - **Only allowlisted facts leave.** Raw stdout, stderr, error messages and recovery text never
 //!   cross IPC. Failures are static categories with no payload. The one place CLI words go is the
@@ -248,6 +249,8 @@ pub struct Report {
     /// from a back end that is down (see `UnfinishedUpdate`).
     pub checks_passed: bool,
     /// With `Reason::ResourcesShort`: which resources the CLI found short, and on which engine.
+    /// With `Readiness::Degraded`: a disk OpenBot found short, or recovering, behind a back end that
+    /// runs but does not answer (`checked_when_unhealthy`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shortfall: Option<Shortfall>,
 }
@@ -269,6 +272,25 @@ pub struct Shortfall {
     pub memory_gb: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disk_gb: Option<String>,
+    /// The back end's own disk is nearly full: its node reports `DiskPressure`, or so little is
+    /// free that k3s removes the back end's images (`EngineCheck::nearly_full`). OpenBot's own
+    /// check after a start that failed, never the CLI's.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub nearly_full: bool,
+    /// How large that disk is, in GiB to one decimal, beside `disk_gb`, when it is nearly full.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk_size_gb: Option<String>,
+    /// The node still reports `DiskPressure` with the disk above both lines: k3s keeps the
+    /// condition for five minutes after space is freed, and the back end recovers by itself.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub recovering: bool,
+    /// Podman on Windows, whose machine runs in WSL: `podman machine set` changes none of its
+    /// resources there, and its disk is freed on the drive that holds it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub wsl: bool,
+    /// That drive, `C:`, when WSL says where the machine's disk is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drive: Option<String>,
 }
 
 /// A number the CLI printed, to one decimal and rounded down as it rounds, without a trailing `.0`.
@@ -280,7 +302,7 @@ fn shown(value: f64) -> String {
 
 impl Shortfall {
     fn named(&self) -> bool {
-        self.cpu || self.memory || self.disk
+        self.cpu || self.memory || self.disk || self.recovering
     }
 }
 
@@ -814,7 +836,8 @@ pub fn normalize_account_sign_in(exit_code: i32, stdout: &[u8]) -> Result<Accoun
     Ok(AccountSignIn { signed_in })
 }
 
-/// The evaluation agreement the licence needs, as the window shows it. No CLI prose is kept.
+/// The evaluation agreement the licence needs, as the window shows it. No CLI prose is kept but
+/// the one sentence of a preflight that blocked (`Blocked`).
 ///
 /// The window reads the CLI's own status words (`signed-out`) and camelCase fields
 /// (`organizationName`). A variant named in camelCase reaches it as `signedOut`, which it does not
@@ -838,6 +861,17 @@ pub enum Terms {
     /// The CLI answers nothing about the agreement until a container engine answers it. On a new
     /// Windows computer Install is still putting Podman in while the person signs in.
     EngineNotReady,
+    /// The CLI's preflight refused this computer for a reason waiting does not change: an engine
+    /// local setup does not run on, such as OrbStack on a Mac, or too few CPUs. `said` is the CLI's
+    /// own sentence for it, when it is one plain line.
+    Blocked {
+        reason: Reason,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        said: Option<String>,
+        /// The engine itself is refused: the fix is Docker Desktop or Podman instead.
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        switch_engine: bool,
+    },
     /// The engine has fewer CPUs or less memory than local setup needs (`engine_size_terms`).
     /// Not a CLI answer: OpenBot's own check, so a small engine is caught before Start.
     EngineTooSmall {
@@ -845,6 +879,11 @@ pub enum Terms {
         cpu: bool,
         memory: bool,
         disk: bool,
+        /// Podman on Windows, in WSL (`Shortfall::wsl`), and the drive that holds its disk.
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        wsl: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        drive: Option<String>,
     },
 }
 
@@ -867,15 +906,7 @@ pub fn normalize_terms(exit_code: i32, stdout: &[u8]) -> Result<Terms, Failure> 
         Some("not-required") => Ok(Terms::NotRequired),
         Some("unavailable") => Ok(Terms::Unavailable),
         Some("signed-out") => Ok(Terms::SignedOut),
-        Some("blocked")
-            if wire
-                .get("preflight")
-                .and_then(|preflight| preflight.get("status"))
-                .and_then(Value::as_str)
-                == Some("fail") =>
-        {
-            Ok(Terms::EngineNotReady)
-        }
+        Some("blocked") => preflight_terms(wire.get("preflight")),
         Some("required") => {
             let url = wire
                 .get("url")
@@ -910,6 +941,46 @@ pub fn normalize_terms(exit_code: i32, stdout: &[u8]) -> Result<Terms, Failure> 
         }
         _ => Err(Failure::InvalidStatus),
     }
+}
+
+/**
+`onboard local-terms` blocked by its preflight (`preflight.status` "fail").
+
+Only an engine that is not there yet is waited for: one that does not answer (`docker_unavailable`),
+or, while Install is still choosing the engine, a Docker address that answers with Podman
+(`engine_mismatch`). Anything else is said at once, since trying again every few seconds cannot
+change it.
+*/
+fn preflight_terms(preflight: Option<&Value>) -> Result<Terms, Failure> {
+    let field = |name: &str| {
+        preflight
+            .and_then(|preflight| preflight.get(name))
+            .and_then(Value::as_str)
+    };
+    if field("status") != Some("fail") {
+        return Err(Failure::InvalidStatus);
+    }
+    let reason = field("reason").unwrap_or("");
+    let detail = field("failureDetail");
+    if reason == "docker_unavailable"
+        || reason == "unsupported_engine" && detail == Some("engine_mismatch")
+    {
+        return Ok(Terms::EngineNotReady);
+    }
+    Ok(Terms::Blocked {
+        reason: Reason::from_wire(reason),
+        // Shown as the CLI wrote it, so only as one bounded line of plain text.
+        said: field("detail")
+            .map(str::trim)
+            .filter(|said| {
+                !said.is_empty()
+                    && said.chars().count() <= 400
+                    && !said.chars().any(char::is_control)
+            })
+            .map(str::to_owned),
+        switch_engine: reason == "unsupported_engine"
+            && detail == Some("engine_not_docker_desktop"),
+    })
 }
 
 /**
@@ -1198,17 +1269,70 @@ pub fn parse_engine_size(output: &str) -> Option<(u64, u64)> {
     fields.next().is_none().then_some((cpus, memory))
 }
 
-/// Free bytes from `df -Pk /`: the fourth field of its last line, in KiB, as the CLI reads it.
+/// A filesystem as `df -Pk` reports it, in bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Disk {
+    pub size: u64,
+    pub free: u64,
+}
+
+/// Size and free bytes from `df -Pk /`: the second and fourth fields of its last line, in KiB, as
+/// the CLI reads them.
+pub fn parse_disk(output: &str) -> Option<Disk> {
+    let mut fields = output.trim().lines().last()?.split_whitespace();
+    let size: u64 = fields.nth(1)?.parse().ok()?;
+    let free: u64 = fields.nth(1)?.parse().ok()?;
+    Some(Disk {
+        size: size * 1024,
+        free: free * 1024,
+    })
+}
+
+/// Free bytes from `df -Pk /`, as the CLI reads them.
 pub fn parse_free_disk(output: &str) -> Option<u64> {
-    let kib: u64 = output
-        .trim()
-        .lines()
-        .last()?
-        .split_whitespace()
-        .nth(3)?
-        .parse()
-        .ok()?;
-    Some(kib * 1024)
+    parse_disk(output).map(|disk| disk.free)
+}
+
+/**
+How long each engine command of the check may take: `info` and `image ls`, and the `run` that
+measures disk, which starts a container. An engine that does not answer within it is not measured,
+as one that fails is, so a hung engine never holds the account step or a Start.
+*/
+const ENGINE_QUERY_LIMIT: Duration = Duration::from_secs(15);
+const ENGINE_RUN_LIMIT: Duration = Duration::from_secs(20);
+/// The most of an engine command's output the check reads: a long image list, at most.
+const ENGINE_OUTPUT_CAP: usize = 1024 * 1024;
+
+/// What a test sets the engine check's limits to.
+#[cfg(test)]
+static ENGINE_CHECK_LIMIT_FOR_TESTS: std::sync::Mutex<Option<Duration>> =
+    std::sync::Mutex::new(None);
+
+/// `args` on the engine, within `limit`: whether it succeeded, and its stdout. Nothing when it did
+/// not finish in time or could not run.
+fn engine_answer(
+    address: &crate::engine::Address,
+    args: &[&str],
+    limit: Duration,
+) -> Option<(bool, String)> {
+    #[cfg(test)]
+    let limit = ENGINE_CHECK_LIMIT_FOR_TESTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .unwrap_or(limit);
+    let mut command = address.command();
+    command.args(args);
+    let (succeeded, stdout) = crate::local_images::run_within(command, limit, ENGINE_OUTPUT_CAP)?;
+    Some((succeeded, String::from_utf8_lossy(&stdout).into_owned()))
+}
+
+/// `args` on the engine, within `limit`: its stdout when it succeeded, or nothing.
+fn engine_output(
+    address: &crate::engine::Address,
+    args: &[&str],
+    limit: Duration,
+) -> Option<String> {
+    engine_answer(address, args, limit).and_then(|(succeeded, stdout)| succeeded.then_some(stdout))
 }
 
 /// The engine's CPUs and memory from its `info`.
@@ -1218,28 +1342,24 @@ fn engine_size(address: &crate::engine::Address) -> Option<(u64, u64)> {
     } else {
         "{{.NCPU}} {{.MemTotal}}"
     };
-    let output = address
-        .command()
-        .args(["info", "--format", format])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())?;
-    parse_engine_size(&String::from_utf8_lossy(&output.stdout))
+    parse_engine_size(&engine_output(
+        address,
+        &["info", "--format", format],
+        ENGINE_QUERY_LIMIT,
+    )?)
 }
 
 /**
-Free disk inside a container, the way the CLI measures it: `df -Pk /` in a container of an image the
-engine already has, so nothing is downloaded. An engine with no image that has a shell gives no
-answer, and disk is then not judged.
+The engine's disk inside a container, the way the CLI measures it: `df -Pk /` in a container of an
+image the engine already has, so nothing is downloaded. An engine with no image that has a shell
+gives no answer, and disk is then not judged.
 */
-fn engine_free_disk(address: &crate::engine::Address) -> Option<u64> {
-    let images = address
-        .command()
-        .args(["image", "ls", "--quiet", "--no-trunc"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())?;
-    let images = String::from_utf8_lossy(&images.stdout).into_owned();
+fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
+    let images = engine_output(
+        address,
+        &["image", "ls", "--quiet", "--no-trunc"],
+        ENGINE_QUERY_LIMIT,
+    )?;
     let mut tried = Vec::new();
     for image in images.lines().map(str::trim).filter(|id| !id.is_empty()) {
         if tried.contains(&image) {
@@ -1249,9 +1369,10 @@ fn engine_free_disk(address: &crate::engine::Address) -> Option<u64> {
             break;
         }
         tried.push(image);
-        let measured = address
-            .command()
-            .args([
+        // No answer in time is an engine that hangs: another image would only hang too.
+        let (succeeded, measured) = engine_answer(
+            address,
+            &[
                 "run",
                 "--rm",
                 "--pull=never",
@@ -1261,17 +1382,206 @@ fn engine_free_disk(address: &crate::engine::Address) -> Option<u64> {
                 image,
                 "-c",
                 "df -Pk /",
-            ])
-            .output();
-        let free = measured
-            .ok()
-            .filter(|output| output.status.success())
-            .and_then(|output| parse_free_disk(&String::from_utf8_lossy(&output.stdout)));
-        if free.is_some() {
-            return free;
+            ],
+            ENGINE_RUN_LIMIT,
+        )?;
+        if let Some(disk) = succeeded.then(|| parse_disk(&measured)).flatten() {
+            return Some(disk);
         }
     }
     None
+}
+
+#[cfg(test)]
+thread_local! {
+    /// What Windows says of the drive that holds the Podman machine's disk, for the tests: Some
+    /// stands in for `windows::podman_machine_drive` on this thread.
+    static MACHINE_DRIVE: std::cell::RefCell<Option<Option<crate::windows::MachineDrive>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The drive that holds the Podman machine `address` names, on Windows (`podman_machine_drive`).
+fn machine_drive(address: &crate::engine::Address) -> Option<crate::windows::MachineDrive> {
+    if address.engine != crate::engine::Engine::Podman {
+        return None;
+    }
+    #[cfg(test)]
+    if let Some(said) = MACHINE_DRIVE.with(|drive| drive.borrow().clone()) {
+        return said;
+    }
+    let connection = address
+        .connection
+        .clone()
+        .or_else(|| address.pin().ok().and_then(|pinned| pinned.connection))?;
+    crate::windows::podman_machine_drive(crate::acquire::machine_of(&connection))
+}
+
+/**
+What OpenBot measured of the engine the back end runs on (`[local check]` in the log): its CPUs and
+memory, its disk as a container sees it, on Windows the drive that holds a Podman machine's disk, and
+after a call that failed, whether the back end's node says it is short of disk.
+*/
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct EngineCheck {
+    podman: bool,
+    /// CPUs and bytes of memory, from the engine's `info`.
+    size: Option<(u64, u64)>,
+    disk: Option<Disk>,
+    drive: Option<crate::windows::MachineDrive>,
+    /// `DiskPressure` on the back end's node (`local_images::Node::disk_pressure`).
+    pressure: Option<bool>,
+}
+
+/// Bytes as GiB to one decimal, as the CLI rounds them.
+fn gib(bytes: u64) -> String {
+    shown(bytes as f64 / GIB as f64)
+}
+
+impl EngineCheck {
+    fn of(address: &crate::engine::Address) -> Self {
+        Self {
+            podman: address.engine == crate::engine::Engine::Podman,
+            size: engine_size(address),
+            disk: engine_disk(address),
+            drive: machine_drive(address),
+            pressure: None,
+        }
+    }
+
+    /// The free disk that counts: the smaller of what a container sees and what the drive under
+    /// the machine's disk has. Either can run out first.
+    fn free_disk(&self) -> Option<u64> {
+        [
+            self.disk.map(|disk| disk.free),
+            self.drive.as_ref().map(|drive| drive.free),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
+    /**
+    The back end's own disk is nearly full, by k3s's lines rather than the CLI's 40 GiB: its node
+    says `DiskPressure`, which k3s raises below 5% free (`evictionHard`), or less than 15% is free,
+    where the kubelet starts removing the images it is not running (`imageGCHighThresholdPercent`
+    85). A relaunched back end runs none yet, so that is when it loses them.
+    */
+    fn nearly_full(&self) -> bool {
+        self.pressure == Some(true) && !self.recovering() || self.below_image_line()
+    }
+
+    /// Less than 15% of the node's disk free: the kubelet removes images it is not running.
+    fn below_image_line(&self) -> bool {
+        self.disk
+            .is_some_and(|disk| u128::from(disk.free) * 100 < u128::from(disk.size) * 15)
+    }
+
+    /// Below the CLI's 40 GiB, or below the kubelet's image line.
+    fn low_on_disk(&self) -> bool {
+        self.free_disk()
+            .is_some_and(|free| free < MIN_ENGINE_FREE_DISK_BYTES)
+            || self.below_image_line()
+    }
+
+    /**
+    The node still says `DiskPressure`, but the disk is above both lines: space was freed, and k3s
+    keeps the condition for five minutes after (`evictionPressureTransitionPeriod`). The back end
+    recovers by itself, and a Retry in those minutes only fails again.
+    */
+    fn recovering(&self) -> bool {
+        self.pressure == Some(true) && self.free_disk().is_some() && !self.low_on_disk()
+    }
+
+    /// Podman on Windows, whose machine runs in WSL.
+    fn wsl(&self) -> bool {
+        self.podman && (cfg!(target_os = "windows") || self.drive.is_some())
+    }
+
+    /// What is short, with the numbers. Anything not measured is not judged.
+    fn shortfall(&self) -> Shortfall {
+        let (cpus, memory) = self.size.unwrap_or((u64::MAX, u64::MAX));
+        let free = self.free_disk();
+        let mut short = engine_shortfall(cpus, memory, free);
+        short.podman = self.podman;
+        short.wsl = self.wsl();
+        short.recovering = self.recovering();
+        short.nearly_full = self.nearly_full();
+        short.disk |= short.nearly_full;
+        if short.disk {
+            short.disk_gb = free.map(gib);
+            short.disk_size_gb = self
+                .disk
+                .filter(|_| short.nearly_full)
+                .map(|disk| gib(disk.size));
+        }
+        short.drive = self.drive.as_ref().and_then(|drive| drive.drive.clone());
+        short
+    }
+
+    /// `4 CPUs and 5.8 GiB of memory, 30.5 GiB free of 983.2 GiB in a container, 120.0 GiB free on
+    /// C:, no disk pressure`, then what is short.
+    fn said(&self) -> String {
+        let mut said = vec![match self.size {
+            Some((cpus, memory)) => format!("{cpus} CPUs and {} GiB of memory", gib(memory)),
+            None => "CPUs and memory not measured".to_owned(),
+        }];
+        said.push(match self.disk {
+            Some(disk) => format!(
+                "{} GiB free of {} GiB in a container",
+                gib(disk.free),
+                gib(disk.size)
+            ),
+            None => "free disk not measured".to_owned(),
+        });
+        if let Some(drive) = &self.drive {
+            let on = drive
+                .drive
+                .as_deref()
+                .unwrap_or("the drive that holds its disk");
+            said.push(format!("{} GiB free on {on}", gib(drive.free)));
+        }
+        match self.pressure {
+            Some(true) => said.push("the node reports disk pressure".to_owned()),
+            Some(false) => said.push("no disk pressure".to_owned()),
+            None => {}
+        }
+        let short = self.shortfall();
+        let mut verdict: Vec<&str> = Vec::new();
+        if short.cpu {
+            verdict.push("CPUs");
+        }
+        if short.memory {
+            verdict.push("memory");
+        }
+        if short.disk {
+            verdict.push(if short.nearly_full {
+                "disk (nearly full)"
+            } else {
+                "disk (OpenBot needs 40 GiB free)"
+            });
+        }
+        let verdict = if short.recovering && verdict.is_empty() {
+            "recovering: the node still reports disk pressure with the disk above both lines"
+                .to_owned()
+        } else if !verdict.is_empty() {
+            format!("short of {}", verdict.join(", "))
+        } else if self.size.is_none() && self.free_disk().is_none() {
+            "not measured".to_owned()
+        } else {
+            "enough".to_owned()
+        };
+        format!("{}; {verdict}", said.join(", "))
+    }
+}
+
+/// Log a check: `[local check] before local start: ...`. A shortfall is a warning.
+fn log_check(when: &str, check: &EngineCheck) {
+    let level = if check.shortfall().named() {
+        log::Level::Warn
+    } else {
+        log::Level::Info
+    };
+    log::log!(level, "[local check] {when}: {}", check.said());
 }
 
 /**
@@ -1282,39 +1592,108 @@ here; the CLI's own check still runs at Start.
 */
 pub fn engine_size_terms() -> Option<Terms> {
     let address = cli_engine()?;
-    let (cpus, memory) = engine_size(&address)?;
-    let free_disk = engine_free_disk(&address);
-    let short = engine_shortfall(cpus, memory, free_disk);
+    let check = EngineCheck::of(&address);
+    let (cpus, memory) = check.size?;
+    let short = engine_shortfall(cpus, memory, check.free_disk());
     if !short.named() {
         return None;
     }
-    log::warn!(
-        "[local terms] the engine has {cpus} CPUs, {memory} bytes of memory and {free_disk:?} bytes of free disk"
-    );
+    log_check("before local setup", &check);
     Some(Terms::EngineTooSmall {
-        podman: address.engine == crate::engine::Engine::Podman,
+        podman: check.podman,
         cpu: short.cpu,
         memory: short.memory,
         disk: short.disk,
+        wsl: check.wsl(),
+        drive: check.drive.and_then(|drive| drive.drive),
     })
 }
 
 /**
 A shortfall whose CLI error did not say which resource, measured here instead: CPUs and memory from
-the engine's `info` against the CLI's 4 and 4 GiB, and free disk inside a container against its 40
-GiB.
+the engine's `info` against the CLI's 4 and 4 GiB, and free disk inside a container, and on the drive
+under a Podman machine's disk, against its 40 GiB.
 */
-fn measured_shortfall(mut shortfall: Shortfall) -> Shortfall {
+fn measured_shortfall(shortfall: Shortfall) -> Shortfall {
     let Some(address) = cli_engine() else {
         return shortfall;
     };
-    if let Some((cpus, memory)) = engine_size(&address) {
-        shortfall.cpu = cpus < 4;
-        shortfall.memory = memory < 4 * GIB;
+    let measured = EngineCheck::of(&address).shortfall();
+    Shortfall {
+        podman: shortfall.podman,
+        ..measured
     }
-    shortfall.disk =
-        engine_free_disk(&address).is_some_and(|free| free < MIN_ENGINE_FREE_DISK_BYTES);
-    shortfall
+}
+
+/**
+The engine checked around a call that starts the back end, `local start`, `local update` or `local
+setup`.
+
+Before it, the check is only logged: an existing back end can run on less than the CLI's 40 GiB, and
+the CLI enforces that only at a first setup. After a call that failed, it is checked again, with the
+back end's node asked whether it is short of disk, and anything short becomes the report's reason
+with its numbers, so the card names it and says where to raise or free it. A failure the CLI already
+named, or one OpenBot stopped, keeps its own words.
+*/
+fn checked_call(
+    command: &str,
+    stack: Option<&StackId>,
+    call: impl FnOnce() -> Result<Report, Failure>,
+) -> Result<Report, Failure> {
+    let Some(address) = cli_engine() else {
+        return call();
+    };
+    log_check(&format!("before {command}"), &EngineCheck::of(&address));
+    let result = call();
+    let unexplained = match &result {
+        Ok(report) => {
+            report.outcome == Outcome::Failed
+                && matches!(
+                    report.reason,
+                    None | Some(Reason::LocalCommandFailed | Reason::Unrecognized)
+                )
+        }
+        // The back end ran and stopped without a report OpenBot can use. One OpenBot stopped, or
+        // that never ran, is not about the engine.
+        Err(failure) => matches!(
+            failure,
+            Failure::Timeout
+                | Failure::OutputLimit
+                | Failure::InvalidJson
+                | Failure::UnexpectedExit
+        ),
+    };
+    if !unexplained {
+        return result;
+    }
+    let mut check = EngineCheck::of(&address);
+    check.pressure = node_disk_pressure(stack);
+    log_check(&format!("after {command} failed"), &check);
+    let short = check.shortfall();
+    match result {
+        Ok(mut report) if short.named() => {
+            report.reason = Some(Reason::ResourcesShort);
+            report.shortfall = Some(short);
+            Ok(report)
+        }
+        other => other,
+    }
+}
+
+/// `DiskPressure` on `stack`'s node, or on any back end node on the engine when no stack is named
+/// (a setup's failed report names none).
+fn node_disk_pressure(stack: Option<&StackId>) -> Option<bool> {
+    let engine = recorded_engine();
+    let command = || engine_command(engine.as_ref());
+    let limits = crate::local_images::Limits {
+        call: Duration::from_secs(20),
+        ..crate::local_images::Limits::standard()
+    };
+    match stack {
+        Some(stack) => crate::local_images::Node::for_stack(&command, stack.as_str())
+            .disk_pressure(limits.call),
+        None => crate::local_images::any_disk_pressure(&command, limits),
+    }
 }
 
 /// The version-1 envelope every `local` command shares: version, command, and a status that
@@ -2092,6 +2471,10 @@ fn cli_environment(
             command.env(name, value);
         }
     }
+    // Share usage data turned off in Settings is the same opt-out as the variable.
+    if crate::usage_data::off() {
+        command.env("COPILOTKIT_TELEMETRY_DISABLED", "1");
+    }
     // Docker's configuration without the person's credential helper, which macOS stops to ask
     // about when OpenBot runs it, so the chart and image downloads never wait on a dialog. See
     // `docker_config`. The person's own configuration is what it mirrors.
@@ -2809,6 +3192,46 @@ impl Drop for Attempt {
 /// Held by the one call that is running. The CLI refuses a second `local` command while one is in
 /// progress (`local_command_busy`), so a start racing a stop would fail one of them for nothing.
 static CALLS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static REQUIRED_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static BACKGROUND_TELEMETRY: std::sync::Mutex<Option<Cancel>> = std::sync::Mutex::new(None);
+
+/// Required CLI work cancels optional attribution before waiting for the process slot.
+struct RequiredCliCall;
+
+impl RequiredCliCall {
+    fn begin() -> Self {
+        REQUIRED_CALLS.fetch_add(1, Ordering::SeqCst);
+        cancel_background_telemetry();
+        Self
+    }
+}
+
+impl Drop for RequiredCliCall {
+    fn drop(&mut self) {
+        REQUIRED_CALLS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Start may also need the native identity lock held by the background handshake.
+pub fn cancel_background_telemetry() {
+    let active = BACKGROUND_TELEMETRY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(cancel) = active.as_ref() {
+        cancel.cancel();
+    }
+}
+
+/// Clear the optional process before releasing its CLI slot, including after an error.
+struct BackgroundTelemetryCall;
+
+impl Drop for BackgroundTelemetryCall {
+    fn drop(&mut self) {
+        *BACKGROUND_TELEMETRY
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    }
+}
 
 /**
 Run `call` once every earlier call has finished, with what is left of `limits.timeout`.
@@ -2822,6 +3245,7 @@ fn one_at_a_time<T>(
     limits: Limits,
     call: impl FnOnce(Limits) -> Result<T, Failure>,
 ) -> Result<T, Failure> {
+    let _priority = RequiredCliCall::begin();
     let deadline = Instant::now() + limits.timeout;
     let _turn = loop {
         if cancel.requested() {
@@ -2911,6 +3335,55 @@ A download has its own limits, so a CLI call that followed one gets its whole li
 rather than what was left of it after the wait for its turn (`limits.1`).
 */
 pub(crate) fn run_with(
+    cli: &PinnedCli,
+    attempt: &str,
+    action: Action,
+    stack: &StackId,
+    limits: (Limits, Limits),
+    cancel: &Cancel,
+    images_limits: crate::local_images::Limits,
+) -> Result<Report, Failure> {
+    let call = || run_downloading(cli, attempt, action, stack, limits, cancel, images_limits);
+    match action {
+        // The calls that start the back end: the engine is checked around them.
+        Action::Start | Action::Update => {
+            checked_call(&format!("local {}", action.as_str()), Some(stack), call)
+        }
+        Action::Status => call().map(|report| checked_when_unhealthy(report, stack)),
+        Action::Stop => call(),
+    }
+}
+
+/**
+A back end that runs but does not answer (`local status` says `degraded`), checked as a failed start
+is. After a start that failed on a full disk the node stays up, so Retry reads its status rather
+than starting it again, and k3s keeps its `DiskPressure` for minutes after space is freed. A disk
+that is short, or a node recovering from one, becomes the report's `shortfall`, and the card says
+which; anything else leaves the report as it was. Not when every check passed: an update the CLI
+keeps on record is `degraded` too, with the back end answering.
+*/
+fn checked_when_unhealthy(mut report: Report, stack: &StackId) -> Report {
+    if report.outcome != Outcome::Completed
+        || report.readiness != Readiness::Degraded
+        || report.checks_passed
+    {
+        return report;
+    }
+    let Some(address) = cli_engine() else {
+        return report;
+    };
+    let mut check = EngineCheck::of(&address);
+    check.pressure = node_disk_pressure(Some(stack));
+    log_check("local status, running but not healthy", &check);
+    let short = check.shortfall();
+    if short.disk || short.recovering {
+        report.shortfall = Some(short);
+    }
+    report
+}
+
+/// `run_with`, without the engine check.
+fn run_downloading(
     cli: &PinnedCli,
     attempt: &str,
     action: Action,
@@ -3131,6 +3604,30 @@ pub(crate) fn setup_with(
     cancel: &Cancel,
     images_limits: crate::local_images::Limits,
 ) -> Result<Report, Failure> {
+    // The engine is checked around it, as around `local start` (`checked_call`).
+    checked_call("local setup", None, || {
+        setup_downloading(
+            cli,
+            attempt,
+            installation,
+            accepted,
+            limits,
+            cancel,
+            images_limits,
+        )
+    })
+}
+
+/// `setup_with`, without the engine check.
+fn setup_downloading(
+    cli: &PinnedCli,
+    attempt: &str,
+    installation: &std::path::Path,
+    accepted: Option<&EulaVersion>,
+    limits: (Limits, Limits),
+    cancel: &Cancel,
+    images_limits: crate::local_images::Limits,
+) -> Result<Report, Failure> {
     let downloaded = match cli_images_of(cli) {
         Some(images) => match stack_set_up_in(cli, installation, cancel)? {
             Some((stack, release)) => download_images(
@@ -3217,6 +3714,104 @@ pub fn account_sign_in_installed(attempt: &str) -> Result<AccountSignIn, Failure
         let cli = installed()?;
         account_sign_in(&cli, limits, &attempt.0, &mut |page| showing.show(page))
     })
+}
+
+/// Closed output of the CLI's authenticated desktop identity handshake.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TelemetryIdentity {
+    Account { account_id: String },
+    Linked { account_id: String },
+    SignedOut,
+    Skipped,
+}
+
+/// Background attribution never queues ahead of required CLI work, and yields if it arrives.
+fn background_telemetry_call<T>(
+    call: impl FnOnce(&Cancel, Limits) -> Result<T, Failure>,
+) -> Result<T, Failure> {
+    let cancel = Cancel::default();
+    let mut active = BACKGROUND_TELEMETRY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if REQUIRED_CALLS.load(Ordering::SeqCst) != 0 {
+        return Err(Failure::Cancelled);
+    }
+    let _turn = match CALLS.try_lock() {
+        Ok(turn) => turn,
+        Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return Err(Failure::Cancelled),
+    };
+    *active = Some(cancel.clone());
+    drop(active);
+    let _cleanup = BackgroundTelemetryCall;
+    call(&cancel, telemetry_link_limits())
+}
+
+/// Use the same verified CLI contract, but let required account/setup calls preempt it.
+pub fn link_telemetry_background_installed(
+    installation: &Installation,
+    account: Option<&str>,
+) -> Result<TelemetryIdentity, Failure> {
+    background_telemetry_call(|cancel, limits| {
+        let cli = installed()?;
+        link_telemetry(&cli, installation, account, limits, cancel)
+    })
+}
+
+/// Bound the optional handshake separately from product CLI operations.
+fn telemetry_link_limits() -> Limits {
+    Limits {
+        timeout: Duration::from_secs(8),
+        grace: Duration::from_millis(250),
+        output: MAX_OUTPUT,
+    }
+}
+
+/// Execute the fixed identity command through the same bounded process boundary as setup.
+fn link_telemetry(
+    cli: &PinnedCli,
+    installation: &Installation,
+    account: Option<&str>,
+    limits: Limits,
+    cancel: &Cancel,
+) -> Result<TelemetryIdentity, Failure> {
+    if account.is_some_and(|value| !crate::telemetry::is_account_id(value)) {
+        return Err(Failure::ContractMismatch);
+    }
+    let mut arguments = vec![
+        "telemetry",
+        "link",
+        "--installation-id",
+        installation.as_str(),
+        "--json",
+    ];
+    if let Some(account) = account {
+        arguments.extend(["--account-id", account]);
+    }
+    let (code, bytes) = execute(cli, &arguments, None, limits, cancel)?;
+    normalize_telemetry_identity(code, &bytes)
+}
+
+/// Refuse unexpected or private fields before returning anything to the shell.
+pub fn normalize_telemetry_identity(code: i32, bytes: &[u8]) -> Result<TelemetryIdentity, Failure> {
+    if code != 0 {
+        return Err(Failure::UnexpectedExit);
+    }
+    if bytes.len() > MAX_OUTPUT {
+        return Err(Failure::OutputLimit);
+    }
+    let result: TelemetryIdentity =
+        serde_json::from_slice(bytes).map_err(|_| Failure::InvalidJson)?;
+    match &result {
+        TelemetryIdentity::Account { account_id } | TelemetryIdentity::Linked { account_id }
+            if !crate::telemetry::is_account_id(account_id) =>
+        {
+            return Err(Failure::ContractMismatch)
+        }
+        _ => {}
+    }
+    Ok(result)
 }
 
 /// The approval page each waiting account sign-in has shown, by attempt id.
@@ -3409,6 +4004,39 @@ mod tests {
     /// The 0.16.0-rc.9 CLI (copilotkit 4.34.0-pre.48a3863), as its bundle names the release its
     /// `local setup` and `local update` install.
     const PINNED_CLI: &str = r#"async function resolveDefaultLocalRelease(directory2, dependencies = {}) {   const pinnedVersion = false ? "" : "0.16.0-rc.9";   const support = supportSchema.parse("#;
+
+    #[test]
+    fn telemetry_link_accepts_only_the_closed_account_handshake() {
+        let account = "a".repeat(64);
+        for kind in ["account", "linked"] {
+            let response = serde_json::json!({ "type": kind, "account_id": account });
+            assert!(normalize_telemetry_identity(0, response.to_string().as_bytes()).is_ok());
+            assert!(normalize_telemetry_identity(1, response.to_string().as_bytes()).is_err());
+            for field in [
+                "email",
+                "name",
+                "prompt",
+                "response",
+                "recording",
+                "filename",
+                "url",
+            ] {
+                let mut extra = response.clone();
+                extra[field] = serde_json::json!("synthetic private content");
+                assert!(normalize_telemetry_identity(0, extra.to_string().as_bytes()).is_err());
+            }
+        }
+        assert_eq!(
+            normalize_telemetry_identity(0, br#"{"type":"skipped"}"#),
+            Ok(TelemetryIdentity::Skipped)
+        );
+        assert!(normalize_telemetry_identity(
+            0,
+            br#"{"type":"account","account_id":"private@example.com"}"#
+        )
+        .is_err());
+        assert!(normalize_telemetry_identity(0, b"not json").is_err());
+    }
 
     #[test]
     fn the_release_a_cli_installs_is_read_out_of_the_cli_itself() {
@@ -4645,6 +5273,42 @@ mod tests {
     }
 
     #[test]
+    fn required_cli_work_preempts_background_attribution() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::required_cli_work_preempts_background_attribution",
+        ) {
+            return;
+        }
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let background = std::thread::spawn(move || {
+            background_telemetry_call(|cancel, _| {
+                entered.send(()).unwrap();
+                let deadline = Instant::now() + Duration::from_secs(2);
+                while !cancel.requested() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Ok(cancel.requested())
+            })
+        });
+        waiting.recv_timeout(Duration::from_secs(3)).unwrap();
+        let started = Instant::now();
+        assert_eq!(
+            one_at_a_time(
+                &Cancel::default(),
+                Limits::for_action(Action::Status),
+                |_| Ok(())
+            ),
+            Ok(())
+        );
+        let cancelled = background.join().unwrap().unwrap();
+        assert!(
+            cancelled,
+            "required account checks waited for optional telemetry"
+        );
+        assert!(started.elapsed() < Duration::from_millis(500));
+    }
+
+    #[test]
     fn calls_run_one_at_a_time() {
         let active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let most = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -5418,7 +6082,7 @@ fn main() {
     std::fs::write(dir.join("argv"), args.join("\n")).unwrap();
     std::fs::write(dir.join("cwd"), std::env::current_dir().unwrap().display().to_string()).unwrap();
     let inherited = |name: &str| format!("{name}={}", std::env::var(name).is_ok());
-    std::fs::write(dir.join("env"), [inherited("NODE_OPTIONS"), inherited("HOME"), inherited("DO_NOT_TRACK")].join("\n")).unwrap();
+    std::fs::write(dir.join("env"), [inherited("NODE_OPTIONS"), inherited("HOME"), inherited("DO_NOT_TRACK"), inherited("COPILOTKIT_TELEMETRY_DISABLED")].join("\n")).unwrap();
     let scenario = std::fs::read_to_string(dir.join("scenario")).unwrap();
     let (mode, body) = scenario.split_once('\n').unwrap_or((scenario.as_str(), ""));
     match mode {
@@ -5456,6 +6120,12 @@ fn main() {
             std::fs::write(dir.join("grandchild.tmp"), grandchild.id().to_string()).unwrap();
             std::fs::rename(dir.join("grandchild.tmp"), dir.join("grandchild")).unwrap();
             std::thread::sleep(std::time::Duration::from_secs(60));
+        }
+        // A valid machine response can precede the CLI's bounded telemetry flush.
+        "flush" => {
+            print!("{body}");
+            std::io::stdout().flush().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(2300));
         }
         "flood" => {
             let chunk = vec![b' '; 65536];
@@ -5652,6 +6322,12 @@ fn main() {{
             let root = temp_root(label);
             std::fs::create_dir_all(&root).unwrap();
             let program = root.join(format!("cli{}", std::env::consts::EXE_SUFFIX));
+            // On Linux, another test's fork can inherit fs::copy's writable descriptor
+            // until exec, even after copy returns. Executing that inode then fails ETXTBSY.
+            // The fixture binary is immutable; link it without opening a new write handle.
+            #[cfg(target_os = "linux")]
+            std::fs::hard_link(compiled(), &program).unwrap();
+            #[cfg(not(target_os = "linux"))]
             std::fs::copy(compiled(), &program).unwrap();
             std::fs::write(root.join("scenario"), scenario).unwrap();
             assert!(warm_copied_program(&program).success());
@@ -5738,6 +6414,171 @@ fn main() {{
             grace: Duration::from_millis(500),
             output: MAX_OUTPUT,
         }
+    }
+
+    #[test]
+    fn fixture_executables_keep_scenarios_and_cleanup_independent() {
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        let signed_out = Fixture::new(
+            "telemetry-fixture-signed-out",
+            "0\n{\"type\":\"signed_out\"}",
+        );
+        let skipped = Fixture::new("telemetry-fixture-skipped", "0\n{\"type\":\"skipped\"}");
+        assert_eq!(
+            link_telemetry(
+                &signed_out.cli(),
+                &installation,
+                None,
+                telemetry_link_limits(),
+                &Cancel::default()
+            ),
+            Ok(TelemetryIdentity::SignedOut)
+        );
+        drop(signed_out);
+        assert_eq!(
+            link_telemetry(
+                &skipped.cli(),
+                &installation,
+                None,
+                telemetry_link_limits(),
+                &Cancel::default()
+            ),
+            Ok(TelemetryIdentity::Skipped)
+        );
+        assert!(compiled().is_file());
+    }
+
+    #[test]
+    fn telemetry_process_uses_fixed_arguments_and_ignores_stderr() {
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        let account = "a".repeat(64);
+        for bound in [None, Some(account.as_str())] {
+            let fixture = Fixture::new(
+                "telemetry-process",
+                &format!("0\n{{\"type\":\"account\",\"account_id\":\"{account}\"}}\n"),
+            );
+            assert_eq!(
+                link_telemetry(
+                    &fixture.cli(),
+                    &installation,
+                    bound,
+                    telemetry_link_limits(),
+                    &Cancel::default()
+                ),
+                Ok(TelemetryIdentity::Account {
+                    account_id: account.clone()
+                })
+            );
+            let mut expected = format!(
+                "telemetry\nlink\n--installation-id\n{}\n--json",
+                installation.as_str()
+            );
+            if let Some(bound) = bound {
+                expected.push_str(&format!("\n--account-id\n{bound}"));
+            }
+            assert_eq!(fixture.argv(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn telemetry_process_refuses_failed_and_old_cli_without_exposing_output() {
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        for body in ["private upstream failure", "Unknown telemetry subcommand"] {
+            let fixture = Fixture::new("telemetry-old-cli", &format!("1\n{body}"));
+            assert_eq!(
+                link_telemetry(
+                    &fixture.cli(),
+                    &installation,
+                    None,
+                    telemetry_link_limits(),
+                    &Cancel::default()
+                ),
+                Err(Failure::UnexpectedExit)
+            );
+        }
+    }
+
+    #[test]
+    fn telemetry_process_keeps_a_valid_response_while_cli_finishes_flushing() {
+        let fixture = Fixture::new("telemetry-flush", "flush\n{\"type\":\"signed_out\"}");
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        assert_eq!(
+            link_telemetry(
+                &fixture.cli(),
+                &installation,
+                None,
+                telemetry_link_limits(),
+                &Cancel::default()
+            ),
+            Ok(TelemetryIdentity::SignedOut)
+        );
+    }
+
+    #[test]
+    fn required_cli_work_stops_a_real_background_process_tree() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::required_cli_work_stops_a_real_background_process_tree",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new("telemetry-preempt", "stubborn");
+        let cli = fixture.cli();
+        let worker = std::thread::spawn(move || {
+            background_telemetry_call(|cancel, limits| {
+                link_telemetry(
+                    &cli,
+                    &Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap(),
+                    None,
+                    limits,
+                    cancel,
+                )
+            })
+        });
+        Fixture::wait_for_grandchild(&fixture.root);
+        let started = Instant::now();
+        assert_eq!(
+            one_at_a_time(
+                &Cancel::default(),
+                Limits::for_action(Action::Status),
+                |_| Ok(())
+            ),
+            Ok(())
+        );
+        assert_eq!(worker.join().unwrap(), Err(Failure::Cancelled));
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "required work waited for the eight-second telemetry timeout"
+        );
+        #[cfg(unix)]
+        assert!(fixture.grandchild_stops());
+    }
+
+    #[test]
+    fn background_telemetry_defers_instead_of_queueing_behind_required_work() {
+        let _turn = hold_turn();
+        assert_eq!(
+            background_telemetry_call::<()>(|_, _| panic!("busy CLI must not run telemetry")),
+            Err(Failure::Cancelled)
+        );
+    }
+
+    #[test]
+    fn telemetry_process_bounds_startup_wait_and_kills_a_hung_cli() {
+        let limits = telemetry_link_limits();
+        // Each call remains bounded while leaving room for cold start, Ops and CLI flush.
+        assert!(limits.timeout + limits.grace <= Duration::from_millis(8250));
+        let fixture = Fixture::new("telemetry-timeout", "stubborn");
+        let cli = fixture.cli();
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        let started = Instant::now();
+        assert_eq!(
+            link_telemetry(&cli, &installation, None, limits, &Cancel::default()),
+            Err(Failure::Timeout)
+        );
+        // Allow scheduler overhead beyond the eight-second budget and kill grace.
+        assert!(started.elapsed() < Duration::from_secs(10));
+        #[cfg(unix)]
+        assert!(fixture.grandchild_stops());
     }
 
     #[test]
@@ -5975,6 +6816,33 @@ fn main() {{
             std::env::var_os("HOME").is_some(),
             "{env}"
         );
+    }
+
+    /// Share usage data turned off in Settings reaches the CLI as the variable it reads, though
+    /// nothing in the app's own environment set it.
+    #[test]
+    fn usage_data_turned_off_in_settings_reaches_the_cli_as_its_opt_out() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::usage_data_turned_off_in_settings_reaches_the_cli_as_its_opt_out",
+        ) {
+            return;
+        }
+        std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
+        let fixture = Fixture::new("local-eval-usage-data", &format!("0\n{}", envelope()));
+        let run = || {
+            fixture
+                .run(
+                    Action::Status,
+                    Limits::for_action(Action::Status),
+                    &Cancel::default(),
+                )
+                .unwrap();
+            std::fs::read_to_string(fixture.root.join("env")).unwrap()
+        };
+        assert!(run().contains("COPILOTKIT_TELEMETRY_DISABLED=false"));
+        crate::usage_data::set_off(true);
+        let env = run();
+        assert!(env.contains("COPILOTKIT_TELEMETRY_DISABLED=true"), "{env}");
     }
 
     fn listing(stacks: Value) -> Value {
@@ -6695,10 +7563,24 @@ overlay 164506208 20481024 135620148 14% /
                 podman: false,
                 cpu: false,
                 memory: false,
-                disk: true
+                disk: true,
+                wsl: false,
+                drive: None,
             })
             .unwrap(),
             json!({ "status": "engine-too-small", "podman": false, "cpu": false, "memory": false, "disk": true })
+        );
+        assert_eq!(
+            serde_json::to_value(Terms::EngineTooSmall {
+                podman: true,
+                cpu: false,
+                memory: false,
+                disk: true,
+                wsl: true,
+                drive: Some("C:".into()),
+            })
+            .unwrap(),
+            json!({ "status": "engine-too-small", "podman": true, "cpu": false, "memory": false, "disk": true, "wsl": true, "drive": "C:" })
         );
     }
 
@@ -6728,6 +7610,76 @@ overlay 164506208 20481024 135620148 14% /
                 br#"{"command":"onboard local-terms","status":"blocked"}"#
             ),
             Err(Failure::InvalidStatus)
+        );
+    }
+
+    /**
+    1.0.0 on a Mac whose Docker is OrbStack: the CLI's preflight refuses the engine on every try,
+    and the account step waited 15 minutes for an engine that was already running, then said only
+    that it couldn't check the account. A refusal waiting cannot change is said at once, in the
+    CLI's own sentence. `local-eval-terms-orbstack.json` is what the window's own test is given.
+    */
+    #[test]
+    fn terms_blocked_on_an_engine_local_setup_does_not_run_on_say_so_at_once() {
+        let wire = include_str!("../test-fixtures/local-eval/onboard-local-terms-orbstack.json");
+        let window: Value = serde_json::from_str(include_str!(
+            "../test-fixtures/local-eval/local-eval-terms-orbstack.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(normalize_terms(0, wire.as_bytes()).unwrap()).unwrap(),
+            window
+        );
+
+        let blocked = |preflight: Value| {
+            let wire = json!({ "command": "onboard local-terms", "status": "blocked", "preflight": preflight });
+            serde_json::to_value(normalize_terms(0, wire.to_string().as_bytes()).unwrap()).unwrap()
+        };
+        // An engine setting the CLI names its own fix for is not told to switch engines.
+        assert_eq!(
+            blocked(json!({
+                "status": "fail",
+                "reason": "unsupported_engine",
+                "failureDetail": "rootless",
+                "detail": "Rootless Podman is not supported. Switch to rootful Podman (podman machine stop; podman machine set --rootful; podman machine start), then retry."
+            })),
+            json!({
+                "status": "blocked",
+                "reason": "unsupported-engine",
+                "said": "Rootless Podman is not supported. Switch to rootful Podman (podman machine stop; podman machine set --rootful; podman machine start), then retry."
+            })
+        );
+        // Too few CPUs is not waited out either. A reason this build does not know stays unknown.
+        assert_eq!(
+            blocked(json!({
+                "status": "fail",
+                "reason": "cpu_short",
+                "detail": "Docker has 2 CPUs. Local evaluation needs 4."
+            })),
+            json!({
+                "status": "blocked",
+                "reason": "unrecognized",
+                "said": "Docker has 2 CPUs. Local evaluation needs 4."
+            })
+        );
+        // A sentence that is not one plain line is not shown; the window says its own.
+        assert_eq!(
+            blocked(json!({
+                "status": "fail",
+                "reason": "unsupported_engine",
+                "failureDetail": "engine_not_docker_desktop",
+                "detail": "Docker Desktop is required.\u{1b}[31m"
+            })),
+            json!({ "status": "blocked", "reason": "unsupported-engine", "switchEngine": true })
+        );
+        assert_eq!(
+            blocked(json!({
+                "status": "fail",
+                "reason": "unsupported_engine",
+                "failureDetail": "engine_not_docker_desktop",
+                "detail": "x".repeat(401)
+            })),
+            json!({ "status": "blocked", "reason": "unsupported-engine", "switchEngine": true })
         );
     }
 
@@ -6807,5 +7759,671 @@ overlay 164506208 20481024 135620148 14% /
         assert!(option_env!("OPENBOT_BUNDLED_CLI_PROGRAM_SHA256").is_none());
         assert!(bundled_cli().is_none());
         assert!(bundled_cli_root().is_some());
+    }
+
+    /**
+    A container engine as `local start` meets it, put on PATH as `docker` or `podman`. It answers
+    what OpenBot asks before and after a start with what the real one prints, from files beside it:
+    `info --format` (`info`), `image ls --quiet --no-trunc` (`images`), `df -Pk /` in a container
+    (`df`), `kubectl get nodes -o json` in the stack's node (`nodes`) and `machine inspect`
+    (`inspect`). A node or a file that is not there fails as the engine does.
+    */
+    const FAKE_ENGINE: &str = r#"
+use std::io::Write;
+fn main() {
+    let exe = std::env::current_exe().unwrap();
+    let dir = exe.parent().unwrap().to_path_buf();
+    let name = exe.file_stem().unwrap().to_string_lossy().into_owned();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let mut asked = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("asked")).unwrap();
+    writeln!(asked, "{} {}", name, args.join(" ")).unwrap();
+    while matches!(args.first().map(String::as_str), Some("--connection" | "--url" | "--context" | "--host")) {
+        args.drain(..2.min(args.len()));
+    }
+    let a: Vec<&str> = args.iter().map(String::as_str).collect();
+    let file = match a.as_slice() {
+        ["info", "--format", _] => "info",
+        ["image", "ls", "--quiet", "--no-trunc"] => "images",
+        ["run", "--rm", "--pull=never", "--network=none", "--entrypoint", "/bin/sh", _, "-c", "df -Pk /"] => "df",
+        ["exec", "k3d-local-abc123-server-0", "kubectl", "get", "nodes", ..] => "nodes",
+        ["machine", "inspect", "openbot"] => "inspect",
+        _ => "",
+    };
+    // An engine that hangs: `<file>.hang` beside it, and that answer never comes.
+    if !file.is_empty() && dir.join(format!("{file}.hang")).exists() {
+        std::thread::sleep(std::time::Duration::from_secs(120));
+    }
+    if let Some(bytes) = (!file.is_empty()).then(|| std::fs::read(dir.join(file)).ok()).flatten() {
+        std::io::stdout().write_all(&bytes).unwrap();
+        return;
+    }
+    if a.first() == Some(&"exec") {
+        let node = a.get(1).copied().unwrap_or_default();
+        if name == "podman" {
+            eprintln!("Error: no container with name or ID \"{node}\" found: no such container");
+            std::process::exit(125);
+        }
+        eprintln!("Error response from daemon: No such container: {node}");
+        std::process::exit(1);
+    }
+    eprintln!("Error: unknown command {a:?}");
+    std::process::exit(125);
+}
+"#;
+
+    /// Every entry logged in this process. Only a test that runs alone in its process
+    /// (`isolated_process`) installs it.
+    static LOGGED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+    struct Keep;
+
+    impl log::Log for Keep {
+        fn enabled(&self, _: &log::Metadata) -> bool {
+            true
+        }
+        fn log(&self, record: &log::Record) {
+            LOGGED
+                .lock()
+                .unwrap()
+                .push(format!("{} {}", record.level(), record.args()));
+        }
+        fn flush(&self) {}
+    }
+
+    /// The `[local check]` entries logged since the last call, taken.
+    fn checks_logged() -> Vec<String> {
+        std::mem::take(&mut *LOGGED.lock().unwrap())
+            .into_iter()
+            .filter(|entry| entry.contains("[local check]"))
+            .collect()
+    }
+
+    /// `docker info --format '{{.NCPU}} {{.MemTotal}}'` on a Mac's Docker Desktop with 10 CPUs and
+    /// 20.5 GiB, and `podman info --format '{{.Host.CPUs}} {{.Host.MemTotal}}'` on OpenBot's own
+    /// Podman machine, 4 CPUs and 6144 MiB.
+    const DOCKER_INFO: &str = "10 22011707392\n";
+    const PODMAN_INFO: &str = "4 6262661120\n";
+
+    /// `df -Pk /` in a container, as busybox prints it: a disk of `size` KiB with `free` KiB free.
+    fn df(size: u64, free: u64) -> String {
+        let used = size - free - size / 20;
+        format!(
+            "Filesystem           1024-blocks    Used Available Capacity Mounted on\noverlay              {size} {used} {free} {}% /\n",
+            used * 100 / (used + free)
+        )
+    }
+
+    const KIB_PER_GIB: u64 = 1024 * 1024;
+    /// OpenBot's Podman machine on WSL: a sparse virtual disk of about a terabyte.
+    const WSL_DISK: u64 = 1_055_762_868;
+
+    /// `kubectl get nodes -o json` in the stack's node, as k3s v1.31.5 printed it, with its
+    /// `DiskPressure` condition as the kubelet sets it when `pressure`.
+    fn nodes(pressure: bool) -> String {
+        let mut nodes: Value = serde_json::from_str(include_str!(
+            "../test-fixtures/local-eval/k3s-v1.31.5-get-nodes.json"
+        ))
+        .unwrap();
+        if pressure {
+            for condition in nodes["items"][0]["status"]["conditions"]
+                .as_array_mut()
+                .unwrap()
+            {
+                if condition["type"] == "DiskPressure" {
+                    condition["status"] = json!("True");
+                    condition["reason"] = json!("KubeletHasDiskPressure");
+                    condition["message"] = json!("kubelet has disk pressure");
+                }
+            }
+        }
+        serde_json::to_string_pretty(&nodes).unwrap()
+    }
+
+    /// `podman machine inspect openbot` for OpenBot's own rootful machine on WSL, as Podman 5
+    /// prints it on Windows.
+    const WSL_INSPECT: &str = r#"[
+     {
+          "ConfigDir": {
+               "Path": "C:\\Users\\me\\.config\\containers\\podman\\machine\\wsl"
+          },
+          "ConnectionInfo": {
+               "PodmanSocket": null,
+               "PodmanPipe": {
+                    "Path": "\\\\.\\pipe\\podman-openbot"
+               }
+          },
+          "Created": "2026-11-02T09:14:03.4719262-08:00",
+          "LastUp": "2026-11-09T08:02:51.1063417-08:00",
+          "Name": "openbot",
+          "Resources": {
+               "CPUs": 4,
+               "DiskSize": 100,
+               "Memory": 6144,
+               "USBs": []
+          },
+          "SSHConfig": {
+               "IdentityPath": "C:\\Users\\me\\.local\\share\\containers\\podman\\machine\\machine",
+               "Port": 61842,
+               "RemoteUsername": "user"
+          },
+          "State": "running",
+          "UserModeNetworking": true,
+          "Rootful": true,
+          "Rosetta": false
+     }
+]
+"#;
+
+    /// `local start` as the pinned CLI (4.34.0-pre.647a03b) reports a start that stopped in
+    /// `stack-services-ready`, the step that waits for the back end's deployments.
+    fn start_failed() -> String {
+        json!({
+            "version": 1,
+            "command": "local start",
+            "status": "failed",
+            "error": {
+                "code": "LOCAL_COMMAND_FAILED",
+                "message": "Local stack-services-ready failed (exit 1). Run `copilotkit local status` and retry the failed step."
+            },
+            "nextAction": {
+                "reason": "local_command_failed",
+                "summary": "The local command did not finish. Check local status for the recorded failed step, then resume the command. No automatic rollback was requested.",
+                "instructions": ["Inspect the recorded stack with npx --yes copilotkit@4.34.0-pre.647a03b local status --json."],
+                "resumeCommand": "npx --yes copilotkit@4.34.0-pre.647a03b local start --json",
+                "url": null, "linkLabel": null, "linkFile": null,
+                "caveats": [], "requiredEnvVars": [], "artifacts": []
+            },
+            "diagnostics": []
+        })
+        .to_string()
+    }
+
+    fn start_completed() -> String {
+        let mut done = envelope();
+        done["command"] = json!("local start");
+        done.to_string()
+    }
+
+    /**
+    An engine and a CLI for `local start` through `run_installed`, the window's own path. The engine
+    is `engine` on PATH answering with `answers` (`FAKE_ENGINE`), and named to the CLI as OpenBot
+    names it; the CLI is pinned as a developer pins one. Windows' answer for the drive that holds a
+    Podman machine's disk is `drive`. Sets process environment: only for a test in its own process.
+    */
+    struct StartLab {
+        fixture: Fixture,
+        bin: PathBuf,
+    }
+
+    impl StartLab {
+        fn new(label: &str) -> Self {
+            let fixture = Fixture::new(label, "0\n{}");
+            let bin = fixture.root.join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            let source = fixture.root.join("engine.rs");
+            std::fs::write(&source, FAKE_ENGINE).unwrap();
+            for engine in ["docker", "podman"] {
+                compile_fixture(
+                    &source,
+                    &bin.join(format!("{engine}{}", std::env::consts::EXE_SUFFIX)),
+                );
+            }
+            std::env::set_var(
+                "PATH",
+                std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(
+                    &std::env::var_os("PATH").unwrap_or_default(),
+                )))
+                .unwrap(),
+            );
+            std::env::set_var(DEVELOPER_PROGRAM, &fixture.program);
+            std::env::set_var(DEVELOPER_PROGRAM_SHA256, sha256(&fixture.program));
+            let _ = log::set_boxed_logger(Box::new(Keep));
+            log::set_max_level(log::LevelFilter::Info);
+            Self { fixture, bin }
+        }
+
+        /// The engine as it answers now, and how `local start` ends.
+        fn engine(
+            &self,
+            engine: crate::engine::Engine,
+            info: &str,
+            df: &str,
+            nodes: Option<&str>,
+            drive: Option<crate::windows::MachineDrive>,
+        ) {
+            let write = |file: &str, said: Option<&str>| match said {
+                Some(said) => std::fs::write(self.bin.join(file), said).unwrap(),
+                None => {
+                    let _ = std::fs::remove_file(self.bin.join(file));
+                }
+            };
+            write("info", Some(info));
+            // `image ls --quiet --no-trunc`: the k3d tools image, which has a shell.
+            write(
+                "images",
+                Some("sha256:3a68d8567335f56c168c36b53059c5dd4dfe23c2edbf4d9251e9ed3170dfacd8\n"),
+            );
+            write("df", Some(df));
+            write("nodes", nodes);
+            write("inspect", Some(WSL_INSPECT));
+            use_engine(&match engine {
+                crate::engine::Engine::Docker => crate::engine::Address::new(engine, None),
+                crate::engine::Engine::Podman => {
+                    crate::engine::Address::new(engine, Some("openbot-root".into()))
+                }
+            });
+            MACHINE_DRIVE.with(|said| *said.borrow_mut() = Some(drive));
+        }
+
+        fn start(&self, ends: &str) -> Report {
+            self.run(Action::Start, ends)
+        }
+
+        /// `action` through the window's path, answered with `ends`.
+        fn run(&self, action: Action, ends: &str) -> Report {
+            std::fs::write(self.fixture.root.join("scenario"), ends).unwrap();
+            let stack = StackId::parse("local-abc123").unwrap();
+            let report = run_installed("checked", action, &stack).unwrap();
+            assert_eq!(
+                self.fixture.argv().unwrap(),
+                format!("local\n{}\n--stack\nlocal-abc123\n--json", action.as_str())
+            );
+            report
+        }
+    }
+
+    /**
+    An engine that stops answering, on the account step. `docker info`, `docker image ls` and the
+    `docker run` that measures disk had no time limit, so a hung engine left the step on
+    "Checking your CopilotKit account…" for good. Each has its own limit now, and what did not
+    answer is not measured, as when nothing answers at all: the CLI is asked next.
+    */
+    #[test]
+    fn an_engine_that_hangs_is_not_measured_and_does_not_hold_the_account_step() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::an_engine_that_hangs_is_not_measured_and_does_not_hold_the_account_step",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("engine-check-hangs");
+        lab.engine(
+            crate::engine::Engine::Docker,
+            DOCKER_INFO,
+            &df(WSL_DISK, 500 * KIB_PER_GIB),
+            None,
+            None,
+        );
+        // Long enough for the fake engine to answer on a busy test machine, far short of a hang.
+        *ENGINE_CHECK_LIMIT_FOR_TESTS.lock().unwrap() = Some(Duration::from_secs(3));
+        let checked = |hangs: &[&str]| {
+            for file in ["info", "images", "df"] {
+                let _ = std::fs::remove_file(lab.bin.join(format!("{file}.hang")));
+            }
+            for file in hangs {
+                std::fs::write(lab.bin.join(format!("{file}.hang")), "").unwrap();
+            }
+            let (sender, received) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = sender.send(engine_size_terms());
+            });
+            received
+                .recv_timeout(Duration::from_secs(30))
+                .unwrap_or_else(|_| {
+                    panic!("the engine check waited on an engine hung in {hangs:?}")
+                })
+        };
+        // Nothing answers, so nothing is measured and nothing stops the step.
+        assert_eq!(checked(&["info", "images"]), None);
+        // Its disk check hangs: a small engine is still said small, from what it did answer.
+        std::fs::write(lab.bin.join("info"), "2 22011707392\n").unwrap();
+        assert_eq!(
+            checked(&["df"]),
+            Some(Terms::EngineTooSmall {
+                podman: false,
+                cpu: true,
+                memory: false,
+                disk: false,
+                wsl: false,
+                drive: None,
+            })
+        );
+    }
+
+    /// Windows' answer for drive C: with `tenths` tenths of a GiB free, and a little more.
+    fn drive(tenths: u64) -> Option<crate::windows::MachineDrive> {
+        Some(crate::windows::MachineDrive {
+            drive: Some("C:".into()),
+            free: tenths * GIB / 10 + GIB / 100,
+        })
+    }
+
+    /**
+    1.0.0 on Windows, a used install on OpenBot's own Podman machine with 30.5 GiB free inside it:
+    Quit, then a relaunch. The CLI checks resources only at a first setup, and an existing back end
+    can run on less than its 40 GiB, so a start that finishes is let through. The log warns, with the
+    numbers, and nothing else changes.
+    */
+    #[test]
+    fn a_used_install_short_of_disk_still_starts_and_the_log_warns() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_used_install_short_of_disk_still_starts_and_the_log_warns",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("start-short-of-disk-warns");
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 30 * KIB_PER_GIB + KIB_PER_GIB / 2),
+            Some(&nodes(false)),
+            drive(946),
+        );
+        let report = lab.start(&format!("0\n{}", start_completed()));
+        let wire = serde_json::to_value(&report).unwrap();
+        assert_eq!(wire["outcome"], json!("completed"));
+        assert_eq!(wire["reason"], Value::Null);
+        assert!(wire.get("shortfall").is_none(), "{wire}");
+        assert_eq!(
+            checks_logged(),
+            ["WARN [local check] before local start: 4 CPUs and 5.8 GiB of memory, 30.5 GiB free of 1006.8 GiB in a container, 94.6 GiB free on C:; short of disk (nearly full)"]
+        );
+    }
+
+    /**
+    The same start, failed: the card said only "The back end stopped with an error partway through"
+    while k3s, short of disk, had removed 13 of the back end's 15 images. A start that fails is
+    checked again with the node asked, and the report names the disk with its numbers, for Podman on
+    Windows, and for Docker short of the CLI's 40 GiB or with its node under disk pressure.
+    */
+    #[test]
+    fn a_start_that_fails_short_of_disk_names_the_disk_with_its_numbers() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_start_that_fails_short_of_disk_names_the_disk_with_its_numbers",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("start-short-of-disk-named");
+        let failed = format!("1\n{}", start_failed());
+
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 30 * KIB_PER_GIB + KIB_PER_GIB / 2),
+            Some(&nodes(true)),
+            drive(946),
+        );
+        let wire = serde_json::to_value(lab.start(&failed)).unwrap();
+        assert_eq!(wire["outcome"], json!("failed"));
+        assert_eq!(wire["reason"], json!("resources-short"));
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": true, "cpu": false, "memory": false, "disk": true,
+                "diskGb": "30.5", "nearlyFull": true, "diskSizeGb": "1006.8",
+                "wsl": true, "drive": "C:"
+            })
+        );
+        assert_eq!(
+            checks_logged(),
+            [
+                "WARN [local check] before local start: 4 CPUs and 5.8 GiB of memory, 30.5 GiB free of 1006.8 GiB in a container, 94.6 GiB free on C:; short of disk (nearly full)",
+                "WARN [local check] after local start failed: 4 CPUs and 5.8 GiB of memory, 30.5 GiB free of 1006.8 GiB in a container, 94.6 GiB free on C:, the node reports disk pressure; short of disk (nearly full)",
+            ]
+        );
+
+        // Docker Desktop with 30 GiB of a 64 GiB disk free: below the CLI's 40 GiB.
+        lab.engine(
+            crate::engine::Engine::Docker,
+            DOCKER_INFO,
+            &df(64 * KIB_PER_GIB, 30 * KIB_PER_GIB),
+            Some(&nodes(false)),
+            None,
+        );
+        let wire = serde_json::to_value(lab.start(&failed)).unwrap();
+        assert_eq!(wire["reason"], json!("resources-short"));
+        assert_eq!(
+            wire["shortfall"],
+            json!({ "podman": false, "cpu": false, "memory": false, "disk": true, "diskGb": "30" })
+        );
+        assert_eq!(
+            checks_logged().last().unwrap(),
+            "WARN [local check] after local start failed: 10 CPUs and 20.5 GiB of memory, 30 GiB free of 64 GiB in a container, no disk pressure; short of disk (OpenBot needs 40 GiB free)"
+        );
+
+        // Docker on a 1.8 TiB disk with 160 GiB free, its node under DiskPressure: nearly full
+        // by k3s's own line, though above the CLI's 40 GiB.
+        lab.engine(
+            crate::engine::Engine::Docker,
+            DOCKER_INFO,
+            &df(1_916_694_008, 160 * KIB_PER_GIB),
+            Some(&nodes(true)),
+            None,
+        );
+        let wire = serde_json::to_value(lab.start(&failed)).unwrap();
+        assert_eq!(wire["reason"], json!("resources-short"));
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": false, "cpu": false, "memory": false, "disk": true,
+                "diskGb": "160", "nearlyFull": true, "diskSizeGb": "1827.9"
+            })
+        );
+        checks_logged();
+    }
+
+    /**
+    Windows, once space was freed: k3s keeps its DiskPressure condition for five minutes after, and
+    a Retry in those minutes failed again, three times over six minutes. A start that fails while
+    the node still says DiskPressure, with the disk above both lines, says the back end is
+    recovering, so the card can say to wait rather than to free more space.
+    */
+    #[test]
+    fn a_start_that_fails_while_the_node_recovers_from_low_disk_says_so() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_start_that_fails_while_the_node_recovers_from_low_disk_says_so",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("start-recovering");
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 941 * KIB_PER_GIB),
+            Some(&nodes(true)),
+            drive(1200),
+        );
+        let wire = serde_json::to_value(lab.start(&format!("1\n{}", start_failed()))).unwrap();
+        assert_eq!(wire["reason"], json!("resources-short"));
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": true, "cpu": false, "memory": false, "disk": false,
+                "recovering": true, "wsl": true, "drive": "C:"
+            })
+        );
+        assert_eq!(
+            checks_logged().last().unwrap(),
+            "WARN [local check] after local start failed: 4 CPUs and 5.8 GiB of memory, 941 GiB free of 1006.8 GiB in a container, 120 GiB free on C:, the node reports disk pressure; recovering: the node still reports disk pressure with the disk above both lines"
+        );
+    }
+
+    /**
+    On Windows the machine's disk is a sparse virtual disk of about a terabyte, so a container sees
+    941 GiB free while the drive that holds it has 30. The drive is what runs out: it is checked,
+    the smaller figure counts, and the card says to free space on that drive. The account step's
+    check before a first setup reads the drive too.
+    */
+    #[test]
+    fn on_windows_the_drive_under_podmans_disk_is_the_free_disk_that_counts() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::on_windows_the_drive_under_podmans_disk_is_the_free_disk_that_counts",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("start-windows-drive");
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 941 * KIB_PER_GIB),
+            Some(&nodes(false)),
+            drive(300),
+        );
+        let wire = serde_json::to_value(lab.start(&format!("1\n{}", start_failed()))).unwrap();
+        assert_eq!(wire["reason"], json!("resources-short"));
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": true, "cpu": false, "memory": false, "disk": true,
+                "diskGb": "30", "wsl": true, "drive": "C:"
+            })
+        );
+        assert_eq!(
+            checks_logged(),
+            [
+                "WARN [local check] before local start: 4 CPUs and 5.8 GiB of memory, 941 GiB free of 1006.8 GiB in a container, 30 GiB free on C:; short of disk (OpenBot needs 40 GiB free)",
+                "WARN [local check] after local start failed: 4 CPUs and 5.8 GiB of memory, 941 GiB free of 1006.8 GiB in a container, 30 GiB free on C:, no disk pressure; short of disk (OpenBot needs 40 GiB free)",
+            ]
+        );
+        assert_eq!(
+            serde_json::to_value(engine_size_terms()).unwrap(),
+            json!({
+                "status": "engine-too-small", "podman": true, "cpu": false, "memory": false,
+                "disk": true, "wsl": true, "drive": "C:"
+            })
+        );
+    }
+
+    /**
+    OpenBot's own Podman machine, 4 CPUs and 6144 MiB, with room on its disk and its drive, passes:
+    a start that finishes says so in the log, and one that fails for some other reason keeps its
+    own words rather than being blamed on resources. The account step lets it through.
+    */
+    #[test]
+    fn openbots_own_podman_machine_with_room_passes_the_check() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::openbots_own_podman_machine_with_room_passes_the_check",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("start-roomy-podman");
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 941 * KIB_PER_GIB),
+            Some(&nodes(false)),
+            drive(1200),
+        );
+        let started =
+            serde_json::to_value(lab.start(&format!("0\n{}", start_completed()))).unwrap();
+        assert_eq!(started["outcome"], json!("completed"));
+        assert!(started.get("shortfall").is_none(), "{started}");
+        let failed = serde_json::to_value(lab.start(&format!("1\n{}", start_failed()))).unwrap();
+        assert_eq!(failed["reason"], json!("local-command-failed"));
+        assert!(failed.get("shortfall").is_none(), "{failed}");
+        let enough = "4 CPUs and 5.8 GiB of memory, 941 GiB free of 1006.8 GiB in a container, 120 GiB free on C:";
+        assert_eq!(
+            checks_logged(),
+            [
+                format!("INFO [local check] before local start: {enough}; enough"),
+                format!("INFO [local check] before local start: {enough}; enough"),
+                format!("INFO [local check] after local start failed: {enough}, no disk pressure; enough"),
+            ]
+        );
+        assert_eq!(engine_size_terms(), None);
+    }
+
+    /// `local status` for a back end left up after a start that failed: its node runs, and the
+    /// API and gateway do not answer. `passed` when every check passed, as with an update on record.
+    fn status_degraded(passed: bool) -> String {
+        let mut status = canonical("degraded", "valid", Value::Null);
+        status["readiness"]["checks"] = json!([
+            { "name": "api", "ok": passed },
+            { "name": "gateway", "ok": passed },
+            { "name": "dashboard", "ok": true }
+        ]);
+        format!("0\n{status}")
+    }
+
+    /**
+    Windows, after space was freed: Retry read the back end's status, which said `degraded`, and the
+    card said "The back end is running but not healthy." twice over two minutes while the node still
+    reported DiskPressure. A back end that runs but does not answer is checked as a failed start is:
+    recovering, nearly full, or nothing to say, in which case the report is as it was.
+    */
+    #[test]
+    fn a_back_end_running_but_not_healthy_is_checked_for_its_disk() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_back_end_running_but_not_healthy_is_checked_for_its_disk",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("status-degraded-checked");
+        let degraded = status_degraded(false);
+
+        // Space freed, the node still under DiskPressure.
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 941 * KIB_PER_GIB),
+            Some(&nodes(true)),
+            drive(1200),
+        );
+        let wire = serde_json::to_value(lab.run(Action::Status, &degraded)).unwrap();
+        assert_eq!(wire["readiness"], json!("degraded"));
+        assert_eq!(wire["reason"], Value::Null);
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": true, "cpu": false, "memory": false, "disk": false,
+                "recovering": true, "wsl": true, "drive": "C:"
+            })
+        );
+        assert_eq!(
+            checks_logged(),
+            ["WARN [local check] local status, running but not healthy: 4 CPUs and 5.8 GiB of memory, 941 GiB free of 1006.8 GiB in a container, 120 GiB free on C:, the node reports disk pressure; recovering: the node still reports disk pressure with the disk above both lines"]
+        );
+
+        // Still nearly full.
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 30 * KIB_PER_GIB + KIB_PER_GIB / 2),
+            Some(&nodes(true)),
+            drive(946),
+        );
+        let wire = serde_json::to_value(lab.run(Action::Status, &degraded)).unwrap();
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": true, "cpu": false, "memory": false, "disk": true,
+                "diskGb": "30.5", "nearlyFull": true, "diskSizeGb": "1006.8",
+                "wsl": true, "drive": "C:"
+            })
+        );
+
+        // Room on the disk and no pressure: not the disk, and the report is as it was.
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 941 * KIB_PER_GIB),
+            Some(&nodes(false)),
+            drive(1200),
+        );
+        let wire = serde_json::to_value(lab.run(Action::Status, &degraded)).unwrap();
+        assert_eq!(wire["readiness"], json!("degraded"));
+        assert!(wire.get("shortfall").is_none(), "{wire}");
+        checks_logged();
+
+        // Every check passed: an update on record, not a back end that does not answer.
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 30 * KIB_PER_GIB),
+            Some(&nodes(true)),
+            drive(946),
+        );
+        let wire = serde_json::to_value(lab.run(Action::Status, &status_degraded(true))).unwrap();
+        assert!(wire.get("shortfall").is_none(), "{wire}");
+        assert_eq!(checks_logged(), Vec::<String>::new());
     }
 }
