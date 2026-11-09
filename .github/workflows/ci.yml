@@ -372,9 +372,9 @@ jobs:
   # .github/actions/test-shard, which says why.
   test:
     name: tests (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
-    # CPU-bound: main and release runs get a 16-core larger runner (org runner group
-    # openbot-larger, billed per minute); pull requests stay on the free standard runner.
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    # Five shards take about three and a half minutes each on the free standard runner, so a
+    # larger runner would add cost without shortening the run.
+    runs-on: ubuntu-latest
     strategy:
       # Every shard runs to the end, so one red run names every failing test, not just the first
       # shard's.
