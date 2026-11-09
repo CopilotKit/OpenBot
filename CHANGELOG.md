@@ -141,6 +141,9 @@ deployment:
 - A chart whose figures are still arriving shows "Drawing the chart…" at the chart's own height,
   where it said "There is no data to chart." A chart that was stopped, or has no figures, still says
   so.
+- **A bar chart with long names lies down**, largest first, with each name in full beside its bar
+  (over it in a narrow chat) and its figure at the bar's end, where "Chart Hacker News" cut every
+  story to "2. Car unlo…". Bars with short names still stand up as before.
 - **+ and Shift+N open a new conversation with To: empty** and the Bot menu open, in the personal
   edition and wherever there is only one Bot, where since 0.3.3 they started with your Bot picked. A
   Bot's own Message link still starts with that Bot, and Send with nobody in To: still keeps the
