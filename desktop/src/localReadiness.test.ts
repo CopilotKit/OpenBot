@@ -286,6 +286,43 @@ test("specific wording and actions", () => {
     said: "The back end is recovering from low disk space. Wait a few minutes, then Retry.",
     action: "retry",
   });
+  // A back end that runs but does not answer, with OpenBot's check of its disk, and without.
+  const degraded = (shortfall?: Partial<Shortfall>) =>
+    said(
+      report({
+        readiness: "degraded",
+        licence: "valid",
+        ...(shortfall
+          ? {
+              shortfall: {
+                podman: true,
+                cpu: false,
+                memory: false,
+                disk: false,
+                ...shortfall,
+              },
+            }
+          : {}),
+      }),
+    );
+  expect(degraded({ recovering: true, wsl: true, drive: "C:" })).toEqual({
+    state: "blocked",
+    said: "The back end is recovering from low disk space. Wait a few minutes, then Retry.",
+    action: "restart-intelligence",
+  });
+  expect(
+    degraded({
+      disk: true,
+      diskGb: "30.5",
+      nearlyFull: true,
+      diskSizeGb: "1006.8",
+      wsl: true,
+      drive: "C:",
+    }).said,
+  ).toBe(
+    "The back end's disk is nearly full. Podman has 30.5 GB free of 1006.8 GB. OpenBot needs 40 GB. Free space on the drive that holds OpenBot's engine (C:), then Retry.",
+  );
+  expect(degraded().said).toBe("The back end is running but not healthy.");
   // The account step's check before a first setup, on Windows.
   expect(
     engineTooSmallSaid({

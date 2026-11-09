@@ -390,6 +390,13 @@ function intelligenceRow(
     return blocked("The back end is stopped.", "start-intelligence");
   }
   if (intelligence.readiness === "degraded") {
+    // OpenBot's check of a back end that runs but does not answer: a full disk, or one recovering.
+    if (intelligence.shortfall) {
+      return blocked(
+        resourcesShortSaid(intelligence.shortfall),
+        "restart-intelligence",
+      );
+    }
     return blocked(
       "The back end is running but not healthy.",
       "restart-intelligence",

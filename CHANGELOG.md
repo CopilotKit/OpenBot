@@ -28,9 +28,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   30.5 GB free of 1006.8 GB. OpenBot needs 40 GB. Free space on the drive that holds OpenBot's
   engine (C:), then Retry." On Windows, free disk is measured on that drive, which can run out
   while the machine itself shows hundreds of GB free, and the card never suggests
-  `podman machine set`, which WSL machines refuse. A start that fails in the few minutes after
-  space was freed, while the back end still reports low disk, says "The back end is recovering
-  from low disk space. Wait a few minutes, then Retry."
+  `podman machine set`, which WSL machines refuse. In the few minutes after space was freed, while
+  the back end still reports low disk, a start that fails, or a Retry that finds the back end
+  running but not healthy, says "The back end is recovering from low disk space. Wait a few
+  minutes, then Retry." where Retry said "The back end is running but not healthy."
 
 ## 1.0.0
 

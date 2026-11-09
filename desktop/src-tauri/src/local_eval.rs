@@ -248,6 +248,8 @@ pub struct Report {
     /// from a back end that is down (see `UnfinishedUpdate`).
     pub checks_passed: bool,
     /// With `Reason::ResourcesShort`: which resources the CLI found short, and on which engine.
+    /// With `Readiness::Degraded`: a disk OpenBot found short, or recovering, behind a back end that
+    /// runs but does not answer (`checked_when_unhealthy`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shortfall: Option<Shortfall>,
 }
@@ -3221,8 +3223,37 @@ pub(crate) fn run_with(
         Action::Start | Action::Update => {
             checked_call(&format!("local {}", action.as_str()), Some(stack), call)
         }
-        Action::Status | Action::Stop => call(),
+        Action::Status => call().map(|report| checked_when_unhealthy(report, stack)),
+        Action::Stop => call(),
     }
+}
+
+/**
+A back end that runs but does not answer (`local status` says `degraded`), checked as a failed start
+is. After a start that failed on a full disk the node stays up, so Retry reads its status rather
+than starting it again, and k3s keeps its `DiskPressure` for minutes after space is freed. A disk
+that is short, or a node recovering from one, becomes the report's `shortfall`, and the card says
+which; anything else leaves the report as it was. Not when every check passed: an update the CLI
+keeps on record is `degraded` too, with the back end answering.
+*/
+fn checked_when_unhealthy(mut report: Report, stack: &StackId) -> Report {
+    if report.outcome != Outcome::Completed
+        || report.readiness != Readiness::Degraded
+        || report.checks_passed
+    {
+        return report;
+    }
+    let Some(address) = cli_engine() else {
+        return report;
+    };
+    let mut check = EngineCheck::of(&address);
+    check.pressure = node_disk_pressure(Some(stack));
+    log_check("local status, running but not healthy", &check);
+    let short = check.shortfall();
+    if short.disk || short.recovering {
+        report.shortfall = Some(short);
+    }
+    report
 }
 
 /// `run_with`, without the engine check.
@@ -7414,12 +7445,17 @@ fn main() {
         }
 
         fn start(&self, ends: &str) -> Report {
+            self.run(Action::Start, ends)
+        }
+
+        /// `action` through the window's path, answered with `ends`.
+        fn run(&self, action: Action, ends: &str) -> Report {
             std::fs::write(self.fixture.root.join("scenario"), ends).unwrap();
             let stack = StackId::parse("local-abc123").unwrap();
-            let report = run_installed("start-checked", Action::Start, &stack).unwrap();
+            let report = run_installed("checked", action, &stack).unwrap();
             assert_eq!(
                 self.fixture.argv().unwrap(),
-                "local\nstart\n--stack\nlocal-abc123\n--json"
+                format!("local\n{}\n--stack\nlocal-abc123\n--json", action.as_str())
             );
             report
         }
@@ -7666,5 +7702,100 @@ fn main() {
             ]
         );
         assert_eq!(engine_size_terms(), None);
+    }
+
+    /// `local status` for a back end left up after a start that failed: its node runs, and the
+    /// API and gateway do not answer. `passed` when every check passed, as with an update on record.
+    fn status_degraded(passed: bool) -> String {
+        let mut status = canonical("degraded", "valid", Value::Null);
+        status["readiness"]["checks"] = json!([
+            { "name": "api", "ok": passed },
+            { "name": "gateway", "ok": passed },
+            { "name": "dashboard", "ok": true }
+        ]);
+        format!("0\n{status}")
+    }
+
+    /**
+    Windows, after space was freed: Retry read the back end's status, which said `degraded`, and the
+    card said "The back end is running but not healthy." twice over two minutes while the node still
+    reported DiskPressure. A back end that runs but does not answer is checked as a failed start is:
+    recovering, nearly full, or nothing to say, in which case the report is as it was.
+    */
+    #[test]
+    fn a_back_end_running_but_not_healthy_is_checked_for_its_disk() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_back_end_running_but_not_healthy_is_checked_for_its_disk",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("status-degraded-checked");
+        let degraded = status_degraded(false);
+
+        // Space freed, the node still under DiskPressure.
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 941 * KIB_PER_GIB),
+            Some(&nodes(true)),
+            drive(1200),
+        );
+        let wire = serde_json::to_value(lab.run(Action::Status, &degraded)).unwrap();
+        assert_eq!(wire["readiness"], json!("degraded"));
+        assert_eq!(wire["reason"], Value::Null);
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": true, "cpu": false, "memory": false, "disk": false,
+                "recovering": true, "wsl": true, "drive": "C:"
+            })
+        );
+        assert_eq!(
+            checks_logged(),
+            ["WARN [local check] local status, running but not healthy: 4 CPUs and 5.8 GiB of memory, 941 GiB free of 1006.8 GiB in a container, 120 GiB free on C:, the node reports disk pressure; recovering: the node still reports disk pressure with the disk above both lines"]
+        );
+
+        // Still nearly full.
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 30 * KIB_PER_GIB + KIB_PER_GIB / 2),
+            Some(&nodes(true)),
+            drive(946),
+        );
+        let wire = serde_json::to_value(lab.run(Action::Status, &degraded)).unwrap();
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": true, "cpu": false, "memory": false, "disk": true,
+                "diskGb": "30.5", "nearlyFull": true, "diskSizeGb": "1006.8",
+                "wsl": true, "drive": "C:"
+            })
+        );
+
+        // Room on the disk and no pressure: not the disk, and the report is as it was.
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 941 * KIB_PER_GIB),
+            Some(&nodes(false)),
+            drive(1200),
+        );
+        let wire = serde_json::to_value(lab.run(Action::Status, &degraded)).unwrap();
+        assert_eq!(wire["readiness"], json!("degraded"));
+        assert!(wire.get("shortfall").is_none(), "{wire}");
+        checks_logged();
+
+        // Every check passed: an update on record, not a back end that does not answer.
+        lab.engine(
+            crate::engine::Engine::Podman,
+            PODMAN_INFO,
+            &df(WSL_DISK, 30 * KIB_PER_GIB),
+            Some(&nodes(true)),
+            drive(946),
+        );
+        let wire = serde_json::to_value(lab.run(Action::Status, &status_degraded(true))).unwrap();
+        assert!(wire.get("shortfall").is_none(), "{wire}");
+        assert_eq!(checks_logged(), Vec::<String>::new());
     }
 }

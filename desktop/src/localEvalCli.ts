@@ -109,7 +109,10 @@ export type Shortfall = {
 
 export type LocalReport = {
   outcome: LocalOutcome;
-  /** With the reason `resources-short`: which resources the CLI found short. */
+  /**
+   * With the reason `resources-short`: which resources the CLI found short. With readiness
+   * `degraded`: a disk OpenBot found short, or recovering, behind a back end that does not answer.
+   */
   shortfall?: Shortfall;
   stack: null | {
     id: string;

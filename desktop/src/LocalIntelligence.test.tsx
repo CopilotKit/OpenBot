@@ -1141,6 +1141,49 @@ test("a relaunch whose start fails on a nearly full disk names the disk on its r
   expect(commands()).toEqual(["run_local_eval:status", "run_local_eval:start"]);
 });
 
+/**
+ * Windows, after space was freed: Retry reads the status of the back end the failed start left
+ * running, which says `degraded`, and the row said only "The back end is running but not healthy."
+ * while k3s still reported low disk. `local_eval::checked_when_unhealthy` now says why.
+ */
+test("a back end running but not healthy after low disk says it is recovering, and Retry asks again", async () => {
+  const recovering = report({
+    readiness: "degraded",
+    licence: "valid",
+    shortfall: {
+      podman: true,
+      cpu: false,
+      memory: false,
+      disk: false,
+      recovering: true,
+      wsl: true,
+      drive: "C:",
+    },
+  });
+  invokeHandler = answers({ run_local_eval: [recovering, ready] });
+  const started: Startable[] = [];
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  const waiting = row(screen, WAIT).textContent;
+  expect(waiting).toContain(
+    "The back end is recovering from low disk space. Wait a few minutes, then Retry.",
+  );
+  expect(waiting).not.toContain("running but not healthy");
+  await userEvent.click(retry);
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:status",
+  ]);
+});
+
 test("a start that fails stops at its row, and Retry starts again without asking the CLI", async () => {
   invokeHandler = answers({ run_local_eval: [ready] });
   let starts = 0;
