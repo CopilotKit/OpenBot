@@ -119,6 +119,13 @@ export type VendorTransport = {
        * own conversations. Like the two above it, it comes from the run and never from `args`.
        */
       threadId?: string;
+      /**
+       * Which of the person's accounts at the app the call runs in, where the vendor tells them
+       * apart by an id (Composio's connected account id). Picked by the call path from the person's
+       * own accounts and never from `args`. Absent runs in whichever account the vendor holds for
+       * the person, which is what every call did before a person could hold two.
+       */
+      accountId?: string;
     },
     toolName: string,
     args: Record<string, unknown>,

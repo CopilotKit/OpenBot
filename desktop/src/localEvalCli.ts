@@ -55,6 +55,8 @@ export type LocalReason =
   // `local login` only; the menu says these as a fixed sentence.
   | "dashboard-unavailable"
   | "browser-open-failed"
+  // The CLI's resource check failed: the report's `shortfall` says which resource is short.
+  | "resources-short"
   | "unrecognized";
 
 /** `local_eval::Readiness`: the CLI's own end-to-end check. Running pods are not this. */
@@ -78,8 +80,22 @@ export const localLicences = [
 ] as const;
 export type LocalLicence = (typeof localLicences)[number];
 
+/** `local_eval::Shortfall`: which of the engine's resources are short, and whether it is Podman. */
+export type Shortfall = {
+  podman: boolean;
+  cpu: boolean;
+  memory: boolean;
+  disk: boolean;
+  /** What the CLI measured free, as it said it: CPUs, and GB of memory and of disk. */
+  cpus?: string;
+  memoryGb?: string;
+  diskGb?: string;
+};
+
 export type LocalReport = {
   outcome: LocalOutcome;
+  /** With the reason `resources-short`: which resources the CLI found short. */
+  shortfall?: Shortfall;
   stack: null | {
     id: string;
     installedRelease: string;
@@ -301,7 +317,9 @@ export type LocalTerms =
     }
   | { status: "not-required" | "unavailable" | "signed-out" }
   /** No container engine answers yet, so the CLI says nothing about the account. */
-  | { status: "engine-not-ready" };
+  | { status: "engine-not-ready" }
+  /** OpenBot's own check: the engine has fewer CPUs or less memory than local setup needs. */
+  | ({ status: "engine-too-small" } & Shortfall);
 
 export function localEvalTerms(): {
   attempt: string;

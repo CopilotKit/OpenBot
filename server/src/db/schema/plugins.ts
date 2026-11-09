@@ -562,6 +562,67 @@ export const brokeredConnections = pgTable(
 );
 
 /**
+ * Each account a person holds at one brokered app, when they hold more than the one.
+ *
+ * `brokered_connections` says a person has an app connected and stays one row per person per app.
+ * This table says WHICH accounts stand behind that row: two Gmail mailboxes, a work and a personal
+ * calendar. It is a record of what the broker last listed for the person, rebuilt from the vendor's
+ * own listing whenever the app's page loads (`syncBrokeredAccounts`), so a row here is never the
+ * only evidence that an account exists.
+ *
+ * `vendor_user_id` IS WHO THE ACCOUNT IS FILED UNDER AT THE BROKER, and `account_id` IS WHICH OF
+ * THEIR ACCOUNTS IT IS. Composio files every account a person holds under one user id and tells them
+ * apart by a connected account id, which a call passes to pick one. Arcade keeps one account per user
+ * id and provider, so a person's second account there is filed under a second user id of theirs
+ * (`<their id>~<suffix>`) and `account_id` is empty. A call reads both off the row it picked.
+ *
+ * `user_id` IS ALWAYS A PERSON. A Shared app's team account is one account and lives only in
+ * `brokered_connections`. No key to `users`, for the reason `brokered_connections.user_id` has none.
+ *
+ * `identity` IS WHAT THE VENDOR SAYS THE ACCOUNT IS — the mailbox address, the login — and is what a
+ * person and a model name the account by. Null where the vendor published none.
+ *
+ * `is_default` MARKS THE ACCOUNT A CALL USES WHEN IT NAMES NONE. The first one listed is the default
+ * until the person picks another; a partial unique index holds it to at most one per person per app.
+ */
+export const brokeredAccounts = pgTable(
+  "brokered_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    provider: text("provider").$type<"composio" | "arcade">().notNull(),
+    app: text("app").notNull(),
+    userId: text("user_id").notNull(),
+    vendorUserId: text("vendor_user_id").notNull(),
+    /** The vendor's id for the account, or the empty string where the user id alone names it. */
+    accountId: text("account_id").notNull().default(""),
+    identity: text("identity"),
+    isDefault: boolean("is_default").notNull().default(false),
+    /** When the vendor says the account was made, where it says. */
+    connectedAt: timestamp("connected_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "brokered_accounts_provider_check",
+      sql`${table.provider} IN ('composio', 'arcade')`,
+    ),
+    uniqueIndex("brokered_accounts_account_idx").on(
+      table.provider,
+      table.app,
+      table.userId,
+      table.vendorUserId,
+      table.accountId,
+    ),
+    uniqueIndex("brokered_accounts_default_idx")
+      .on(table.provider, table.app, table.userId)
+      .where(sql`${table.isDefault}`),
+    index("brokered_accounts_user_idx").on(table.userId),
+  ],
+);
+
+/**
  * The name a person's accounts are filed under at a broker, where it is not their own id.
  *
  * A person is filed under their own `users.id` everywhere else (see `personAccount`), and that is

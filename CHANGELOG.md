@@ -8,8 +8,31 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** There are no migrations: the database stays at
-`0083_learning_skill_approvals`. Four things change for an existing deployment:
+### OpenBot Desktop
+
+- **Docker Desktop 29 pulls OpenBot's images from downloads.copilotkit.ai.** Its pulls there
+  failed with 403 and went to GitHub, because the copy held only each image's Linux amd64 and arm64
+  manifests, and Docker 29 also fetches the image's attestations and asks which artifacts refer to
+  it. The copy now holds every manifest each image names, and answers that question with an empty
+  list.
+- **A release candidate's images are on downloads.copilotkit.ai too.** A fresh install of a
+  candidate got 403 there for every image, because only the Latest stable release was copied.
+  Downloads sync now copies a prerelease asked for by tag (its images and its own files, never
+  `latest/`), and each scheduled run copies the images of every prerelease newer than Latest from
+  the last 30 days. Drafts are never copied.
+
+## 1.0.0
+
+**Before upgrading.** Two migrations run at start, and the database moves to
+`0085_approval_rule_account`. `0084_brokered_accounts` creates a new, empty `brokered_accounts`
+table, which fills as people open an app's page in Connections. `0085_approval_rule_account` adds
+a nullable `account` column to `approval_rules`. No existing row is rewritten or backfilled,
+nothing is dropped and no existing constraint changes. A person's existing connection to an app is
+untouched, and calls through it run as before. Going back to 1.0.0-rc.1 or 0.3.4 after people
+connect more than one account of an app is not seamless: a rule saved for one account applies to
+every account of that app, and Disconnect can leave an extra account connected at Arcade, so
+restore the backup taken before the upgrade instead. Four things change for an existing
+deployment:
 - OpenBot Desktop updates its back end to CopilotKit Intelligence 0.16.0-rc.10 at the next Start,
   saying "Updating the back end to 0.16.0-rc.10. Its data stays." With it, a first back end setup
   downloads all of its images through downloads.copilotkit.ai first, where its own images came
@@ -29,18 +52,52 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   of the subtitle, and a Bot picked in setup before 0.3.3 and named "LangChain (LangGraph)" is
   renamed "LangChain". A Bot whose connection you set yourself keeps its subtitle.
 
+### Apps and connections
+
+- **Connect more than one account of an app.** Once an app is connected, its page in Connections,
+  and Admin → Plugins for an admin's own account, offers **Connect another account**, on Composio
+  and Arcade. Pressing Connect again used to be refused with "You already have an account connected
+  to Gmail. Disconnect it first if you want to connect a different one." With several accounts the
+  page lists each by its address, with **Make default** and a Disconnect that ends only that
+  account. An app whose team account is shared still has one account.
+- **A Bot can use the account a request is about.** It is told the addresses of your accounts at
+  that app; with none named it uses your default, the first you connected until you pick another.
+  A name that isn't one of your accounts is refused, and nothing is sent.
+- **An approval names the account** ("Research Bot wants to send email from … on Gmail"), and Always
+  allow here saves the rule for that account only, shown as "from" and the address under the rule.
+  Once you connect a second account of an app, your own rules that let Bots act on that app without
+  asking stop applying, so Bots ask again for each account. Rules that ask or hand off, and team
+  rules, still cover every account.
+- **Apps that need a key say so before you connect** (on Composio). In Browse apps, an app you
+  connect with a key reads "Needs a key from 1Password", and apps you sign in to are listed first,
+  where the list was by name alone. Its Connections tile says the same until it is connected, and
+  its page says "Needs a key from 1Password. Connect shows where to get one.", where it said the app
+  "connects with a key you already have".
+- **The key form says where the key comes from.** Above the boxes, Connect says "1Password doesn't
+  offer a sign-in here, so it connects with a key from your 1Password account.", what to do at the
+  app, and **Get a key from 1Password**, which opens the app's own page, for 33 of the most-used key
+  apps and any app whose listing publishes a link. Box labels read in plain words ("Access token"
+  for "Bearer Token", "Web address" for "Base URL"), and help text that named Composio says
+  OpenBot.
+
 ### OpenBot Desktop
 
-- **Docker Desktop 29 pulls OpenBot's images from downloads.copilotkit.ai.** Its pulls there
-  failed with 403 and went to GitHub, because the copy held only each image's Linux amd64 and arm64
-  manifests, and Docker 29 also fetches the image's attestations and asks which artifacts refer to
-  it. The copy now holds every manifest each image names, and answers that question with an empty
-  list.
 - **A back end setup that stops says why.** OpenBot's log now records how every back end setup,
   start, update and stop ended: how long it took, its exit code, what its report says went wrong
   and the end of its error output. A setup that stopped used to leave nothing in the log. The card
   says whether the back end stopped with an error partway, quit without saying why, or could not
   be run, where all three said "The back end could not start."
+- When OpenBot Desktop is signed in with a model Learning can't use, Learn now in Settings →
+  Learning says "Learning can't run on the model you signed in with. To use it, sign OpenBot in with
+  an OpenAI or Anthropic API key, or a Claude or ChatGPT plan.", where it told you to give the back
+  end's Learning agent a model and key.
+- **A Docker short of CPUs, memory or disk says which, and where to raise it.** When the back end
+  refuses to set up for its resources, OpenBot Desktop names what is short with the back end's own
+  numbers, such as "Docker has 0 GB of free disk. OpenBot needs 40 GB. Raise the disk limit in
+  Docker Desktop > Settings > Resources, or free space in Docker, then Retry.", or the `podman
+  machine set` command to run on Podman, where it said "The back end could not start." Setup's
+  CopilotKit account step checks the engine first, and one with fewer than 4 CPUs, less than 4 GB of
+  memory or less than 40 GB of free disk stops there with the same advice.
 - **The first notification after OpenBot Desktop starts is raised**, for a Bot that needs you or
   replies while OpenBot is minimised or behind another window. The first one after each launch used
   to raise nothing, because the app was still checking that notifications were on. OpenBot's log
@@ -51,16 +108,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   step says "Setting up your apps" while they connect, where it flashed "Sign in to CopilotKit".
   Opening OpenBot after a restart says "Starting the engine machine." while it starts OpenBot's
   Podman machine, and Start's steps say "OpenBot's services" where they said "Containers".
+- **Install's bar is full only when it is done.** Once every byte has arrived and the last items are
+  still unpacking, the bar keeps moving without filling and the line says "1.1 GB downloaded ·
+  Unpacking the last item", where it showed a full bar beside "1.1 GB of 1.1 GB · 1 of 5 items
+  remaining".
+- The screen shown while OpenBot runs opens on "OpenBot is running", with its Updates section under
+  Show OpenBot and Stop OpenBot, as on the stopped screen, where it sat above the heading.
 - **App updates download from downloads.copilotkit.ai.** The update feed there names
   downloads.copilotkit.ai for the Windows installer and the Mac update archives, where they came
   from GitHub, and every signature is unchanged. If that download fails, OpenBot Desktop reads
   GitHub's update feed and downloads the same signed version from there, where the update failed.
   The log says where it came from.
-- **A release candidate's images are on downloads.copilotkit.ai too.** A fresh install of a
-  candidate got 403 there for every image, because only the Latest stable release was copied.
-  Downloads sync now copies a prerelease asked for by tag (its images and its own files, never
-  `latest/`), and each scheduled run copies the images of every prerelease newer than Latest from
-  the last 30 days. Drafts are never copied.
 - **A Bot with no folders says so in plain words**, as every Bot does after OpenBot restarts: "This
   Bot has no folders it can read right now. Folder access ends when you stop OpenBot. To give it a
   folder, use Choose folder in Settings → Computer." It said "No host folders are granted to this
@@ -68,6 +126,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Teach a Bot
 
+- **Teach a Bot says what happens after a recording saves**: "OpenBot learns a skill from it, and
+  you'll find it in Settings, Learning. Once it's learned, ask any Bot to do it." A row under the
+  recording follows it through Learning: **Learn now** before a run, "Learning from your
+  recordings" during one, "Ready to review" with **Review**, and "Skill learned" with **Try it**,
+  which opens Home with the task in the message box, not sent. A failed run, Learning with no
+  model, or a refused Learn now says why, and **See your skills** opens Settings → Learning. With
+  the page in the background and notifications allowed, a notification says when the skill
+  arrives. It used to say only that the recording was saved to your Learning space.
 - **Teach a Bot is one page.** Its title and one line on how sit above the browser, and Your
   recordings sits under it at the same width and scrolls on its own, so a long list no longer makes
   the browser smaller. The page was headed "Browser". Where the browser opens as a window on your
@@ -79,11 +145,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   name, the Narration switch (its (i) says what narration is for) and **Start recording**, where the
   name field, the switch and Record sat in a bar above the browser. The narration line shows under
   the browser only while recording, or to say "No microphone found. Narration is off." on a
-  computer with none, which keeps your narration choice for when there is one.
+  computer with none. There, Record no longer asks "Narrate while you record?": it records without
+  narration and asks the first time you record with a microphone.
 - Your recordings links to Settings → Learning ("See what your Bots learned").
 
 ### Conversations
 
+- **A Bot is told which apps it can use from its first message.** Its instructions name each app it
+  holds and where it stands for you the way the app's page does, such as "Gmail (connected), Notion
+  (needs connecting)". An app you haven't connected is never listed as one it can reach, and a tool
+  it holds but isn't offered on a turn isn't called missing. It is told to look an app's tools up
+  rather than say it has no access, and in the personal edition never to mention an admin. Bots are
+  also told to say what they did in plain words ("I checked your Gmail profile") and never to name a
+  tool, such as `GMAIL_GET_PROFILE`.
 - **Bots answer in Markdown by default.** Ordinary questions, explanations, summaries and short
   lists come back as a reply. A notice card is kept for an alert that needs you to act, or for when
   you ask for one, and a chart, table or card is drawn when it makes the answer easier to use. Bots
@@ -113,6 +187,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   card, Needs you and a task's waiting line say "Save a file todo.txt in share", "Read a file" and
   "Run a command", where they said "Write file on todo.txt in share". A file on the Bot's own
   computer is named by its path, and its save step reads "Saved a file".
+- **A Bot's Activity names an action waiting for your approval the way its card does**, "Click
+  the link “Python” on en.wikipedia.org" or "Send email on Gmail", where it read "Approve
+  computer_click" with "write" beside it. Approval cards list what an action would send as
+  labelled lines, where they showed raw JSON, and a click shows none. In Slack and Microsoft Teams
+  the card says it the same way ("Research Bot wants to click the link “Python” on
+  en.wikipedia.org"). A saved rule is titled "Click" or "Send email on Gmail" instead of its tool
+  id, and the line under it reads "changes in share for Shop", where it read "write on
+  host-grant-15407-… for shopper-bot".
 - An opened "Looked for a tool" step lists the tools the Bot found by name ("Send email on Gmail"),
   where it showed their ids and the descriptions the search returned to the Bot.
 
@@ -163,19 +245,30 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   is read out by screen readers.
 - **New Bot** lists the frameworks a custom agent can run on under **Connect a custom agent** on its
   first screen, below the form, one line each with its logo, Claude Agent SDK, LangChain, Google ADK
-  and AWS Strands first. Choosing one goes straight to its address, and Back returns to the list.
-  They were behind a Connect a custom agent button.
+  and AWS Strands first, all four above Cancel and Create Bot in OpenBot Desktop's default window,
+  800px tall. Choosing one goes straight to its address, and Back returns to the list. They were
+  behind a Connect a custom agent button.
 - LangChain is called **LangChain**, with LangChain's own mark, where it said "LangChain
   (LangGraph)": in New Bot, a Bot's "Powered by" subtitle and its Runs on row, and OpenBot Desktop's
   note under a ChatGPT plan.
-- A browser action waiting for your approval is named the way its card names it. A Bot's Activity
-  row read "Approve computer_click" with "write" beside it, and now reads "Click the link “Python”
-  on en.wikipedia.org". The Needs you card names the link too and lists what the action would send
-  by label, without the page handles a click carried as raw JSON. An approval in Slack says it the
-  same way ("Research Bot wants to click the link “Python” on en.wikipedia.org"), and a saved rule
-  is titled "Click" or "Send email on Gmail" instead of its tool id. The line under it names the
-  folder and the Bot by name and the kind of action in words ("changes in share for Shop"), where
-  it read "write on host-grant-15407-… for shopper-bot".
+- Settings → Activity and Admin → Audit reach past the newest 50 events. **Show older events** under
+  the last row loads the next page, and the count reads "Newest 50 events", growing as more load,
+  until nothing older is left. They stopped at the newest 50 and counted them as if that were
+  everything.
+- Apps the broker lists in lowercase are named with capitals in Browse apps and when added, such as
+  "1Password" where it said "1password". An app added before the upgrade keeps its name.
+- Onboarding's Welcome says "Give work to Bots in plain words.", where it said "Hand work to Bots".
+- Onboarding's Book a demo step has one button under the calendar, **Not now**, which moves on
+  without booking, where Continue sat beside it. Once you book a time, it becomes **Continue**. If
+  the calendar can't load, Book a call and Not now show as before.
+- The Browse Google Maps starter task asks the Bot to list the walking directions from King's
+  Cross step by step, where a Bot could reply with only the walking time and distance.
+- A bar chart with any name longer than 12 characters lies on its side, largest first, with each
+  name beside its bar (above it in a narrow chat) on up to two lines, the whole name on hover, and
+  its figure at the bar's end. "Chart Hacker News" cut every story to a few letters ("2. Car
+  unlo…"). Bars with short names still stand up as before.
+- The marks for each turn on the left of a conversation show only where the window leaves room for
+  them beside the messages, so they never sit on the first letters of a Bot's replies.
 
 ## 0.3.4
 

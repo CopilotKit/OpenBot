@@ -39,7 +39,7 @@ commit, backend release/image and OS for each result; the desktop shell can run 
 | Suggestion | Result that proves useful work | Mac candidate | Windows x64 candidate |
 | --- | --- | --- | --- |
 | Chart Hacker News | A bar chart of the current Hacker News front page by points, then the same stories listed with points and links. Compare both with the live front page. Inspect the activity log for web search or fetch tools. | Not run | Not run |
-| Browse Google Maps | Watch the Bot open Google Maps in its browser, read the British Museum's Saturday opening hours, open walking directions from King's Cross, and give a leave-by time that matches the hours and walking time Maps shows. Nothing is signed in to or changed. | Not run | Not run |
+| Browse Google Maps | Watch the Bot open Google Maps in its browser, read the British Museum's Saturday opening hours, open walking directions from King's Cross, list the route step by step, and give a leave-by time that matches the hours and walking time Maps shows. Nothing is signed in to or changed. | Not run | Not run |
 | Triage my inbox | Gmail's connect card appears in the conversation before any mail is read. Connect, finish consent, return to the same thread, and check the two emails it picks against the last 24 hours of mail. An empty day must be reported accurately. Test cancellation and retry. Nothing is marked read or changed. | Not run | Not run |
 | Build a trip budget | Generated controls start at $100 + $200 + $80 = $380. Change lodging to $250 and observe $430 without another model request. | Not run | Not run |
 

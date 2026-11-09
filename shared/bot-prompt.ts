@@ -70,6 +70,14 @@ const WITHOUT_SEARCH_LINES = [
   "names but cannot search.",
 ];
 
+/** The same, for the personal edition: one person, no administrator, and the card offers the step. */
+const WITHOUT_SEARCH_PERSONAL_LINES = [
+  ...WITHOUT_SEARCH_LINES.slice(0, 6),
+  `If you hold ${SHOW_APP_ACCESS_TOOL}, call it once in the conversation with the name of one search`,
+  `app (${RESEARCH_APP_NAMES.join(", ")}): the card offers the step that turns it on.`,
+  ...WITHOUT_SEARCH_LINES.slice(-2),
+];
+
 /**
  * The order of operations that makes the computer tools usable.
  *
@@ -150,6 +158,8 @@ function asParagraphs(lines: readonly string[]): string {
 export type ComputerHolding = {
   /** Whether this run was offered a tool that finds sources, from any research provider. */
   search: boolean;
+  /** The personal edition, which has no administrator to send anybody to. */
+  personal?: boolean;
 };
 
 /**
@@ -164,7 +174,11 @@ export function computerGuidance(holding: ComputerHolding): string {
   return asParagraphs([
     ...OPENING_A_PAGE_LINES,
     "",
-    ...(holding.search ? WITH_SEARCH_LINES : WITHOUT_SEARCH_LINES),
+    ...(holding.search
+      ? WITH_SEARCH_LINES
+      : holding.personal
+        ? WITHOUT_SEARCH_PERSONAL_LINES
+        : WITHOUT_SEARCH_LINES),
     "",
     ...ACTING_LINES,
   ]);
@@ -200,11 +214,16 @@ export type ComputerGuidance = typeof computerGuidance;
  * A search tool is the exception, and the line that says so is what lets one be used. Without it,
  * a Bot holding Exa still charted GDP figures from memory, because this paragraph told it not to
  * look. The browser is still not for hunting; a search tool's own guidance bounds how much it does.
+ *
+ * Citing is in words, not tool ids: a Bot answered "Confirmed via `GMAIL_GET_PROFILE`", which tells
+ * the person nothing and reads as a debug log.
  */
 const PROVENANCE_GUIDANCE_LINES = [
   "Say where an answer came from. When you read it with one of your tools, cite what you read.",
   "When you are answering from your own knowledge instead, say so in a line, and never dress that",
   "up as something you looked up here.",
+  "Say what you did in plain words, such as 'I checked your Gmail profile'. Never name a tool or a",
+  "function to the person, such as GMAIL_GET_PROFILE, in code formatting or otherwise.",
   "",
   "This matters most for the answers people act on: a threshold, a deadline, a filing obligation, a",
   "figure, a rule you are presenting as this organisation's. Never state one of those as established",
