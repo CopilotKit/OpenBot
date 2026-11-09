@@ -74,10 +74,10 @@ deployment:
   be run, where all three said "The back end could not start."
 - **A Docker short of disk, CPUs or memory says which, and where to raise it.** A setup the back
   end refuses for its resources said "The back end stopped with an error partway through." It now
-  names the resource: a full Docker disk says "Docker is out of disk space. OpenBot needs 40 GB
-  free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then
-  Retry.", and too few free CPUs or too little free memory say so the same way. On Podman it names
-  `podman machine set` instead. The CopilotKit account step now checks the engine first, and one
+  names the resource with the back end's own numbers: a full Docker disk says "Docker has 0 GB of
+  free disk. OpenBot needs 40 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or
+  free space in Docker, then Retry.", and too few free CPUs or too little free memory say so the
+  same way. On Podman it names `podman machine set` instead. The CopilotKit account step now checks the engine first, and one
   with fewer than 6 CPUs, less than 8 GB of memory or less than 40 GB of free disk stops there with
   the same advice, before Start.
 - When OpenBot Desktop is signed in with a model Learning can't use, Learn now in Settings →

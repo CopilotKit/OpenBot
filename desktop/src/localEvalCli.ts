@@ -86,6 +86,10 @@ export type Shortfall = {
   cpu: boolean;
   memory: boolean;
   disk: boolean;
+  /** What the CLI measured free, as it said it: CPUs, and GB of memory and of disk. */
+  cpus?: string;
+  memoryGb?: string;
+  diskGb?: string;
 };
 
 export type LocalReport = {

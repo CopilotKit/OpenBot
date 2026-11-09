@@ -207,6 +207,26 @@ test("specific wording and actions", () => {
   expect(short({ podman: true, disk: true }).said).toBe(
     "Podman is out of disk space. OpenBot needs 40 GB free. Stop your Podman machine, run podman machine set --disk-size 160, start it again, then Retry.",
   );
+  // With the CLI's own numbers, as `local_eval.rs` reads them from its error.
+  expect(
+    short({ disk: true, cpus: "9.8", memoryGb: "18.9", diskGb: "0" }).said,
+  ).toBe(
+    "Docker has 0 GB of free disk. OpenBot needs 40 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+  );
+  expect(
+    short({ cpu: true, cpus: "3.7", memoryGb: "5.2", diskGb: "51" }).said,
+  ).toBe(
+    "Docker has 3.7 free CPUs. OpenBot needs 4. Raise the CPU limit in Docker Desktop > Settings > Resources, then Retry.",
+  );
+  expect(short({ memory: true, memoryGb: "2.9" }).said).toBe(
+    "Docker has 2.9 GB of free memory. OpenBot needs 4 GB. Raise the memory limit in Docker Desktop > Settings > Resources, then Retry.",
+  );
+  expect(
+    short({ cpu: true, disk: true, cpus: "3.5", memoryGb: "6", diskGb: "12" })
+      .said,
+  ).toBe(
+    "Docker has 3.5 free CPUs and 12 GB of free disk. OpenBot needs 4 free CPUs and 40 GB of free disk. Raise the limits in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+  );
   // A report that does not say which is still about resources, never "partway through".
   expect(
     said(report({ outcome: "failed", reason: "resources-short" })).said,

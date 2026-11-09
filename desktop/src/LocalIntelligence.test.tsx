@@ -721,7 +721,17 @@ test("a setup refused for a full Docker disk says so, with Retry", async () => {
         outcome: "failed",
         stack: null,
         reason: "resources-short",
-        shortfall: { podman: false, cpu: false, memory: false, disk: true },
+        // As `local_eval.rs` reads the rc.10 CLI's "Docker available resources: 9.871234 CPUs
+        // (requires 4), 18.9 GiB RAM available (requires 4), 0 GiB free storage (requires 40)."
+        shortfall: {
+          podman: false,
+          cpu: false,
+          memory: false,
+          disk: true,
+          cpus: "9.8",
+          memoryGb: "18.9",
+          diskGb: "0",
+        },
       }),
     ],
     local_eval_download: [null],
@@ -731,7 +741,7 @@ test("a setup refused for a full Docker disk says so, with Retry", async () => {
   await screen.findByRole("button", { name: "Retry" });
   const setup = row(screen, SETUP).textContent;
   expect(setup).toContain(
-    "Docker is out of disk space. OpenBot needs 40 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+    "Docker has 0 GB of free disk. OpenBot needs 40 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   expect(setup).not.toContain("partway through");
 });

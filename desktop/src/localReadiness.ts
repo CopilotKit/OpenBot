@@ -143,12 +143,37 @@ function shortfallSaid(
   const fix = shortfall.podman
     ? `Stop your Podman machine, run podman machine set ${short.map((resource) => podmanFlag[resource]).join(" ")}, start it again`
     : `Raise the ${short.length === 1 ? `${limitName[short[0]]} limit` : "limits"} in Docker Desktop > Settings > Resources${shortfall.disk ? ", or free space in Docker" : ""}`;
-  const said =
-    short.length === 1 && short[0] === "disk"
+  // The CLI's own numbers, when its error gave one for every resource that is short.
+  const measured: Record<Resource, string | undefined> = {
+    cpu: shortfall.cpus && `${shortfall.cpus} free CPUs`,
+    memory: shortfall.memoryGb && `${shortfall.memoryGb} GB of free memory`,
+    disk: shortfall.diskGb && `${shortfall.diskGb} GB of free disk`,
+  };
+  const has = short.map((resource) => measured[resource]);
+  const said = has.every((said) => said !== undefined)
+    ? `${engine} has ${listed(has as string[])}. OpenBot needs ${
+        short.length === 1
+          ? needed[short[0]]
+          : listed(short.map((resource) => neededFully[resource]))
+      }.`
+    : short.length === 1 && short[0] === "disk"
       ? `${engine} is out of disk space. OpenBot needs ${needs.disk}.`
       : `${engine} doesn't have enough ${listed(short.map((resource) => resourceName[resource]))}. OpenBot needs ${listed(short.map((resource) => needs[resource]))}.`;
   return `${said} ${fix}, then ${then}.`;
 }
+
+// What the CLI requires free, beside its own numbers: "Docker has 0 GB of free disk. OpenBot
+// needs 40 GB."
+const needed: Record<Resource, string> = {
+  cpu: "4",
+  memory: "4 GB",
+  disk: "40 GB",
+};
+const neededFully: Record<Resource, string> = {
+  cpu: "4 free CPUs",
+  memory: "4 GB of free memory",
+  disk: "40 GB of free disk",
+};
 
 /**
  * The CLI's resource check at Start: 4 free CPUs, 4 GB of free memory and 40 GB of free disk, with

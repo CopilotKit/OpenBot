@@ -254,13 +254,28 @@ pub struct Report {
 
 /// Which of the engine's resources are below what local setup needs, and whether the engine is
 /// Podman, so the window names the right resource and the right settings.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Shortfall {
     pub podman: bool,
     pub cpu: bool,
     pub memory: bool,
     pub disk: bool,
+    /// What the CLI measured free, as it said it, to one decimal: CPUs, and GiB of memory and of
+    /// disk. Absent when its error did not say.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpus: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_gb: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk_gb: Option<String>,
+}
+
+/// A number the CLI printed, to one decimal and rounded down as it rounds, without a trailing `.0`.
+fn shown(value: f64) -> String {
+    let tenths = (value.max(0.0) * 10.0).floor() / 10.0;
+    let said = format!("{tenths:.1}");
+    said.strip_suffix(".0").map(str::to_owned).unwrap_or(said)
 }
 
 impl Shortfall {
@@ -1101,15 +1116,21 @@ fn shortfall_of(wire: &Map<String, Value>, podman: bool) -> Option<Shortfall> {
         podman,
         ..Shortfall::default()
     };
-    if code == MEMORY_SHORT {
-        shortfall.memory = true;
-        return Some(shortfall);
-    }
     let message = wire
         .get("error")
         .and_then(|error| error.get("message"))
         .and_then(Value::as_str)
         .unwrap_or("");
+    if code == MEMORY_SHORT {
+        shortfall.memory = true;
+        let available = regex::Regex::new(r"([\d.]+) GiB available to new containers")
+            .expect("a valid pattern");
+        shortfall.memory_gb = available
+            .captures(message)
+            .and_then(|found| found[1].parse::<f64>().ok())
+            .map(shown);
+        return Some(shortfall);
+    }
     let measures = regex::Regex::new(
         r"(-?[\d.]+) CPUs \(requires ([\d.]+)\), (-?[\d.]+) GiB RAM available \(requires ([\d.]+)\), (-?[\d.]+) GiB free storage \(requires ([\d.]+)\)",
     )
@@ -1123,6 +1144,9 @@ fn shortfall_of(wire: &Map<String, Value>, podman: bool) -> Option<Shortfall> {
         shortfall.cpu = below(1, 2);
         shortfall.memory = below(3, 4);
         shortfall.disk = below(5, 6);
+        shortfall.cpus = number(1).map(shown);
+        shortfall.memory_gb = number(3).map(shown);
+        shortfall.disk_gb = number(5).map(shown);
     }
     Some(shortfall)
 }
@@ -1158,10 +1182,10 @@ pub const MIN_ENGINE_FREE_DISK_BYTES: u64 = 40 * GIB;
 /// is not judged.
 pub fn engine_shortfall(cpus: u64, memory_bytes: u64, free_disk_bytes: Option<u64>) -> Shortfall {
     Shortfall {
-        podman: false,
         cpu: cpus < MIN_ENGINE_CPUS,
         memory: memory_bytes < MIN_ENGINE_MEMORY_BYTES,
         disk: free_disk_bytes.is_some_and(|free| free < MIN_ENGINE_FREE_DISK_BYTES),
+        ..Shortfall::default()
     }
 }
 
@@ -6467,26 +6491,32 @@ fn main() {{
     #[test]
     fn a_setup_the_cli_refused_for_resources_names_the_resource() {
         let none = Shortfall::default();
+        let numbers = |cpus: &str, memory: &str, disk: &str| Shortfall {
+            cpus: Some(cpus.into()),
+            memory_gb: Some(memory.into()),
+            disk_gb: Some(disk.into()),
+            ..Shortfall::default()
+        };
         for (code, message, short) in [
             (
                 "LOCAL_DOCKER_RESOURCES_SHORT",
                 "Docker available resources: 9.871234 CPUs (requires 4), 18.9 GiB RAM available (requires 4), 0 GiB free storage (requires 40). Stop other container workloads or increase Docker resources, then retry local setup.",
-                Shortfall { disk: true, ..none },
+                Shortfall { disk: true, ..numbers("9.8", "18.9", "0") },
             ),
             (
                 "LOCAL_DOCKER_RESOURCES_SHORT",
                 "Docker available resources: 3.71 CPUs (requires 4), 5.2 GiB RAM available (requires 4), 51 GiB free storage (requires 40). Stop other container workloads or increase Docker resources, then retry local setup.",
-                Shortfall { cpu: true, ..none },
+                Shortfall { cpu: true, ..numbers("3.7", "5.2", "51") },
             ),
             (
                 "LOCAL_DOCKER_RESOURCES_SHORT",
                 "Docker available resources: 3.5 CPUs (requires 4), 2.9 GiB RAM available (requires 4), 12 GiB free storage (requires 40). Docker memory: 3.8 GiB total, 2.9 GiB available to new containers (requires 4 GiB available). Docker keeps part of its memory limit for itself, so raise Docker's memory limit by at least 3 GiB (Docker Desktop: Settings > Resources > Memory), or stop other containers, raise the CPUs or storage named above, then retry local setup.",
-                Shortfall { cpu: true, memory: true, disk: true, ..none },
+                Shortfall { cpu: true, memory: true, disk: true, ..numbers("3.5", "2.9", "12") },
             ),
             (
                 "LOCAL_DOCKER_MEMORY_SHORT",
                 "Docker memory: 7.6 GiB total, 2.9 GiB available to new containers (requires 4 GiB available). Docker keeps part of its memory limit for itself, so raise Docker's memory limit by at least 3 GiB (Docker Desktop: Settings > Resources > Memory), or stop other containers, then retry local setup.",
-                Shortfall { memory: true, ..none },
+                Shortfall { memory: true, memory_gb: Some("2.9".into()), ..none.clone() },
             ),
         ] {
             let report = normalize_setup(1, &refused_for_resources(code, message)).unwrap();
@@ -6506,7 +6536,10 @@ fn main() {{
         assert_eq!(wire["reason"], json!("resources-short"));
         assert_eq!(
             wire["shortfall"],
-            json!({ "podman": false, "cpu": false, "memory": false, "disk": true })
+            json!({
+                "podman": false, "cpu": false, "memory": false, "disk": true,
+                "cpus": "9.8", "memoryGb": "18.9", "diskGb": "0"
+            })
         );
         // A probe that measured nothing is not a shortfall the person can fix in Settings.
         let unmeasurable = normalize_setup(
