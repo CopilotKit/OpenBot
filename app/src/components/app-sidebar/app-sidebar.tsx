@@ -232,16 +232,20 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       <SidebarHeader className="h-12 p-2">
         <SidebarMenu>
           <SidebarMenuItem className="flex flex-row gap-1.5">
+            {/* The same hover as every other row in the sidebar, not the menu button's accent tint. */}
             <SidebarMenuButton
-              className="font-semibold text-[14px] tracking-tighter h-full leading-tight"
+              className="font-semibold text-[14px] tracking-tighter h-full leading-tight hover:bg-foreground/5 hover:text-sidebar-foreground active:bg-foreground/5 active:text-sidebar-foreground"
               render={(props) => (
                 <Link {...appLinkOptions} {...props}>
                   {appConfig.brand.productName}
                 </Link>
               )}
             />
+            {/* Square, as tall as the name beside it, with the sidebar's hover rather than `muted`, which
+                is nearly the sidebar's own colour. */}
             <Button
               aria-label="New conversation"
+              className="aspect-square h-full w-auto hover:bg-foreground/5 dark:hover:bg-foreground/5"
               size="icon"
               variant="ghost"
               render={(props) => (
