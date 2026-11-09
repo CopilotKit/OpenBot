@@ -423,6 +423,8 @@ mod tests {
             "WARN [local check] before local start: 8 CPUs and 7.7 GiB of memory, 0.0 GiB free of 58.4 GiB in a container; short of disk (nearly full)",
             r#"{"level":30,"time":"2026-11-08T10:12:03.000Z","event":"consent.state.invalid","flowId":"setup-abc","runId":"run-7"}"#,
             "stack local-7f3a2c is starting",
+            // What the app logs when it saves a bundle. The file's whole name reads as a key.
+            "2026-11-09T22:27:16.960Z INFO  [logs] saved troubleshooting logs in the log folder, stamped 2026-11-09T22-27-16Z",
         ] {
             assert_eq!(redact(line, Some("/Users/dana")), line);
         }

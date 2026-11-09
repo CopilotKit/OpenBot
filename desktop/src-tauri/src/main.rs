@@ -5675,7 +5675,9 @@ fn save_troubleshooting_logs_now<R: tauri::Runtime>(
     let saved = troubleshooting::save(&folder, &text, &stamp)
         .map_err(|error| format!("could not save the logs: {error}"))
         .inspect_err(|error| log::warn!("[logs] {error}"))?;
-    log::info!("[logs] saved troubleshooting logs as {}", saved.display());
+    // The stamp, not the file name: the log's own scrubbing takes a name that long and mixed for a
+    // key.
+    log::info!("[logs] saved troubleshooting logs in the log folder, stamped {stamp}");
     tauri_plugin_opener::reveal_item_in_dir(&saved)
         .map_err(|error| error.to_string())
         .inspect_err(|error| log::warn!("[logs] could not show the saved logs: {error}"))
