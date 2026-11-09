@@ -1248,6 +1248,134 @@ describe("what a Bot is told it holds", () => {
 });
 
 /**
+ * A Bot knows which apps it can use for this person from its first message.
+ *
+ * FOUND IN 1.0.0-rc.1. A new Bot holding Gmail, which the person had connected, said it had no email
+ * connected; asked to check, it searched, found Gmail's tools, and said Gmail was connected and
+ * working. Its instructions named the app only as `composio-gmail`, said nothing about the person's
+ * connection, and gave Gmail as the example of an app "not named here at all". Any app, not Gmail
+ * alone: the apps here are several, behind tool search as a held app's tools are past the floor.
+ */
+describe("which apps a Bot is told it can use", () => {
+  const card = {
+    name: "show_app_access",
+    ref: "app-access/show_app_access",
+    description: "Show an app card.",
+    parameters: z.object({}),
+    execute: async () => "",
+  };
+  const appTools = (server: string, count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      name: `mcp__${server}__ACTION_${index}`,
+      ref: `${server}/ACTION_${index}`,
+      searchable: true as const,
+      description: "An app action.",
+      parameters: z.object({}),
+      execute: async () => "",
+    }));
+  const tools = [
+    card,
+    ...appTools("composio-gmail", 30),
+    ...appTools("composio-googlecalendar", 20),
+    ...appTools("composio-notion", 10),
+  ];
+  const instructionsFor = (
+    apps?: Parameters<typeof builtInAgentConfiguration>[13],
+  ) =>
+    String(
+      (
+        builtInAgentConfiguration(
+          {
+            id: "weekly-planner",
+            name: "Weekly Planner",
+            type: "built_in",
+            systemPrompt: "Plan the person's week.",
+          },
+          { provider: "openai", defaultModel: "gpt-5.6-terra" },
+          "openai-secret",
+          apps?.length ? (tools as never[]) : ([card] as never[]),
+          computerGuidance,
+          ["composio-gmail", "composio-googlecalendar", "composio-notion"],
+          null,
+          undefined,
+          undefined,
+          new Set(
+            apps?.length
+              ? tools.filter((tool) => "searchable" in tool).map((t) => t.name)
+              : [],
+          ),
+          new Date("2026-11-08T12:00:00Z"),
+          undefined,
+          undefined,
+          apps,
+        ) as { prompt?: unknown }
+      ).prompt,
+    ).replace(/\s+/g, " ");
+  const gmail = {
+    key: "composio-gmail",
+    displayName: "Gmail",
+    account: "personal" as const,
+  };
+  const calendar = {
+    key: "composio-googlecalendar",
+    displayName: "Google Calendar",
+    account: "personal" as const,
+  };
+  const notion = {
+    key: "composio-notion",
+    displayName: "Notion",
+    account: "personal" as const,
+  };
+
+  test("an app the person connected is named as one it can use now, by its own name", () => {
+    const prompt = instructionsFor([
+      { ...gmail, state: "ready" },
+      { ...calendar, state: "ready" },
+      { ...notion, state: "not_connected" },
+    ]);
+    expect(prompt).toContain(
+      "You can use these apps for the person you are working with: Gmail (connected), Google Calendar (connected), Notion (needs connecting).",
+    );
+    expect(prompt).toContain(
+      "Never tell the person you have no access to an app named here as connected or ready",
+    );
+    // Its tools wait behind search, so it is told to look them up rather than claim it has none.
+    expect(prompt).toContain(
+      "use its tools, finding them with search_tools when they are not in front of you",
+    );
+    expect(prompt).toContain("- Gmail: 30 tools you find with search_tools");
+    expect(prompt).not.toContain("composio-gmail");
+    // Gmail is held, so it is never the example of an app "not named here at all".
+    expect(prompt).not.toContain("not named here at all (Gmail");
+  });
+
+  test("an app turned on and not connected is named as needing a connection", () => {
+    const prompt = instructionsFor([
+      { ...gmail, state: "not_connected" },
+      { ...calendar, state: "reconnect" },
+    ]);
+    expect(prompt).toContain(
+      "You can use these apps for the person you are working with: Gmail (needs connecting), Google Calendar (needs reconnecting).",
+    );
+    expect(prompt).toContain(
+      "For one that needs connecting or reconnecting, call show_app_access with its name",
+    );
+  });
+
+  test("a Bot with no apps is told it has none", () => {
+    expect(instructionsFor([])).toContain(
+      "You have no apps turned on for the person you are working with.",
+    );
+  });
+
+  test("it says what it did in plain words, never a tool id", () => {
+    expect(instructionsFor([{ ...gmail, state: "ready" }])).toContain(
+      "Never name a tool or a function to the person, such as GMAIL_GET_PROFILE",
+    );
+  });
+});
+
+/**
  * Whether the browser leaves searching to a search tool, decided by what this run holds.
  *
  * "search for X" in a demo made a Bot drive its browser to a search engine. The guidance has two

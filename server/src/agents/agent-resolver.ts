@@ -8,6 +8,7 @@ import {
   type LoadAgentsForActor,
   type LoadAttachment,
   type LoadInstructions,
+  type LoadAppsForBot,
   type LoadToolsForBot,
   type MarkAttachmentsSent,
   onOpenBotRunner,
@@ -65,6 +66,8 @@ export type ActorAgentResolverDependencies = {
     actorId: string,
     initiator?: AuditInitiator,
   ) => LoadToolsForBot;
+  /** The apps each Bot holds, as they stand for whoever is asking. See `LoadAppsForBot`. */
+  loadAppsForActor?: (actorId: string) => LoadAppsForBot;
   signRunForActor?: (
     actorId: string,
     initiator?: AuditInitiator,
@@ -165,6 +168,7 @@ export function createActorAgentResolver(
       deps.recordToolLimitRefusalForActor?.(actor.id, context?.initiator),
       context?.holdsTools,
       deps.pickedModelForActor?.(actor.id),
+      deps.loadAppsForActor?.(actor.id),
     ).then((agents) => {
       const loadName = deps.loadNameForActor;
       if (loadName) {
