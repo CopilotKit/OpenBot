@@ -99,6 +99,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- LangChain is listed as **LangChain**, with LangChain's own symbol, where it said "LangChain
+  (LangGraph)". This covers New Bot, a Bot's "Powered by" subtitle, its setup row and OpenBot
+  Desktop's plan note. A subtitle saved under the old name still follows a change of harness. New
+  Bot's custom agents are one line each, and the four named frameworks show without scrolling.
+- **New Bot** shows custom agents on its first screen. Below the simple form, **Connect a custom
+  agent** lists every framework with its logo, Claude Agent SDK, LangChain, Google ADK and AWS
+  Strands first, and on a desktop its heading and first row show without scrolling. Pressing one
+  goes straight to its address, and Back returns to the list. Its labels are small and uppercase,
+  and Isolated and apps are plain rows.
 - The sidebar floats as frosted glass over the colours of OpenBot's orb, the orb sits beside
   OpenBot's name, and the app is set in Atkinson Hyperlegible Next. A skin keeps its own faces.
 - Settings → General lists your answers as rows that open a dialog. Settings → Notifications shows
