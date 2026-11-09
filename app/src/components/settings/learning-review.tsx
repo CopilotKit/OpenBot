@@ -212,6 +212,19 @@ export function LearningReview() {
   const anyWaiting = groups.some((group) => group.waiting.length > 0);
   // With automatic approval on, an empty list says nothing the switch doesn't.
   const showList = autoApproveOn !== true || anyWaiting;
+  // The heading says something waits only when a skill does: not while Learning runs, and not with nothing left to approve.
+  const heading = !anyWaiting
+    ? { title: "New skills", description: undefined }
+    : canReview
+      ? {
+          title: "Waiting for your review",
+          description: "Approve a skill to publish it to your Bots.",
+        }
+      : {
+          title: "Waiting for an admin",
+          description:
+            "An admin reviews these. You can read what Learning proposes here.",
+        };
   const learnNowFor = async (group: {
     label: string;
     containers: string[];
@@ -244,14 +257,7 @@ export function LearningReview() {
   };
 
   return (
-    <PageSection
-      title={canReview ? "Waiting for your review" : "Waiting for an admin"}
-      description={
-        canReview
-          ? "Approve a skill to publish it to your Bots."
-          : "An admin reviews these. You can read what Learning proposes here."
-      }
-    >
+    <PageSection title={heading.title} description={heading.description}>
       {autoApproveOn !== null && (
         <PageRows>
           <Item size="sm">
