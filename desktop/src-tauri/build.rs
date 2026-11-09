@@ -67,6 +67,8 @@ fn main() {
                     "notify",
                     // Ctrl+Q in the window on Windows. See `src/quit-shortcut.js`.
                     "quit",
+                    // The zoom keys no menu carries. See `src/zoom-shortcut.js`.
+                    "zoom",
                 ]),
             ),
     )

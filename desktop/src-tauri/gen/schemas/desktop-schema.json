@@ -3039,6 +3039,12 @@
           "markdownDescription": "Enables the update_offer command without any pre-configured scope."
         },
         {
+          "description": "Enables the zoom command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-zoom",
+          "markdownDescription": "Enables the zoom command without any pre-configured scope."
+        },
+        {
           "description": "Denies the appearance command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:deny-appearance",
@@ -3133,6 +3139,12 @@
           "type": "string",
           "const": "openbot-desktop:deny-update-offer",
           "markdownDescription": "Denies the update_offer command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the zoom command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-zoom",
+          "markdownDescription": "Denies the zoom command without any pre-configured scope."
         },
         {
           "description": "Enables the open command without any pre-configured scope.",
