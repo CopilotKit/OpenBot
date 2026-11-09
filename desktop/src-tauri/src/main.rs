@@ -15298,10 +15298,18 @@ fn main() {
             ),
             "Start reached the runtime handoff: {commands}"
         );
+        // Not on Start's path at all: when Start returns, the link has not been asked for. (Before,
+        // Start ran it and joined it, so the call was there and Start took its 8-second budget.)
+        // How long Start itself takes depends on the platform's fake engine, so that is bounded
+        // only by the fake CLI's own 30 seconds.
+        assert_eq!(
+            cli.calls(),
+            "",
+            "Start ran `telemetry link` and waited {took:?} for it"
+        );
         assert!(
-            took < std::time::Duration::from_secs(5),
-            "Start waited {took:?} on a slow telemetry link (calls: {})",
-            cli.calls()
+            took < std::time::Duration::from_secs(30),
+            "Start waited {took:?} on a slow telemetry link"
         );
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
