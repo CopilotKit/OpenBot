@@ -226,6 +226,63 @@ test("a dropped file the screen refuses says why, in our words", async () => {
   expect(uploads).toEqual([]);
 });
 
+/**
+ * A screenshot dragged onto a conversation: the chip with its preview, and the upload that carries
+ * the image to the Bot. OpenBot Desktop dropped exactly this on the floor while Tauri's own
+ * drag-and-drop handler took the file (see `dragDropEnabled` in `desktop/src-tauri/tauri.conf.json`
+ * and `main_window_leaves_dropped_files_to_the_page`); this pins the page's half of that path.
+ */
+test("a dropped screenshot shows its preview and goes up to the conversation", async () => {
+  serverSniffs("image/png");
+  const screenshot = new File(
+    [new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
+    "Screenshot 2026-11-09 at 14.20.00.png",
+    { type: "image/png" },
+  );
+  const view = render(
+    <Composer channelId="channel-1" compact onSubmit={() => {}} />,
+  );
+
+  drop(view.container.querySelector("form") as HTMLFormElement, [screenshot]);
+  await uploaded(view, screenshot.name);
+
+  expect(uploads).toEqual([
+    { path: "/api/channels/channel-1/attachments", name: screenshot.name },
+  ]);
+  expect(view.container.querySelector("img")).not.toBeNull();
+  expect(view.container.querySelector('[role="alert"]')).toBeNull();
+});
+
+/**
+ * A drag that announced files and handed over none (the webview could not read what was dragged)
+ * used to stage an empty list: no chip, no refusal, nothing. It says so now.
+ */
+test("a drop that carries files the page cannot read says so instead of doing nothing", async () => {
+  const { container, findByRole } = render(
+    <Composer channelId="channel-1" compact onSubmit={() => {}} />,
+  );
+
+  drop(container.querySelector("form") as HTMLFormElement, []);
+
+  const alert = await findByRole("alert");
+  expect(alert.textContent).toContain("Dropped file");
+  expect(alert.textContent).toContain("Attach it with +");
+  expect(uploads).toEqual([]);
+});
+
+test("a drag carrying no file at all is not answered with a refusal", async () => {
+  const { container } = render(
+    <Composer channelId="channel-1" compact onSubmit={() => {}} />,
+  );
+
+  fireEvent.drop(container.querySelector("form") as HTMLFormElement, {
+    dataTransfer: { files: [], items: [], types: ["text/plain"] },
+  });
+  await settleReactWork();
+
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+});
+
 test("a text file the screen accepts is not refused a second time by the SDK", async () => {
   // The two-gate collision, pinned. `processFiles` compares `file.type` to the accept list
   // exactly, while our screen (and the server behind it) drop MIME parameters first. A `File`
