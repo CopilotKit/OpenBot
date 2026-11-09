@@ -137,13 +137,19 @@ async function connect(cookie: string, installId: string) {
   return (await exchanged.json()) as ExchangeResponse;
 }
 
-const clearOrganizationFailure = () =>
-  clearDesktopConnectionFailure("organization");
+// Every kind and not just the organization's: the failure state is one per process, the endpoint
+// answers with whichever failure it holds, and these tests assert it is empty. A file that ran
+// earlier in the same process and left a model failure behind failed them when the suite was first
+// split into shards.
+const clearDesktopFailures = () => {
+  for (const connection of ["model", "intelligence", "organization"] as const)
+    clearDesktopConnectionFailure(connection);
+};
 beforeEach(() => {
-  clearOrganizationFailure();
+  clearDesktopFailures();
   answer = signedIn;
 });
-afterEach(clearOrganizationFailure);
+afterEach(clearDesktopFailures);
 
 beforeAll(() => {
   Date.now = () => realNow() + skewMs;
