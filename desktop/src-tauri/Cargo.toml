@@ -1,6 +1,6 @@
 [package]
 name = "openbot-desktop"
-version = "1.0.0-rc.5"
+version = "1.0.0"
 description = "OpenBot Desktop"
 edition = "2021"
 rust-version = "1.90"
