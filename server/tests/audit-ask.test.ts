@@ -543,6 +543,56 @@ test("each recent midnight carries the offset in force that day, across a change
  * Bot whether or not any filter named one. It is handed the Audit page's words for the kind of row
  * now, and nothing that invites a subject the filters don't name.
  */
+/*
+ * Given "After: Monday, 9 November…" and "Before: Monday, 9 November…", the reader wrote "from 9
+ * November to 9 November". A range inside one local day reaches it as that day, once.
+ */
+describe("the reading is given a range inside one day as that day once", () => {
+  const timeOf = (filters: { from?: string; to?: string }) =>
+    describeFilters(
+      filters,
+      { bots: {}, people: {}, apps: {}, rules: {} },
+      "Europe/London",
+    );
+
+  test("today so far", () => {
+    expect(
+      timeOf({ from: "2026-11-09T00:00:00Z", to: "2026-11-09T14:33:00Z" }),
+    ).toEqual(["On Monday, 9 November 2026, from 00:00 to 14:33"]);
+  });
+
+  test("yesterday, ending at today's midnight", () => {
+    expect(
+      timeOf({ from: "2026-11-08T00:00:00Z", to: "2026-11-09T00:00:00Z" }),
+    ).toEqual(["On Sunday, 8 November 2026, the whole day"]);
+  });
+
+  test("the same day in the admin's zone, though not in UTC", () => {
+    expect(
+      describeFilters(
+        { from: "2026-11-09T08:00:00.000Z", to: "2026-11-09T22:00:00.000Z" },
+        { bots: {}, people: {}, apps: {}, rules: {} },
+        "America/Los_Angeles",
+      ),
+    ).toEqual(["On Monday, 9 November 2026, from 00:00 to 14:00"]);
+  });
+
+  test("a range over several days keeps both ends", () => {
+    expect(
+      timeOf({ from: "2026-11-02T00:00:00Z", to: "2026-11-09T00:00:00Z" }),
+    ).toEqual([
+      "After: Monday, 2 November 2026 at 00:00",
+      "Before: Monday, 9 November 2026 at 00:00",
+    ]);
+  });
+
+  test("one end alone is said as that end", () => {
+    expect(timeOf({ from: "2026-11-09T09:00:00Z" })).toEqual([
+      "After: Monday, 9 November 2026 at 09:00",
+    ]);
+  });
+});
+
 test("the reading is given the kind of row in the Audit page's words, and no Bot the filters don't name", () => {
   const rule = 'intent == "navigate" && contains(page.host, "facebook")';
   const ruleName = "Bots may not visit social media sites";

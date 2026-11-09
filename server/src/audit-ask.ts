@@ -271,7 +271,7 @@ function offsetMinutes(offset: string): number {
   );
 }
 
-/** "Monday 9 November 2026, 13:05" for the prompt and the reading. */
+/** "Monday, 9 November 2026 at 13:05" for the prompt and the reading. */
 function spokenTime(at: Date, timeZone: string): string {
   return new Intl.DateTimeFormat("en-GB", {
     timeZone,
@@ -871,11 +871,50 @@ export function describeFilters(
         : `${by} the rule written as: ${filters.rule}`,
     );
   }
-  if (filters.from)
-    lines.push(`After: ${spokenTime(new Date(filters.from), timeZone)}`);
-  if (filters.to)
-    lines.push(`Before: ${spokenTime(new Date(filters.to), timeZone)}`);
+  const oneDay =
+    filters.from &&
+    filters.to &&
+    withinOneDay(filters.from, filters.to, timeZone);
+  if (oneDay) lines.push(oneDay);
+  else {
+    if (filters.from)
+      lines.push(`After: ${spokenTime(new Date(filters.from), timeZone)}`);
+    if (filters.to)
+      lines.push(`Before: ${spokenTime(new Date(filters.to), timeZone)}`);
+  }
   return lines;
+}
+
+/**
+ * A range inside one local day, said as that day once: "On Monday, 9 November 2026, from 00:00 to
+ * 14:33". Given an After and a Before on the same day, the reader wrote "from 9 November to 9
+ * November". A range ending at the next midnight is that whole day, as "yesterday" is asked.
+ */
+function withinOneDay(
+  from: string,
+  to: string,
+  timeZone: string,
+): string | undefined {
+  const start = localIso(new Date(from), timeZone);
+  const end = localIso(new Date(to), timeZone);
+  const endsAtMidnight = end.slice(11, 19) === "00:00:00";
+  // The last moment the range holds, so a range ending at midnight belongs to the day before it.
+  const lastDay = localIso(
+    new Date(Date.parse(to) - (endsAtMidnight ? 1 : 0)),
+    timeZone,
+  ).slice(0, 10);
+  if (start.slice(0, 10) !== lastDay || Date.parse(from) >= Date.parse(to))
+    return undefined;
+  const day = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date(from));
+  if (start.slice(11, 19) === "00:00:00" && endsAtMidnight)
+    return `On ${day}, the whole day`;
+  return `On ${day}, from ${start.slice(11, 16)} to ${endsAtMidnight ? "the end of the day" : end.slice(11, 16)}`;
 }
 
 /** The filters as the reader receives them: the filters, and nothing about the question. */
