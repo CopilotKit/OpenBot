@@ -91,6 +91,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   file todo.txt in share", as its step and its Activity row do, and an opened "Looked for a tool"
   names the tools it found in words. A Bot's Your skills lists each skill by its title, and an app's
   page names the "Always ask before making changes" setting by its name.
+- A browser action waiting for your approval is named the way its card names it. A Bot's Activity
+  row read "Approve computer_click" with "write" beside it, and now reads "Click the link “Python”
+  on en.wikipedia.org". The Needs you card names the link too and lists what the action would send
+  by label, without the page handles a click carried as raw JSON.
 
 ## 0.3.4
 

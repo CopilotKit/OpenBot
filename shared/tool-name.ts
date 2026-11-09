@@ -198,6 +198,12 @@ function approvalParts(action: {
     };
   }
   /*
+   * A browser action on the site it acts on, with the control it presses when the page named one:
+   * "click the link “Python” on en.wikipedia.org". Activity said "Approve computer_click".
+   */
+  const browser = browserAction(action.toolRef, action.target);
+  if (browser) return { action: browser, place: action.scope, joiner: "on" };
+  /*
    * A computer's or a folder's own action in the words its step and its Activity row use. The card
    * said "write file on todo.txt in share" above a step that read "Save a file todo.txt in share".
    */
@@ -226,6 +232,96 @@ function approvalParts(action: {
   const path = computerFile(action.target);
   if (path) return { action: words, place: path, joiner: "" };
   return { action: words, place: action.scope, joiner: "on" };
+}
+
+/** Handles the model cites and the run carries, which name nothing a person could check. */
+const INTERNAL_ARGS = new Set(["ref", "snapshotId", "toolCallId", "signal"]);
+
+/**
+ * What an approval would send, as labelled lines for its card: "Text: hello", "To: sam@example.test".
+ * The card showed the arguments as JSON, and a click read `{ "ref": "f3e43", "snapshotId": 4 }`, two
+ * handles to a page snapshot nobody can see. Those are left out, so a click has nothing to add to its
+ * title and shows no lines at all. Everything else stays whole: nobody allows what they were not shown.
+ */
+export function approvalDetails(
+  args: unknown,
+): { label: string; value: string }[] {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return [];
+  return Object.entries(args).flatMap(([key, value]) => {
+    if (INTERNAL_ARGS.has(key) || value === undefined || value === null)
+      return [];
+    const text =
+      typeof value === "string"
+        ? value
+        : typeof value === "boolean"
+          ? value
+            ? "Yes"
+            : "No"
+          : typeof value === "number"
+            ? String(value)
+            : Array.isArray(value) &&
+                value.every((entry) => typeof entry === "string")
+              ? value.join(", ")
+              : JSON.stringify(value, null, 2);
+    const words = wordsOf(key).join(" ");
+    const label = words ? words.charAt(0).toUpperCase() + words.slice(1) : key;
+    return [{ label, value: text }];
+  });
+}
+
+/** What a browser action asks to do, said as its step says it. */
+const BROWSER_ACTIONS: Record<string, string> = {
+  computer_navigate: "open a page",
+  computer_click: "click",
+  computer_type: "fill in a field",
+  computer_key: "press a key",
+  computer_scroll: "scroll the page",
+};
+
+/** A page control's role in the words a person uses for it. */
+const CONTROL_WORDS: Record<string, string> = {
+  link: "link",
+  button: "button",
+  checkbox: "checkbox",
+  radio: "option",
+  option: "option",
+  tab: "tab",
+  menuitem: "menu item",
+  switch: "switch",
+  textbox: "field",
+  searchbox: "search field",
+  combobox: "list",
+};
+
+/**
+ * A browser action in words, naming the control it presses from the label the server resolved
+ * (`target.element`), never the ref and snapshot the model cited. Undefined for any other action.
+ */
+function browserAction(toolRef: string, target: unknown): string | undefined {
+  const base = BROWSER_ACTIONS[toolRef];
+  if (!base) return undefined;
+  const element =
+    target && typeof target === "object"
+      ? (target as { element?: { role?: unknown; name?: unknown } }).element
+      : undefined;
+  const name =
+    typeof element?.name === "string"
+      ? element.name.replace(/\s+/g, " ").trim()
+      : "";
+  const role =
+    typeof element?.role === "string" ? CONTROL_WORDS[element.role] : undefined;
+  if (toolRef === "computer_click") {
+    if (name) return `click ${role ? `the ${role} ` : ""}“${clipName(name)}”`;
+    return role ? `click ${/^[aeiou]/.test(role) ? "an" : "a"} ${role}` : base;
+  }
+  if (toolRef === "computer_type" && name) return `fill in “${clipName(name)}”`;
+  return base;
+}
+
+/** A control's label, short enough for a title. */
+function clipName(name: string): string {
+  const chars = Array.from(name);
+  return chars.length > 60 ? `${chars.slice(0, 59).join("")}…` : name;
 }
 
 /** The path a file action on the Bot's own computer names (`target.filePath`), or undefined. */
