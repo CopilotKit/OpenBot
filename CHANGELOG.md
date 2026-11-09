@@ -130,6 +130,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- "OpenBot is running" opens on its heading again. Its Updates disclosure, and the line above it,
+  sit under Show OpenBot and Stop OpenBot, as on the stopped screen, instead of at the top of the
+  card with nothing above the line.
 - The sidebar floats as frosted glass over the colours of OpenBot's orb, the orb sits beside
   OpenBot's name, and the app is set in Atkinson Hyperlegible Next. The glass turns off with the
   system's reduce transparency or increase contrast setting, and a skin keeps its own look.
