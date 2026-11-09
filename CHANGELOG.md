@@ -173,6 +173,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   is titled "Click" or "Send email on Gmail" instead of its tool id. The line under it names the
   folder and the Bot by name and the kind of action in words ("changes in share for Shop"), where
   it read "write on host-grant-15407-… for shopper-bot".
+- The CrewAI, Agno, LlamaIndex, ADK, Strands and Langroid Bots now run on Google. Choosing
+  Google sent litellm the provider name `google`, which it does not know, so every message failed
+  with "LLM Provider NOT provided"; it now gets `gemini`. `GOOGLE_API_KEY` is still the key.
 
 ## 0.3.4
 

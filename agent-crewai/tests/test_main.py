@@ -60,6 +60,7 @@ def run_input(messages):
         ("anthropic", "openai/gpt-4o", "anthropic/openai/gpt-4o"),
         ("openai", "qwen/qwen3-8b", "openai/qwen/qwen3-8b"),
         ("", "openai/gpt-5.6-terra", "openai/openai/gpt-5.6-terra"),
+        ("google", "gemini-2.5-flash", "gemini/gemini-2.5-flash"),
     ],
 )
 def test_model_normalizes_blank_provider_and_model_before_defaults(
