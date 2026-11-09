@@ -50,6 +50,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   (`{"type":"model-list-unreadable","source":"claude","status":401}` in the server log), and only
   the default model was known. The list is now asked for with the plan's own token, and the
   harness token is never sent anywhere but the harness.
+- **A message that couldn't reach the back end says so in plain words.** The conversation showed
+  the raw request failure in red, such as `REST run request failed: {"error":"Failed to resolve
+  Learning Container"}`. It now says "OpenBot couldn't reach its back end, so your message wasn't
+  sent. Try again, or quit and reopen OpenBot." The original text goes to the browser console.
 
 ## 1.0.0
 
