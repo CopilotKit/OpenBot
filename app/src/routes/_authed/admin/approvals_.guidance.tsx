@@ -143,10 +143,12 @@ function ReviewerGuidancePage() {
                 <p className="flex gap-1.5 text-muted-foreground text-sm">
                   <IconShieldLock className="mt-0.5 size-4 shrink-0" />
                   <span>
-                    Built-in safety always comes first. Changing passwords or
-                    security settings and paying always go to a person.
-                    Deleting, sending, sharing and publishing always ask.
-                    Guidance can't change that.
+                    Built-in safety always comes first. Deleting, sending,
+                    sharing, posting, paying and changing account settings ask
+                    first. Members can allow each once, for a conversation, or
+                    always, unless you set it to ask every time. Changing a
+                    password on a website is always left to the person. Guidance
+                    can't change that.
                   </span>
                 </p>
                 <div>

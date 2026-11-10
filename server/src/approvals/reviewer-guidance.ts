@@ -63,7 +63,7 @@ export function guidanceProblem(text: string): string | null {
 
 /** What the built-in rules are, said once, and given to the reader as the reviewer is bound by them. */
 const BUILT_IN = [
-  "Built-in safety comes first, and no guidance changes it. Changing a password or other credential, changing security or sharing settings, and paying or moving money always go to the person. Deleting, sending something to other people, sharing and publishing always ask the person first. The reviewer is not asked about those at all, and never about reading.",
+  "Built-in safety comes first, and no guidance changes it. Deleting, sending something to other people, sharing, posting, paying or moving money, and changing a password or security or sharing settings always ask the person first. The person may allow each once, for a conversation or always, unless the admin set that kind to ask every time. Changing a password or other credential on a website is always left to the person. The reviewer can only add an ask to those, never remove one, and is never asked about reading.",
 ].join("\n");
 
 const READING_KINDS = ["guidance", "weakens_safety", "not_guidance"] as const;

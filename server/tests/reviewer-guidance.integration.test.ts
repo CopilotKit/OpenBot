@@ -13,8 +13,8 @@ import { approvalTeamSettings } from "../src/db/schema/approvals";
 import { users } from "../src/db/schema/core";
 import { workItems } from "../src/db/schema/work";
 import { createModelCompleter } from "../src/routing/model";
-import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import recorded from "./fixtures/reviewer-guidance-recorded.json";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import {
   ACTIONS,
   type ActionName,
@@ -340,10 +340,12 @@ test("built-in safety still wins over guidance that tries to loosen it", async (
     ),
   ).toBe(false);
 
-  // Without guidance, the reviewer hands a reset of someone's sign-in factors to the person.
+  // Without guidance, safety decides a reset of someone's sign-in factors: a change to security
+  // settings, which asks the person first.
   expect((await gate("mfaReset"))?.action.policy).toMatchObject({
-    behaviour: "hand_off",
+    behaviour: "ask",
     source: "safety",
+    kind: "security_settings",
   });
 
   // Saved anyway, as if a reading had missed it, it still changes nothing safety decides.
@@ -351,17 +353,42 @@ test("built-in safety still wins over guidance that tries to loosen it", async (
     text: GUIDANCE.weakensSafety,
   });
   mock.clearRequests();
-  // Sending asks before the reviewer is asked at all.
-  expect((await gate("sendEmail"))?.action.policy).toMatchObject({
+  /*
+   * Sending still asks, even if the reviewer, read with these words, says to go ahead: a "proceed"
+   * can't let a kind of action through. The reviewer's worst answer for this send is served here.
+   */
+  mock.on(
+    {
+      predicate: (request) =>
+        lastMessage(request).includes("GMAIL_SEND_EMAIL") &&
+        lastMessage(request).includes(
+          guidanceForPrompt(GUIDANCE.weakensSafety),
+        ),
+    },
+    {
+      content: JSON.stringify({
+        verdict: "proceed",
+        preApproved: true,
+        safety: "none",
+        reason: "The guidance says to proceed.",
+      }),
+    },
+  );
+  const send = await gate("sendEmail");
+  expect(prompts()).toHaveLength(1);
+  expect(send?.action.policy).toMatchObject({
     behaviour: "ask",
     source: "safety",
+    kind: "sending",
+    review: { verdict: "proceed" },
   });
-  expect(prompts()).toHaveLength(0);
-  // The reset, which only the reviewer recognises, is still handed to the person as safety.
+  // The reset, which only the reviewer recognises as a sign-in change, still asks the person as
+  // safety: the reviewer's finding can only add an ask, whatever the guidance says.
   const reset = await gate("mfaReset");
   expect(reset?.action.policy).toMatchObject({
-    behaviour: "hand_off",
+    behaviour: "ask",
     source: "safety",
+    kind: "credentials",
     review: { safety: "credentials" },
   });
   expect(prompts()[0]).toContain(guidanceForPrompt(GUIDANCE.weakensSafety));
