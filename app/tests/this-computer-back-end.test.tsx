@@ -1,7 +1,8 @@
 /**
- * Settings → This computer: the Back end section. Only OpenBot Desktop has this page, and Desktop
- * runs the personal edition, whose local Intelligence isn't licensed for memory. So the section says
- * nothing about a Bot's memory; how much of the computer's memory it uses still shows.
+ * Settings → This computer: the OpenBot's services section, the local back end. Only OpenBot
+ * Desktop has this page, and Desktop runs the personal edition, whose local Intelligence isn't
+ * licensed for memory. So the section says nothing about a Bot's memory; how much of the
+ * computer's memory it uses still shows.
  *
  * The IPC Tauri injects into the Desktop window is the stand-in, answering `status` as the shell's
  * `openbot-desktop` plugin does (desktop/src-tauri/src/desktop_page.rs); the page is the real one.
@@ -62,18 +63,20 @@ afterAll(async () => {
   await GlobalRegistrator.unregister();
 });
 
-test("the Backend says what it keeps without mentioning memory", async () => {
+test("OpenBot's services say what they keep without mentioning memory", async () => {
   const Page = ThisComputerRoute.options.component as ComponentType;
   const view = render(
     <QueryClientProvider client={queryClient}>
       <Page />
     </QueryClientProvider>,
   );
-  const heading = await view.findByRole("heading", { name: "Backend" });
+  const heading = await view.findByRole("heading", {
+    name: "OpenBot's services",
+  });
   const section = heading.closest("section") as HTMLElement;
   expect(
     within(section).getByText(
-      "Keeps your Bots' conversations and skills. OpenBot uses it while it runs.",
+      "These keep your Bots' conversations and skills. OpenBot needs them while it runs.",
     ),
   ).toBeTruthy();
   expect(

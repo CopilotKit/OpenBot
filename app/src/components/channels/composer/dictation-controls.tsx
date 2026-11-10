@@ -18,11 +18,22 @@ type Dictation = ReturnType<typeof useDictation>;
 export function DictationButton({
   dictation,
   disabled,
+  onStarted,
 }: {
   dictation: Dictation;
   disabled: boolean;
+  /** Live dictation began: the caret goes to the box, so Enter stops it there. */
+  onStarted?: () => void;
 }) {
   if (!dictation.available) return null;
+  if (dictation.mode === "live")
+    return (
+      <LiveDictationButton
+        dictation={dictation}
+        disabled={disabled}
+        onStarted={onStarted}
+      />
+    );
   return (
     <Button
       aria-label="Dictate a message"
@@ -41,6 +52,116 @@ export function DictationButton({
     >
       <IconMicrophone className="size-4" />
     </Button>
+  );
+}
+
+/**
+ * LIVE DICTATION'S ONE BUTTON. The microphone starts it, and while it listens the same button is Stop,
+ * in the same place and size, so the way out is where the way in was. Stopping keeps every word in
+ * the box and sends nothing; Enter in the box does the same.
+ */
+function LiveDictationButton({
+  dictation,
+  disabled,
+  onStarted,
+}: {
+  dictation: Dictation;
+  disabled: boolean;
+  onStarted?: () => void;
+}) {
+  const { session, state, active } = dictation.live;
+  if (!active)
+    return (
+      <Button
+        aria-label="Dictate a message"
+        data-slot="composer-dictate"
+        title="Dictate a message"
+        className="size-8 shrink-0 self-end rounded-full"
+        disabled={disabled}
+        onClick={() => {
+          void session.start();
+          onStarted?.();
+        }}
+        size="icon"
+        type="button"
+        variant="ghost"
+      >
+        <IconMicrophone className="size-4" />
+      </Button>
+    );
+  const stopping = state.phase === "stopping";
+  return (
+    <Button
+      aria-label={stopping ? "Finishing dictation" : "Stop dictation"}
+      data-slot="composer-dictate-stop"
+      data-state={state.phase}
+      title="Stop dictation"
+      className="relative size-8 shrink-0 self-end rounded-full bg-muted text-foreground hover:bg-muted"
+      disabled={stopping}
+      onClick={session.stop}
+      size="icon"
+      type="button"
+      variant="ghost"
+    >
+      {state.phase === "listening" && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 rounded-full ring-2 ring-primary/40 motion-safe:animate-pulse"
+        />
+      )}
+      {/*
+       * No fade-in on the icon. Motion starts it at opacity 0 and needs animation frames to show it,
+       * and a Desktop window behind other windows gets none: Stop was there and could not be seen.
+       */}
+      {stopping ? (
+        <IconLoader2
+          aria-hidden="true"
+          className="size-4 motion-safe:animate-spin"
+        />
+      ) : (
+        <IconPlayerStopFilled className="size-3.5" />
+      )}
+    </Button>
+  );
+}
+
+/** What live dictation says above the box: that it is listening, waiting on the system, or a problem. */
+export function LiveDictationNotice({ dictation }: { dictation: Dictation }) {
+  const { state, session } = dictation.live;
+  if (dictation.mode !== "live") return null;
+  if (state.phase === "listening" || state.phase === "stopping")
+    return (
+      <span className="sr-only" role="status">
+        {state.phase === "listening" ? "Listening" : "Finishing dictation"}
+      </span>
+    );
+  if (state.phase === "preparing")
+    return (
+      <p className="pb-2 text-sm text-muted-foreground" role="status">
+        Waiting for permission to use the microphone and speech recognition.
+      </p>
+    );
+  if (state.phase !== "error") return null;
+  return (
+    <div className="flex items-start gap-2 pb-2">
+      <p
+        className="min-w-0 flex-1 text-sm text-destructive"
+        data-slot="composer-dictate-error"
+        role="alert"
+      >
+        {state.error}
+      </p>
+      <Button
+        aria-label="Dismiss"
+        className="shrink-0"
+        onClick={session.release}
+        size="icon-xs"
+        type="button"
+        variant="ghost"
+      >
+        <IconX />
+      </Button>
+    </div>
   );
 }
 
