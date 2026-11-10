@@ -31,6 +31,7 @@ import { inspectToolArguments } from "../content-governance";
 import { shareTargetOf } from "../share-target";
 import { type AccountMode, filedUnderPerson } from "../shared-accounts";
 import { transportFor } from "../transport";
+import { withReadRetries } from "../transient";
 import { withVendorDeadline } from "../vendor-deadline";
 import { accountBook, type PinnedAccount } from "./accounts";
 import { appCallPolicyContext } from "./call-policy";
@@ -708,34 +709,45 @@ export function callMethods(context: StoreContext) {
             : vendorUserId;
         const vendor =
           injectedVendor ?? transportFor(access.transport).callTool;
-        const result = await vendor(
-          {
-            url: effectiveUrl(row, entry),
-            token,
-            tokenHeader: tokenHeaderFor(entry),
-            actorId: runsAs ?? input.credentialActorId ?? input.actorId,
-            ...(pinned?.accountId && runsAs !== undefined
-              ? { accountId: pinned.accountId }
-              : {}),
-            botId: input.botId,
-            threadId: input.threadId ?? currentApprovalContext()?.threadId,
-          },
-          /*
-           * THE NAME THE VENDOR KNOWS, WHICH IS THE ONLY ONE IT WILL ANSWER TO. `toolName` is this
-           * deployment's half of the ref and is what the model was offered; Arcade is called by the
-           * qualified name its listing gave. They are the same string for every other transport,
-           * which is what the fallback records rather than papers over — see
-           * {@link mcpTools.vendorName}.
-           *
-           * FALLING BACK TO `toolName` RATHER THAN REFUSING, because a row this read did not find
-           * is not an unknown action: `classifyTool` above is built to decide on an app whose
-           * listing predates its catalogue entry, and the call goes on to the vendor to be judged
-           * there. The fallback is reached only for an action with no recorded row at all, and for
-           * those two names were never distinct.
-           */
-          advertised[0]?.vendorName ?? toolName,
-          vendorArgs,
-        );
+        /*
+         * A READ THAT FAILED FOR A REASON THAT PASSES IS TRIED AGAIN HERE, before the Bot hears of
+         * it, and a write never is: a write that timed out may have landed. Here rather than around
+         * the whole call, so the grant, the policy and the approval above are settled once, and the
+         * trail gets one row for what finally happened. See `../transient`.
+         */
+        const callVendor = () =>
+          vendor(
+            {
+              url: effectiveUrl(row, entry),
+              token,
+              tokenHeader: tokenHeaderFor(entry),
+              actorId: runsAs ?? input.credentialActorId ?? input.actorId,
+              ...(pinned?.accountId && runsAs !== undefined
+                ? { accountId: pinned.accountId }
+                : {}),
+              botId: input.botId,
+              threadId: input.threadId ?? currentApprovalContext()?.threadId,
+            },
+            /*
+             * THE NAME THE VENDOR KNOWS, WHICH IS THE ONLY ONE IT WILL ANSWER TO. `toolName` is this
+             * deployment's half of the ref and is what the model was offered; Arcade is called by the
+             * qualified name its listing gave. They are the same string for every other transport,
+             * which is what the fallback records rather than papers over — see
+             * {@link mcpTools.vendorName}.
+             *
+             * FALLING BACK TO `toolName` RATHER THAN REFUSING, because a row this read did not find
+             * is not an unknown action: `classifyTool` above is built to decide on an app whose
+             * listing predates its catalogue entry, and the call goes on to the vendor to be judged
+             * there. The fallback is reached only for an action with no recorded row at all, and for
+             * those two names were never distinct.
+             */
+            advertised[0]?.vendorName ?? toolName,
+            vendorArgs,
+          );
+        const result =
+          effect === "read"
+            ? await withReadRetries(callVendor)
+            : await callVendor();
         await recordAuditEvent(auditStore, {
           eventType: result.isError ? "mcp.call_failed" : "mcp.call_succeeded",
           targetType: "mcp_tool",

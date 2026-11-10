@@ -136,8 +136,9 @@ describe("a tool call nothing ever answered", () => {
   test("says no result rather than inventing a successful one", () => {
     // A fake success would have the Bot report reading a page it never reached.
     expect(NO_ANSWER_CAME.toLowerCase()).toContain("no result");
-    expect(NO_ANSWER_CAME.toLowerCase()).toContain(
-      "do not assume it succeeded",
+    expect(NO_ANSWER_CAME.startsWith("Not run:")).toBe(true);
+    expect(NO_ANSWER_CAME).toContain(
+      "say in your answer that you could not get it",
     );
   });
 

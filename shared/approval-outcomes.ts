@@ -24,10 +24,25 @@ export const DECLINED_BY_PERSON =
 /** What a Bot retrying an action that is still waiting is told, instead of opening a second request. */
 export const ALREADY_WAITING =
   "An identical request is already waiting for the person's decision on the Bot's page in OpenBot, so this was not done and no second request was made. Do not repeat it; wait for their answer.";
-export const WITHDRAWN_APPROVALS_OFF =
-  "Not done: this request was withdrawn because the person switched off asking before changes. Try the action again if it is still needed.";
-export const WITHDRAWN_RULE_ALLOWS =
-  "Not done: this request was withdrawn because a rule the person saved now allows it without asking. Try the action again if it is still needed.";
+/**
+ * ONE VOICE FOR EVERY STEP THAT DID NOT RUN: what happened, then the same two ways on.
+ *
+ * Three of these used to point three ways: "Do not assume it succeeded", "Run it again if it is
+ * still needed" and "Carry on without it". A Bot told only not to assume did nothing with the gap,
+ * and one told to carry on left it out of its answer without a word. Every "not run" answer now says
+ * what happened and then the same thing: run it again if it is still needed, or say in the answer
+ * that it could not be had. `why` is one sentence, with its full stop.
+ */
+export function notRun(why: string): string {
+  return `Not run: ${why} Run it again if you still need it, or say in your answer that you could not get it.`;
+}
+
+export const WITHDRAWN_APPROVALS_OFF = notRun(
+  "this request was withdrawn because the person switched off asking before changes.",
+);
+export const WITHDRAWN_RULE_ALLOWS = notRun(
+  "this request was withdrawn because a rule the person saved now allows it without asking.",
+);
 /**
  * What a hand-off answers the Bot with once the person has done it themselves.
  *
@@ -49,8 +64,9 @@ export const NOT_DONE = "Not done.";
  * before running. The turn picks up again with an answer for every step it asked for, so a Bot that
  * waits for all of them before it goes on (the Claude Agent SDK's does) is not left waiting for ever.
  */
-export const NOT_RUN_WHILE_WAITING =
-  "Not done: the turn stopped before this step to wait for the person on another step asked for at the same time. Run it again if it is still needed.";
+export const NOT_RUN_WHILE_WAITING = notRun(
+  "the turn stopped before this step to wait for the person on another step asked for at the same time.",
+);
 
 /**
  * An approved step that the check just before it ran turned away. `why` is one sentence, with its
@@ -83,14 +99,15 @@ const FOR_PERSON = new Map<string, string>([
 
 /**
  * The sentence a person reads for a step the Bot did not carry out. A known sentence is replaced
- * whole. Any other "Not done: <why>." keeps its first sentence and loses what follows it, which is
+ * whole. Any other "Not done: <why>." or "Not run: <why>." keeps its first sentence and loses what follows it, which is
  * the Bot's next step ("Ask the person again if it is still needed."). Anything else is a boundary
  * or the computer speaking, already written for a person, and is returned as it is.
  */
 export function outcomeForPerson(text: string): string {
   const known = FOR_PERSON.get(text.trim());
   if (known) return known;
-  if (!text.startsWith("Not done:")) return text;
+  if (!text.startsWith("Not done:") && !text.startsWith("Not run:"))
+    return text;
   const end = firstSentenceEnd(text);
   return end === -1 ? text : text.slice(0, end + 1);
 }
