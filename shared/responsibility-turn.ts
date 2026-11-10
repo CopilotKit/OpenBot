@@ -33,6 +33,9 @@ const REPORT =
 const REPORTED_AS_RESPONSIBILITY =
   "\n\nRecord meaningful progress with report_responsibility_progress for responsibility ";
 
+/** What a goal run with no success criteria is told it is done when. */
+export const NO_OUTCOME = "The instruction has been carried out.";
+
 export type ResponsibilityTurnParts = {
   instruction: string;
   successCriteria: string;
@@ -52,7 +55,7 @@ export function buildResponsibilityTurn(
   const repeats = parts.repeats
     ? `${REPEATS}${parts.repeats}${ONE_OF_MANY}`
     : "";
-  return `${parts.instruction}${CRITERIA}${parts.successCriteria}${PROGRESS}${parts.progress || "No progress recorded yet."}${TRIGGER}${parts.trigger.source}/${parts.trigger.type}${EVENT}${parts.eventData}${repeats}${REPORT}${parts.responsibilityId}.`;
+  return `${parts.instruction}${CRITERIA}${parts.successCriteria || NO_OUTCOME}${PROGRESS}${parts.progress || "No progress recorded yet."}${TRIGGER}${parts.trigger.source}/${parts.trigger.type}${EVENT}${parts.eventData}${repeats}${REPORT}${parts.responsibilityId}.`;
 }
 
 export type ResponsibilityTurn = {

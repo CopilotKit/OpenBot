@@ -15,6 +15,7 @@ import {
   agents,
   channels,
   intelligenceChannelMappings,
+  responsibilities,
   routines,
   users,
 } from "../src/db/schema";
@@ -154,7 +155,196 @@ async function listed(app: Hono<{ Variables: AppVariables }>) {
   return ((await response.json()) as { routines: ListedRoutine[] }).routines;
 }
 
+async function createGoal(
+  owner: AgentActor,
+  agentId: string,
+  channel: { id: string; threadId: string },
+) {
+  const id = `${testPrefix}-goal-${randomUUID()}`;
+  await database.insert(responsibilities).values({
+    id,
+    ownerUserId: owner.id,
+    agentId,
+    channelId: channel.id,
+    threadId: channel.threadId,
+    title: "Keep the leads list tidy",
+    instruction: "Tidy the leads list",
+    successCriteria: "The list has no duplicates",
+  });
+  return { id };
+}
+
 describe("New routine from the Routines page", () => {
+  test("a routine made from the page records the goal it runs", async () => {
+    const owner = await createUser();
+    const bot = await createBot(owner, "Lead Desk");
+    const channel = await createChannel(owner, [bot]);
+    const goal = await createGoal(owner, bot, channel);
+    const app = appFor(owner, async () => ({ replyText: "ok" }));
+    const created = await post(app, {
+      agentId: bot,
+      instruction: "Tidy the leads list",
+      cron: "0 9 * * 1-5",
+      timezone: "UTC",
+      channelId: channel.id,
+      goalId: goal.id,
+    });
+    expect(created.status).toBe(201);
+    expect(
+      ((await created.json()) as { routine: { goalId: string | null } }).routine
+        .goalId,
+    ).toBe(goal.id);
+  });
+
+  test("a routine can't be made for another person's goal", async () => {
+    const owner = await createUser();
+    const stranger = await createUser();
+    const bot = await createBot(owner, "Lead Desk");
+    const channel = await createChannel(owner, [bot]);
+    const strangersBot = await createBot(stranger, "Their Bot");
+    const strangersChannel = await createChannel(stranger, [strangersBot]);
+    const goal = await createGoal(stranger, strangersBot, strangersChannel);
+    const app = appFor(owner, async () => ({ replyText: "ok" }));
+    const refused = await post(app, {
+      agentId: bot,
+      instruction: "Tidy the leads list",
+      cron: "0 9 * * 1-5",
+      timezone: "UTC",
+      channelId: channel.id,
+      goalId: goal.id,
+    });
+    expect(refused.status).toBe(400);
+  });
+
+  test("a goal that belongs to somebody else on the same Bot is refused in words a person can read", async () => {
+    // The Bot and the conversation are the owner's, so only the owner check can refuse this.
+    const owner = await createUser();
+    const stranger = await createUser();
+    const bot = await createBot(owner, "Lead Desk");
+    const channel = await createChannel(owner, [bot]);
+    const goal = await createGoal(stranger, bot, channel);
+    const app = appFor(owner, async () => ({ replyText: "ok" }));
+    const refused = await post(app, {
+      agentId: bot,
+      instruction: "Tidy the leads list",
+      cron: "0 9 * * 1-5",
+      timezone: "UTC",
+      channelId: channel.id,
+      goalId: goal.id,
+    });
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { error: string }).error).toBe(
+      "This Bot doesn't have that goal. Choose another one.",
+    );
+    expect(await listed(app)).toEqual([]);
+  });
+
+  test("the other person's goal on the other person's Bot reads the same", async () => {
+    const owner = await createUser();
+    const stranger = await createUser();
+    const bot = await createBot(owner, "Lead Desk");
+    const channel = await createChannel(owner, [bot]);
+    const strangersBot = await createBot(stranger, "Their Bot");
+    const strangersChannel = await createChannel(stranger, [strangersBot]);
+    const goal = await createGoal(stranger, strangersBot, strangersChannel);
+    const app = appFor(owner, async () => ({ replyText: "ok" }));
+    const refused = await post(app, {
+      agentId: bot,
+      instruction: "Tidy the leads list",
+      cron: "0 9 * * 1-5",
+      timezone: "UTC",
+      channelId: channel.id,
+      goalId: goal.id,
+    });
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { error: string }).error).toBe(
+      "This Bot doesn't have that goal. Choose another one.",
+    );
+  });
+
+  test("a completed goal is refused in words a person can read", async () => {
+    const owner = await createUser();
+    const bot = await createBot(owner, "Lead Desk");
+    const channel = await createChannel(owner, [bot]);
+    const goal = await createGoal(owner, bot, channel);
+    await database
+      .update(responsibilities)
+      .set({ status: "completed" })
+      .where(eq(responsibilities.id, goal.id));
+    const app = appFor(owner, async () => ({ replyText: "ok" }));
+    const refused = await post(app, {
+      agentId: bot,
+      instruction: "Tidy the leads list",
+      cron: "0 9 * * 1-5",
+      timezone: "UTC",
+      channelId: channel.id,
+      goalId: goal.id,
+    });
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { error: string }).error).toBe(
+      "That goal is complete, so a routine can't run it. Choose another one.",
+    );
+  });
+
+  test("a time zone OpenBot doesn't know is refused in words a person can read", async () => {
+    const owner = await createUser();
+    const bot = await createBot(owner, "Lead Desk");
+    const channel = await createChannel(owner, [bot]);
+    const app = appFor(owner, async () => ({ replyText: "ok" }));
+    const refused = await post(app, {
+      agentId: bot,
+      instruction: "Tidy the leads list",
+      cron: "0 9 * * 1-5",
+      timezone: "Mars/Olympus_Mons",
+      channelId: channel.id,
+    });
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { error: string }).error).toBe(
+      "OpenBot doesn't know that time zone. Choose another one.",
+    );
+    expect(await listed(app)).toEqual([]);
+  });
+
+  test("switching on a routine whose stored time zone is invalid says what to do there", async () => {
+    const owner = await createUser();
+    const bot = await createBot(owner, "Lead Desk");
+    const channel = await createChannel(owner, [bot]);
+    const app = appFor(owner, async () => ({ replyText: "ok" }));
+    const created = await post(app, {
+      agentId: bot,
+      instruction: "Tidy the leads list",
+      cron: "0 9 * * 1-5",
+      timezone: "UTC",
+      channelId: channel.id,
+    });
+    const { routine } = (await created.json()) as { routine: { id: string } };
+    await app.request(
+      `http://openbot.test/api/routines/${routine.id}/enabled`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: false }),
+      },
+    );
+    await database
+      .update(routines)
+      .set({ timezone: "Mars/Olympus_Mons" })
+      .where(eq(routines.id, routine.id));
+
+    const refused = await app.request(
+      `http://openbot.test/api/routines/${routine.id}/enabled`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: true }),
+      },
+    );
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { error: string }).error).toBe(
+      "This routine's time zone isn't one OpenBot knows. Ask its Bot to change its schedule.",
+    );
+  });
+
   test("is created through the routine store, listed on both pages, and runs through the real runner", async () => {
     const owner = await createUser();
     const leadsBot = await createBot(owner, "Lead Desk");

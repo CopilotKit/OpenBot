@@ -8,6 +8,7 @@ import {
   NO_SHARED_CHANNEL,
   RoutineNotFoundError,
   RoutineRefusedError,
+  type RoutineRefusalCode,
   type RoutineRunOutcome,
   type RoutineStore,
   type RoutineSummary,
@@ -70,7 +71,7 @@ export function createRoutineRoutes(
         void runner.run(runId).catch(() => {});
         return context.json({ accepted: true, runId }, 202);
       } catch (error) {
-        return mapStoreError(context, error);
+        return mapStoreError(context, error, "run");
       }
     });
   }
@@ -92,7 +93,7 @@ export function createRoutineRoutes(
         })),
       });
     } catch (error) {
-      return mapStoreError(context, error);
+      return mapStoreError(context, error, "runs");
     }
   });
 
@@ -153,6 +154,7 @@ export function createRoutineRoutes(
         cron,
         timezone: text("timezone"),
         channelId,
+        goalId: text("goalId"),
       });
       const summary = (await routineStore.listFor(context.var.actor.id)).find(
         (candidate) => candidate.id === routine.id,
@@ -176,7 +178,7 @@ export function createRoutineRoutes(
           400,
         );
       }
-      return mapStoreError(context, error);
+      return mapStoreError(context, error, "create");
     }
   });
 
@@ -197,7 +199,7 @@ export function createRoutineRoutes(
       await routineStore.setEnabled(context.var.actor.id, id, enabled);
       return context.json({ enabled });
     } catch (error) {
-      return mapStoreError(context, error);
+      return mapStoreError(context, error, "enable");
     }
   });
 
@@ -210,7 +212,7 @@ export function createRoutineRoutes(
       await routineStore.remove(context.var.actor.id, id);
       return context.body(null, 204);
     } catch (error) {
-      return mapStoreError(context, error);
+      return mapStoreError(context, error, "delete");
     }
   });
 
@@ -294,14 +296,60 @@ function routineDto(routine: RoutineSummary): RoutineDto {
   };
 }
 
-function mapStoreError(context: Context, error: unknown): Response {
+/** The routes that answer a store refusal, each with its own sentences. */
+type RefusalRoute = "create" | "enable" | "run" | "runs" | "delete";
+
+/**
+ * The refusals the store words for a model (it names a tool, or says "I"), said to a person. The
+ * store keeps its own sentence for the Bot's tools; the rest read well as they are.
+ *
+ * KEYED BY ROUTE, THEN CODE, because the same refusal asks for different things on different
+ * screens. Only the create form offers a goal or a time zone to choose again; the enable switch
+ * offers nothing to choose, and there is no edit endpoint, so a routine with a time zone OpenBot
+ * doesn't know can only be replaced. A code a route can't raise has no entry there, and an entry
+ * missing for a coded refusal falls back to the store's own sentence.
+ *
+ * Call sites: POST / (create), PUT /:id/enabled (enable), POST /:id/run (run), GET /:id/runs (runs),
+ * DELETE /:id (delete).
+ */
+const PERSON_REFUSALS: Record<
+  RefusalRoute,
+  Partial<Record<RoutineRefusalCode, string>>
+> = {
+  create: {
+    goal_not_found: "This Bot doesn't have that goal. Choose another one.",
+    goal_complete:
+      "That goal is complete, so a routine can't run it. Choose another one.",
+    unknown_timezone:
+      "OpenBot doesn't know that time zone. Choose another one.",
+  },
+  enable: {
+    unknown_timezone:
+      "This routine's time zone isn't one OpenBot knows. Ask its Bot to change its schedule.",
+  },
+  run: {},
+  runs: {},
+  delete: {},
+};
+
+function mapStoreError(
+  context: Context,
+  error: unknown,
+  route: RefusalRoute,
+): Response {
   // The store's own sentence, verbatim: it already reads the same whether the id belongs to nobody
   // or to somebody else, which is what keeps ownership unprobeable from out here.
   if (error instanceof RoutineNotFoundError) {
     return context.json({ error: error.message }, 404);
   }
   if (error instanceof RoutineRefusedError) {
-    return context.json({ error: error.message }, 400);
+    return context.json(
+      {
+        error:
+          (error.code && PERSON_REFUSALS[route][error.code]) ?? error.message,
+      },
+      400,
+    );
   }
   throw error;
 }
