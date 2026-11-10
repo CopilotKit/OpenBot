@@ -75,7 +75,7 @@ const NOT_SHOWN: { file: string; text: string; why: string }[] = [
 const SHOWN_BY_DECISION: { file: string; text: string; why: string }[] = [
   {
     file: "desktop/src/CopilotKitAccount.tsx",
-    text: "It works with CopilotKit Intelligence, which runs on this computer too. Sign in to CopilotKit to get a free local license key for it.",
+    text: "This version of OpenBot runs self-contained on this computer. It uses a local version of CopilotKit Intelligence, which requires a free license key.",
     why: "the Account step names what the sign-in gets a license key for",
   },
 ];

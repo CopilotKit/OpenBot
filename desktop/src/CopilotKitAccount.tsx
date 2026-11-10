@@ -31,6 +31,14 @@ type Seen =
 const COULD_NOT_CHECK = "Couldn’t check your CopilotKit account. Try again.";
 
 /**
+ * The signed-out step's footnote, in Atai's words (2026-11-10). One string so a change of wording
+ * is one line. "Traffic data" is being checked with Atai: setup and usage telemetry go to
+ * CopilotKit by default (desktop_telemetry.rs, server/src/telemetry/product.ts).
+ */
+const WHAT_SIGNING_IN_SENDS =
+  "Your conversations and files stay on this computer. Signing in gets your free local license key and does NOT send traffic data to CopilotKit.";
+
+/**
  * How long the account check waits for a container engine, and how often it asks again. A new
  * Windows computer installs Podman and its machine while the person signs in, a few minutes at
  * most; an engine that never comes is Install's failure to show, not this step's.
@@ -213,7 +221,7 @@ export function CopilotKitAccount({
             ? "Setting up your apps"
             : appsFailed
               ? "Connect your apps"
-              : "OpenBot runs on this computer"}
+              : "Self-Contained OpenBot"}
       </h1>
       <p className="lede">
         {agreement
@@ -222,20 +230,14 @@ export function CopilotKitAccount({
             ? "OpenBot uses your CopilotKit account to set up apps like Gmail and Slack."
             : // Names CopilotKit Intelligence on this step alone: it is what the license key is
               // for, and the browser sign-in page that opens next says the same.
-              "It works with CopilotKit Intelligence, which runs on this computer too. Sign in to CopilotKit to get a free local license key for it."}
+              "This version of OpenBot runs self-contained on this computer. It uses a local version of CopilotKit Intelligence, which requires a free license key."}
       </p>
-      {/* What the person gives up by signing in, and only what holds: conversations and files stay
-          here, the sign-in fetches the license key, and what a Bot is asked goes to the AI provider
-          chosen on the AI step. Never "only gets the license key": once signed in, this step also
-          sets up apps. Nothing broader, such as "no data leaves this
-          computer": setup and usage telemetry, the AI provider and connected apps all reach the
-          network. */}
+      {/* What signing in sends, in Atai's words: see WHAT_SIGNING_IN_SENDS. Never "only gets the
+          license key": once signed in, this step also sets up apps. Nothing broader, such as "no
+          data leaves this computer": setup and usage telemetry, the AI provider and connected apps
+          all reach the network. */}
       {!agreement && !connecting && !appsFailed && (
-        <p className="footnote">
-          Your conversations and files stay on this computer. Signing in gets
-          your license key and doesn’t send them to CopilotKit. What you ask a
-          Bot goes to the AI provider you choose.
-        </p>
+        <p className="footnote">{WHAT_SIGNING_IN_SENDS}</p>
       )}
 
       {/* The account check waits on the engine too. While Docker Desktop starts, this says what
@@ -275,7 +277,7 @@ export function CopilotKitAccount({
       <div className="row">
         {seen.at === "signed-out" && (
           <button type="button" onClick={signIn}>
-            Sign in for a free license key
+            Sign in for a free local license key
           </button>
         )}
         {agreement && (

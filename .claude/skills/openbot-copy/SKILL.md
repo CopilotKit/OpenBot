@@ -46,9 +46,9 @@ end. Try again." Name a feature by what it does (Automatic learning, Memory, Ski
 docs under `docs/` and `charts/` are not shown to a person and may name it.
 `tests/no-intelligence-in-user-copy.test.ts` fails on a shown string that says it.
 
-**One exception: OpenBot Desktop's Account step.** Its lede says "It works with CopilotKit
-Intelligence, which runs on this computer too. Sign in to CopilotKit to get a free local license key
-for it."
+**One exception: OpenBot Desktop's Account step.** Its lede says "This version of OpenBot
+runs self-contained on this computer. It uses a local version of CopilotKit Intelligence, which
+requires a free license key." That copy is Atai's, word for word.
 That screen asks the person to sign in to another company's account, and the name is what makes
 the license key make sense; the CopilotKit sign-in page it opens says the same. It is listed by
 exact text in `SHOWN_BY_DECISION` in the test. Anywhere else, the back end.
