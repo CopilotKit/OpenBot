@@ -25,7 +25,7 @@ import { OnboardingFrame } from "../src/components/onboarding/onboarding-frame";
 const asked = process.env.OPENBOT_APP_BROWSER === "1";
 
 /** Where macOS draws the window's buttons over the page, as measured in OpenBot Desktop on macOS 26. */
-const WINDOW_BUTTONS = { left: 19, top: 25, right: 81, bottom: 41 };
+const WINDOW_BUTTONS = { left: 19, top: 21, right: 81, bottom: 37 };
 
 const frame = renderToStaticMarkup(
   <OnboardingFrame
