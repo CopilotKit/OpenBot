@@ -227,6 +227,7 @@ describe("what a channel is waiting on", () => {
       createdAt: since,
       pinned: false,
       lastReadAt: null,
+      canRename: true,
       task: false,
     });
     const store = fakeStore({
@@ -260,6 +261,7 @@ describe("what a channel is waiting on", () => {
       createdAt: since,
       pinned: false,
       lastReadAt: null,
+      canRename: true,
       task,
     });
     const store = fakeStore({
