@@ -22,7 +22,7 @@ use openbot_desktop_lib::{
     harness, host_access, install, local_eval, local_eval_state, logging, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
-    telemetry, tray, troubleshooting, upgrade, windows as win,
+    telemetry, tray, troubleshooting, update_ready, upgrade, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -119,6 +119,8 @@ struct Shell {
     waiting_notice_page: Mutex<Option<String>>,
     /// A newer OpenBot Desktop, as the feed last said, and an install of it under way.
     app_update: app_update::Known,
+    /// Wakes the thread that gets a newer version ready when the feed names one.
+    update_ready: update_ready::Nudge,
 }
 
 /// The deployment whose Compose up may have created containers, including a partial failure.
@@ -752,8 +754,13 @@ fn report_running_line<R: tauri::Runtime>(
 /// behind. So the deprecated call, through `set_focus`, is the one used. `AppHandle::show` first
 /// unhides an app hidden with Command-H, which `set_focus` does not.
 ///
-/// On Windows `set_focus` gets past the foreground lock (tao's `force_window_active`).
-/// `set_focus` does nothing to a hidden or minimised window, hence `show` and `unminimize` first.
+/// On Windows it is `SetForegroundWindow`, and when Windows refuses it (another app holds the
+/// foreground, as the browser does during sign-in) the taskbar button flashes instead. Never tao's
+/// `set_focus` there: past a refusal it presses and releases Alt to get by the foreground lock
+/// (`force_window_active`), and a lone Alt can put a WebView2 window into menu mode, which only a
+/// click, Alt+Tab or Esc ends. On Windows F setup froze for minutes right after "[front] the engine
+/// machine is prepared" with the browser in front. `set_focus` does nothing to a hidden or
+/// minimised window, hence `show` and `unminimize` first.
 fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
     log::info!("[front] {why}");
     #[cfg(target_os = "macos")]
@@ -763,7 +770,58 @@ fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
     };
     let _ = window.show();
     let _ = window.unminimize();
+    #[cfg(windows)]
+    {
+        let hwnd = window.hwnd().ok().map(|hwnd| hwnd.0 as isize);
+        let why = why.to_owned();
+        // On the window's own thread, as `notice::bring_to_front` is.
+        let _ = app.run_on_main_thread(move || {
+            let front = come_forward(
+                || {
+                    hwnd.is_some_and(|hwnd| {
+                        use windows::Win32::Foundation::HWND;
+                        use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
+                        // SAFETY: `hwnd` is this window's live handle, read just now.
+                        unsafe { SetForegroundWindow(HWND(hwnd as *mut core::ffi::c_void)) }
+                            .as_bool()
+                    })
+                },
+                || {
+                    let _ = window
+                        .request_user_attention(Some(tauri::UserAttentionType::Informational));
+                },
+            );
+            if front == Front::Flashed {
+                log::info!(
+                    "[front] {why}: Windows kept another window in front; flashed the taskbar"
+                );
+            }
+        });
+    }
+    #[cfg(not(windows))]
     let _ = window.set_focus();
+}
+
+/// How OpenBot's window came forward on Windows (`bring_to_front`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
+enum Front {
+    /// `SetForegroundWindow` put it in front.
+    Came,
+    /// Windows refused, and the taskbar button flashes for the person to come to it.
+    Flashed,
+}
+
+/// Bring the window forward with `set_foreground`, and if Windows refuses, `flash` its taskbar
+/// button. Nothing else: no key pressed or released on the person's behalf.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn come_forward(set_foreground: impl FnOnce() -> bool, flash: impl FnOnce()) -> Front {
+    if set_foreground() {
+        Front::Came
+    } else {
+        flash();
+        Front::Flashed
+    }
 }
 
 /// The setup window asks to come to the front: its installation finished or failed, and the next
@@ -1408,6 +1466,9 @@ fn watch_for_app_updates<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Some(feed) = app_update_feed(app) else {
         let version = &app.package_info().version;
         log::info!("[app update] {version} is offered no updates; no update check");
+        if let Some(folder) = app_update_test_feed(app) {
+            watch_test_feed(app, folder);
+        }
         return;
     };
     let handle = app.clone();
@@ -1431,11 +1492,222 @@ fn watch_for_app_updates<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
                         }
                     }
                     handle.state::<Shell>().app_update.record(&answer);
+                    if matches!(answer, Ok(Some(_))) {
+                        handle.state::<Shell>().update_ready.nudge();
+                    }
                 },
             )
         });
     if let Err(error) = watching {
         log::error!("[app update] could not start checking for updates: {error}");
+    }
+}
+
+/**
+Get the newer version the feed names ready while this one runs (`update_ready`), on a thread of its
+own: a try as soon as the feed names one, and every `app_update::TICK` after, until it is ready. A
+try waits while OpenBot is not running, or while something the person started needs the engine
+(`update_ready_paused`), so the first one after a launch comes once Start is done. Once ready, each
+try only checks that it still is. A build that is offered no updates never starts it.
+*/
+fn get_updates_ready<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    // An internal build pointed at a test feed reads its list from there.
+    let test = app_update_test_feed(app);
+    if app_update_feed(app).is_none() && test.is_none() {
+        return;
+    }
+    let handle = app.clone();
+    let getting = std::thread::Builder::new()
+        .name("openbot-update-ready".into())
+        .spawn(move || {
+            let mut lists: Option<(semver::Version, update_ready::Announced)> = None;
+            let mut said: Option<String> = None;
+            loop {
+                handle.state::<Shell>().update_ready.wait(app_update::TICK);
+                try_getting_update_ready(&handle, test.as_deref(), &mut lists, &mut said);
+            }
+        });
+    if let Err(error) = getting {
+        log::error!("[update ready] could not start getting updates ready: {error}");
+    }
+}
+
+/// Whether a try at getting an update ready waits, or stops before its next image: OpenBot is not
+/// running, or is starting, stopping, updating or quitting.
+fn update_ready_paused<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    use std::sync::atomic::Ordering::SeqCst;
+    let shell = app.state::<Shell>();
+    shell.starting.load(SeqCst)
+        || shell.updating.load(SeqCst)
+        || shell.app_update.installing()
+        || !matches!(*shell.quit.phase.lock().unwrap(), QuitPhase::Idle)
+        || shell.root.lock().unwrap().is_none()
+        || shell.containers.lock().unwrap().is_none()
+}
+
+/// One try at getting the newer version ready, said in the log once per change of outcome.
+fn try_getting_update_ready<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    test: Option<&Path>,
+    lists: &mut Option<(semver::Version, update_ready::Announced)>,
+    said: &mut Option<String>,
+) {
+    let mut say = |line: String, warn: bool| {
+        if said.as_deref() != Some(line.as_str()) {
+            if warn {
+                log::warn!("{line}");
+            } else {
+                log::info!("{line}");
+            }
+            *said = Some(line);
+        }
+    };
+    let shell = app.state::<Shell>();
+    let Some(version) = shell.app_update.newer() else {
+        shell.app_update.not_ready();
+        return;
+    };
+    if update_ready_paused(app) {
+        return;
+    }
+    let Some((root, address)) = shell
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|running| (running.root.clone(), running.address.clone()))
+    else {
+        return;
+    };
+    let list = match lists.as_ref().filter(|(listed, _)| *listed == version) {
+        Some((_, list)) => list.clone(),
+        None => {
+            let repository = deployment_release::distribution(&root)
+                .map(|policy| policy.repository)
+                .unwrap_or_else(|_| "CopilotKit/OpenBot".into());
+            let read = match test {
+                Some(folder) => update_ready::read_test_list(folder),
+                None => deployment::get(&update_ready::list_url(&repository, &version))
+                    .and_then(|body| update_ready::read_list(&body, &version)),
+            };
+            match read {
+                Ok(list) => {
+                    *lists = Some((version.clone(), list.clone()));
+                    list
+                }
+                Err(error) => {
+                    say(
+                        format!("[update ready] could not read what {version} downloads: {error}"),
+                        true,
+                    );
+                    return;
+                }
+            }
+        }
+    };
+    let installed = preparation::installed_images(&root).unwrap_or_default();
+    let engine = local_eval::node_engine();
+    let node = local_eval_state::read(&root, None)
+        .map(|state| openbot_desktop_lib::local_images::Node::for_stack(&engine, &state.stack));
+    let current = local_eval::bundled_cli_images();
+    let ahead = update_ready::Ahead {
+        version: &version,
+        list: &list,
+        engine: &address,
+        installed: &installed,
+        back_end: node.as_ref().zip(current.as_ref()),
+        disk: &|| local_eval::engine_disk(&address),
+        computer_free: &|| update_ready::computer_free(&address),
+        limits: openbot_desktop_lib::local_images::Limits::standard(),
+    };
+    // Stopped when OpenBot needs the engine, or the feed names another version meanwhile.
+    let stop = || update_ready_paused(app) || shell.app_update.newer().as_ref() != Some(&version);
+    let outcome = update_ready::get_ready(&ahead, &stop, &mut |done, total| {
+        shell
+            .app_update
+            .readying(&version, app_update::Readiness::Preparing { done, total })
+    });
+    match outcome {
+        update_ready::Outcome::Ready => {
+            shell
+                .app_update
+                .readying(&version, app_update::Readiness::Ready);
+            say(
+                format!("[update ready] {version} is ready to install"),
+                false,
+            );
+        }
+        update_ready::Outcome::Skipped(why) => {
+            shell.app_update.not_ready();
+            say(
+                format!(
+                    "[update ready] not downloading {version} ahead of the update: {why}; the update downloads it"
+                ),
+                true,
+            );
+        }
+        update_ready::Outcome::Stopped => {
+            shell.app_update.not_ready();
+            log::info!("[update ready] stopped getting {version} ready; it goes on later");
+        }
+        update_ready::Outcome::NotYet(why) => {
+            shell.app_update.not_ready();
+            say(
+                format!("[update ready] {version} is not ready yet: {why}; trying again later"),
+                true,
+            );
+        }
+    }
+}
+
+/// The test feed an internal build was pointed at (`app_update::TEST_FEED`), from the environment
+/// the app was started in. None on a stable or candidate build, whatever the environment says.
+fn app_update_test_feed<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
+    app_update::test_feed(&app.package_info().version, |name| std::env::var_os(name))
+}
+
+/**
+Read an internal build's test feed (`app_update::TEST_FEED`) at launch and every `app_update::TICK`,
+as a release build reads its update feed, and keep what it names newer, so the background download
+(`get_updates_ready`) runs for it. Nothing installs from it: an internal build has no updater.
+*/
+fn watch_test_feed<R: tauri::Runtime>(app: &tauri::AppHandle<R>, folder: PathBuf) {
+    log::info!("[update ready] using a test feed from {}", folder.display());
+    let handle = app.clone();
+    let watching = std::thread::Builder::new()
+        .name("openbot-test-feed".into())
+        .spawn(move || {
+            let current = handle.package_info().version.clone();
+            let mut said: Option<String> = None;
+            app_update::watch(
+                app_update::Schedule::new(app_update::TICK),
+                std::time::SystemTime::now,
+                |tick| {
+                    std::thread::sleep(tick);
+                    true
+                },
+                || {
+                    let answer = app_update::test_newer(&current, &folder);
+                    let line = match &answer {
+                        Ok(Some(newer)) => format!("[update ready] the test feed names {newer}"),
+                        Ok(None) => "[update ready] the test feed names nothing newer".into(),
+                        Err(error) => {
+                            format!("[update ready] could not read the test feed: {error}")
+                        }
+                    };
+                    if said.as_deref() != Some(line.as_str()) {
+                        log::info!("{line}");
+                        said = Some(line);
+                    }
+                    handle.state::<Shell>().app_update.record(&answer);
+                    if matches!(answer, Ok(Some(_))) {
+                        handle.state::<Shell>().update_ready.nudge();
+                    }
+                },
+            )
+        });
+    if let Err(error) = watching {
+        log::error!("[update ready] could not start reading the test feed: {error}");
     }
 }
 
@@ -1453,17 +1725,22 @@ fn app_update_feed<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<app_u
 async fn check_app_update_now<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<app_update::Asked, String> {
+    let handle = app.clone();
     let asked = tauri::async_runtime::spawn_blocking(move || {
         app_update::ask(
-            app_update_feed(&app).as_ref(),
-            &app.package_info().version,
-            &app.state::<Shell>().app_update,
+            app_update_feed(&handle).as_ref(),
+            &handle.package_info().version,
+            &handle.state::<Shell>().app_update,
         )
     })
     .await
     .map_err(|error| error.to_string())?;
     if let Ok(found) = &asked {
         log::info!("[app update] checked when asked: {found:?}");
+    }
+    // Got ready at once, rather than at the next tick.
+    if let Ok(app_update::Asked::Available { .. }) = &asked {
+        app.state::<Shell>().update_ready.nudge();
     }
     asked
 }
@@ -4855,14 +5132,16 @@ Windows opened a bare browser window of its own. The configuration says `"create
 /**
 Where the main window's buttons sit on macOS: 20pt in from the left, and low enough that their middle
 lines up with the first row of OpenBot's sidebar header (its name and +), which the page
-moves right to clear them (app/src/styles.css, `data-desktop-titlebar`).
+moves right to clear them (app/src/styles.css, `data-desktop-titlebar`). That row's middle is 32pt
+down (the inset sidebar's 8pt, the header's 8pt, then half its 32pt row), and on macOS 26 the
+circles' middle lands about 1.5pt below `y`, so `y` is 31.
 
 Set on the builder, not per page, because tao keeps it and puts the buttons back after anything that
 moves them (a resize, leaving full screen), and Tauri 2.12 can't change it after the window exists.
 So the setup screens have the buttons here too, where nothing of theirs is near them.
 */
 #[cfg(target_os = "macos")]
-const TRAFFIC_LIGHTS: tauri::LogicalPosition<f64> = tauri::LogicalPosition { x: 20.0, y: 35.0 };
+const TRAFFIC_LIGHTS: tauri::LogicalPosition<f64> = tauri::LogicalPosition { x: 20.0, y: 31.0 };
 
 fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
     let Some(config) = app
@@ -4882,13 +5161,14 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
     #[cfg(target_os = "macos")]
     let builder = builder.traffic_light_position(TRAFFIC_LIGHTS);
     /*
-     * Hidden until it is where it belongs. `tauri_plugin_window_state` puts it back at the size and
-     * place it had as it is built, and `fit_main_window_to_screen` brings it onto a screen that is
-     * there; only then is it shown. Shown as built, it flashed blank at Windows' default spot for a
-     * moment and then jumped (52,52 to 360,90 on Windows D).
+     * Built visible, as the configured window always was. It was built hidden and shown once it
+     * was in place (to spare a reopened window a moment at the system's default spot), and on
+     * Windows that froze setup: the WebView2 page under a window first created hidden stopped
+     * taking native updates a few seconds after a download line appeared, for minutes, until the
+     * window was activated or clicked. `tauri_plugin_window_state` puts it back at the size and
+     * place it had as it is built, and `fit_main_window_to_screen` brings it onto a screen.
      */
     let window = builder
-        .visible(false)
         .on_new_window(move |destination, _features| {
             outside_links::new_window(&destination, |to| {
                 use tauri_plugin_opener::OpenerExt;
@@ -4900,7 +5180,6 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
     // At the level kept from the last launch before anything paints (`zoom`).
     let _ = window.set_zoom(saved_zoom(app));
     fit_main_window_to_screen(app);
-    let _ = window.show();
     Ok(())
 }
 
@@ -9297,6 +9576,7 @@ fn main() {
             }
             // The banner and the setup window's offer both read this, never the network.
             watch_for_app_updates(app.handle());
+            get_updates_ready(app.handle());
             desktop_telemetry::initialize(app.handle());
             if let Some(root) = app
                 .path()
@@ -9547,6 +9827,47 @@ mod check_for_updates_tests {
         .map(|body| body.deserialize().unwrap())
     }
 
+    /// The test feed reaches only an internal build, through the start the app itself makes: a
+    /// stable build started with `OPENBOT_TEST_UPDATE_FEED` set is offered nothing from it, and an
+    /// internal build started the same way is offered what it names.
+    #[test]
+    fn only_an_internal_build_is_offered_what_the_test_feed_names() {
+        let folder = crate::test_support::temp_root("test-feed-wiring");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("latest.json"), r#"{"version": "9.9.9"}"#).unwrap();
+        std::env::set_var(app_update::TEST_FEED, &folder);
+        let started = |version: &str| {
+            let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+            context.package_info_mut().version = semver::Version::parse(version).unwrap();
+            let app = tauri::test::mock_builder()
+                .manage(Shell::default())
+                .build(context)
+                .unwrap();
+            watch_for_app_updates(app.handle());
+            app
+        };
+        let stable = started("1.0.1");
+        let candidate = started("1.0.1-rc.2");
+        let internal = started("1.0.1-internal.731.gabc123456789");
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while internal.state::<Shell>().app_update.newer().is_none() {
+            assert!(
+                std::time::Instant::now() < until,
+                "the internal build read its test feed"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        std::env::remove_var(app_update::TEST_FEED);
+        assert_eq!(
+            internal.state::<Shell>().app_update.newer(),
+            Some(semver::Version::parse("9.9.9").unwrap())
+        );
+        assert_eq!(stable.state::<Shell>().app_update.newer(), None);
+        assert_eq!(candidate.state::<Shell>().app_update.newer(), None);
+        assert_eq!(app_update_status(stable.handle()).version, None);
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+
     /// The bug: on a signed 0.3.2, the setup window's Check desktop shell update asked an old
     /// mechanism release builds do not carry, and said "Signed desktop shell updates are not
     /// configured." A release build now answers from the feed its updater installs from.
@@ -9560,7 +9881,9 @@ mod check_for_updates_tests {
         let (app, window) = app(Some(&feed_at("0.3.3")));
         assert_eq!(
             check(&window),
-            Ok(serde_json::json!({ "found": "available", "version": "0.3.3", "current": "0.1.0" }))
+            Ok(
+                serde_json::json!({ "found": "available", "version": "0.3.3", "current": "0.1.0", "ready": null })
+            )
         );
         // Kept, so the banner offers the same version.
         assert_eq!(
@@ -13110,6 +13433,49 @@ mod tests {
         assert_eq!(onto_a_screen(rect(-5000.0, 0.0, 1016.0, 839.0), &[]), None);
     }
 
+    /// Another app holds the foreground (the browser, signing in): Windows refuses
+    /// `SetForegroundWindow`, and the taskbar button flashes. Nothing else happens: no key is
+    /// pressed or released on the person's behalf. tao's `set_focus` pressed Alt there, and a lone
+    /// Alt can leave a WebView2 window in menu mode; on Windows F setup froze for minutes after
+    /// "[front] the engine machine is prepared" with the browser in front.
+    #[test]
+    fn coming_forward_with_another_window_in_front_flashes_and_sends_no_input() {
+        let done = std::cell::RefCell::new(Vec::new());
+        let front = come_forward(
+            || {
+                done.borrow_mut().push("set foreground");
+                false
+            },
+            || done.borrow_mut().push("flash the taskbar"),
+        );
+        assert_eq!(front, Front::Flashed);
+        assert_eq!(*done.borrow(), ["set foreground", "flash the taskbar"]);
+        // Allowed in front: nothing flashes.
+        let done = std::cell::RefCell::new(Vec::new());
+        let front = come_forward(
+            || {
+                done.borrow_mut().push("set foreground");
+                true
+            },
+            || done.borrow_mut().push("flash the taskbar"),
+        );
+        assert_eq!(front, Front::Came);
+        assert_eq!(*done.borrow(), ["set foreground"]);
+        // On Windows, `bring_to_front` never reaches tao's `set_focus` (its Alt press), and
+        // nothing in this file sends key input of its own.
+        let main = include_str!("main.rs");
+        let body = &main[main.find("fn bring_to_front<").unwrap()..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        let windows = &body[body.find("#[cfg(windows)]").unwrap()..];
+        let windows = &windows[..windows.find("#[cfg(not(windows))]").unwrap()];
+        assert!(!windows.contains("set_focus"), "{windows}");
+        assert!(body.contains("#[cfg(not(windows))]\n    let _ = window.set_focus();"));
+        let tests = main.find("#[cfg(test)]\nmod tests").unwrap_or(main.len());
+        for input in ["SendInput", "keybd_event", "VK_MENU"] {
+            assert!(!main[..tests].contains(input), "{input}");
+        }
+    }
+
     /// Windows cascades a window with no position of its own down and right on every launch. On
     /// a 1080p screen with a 48 px taskbar the third launch put a 1016 by 839 window's top at 234,
     /// its bottom at 1073, past the work area's 1032, and the account row behind the taskbar.
@@ -13183,15 +13549,14 @@ mod tests {
         );
         assert_eq!(window.label(), "main");
 
-        // Built hidden, put where it belongs, then shown: never a flash at the system's default
-        // spot before it moves (Windows D, reopening).
+        // Never built hidden: on Windows a WebView2 page under a window first created hidden
+        // stopped taking native updates mid-setup, for minutes, until the window was activated
+        // (1.0.1 release candidate). Built visible, then put on a screen.
         let body = &main[main.find("fn build_main_window").unwrap()..];
         let body = &body[..body.find("\n}\n").unwrap()];
-        let hidden = body.find(".visible(false)").expect("built hidden");
-        let built = body.find(".build()?").unwrap();
-        let fitted = body.find("fit_main_window_to_screen(app)").expect("fitted");
-        let shown = body.find("window.show()").expect("shown");
-        assert!(hidden < built && built < fitted && fitted < shown, "{body}");
+        assert!(!body.contains(".visible(false)"), "{body}");
+        assert!(!body.contains(".show()"), "{body}");
+        assert!(body.contains("fit_main_window_to_screen(app)"), "{body}");
         assert!(window.is_visible().unwrap_or(true));
     }
 

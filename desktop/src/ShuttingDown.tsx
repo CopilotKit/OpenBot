@@ -141,13 +141,20 @@ export function quitTick(
 }
 
 /** A Quit's journey: what it is doing, one bar, the time left and the time so far. */
-function QuitJourney({ steps }: { steps: readonly Progress[] }) {
-  const [now, setNow] = useState(() => Date.now());
+function QuitJourney({
+  steps,
+  clock,
+}: {
+  steps: readonly Progress[];
+  /** The quit's clock, kept by the screen for the whole quit (`ShuttingDown`). */
+  clock: { current: QuitClock | null };
+}) {
+  const [, tick] = useState(0);
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
+    const timer = setInterval(() => tick((count) => count + 1), 1000);
     return () => clearInterval(timer);
   }, []);
-  const clock = useRef<QuitClock | null>(null);
+  const now = Date.now();
   const ticked = quitTick(clock.current, steps, now);
   clock.current = ticked.clock;
   const elapsed = Math.floor((now - ticked.clock.began) / 1000);
@@ -182,7 +189,14 @@ function QuitJourney({ steps }: { steps: readonly Progress[] }) {
 export function ShuttingDown({ status }: { status: QuitStatus | null }) {
   const steps = status?.steps ?? [];
   const failed = steps.some((step) => !step.ok);
-  const running = !failed && steps.some((step) => step.running);
+  /*
+   * The journey stays for the whole quit, with its clock kept here. It was shown only while a
+   * step ran, so in the moment between "Stopping OpenBot" finishing and its services starting to
+   * stop it went away and came back with a new clock: on Windows F the bar went from 46% to 7% and
+   * "14s so far" to "1s so far".
+   */
+  const clock = useRef<QuitClock | null>(null);
+  const running = !failed && status !== null;
   return (
     <main>
       <div className="sheet connection-sheet">
@@ -192,7 +206,7 @@ export function ShuttingDown({ status }: { status: QuitStatus | null }) {
             ? "Part of it could not be stopped. OpenBot says what happened the next time it opens."
             : "OpenBot is stopping what it started on this computer, then it closes."}
         </p>
-        {running && <QuitJourney steps={steps} />}
+        {running && <QuitJourney steps={steps} clock={clock} />}
         <SetupProgress
           steps={steps}
           label="Shutdown progress"

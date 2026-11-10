@@ -331,6 +331,7 @@ export function journeyTick(
       watched.waited,
       watched.perPart,
       watched.steady,
+      watched.allIn,
     );
     steady = watched.steady;
   }

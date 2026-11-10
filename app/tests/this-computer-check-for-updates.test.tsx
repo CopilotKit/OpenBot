@@ -193,3 +193,30 @@ test("an older desktop app that doesn't say up front still answers the check in 
   expect(said).toBe(DOESNT_UPDATE_ITSELF);
   expect(said).not.toMatch(/configured|feature|shell/i);
 });
+
+test("a newer version says it is downloading in the background, then that it is ready to install", async () => {
+  found = { found: "available", version: "0.3.3", current: "0.3.2" };
+  offer = {
+    version: "0.3.3",
+    current: "0.3.2",
+    installing: null,
+    updatesItself: true,
+    ready: { state: "preparing", done: 300, total: 1000 },
+  };
+  const view = await checkForUpdates();
+  await waitFor(async () =>
+    expect((await view.findByRole("status")).textContent).toBe(
+      "OpenBot 0.3.3 is downloading in the background (30%).",
+    ),
+  );
+  // Nothing waits for it: Update and restart works now.
+  expect(view.getByRole("button", { name: "Update and restart" })).toBeTruthy();
+  // The app finishes, and the next ask of its offer says so.
+  offer = { ...offer, ready: { state: "ready" } };
+  await queryClient.invalidateQueries({ queryKey: desktopKeys.appUpdate });
+  await waitFor(() =>
+    expect(view.getByRole("status").textContent).toBe(
+      "OpenBot 0.3.3 is ready to install. It takes a few minutes.",
+    ),
+  );
+});

@@ -1,4 +1,8 @@
-import { DOESNT_UPDATE_ITSELF } from "@openbot/shared/desktop-updates";
+import {
+  DOESNT_UPDATE_ITSELF,
+  type UpdateReadiness,
+  updateOffered,
+} from "@openbot/shared/desktop-updates";
 import {
   IconBox,
   IconBrandDocker,
@@ -413,15 +417,24 @@ function LogsRow({ folder }: { folder: string }) {
  *
  * A build that never updates itself (internal, candidate, or without the updater) says so up front
  * in the setup window's words, with no button: the tray and the menus don't offer the check either.
+ *
+ * A newer version found says how ready it is, as the banner does: downloading in the background
+ * while this version keeps running, then ready to install in a few minutes.
  */
 function VersionRow({ status }: { status: DesktopStatus }) {
   const check = useMutation(checkAppUpdateMutationOptions(queryClient));
   const install = useMutation(installAppUpdateMutationOptions(queryClient));
   // The download's progress, asked twice a second from the click on, as the banner asks once it
-  // sees an install under way.
+  // sees an install under way; and every five seconds while the new version downloads in the
+  // background, so its share moves.
   const offer = useQuery({
     ...desktopAppUpdateQueryOptions(),
-    refetchInterval: install.isPending ? 500 : false,
+    refetchInterval: (query) =>
+      install.isPending
+        ? 500
+        : query.state.data?.ready?.state === "preparing"
+          ? 5_000
+          : false,
   });
   const progress = offer.data?.installing ?? null;
   const installing = install.isPending || progress !== null;
@@ -449,7 +462,7 @@ function VersionRow({ status }: { status: DesktopStatus }) {
             className="line-clamp-none text-foreground"
             role="status"
           >
-            {checked(found)}
+            {checked(found, offer.data?.ready)}
           </ItemDescription>
         )}
         {check.error && (
@@ -495,11 +508,17 @@ function VersionRow({ status }: { status: DesktopStatus }) {
   );
 }
 
-/** What a check found, in a sentence. */
-function checked(found: DesktopAppUpdateCheck): string {
+/**
+ * What a check found, in a sentence. A newer version says how ready it is now (`ready`, from the
+ * app's offer, which moves on after the check), or as the check found it.
+ */
+function checked(
+  found: DesktopAppUpdateCheck,
+  ready?: UpdateReadiness | null,
+): string {
   switch (found.found) {
     case "available":
-      return `OpenBot ${found.version} is available.`;
+      return updateOffered(found.version, ready ?? found.ready);
     case "upToDate":
       return `OpenBot ${found.current} is up to date.`;
     case "installing":
