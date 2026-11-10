@@ -762,6 +762,9 @@ fn report_running_line<R: tauri::Runtime>(
 /// machine is prepared" with the browser in front. `set_focus` does nothing to a hidden or
 /// minimised window, hence `show` and `unminimize` first.
 fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
+    if held_back(why) {
+        return;
+    }
     log::info!("[front] {why}");
     #[cfg(target_os = "macos")]
     let _ = app.show();
@@ -800,6 +803,51 @@ fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
     }
     #[cfg(not(windows))]
     let _ = window.set_focus();
+}
+
+/// The browser sign-in is open (`sign_in_to_copilotkit`): the person is in their browser.
+static SIGN_IN_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/**
+Whether `bring_to_front` holds OpenBot back, and says so in the log: while the browser sign-in is
+open, nothing setup does is the person's next step. On Windows F, "[front] the engine machine is
+prepared" brought OpenBot in front of the browser while the person typed their email to sign in.
+When the sign-in ends, OpenBot comes forward once (`while_signing_in`): the license agreement is
+the person's next step then.
+*/
+fn held_back(why: &str) -> bool {
+    let held = SIGN_IN_OPEN.load(std::sync::atomic::Ordering::SeqCst);
+    if held {
+        log::info!("[front] held back: sign-in open in the browser ({why})");
+    }
+    held
+}
+
+/// Marks the browser sign-in open while it lives, and closed when it is dropped, however the
+/// sign-in ends.
+struct SignInOpen;
+
+impl SignInOpen {
+    fn begin() -> Self {
+        SIGN_IN_OPEN.store(true, std::sync::atomic::Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for SignInOpen {
+    fn drop(&mut self) {
+        SIGN_IN_OPEN.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Run the browser sign-in, with OpenBot held back from the front meanwhile, then bring it forward
+/// once, whatever the sign-in's outcome: what comes next is the person's.
+fn while_signing_in<T>(sign_in: impl FnOnce() -> T, come_forward: impl FnOnce()) -> T {
+    let open = SignInOpen::begin();
+    let ended = sign_in();
+    drop(open);
+    come_forward();
+    ended
 }
 
 /// How OpenBot's window came forward on Windows (`bring_to_front`).
@@ -7291,7 +7339,10 @@ async fn sign_in_to_copilotkit<R: tauri::Runtime>(
         log::info!("[account] browser sign-in started");
         desktop_telemetry::sign_in_started(&started_app);
         let asked = std::time::Instant::now();
-        let signed_in = local_eval::account_sign_in_installed(&attempt);
+        let signed_in = while_signing_in(
+            || local_eval::account_sign_in_installed(&attempt),
+            || bring_to_front(&started_app, "the browser sign-in ended"),
+        );
         let took = asked.elapsed();
         match &signed_in {
             Ok(said) => log::info!(
@@ -13474,6 +13525,52 @@ mod tests {
         for input in ["SendInput", "keybd_event", "VK_MENU"] {
             assert!(!main[..tests].contains(input), "{input}");
         }
+    }
+
+    /// Windows F: "[front] the engine machine is prepared" brought OpenBot in front of the
+    /// browser while the person typed their email to sign in. While the sign-in is open, setup's
+    /// own moments hold back; when it ends, OpenBot comes forward once.
+    #[test]
+    fn nothing_comes_forward_while_the_browser_sign_in_is_open_and_once_when_it_ends() {
+        if crate::test_support::isolated_process(
+            "tests::nothing_comes_forward_while_the_browser_sign_in_is_open_and_once_when_it_ends",
+        ) {
+            return;
+        }
+        let forward = std::cell::Cell::new(0);
+        let during = while_signing_in(
+            || {
+                // Setup's moments while the person is in the browser.
+                [
+                    "the engine machine is prepared",
+                    "Docker Desktop answers",
+                    "the engine no longer needs another app's window",
+                ]
+                .map(held_back)
+            },
+            || forward.set(forward.get() + 1),
+        );
+        assert_eq!(during, [true, true, true]);
+        assert_eq!(forward.get(), 1);
+        // Signed in: the next moment comes forward as before.
+        assert!(!held_back("the engine machine is prepared"));
+        // However the sign-in ends, the hold ends with it.
+        let failed = std::panic::catch_unwind(|| {
+            while_signing_in(|| panic!("the sign-in failed"), || {});
+        });
+        assert!(failed.is_err());
+        assert!(!held_back("OpenBot is showing"));
+        // `bring_to_front` asks before it does anything, and the sign-in runs inside the hold.
+        let main = include_str!("main.rs");
+        let body = &main[main.find("fn bring_to_front<").unwrap()..];
+        assert!(body.starts_with(
+            "fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {\n    if held_back(why) {\n        return;\n    }"
+        ));
+        let sign_in = &main[main.find("async fn sign_in_to_copilotkit<").unwrap()..];
+        let sign_in = &sign_in[..sign_in.find("\n}\n").unwrap()];
+        assert!(sign_in.contains(
+            "while_signing_in(\n            || local_eval::account_sign_in_installed(&attempt),\n            || bring_to_front(&started_app, \"the browser sign-in ended\"),"
+        ));
     }
 
     /// Windows cascades a window with no position of its own down and right on every launch. On
