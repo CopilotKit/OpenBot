@@ -399,10 +399,10 @@ async fn wake_installation_engine<R: tauri::Runtime>(
             },
             || acquire::machine_exists().unwrap_or(false),
             || {
-                report_running(
+                report_running_line(
                     &progress_app,
                     "start-machine",
-                    "Starting the engine machine.",
+                    engine::starting_machine_line(),
                     None,
                 );
                 let started = acquire::start_machine();
@@ -500,12 +500,23 @@ fn report<R: tauri::Runtime>(
     ok: bool,
     detail: impl Into<String>,
 ) {
-    let detail = detail.into();
+    report_line(app, step, ok, engine::StepLine::here(detail));
+}
+
+/// A finished step's line, said plainly in the window, with its technical detail in the log only.
+fn report_line<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    step: &str,
+    ok: bool,
+    line: engine::StepLine,
+) {
+    let entry = line.log_entry();
+    let detail = line.said;
     // Every row setup shows goes in the log too, so the file reads as the window did.
     if ok {
-        log::info!("[step {step}] {detail}");
+        log::info!("[step {step}] {entry}");
     } else {
-        log::error!("[step {step}] failed: {detail}");
+        log::error!("[step {step}] failed: {entry}");
     }
     forget_running_logged();
     if !ok {
@@ -594,19 +605,22 @@ fn report_running_line<R: tauri::Runtime>(
         .lock()
         .unwrap_or_else(|held| held.into_inner())
         .insert(step.to_owned(), line.clone());
+    // The window shows the plain line; the log keeps the technical detail beside it.
+    let entry = line.log_entry();
     let engine::StepLine {
         said: detail,
         elsewhere,
         asks,
+        detail: _,
     } = line;
     setup_phase(step);
     {
         let mut logged = RUNNING_LOGGED
             .lock()
             .unwrap_or_else(|held| held.into_inner());
-        let now = (step.to_owned(), detail.clone());
+        let now = (step.to_owned(), entry.clone());
         if logged.as_ref() != Some(&now) {
-            log::info!("[step {step}] {detail}");
+            log::info!("[step {step}] {entry}");
             *logged = Some(now);
         }
     }
@@ -2105,20 +2119,11 @@ async fn engine_ready(
     // One at a time, and each only if the last one worked. Written as a loop over an array once,
     // which ran all three before the first was checked: a failed `machine init` was still followed
     // by `machine start`.
+    // On Windows, Podman's own installer for WSL may come first: see `preparing_machine_line`.
     report_running_line(
         app,
         "create-machine",
-        if cfg!(target_os = "windows") {
-            // Podman's own installer for WSL, when WSL is missing: its dialog, then Windows' own
-            // administrator prompt, then a restart. Said before it happens rather than after, and
-            // on whichever screen the person is on: those windows come to the front over OpenBot's.
-            engine::StepLine::elsewhere(
-                "Preparing the engine machine. If Windows Subsystem for Linux is missing, Podman \
-                 offers to install it. Windows then asks for administrator approval and a restart.",
-            )
-        } else {
-            engine::StepLine::here("Preparing the engine machine.")
-        },
+        engine::preparing_machine_line(std::env::consts::OS),
         None,
     );
     // The machine image the first screen started downloading: waited for with its download shown
@@ -2135,6 +2140,21 @@ async fn engine_ready(
         log::warn!("[early downloads] the machine image wait did not run: {error}");
         None
     });
+    log::info!(
+        "[early downloads] creating the machine {}",
+        image.as_deref().map_or_else(
+            || "with the image Podman pulls itself".to_string(),
+            |image| format!("from {}", image.display())
+        )
+    );
+    // Downloaded: the row says the machine's own line again, without the download, since that line
+    // is what a Windows prompt during `machine init` needs said.
+    report_running_line(
+        app,
+        "create-machine",
+        engine::preparing_machine_line(std::env::consts::OS),
+        None,
+    );
     let created = acquire::create_machine(4, 6144, 60, image.as_deref());
     if created.ok && image.is_some() {
         early_downloads::forget_machine_image();
@@ -2147,19 +2167,14 @@ async fn engine_ready(
         return Err(created.problem());
     }
 
-    report_running(app, "start-machine", "Starting the engine machine.", None);
+    report_running_line(app, "start-machine", engine::starting_machine_line(), None);
     let started = acquire::start_machine();
     report(app, "start-machine", started.ok, started.said.clone());
     if !started.ok {
         return Err(started.problem());
     }
 
-    report_running(
-        app,
-        "health-gate",
-        "Waiting for the engine to answer.",
-        None,
-    );
+    report_running_line(app, "health-gate", engine::checking_engine_line(), None);
     let gate = acquire::health_gate(&acquire::address());
     report(app, "health-gate", gate.ok, gate.said.clone());
     if !gate.ok {
@@ -2179,7 +2194,7 @@ async fn engine_ready(
             )
         })?;
     local_eval::use_engine(&address);
-    report(app, "engine", true, "The container engine is answering.");
+    report_line(app, "engine", true, engine::engine_ready_line());
     Ok(address)
 }
 
@@ -2236,7 +2251,13 @@ async fn deployment_ready<R: tauri::Runtime>(
         );
         return Ok(());
     }
-    report_running(app, "deployment", "Checking the OpenBot release.", None);
+    report_running_line(
+        app,
+        "deployment",
+        engine::StepLine::here("Checking which version of OpenBot to download.")
+            .logged("Checking the OpenBot release."),
+        None,
+    );
     // Both release discovery and downloading use blocking HTTP. Keeping them in a blocking task
     // avoids dropping reqwest's runtime inside this async context.
     let target = root.to_path_buf();
@@ -6775,6 +6796,31 @@ async fn run_local_eval<R: tauri::Runtime>(
     Ok(report)
 }
 
+/// The back end update last written to the log, so a status polled every few seconds says it once.
+static UPDATE_LOGGED: Mutex<Option<String>> = Mutex::new(None);
+
+/// The release the back end is on, the one the window updates it to, and the CLI's step an earlier
+/// update stopped at. The window says only "Updating OpenBot", and where it stopped in plain words:
+/// the versions and the step's name are for whoever reads the log.
+fn log_update_due(from: &str, to: &str, stopped_at: Option<&str>) {
+    let entry = update_due_entry(from, to, stopped_at);
+    let mut logged = UPDATE_LOGGED
+        .lock()
+        .unwrap_or_else(|held| held.into_inner());
+    if logged.as_deref() != Some(entry.as_str()) {
+        log::info!("{entry}");
+        *logged = Some(entry);
+    }
+}
+
+fn update_due_entry(from: &str, to: &str, stopped_at: Option<&str>) -> String {
+    let mut entry = format!("[local update] the back end is on {from}, due an update to {to}");
+    if let Some(step) = stopped_at {
+        entry.push_str(&format!("; the last update stopped at {step}"));
+    }
+    entry
+}
+
 /// What `run_local_eval` answers the window for one CLI call, from the installed CLI.
 fn local_eval_answer(
     root: &Path,
@@ -6789,6 +6835,15 @@ fn local_eval_answer(
     if action == local_eval::Action::Status {
         report.update_to =
             local_eval::update_due(&report, local_eval::bundled_release().as_deref());
+        // The window says "Updating OpenBot"; the log keeps the releases, once per update due,
+        // and the step an update that did not finish stopped at.
+        if let (Some(to), Some(stack)) = (&report.update_to, &report.stack) {
+            let stopped_at = stack
+                .unfinished_update
+                .as_ref()
+                .and_then(|unfinished| unfinished.failed_step.as_deref());
+            log_update_due(&stack.installed_release, to, stopped_at);
+        }
     }
     Ok(report)
 }
@@ -9717,6 +9772,21 @@ mod runtime_update_tests {
 
 #[cfg(test)]
 mod tests {
+    /// The window says "Updating OpenBot" and where an update stopped in plain words; the log
+    /// keeps the releases and the CLI's own name for the step.
+    #[test]
+    fn the_log_keeps_the_back_end_releases_and_the_step_an_update_stopped_at() {
+        assert_eq!(
+            update_due_entry("0.16.0-rc.9", "0.16.0-rc.10", Some("update-quiesce")),
+            "[local update] the back end is on 0.16.0-rc.9, due an update to 0.16.0-rc.10; the last \
+             update stopped at update-quiesce"
+        );
+        assert_eq!(
+            update_due_entry("0.16.0-rc.9", "0.16.0-rc.10", None),
+            "[local update] the back end is on 0.16.0-rc.9, due an update to 0.16.0-rc.10"
+        );
+    }
+
     #[test]
     fn only_an_app_that_makes_room_gets_the_overlay_title_bar() {
         let root = test_support::temp_root("titlebar-room");

@@ -3,7 +3,11 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckForUpdates } from "./CheckForUpdates";
 import { CopilotKitAccount } from "./CopilotKitAccount";
-import { EarlyDownloadsLine } from "./EarlyDownloads";
+import {
+  EarlyDownloadsLine,
+  earlyDownload,
+  useEarlyDownloads,
+} from "./EarlyDownloads";
 import { useWindowFitsContent } from "./fitWindow";
 import { DEFAULT_HARNESS, type HarnessChoice } from "./harness";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
@@ -33,7 +37,9 @@ import {
   engineNow,
   goAheadNow,
   handOffNow,
+  BehindSlot,
   INSTALL_BLURB,
+  installingBehind,
   type Progress,
   plainInstallSteps,
   SetupProgress,
@@ -142,6 +148,8 @@ function Setup() {
   const [backEndNotice, setBackEndNotice] = useState<string | null>(null);
   const [step, setStep] = useState<SetupStep>("welcome");
   const [steps, setSteps] = useState<Progress[]>([]);
+  // When the install now running began: its row on the other screens counts from here.
+  const [installSince, setInstallSince] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [checkingResume, setCheckingResume] = useState(true);
   const savedLaunch = useRef<string | null>(null);
@@ -430,6 +438,7 @@ function Setup() {
     setBusy(true);
     setFailure(null);
     setRecoveryFailure(null);
+    setInstallSince(Date.now());
     setSteps([
       {
         step: "engine",
@@ -739,6 +748,24 @@ function Setup() {
   // on says why, with Continue. See `install::GoAhead`.
   const goAhead = goAheadNow(steps);
 
+  /*
+   * What is installing behind a screen that asks the person for something else, as one row: the
+   * account step and the AI step. It says what OpenBot is doing, how far along it is and for how
+   * long, so the screen never looks stuck while minutes of install go on behind it.
+   */
+  // The downloads the first screen started, which the background row shows while they run.
+  const earlyDownloads = useEarlyDownloads();
+  const behind = (said: { waitingFor?: string; done?: string }) =>
+    installingBehind({
+      steps,
+      installing: preparation?.status === "preparing",
+      installed: installationReady,
+      since: installSince,
+      backEnd: local,
+      early: earlyDownload(earlyDownloads),
+      ...said,
+    });
+
   // Quit outranks every screen: the app is closing, whatever was on it.
   const quitting = useQuitStatus(false);
   if (quitting) return <ShuttingDown status={quitting} />;
@@ -881,8 +908,10 @@ function Setup() {
           engine={engineNow(steps)}
           // Once signed in, the step explains the password prompt Install waits to raise.
           goAhead={goAhead}
-          // The downloads the first screen started, while they still run.
-          downloads={<EarlyDownloadsLine />}
+          behind={behind({
+            waitingFor:
+              "The rest of the install starts after you sign in and accept the license agreement.",
+          })}
           onDone={(acceptedVersion) => {
             if (acceptedVersion) local.acceptTerms(acceptedVersion);
             // Intelligence sets itself up once the install has Docker answering; see above. The
@@ -909,7 +938,20 @@ function Setup() {
           chosen={model}
           returning={returningToInstallation}
           busy={busy}
-          status={<LocalStatus sequence={local} />}
+          status={
+            returningToInstallation ? (
+              <LocalStatus sequence={local} />
+            ) : (
+              <BehindSlot>
+                <BehindRow
+                  row={behind({
+                    done: "OpenBot starts as soon as you connect your AI.",
+                  })}
+                />
+                <LocalStatus sequence={local} download={false} />
+              </BehindSlot>
+            )
+          }
           onInstallRequired={(problem, choice) => {
             // The record is from an earlier run. Install again, keeping the provider chosen.
             localInstall.current = null;
@@ -961,7 +1003,23 @@ function Setup() {
             row.running,
         )
     : undefined;
-  const updatingLine = updating && <StatusLine>{updating.detail}</StatusLine>;
+  // One row while it updates, with its download's bar once there is one: "Installing OpenBot" sat
+  // unchanged for minutes while the update's software downloaded.
+  const updatingLine = updating && (
+    <SetupProgress
+      label="Update progress"
+      steps={[
+        {
+          step: "Updating OpenBot",
+          ok: true,
+          running: true,
+          detail: updating.detail,
+          downloads: steps.find((row) => row.step === "images" && row.running)
+            ?.downloads,
+        },
+      ]}
+    />
+  );
   // Docker Desktop opened, or the engine machine started, before the back end starts, as after a
   // restart: said under the rows.
   const handOff = engineNow(steps);
@@ -973,7 +1031,7 @@ function Setup() {
           <h1>{localStarting ? "Starting OpenBot" : "OpenBot is stopped"}</h1>
           <p className="lede">
             {localStarting
-              ? "Starting the back end first, then the rest of OpenBot."
+              ? "OpenBot is getting ready and opens by itself. This usually takes a minute or two."
               : "Your installation and saved connections are ready to reopen."}
           </p>
           <LocalIntelligence sequence={local} offerStart handOff={handOff} />
@@ -1141,6 +1199,11 @@ function Setup() {
       </div>
     </main>
   );
+}
+
+/** The background install's row, when there is one. */
+function BehindRow({ row }: { row: Progress | null }) {
+  return row && <SetupProgress steps={[row]} label="Background install" />;
 }
 
 function settleProgress(steps: Progress[], problem?: Problem): Progress[] {

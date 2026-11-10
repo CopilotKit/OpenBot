@@ -168,6 +168,14 @@ jobs:
           bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx
         env:
           OPENBOT_APP_BROWSER: '1'
+      # The desktop setup window's, for the same reason: the AI step's form holding still while the
+      # install behind it comes and goes. It bundles the window from the desktop's own dependencies.
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
+      - run: bun test src/setupLayout.browser.test.ts
+        working-directory: desktop
+        env:
+          OPENBOT_APP_BROWSER: '1'
       # Headed is the default for hosted computers, so it is tested as one: the computer starting its
       # own Xvfb, and the signing again with cross-site frames in processes of their own.
       - run: bun test tests/headed-browser.test.ts

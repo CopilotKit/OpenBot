@@ -42,7 +42,8 @@ test("install progress is the bytes downloaded out of the whole download, and di
   const row = within(
     view.getByRole("listitem", { name: "Installing OpenBot" }),
   );
-  expect(row.getByText("In progress")).toBeTruthy();
+  // Running, it says how far along the install is.
+  expect(row.getByText("Step 2 of 4")).toBeTruthy();
   expect(row.queryByRole("progressbar")).toBeNull();
 
   for (const [done, bytes, said] of [
@@ -159,15 +160,18 @@ test("a download whose size is not known yet says so, and its bar does not guess
   ).toBeTruthy();
 });
 
+const UPDATING =
+  "Updating OpenBot. Your Bots and data stay as they are. This usually takes a few minutes.";
+
 test("a row with bytes and no items says only the bytes", () => {
   const view = render(
     <SetupProgress
       steps={[
         {
-          step: "Waiting for the back end",
+          step: "Getting OpenBot ready",
           ok: true,
           running: true,
-          detail: "Updating the back end to 0.16.0-rc.9. Its data stays.",
+          detail: UPDATING,
           downloads: { bytes: 207_000_000, size: 315_000_000 },
         },
       ]}
@@ -175,11 +179,9 @@ test("a row with bytes and no items says only the bytes", () => {
     />,
   );
   const row = within(
-    view.getByRole("listitem", { name: "Waiting for the back end" }),
+    view.getByRole("listitem", { name: "Getting OpenBot ready" }),
   );
-  expect(
-    row.getByText("Updating the back end to 0.16.0-rc.9. Its data stays."),
-  ).toBeTruthy();
+  expect(row.getByText(UPDATING)).toBeTruthy();
   expect(row.getByText("207.0 MB of 315.0 MB")).toBeTruthy();
   const bar = row.getByRole("progressbar", { name: "Download progress" });
   expect(bar.getAttribute("value")).toBe("207000000");
@@ -188,9 +190,13 @@ test("a row with bytes and no items says only the bytes", () => {
 
 test("the install blurb names the parts of OpenBot it installs, in two sentences at most", () => {
   expect(INSTALL_BLURB).toContain(
-    "This installs OpenBot on this computer: the front end, the back end, the database, your Bots, and the computers they work on.",
+    "This installs OpenBot on this computer: the app, its database, your Bots, and the computers they work on.",
   );
   expect(INSTALL_BLURB.split(/(?<=\.)\s/).length).toBeLessThanOrEqual(2);
-  // A person installing OpenBot knows its parts, not the product names behind them.
-  expect(INSTALL_BLURB).not.toMatch(/—|agent|Intelligence/);
+  // A person installing OpenBot knows its parts, not the product names behind them, and how long
+  // the wait is.
+  expect(INSTALL_BLURB).not.toMatch(
+    /—|agent|Intelligence|back ?end|front ?end/i,
+  );
+  expect(INSTALL_BLURB).toContain("about 10 minutes");
 });

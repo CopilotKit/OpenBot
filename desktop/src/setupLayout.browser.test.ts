@@ -1,0 +1,280 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+
+/**
+ * The AI step's form holds still while the install behind it comes and goes.
+ *
+ * Seen on Windows: on "Connect your AI", the back end's download card appeared above the endpoint
+ * form while the person typed in it, and went when the download ended. Base URL and Model jumped
+ * about 100px each time, a click meant for a field landed on "Advanced compatible endpoint options",
+ * and the window grew taller and moved to fit. The install's row now has one slot under the form,
+ * its height held (`BehindSlot`).
+ *
+ * The real window (`main.tsx` and `styles.css`), bundled as the app is, in a real Chromium, because
+ * where a field lands is the browser's layout to decide. Only the native side is scripted, as it
+ * answers on a first run: install done, the account passed, the rest of OpenBot setting up behind
+ * the step, its download arriving and ending.
+ *
+ *   OPENBOT_APP_BROWSER=1 bun test src/setupLayout.browser.test.ts
+ */
+const asked = process.env.OPENBOT_APP_BROWSER === "1";
+
+/*
+ * Playwright comes from the root install, which the real-browser CI job has. The desktop's own
+ * jobs install only the desktop's dependencies and typecheck this file, so it names the module
+ * by a variable and types only the part of it used here.
+ */
+const PLAYWRIGHT: string = "playwright-core";
+type Box = { x: number; y: number; width: number; height: number } | null;
+type Locator = {
+  click(): Promise<void>;
+  waitFor(options?: { state?: "hidden" | "visible" }): Promise<void>;
+  boundingBox(): Promise<Box>;
+};
+type Route = {
+  request(): { url(): string };
+  fulfill(response: {
+    status?: number;
+    contentType?: string;
+    body: string;
+  }): Promise<void>;
+};
+type Page = {
+  route(url: string, handler: (route: Route) => Promise<void>): Promise<void>;
+  goto(url: string): Promise<unknown>;
+  getByRole(role: string, options: { name: string; exact?: boolean }): Locator;
+  getByText(text: string): Locator;
+  getByLabel(text: string, options: { exact: boolean }): Locator;
+  evaluate<T>(run: () => T): Promise<T>;
+  waitForTimeout(ms: number): Promise<void>;
+  close(): Promise<void>;
+};
+type Browser = {
+  newPage(options: {
+    viewport: { width: number; height: number };
+  }): Promise<Page>;
+  close(): Promise<void>;
+};
+type Chromium = { launch(options: { channel: string }): Promise<Browser> };
+
+/** `@tauri-apps/api/core`, scripted. The page's `__download` is what the download poll answers. */
+const FAKE_CORE = `
+const fake = (globalThis.__fake ??= { listeners: {}, download: null });
+const emit = (name, payload) => {
+  for (const listener of fake.listeners[name] ?? []) listener({ payload });
+};
+let finishSetUp;
+const setUp = new Promise((resolve) => (finishSetUp = resolve));
+const stack = {
+  id: "local-abc123",
+  installedRelease: "0.16.0-rc.10",
+  step: "ready",
+  urls: { api: "http://127.0.0.1:64770", dashboard: "http://127.0.0.1:64771", gateway: "ws://127.0.0.1:64772" },
+  hasFailedStep: false,
+  updateInProgress: false,
+  unfinishedUpdate: null,
+  observed: null,
+};
+const status = (readiness, licence) => ({
+  outcome: "completed", stack, reason: null, readiness, licence, licenceExpiresAt: null, checksPassed: false,
+});
+fake.finishSetUp = () => finishSetUp(status("starting", "valid"));
+const none = { openai: false, anthropic: false };
+export function convertFileSrc(path) { return path; }
+export async function invoke(command) {
+  switch (command) {
+    case "windows_restart_pending":
+    case "take_ai_connection_change":
+    case "already_running":
+      return false;
+    case "default_root":
+      return "/Users/you/OpenBot";
+    case "already_configured":
+      return { values: {}, saved: { modelApiKeys: none, modelSessions: none } };
+    case "providers":
+      return [
+        { id: "openai", name: "OpenAI", summary: "Use OpenAI.", logins: ["api-key"], mark: null, caution: null },
+        { id: "openai-compatible", name: "Any OpenAI-compatible endpoint", summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.", logins: ["endpoint"], mark: null, caution: null },
+      ];
+    case "prepare_installation":
+      emit("setup:progress", { step: "engine", ok: true, running: false, detail: "The software OpenBot runs on is ready." });
+      return new Promise((resolve) => setTimeout(() => resolve(null), 50));
+    case "sign_in_to_copilotkit":
+      return { signedIn: true };
+    case "local_eval_terms":
+      return { status: "required", accepted: true, version: "developer-edition-2026-10-01-web", url: "https://copilotkit.ai/legal/developer-edition", organizationName: "Acme" };
+    case "set_up_local_eval":
+      return setUp;
+    case "local_eval_download":
+      return fake.download;
+    case "connect_local_eval":
+      return { outcome: "completed", stack, reason: null, conflicted: false };
+    case "run_local_eval":
+      return status("ready", "valid");
+    default:
+      return null;
+  }
+}
+`;
+
+/** `@tauri-apps/api/event`, scripted: `FAKE_CORE` emits through the same listeners. */
+const FAKE_EVENT = `
+const fake = (globalThis.__fake ??= { listeners: {}, download: null });
+export async function listen(name, listener) {
+  (fake.listeners[name] ??= new Set()).add(listener);
+  return () => fake.listeners[name].delete(listener);
+}
+`;
+
+type Window = { script: string; style: string };
+
+/** The window as the app builds it, with the native side scripted and the marks left out. */
+async function buildWindow(): Promise<Window> {
+  const built = await Bun.build({
+    entrypoints: [new URL("./main.tsx", import.meta.url).pathname],
+    target: "browser",
+    format: "esm",
+    define: { "process.env.NODE_ENV": '"production"' },
+    plugins: [
+      {
+        name: "scripted-native-side",
+        setup(build) {
+          build.onResolve({ filter: /^@tauri-apps\/api\/event$/ }, () => ({
+            path: "event",
+            namespace: "scripted",
+          }));
+          build.onResolve({ filter: /^@tauri-apps\/api\// }, () => ({
+            path: "core",
+            namespace: "scripted",
+          }));
+          // Brand marks come from Vite's glob import, which this build has not got.
+          build.onResolve({ filter: /^\.\/Mark$/ }, () => ({
+            path: "mark",
+            namespace: "scripted",
+          }));
+          build.onLoad({ filter: /.*/, namespace: "scripted" }, (args) => ({
+            contents:
+              args.path === "event"
+                ? FAKE_EVENT
+                : args.path === "mark"
+                  ? "export const Mark = () => null; export const ButtonMark = () => null;"
+                  : FAKE_CORE,
+            loader: "js",
+          }));
+        },
+      },
+    ],
+  });
+  if (!built.success) throw new AggregateError(built.logs, "build failed");
+  const script = await built.outputs
+    .find((out) => out.kind === "entry-point")
+    ?.text();
+  const style = await built.outputs
+    .find((out) => out.path.endsWith(".css"))
+    ?.text();
+  if (!script) throw new Error("the build has no entry point");
+  return { script, style: style ?? "" };
+}
+
+/** Served as the shell serves the window: its page, its script and its stylesheet. */
+async function open(page: Page) {
+  await page.route("https://openbot.test/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/main.js")
+      return route.fulfill({
+        contentType: "text/javascript",
+        body: built.script,
+      });
+    if (path === "/main.css")
+      return route.fulfill({ contentType: "text/css", body: built.style });
+    if (path === "/")
+      return route.fulfill({
+        contentType: "text/html",
+        body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/main.css"></head><body><div id="root"></div><script type="module" src="/main.js"></script></body></html>',
+      });
+    return route.fulfill({ status: 404, body: "" });
+  });
+  // A secure origin, as the shell's own is: the window's calls are named with `crypto.randomUUID`.
+  await page.goto("https://openbot.test/");
+}
+
+let browser: Browser;
+let built: Window;
+
+beforeAll(async () => {
+  if (!asked) return;
+  built = await buildWindow();
+  const { chromium } = (await import(PLAYWRIGHT)) as { chromium: Chromium };
+  // The CI job installs full Chromium without the headless shell.
+  browser = await chromium.launch({ channel: "chromium" });
+});
+
+afterAll(async () => {
+  await browser?.close();
+});
+
+/** Where the form's first field is, and how tall the page is: what the window is sized to. */
+async function measure(page: Page) {
+  const field = await page
+    .getByLabel("Base URL", { exact: true })
+    .boundingBox();
+  const advanced = await page
+    .getByText("Advanced compatible endpoint options")
+    .boundingBox();
+  const height = await page.evaluate(
+    () => document.documentElement.scrollHeight,
+  );
+  return { field: field?.y, advanced: advanced?.y, height };
+}
+
+describe.skipIf(!asked)("the AI step while OpenBot installs behind it", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const) {
+    test(`at ${width}x${height}, the form does not move and the page does not grow as the download comes and goes`, async () => {
+      const page = await browser.newPage({ viewport: { width, height } });
+      try {
+        await open(page);
+        await page
+          .getByRole("button", { name: "Install", exact: true })
+          .click();
+        await page.getByRole("heading", { name: "Connect your AI" }).waitFor();
+        await page.getByText("Any OpenAI-compatible endpoint").click();
+        await page.getByLabel("Base URL", { exact: true }).waitFor();
+        // The entrance animation settles before anything is measured.
+        await page.waitForTimeout(600);
+        const before = await measure(page);
+        expect(before.field).toBeGreaterThan(0);
+
+        // The rest of OpenBot starts downloading, while the person types in the form.
+        await page.evaluate(() => {
+          (
+            globalThis as unknown as { __fake: { download: unknown } }
+          ).__fake.download = { done: 400_000_000, total: 1_600_000_000 };
+        });
+        await page.getByText("400.0 MB of 1.6 GB").waitFor();
+        expect(await measure(page)).toEqual(before);
+
+        // The download ends.
+        await page.evaluate(() => {
+          (
+            globalThis as unknown as { __fake: { download: unknown } }
+          ).__fake.download = null;
+        });
+        await page.getByText("400.0 MB of 1.6 GB").waitFor({ state: "hidden" });
+        expect(await measure(page)).toEqual(before);
+
+        // Everything is installed, and the row says so.
+        await page.evaluate(() =>
+          (
+            globalThis as unknown as { __fake: { finishSetUp: () => void } }
+          ).__fake.finishSetUp(),
+        );
+        await page.getByText("OpenBot is installed").waitFor();
+        expect(await measure(page)).toEqual(before);
+      } finally {
+        await page.close();
+      }
+    }, 30_000);
+  }
+});

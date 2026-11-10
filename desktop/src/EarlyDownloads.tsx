@@ -1,7 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
-import { StatusLine } from "./SetupProgress";
+import {
+  type Downloads,
+  DownloadProgress,
+  StatusLine,
+  timeLeft,
+} from "./SetupProgress";
 
 /**
  * The big downloads that start when the first screen shows, before Install is clicked
@@ -43,20 +48,17 @@ export function useEarlyDownloads(): EarlyDownloads | null {
 }
 
 const GB = 1_000_000_000;
-const MB = 1_000_000;
 
-/** "1.2 of 2.9 GB", or "450 of 937 MB": both in the unit of the whole. */
-export function ofSize(bytes: number, size: number): string {
-  if (size >= GB)
-    return `${(bytes / GB).toFixed(1)} of ${(size / GB).toFixed(1)} GB`;
-  return `${Math.round(bytes / MB)} of ${Math.round(size / MB)} MB`;
-}
-
-/** "about 3 minutes left", from what is left and the speed it is arriving at. */
-export function timeLeft(seconds: number): string {
-  if (seconds < 60) return "less than a minute left";
-  if (seconds < 90) return "about a minute left";
-  return `about ${Math.round(seconds / 60)} minutes left`;
+/** The early downloads as a download the setup rows can show, while they run; null otherwise. */
+export function earlyDownload(
+  downloads: EarlyDownloads | null,
+): Downloads | null {
+  if (downloads?.state !== "downloading") return null;
+  return {
+    bytes: downloads.bytes,
+    size: downloads.size,
+    bytesPerSecond: downloads.bytesPerSecond,
+  };
 }
 
 function gigabytes(bytes: number): string {
@@ -64,27 +66,21 @@ function gigabytes(bytes: number): string {
 }
 
 /**
- * The line for `downloads`, or null when there is nothing to say. The first screen also says when
- * everything is downloaded, or when something will download at Install instead; later screens say
- * only what is still going on, since Install's own rows take over from there.
+ * The line for `downloads`, or null when there is nothing to say. In the words the background
+ * install's row uses ("Downloading OpenBot. About 3 minutes left."), with the bytes under the bar.
+ * The first screen also says when everything is downloaded, or when something will download at
+ * Install instead; later screens say only what is still going on, since Install's own rows take
+ * over from there.
  */
 export function earlyDownloadsSaid(
   downloads: EarlyDownloads,
   firstScreen: boolean,
 ): string | null {
-  const { state, bytes, size, bytesPerSecond, free, needed } = downloads;
+  const { state, free, needed } = downloads;
   switch (state) {
     case "downloading": {
-      if (size == null || size <= 0) {
-        return bytes > 0
-          ? `Downloading OpenBot (${(bytes / GB).toFixed(1)} GB so far).`
-          : "Downloading OpenBot.";
-      }
-      const parts = [ofSize(Math.min(bytes, size), size)];
-      if (bytesPerSecond != null && bytesPerSecond > 0 && bytes < size) {
-        parts.push(timeLeft((size - bytes) / bytesPerSecond));
-      }
-      return `Downloading OpenBot (${parts.join(", ")}).`;
+      const left = timeLeft(earlyDownload(downloads));
+      return left ? `Downloading OpenBot. ${left}` : "Downloading OpenBot.";
     }
     case "short":
       return free != null && needed != null
@@ -112,24 +108,11 @@ export function EarlyDownloadsLine({
   if (!downloads) return null;
   const said = earlyDownloadsSaid(downloads, firstScreen);
   if (!said) return null;
-  const downloading = downloads.state === "downloading";
-  const known = downloading && downloads.size != null && downloads.size > 0;
+  const download = earlyDownload(downloads);
   return (
     <div className="early-downloads">
-      <StatusLine working={downloading}>{said}</StatusLine>
-      {downloading && (
-        <div className="downloads">
-          {known ? (
-            <progress
-              aria-label="Download progress"
-              value={Math.min(downloads.bytes, downloads.size ?? 0)}
-              max={downloads.size}
-            />
-          ) : (
-            <progress aria-label="Download progress" />
-          )}
-        </div>
-      )}
+      <StatusLine working={download != null}>{said}</StatusLine>
+      {download && <DownloadProgress downloads={download} />}
     </div>
   );
 }

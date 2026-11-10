@@ -437,6 +437,15 @@ fn attempt(
         );
         have.restart().map_err(Failed::ForGood)?;
     }
+    if have.bytes > 0 {
+        log::info!(
+            "[download] {} from {source}, carrying on after {} bytes",
+            pinned.name,
+            have.bytes
+        );
+    } else {
+        log::info!("[download] {} from {source}", pinned.name);
+    }
     have.file
         .seek(std::io::SeekFrom::Start(have.bytes))
         .map_err(|error| Failed::ForGood(format!("could not write the download: {error}")))?;
@@ -479,6 +488,13 @@ fn attempt(
         .flush()
         .map_err(|error| Failed::ForGood(format!("could not write the download: {error}")))?;
     let got = hex(&have.hasher.clone().finalize());
+    if got == pinned.sha256 {
+        log::info!(
+            "[download] {}: {} bytes, sha256 {got} as pinned",
+            pinned.name,
+            have.bytes
+        );
+    }
     if got != pinned.sha256 {
         have.restart().map_err(Failed::ForGood)?;
         return Err(Failed::ForGood(format!(
@@ -981,6 +997,13 @@ pub fn run(
         }
     }
 
+    log::info!(
+        "[early downloads] downloading before Install: {}",
+        jobs.iter()
+            .map(|job| job.key)
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     {
         let mut table = table();
         table.state = State::Downloading;

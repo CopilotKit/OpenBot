@@ -37,7 +37,7 @@
 //!   to want one: it is the same dialog every other installer raises. It is never raised unexplained:
 //!   the package downloads while the person signs in, then the step waits (`GoAhead`) while OpenBot's
 //!   window says what comes next and why, and raises the prompt only once they choose Continue. The
-//!   prompt itself names OpenBot and Podman (`PODMAN_PASSWORD_PROMPT`).
+//!   prompt itself names OpenBot and says why, in plain words (`PODMAN_PASSWORD_PROMPT`).
 //! - **Linux.** Podman there is not a binary but a set of them (`conmon`, `crun`, `netavark`,
 //!   `slirp4netns`), wired to the distribution's own paths, so downloading one file would produce
 //!   something that runs nothing. The distribution's package manager installs it, through
@@ -282,19 +282,32 @@ pub fn install_engine_observed(
     )
 }
 
+/*
+ * The person reads "the software OpenBot runs on", never "Podman": a person setting OpenBot up
+ * does not know what Podman is, and does not need to. The log names it (`StepLine::logged`).
+ */
+
 /// The step row's line while Podman's package downloads, before anything needs the person.
-pub const PODMAN_DOWNLOADING: &str = "Downloading Podman.";
+pub fn podman_downloading() -> StepLine {
+    StepLine::here("Downloading the software OpenBot runs on.").logged("Downloading Podman.")
+}
 
 /// The step row's line while it waits for the person's go-ahead to install Podman. The window
 /// shows its own explanation and Continue beside it.
-pub const PODMAN_GO_AHEAD: &str = "Podman is downloaded and ready to install.";
+pub fn podman_go_ahead() -> StepLine {
+    StepLine::asks("The software OpenBot runs on is downloaded and ready to install.")
+        .logged("Podman is downloaded and ready to install; waiting for Continue.")
+}
 
 /// The same wait, after the person closed macOS's password prompt without a password.
-pub const PODMAN_DECLINED: &str = "macOS didn't get your password, so Podman isn't installed yet.";
+pub fn podman_declined() -> StepLine {
+    StepLine::asks("macOS didn't get your password, so the software isn't installed yet.")
+        .logged("The password prompt was closed, so Podman isn't installed yet; asking again.")
+}
 
 /// What macOS's password prompt says, under the name of the process that raised it.
 pub const PODMAN_PASSWORD_PROMPT: &str =
-    "OpenBot needs your password to install Podman, which runs OpenBot's back end.";
+    "OpenBot needs your password to install the software it runs on.";
 
 /**
 The person's go-ahead for a step that raises the system's password prompt.
@@ -360,8 +373,10 @@ impl GoAhead {
             }
             if cancelled() {
                 *state = Asked::Nothing;
-                return Err(Problem::plain(
-                    "OpenBot stopped before installing Podman. Start again when you're ready.",
+                return Err(Problem::with(
+                    "OpenBot stopped before installing the software it runs on. Start again when \
+                     you're ready.",
+                    "stopped while waiting for Continue to install Podman",
                 ));
             }
             state = self
@@ -407,19 +422,19 @@ fn install_after_go_ahead(
     mut prompt: impl FnMut(&str) -> Prompted,
     back: &dyn Fn(),
 ) -> Result<(), Problem> {
-    progress(StepLine::here(PODMAN_DOWNLOADING));
+    progress(podman_downloading());
     let package = fetch()?;
     let script = podman_install_script(&package);
-    let mut asking = PODMAN_GO_AHEAD;
+    let mut asking = podman_go_ahead();
     loop {
-        gate.wait(|| progress(StepLine::asks(asking)), cancelled)?;
+        gate.wait(|| progress(asking.clone()), cancelled)?;
         progress(podman_install_said("macos"));
         let prompted = prompt(&script);
         // The prompt was in front of OpenBot's window, however it ended.
         back();
         match prompted {
             Prompted::Installed => return Ok(()),
-            Prompted::Declined => asking = PODMAN_DECLINED,
+            Prompted::Declined => asking = podman_declined(),
             Prompted::Failed(problem) => return Err(problem),
         }
     }
@@ -448,15 +463,21 @@ fn applescript_string(text: &str) -> String {
 /// macOS asks for the person's password, because the package writes to `/opt/podman`. Windows
 /// asks for nothing here: the MSI installs for this account alone. Linux asks through `pkexec`.
 /// A prompt is a window of the system's own, in front of OpenBot's, so its line is `elsewhere`.
-fn podman_install_said(os: &str) -> StepLine {
+pub fn podman_install_said(os: &str) -> StepLine {
     match os {
         "macos" => StepLine::elsewhere(
-            "Installing Podman. Enter your Mac password when macOS asks for it.",
-        ),
+            "Installing the software OpenBot runs on. Enter your Mac password when macOS asks \
+             for it.",
+        )
+        .logged("Installing Podman's package; macOS asks for the password."),
         "linux" => StepLine::elsewhere(
-            "Installing Podman. Enter your password when your system asks for it.",
-        ),
-        _ => StepLine::here("Installing Podman."),
+            "Installing the software OpenBot runs on. Enter your password when your system asks \
+             for it.",
+        )
+        .logged("Installing Podman with pkexec; the system asks for the password."),
+        _ => {
+            StepLine::here("Installing the software OpenBot runs on.").logged("Installing Podman.")
+        }
     }
 }
 
@@ -1531,10 +1552,76 @@ esac
             assert!(line.said.contains("password"), "{os}");
             assert!(line.elsewhere, "{os}");
         }
-        assert_eq!(
+        let windows = podman_install_said("windows");
+        assert_eq!(windows.said, "Installing the software OpenBot runs on.");
+        assert!(!windows.elsewhere);
+    }
+
+    /// Words a person setting OpenBot up doesn't know. The screen never says them; the log does.
+    const TECHNICAL: &[&str] = &[
+        "Podman",
+        "WSL",
+        "Windows Subsystem for Linux",
+        "engine machine",
+        "engine",
+        "machine",
+        "k3s",
+        "Helm",
+        "Compose",
+    ];
+
+    /// A tester read "Preparing the engine machine" and "Installing Podman" for minutes and could
+    /// not tell whether setup was stuck. Every line setup shows while it prepares this computer is
+    /// in plain words; the log keeps the technical names beside it.
+    #[test]
+    fn every_line_shown_while_preparing_this_computer_is_plain_and_the_log_keeps_the_detail() {
+        let lines = [
+            podman_downloading(),
+            podman_go_ahead(),
+            podman_declined(),
+            podman_install_said("macos"),
+            podman_install_said("linux"),
             podman_install_said("windows"),
-            StepLine::here("Installing Podman.")
-        );
+            engine::preparing_machine_line("macos"),
+            engine::preparing_machine_line("windows"),
+            engine::preparing_machine_line("linux"),
+            engine::starting_machine_line(),
+            engine::checking_engine_line(),
+            engine::engine_ready_line(),
+        ];
+        let shown = lines
+            .iter()
+            .map(|line| line.said.as_str())
+            .chain([PODMAN_PASSWORD_PROMPT]);
+        for said in shown {
+            for word in TECHNICAL {
+                assert!(
+                    !said.to_lowercase().contains(&word.to_lowercase()),
+                    "{word:?} is on screen: {said:?}"
+                );
+            }
+        }
+        for line in &lines {
+            let detail = line.detail.as_deref().expect("the log keeps the detail");
+            let entry = line.log_entry();
+            assert!(entry.contains(detail), "{entry}");
+            assert!(entry.contains(&line.said), "{entry}");
+        }
+        let log = lines
+            .iter()
+            .map(StepLine::log_entry)
+            .collect::<Vec<_>>()
+            .join("\n");
+        for kept in [
+            "Podman",
+            "engine machine",
+            "Windows Subsystem for Linux",
+            "podman machine init",
+            "podman machine start",
+            "Waiting for the engine to answer.",
+        ] {
+            assert!(log.contains(kept), "{kept:?} is not in the log:\n{log}");
+        }
     }
 
     /// Where Podman's package lands: the app's cache, which has a space in its path on macOS.
@@ -1622,10 +1709,11 @@ esac
         assert_eq!(
             seen.all(),
             [
-                "here: Downloading Podman.",
+                "here: Downloading the software OpenBot runs on.",
                 "downloaded",
-                "asks: Podman is downloaded and ready to install.",
-                "elsewhere: Installing Podman. Enter your Mac password when macOS asks for it.",
+                "asks: The software OpenBot runs on is downloaded and ready to install.",
+                "elsewhere: Installing the software OpenBot runs on. Enter your Mac password when \
+                 macOS asks for it.",
                 "prompt",
                 "back",
             ]
@@ -1635,8 +1723,7 @@ esac
             [concat!(
                 r#"do shell script "/usr/sbin/installer -pkg '/Users/a b/Library/Caches/OpenBot/"#,
                 r#"podman-installer-macos-arm64.pkg' -target /" with administrator privileges "#,
-                r#"with prompt "OpenBot needs your password to install Podman, which runs "#,
-                r#"OpenBot's back end.""#
+                r#"with prompt "OpenBot needs your password to install the software it runs on.""#
             )]
         );
     }
@@ -1671,13 +1758,15 @@ esac
         assert_eq!(
             seen.all(),
             [
-                "here: Downloading Podman.",
-                "asks: Podman is downloaded and ready to install.",
-                "elsewhere: Installing Podman. Enter your Mac password when macOS asks for it.",
+                "here: Downloading the software OpenBot runs on.",
+                "asks: The software OpenBot runs on is downloaded and ready to install.",
+                "elsewhere: Installing the software OpenBot runs on. Enter your Mac password when \
+                 macOS asks for it.",
                 "prompt",
                 "back",
-                "asks: macOS didn't get your password, so Podman isn't installed yet.",
-                "elsewhere: Installing Podman. Enter your Mac password when macOS asks for it.",
+                "asks: macOS didn't get your password, so the software isn't installed yet.",
+                "elsewhere: Installing the software OpenBot runs on. Enter your Mac password when \
+                 macOS asks for it.",
                 "prompt",
                 "back",
             ]
@@ -1707,7 +1796,8 @@ esac
         .unwrap_err();
         assert_eq!(
             failed.said,
-            "OpenBot stopped before installing Podman. Start again when you're ready."
+            "OpenBot stopped before installing the software it runs on. Start again when you're \
+             ready."
         );
         assert!(
             !seen.all().contains(&"prompt".to_owned()),
