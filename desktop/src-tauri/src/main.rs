@@ -7792,7 +7792,7 @@ fn back_end_wait_ended(why: String) {
     let now = std::time::Instant::now();
     match wait.take() {
         Some(waited) => log::warn!("{}", waited.ended(now, &format!("gave up: {why}"))),
-        None => log::warn!("[wait] the back end: gave up before any status answered: {why}"),
+        None => log::warn!("[wait] the backend: gave up before any status answered: {why}"),
     }
 }
 
