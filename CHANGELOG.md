@@ -24,7 +24,7 @@ backup taken before the upgrade instead. Three things change for an existing dep
   to ask every time in Admin > Approvals.
 - A Personal Assistant whose instructions nobody changed takes the new ones at the next start
   (below). One whose instructions were edited keeps them.
-- OpenBot Desktop's bundled CLI moves to `copilotkit@f72e270`, and Start writes
+- OpenBot Desktop's bundled CLI moves to `copilotkit@2e1c519`, and Start writes
   `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` in `~/OpenBot/.env` as empty (below). The back end stays
   on CopilotKit Intelligence 0.16.0-rc.10.
 
@@ -239,8 +239,8 @@ backup taken before the upgrade instead. Three things change for an existing dep
   `localhost`, `127.0.0.1` and `[::1]` with the same port as the same address, connects again, and
   leaves OpenBot's addresses as they are. An address changed to another port or host is still
   refused.
-- **CopilotKit CLI `copilotkit@f72e270`.** OpenBot Desktop's bundled CLI moves to the production
-  build of Intelligence `f72e2704d`: `6bfaa0f5c`, which added `telemetry link`, with `--app-path`
+- **CopilotKit CLI `copilotkit@2e1c519`.** OpenBot Desktop's bundled CLI moves to the production
+  build of Intelligence `2e1c51900`: `6bfaa0f5c`, which added `telemetry link`, with `--app-path`
   added to its `local` commands and a second `local connect` accepted after OpenBot rewrote its
   addresses to `127.0.0.1`. It keeps Intelligence 0.16.0-rc.10 and CopilotKit v1.85.0 templates.
 - **A Learning container left in `~/OpenBot/.env` by an earlier setup no longer fails every
