@@ -10,6 +10,24 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **Usage data now says why setup stopped.** A failed `local setup`, every failed install or
+  Start (a failed `compose up` among them), a failed `local start`, `local connect` or Learning
+  model setup, and an Account step that stops on an engine too small or one local setup does not
+  run on each send one `setup_failed`, with the step that failed, a reason class, the CLI's own
+  reason, and for an engine too small its CPUs, memory and disk against what setup needs. The
+  Account step's sign-in sends when it starts and whether it completed, failed or was cancelled.
+  The app version keeps a release candidate's label (`1.0.0-rc.5`, not `1.0.0`). Only closed values
+  and numbers are sent, and nothing at all when usage data is off.
+- **Sign-in comes first, and macOS asks for your password only after OpenBot says why.** On a new
+  Mac the Account step waited for Install to put Podman in before any browser sign-in opened, and
+  the "osascript wants to make changes" password box came up by itself over it. The CopilotKit
+  sign-in now opens in your browser as soon as the Account step opens: the CLI's sign-in needs no
+  engine, and only the license agreement waits for one. Podman downloads meanwhile. Once you're
+  signed in, the step says "OpenBot installs Podman, which runs OpenBot's back end on this
+  computer. macOS asks for your password once to install it." and the password box comes up only
+  when you choose Continue. It now says "OpenBot needs your password to install Podman, which runs
+  OpenBot's back end." Closing it without a password offers Continue again instead of stopping
+  Install. Windows and Linux install as before.
 - **A back end update that was stopped partway no longer breaks every later Start.** Quitting
   while the back end updated could leave it half updated, and every Start after that failed with
   "Local update-quiesce failed (exit 1)". OpenBot now lets an update finish once it has begun
@@ -20,11 +38,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   fails. A failed update says the step it stopped at, and that your data is kept.
 - **The Account step says when it is waiting for Install to set up the engine.** On a new Mac it
   said "Checking your CopilotKit account…" for minutes while Install put Podman in, because the
-  sign-in check needs a running engine. It now says "OpenBot is setting up the software it runs on.
-  Your CopilotKit sign-in comes next.", with what Install is doing ("Installing Podman.",
-  "Preparing the engine machine.", "Starting the engine machine."). The desktop log says each change
-  once as `[account]`: what the CLI's preflight answered, the install step, how long the wait took
-  and what the sign-in check answered, and how long the browser sign-in took.
+  license agreement check needs a running engine. It now says "You're signed in. OpenBot is setting
+  up the software it runs on. The license agreement comes next.", with what Install is doing
+  ("Downloading Podman.", "Preparing the engine machine.", "Starting the engine machine."). The
+  desktop log says each change once as `[account]`: what the CLI's preflight answered, the install
+  step, how long the wait took and what the sign-in check answered, and how long the browser
+  sign-in took.
 - **Connecting an app from OpenBot Desktop brings you back to OpenBot Desktop.** The app's sign-in
   opens in your browser, and when it finished, the browser showed OpenBot in a new tab while the
   window behind it still had the app as not connected. The browser now shows a short "Back to
@@ -213,6 +232,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Personal edition
 
+- **Adding an app in Browse apps signs you in to it.** Add on an app you sign in to, such as Slack,
+  GitHub or Gmail, turned the row to "Added" and signed nobody in, so a Bot then said the app wasn't
+  connected. Add now adds the app and opens its sign-in in a new tab, as a Bot's Connect card does.
+  Add on an app that takes a key opens its page with the key form. In either edition, an app that
+  is added and not signed in to reads **Not connected** beside **Connect** in Browse apps, on
+  Connections and on the app's page, where it read "Added" or showed Connect alone. The team
+  edition's Add is still the admin's act and reads "Added, not connected" until the admin connects
+  their own account. GitHub on Connections no longer reads Connected off the GitHub sign-in alone
+  while its tools are not connected.
 - **Settings → Learning says Waiting for your review only when a skill is waiting.** With
   **Approve new skills automatically** on, the heading showed while Learning was in progress and
   after it finished, though nothing waited. The section is now **New skills** until a learned skill

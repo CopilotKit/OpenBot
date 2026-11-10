@@ -276,15 +276,22 @@ export function addCustomServerMutationOptions(queryClient: QueryClient) {
  *
  * Its own endpoint rather than a curated key, because the catalogue is the vendor's rather than
  * ours: the slug is all the server needs to look the app up and record the row.
+ *
+ * Answers the new row's id, which is what a sign-in started on the same press is asked against.
  */
 export function enableComposioAppMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: async (input: { slug: string }) => {
-      await client("/api/plugins/composio/apps", {
-        method: "POST",
-        body: input,
-        fallback: "That app could not be added.",
-      });
+    mutationFn: async (input: { slug: string }): Promise<string> => {
+      const server = await client<{ id: string }>(
+        "/api/plugins/composio/apps",
+        "server",
+        {
+          method: "POST",
+          body: input,
+          fallback: "That app could not be added.",
+        },
+      );
+      return server.id;
     },
     onSettled: () => invalidatePlugins(queryClient),
   });

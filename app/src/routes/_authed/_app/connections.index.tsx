@@ -689,7 +689,7 @@ function ConnectionStateLabel({
   if (state === "team") {
     return <span className="text-xs text-muted-foreground">Team account</span>;
   }
-  return (
+  const pill = (
     <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium">
       {pending
         ? row.action === "add"
@@ -700,4 +700,19 @@ function ConnectionStateLabel({
           : ACTION_LABEL[row.action ?? "connect"]}
     </span>
   );
+  // Added and not signed in to: said in words, beside the press that connects it.
+  if (state === "available" && row.notConnected && !pending) {
+    return (
+      <span className="flex items-center gap-2">
+        <span
+          className="text-xs text-muted-foreground"
+          data-testid="tile-not-connected"
+        >
+          Not connected
+        </span>
+        {pill}
+      </span>
+    );
+  }
+  return pill;
 }

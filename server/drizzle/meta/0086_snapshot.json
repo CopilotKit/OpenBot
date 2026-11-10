@@ -1,5 +1,5 @@
 {
-  "id": "b031d35a-9631-433a-980a-8dc5041d0823",
+  "id": "0a690cd8-8287-48fe-b8b0-0a67264f2bcd",
   "prevId": "e2aa32e0-7fb8-4de8-8d4a-d66498985cf4",
   "version": "7",
   "dialect": "postgresql",
@@ -797,6 +797,12 @@
         "summary_at": {
           "name": "summary_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -5417,141 +5423,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.approval_conversation_grants": {
-      "name": "approval_conversation_grants",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "owner_user_id": {
-          "name": "owner_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "thread_id": {
-          "name": "thread_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "approval_id": {
-          "name": "approval_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "bot_id": {
-          "name": "bot_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "tool_ref": {
-          "name": "tool_ref",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "effect": {
-          "name": "effect",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "scope": {
-          "name": "scope",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "account": {
-          "name": "account",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "revoked_at": {
-          "name": "revoked_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "approval_conversation_grants_thread_idx": {
-          "name": "approval_conversation_grants_thread_idx",
-          "columns": [
-            {
-              "expression": "owner_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "thread_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "approval_conversation_grants_owner_user_id_users_id_fk": {
-          "name": "approval_conversation_grants_owner_user_id_users_id_fk",
-          "tableFrom": "approval_conversation_grants",
-          "tableTo": "users",
-          "columnsFrom": [
-            "owner_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "approval_conversation_grants_approval_id_approval_requests_id_fk": {
-          "name": "approval_conversation_grants_approval_id_approval_requests_id_fk",
-          "tableFrom": "approval_conversation_grants",
-          "tableTo": "approval_requests",
-          "columnsFrom": [
-            "approval_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.approval_preferences": {
       "name": "approval_preferences",
       "schema": "",
@@ -5771,7 +5642,7 @@
         },
         "approval_decision_check": {
           "name": "approval_decision_check",
-          "value": "\"approval_requests\".\"decision\" IN ('allow_once', 'allow_conversation', 'allow_always', 'deny', 'handled')"
+          "value": "\"approval_requests\".\"decision\" IN ('allow_once', 'allow_always', 'deny', 'handled')"
         }
       },
       "isRLSEnabled": false
@@ -5825,12 +5696,6 @@
         },
         "account": {
           "name": "account",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "kind": {
-          "name": "kind",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -6009,13 +5874,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'allow'"
-        },
-        "action_kinds": {
-          "name": "action_kinds",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
         },
         "updated_by": {
           "name": "updated_by",

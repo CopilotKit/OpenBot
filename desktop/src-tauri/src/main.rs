@@ -250,6 +250,9 @@ struct Progress {
     /// The detail sends the person to another app's window: see `engine::StepLine`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     elsewhere: bool,
+    /// The step waits for the person's go-ahead in this window: see `install::GoAhead`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    asks: bool,
 }
 
 #[derive(Serialize)]
@@ -505,15 +508,16 @@ fn report<R: tauri::Runtime>(
     }
     forget_running_logged();
     if !ok {
-        let error_class = match step {
-            "install-engine" => telemetry::SetupErrorClass::EngineInstallFailed,
-            "engine" | "create-machine" | "start-machine" | "health-gate" => {
-                telemetry::SetupErrorClass::EngineUnavailable
-            }
-            "env" | "ports" => telemetry::SetupErrorClass::InvalidConfiguration,
-            _ => telemetry::SetupErrorClass::Unknown,
-        };
-        desktop_telemetry::failure(app, error_class);
+        // The row's step, and a class from the step or, where the step says nothing, its words.
+        // Only the two enums are recorded, never the words.
+        let failing = telemetry::FailingStep::from_row(step);
+        desktop_telemetry::setup_failed(
+            app,
+            desktop_telemetry::SetupFailure::new(
+                failing,
+                desktop_telemetry::class_of_row(failing, &detail),
+            ),
+        );
     }
     let _ = app.emit(
         "setup:progress",
@@ -525,6 +529,7 @@ fn report<R: tauri::Runtime>(
             download_bytes: None,
             downloads: None,
             elsewhere: false,
+            asks: false,
         },
     );
 }
@@ -532,6 +537,31 @@ fn report<R: tauri::Runtime>(
 /// The running step last written to the log, so a step that says the same thing on every poll
 /// (an engine that is still starting) is one entry rather than one a second.
 static RUNNING_LOGGED: Mutex<Option<(String, String)>> = Mutex::new(None);
+
+/// The part of a Start or install under way, by its row's name, for the usage data of a failure
+/// that returns before any row says it failed (`desktop_telemetry::unreported_failure`). Set by
+/// every running row, and by `setup_phase` where Start does work no row shows.
+static SETUP_PHASE: Mutex<Option<telemetry::FailingStep>> = Mutex::new(None);
+
+fn setup_phase(step: &str) {
+    *SETUP_PHASE.lock().unwrap_or_else(|held| held.into_inner()) =
+        Some(telemetry::FailingStep::from_row(step));
+}
+
+fn current_setup_phase() -> telemetry::FailingStep {
+    SETUP_PHASE
+        .lock()
+        .unwrap_or_else(|held| held.into_inner())
+        .unwrap_or(telemetry::FailingStep::Start)
+}
+
+/// Refusals that are not a failure of setup: Start cancelled by Stop, one already under way, or an
+/// update in progress. None of them is recorded as `setup_failed`.
+fn refused_not_failed(problem: &Problem) -> bool {
+    problem.said == StartAttempt::cancelled().said
+        || problem.said.starts_with("OpenBot is already starting")
+        || problem.said.starts_with("OpenBot is updating.")
+}
 
 fn forget_running_logged() {
     *RUNNING_LOGGED
@@ -558,7 +588,9 @@ fn report_running_line<R: tauri::Runtime>(
     let engine::StepLine {
         said: detail,
         elsewhere,
+        asks,
     } = line;
+    setup_phase(step);
     {
         let mut logged = RUNNING_LOGGED
             .lock()
@@ -579,6 +611,7 @@ fn report_running_line<R: tauri::Runtime>(
             download_bytes,
             downloads: None,
             elsewhere,
+            asks,
         },
     );
 }
@@ -617,6 +650,22 @@ fn bring_setup_to_front(app: tauri::AppHandle, why: String) {
     bring_to_front(&app, &why);
 }
 
+/// The person chose Continue under the setup window's explanation of the password prompt, so
+/// Install may raise it now. See `install::GoAhead`. False when nothing was waiting for it.
+#[tauri::command]
+fn allow_podman_install() -> bool {
+    let waiting = install::allow_podman_install();
+    log::info!(
+        "[install] Continue to install Podman{}",
+        if waiting {
+            ""
+        } else {
+            ", with nothing waiting for it"
+        }
+    );
+    waiting
+}
+
 /// Install's running image downloads: the step's sentence, the overall bytes as `downloadBytes`
 /// for anything that reads only that, and the per-image detail.
 fn report_downloads<R: tauri::Runtime>(
@@ -633,6 +682,7 @@ fn report_downloads<R: tauri::Runtime>(
             download_bytes: (downloads.bytes > 0).then_some(downloads.bytes),
             downloads: Some(downloads),
             elsewhere: false,
+            asks: false,
         },
     );
 }
@@ -1680,12 +1730,25 @@ async fn prepare_installation(
         harness.as_ref().map_or("none", |chosen| chosen.id.as_str())
     );
     let selected = stack::root_from(&root);
+    let failures = desktop_telemetry::failures_recorded(&app);
+    setup_phase("installation");
+    let telemetry_app = app.clone();
     // Repair after an interrupted upgrade prepares the version that is back.
     let prepared = match put_back_interrupted_upgrade(&app, &selected).await {
         Ok(()) => prepare_installation_inner(app, root, harness).await,
         Err(problem) => Err(problem),
     };
     logging::outcome("install", asked, &prepared);
+    // As for Start: one `setup_failed` for an install that failed without a row saying so.
+    if let Err(problem) = &prepared {
+        desktop_telemetry::unreported_failure(
+            &telemetry_app,
+            failures,
+            current_setup_phase(),
+            problem,
+            refused_not_failed(problem),
+        );
+    }
     prepared
 }
 
@@ -1908,6 +1971,12 @@ async fn engine_ready(
     let telemetry_app = app.clone();
     let progress_app = app.clone();
     let back_app = app.clone();
+    // Stop and Quit move the ticket on: a wait for the person's go-ahead ends with them.
+    let watching = app.clone();
+    let ticket = app
+        .state::<Shell>()
+        .start_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
     let installed = tauri::async_runtime::spawn_blocking(move || {
         install::install_engine_observed(
             &stack::default_root(),
@@ -1932,6 +2001,13 @@ async fn engine_ready(
             &mut |line| report_running_line(&progress_app, "install-engine", line, None),
             // Docker Desktop's window, or the password prompt, came to the front over OpenBot's.
             &|| bring_to_front(&back_app, "the engine no longer needs another app's window"),
+            &|| {
+                watching
+                    .state::<Shell>()
+                    .start_generation
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    != ticket
+            },
         )
     })
     .await
@@ -2642,8 +2718,22 @@ async fn start_stack<R: tauri::Runtime>(
         model.login,
         harness.as_ref().map_or("none", |chosen| chosen.id.as_str())
     );
+    let failures = desktop_telemetry::failures_recorded(&app);
+    setup_phase("start");
+    let telemetry_app = app.clone();
     let started = start_stack_now(app, root, api_url, gateway_ws_url, model, harness).await;
     logging::outcome("start", asked, &started);
+    // Every way Start can fail sends one `setup_failed`: a row that failed has sent it already,
+    // and any other return (a failed `compose up` among them) sends it here.
+    if let Err(problem) = &started {
+        desktop_telemetry::unreported_failure(
+            &telemetry_app,
+            failures,
+            current_setup_phase(),
+            problem,
+            refused_not_failed(problem),
+        );
+    }
     started
 }
 
@@ -2787,10 +2877,12 @@ async fn start_stack_inner<R: tauri::Runtime>(
 
         // Belt and braces: a fetch that reported success and left something out is still not a
         // deployment, and Compose's own error would not say which part was missing.
+        setup_phase("deployment");
         if let Some(problem) = stack::deployment_problem(&root) {
             report(&app, "deployment", false, problem.clone());
             return Err(problem.into());
         }
+        setup_phase("engine");
 
         let owned_address = shell
             .containers
@@ -2860,6 +2952,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
             return Err(problem.into());
         }
 
+        setup_phase("env");
         let api_key = intelligence_key_for_start(&root, saved_secret)?;
         let existing_secrets = openbot_desktop_lib::vault::already_given_no_ui(
             &root,
@@ -2887,6 +2980,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         let previous_ports = openbot_env::Ports::read(&root).map_err(|error| {
             Problem::with("OpenBot could not read its local ports.", error.to_string())
         })?;
+        setup_phase("cleanup");
         let reclaimed = cleanup_before_start(&app, &attempt, &root, stack::stop_processes_under)?;
         if reclaimed > 0 {
             stack::wait_for_ports_to_clear(
@@ -2894,6 +2988,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
                 std::time::Duration::from_secs(5),
             );
         }
+        setup_phase("ports");
         let ours = stack::ports_we_already_publish(&found, &root);
         // The last run's own ports are waited for before anything moves off them (`for_start`).
         let own = openbot_env::Ports::recorded(&root).map_err(|error| {
@@ -2913,6 +3008,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
                 )
             })?;
 
+        setup_phase("env");
         let mut settings = openbot_env::compose(
             &openbot_env::Intelligence {
                 api_url,
@@ -3142,6 +3238,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
     })?;
     preparation::save_selected_root(&config, &root)?;
     give_learning_its_model(
+        app.clone(),
         root.clone(),
         found.clone(),
         credential,
@@ -3165,7 +3262,8 @@ In the background, on its own thread. Learning is not what Start waits on, and a
 fails here leaves OpenBot running, Settings saying why Learning can't run, and the next Start trying
 again. The CLI takes its turn with the window's own calls (`local_eval::one_at_a_time`).
 */
-fn give_learning_its_model(
+fn give_learning_its_model<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     root: PathBuf,
     engine: engine::Address,
     credential: openbot_env::ModelCredential,
@@ -3189,9 +3287,38 @@ fn give_learning_its_model(
             learning_model::Given::Given => {
                 log::info!("[learning] the Learning agent has the model this sign-in gives it")
             }
-            other => log::warn!("[learning] the Learning agent's model was not changed: {other:?}"),
+            other => {
+                log::warn!("[learning] the Learning agent's model was not changed: {other:?}");
+                if let Some(failure) = learning_failure(&other) {
+                    desktop_telemetry::setup_failed(&app, failure);
+                }
+            }
         }
     });
+}
+
+/// A Learning model the CLI did not take, as usage data. Waiting for the stack is not a failure.
+fn learning_failure(
+    given: &openbot_desktop_lib::learning_model::Given,
+) -> Option<desktop_telemetry::SetupFailure> {
+    use openbot_desktop_lib::learning_model::Given;
+    use telemetry::{FailingStep, SetupErrorClass};
+    let step = FailingStep::LearningModel;
+    match given {
+        Given::Nothing | Given::NotReady | Given::Given => None,
+        Given::Refused(_) => Some(desktop_telemetry::SetupFailure::new(
+            step,
+            SetupErrorClass::Unknown,
+        )),
+        Given::NoAddress => Some(desktop_telemetry::SetupFailure::new(
+            step,
+            SetupErrorClass::InvalidConfiguration,
+        )),
+        Given::Failed(said) => Some(desktop_telemetry::SetupFailure::new(
+            step,
+            desktop_telemetry::class_of_row(step, said),
+        )),
+    }
 }
 
 /// Local folder access for the deployment at `root`, answering to its server with the per-run
@@ -3461,6 +3588,7 @@ impl QuitStatus {
             download_bytes: None,
             downloads: None,
             elsewhere: false,
+            asks: false,
         };
         match self.steps.iter_mut().find(|known| known.step == row.step) {
             Some(known) => *known = row,
@@ -6531,8 +6659,8 @@ fn cancel_model_oauth(attempt_id: String) {
 /// static failure category; the CLI's own output never reaches the window. `attempt` names the
 /// call so `cancel_local_eval` can stop it, including before it has started.
 #[tauri::command]
-async fn run_local_eval(
-    app: tauri::AppHandle,
+async fn run_local_eval<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     attempt: String,
     action: local_eval::Action,
     stack: String,
@@ -6547,7 +6675,19 @@ async fn run_local_eval(
         local_eval_answer(&root, &attempt, action, &stack)
     })
     .await
-    .map_err(|_| local_eval::Failure::Spawn)??;
+    .map_err(|_| local_eval::Failure::Spawn)
+    .and_then(|answered| answered);
+    // A `local start` or `local update` that stops the back end from running is a setup failure.
+    let failing = match action {
+        local_eval::Action::Start => Some(telemetry::FailingStep::LocalStart),
+        local_eval::Action::Update => Some(telemetry::FailingStep::LocalUpdate),
+        local_eval::Action::Status | local_eval::Action::Stop => None,
+    };
+    if let Some(failure) = failing.and_then(|step| desktop_telemetry::report_failure(step, &report))
+    {
+        desktop_telemetry::setup_failed(&app, failure);
+    }
+    let report = report?;
     learn_dashboards(&app, report.stack.iter());
     Ok(report)
 }
@@ -6592,8 +6732,8 @@ fn know_cli_engine(root: &Path) {
 }
 
 /// Keep the dashboard address of every stack a CLI report described, for `Dashboards`.
-fn learn_dashboards<'a>(
-    app: &tauri::AppHandle,
+fn learn_dashboards<'a, R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     stacks: impl Iterator<Item = &'a local_eval::Stack>,
 ) {
     let shell = app.state::<Shell>();
@@ -6621,8 +6761,8 @@ person accepts in their own terminal before the window asks again. Only a comple
 recorded, and only then does Stop or Quit stop that stack.
 */
 #[tauri::command]
-async fn set_up_local_eval(
-    app: tauri::AppHandle,
+async fn set_up_local_eval<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     attempt: String,
     root: String,
     accepted_eula_version: Option<String>,
@@ -6645,7 +6785,24 @@ async fn set_up_local_eval(
         })
     })
     .await
-    .map_err(|_| SetupError::Failure(local_eval::Failure::Spawn))??;
+    .map_err(|_| SetupError::Failure(local_eval::Failure::Spawn))
+    .and_then(|set_up| set_up);
+    // A failed `local setup` is a setup failure, sent from here: the window hands it on only.
+    let failing = telemetry::FailingStep::LocalSetup;
+    let failure = match &report {
+        Ok(report) => desktop_telemetry::report_failure(failing, &Ok(report.clone())),
+        Err(SetupError::Failure(failure)) => {
+            desktop_telemetry::report_failure(failing, &Err(*failure))
+        }
+        Err(SetupError::Unrecorded(problem)) => Some(desktop_telemetry::SetupFailure::new(
+            failing,
+            desktop_telemetry::class_of_row(failing, &problem.said),
+        )),
+    };
+    if let Some(failure) = failure {
+        desktop_telemetry::setup_failed(&app, failure);
+    }
+    let report = report?;
     learn_dashboards(&app, report.stack.iter());
     Ok(report)
 }
@@ -6658,27 +6815,33 @@ approved it there, or it failed. `attempt` lets `cancel_local_eval` stop the wai
 `copilotkit_sign_in_page` show the page it is waiting on.
 */
 #[tauri::command]
-async fn sign_in_to_copilotkit(
-    app: tauri::AppHandle,
+async fn sign_in_to_copilotkit<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     attempt: String,
 ) -> Result<local_eval::AccountSignIn, local_eval::Failure> {
     let root = selected_root_or_default(&app);
+    let started_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         know_cli_engine(&root);
         // The person is in their browser for as long as this takes, minutes at times.
         log::info!("[account] browser sign-in started");
+        desktop_telemetry::sign_in_started(&started_app);
         let asked = std::time::Instant::now();
         let signed_in = local_eval::account_sign_in_installed(&attempt);
-        let took = asked.elapsed().as_secs();
+        let took = asked.elapsed();
         match &signed_in {
             Ok(said) => log::info!(
-                "[account] browser sign-in ended after {took}s, signed in: {}",
+                "[account] browser sign-in ended after {}s, signed in: {}",
+                took.as_secs(),
                 said.signed_in
             ),
-            Err(failure) => {
-                log::info!("[account] browser sign-in ended after {took}s: {failure:?}")
-            }
+            Err(failure) => log::info!(
+                "[account] browser sign-in ended after {}s: {failure:?}",
+                took.as_secs()
+            ),
         }
+        // What the `[account]` lines say, as usage data: how it ended and how long it took.
+        desktop_telemetry::sign_in_ended(&started_app, &signed_in, took);
         signed_in
     })
     .await
@@ -6754,7 +6917,7 @@ async fn local_eval_terms(
 static ACCOUNT_WAIT: Mutex<local_eval::AccountWait> = Mutex::new(local_eval::AccountWait::new());
 
 /// The folder this window is installing into, or the default one.
-fn selected_root_or_default(app: &tauri::AppHandle) -> PathBuf {
+fn selected_root_or_default<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
     let shell = app.state::<Shell>();
     let selected = shell.selected_root.lock().unwrap().clone();
     selected.unwrap_or_else(stack::default_root)
@@ -6843,8 +7006,8 @@ place a pasted key goes, and Start takes it from there. Blocked and conflicted a
 as they are, with nothing taken.
 */
 #[tauri::command]
-async fn connect_local_eval(
-    app: tauri::AppHandle,
+async fn connect_local_eval<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     attempt: String,
     root: String,
 ) -> Result<local_eval::Connection, ConnectError> {
@@ -6858,7 +7021,23 @@ async fn connect_local_eval(
         )
     })
     .await
-    .map_err(|_| ConnectError::Failure(local_eval::Failure::Spawn))??;
+    .map_err(|_| ConnectError::Failure(local_eval::Failure::Spawn))
+    .and_then(|connected| connected);
+    let failing = telemetry::FailingStep::LocalConnect;
+    let failure = match &connection {
+        Ok(connection) => desktop_telemetry::connection_failure(&Ok(connection.clone())),
+        Err(ConnectError::Failure(failure)) => {
+            desktop_telemetry::connection_failure(&Err(*failure))
+        }
+        Err(ConnectError::Unconnected(problem)) => Some(desktop_telemetry::SetupFailure::new(
+            failing,
+            desktop_telemetry::class_of_row(failing, &problem.said),
+        )),
+    };
+    if let Some(failure) = failure {
+        desktop_telemetry::setup_failed(&app, failure);
+    }
+    let connection = connection?;
     learn_dashboards(&app, connection.stack.iter());
     Ok(connection)
 }
@@ -8722,6 +8901,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             record_setup_event,
             bring_setup_to_front,
+            allow_podman_install,
             wake_engine,
             fit_setup_window,
             detect_engine,
@@ -12733,7 +12913,7 @@ mod tests {
         let source = include_str!("main.rs");
         for command in [
             "async fn local_eval_terms(",
-            "async fn sign_in_to_copilotkit(",
+            "async fn sign_in_to_copilotkit<R: tauri::Runtime>(",
         ] {
             let start = source.find(command).expect(command);
             let body = &source[start..];
@@ -15713,6 +15893,320 @@ fn main() {
         }
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
+    }
+
+    /// What a Start through the app's own command sends: `start_stack`, on the fake engine.
+    fn start_through_the_command(
+        app: &tauri::App<tauri::test::MockRuntime>,
+        root: &Path,
+    ) -> Result<(), Problem> {
+        tauri::async_runtime::block_on(start_stack(
+            app.handle().clone(),
+            root.display().to_string(),
+            "https://intelligence.example.test".into(),
+            "wss://gateway.example.test".into(),
+            ChosenModel {
+                provider: "openai".into(),
+                login: "api-key".into(),
+                api_key: Some("synthetic-openai-key".into()),
+                base_url: None,
+                container_base_url: None,
+                model: None,
+                token: None,
+                saved: Some(false),
+            },
+            None,
+        ))
+    }
+
+    fn setup_failures(app: &tauri::App<tauri::test::MockRuntime>) -> Vec<telemetry::EventData> {
+        app.state::<desktop_telemetry::DesktopTelemetry>()
+            .queued()
+            .into_iter()
+            .filter(|event| matches!(event, telemetry::EventData::SetupFailed { .. }))
+            .collect()
+    }
+
+    /// A failed `compose up` returned from Start with no row saying it failed, and no event: of
+    /// the installs that never ran, most sent no error at all. Every failed Start now sends one
+    /// `setup_failed`, at the step it was in, classed by what the engine said, and one only: a
+    /// row that already said it failed (a service that exited) is not counted twice.
+    #[test]
+    fn every_failed_start_sends_one_setup_failed() {
+        if crate::test_support::isolated_process("tests::every_failed_start_sends_one_setup_failed")
+        {
+            return;
+        }
+        std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
+        std::env::remove_var("DO_NOT_TRACK");
+        for (scenario, error_class, said) in [
+            (
+                "up-fails",
+                telemetry::SetupErrorClass::PermissionDenied,
+                // The sentence is the engine's to choose (`problem::said_about`).
+                "",
+            ),
+            (
+                "dead-service",
+                telemetry::SetupErrorClass::Unknown,
+                "Part of OpenBot stopped during startup.",
+            ),
+        ] {
+            let root = temp_root(&format!("openbot-failed-start-{scenario}"));
+            write_installed_deployment(&root);
+            remember_local_intelligence_key(&root);
+            let _path = SerializedPath::set_only_with("docker", scenario);
+            let app = tauri::test::mock_builder()
+                .manage(Shell::default())
+                .manage(desktop_telemetry::DesktopTelemetry::for_tests(
+                    temp_root(&format!("openbot-failed-start-telemetry-{scenario}")),
+                    true,
+                ))
+                .build(tauri::test::mock_context(tauri::test::noop_assets()))
+                .unwrap();
+            let problem = start_through_the_command(&app, &root).expect_err(scenario);
+            assert!(problem.said.starts_with(said), "{scenario}: {problem:?}");
+            assert_eq!(
+                setup_failures(&app),
+                vec![telemetry::EventData::SetupFailed {
+                    step: telemetry::Step::Install,
+                    error_class,
+                    failing_step: Some(telemetry::FailingStep::Services),
+                    cli_reason: None,
+                    cli_failure: None,
+                    resources: None,
+                }],
+                "{scenario}: {problem:?}"
+            );
+            let _ = std::fs::remove_dir_all(root);
+        }
+
+        // Opted out: a failed Start sends nothing.
+        let root = temp_root("openbot-failed-start-opted-out");
+        write_installed_deployment(&root);
+        remember_local_intelligence_key(&root);
+        let _path = SerializedPath::set_only_with("docker", "up-fails");
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .manage(desktop_telemetry::DesktopTelemetry::for_tests(
+                temp_root("openbot-failed-start-telemetry-off"),
+                false,
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        assert!(start_through_the_command(&app, &root).is_err());
+        assert_eq!(setup_failures(&app), vec![]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// The CLI's answer to a `local setup` refused for resources, as the 4.34.0 CLI prints it.
+    const SETUP_REFUSED_FOR_DISK: &str = r#"{"version":1,"command":"local setup","status":"failed","error":{"code":"LOCAL_DOCKER_RESOURCES_SHORT","message":"Docker available resources: 9.871234 CPUs (requires 4), 18.9 GiB RAM available (requires 4), 0 GiB free storage (requires 40). Stop other container workloads or increase Docker resources, then retry local setup."},"nextAction":{"reason":"local_command_failed","summary":"The local command did not finish.","instructions":[],"resumeCommand":"npx --yes copilotkit local setup --json","url":null,"linkLabel":null,"linkFile":null,"caveats":[],"requiredEnvVars":[],"artifacts":[]},"diagnostics":[]}"#;
+
+    /// A failed `local setup` was handed back to the window and recorded nowhere. It is sent now,
+    /// by the desktop, as one `setup_failed` at `local_setup` with the CLI's reason and what the
+    /// engine had against what setup needs, to the ingest as JSON. Only closed values and numbers:
+    /// not the folder, the user's name, nor the CLI's message. Opted out, in the environment or in
+    /// Settings, nothing reaches the ingest.
+    #[test]
+    fn a_failed_local_setup_sends_setup_failed_to_the_ingest() {
+        if crate::test_support::isolated_process(
+            "tests::a_failed_local_setup_sends_setup_failed_to_the_ingest",
+        ) {
+            return;
+        }
+        std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
+        std::env::remove_var("DO_NOT_TRACK");
+        // No engine to find: the CLI's own answer is the whole of the failure.
+        let empty = temp_root("openbot-local-setup-no-engine");
+        std::fs::create_dir_all(&empty).unwrap();
+        std::env::set_var("PATH", &empty);
+        let cli = desktop_telemetry::fake_cli::FakeCli::pinned("openbot-local-setup-cli", false);
+        cli.answer(SETUP_REFUSED_FOR_DISK, 1);
+        let sink = desktop_telemetry::sink::Sink::start();
+        let set_up = |sharing: bool, label: &str| {
+            let root = temp_root(label);
+            let app = tauri::test::mock_builder()
+                .manage(Shell::default())
+                .manage(desktop_telemetry::DesktopTelemetry::for_tests_sending(
+                    temp_root(&format!("{label}-telemetry")),
+                    sharing,
+                    sink.endpoint.clone(),
+                ))
+                .build(tauri::test::mock_context(tauri::test::noop_assets()))
+                .unwrap();
+            let report = tauri::async_runtime::block_on(set_up_local_eval(
+                app.handle().clone(),
+                format!("{label}-attempt"),
+                root.display().to_string(),
+                None,
+            ));
+            (app, root, report)
+        };
+
+        let (app, root, report) = set_up(true, "openbot-local-setup-failed");
+        let report = report.expect("the CLI answered");
+        assert_eq!(report.outcome, local_eval::Outcome::Failed);
+        assert!(cli.calls().contains("local setup"), "{}", cli.calls());
+        app.state::<desktop_telemetry::DesktopTelemetry>().deliver();
+        let (id, sent) = sink
+            .next(std::time::Duration::from_secs(10))
+            .expect("setup_failed reached the ingest");
+        println!(
+            "SAMPLE PAYLOAD (failed local setup), X-CopilotKit-Telemetry-Id: {id}\n{}",
+            serde_json::to_string_pretty(&sent).unwrap()
+        );
+        assert_eq!(sent["event"], "oss.desktop.setup_failed");
+        assert_eq!(
+            sent["properties"],
+            serde_json::json!({
+                "kind": "setup_failed",
+                "step": "install",
+                "error_class": "insufficient_resources",
+                "failing_step": "local_setup",
+                "cli_reason": "resources_short",
+                "resources": {
+                    "cpu_short": false, "memory_short": false, "disk_short": true,
+                    "cpu_needed_millis": 4000, "cpu_available_millis": 9800,
+                    "memory_needed_mib": 4096, "memory_available_mib": 19353,
+                    "disk_needed_mib": 40960, "disk_available_mib": 0
+                }
+            })
+        );
+        let wire = sent.to_string();
+        let user = std::env::var("USER").unwrap_or_default();
+        for private in [
+            root.display().to_string(),
+            "Docker available resources".to_owned(),
+            "npx".to_owned(),
+            "@".to_owned(),
+        ]
+        .into_iter()
+        .chain((user.len() > 2).then_some(user))
+        {
+            assert!(!wire.contains(&private), "{private} in {wire}");
+        }
+        assert_eq!(
+            sent.as_object().unwrap().keys().collect::<Vec<_>>(),
+            [
+                "event",
+                "event_id",
+                "global_properties",
+                "package",
+                "properties",
+                "ts"
+            ]
+        );
+
+        // Opted out in the environment: the same failure, and nothing reaches the ingest.
+        let (app, _, report) = set_up(false, "openbot-local-setup-opted-out");
+        assert_eq!(report.unwrap().outcome, local_eval::Outcome::Failed);
+        app.state::<desktop_telemetry::DesktopTelemetry>().deliver();
+        assert!(sink.next(std::time::Duration::from_secs(2)).is_none());
+
+        // Turned off in Settings after the launch: nothing either.
+        let settings = temp_root("openbot-local-setup-settings");
+        let (app, _, _) = set_up(true, "openbot-local-setup-settings-on");
+        let _ = sink.next(std::time::Duration::from_secs(10));
+        desktop_telemetry::set_usage_data_in(
+            &settings,
+            Some(&app.state::<desktop_telemetry::DesktopTelemetry>()),
+            false,
+        )
+        .unwrap();
+        let report = tauri::async_runtime::block_on(set_up_local_eval(
+            app.handle().clone(),
+            "openbot-local-setup-settings-off".into(),
+            temp_root("openbot-local-setup-settings-root")
+                .display()
+                .to_string(),
+            None,
+        ));
+        assert_eq!(report.unwrap().outcome, local_eval::Outcome::Failed);
+        app.state::<desktop_telemetry::DesktopTelemetry>().deliver();
+        assert!(sink.next(std::time::Duration::from_secs(2)).is_none());
+        let _ = std::fs::remove_dir_all(&cli.dir);
+    }
+
+    /// The Account step's sign-in said nothing: 22 installs that stopped there sent no event. A
+    /// sign-in now sends `sign_in` started, and how it ended. Here the person cancels it while
+    /// the CLI waits on the browser, and the ingest gets `started` then `cancelled`, with how long
+    /// it took and nothing else.
+    #[test]
+    fn a_cancelled_sign_in_sends_started_then_cancelled() {
+        if crate::test_support::isolated_process(
+            "tests::a_cancelled_sign_in_sends_started_then_cancelled",
+        ) {
+            return;
+        }
+        std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
+        std::env::remove_var("DO_NOT_TRACK");
+        let empty = temp_root("openbot-sign-in-no-engine");
+        std::fs::create_dir_all(&empty).unwrap();
+        std::env::set_var("PATH", &empty);
+        // A CLI that waits on the browser for longer than the test does.
+        let cli = desktop_telemetry::fake_cli::FakeCli::pinned("openbot-sign-in-cli", true);
+        let sink = desktop_telemetry::sink::Sink::start();
+        let sign_in = |sharing: bool, attempt: &'static str| {
+            let app = tauri::test::mock_builder()
+                .manage(Shell::default())
+                .manage(desktop_telemetry::DesktopTelemetry::for_tests_sending(
+                    temp_root(&format!("{attempt}-telemetry")),
+                    sharing,
+                    sink.endpoint.clone(),
+                ))
+                .build(tauri::test::mock_context(tauri::test::noop_assets()))
+                .unwrap();
+            let handle = app.handle().clone();
+            let waiting = std::thread::spawn(move || {
+                tauri::async_runtime::block_on(sign_in_to_copilotkit(handle, attempt.into()))
+            });
+            // The person cancels once the CLI is waiting on the browser.
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            while !cli.calls().contains("login") && std::time::Instant::now() < until {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            cli.forget_calls();
+            local_eval::cancel(attempt);
+            let result = waiting.join().unwrap();
+            app.state::<desktop_telemetry::DesktopTelemetry>().deliver();
+            (app, result)
+        };
+
+        let (_app, result) = sign_in(true, "openbot-sign-in-cancelled");
+        assert_eq!(result, Err(local_eval::Failure::Cancelled));
+        let mut sent = Vec::new();
+        while let Some((_, event)) = sink.next(std::time::Duration::from_secs(10)) {
+            sent.push(event);
+            if sent.len() == 2 {
+                break;
+            }
+        }
+        for event in &sent {
+            println!(
+                "SAMPLE PAYLOAD (cancelled sign-in)\n{}",
+                serde_json::to_string_pretty(event).unwrap()
+            );
+        }
+        assert_eq!(sent.len(), 2, "{sent:?}");
+        assert_eq!(sent[0]["event"], "oss.desktop.sign_in");
+        assert_eq!(
+            sent[0]["properties"],
+            serde_json::json!({ "kind": "sign_in", "outcome": "started" })
+        );
+        assert_eq!(sent[1]["event"], "oss.desktop.sign_in");
+        let ended = sent[1]["properties"].as_object().unwrap();
+        assert_eq!(ended["outcome"], "cancelled");
+        assert!(ended["duration_ms"].is_u64());
+        assert_eq!(
+            ended.keys().collect::<Vec<_>>(),
+            ["duration_ms", "kind", "outcome"]
+        );
+
+        // Opted out: the same sign-in, and nothing reaches the ingest.
+        let (_app, result) = sign_in(false, "openbot-sign-in-opted-out");
+        assert_eq!(result, Err(local_eval::Failure::Cancelled));
+        assert!(sink.next(std::time::Duration::from_secs(2)).is_none());
+        let _ = std::fs::remove_dir_all(&cli.dir);
     }
 
     /// A Compose file from a release that runs the server and worker as services.
