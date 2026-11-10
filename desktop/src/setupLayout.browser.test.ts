@@ -371,7 +371,7 @@ describe.skipIf(!asked)("a setup step's foot", () => {
           .getByRole("button", { name: "Install", exact: true })
           .click();
         await account
-          .getByRole("heading", { name: "Self-Contained OpenBot" })
+          .getByRole("heading", { name: "Self-contained OpenBot" })
           .waitFor();
         await account.waitForTimeout(600);
         await background(account);

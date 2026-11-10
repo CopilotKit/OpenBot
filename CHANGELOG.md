@@ -72,7 +72,7 @@ backup taken before the upgrade instead. Three things change for an existing dep
   license agreement" without the agreement's id, and no step line shows a release name or the
   engine's own output.
 - **The Account step leads with OpenBot.** Its header reads "OpenBot by CopilotKit" and its
-  heading "Self-Contained OpenBot". It says this version of OpenBot runs on this computer with a
+  heading "Self-contained OpenBot". It says this version of OpenBot runs on this computer with a
   local version of CopilotKit Intelligence, which needs a free license key, and that your
   conversations and files stay on this computer. The button reads "Sign in for a free local license
   key", and CopilotKit's logo no longer heads the step.

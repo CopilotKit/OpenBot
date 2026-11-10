@@ -717,7 +717,7 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   await installLocal(view);
   // The first step. OpenBot needs no account, so it installs behind it, exactly once; nothing
   // of Intelligence's runs before the agreement. The browser sign-in starts without a click.
-  await view.findByRole("heading", { name: "Self-Contained OpenBot" });
+  await view.findByRole("heading", { name: "Self-contained OpenBot" });
   await view.findByText("Finish signing in to CopilotKit in your browser…");
   expect(
     view.getByText(/Your conversations and files stay on this computer/),

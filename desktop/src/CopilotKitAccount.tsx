@@ -325,7 +325,7 @@ export function CopilotKitAccount({
                   : "Change this computer's setup"
                 : waitingForEngine
                   ? "Setting up this computer"
-                  : "Self-Contained OpenBot"}
+                  : "Self-contained OpenBot"}
       </h1>
       <p className="lede">
         {agreement
