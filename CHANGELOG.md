@@ -82,6 +82,11 @@ backup taken before the upgrade instead. Three things change for an existing dep
   inside its card; a reopened window comes back where it was. The license step links "Read the
   license agreement" without the agreement's id, and no step line shows a release name or the
   engine's own output.
+- **The Account step leads with OpenBot.** Its header reads "OpenBot by CopilotKit" and its
+  heading "Self-contained OpenBot". It says this version of OpenBot runs on this computer with a
+  local version of CopilotKit Intelligence, which needs a free license key, and that your
+  conversations and files stay on this computer. The button reads "Sign in for a free local license
+  key", and CopilotKit's logo no longer heads the step.
 - **A first install on a Mac starts the first time, and a reinstall sets its back end up again.**
   Three things a from-zero install of 1.0.0 hit on a Mac with Docker Desktop:
   - The first Start could stop with "Something went wrong" because Docker Desktop refused the
@@ -105,6 +110,15 @@ backup taken before the upgrade instead. Three things change for an existing dep
   Account step's sign-in sends when it starts and whether it completed, failed or was cancelled.
   The app version keeps a release candidate's label (`1.0.0-rc.5`, not `1.0.0`). Only closed values
   and numbers are sent, and nothing at all when usage data is off.
+- **Usage data also says when setup looks stuck, or its window stops answering.** A hang is not a
+  failure, so `setup_failed` never said it. A step of the back end's setup or update, OpenBot's own
+  start, or OpenBot updating itself that runs three times as long as it usually takes, and two
+  minutes over at least, now sends one `setup_stalled` with the step, its usual time and how long it
+  has run. A setup window that stops taking what OpenBot sends it for over 30 seconds while it is on
+  screen (as one did on Windows until a click or Alt+Tab) sends one `ui_stalled` with how long it
+  lasted, and the Desktop log says `[ui] the window stopped answering for 42s during
+  start_machine`. Minimised, hidden or covered windows never count. Step names and seconds only,
+  and nothing at all when usage data is off.
 - **Sign-in comes first, and macOS asks for your password only after OpenBot says why.** On a new
   Mac the Account step waited for Install to put Podman in before any browser sign-in opened, and
   the "osascript wants to make changes" password box came up by itself over it. The CopilotKit
@@ -410,12 +424,23 @@ a model key is needed.
 
 ### Smaller changes
 
+- "Backend" is one word everywhere OpenBot shows it: OpenBot Desktop's Status window, tray and
+  messages, the app, the server's messages and the Recorder. Desktop's Status window heads its card
+  "Backend" where it said "Back end".
+
 - A page a Bot's browser couldn't open, or that a boundary refused, is one line in the conversation,
   such as "Blocked: Open x.com", where it was an empty grey box saying "This turn did not open a
   page."
 
 - An interface a Bot draws in a card, such as the "Build a trip budget" starter task, has one frame
   in the conversation. It had a second border around the card, with a gap between the two.
+- The Personal Assistant on a framework picked in setup reads "Everyday life agent. (powered by a
+  LangChain agent; you can bring your own agent from any stack.)" under its name (with its own
+  framework's name), on a new install and on an existing one that kept "Powered by LangChain
+  (LangGraph)" after an upgrade. Any other Bot OpenBot subtitled under LangChain's earlier names
+  reads "Powered by LangChain". Only what a person sees changes: nothing stored changes, a Bot is
+  told its subtitle as before, and words a person wrote stay theirs. A Bot's page shows a long
+  subtitle on up to three lines.
 - Onboarding's OpenBot for Business step says what OpenBot for Business is before it asks for a
   demo: work sign-in, Bots shared in Slack and Microsoft Teams, and the controls and audit trail,
   beside the picture of running OpenBot yourself that the step showed before. Book a demo then
@@ -430,6 +455,13 @@ a model key is needed.
   mark.
 - The OpenBot version sits to the right of your name at the foot of the sidebar, where it was a
   line under it.
+- The "Always ask before making changes" switch is called "Extra vigilant", on Welcome, in
+  Settings → Approvals and on a Bot's Tools section in the personal edition. Its description,
+  behaviour and default are unchanged.
+- Welcome's permissions section is shorter: "Choose when Bots ask", one sentence saying Bots ask
+  before they delete, send, share, post or pay in your apps or on websites, the Extra vigilant
+  switch, and where to change it later. Allowing an action always, passwords and a Bot's own
+  workspace are still explained in Settings → Approvals.
 
 ### Personal edition
 

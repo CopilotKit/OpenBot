@@ -15,7 +15,14 @@ const SECTIONS: Section[] = ["Account", "Install", "AI", "Start"];
  * step that signs in to a CopilotKit account. The name is decoration here: the window's title
  * already says it, so it is hidden from assistive technology rather than read on every screen.
  */
-export function Sections({ at }: { at: Section }) {
+export function Sections({
+  at,
+  byCopilotKit = false,
+}: {
+  at: Section;
+  /** "by CopilotKit" beside OpenBot's name, on the step that asks for a CopilotKit sign-in. */
+  byCopilotKit?: boolean;
+}) {
   const names = SECTIONS;
   const current = names.indexOf(at);
   return (
@@ -23,6 +30,7 @@ export function Sections({ at }: { at: Section }) {
       <div className="lockup" aria-hidden="true">
         <div className="orb" />
         <span>OpenBot</span>
+        {byCopilotKit && <span className="lockup-by">by CopilotKit</span>}
       </div>
       <ol className="steps-of sections" aria-label="Setup">
         {names.map((name, index) => (

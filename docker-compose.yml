@@ -514,15 +514,20 @@ services:
   # this file. The image and the port come from `.env`, which the shell writes from the pick, and
   # both are facts about the image: each harness fixes its own port in its own Dockerfile.
   #
-  # Behind a profile so a deployment that has picked nothing does not try to start it. Without that
-  # an unset `PICKED_HARNESS_IMAGE` becomes a request to pull the empty string, which fails the
-  # whole `compose up` rather than the one service nobody asked for.
+  # Behind a profile so a deployment that has picked nothing does not try to start it.
+  #
+  # The image still needs a value when nothing is picked. Older Compose (v2.24.5, as
+  # shipped with Docker Desktop in early 2024) checks every service before it looks at profiles,
+  # and a blank image there fails `compose config` for the whole project with "has neither
+  # an image nor a build context specified". The stand-in is the one-shot image `spire-init` already
+  # uses: it is never pulled or started while the profile is off, and the desktop shell only turns
+  # the profile on after writing the picked image to `.env`.
   #
   # No `build:`, so `pull_policy` cannot be `build` here as it is elsewhere: this image is only ever
   # published, never built from this tree.
   agent-harness:
     profiles: ["harness"]
-    image: ${PICKED_HARNESS_IMAGE:-}
+    image: ${PICKED_HARNESS_IMAGE:-busybox:1.37}
     pull_policy: missing
     ports:
       # Loopback, and on the image's own port on both sides. The server is a host process, so it

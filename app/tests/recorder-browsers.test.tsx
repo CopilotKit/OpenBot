@@ -663,7 +663,7 @@ test("in the personal edition Settings, Browsers says a recording goes to your o
   const view = await browsersPage("personal");
   const page = view.container.textContent ?? "";
   expect(page).toContain(
-    "What you record goes straight from your browser to your own Learning space in OpenBot's back end",
+    "What you record goes straight from your browser to your own Learning space in OpenBot's backend",
   );
   expect(page).toContain(
     "Your recordings are used only for your own Skills, evaluations and insights.",
@@ -680,7 +680,7 @@ test("in the team edition Settings, Browsers still says a recording goes to your
   const view = await browsersPage("team");
   expect(view.getByText(RECORDER_DISCLOSURE)).toBeTruthy();
   expect(view.container.textContent).toContain(
-    "the learning part of your organization's OpenBot back end",
+    "the learning part of your organization's OpenBot backend",
   );
 });
 

@@ -75,7 +75,7 @@ test("memory reads as people read it, and a total ignores what could not be meas
   expect(totalMemory([{ name: "b", memoryBytes: null }])).toBeNull();
 });
 
-test("each part shows its state and memory, and the back end its CLI readiness", async () => {
+test("each part shows its state and memory, and the backend its CLI readiness", async () => {
   invokeHandler = answers();
   const view = render(<StatusWindow readEveryMs={60_000} />);
   const bots = await view.findByRole("region", { name: "App" });
@@ -195,7 +195,7 @@ test("the back end's stack id goes only to Copy diagnostics", async () => {
   expect(view.container.textContent).not.toContain("local-08ff56ec9469e95e");
   await userEvent.click(view.getByRole("button", { name: "Copy diagnostics" }));
   await waitFor(() =>
-    expect(copied).toContain("Back end: local-08ff56ec9469e95e"),
+    expect(copied).toContain("Backend: local-08ff56ec9469e95e"),
   );
 });
 
@@ -205,7 +205,7 @@ test("diagnostics carry versions, places and memory, and nothing secret", () => 
   expect(text).toContain(
     "Installed in /Users/someone/OpenBot, app on port 3010",
   );
-  expect(text).toContain("Back end: local-abc, ready");
+  expect(text).toContain("Backend: local-abc, ready");
   expect(text).toContain("k3d-local-abc-server-0 2.4 GB");
   expect(text).toContain("openbot-desktop-postgres-1 150 MB");
   expect(text).not.toMatch(/key|token|secret/i);

@@ -178,7 +178,7 @@ describe("Learning with no model on OpenBot Desktop", () => {
     expect(without.modelProblem).toBeUndefined();
   });
 
-  test("Learn now on the person's own recordings says the same, not the back end's setup", async () => {
+  test("Learn now on the person's own recordings says the same, not the backend's setup", async () => {
     const { app } = routes({ noModel: true, modelUnavailable: "unsupported" });
     const response = await app.request(`/runs?container=${SPACE}`, {
       method: "POST",

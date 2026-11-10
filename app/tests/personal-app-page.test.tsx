@@ -221,7 +221,7 @@ describe("an app's page in the personal edition", () => {
     expect(await view.findByText("Search")).toBeTruthy();
     // The setting by its name in Settings > Approvals; it was once "Ask before acting", named nowhere.
     expect(view.getByText(/Every Bot can use these/).textContent).toContain(
-      "While Always ask before making changes is on,",
+      "While Extra vigilant is on,",
     );
     expect(view.container.textContent).not.toContain("Ask before acting");
     expect(view.queryByRole("button", { name: "Grant tools…" })).toBeNull();

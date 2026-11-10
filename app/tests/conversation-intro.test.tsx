@@ -54,6 +54,30 @@ test("a Bot with no role shows its title alone", () => {
   view.getByText("Finance Operations");
 });
 
+/*
+ * Reported on 1.0.0: the Personal Assistant's header read "Everyday life. Powered by LangChain
+ * (LangGraph). · Help with email…". Its stored subtitle is what the Bot is told and stays as seeded;
+ * only what is drawn here reads the new wording.
+ */
+test("the Personal Assistant's stored subtitle shows the new wording, and no LangGraph", () => {
+  const view = draw(
+    <ConversationIntro
+      agent={{
+        ...expenseReview,
+        name: "Personal Assistant",
+        title: "Everyday life. Powered by LangChain (LangGraph).",
+        roleDescription:
+          "Help with email, your calendar, research, planning and everyday errands.",
+      }}
+    />,
+    "personal",
+  );
+  view.getByText(
+    "Everyday life agent. (powered by a LangChain agent; you can bring your own agent from any stack.) · Help with email, your calendar, research, planning and everyday errands.",
+  );
+  expect(view.container.textContent).not.toContain("LangGraph");
+});
+
 test("the orb is the large one, named once", () => {
   const view = draw(<ConversationIntro agent={expenseReview} />);
   const orb = view.getByRole("img");

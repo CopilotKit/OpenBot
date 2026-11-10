@@ -3106,8 +3106,8 @@ fn execute_child(
             if !letting_finish {
                 letting_finish = true;
                 log::warn!(
-                    "[local update] asked to stop after it began changing the back end with Helm: \
-                     letting it finish, since stopping it there leaves the back end half updated"
+                    "[local update] asked to stop after it began changing the backend with Helm: \
+                     letting it finish, since stopping it there leaves the backend half updated"
                 );
             }
         }
@@ -3246,7 +3246,7 @@ impl UpdateWatch {
         }
         if self.log.committed() && self.finishing.is_none() {
             log::info!(
-                "[local update] it is changing the back end with Helm now; Cancel and Quit let it finish"
+                "[local update] it is changing the backend with Helm now; Cancel and Quit let it finish"
             );
             self.finishing = Some(Finishing::begin());
         }
@@ -3540,7 +3540,7 @@ pub fn close_for_quit_reporting(finishing: impl FnOnce()) -> bool {
     loop {
         if update_finishing() {
             if let Some(say) = finishing.take() {
-                log::info!("[quit] letting the back end update finish before OpenBot quits");
+                log::info!("[quit] letting the backend update finish before OpenBot quits");
                 say();
             }
         } else if RUNNING.load(Ordering::SeqCst) == 0 || Instant::now() >= until {
@@ -3550,7 +3550,7 @@ pub fn close_for_quit_reporting(finishing: impl FnOnce()) -> bool {
     }
     let waited = finishing.is_none();
     if waited {
-        log::info!("[quit] the back end update ended");
+        log::info!("[quit] the backend update ended");
     }
     waited
 }
@@ -3731,7 +3731,7 @@ fn run_attempt(
 ) -> Result<Report, Failure> {
     one_at_a_time(&attempt.0, limits, |remaining| {
         // Its turn: the CLI's log from here on is this call's (`Trail`).
-        let _trail = Trail::begin(id);
+        let _trail = Trail::begin(id, action.into());
         let cli = installed()?;
         run_with(
             &cli,
@@ -3826,7 +3826,7 @@ fn update_repairing(
         return first;
     }
     log::warn!(
-        "[local update] failed; checking whether an update stopped earlier left the back end needing repair"
+        "[local update] failed; checking whether an update stopped earlier left the backend needing repair"
     );
     match repair_stack(stack) {
         Ok(repaired) if repaired.changed() => {
@@ -3854,7 +3854,7 @@ fn uncordoned(stack: &StackId, when: &str) {
         || engine_command(engine.as_ref()),
         stack.as_str(),
     ) {
-        Ok(true) => log::info!("[local update] uncordoned the back end's node {when}"),
+        Ok(true) => log::info!("[local update] uncordoned the backend's node {when}"),
         Ok(false) => {}
         Err(why) => log::info!("[local update] node not checked {when}: {why}"),
     }
@@ -4064,7 +4064,7 @@ fn repaired_before(stack: &StackId, saved: Stack) -> Stack {
         .is_some_and(|observed| observed.running);
     if past_first_step && running {
         log::info!(
-            "[update repair] an update is on record past its first step; checking the back end before it resumes"
+            "[update repair] an update is on record past its first step; checking the backend before it resumes"
         );
         match repair_stack(stack) {
             Ok(repaired) => log::info!("[update repair] {repaired:?}"),
@@ -4146,7 +4146,7 @@ pub fn setup_installed(
     let attempt = Attempt::register(attempt);
     one_at_a_time(&attempt.0, Limits::for_setup(), |remaining| {
         // Its turn: the CLI's log from here on is this setup's (`Trail`).
-        let _trail = Trail::begin(id);
+        let _trail = Trail::begin(id, TrailKind::Setup);
         let cli = installed()?;
         let set_up = || {
             setup_with(
@@ -4371,7 +4371,7 @@ fn forget(cli: &PinnedCli, stack: &StackId, cancel: &Cancel) -> Result<(), Failu
         return Err(Failure::InvalidStatus);
     }
     log::info!(
-        "[local setup] forgot {}, whose private files were gone; setting the back end up again",
+        "[local setup] forgot {}, whose private files were gone; setting the backend up again",
         stack.as_str()
     );
     Ok(())
@@ -4650,9 +4650,30 @@ struct Trail(String);
 
 struct Followed {
     attempt: String,
+    kind: TrailKind,
     log: crate::local_update::StepLog,
     ended: Vec<String>,
     since: Instant,
+}
+
+/// Which CLI call a trail follows, for the journey its steps belong to (`stall`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrailKind {
+    /// `local setup`.
+    Setup,
+    /// `local update`.
+    Update,
+    /// Any other call: `local start`, `stop` or `status`.
+    Other,
+}
+
+impl From<Action> for TrailKind {
+    fn from(action: Action) -> Self {
+        match action {
+            Action::Update => TrailKind::Update,
+            Action::Status | Action::Start | Action::Stop => TrailKind::Other,
+        }
+    }
 }
 
 static TRAILS: std::sync::Mutex<Vec<Followed>> = std::sync::Mutex::new(Vec::new());
@@ -4664,12 +4685,13 @@ fn trails() -> std::sync::MutexGuard<'static, Vec<Followed>> {
 }
 
 impl Trail {
-    fn begin(attempt: &str) -> Self {
+    fn begin(attempt: &str, kind: TrailKind) -> Self {
         if let Some(path) = crate::local_update::cli_log() {
             let mut held = trails();
             held.retain(|followed| followed.attempt != attempt);
             held.push(Followed {
                 attempt: attempt.to_owned(),
+                kind,
                 log: crate::local_update::StepLog::at_end_of(path),
                 ended: Vec::new(),
                 since: Instant::now(),
@@ -4700,14 +4722,46 @@ pub fn steps(attempt: &str) -> Option<Steps> {
     let followed = held
         .iter_mut()
         .find(|followed| followed.attempt == attempt)?;
-    let ended = followed.log.poll();
-    if !ended.is_empty() {
-        followed.since = Instant::now();
-        followed.ended.extend(ended);
-    }
+    followed.catch_up();
     Some(Steps {
         ended: followed.ended.clone(),
         quiet_seconds: followed.since.elapsed().as_secs(),
+    })
+}
+
+impl Followed {
+    /// Read the steps logged since the last look.
+    fn catch_up(&mut self) {
+        let ended = self.log.poll();
+        if !ended.is_empty() {
+            self.since = Instant::now();
+            self.ended.extend(ended);
+        }
+    }
+}
+
+/// The setup or update running now, as `stall` times its steps: its attempt, the steps it has
+/// finished, and when the last of them ended (or the call began).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrailNow {
+    pub kind: TrailKind,
+    pub attempt: String,
+    pub ended: Vec<String>,
+    pub since: Instant,
+}
+
+/// The `local setup` or `local update` running now, if one is.
+pub fn trail_now() -> Option<TrailNow> {
+    let mut held = trails();
+    let followed = held
+        .iter_mut()
+        .find(|followed| followed.kind != TrailKind::Other)?;
+    followed.catch_up();
+    Some(TrailNow {
+        kind: followed.kind,
+        attempt: followed.attempt.clone(),
+        ended: followed.ended.clone(),
+        since: followed.since,
     })
 }
 
@@ -9559,7 +9613,7 @@ fn main() {
 
         let text = crate::troubleshooting::gather(crate::troubleshooting::Sources {
             desktop: "OpenBot Desktop 1.0.0 (Built 2026-11-08 06:40 UTC from 52ea4b5)".into(),
-            failure: Some("The back end could not start.".into()),
+            failure: Some("The backend could not start.".into()),
             log_folder: Some(&logs),
             home: Some(&home),
             engine: engine_in_use(),
@@ -9568,7 +9622,7 @@ fn main() {
         // `~/.copilotkit/cli.log`, with Windows' separators on Windows.
         let cli_log = format!("~{0}.copilotkit{0}cli.log", std::path::MAIN_SEPARATOR);
         for expected in [
-            "Failed: The back end could not start.",
+            "Failed: The backend could not start.",
             "Container engine: docker 28.5.1. 10 CPUs and 20.5 GiB of memory, 0 GiB free of 1006.8 GiB in a container; short of disk (nearly full).",
             "$ docker system df\nTYPE",
             "Images          14        3         18.2GB    12.1GB (66%)",
