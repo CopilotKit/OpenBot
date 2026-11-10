@@ -9,11 +9,7 @@ import {
   currentApprovalContext,
 } from "../../approvals/types";
 import { type AuditInitiator, recordAuditEvent } from "../../audit";
-import {
-  evaluateActionPolicy,
-  type PolicyContext,
-  policyInitiator,
-} from "../../computer/policy";
+import { evaluateActionPolicy } from "../../computer/policy";
 import { withoutStatement } from "../../db/query-failure";
 import {
   brokeredAccounts,
@@ -35,8 +31,10 @@ import { inspectToolArguments } from "../content-governance";
 import { shareTargetOf } from "../share-target";
 import { type AccountMode, filedUnderPerson } from "../shared-accounts";
 import { transportFor } from "../transport";
+import { withReadRetries } from "../transient";
 import { withVendorDeadline } from "../vendor-deadline";
 import { accountBook, type PinnedAccount } from "./accounts";
+import { appCallPolicyContext } from "./call-policy";
 import type { StoreContext } from "./context";
 import {
   effectiveUrl,
@@ -44,7 +42,6 @@ import {
   type PluginKind,
   PluginRefusedError,
   reachedAsFor,
-  toolNameFor,
   UNATTRIBUTED_ACTOR,
   withoutEmptyOptionals,
 } from "./model";
@@ -339,47 +336,20 @@ export function callMethods(context: StoreContext) {
         }
       }
 
-      /**
-       * The same policy the computer actions are judged by, asked about a tool call.
-       *
-       * Every field is present, including the ones a tool call has no use for, and that is load
-       * bearing rather than tidy. This engine treats an expression it cannot evaluate as a match,
-       * which is correct for a browser action on an element the server could not resolve. Applied to
-       * a tool call it is a disaster: the boundary this product ships in `.env.example` denies
-       * `contains(element.name, "submit") || key == "Enter"`, and with `element` and `key` absent
-       * that rule is unevaluable, so it would match, so every deployment using the shipped preset
-       * would refuse every MCP call for a reason mentioning a submit button.
-       *
-       * Neutral values instead. Empty strings match no substring, no key and no extension, so a rule
-       * written about the browser evaluates to false against a tool call, which is the honest answer:
-       * a tool call did not click anything. A rule meant to catch tool calls says so, with `mcp` or
-       * with `intent`.
+      /*
+       * Built by the helper the boundaries backtest rebuilds it with from this call's row, so a rule
+       * previewed against past calls decides them as it decides this one. See `./call-policy`.
        */
-      const context: PolicyContext = {
-        tool: { name: toolNameFor(input.ref) },
-        bot: { id: input.botId },
-        actor: { id: input.actorId },
-        page: { url: "", host: "" },
-        element: { ref: "", role: "", name: "", type: "" },
-        key: "",
-        file: { path: "", name: "", extension: "" },
-        // Empty, like the browser fields above: an MCP call runs no shell command, but a
-        // `deny: contains(command, "rm -rf")` names `command`, and an unbound identifier throws and
-        // fails closed — which would refuse every MCP call once a deployment wrote a rule about its
-        // shell. An empty command matches no such rule.
-        command: "",
-        intent: effect === "write" ? "write_tool" : "read_tool",
-        mcp: { server: serverId, tool: toolName, effect },
-        /*
-         * The real one, and this is the path where it is not neutral. A routine's turn reaches its
-         * tools through here, carrying the initiator its run assertion was signed with, so this is
-         * where `initiator.kind == "routine"` becomes a rule a deployment can actually write. A
-         * chat turn arrives with none and reads as a person.
-         */
-        initiator: policyInitiator(input.initiator),
-      };
-
-      const verdict = evaluateActionPolicy(options.policy(), context);
+      const verdict = evaluateActionPolicy(
+        options.policy(),
+        appCallPolicyContext({
+          ref: input.ref,
+          botId: input.botId,
+          actorId: input.actorId,
+          effect,
+          ...(input.initiator ? { initiator: input.initiator } : {}),
+        }),
+      );
 
       /*
        * The parts of the row that are known before the attempt, held rather than written.
@@ -394,6 +364,12 @@ export function callMethods(context: StoreContext) {
         server: serverId,
         tool: toolName,
         effect,
+        /*
+         * One id on every row this call writes, as a computer action's rows share one. A call the
+         * boundary refuses in trial mode is recorded refused and then recorded again with what became
+         * of it, and a reader counting calls, the boundaries backtest among them, counts it once.
+         */
+        attempt: crypto.randomUUID(),
         /*
          * Whose credential this call goes out with.
          *
@@ -414,6 +390,8 @@ export function callMethods(context: StoreContext) {
           allowed: verdict.allowed,
           mode: verdict.mode,
           rule: verdict.matched,
+          // Its name from the Boundaries page, where it has one, as a computer action's row carries it.
+          ...(verdict.ruleName ? { ruleName: verdict.ruleName } : {}),
           source: verdict.source,
           carriedOut: verdict.forward,
         },
@@ -731,34 +709,45 @@ export function callMethods(context: StoreContext) {
             : vendorUserId;
         const vendor =
           injectedVendor ?? transportFor(access.transport).callTool;
-        const result = await vendor(
-          {
-            url: effectiveUrl(row, entry),
-            token,
-            tokenHeader: tokenHeaderFor(entry),
-            actorId: runsAs ?? input.credentialActorId ?? input.actorId,
-            ...(pinned?.accountId && runsAs !== undefined
-              ? { accountId: pinned.accountId }
-              : {}),
-            botId: input.botId,
-            threadId: input.threadId ?? currentApprovalContext()?.threadId,
-          },
-          /*
-           * THE NAME THE VENDOR KNOWS, WHICH IS THE ONLY ONE IT WILL ANSWER TO. `toolName` is this
-           * deployment's half of the ref and is what the model was offered; Arcade is called by the
-           * qualified name its listing gave. They are the same string for every other transport,
-           * which is what the fallback records rather than papers over — see
-           * {@link mcpTools.vendorName}.
-           *
-           * FALLING BACK TO `toolName` RATHER THAN REFUSING, because a row this read did not find
-           * is not an unknown action: `classifyTool` above is built to decide on an app whose
-           * listing predates its catalogue entry, and the call goes on to the vendor to be judged
-           * there. The fallback is reached only for an action with no recorded row at all, and for
-           * those two names were never distinct.
-           */
-          advertised[0]?.vendorName ?? toolName,
-          vendorArgs,
-        );
+        /*
+         * A READ THAT FAILED FOR A REASON THAT PASSES IS TRIED AGAIN HERE, before the Bot hears of
+         * it, and a write never is: a write that timed out may have landed. Here rather than around
+         * the whole call, so the grant, the policy and the approval above are settled once, and the
+         * trail gets one row for what finally happened. See `../transient`.
+         */
+        const callVendor = () =>
+          vendor(
+            {
+              url: effectiveUrl(row, entry),
+              token,
+              tokenHeader: tokenHeaderFor(entry),
+              actorId: runsAs ?? input.credentialActorId ?? input.actorId,
+              ...(pinned?.accountId && runsAs !== undefined
+                ? { accountId: pinned.accountId }
+                : {}),
+              botId: input.botId,
+              threadId: input.threadId ?? currentApprovalContext()?.threadId,
+            },
+            /*
+             * THE NAME THE VENDOR KNOWS, WHICH IS THE ONLY ONE IT WILL ANSWER TO. `toolName` is this
+             * deployment's half of the ref and is what the model was offered; Arcade is called by the
+             * qualified name its listing gave. They are the same string for every other transport,
+             * which is what the fallback records rather than papers over — see
+             * {@link mcpTools.vendorName}.
+             *
+             * FALLING BACK TO `toolName` RATHER THAN REFUSING, because a row this read did not find
+             * is not an unknown action: `classifyTool` above is built to decide on an app whose
+             * listing predates its catalogue entry, and the call goes on to the vendor to be judged
+             * there. The fallback is reached only for an action with no recorded row at all, and for
+             * those two names were never distinct.
+             */
+            advertised[0]?.vendorName ?? toolName,
+            vendorArgs,
+          );
+        const result =
+          effect === "read"
+            ? await withReadRetries(callVendor)
+            : await callVendor();
         await recordAuditEvent(auditStore, {
           eventType: result.isError ? "mcp.call_failed" : "mcp.call_succeeded",
           targetType: "mcp_tool",

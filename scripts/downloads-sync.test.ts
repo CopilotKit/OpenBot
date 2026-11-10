@@ -50,6 +50,16 @@ function signed(version: string) {
   };
 }
 
+/** A candidate as its release really carries it: signed installers and the image list, but no
+ * update feed or updater archives, because a candidate is never offered as an update. */
+function candidate(version: string) {
+  const files: Record<string, string> = signed(version);
+  delete files["latest.json"];
+  delete files["OpenBot-darwin-aarch64.app.tar.gz"];
+  delete files["OpenBot-darwin-aarch64.app.tar.gz.sig"];
+  return files;
+}
+
 function run(fake: FakeDownloads, env: Record<string, string> = {}) {
   const result = Bun.spawnSync(["bash", sync], {
     cwd: root,
@@ -442,32 +452,70 @@ test("a release with no latest.json, or whose versioned installer is not the sig
   expect(unsigned.invalidations()).toEqual([]);
 });
 
-test("prereleases are ignored, even fully signed and newer than Latest", () => {
+test("a prerelease never touches latest/, and asked for by tag mirrors its releases/<tag>/; a draft is refused", () => {
   const fake = downloads();
   fake.release("v0.3.0", signed("0.3.0"));
-  fake.release("v0.4.0-rc.1", signed("0.4.0-rc.1"), { prerelease: true });
+  fake.release("v0.4.0-rc.1", candidate("0.4.0-rc.1"), { prerelease: true });
   fake.setLatest("v0.3.0");
   expect(run(fake).code).toBe(0);
   expect(
     Object.keys(fake.bucket()).filter((key) => key.includes("0.4.0")),
   ).toEqual([]);
-  expect(fake.bucket()["latest/OpenBot-mac-arm64.dmg"]?.content).toBe(
+  const latest = Object.fromEntries(
+    Object.entries(fake.bucket()).filter(([key]) => key.startsWith("latest/")),
+  );
+  expect(latest["latest/OpenBot-mac-arm64.dmg"]?.content).toBe(
     "signed arm64 0.3.0",
   );
 
-  // Asked for by name, a candidate is refused and nothing changes.
+  // Asked for by name, a candidate's own files are mirrored, where its installs read them, and
+  // cached for five minutes: its signing runs may still replace one. latest/ stays the stable's.
   const before = fake.calls().length;
   const result = run(fake, { DOWNLOADS_TAG: "v0.4.0-rc.1" });
-  expect(result.code).toBe(1);
-  expect(result.out).toContain(
-    "v0.4.0-rc.1 is a prerelease, a draft or a candidate, not a stable release. Nothing was mirrored.",
-  );
+  expect(result.code).toBe(0);
+  expect(
+    Object.keys(fake.bucket())
+      .filter((key) => key.includes("0.4.0"))
+      .sort(),
+  ).toEqual([
+    "releases/v0.4.0-rc.1/OpenBot_0.4.0-rc.1_aarch64.dmg",
+    "releases/v0.4.0-rc.1/OpenBot_0.4.0-rc.1_x64-setup.exe",
+    "releases/v0.4.0-rc.1/OpenBot_0.4.0-rc.1_x64.dmg",
+    "releases/v0.4.0-rc.1/container-images.json",
+  ]);
+  expect(
+    fake.bucket()["releases/v0.4.0-rc.1/OpenBot_0.4.0-rc.1_aarch64.dmg"],
+  ).toMatchObject({ content: "signed arm64 0.4.0-rc.1", cacheControl: LATEST });
+  expect(
+    Object.fromEntries(
+      Object.entries(fake.bucket()).filter(([key]) =>
+        key.startsWith("latest/"),
+      ),
+    ),
+  ).toEqual(latest);
   expect(
     fake
       .calls()
       .slice(before)
-      .some((call) => call.startsWith("aws ")),
+      .some(
+        (call) =>
+          call.includes("--key latest/") || call.startsWith("aws cloudfront"),
+      ),
   ).toBe(false);
+
+  // A draft is not published, and nothing installs it.
+  fake.release("v0.5.0-rc.1", signed("0.5.0-rc.1"), {
+    prerelease: true,
+    draft: true,
+  });
+  const draft = run(fake, { DOWNLOADS_TAG: "v0.5.0-rc.1" });
+  expect(draft.code).toBe(1);
+  expect(draft.out).toContain(
+    "::error::v0.5.0-rc.1 is a draft, not a published release. Nothing was mirrored.",
+  );
+  expect(Object.keys(fake.bucket()).some((key) => key.includes("0.5.0"))).toBe(
+    false,
+  );
 });
 
 test("a candidate tag is refused even when it is not marked a prerelease", () => {

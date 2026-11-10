@@ -159,6 +159,12 @@ describe("describeCron", () => {
     expect(describeCron("0 9 1 * *")).toBe("On the 1st of the month at 09:00");
   });
 
+  // The Routines page's Every hour writes this, and the list read it back as five raw fields.
+  test("once an hour, at one minute", () => {
+    expect(describeCron("0 * * * *")).toBe("Every hour");
+    expect(describeCron("30 * * * *")).toBe("Every hour at 30 past");
+  });
+
   test("step minutes", () => {
     expect(describeCron("*/20 * * * *")).toBe("Every 20 minutes");
     expect(describeCron("*/15 * * * *")).toBe("Every 15 minutes");

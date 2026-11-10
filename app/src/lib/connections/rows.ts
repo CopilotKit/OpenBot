@@ -37,6 +37,11 @@ export type ConnectionRow = {
   action?: "connect" | "add" | "setup";
   /** An app with no account behind it, which reads "On" rather than "Connected" once added. */
   noAccount?: boolean;
+  /**
+   * Added, and the person's own account isn't connected yet. The tile says "Not connected" beside
+   * Connect, so an app that is on never reads as ready before anybody has signed in to it.
+   */
+  notConnected?: boolean;
   /** What draws the row's mark: a catalogue icon, an app's logo, or an identity provider's icon. */
   mark:
     | { kind: "catalogue"; key: string }
@@ -115,6 +120,20 @@ export function connectionRows(input: {
    * same name; GitHub's page links to it instead, so the list names the vendor once.
    */
   const githubListed = identity.some((row) => row.key === "github");
+  /*
+   * AND THAT ONE ROW SPEAKS FOR THE TOOLS TOO. The GitHub link only recognises a person; a Bot uses
+   * GitHub through the added app, which is connected separately. With the app added and not
+   * connected, the tile says "Not connected" beside Connect, as the Bot does, never "Connected" off
+   * the link alone.
+   */
+  const githubTools = input.brokered.find(isBrokeredGithub);
+  if (githubListed && githubTools && !input.connected.has(githubTools.id)) {
+    const github = identity.find((row) => row.key === "github");
+    if (github && github.state !== "needs_reconnect") {
+      github.state = "available";
+      github.notConnected = true;
+    }
+  }
   const rows: ConnectionRow[] = [
     ...input.catalogue.map(
       (entry): ConnectionRow => ({
@@ -122,6 +141,7 @@ export function connectionRows(input: {
         title: entry.title,
         summary: entry.summary,
         state: input.connected.has(entry.key) ? "connected" : "available",
+        notConnected: !input.connected.has(entry.key),
         mark: { kind: "catalogue", key: entry.key },
       }),
     ),
@@ -139,6 +159,7 @@ export function connectionRows(input: {
               ? `Needs a key from ${server.title}`
               : server.summary,
           state: input.connected.has(server.id) ? "connected" : "available",
+          notConnected: !input.connected.has(server.id),
           mark: { kind: "logo", logo: server.logo },
         }),
       ),
@@ -236,6 +257,8 @@ function personalAppRow(
       ...base,
       state: input.connected.has(entry.key) ? "connected" : "available",
       action: "connect",
+      notConnected:
+        input.added.has(entry.key) && !input.connected.has(entry.key),
     };
   return {
     ...base,

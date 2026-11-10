@@ -45,7 +45,6 @@ import {
 } from "@/lib/settings/message-list";
 import { BotsNavBadge } from "../bot-profile/attention";
 import { BrowserNavItem } from "../browser/browser-nav-item";
-import { OpenBotLogo } from "../edition/openbot-logo";
 import { navigationRender } from "../edition/team-features-dialog";
 import { OpenBotVersion } from "../layout/openbot-version";
 import { Button } from "../ui/button";
@@ -197,6 +196,7 @@ function ChannelRow({
             : undefined
         }
         pinned={channel.pinned}
+        canRename={channel.canRename ?? false}
         unread={unread}
         // A turn running, or work the conversation waits on between turns: a hop, a routine.
         busy={(channel.busy ?? false) || (channel.work?.length ?? 0) > 0}
@@ -233,26 +233,20 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       <SidebarHeader className="h-12 p-2">
         <SidebarMenu>
           <SidebarMenuItem className="flex flex-row gap-1.5">
+            {/* The same hover as every other row in the sidebar, not the menu button's accent tint. */}
             <SidebarMenuButton
-              // The product's name, not a menu row: nothing changes on hover or press (the row fill read as a blue box on
-              // the frosted sidebar). It still goes home when clicked, and the keyboard's focus ring stays.
-              className="h-full cursor-default font-semibold text-[14px] leading-tight tracking-tighter hover:bg-transparent hover:text-sidebar-foreground active:bg-transparent active:text-sidebar-foreground"
+              className="font-semibold text-[14px] tracking-tighter h-full leading-tight hover:bg-foreground/5 hover:text-sidebar-foreground active:bg-foreground/5 active:text-sidebar-foreground"
               render={(props) => (
                 <Link {...appLinkOptions} {...props}>
-                  {/* OpenBot's mark beside its name, as on open.bot and the desktop app. A deployment that renames the
-                      product (brand.yaml) has no mark here: the orb is OpenBot's, not theirs. */}
-                  {appConfig.brand.productName === "OpenBot" ? (
-                    <OpenBotLogo
-                      aria-hidden="true"
-                      className="size-5 shrink-0"
-                    />
-                  ) : null}
                   {appConfig.brand.productName}
                 </Link>
               )}
             />
+            {/* Square, as tall as the name beside it, with the sidebar's hover rather than `muted`, which
+                is nearly the sidebar's own colour. */}
             <Button
               aria-label="New conversation"
+              className="aspect-square h-full w-auto hover:bg-foreground/5 dark:hover:bg-foreground/5"
               size="icon"
               variant="ghost"
               render={(props) => (
@@ -377,11 +371,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 }
               >
                 <UserAvatar />
-                <span className="flex min-w-0 flex-col">
+                {/* The name and the release the server runs, side by side: 80/20 of the row. */}
+                <span className="grid min-w-0 flex-1 grid-cols-[4fr_1fr] items-center gap-2">
                   <span className="truncate text-sm trackint-tight">
                     {currentUser?.name || currentUser?.email}
                   </span>
-                  <OpenBotVersion className="text-[10px] leading-3 text-muted-foreground" />
+                  <OpenBotVersion className="text-right text-[10px] leading-3 text-muted-foreground" />
                 </span>
               </DropdownMenuTrigger>
               <DropdownMenuContent

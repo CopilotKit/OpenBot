@@ -36,7 +36,8 @@ function app(seen: { limit?: number }[]) {
   } as unknown as AuditReader;
   const routes = createComputerRoutes(
     {} as never,
-    {} as PolicyStore,
+    // The policy in force, whose rules a candidate's are not checked again against.
+    { get: () => POLICY } as unknown as PolicyStore,
     asActor,
     async () => false,
     undefined,

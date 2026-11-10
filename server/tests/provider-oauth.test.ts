@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import * as fsPromises from "node:fs/promises";
 import {
   chmod,
@@ -27,11 +27,18 @@ import { lockProviderCredentials } from "../src/provider-oauth-lock";
 import { createModelCatalogue } from "../src/model-catalogue";
 
 const cleanup: (() => Promise<void> | void)[] = [];
+// The failure state is one per process and the endpoint answers with whichever failure it holds, so
+// every kind is cleared before each test too, including one an earlier file left behind.
+const clearDesktopFailures = () => {
+  for (const connection of ["model", "intelligence", "organization"] as const)
+    clearDesktopConnectionFailure(connection);
+};
+beforeEach(clearDesktopFailures);
 afterEach(async () => {
   try {
     for (const dispose of cleanup.splice(0).reverse()) await dispose();
   } finally {
-    clearDesktopConnectionFailure("model");
+    clearDesktopFailures();
   }
 });
 

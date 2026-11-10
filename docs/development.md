@@ -179,7 +179,7 @@ Integration tests expect a PostgreSQL database with pgvector. Point `TEST_DATABA
 
 They refuse to use the application `openbot` database. `DATABASE_URL` is still the application setting, and the database client removes it from the process environment after opening a connection to preserve the Windows Bun connection fix, so tests use `TEST_DATABASE_URL` as their immutable fixture address. Running them against a deployment you are using puts test Bots in its audit trail and its activity reports, so create a separate database and migrate that before running the integration suite.
 
-CI uses `bun run test:ci` to verify the expected test count in addition to normal tests.
+CI uses `bun run test:ci` to verify the expected test count in addition to normal tests. It runs the suite in shards, one runner each, and the `tests` check passes only when every shard passed and their counts add up to the floor in `scripts/test-floor.ts`. To run one shard the way CI does, pass it to the same script: `bun run test:ci --shard=2/4`.
 
 `bun run test:smoke` is separate and needs a deployment that is up, and a session on it:
 

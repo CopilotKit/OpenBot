@@ -14,6 +14,7 @@ import {
   IconRadar,
   IconShieldCheck,
   IconUsers,
+  IconZoomQuestion,
 } from "@tabler/icons-react";
 import {
   createFileRoute,
@@ -176,6 +177,13 @@ const SECTIONS: {
           "Review actions taken in OpenBot and who took them, and record Bots' commands.",
         icon: IconListDetails,
         linkOptions: { to: "/admin/audit" },
+      },
+      {
+        title: "What would happen",
+        description:
+          "Ask what OpenBot would do if a Bot took an action, and see which control decides.",
+        icon: IconZoomQuestion,
+        linkOptions: { to: "/admin/what-if" },
       },
     ],
   },

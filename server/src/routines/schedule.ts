@@ -307,6 +307,11 @@ export function describeCron(cron: string): string {
       }
     }
 
+    // "0 * * * *": once an hour, at one plain minute. The Routines page offers it as Every hour.
+    if (wideOpen && hourField === "*" && minute !== null) {
+      return minute === 0 ? "Every hour" : `Every hour at ${pad2(minute)} past`;
+    }
+
     if (minute === null || hour === null) return cron;
 
     const time = `${pad2(hour)}:${pad2(minute)}`;

@@ -477,6 +477,68 @@ test("the personal edition shows Learning with automatic approval on and no shar
   );
 });
 
+test("Waiting for your review shows only once a skill is waiting, not while Learning runs with automatic approval on", async () => {
+  const base = body(true, true);
+  const source = (
+    proposals: LearningProposal[],
+    status: "batching" | null,
+  ) => ({
+    ...base.sources[0]!,
+    latestRun: status
+      ? { ...run("run-1", "2026-11-01T00:00:00Z"), status }
+      : run("run-1", "2026-11-01T00:00:00Z"),
+    proposals,
+  });
+  review = { ...base, sources: [source([], "batching")] };
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <LearningSettingsPage />
+    </QueryClientProvider>,
+  );
+  await view.findByRole("button", { name: "Learning in progress…" });
+  await view.findByText("Your skills");
+  expect(view.queryByText("Waiting for your review")).toBeNull();
+  expect(view.queryByText(/Approve a skill to publish it/)).toBeNull();
+  expect(view.getByRole("heading", { name: "New skills" })).toBeTruthy();
+
+  // The run finished and its skill was approved automatically: still nothing waits.
+  review = { ...base, sources: [source([], null)] };
+  await queryClient.invalidateQueries({ queryKey: ["learning", "review"] });
+  await view.findByRole("button", { name: "Learn now" });
+  expect(view.queryByText("Waiting for your review")).toBeNull();
+
+  // One skill is waiting: now the heading says so.
+  review = {
+    ...base,
+    sources: [source([proposal("p1", "refund-order", "add")], null)],
+  };
+  await queryClient.invalidateQueries({ queryKey: ["learning", "review"] });
+  expect(
+    await view.findByRole("heading", { name: "Waiting for your review" }),
+  ).toBeTruthy();
+  expect(
+    view.getByText("Approve a skill to publish it to your Bots."),
+  ).toBeTruthy();
+  expect(view.getByText("Refund order")).toBeTruthy();
+  expect(view.queryByRole("heading", { name: "New skills" })).toBeNull();
+});
+
+test("with nothing waiting, the empty state shows under New skills, not under a Waiting heading", async () => {
+  review = { canReview: true, autoApprove: false, sources: [] };
+  const view = draw();
+  expect(await view.findByText("Nothing to review")).toBeTruthy();
+  expect(view.queryByText("Waiting for your review")).toBeNull();
+  expect(view.getByRole("heading", { name: "New skills" })).toBeTruthy();
+  cleanup();
+  queryClient.clear();
+
+  // On a team where admins approve, the same rule holds for Waiting for an admin.
+  review = { canReview: false, autoApprove: null, sources: [] };
+  const team = draw();
+  expect(await team.findByText("Nothing to review")).toBeTruthy();
+  expect(team.queryByText("Waiting for an admin")).toBeNull();
+});
+
 test("a source Learning is off for says so plainly, without the read failure alert", async () => {
   review = {
     canReview: true,

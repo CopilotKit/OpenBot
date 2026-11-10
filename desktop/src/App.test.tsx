@@ -1,4 +1,12 @@
-import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  expect,
+  mock,
+  setSystemTime,
+  test,
+} from "bun:test";
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, render, waitFor, within } from "@testing-library/react";
@@ -12,6 +20,7 @@ type ProgressEvent = {
   detail: string;
   running?: boolean;
   elsewhere?: boolean;
+  asks?: boolean;
   downloadBytes?: number;
   downloads?: {
     done: number;
@@ -37,8 +46,13 @@ const progressListeners = new Set<
 type QuitEvent = { seq: number; steps: ProgressEvent[] };
 const quitListeners = new Set<(event: { payload: QuitEvent }) => void>();
 
+/** What `local_eval_steps` answers for the CLI call running now: the steps it has finished. */
+let localSteps: unknown = null;
+
 mock.module("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => {
+    // Asked every second while a CLI call runs: not a step of the sequence.
+    if (command === "local_eval_steps") return Promise.resolve(localSteps);
     invokeCalls.push({ command, args });
     return invokeHandler(command, args);
   },
@@ -76,7 +90,9 @@ beforeAll(() => GlobalRegistrator.register());
 afterEach(() => {
   // Unmounting can still call (a running local step is cancelled), so clear the record after it.
   cleanup();
+  setSystemTime();
   invokeCalls = [];
+  localSteps = null;
   progressListeners.clear();
   quitListeners.clear();
 });
@@ -179,6 +195,35 @@ const failed = (step: string) => ({
   running: false,
 });
 
+/**
+ * The background install's row, on a screen that asks for something else meanwhile: what it says,
+ * how far along it is, and whether it is working (its spinner) or waiting for the person.
+ */
+function expectBehind(
+  view: ReturnType<typeof render>,
+  at: number,
+  said: string,
+  { waiting = false }: { waiting?: boolean } = {},
+) {
+  const row = view.getByRole("listitem", {
+    name: "Installing OpenBot in the background",
+  });
+  expect(row.querySelector(".detail")?.textContent).toBe(said);
+  expect(row.querySelector(".step-status")?.textContent).toContain(
+    `Step ${at} of 4`,
+  );
+  expect(row.querySelector(".step-spinner") !== null).toBe(!waiting);
+  expect(row.textContent?.includes("Waiting for you")).toBe(waiting);
+}
+
+/** What the Start screen's journey says is happening now, with its spinner (`StartJourney`). */
+function expectJourney(view: ReturnType<typeof render>, said: string) {
+  const journey = view.getByRole("region", { name: "How far along" });
+  expect(journey.querySelector(".journey-said")?.textContent).toBe(said);
+  expect(journey.querySelector(".step-spinner")).not.toBeNull();
+  expect(journey.querySelector("progress")).not.toBeNull();
+}
+
 /** A status line that is still working: its words, with the setup rows' spinner beside them. */
 function expectWorking(view: ReturnType<typeof render>, said: string) {
   const status = view
@@ -198,7 +243,20 @@ async function emitProgress(payload: ProgressEvent) {
   });
 }
 
-test("installation shows its active stage immediately without an elapsed timer", async () => {
+/**
+ * A download's report again, once it has run long enough for its speed to say a time from: a
+ * row says no time left before 3 seconds and 5 MB (`STEADY_SECONDS`, `STEADY_BYTES`).
+ */
+async function steadied(payload: ProgressEvent) {
+  setSystemTime(new Date(Date.now() + 3_500));
+  await emitProgress(payload);
+}
+
+/*
+ * The install's rows say their time so far, counted from when the install began. Windows F showed
+ * a row with neither a time so far nor a time left, under a full bar, and it looked stuck.
+ */
+test("installation shows its active stage immediately, with its time so far", async () => {
   const { view, preparation } = await beginPendingInstallation();
   const preparing = within(
     view.getByRole("listitem", { name: "Preparing this computer" }),
@@ -206,14 +264,25 @@ test("installation shows its active stage immediately without an elapsed timer",
   expect(
     preparing.getByText("Checking the software OpenBot needs."),
   ).toBeTruthy();
-  expect(preparing.getByText("In progress")).toBeTruthy();
+  // Running, it says how far along the install is: the first of its four parts.
+  expect(preparing.getByText("Step 1 of 4")).toBeTruthy();
   expect(preparing.queryByText("✓")).toBeNull();
-  expect(preparing.queryByText(/elapsed/)).toBeNull();
+  expect(preparing.getByText(/· \d+s elapsed/)).toBeTruthy();
   await act(async () => preparation.resolve());
-  // Installed: on to the AI provider screen, with nothing left in progress.
+  // Installed: on to the AI provider screen. The install's rows are done; what is left, setting
+  // up the rest of OpenBot, is said on one row under the choice.
   await view.findByRole("heading", { name: "Connect your AI" });
-  expect(view.queryByText("In progress")).toBeNull();
-  expect(view.queryByText(/elapsed/)).toBeNull();
+  expect(
+    view.queryByRole("listitem", { name: "Preparing this computer" }),
+  ).toBeNull();
+  expect(
+    view.queryByRole("listitem", { name: "Downloading OpenBot" }),
+  ).toBeNull();
+  expectBehind(
+    view,
+    3,
+    "Setting up OpenBot on this computer. This takes a few minutes the first time.",
+  );
 });
 
 test("installation failure stops active indicators and retry begins fresh", async () => {
@@ -234,14 +303,14 @@ test("installation failure stops active indicators and retry begins fresh", asyn
     preparation.reject({ said: "The download was interrupted." }),
   );
   const installing = within(
-    view.getByRole("listitem", { name: "Installing OpenBot" }),
+    view.getByRole("listitem", { name: "Downloading OpenBot" }),
   );
   expect(installing.getByText("Failed")).toBeTruthy();
   expect(installing.getByText("✗")).toBeTruthy();
   expect(view.getByRole("alert").textContent).toContain(
     "The download was interrupted.",
   );
-  expect(view.queryByText("In progress") === null).toBe(true);
+  expect(view.queryByText(/In progress|Step \d of \d/) === null).toBe(true);
   expect(view.queryByText(/elapsed/)).toBeNull();
   expect(
     within(
@@ -252,7 +321,7 @@ test("installation failure stops active indicators and retry begins fresh", asyn
   expect(view.queryByRole("heading", { name: "Connect your AI" })).toBeNull();
   const secondAttempt = await retry();
   expect(view.queryByText("Failed")).toBeNull();
-  expect(view.getByText("In progress")).toBeTruthy();
+  expect(view.getByText("Step 1 of 4")).toBeTruthy();
   expect(view.queryByRole("alert")).toBeNull();
   await act(async () => secondAttempt.resolve());
   await view.findByRole("heading", { name: "Connect your AI" });
@@ -328,7 +397,13 @@ function withLocalCli(local: Record<string, unknown>) {
     if (command === "list_local_eval") return localListing;
     if (command === "cancel_local_eval") return null;
     if (command === "show_openbot") return null;
-    // Signed in and agreed already, unless a test says otherwise: the account step passes.
+    // Signed in and agreed already, unless a test says otherwise: the account step passes. The
+    // CLI's `login` answers at once for a sign-in it already has, and opens no browser.
+    if (
+      command === "sign_in_to_copilotkit" &&
+      !("sign_in_to_copilotkit" in local)
+    )
+      return { signedIn: true };
     if (command === "local_eval_terms" && !("local_eval_terms" in local))
       return ACCEPTED_TERMS;
     // Apps connect once signed in, unless a test says otherwise.
@@ -391,14 +466,20 @@ async function installLocal(view: Awaited<ReturnType<typeof renderApp>>) {
 }
 
 /** Words about the software underneath, which no local screen says. */
-// Docker and Podman are not here: they are the engine a person may already know, and their prompts
-// and agreements show windows of their own, so a screen names them when it waits on one. See
-// `plainInstallSteps`. Intelligence is: a screen names the part of OpenBot, the back end, instead.
+// Docker is not here: Docker Desktop is an app a person may already have, and its prompts and
+// agreements show windows of its own, so a screen names it when it waits on one. See
+// `plainInstallSteps`. Podman is: OpenBot installs it, and a person reads "the software OpenBot
+// runs on" instead. The log names it.
 const JARGON = [
   /\bCLI\b/,
   /Container engine/i,
   /Engine machine/i,
   /k3d/i,
+  /k3s/i,
+  /\bHelm\b/,
+  /Podman/,
+  /\bWSL\b/,
+  /Windows Subsystem for Linux/,
   /Intelligence/,
 ];
 
@@ -434,13 +515,31 @@ test("the first screen is Install, with nothing to choose", async () => {
   expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
   expect(
     view.getByText(
-      "Installs the OpenBot app and backend on this computer. The first setup takes about 10 minutes.",
+      "This installs OpenBot on this computer. The first setup takes about 10 minutes.",
     ),
   ).toBeTruthy();
   expect(buttons(view)).toEqual(["Install"]);
   expect(view.queryByRole("radio")).toBeNull();
   expect(view.queryByText(/hosted/i)).toBeNull();
   expectPlain(view);
+  expect(localCliCalls()).toEqual([]);
+});
+
+test("the first screen says what usage data OpenBot sends, before the CopilotKit sign-in links it", async () => {
+  setupRootConfiguration("/tmp/local-eval-welcome-usage", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({});
+  const view = await renderApp();
+  const notice = view.getByText(/OpenBot sends CopilotKit usage data/);
+  expect(notice.textContent).toBe(
+    "OpenBot sends CopilotKit usage data, linked to your CopilotKit account. It never sends your conversations, files or keys. You can turn this off in Settings. What OpenBot sends",
+  );
+  const link = view.getByRole("link", { name: "What OpenBot sends" });
+  expect(link.getAttribute("href")).toBe(
+    "https://github.com/CopilotKit/OpenBot/blob/main/desktop/TELEMETRY.md",
+  );
+  // Before anything is installed or signed in to: the notice comes first.
   expect(localCliCalls()).toEqual([]);
 });
 
@@ -465,7 +564,7 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
   // Names every part it installs, so a large download is expected.
   expect(
     view.getByText(
-      /installs OpenBot on this computer: the front end, the back end, the database/,
+      /installs OpenBot on this computer: the app, its database, your Bots/,
     ),
   ).toBeTruthy();
   expect(view.queryByLabelText("Where OpenBot lives")).toBeNull();
@@ -507,12 +606,12 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
   await emitProgress({
     step: "engine",
     ok: true,
-    detail: "The container engine is answering.",
+    detail: "The software OpenBot runs on is ready.",
   });
   await emitProgress({
     step: "create-machine",
     ok: true,
-    detail: "Preparing the engine machine.",
+    detail: "openbot created.",
   });
   await emitProgress({
     step: "images",
@@ -520,7 +619,7 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
     running: true,
     detail: "Checking which local software to download.",
   });
-  const checking = rowStatus(view, "Installing OpenBot");
+  const checking = rowStatus(view, "Downloading OpenBot");
   expect(
     checking.getByText("Checking which local software to download."),
   ).toBeTruthy();
@@ -538,12 +637,12 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
     ).getByText("Complete"),
   ).toBeTruthy();
   const installing = within(
-    view.getByRole("listitem", { name: "Installing OpenBot" }),
+    view.getByRole("listitem", { name: "Downloading OpenBot" }),
   );
-  expect(installing.getByText("In progress")).toBeTruthy();
+  expect(installing.getByText("Step 2 of 4")).toBeTruthy();
   expect(installing.queryByText(/Downloading local software/)).toBeNull();
   expect(installing.queryByRole("progressbar")).toBeNull();
-  await emitProgress({
+  const pulling: ProgressEvent = {
     step: "images",
     ok: true,
     running: true,
@@ -556,20 +655,27 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
       size: 1_300_000_000,
       bytesPerSecond: 3_000_000,
     },
-  });
+  };
+  await emitProgress(pulling);
+  // No time left before its speed is steady: Windows F said "About 164011 minutes left".
+  expect(installing.queryByText(/left\.$/)).toBeNull();
+  await steadied(pulling);
   expect(
     installing.queryByText("Checking which local software to download."),
   ).toBeNull();
   expect(
-    installing.getByText("52.0 MB of 1.3 GB · 5 of 7 items remaining"),
+    installing.getByText("52.0 MB of 1.3 GB · 5 of 7 parts left"),
   ).toBeTruthy();
-  // The bar is the bytes, out of the whole download.
-  expect(installing.getByRole("progressbar").getAttribute("value")).toBe(
-    "52000000",
+  // One bar for the bytes and the parts unpacking after them: the bytes most of it.
+  const bar = installing.getByRole("progressbar");
+  expect(bar.getAttribute("max")).toBe("1");
+  expect(Number(bar.getAttribute("value"))).toBeCloseTo(
+    0.8 * (52 / 1300) + 0.2 * (2 / 7),
+    3,
   );
-  expect(installing.getByRole("progressbar").getAttribute("max")).toBe(
-    "1300000000",
-  );
+  // What it is doing and the time left from its speed, with the time so far beside the step.
+  expect(installing.getByText(/^About \d+ minutes left\.$/)).toBeTruthy();
+  expect(installing.getByText(/elapsed/)).toBeTruthy();
   expectPlain(view);
   expect(
     setupEvents().filter(
@@ -593,16 +699,15 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   setupRootConfiguration("/tmp/local-eval-account", async () =>
     emptyConfiguration(),
   );
-  let signedIn = false;
+  const browser = deferred<{ signedIn: boolean }>();
   withLocalCli({
-    local_eval_terms: () =>
-      signedIn
-        ? { ...ACCEPTED_TERMS, accepted: false }
-        : { status: "signed-out" },
-    sign_in_to_copilotkit: () => {
-      signedIn = true;
-      return { signedIn: true };
-    },
+    local_eval_terms: () => ({ ...ACCEPTED_TERMS, accepted: false }),
+    // The CLI opens the browser and waits for the person to approve there.
+    sign_in_to_copilotkit: () => browser.promise,
+    copilotkit_sign_in_page: () => ({
+      url: "https://dashboard.copilotkit.ai/cli-auth/device?user_code=WXYZ-2345",
+      userCode: "WXYZ-2345",
+    }),
     set_up_local_eval: localStatus("starting", "valid"),
     connect_local_eval: localConnection,
     run_local_eval: localStatus("ready", "valid"),
@@ -610,8 +715,9 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   const view = await renderApp();
   await installLocal(view);
   // The first step. OpenBot needs no account, so it installs behind it, exactly once; nothing
-  // of Intelligence's runs before the agreement.
+  // of Intelligence's runs before the agreement. The browser sign-in starts without a click.
   await view.findByRole("heading", { name: "Sign in to CopilotKit" });
+  await view.findByText("Finish signing in to CopilotKit in your browser…");
   expect(
     view.getByText(
       "Your conversations and files are stored on this computer. Signing in does not send them to CopilotKit.",
@@ -624,16 +730,18 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
     ]),
   );
   expect(localSequence()).toEqual([]);
-  await userEvent.click(
-    view.getByRole("button", { name: "Sign in to CopilotKit" }),
-  );
+  await act(async () => browser.resolve({ signedIn: true }));
   await view.findByRole("heading", { name: "Accept the license agreement" });
   expect(
     view.getByText(
-      "To run OpenBot on this computer, accept the CopilotKit license agreement for Acme.",
+      "To run OpenBot on this computer, accept the CopilotKit license agreement.",
     ),
   ).toBeTruthy();
-  expect(view.getByRole("link", { name: "Read the agreement" })).toBeTruthy();
+  expect(
+    view.getByRole("link", { name: "Read the license agreement" }),
+  ).toBeTruthy();
+  // The agreement's version and the organization are the log's, not the screen's.
+  expect(document.body.textContent).not.toMatch(/developer-edition|Acme/);
   // Nothing licensed runs before Accept.
   expect(localSequence()).toEqual([]);
   await userEvent.click(view.getByRole("button", { name: "Accept" }));
@@ -660,6 +768,148 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
     acceptedEulaVersion: "developer-edition-2026-10-01-web",
   });
   expectPlain(view);
+});
+
+/**
+ * A new Mac sat on "Checking your CopilotKit account…" for the whole of Podman's install, and no
+ * browser opened: the check ran the CLI's `onboard local-terms`, which checks the engine first. The
+ * CLI's `login` needs no engine. So the sign-in starts the moment the step opens, and the engine is
+ * waited for only after it, for the agreement.
+ */
+test("the account step opens the CopilotKit sign-in at once, without waiting for the engine Install is setting up", async () => {
+  setupRootConfiguration("/tmp/local-eval-sign-in-first", async () =>
+    emptyConfiguration(),
+  );
+  const browser = deferred<{ signedIn: boolean }>();
+  withLocalCli({
+    // Install is still putting Podman in: no engine answers, for as long as this test runs.
+    prepare_installation: () => new Promise(() => {}),
+    local_eval_terms: () => ({ status: "engine-not-ready" }),
+    sign_in_to_copilotkit: () => browser.promise,
+    copilotkit_sign_in_page: () => ({
+      url: "https://dashboard.copilotkit.ai/cli-auth/device?user_code=WXYZ-2345",
+      userCode: "WXYZ-2345",
+    }),
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await emitProgress({
+    step: "install-engine",
+    ok: true,
+    running: true,
+    detail: DOWNLOADING_SOFTWARE,
+  });
+
+  // The browser sign-in, first, with nothing asked of the engine before it. Under it, what is
+  // installing meanwhile.
+  await view.findByText("Finish signing in to CopilotKit in your browser…");
+  expect(view.getByText("WXYZ-2345")).toBeTruthy();
+  expectBehind(view, 1, DOWNLOADING_SOFTWARE);
+  const accountCalls = () =>
+    invokeCalls
+      .map((call) => call.command)
+      .filter((command) =>
+        ["sign_in_to_copilotkit", "local_eval_terms"].includes(command),
+      );
+  expect(accountCalls()).toEqual(["sign_in_to_copilotkit"]);
+
+  // Signed in, the agreement waits for the engine, and the step says what it waits on.
+  await act(async () => browser.resolve({ signedIn: true }));
+  await view.findByRole("heading", { name: "Setting up this computer" });
+  expect(
+    view.getByText(
+      "You're signed in. OpenBot is setting up the software it runs on. The license agreement comes next.",
+    ),
+  ).toBeTruthy();
+  expectBehind(view, 1, DOWNLOADING_SOFTWARE);
+  expect(accountCalls()[0]).toBe("sign_in_to_copilotkit");
+  expect(accountCalls()).toContain("local_eval_terms");
+});
+
+// What Install says as it downloads the software OpenBot runs on, before macOS asks for the
+// password, and after a prompt the person closed (`install::podman_downloading`,
+// `podman_install_said`, `podman_declined`).
+const DOWNLOADING_SOFTWARE = "Downloading the software OpenBot runs on.";
+const PODMAN_PROMPTING =
+  "Your Mac will ask for your password so OpenBot can install what it needs to run.";
+const PODMAN_DECLINED =
+  "OpenBot needs your password to install what it needs to run. It asks again in a moment, or choose Try again.";
+
+/**
+ * David's direction for 1.0.1: no Continue before macOS asks for the password. #1385 put one
+ * there; an install step informs the person and moves forward. Install says what is coming and
+ * why, and the prompt comes by itself (`install::install_with_password`). A prompt closed without a
+ * password is said plainly, with Try again, and Install asks again by itself.
+ */
+test("macOS's password prompt is explained and comes without a click, and a closed one is asked again", async () => {
+  setupRootConfiguration("/tmp/local-eval-podman-no-gate", async () =>
+    emptyConfiguration(),
+  );
+  const browser = deferred<{ signedIn: boolean }>();
+  withLocalCli({
+    prepare_installation: () => new Promise(() => {}),
+    local_eval_terms: () => ({ status: "engine-not-ready" }),
+    sign_in_to_copilotkit: () => browser.promise,
+    copilotkit_sign_in_page: () => null,
+    allow_podman_install: () => true,
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByText("Checking your CopilotKit account…");
+
+  // Downloaded while the person signs in, then said before the prompt, with nothing to click.
+  await emitProgress({
+    step: "install-engine",
+    ok: true,
+    running: true,
+    detail: DOWNLOADING_SOFTWARE,
+  });
+  await emitProgress({
+    step: "install-engine",
+    ok: true,
+    running: true,
+    elsewhere: true,
+    detail: PODMAN_PROMPTING,
+  });
+  expectBehind(view, 1, PODMAN_PROMPTING);
+  expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
+  expect(view.queryByRole("button", { name: "Try again" })).toBeNull();
+  await act(async () => browser.resolve({ signedIn: true }));
+  await view.findByRole("heading", { name: "Setting up this computer" });
+  expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
+  expect(view.queryByRole("button", { name: "Try again" })).toBeNull();
+  const allowed = () =>
+    invokeCalls.filter((call) => call.command === "allow_podman_install");
+  expect(allowed()).toHaveLength(0);
+
+  // The person closed the prompt: said plainly, not as a failure, with Try again.
+  await emitProgress({
+    step: "install-engine",
+    ok: true,
+    running: true,
+    asks: true,
+    detail: PODMAN_DECLINED,
+  });
+  const card = await view.findByRole("region", {
+    name: "Your password is needed",
+  });
+  expect(card.textContent).toContain(PODMAN_DECLINED);
+  expect(view.queryByRole("alert")).toBeNull();
+  await userEvent.click(view.getByRole("button", { name: "Try again" }));
+  expect(allowed()).toHaveLength(1);
+
+  // Asked again: the card goes, and the line before the prompt is back.
+  await emitProgress({
+    step: "install-engine",
+    ok: true,
+    running: true,
+    elsewhere: true,
+    detail: PODMAN_PROMPTING,
+  });
+  expect(
+    view.queryByRole("region", { name: "Your password is needed" }),
+  ).toBeNull();
+  expectBehind(view, 1, PODMAN_PROMPTING);
 });
 
 test("the account step waits for a container engine Install is still setting up, rather than failing", async () => {
@@ -710,7 +960,7 @@ test("the account step says Docker Desktop is starting while Install waits on it
   });
   const view = await renderApp();
   await installLocal(view);
-  await view.findByRole("heading", { name: "Sign in to CopilotKit" });
+  await view.findByRole("heading", { name: "Setting up this computer" });
 
   await emitProgress({
     step: "install-engine",
@@ -719,11 +969,13 @@ test("the account step says Docker Desktop is starting while Install waits on it
     elsewhere: true,
     detail: DOCKER_HAND_OFF,
   });
-  expectWorking(view, DOCKER_HAND_OFF);
+  expectBehind(view, 1, DOCKER_HAND_OFF);
   // One line, saying what the wait is for.
   expect(view.queryByText("Checking your CopilotKit account…")).toBeNull();
+  expect(view.getAllByText(DOCKER_HAND_OFF)).toHaveLength(1);
 
-  // Docker answers: the line goes, and the account check is what is left.
+  // Docker answers: the line goes. Until the account check hears the engine, the step says what
+  // Install is doing, as Install's own row does.
   await emitProgress({
     step: "install-engine",
     ok: true,
@@ -731,28 +983,612 @@ test("the account step says Docker Desktop is starting while Install waits on it
     detail: "Docker Desktop is running.",
   });
   expect(view.queryByText(DOCKER_HAND_OFF)).toBeNull();
-  expectWorking(view, "Checking your CopilotKit account…");
+  expectBehind(view, 1, "Checking the software OpenBot needs.");
 });
 
-test("a line about OpenBot's own work is not said as a hand-off on the account step", async () => {
+/**
+ * The line about the install behind the account step stays whatever the step shows: signing in,
+ * waiting for the engine, the agreement. A person on any of them knows OpenBot is still installing.
+ */
+test("the install behind the account step is said on every part of it, signing in included", async () => {
   setupRootConfiguration("/tmp/hand-off-none", async () =>
     emptyConfiguration(),
   );
+  let engineAnswers = false;
   withLocalCli({
     prepare_installation: () => new Promise(() => {}),
-    local_eval_terms: () => ({ status: "engine-not-ready" }),
+    local_eval_terms: () =>
+      engineAnswers ? { status: "signed-out" } : { status: "engine-not-ready" },
   });
   const view = await renderApp();
   await installLocal(view);
-  await view.findByRole("heading", { name: "Sign in to CopilotKit" });
+  await view.findByRole("heading", { name: "Setting up this computer" });
   await emitProgress({
     step: "install-engine",
     ok: true,
     running: true,
-    detail: "Installing Podman.",
+    detail: "Installing the software OpenBot runs on.",
   });
-  expect(view.queryByText("Installing Podman.")).toBeNull();
-  expectWorking(view, "Checking your CopilotKit account…");
+  // What the account check waits on, in Install's own words, said once.
+  expectBehind(view, 1, "Installing the software OpenBot runs on.");
+  expect(view.queryByText("Checking your CopilotKit account…")).toBeNull();
+  expect(view.queryAllByRole("status")).toHaveLength(0);
+
+  // Signed out, the step is about signing in, and the install behind it is still said.
+  engineAnswers = true;
+  await view.findByRole(
+    "button",
+    { name: "Sign in to CopilotKit" },
+    { timeout: 5000 },
+  );
+  expectBehind(view, 1, "Installing the software OpenBot runs on.");
+}, 15000);
+
+/*
+ * A tester waited minutes on the first setup step and could not tell whether it was stuck: the
+ * screen read "Preparing the engine machine", "Installing Podman", "Waiting for the back end",
+ * "Updating the back end to 0.16.0-rc.10". The product's rule: the log keeps the technical parts,
+ * and the screen says what OpenBot is doing in plain words.
+ *
+ * These walk setup as a person meets it, with the native side's lines word for word as it sends
+ * them, and read every screen. The log side is `install::tests::every_line_shown_while_preparing_
+ * this_computer_is_plain_and_the_log_keeps_the_detail`: each of these lines is logged with the
+ * technical words beside it, and the back end's releases by `log_update_due`.
+ */
+
+/** Words a person setting OpenBot up doesn't know, and the back end's versions. */
+const TECHNICAL = [
+  /Podman/i,
+  /\bWSL\b/,
+  /Windows Subsystem for Linux/i,
+  /engine machine/i,
+  /\bengine\b/i,
+  /\bk3[sd]\b/i,
+  /\bHelm\b/,
+  /\bkubectl\b/i,
+  /\bback ?end\b/i,
+  /Intelligence/,
+  /\bCLI\b/,
+  /\bCompose\b/,
+  /0\.16\.0/,
+];
+
+/** The native side's lines while it prepares this computer (`engine.rs`, `install.rs`). */
+const NATIVE = {
+  checking: "Checking the software OpenBot needs.",
+  looking: "Looking for the software OpenBot runs on.",
+  downloading: DOWNLOADING_SOFTWARE,
+  declined: PODMAN_DECLINED,
+  prompting: PODMAN_PROMPTING,
+  installingWindows: "Installing the software OpenBot runs on.",
+  // The row of a finished install keeps Install's own words: never shown, and checked here.
+  installed: "Podman 5.6.2 and Compose 2.40.3 installed.",
+  preparingMac:
+    "Preparing this computer to run OpenBot. This takes a few minutes the first time.",
+  preparingWindows:
+    "Preparing this computer to run OpenBot. If a window asks to install a Windows feature OpenBot needs, allow it. Windows then asks for your approval and a restart.",
+  starting: "Starting the software OpenBot runs on.",
+  answering: "Checking that the software OpenBot runs on is ready.",
+  ready: "The software OpenBot runs on is ready.",
+  version: "Checking which version of OpenBot to download.",
+  images: "Checking which local software to download.",
+};
+
+type Beat = { beat: string; text: string; behind: string | null };
+
+/** The background install's row as a person reads it, less its ticking time: status | line. */
+function behindNow(view: ReturnType<typeof render>): string | null {
+  const row = view.queryByRole("listitem", {
+    name: "Installing OpenBot in the background",
+  });
+  if (!row) return null;
+  const status = row
+    .querySelector(".step-status")
+    ?.textContent?.replace(/ · [\dms ]+ elapsed$/, "");
+  return `${status} | ${row.querySelector(".detail")?.textContent ?? ""}`;
+}
+
+function technicalOn(beats: Beat[]) {
+  return beats.flatMap(({ beat, text }) =>
+    TECHNICAL.filter((word) => word.test(text)).map(
+      (word) => `${beat}: ${text.match(word)?.[0]}`,
+    ),
+  );
+}
+
+/** What each part of a first run said, from the first screen to OpenBot opening. */
+async function walkFirstRun(platform: "macOS" | "Windows"): Promise<Beat[]> {
+  setupRootConfiguration(`/tmp/plain-walk-${platform}`, async () =>
+    emptyConfiguration(),
+  );
+  const preparation = deferred<void>();
+  const browser = deferred<{ signedIn: boolean }>();
+  const setUp = deferred<unknown>();
+  let engineAnswers = false;
+  withLocalCli({
+    prepare_installation: () => preparation.promise,
+    sign_in_to_copilotkit: () => browser.promise,
+    copilotkit_sign_in_page: () => ({
+      url: "https://dashboard.copilotkit.ai/cli-auth/device?user_code=WXYZ-2345",
+      userCode: "WXYZ-2345",
+    }),
+    local_eval_terms: () =>
+      engineAnswers
+        ? { ...ACCEPTED_TERMS, accepted: false }
+        : { status: "engine-not-ready" },
+    allow_podman_install: () => true,
+    set_up_local_eval: () => setUp.promise,
+    local_eval_download: () => ({ done: 400_000_000, total: 1_600_000_000 }),
+    connect_local_eval: localConnection,
+    run_local_eval: localStatus("ready", "valid"),
+  });
+  const beats: Beat[] = [];
+  const view = await renderApp();
+  const seen = (beat: string) =>
+    beats.push({
+      beat,
+      text: view.container.textContent ?? "",
+      behind: behindNow(view),
+    });
+  const running = (step: string, detail: string, more = {}) =>
+    emitProgress({ step, ok: true, running: true, detail, ...more });
+  const done = (step: string, detail: string) =>
+    emitProgress({ step, ok: true, running: false, detail });
+  seen("welcome");
+
+  await installLocal(view);
+  await view.findByText("Finish signing in to CopilotKit in your browser…");
+  seen("signing in");
+  await running("install-engine", NATIVE.looking);
+  seen("signing in, looking");
+  await running("install-engine", NATIVE.downloading);
+  seen("signing in, downloading");
+  if (platform === "macOS") {
+    // Said before macOS asks for the password, with nothing to click, then asked.
+    await running("install-engine", NATIVE.prompting, { elsewhere: true });
+    seen("signing in, before the password prompt");
+    await act(async () => browser.resolve({ signedIn: true }));
+    await view.findByRole("heading", { name: "Setting up this computer" });
+    seen("password prompt");
+    // Closed without a password: said, with Try again, and asked again.
+    await running("install-engine", NATIVE.declined, { asks: true });
+    seen("password prompt closed");
+    await running("install-engine", NATIVE.prompting, { elsewhere: true });
+  } else {
+    await running("install-engine", NATIVE.installingWindows);
+    seen("signing in, installing");
+    await act(async () => browser.resolve({ signedIn: true }));
+  }
+  await done("install-engine", NATIVE.installed);
+  await running(
+    "create-machine",
+    platform === "macOS" ? NATIVE.preparingMac : NATIVE.preparingWindows,
+    { elsewhere: platform === "Windows" },
+  );
+  seen("preparing this computer");
+  await done("create-machine", "openbot created.");
+  await running("start-machine", NATIVE.starting);
+  seen("starting the software");
+  await done("start-machine", "openbot started.");
+  await running("health-gate", NATIVE.answering);
+  seen("checking the software");
+  await done("health-gate", "The engine answers.");
+  await done("engine", NATIVE.ready);
+  engineAnswers = true;
+  await running("deployment", NATIVE.version);
+  seen("checking the version");
+  await done("deployment", "v0.3.4 in /tmp/plain-walk");
+  await running("images", NATIVE.images);
+  seen("checking what to download");
+  const downloading: ProgressEvent = {
+    step: "images",
+    ok: true,
+    running: true,
+    detail: "Downloading local software.",
+    downloadBytes: 1_200_000_000,
+    downloads: {
+      done: 1,
+      total: 5,
+      bytes: 1_200_000_000,
+      size: 3_400_000_000,
+      bytesPerSecond: 9_000_000,
+    },
+  };
+  await emitProgress(downloading);
+  await steadied(downloading);
+  seen("downloading");
+
+  // The agreement, once the software it is checked on answers.
+  await view.findByRole("button", { name: "Accept" }, { timeout: 5000 });
+  seen("agreement");
+  await userEvent.click(view.getByRole("button", { name: "Accept" }));
+  await view.findByRole("heading", { name: "Installing OpenBot" });
+  const installing: ProgressEvent = {
+    step: "images",
+    ok: true,
+    running: true,
+    detail: "Downloading local software.",
+    downloadBytes: 3_000_000_000,
+    downloads: {
+      done: 4,
+      total: 5,
+      bytes: 3_000_000_000,
+      size: 3_400_000_000,
+      bytesPerSecond: 9_000_000,
+    },
+  };
+  await emitProgress(installing);
+  await steadied(installing);
+  seen("install");
+
+  await act(async () => preparation.resolve());
+  await view.findByRole("heading", { name: "Connect your AI" });
+  await waitFor(() => expect(localSequence()).toContain("set_up_local_eval"));
+  await waitFor(
+    () => expect(view.container.textContent).toContain("of 1.6 GB"),
+    { timeout: 3000 },
+  );
+  seen("AI, downloading the rest");
+  await act(async () => setUp.resolve(localStatus("starting", "valid")));
+  await waitFor(() => expect(localSequence()).toContain("run_local_eval"));
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 50)));
+  seen("AI, installed");
+
+  await chooseOpenAi(view);
+  await expectHandover();
+  seen("start");
+  return beats;
+}
+
+for (const platform of ["macOS", "Windows"] as const) {
+  test(`a first run on ${platform} says every line in plain words, and what is installing behind every screen`, async () => {
+    const beats = await walkFirstRun(platform);
+
+    // No technical word on any screen, at any point.
+    expect(technicalOn(beats)).toEqual([]);
+
+    // Behind the account and AI steps: one line, in plain words, saying what is installing and
+    // how far along it is. It changes as the install moves on.
+    const behind = Object.fromEntries(
+      beats.map(({ beat, behind }) => [beat, behind]),
+    );
+    const mac = platform === "macOS";
+    expect(behind).toEqual({
+      welcome: null,
+      "signing in": `Step 1 of 4 | ${NATIVE.checking}`,
+      "signing in, looking": `Step 1 of 4 | ${NATIVE.looking}`,
+      "signing in, downloading": `Step 1 of 4 | ${NATIVE.downloading}`,
+      ...(mac
+        ? {
+            "signing in, before the password prompt": `Step 1 of 4 | ${NATIVE.prompting}`,
+            "password prompt": `Step 1 of 4 | ${NATIVE.prompting}`,
+            "password prompt closed":
+              "Step 1 of 4 · Waiting for you | Waiting for your password.",
+            "preparing this computer": `Step 1 of 4 | ${NATIVE.preparingMac}`,
+          }
+        : {
+            "signing in, installing": `Step 1 of 4 | ${NATIVE.installingWindows}`,
+            "preparing this computer": `Step 1 of 4 | ${NATIVE.preparingWindows}`,
+          }),
+      "starting the software": `Step 1 of 4 | ${NATIVE.starting}`,
+      "checking the software": `Step 1 of 4 | ${NATIVE.answering}`,
+      "checking the version": `Step 2 of 4 | ${NATIVE.version}`,
+      "checking what to download": `Step 2 of 4 | ${NATIVE.images}`,
+      downloading: "Step 2 of 4 | Downloading OpenBot. About 4 minutes left.",
+      agreement: "Step 2 of 4 | Downloading OpenBot. About 4 minutes left.",
+      // The install is the screen itself here: its own rows say it.
+      install: null,
+      "AI, downloading the rest":
+        "Step 3 of 4 | Downloading the rest of OpenBot.",
+      "AI, installed": null,
+      start: null,
+    });
+    // Once everything is installed, the AI step says so, and what comes next.
+    const installed = beats.find(({ beat }) => beat === "AI, installed");
+    expect(installed?.text).toContain(
+      "OpenBot is installedCompleteOpenBot starts as soon as you connect your AI.",
+    );
+    // The Install step's own rows say how far along, the time so far and the time left. Its row
+    // is not named as the heading above it is: on Windows F both said "Installing OpenBot".
+    const install = beats.find(({ beat }) => beat === "install");
+    expect(install?.text).toMatch(
+      /Downloading OpenBotStep 2 of 4 · \d+s elapsedLess than a minute left\./,
+    );
+    expect(install?.text).not.toContain("Installing OpenBotStep");
+  });
+}
+
+/**
+ * Every day: a start after a restart wakes the software OpenBot runs on, and a start after an app
+ * update updates what runs behind OpenBot. "Waiting for the back end" and "Updating the back end to
+ * 0.16.0-rc.9" are now "Getting OpenBot ready" and "Updating OpenBot", with how far along.
+ */
+test("a start that wakes the computer's software and updates OpenBot says it in plain words", async () => {
+  const after = pinnedCli.updateDidNotFinish;
+  const before = {
+    ...after,
+    readiness: "ready",
+    stack: {
+      ...after.stack,
+      step: "ready",
+      hasFailedStep: false,
+      updateInProgress: false,
+      unfinishedUpdate: null,
+    },
+  };
+  setupConnectedLocalStack("/tmp/plain-walk-start", before);
+  const wake = deferred<unknown>();
+  const update = deferred<unknown>();
+  let asked = 0;
+  let downloading = false;
+  withLocalCli({
+    wake_engine: () => wake.promise,
+    local_eval_download: () =>
+      downloading ? { done: 300_000_000, total: 900_000_000 } : null,
+    run_local_eval: (args: { action: string }) => {
+      if (args.action === "update") return update.promise;
+      asked += 1;
+      return asked === 1 ? before : after;
+    },
+  });
+  const beats: Beat[] = [];
+  const view = await renderApp();
+  const seen = (beat: string) =>
+    beats.push({
+      beat,
+      text: view.container.textContent ?? "",
+      behind: behindNow(view),
+    });
+  await view.findByRole("heading", { name: "Starting OpenBot" });
+  await emitProgress({
+    step: "start-machine",
+    ok: true,
+    running: true,
+    detail: NATIVE.starting,
+  });
+  seen("waking the software");
+  await emitProgress({
+    step: "start-machine",
+    ok: true,
+    running: false,
+    detail: "openbot started.",
+  });
+  await act(async () => wake.resolve(null));
+  await waitFor(() => expect(localActions()).toContain("update"));
+  seen("updating");
+  downloading = true;
+  await waitFor(
+    () => expect(view.container.textContent).toContain("of 900.0 MB"),
+    { timeout: 3000 },
+  );
+  seen("downloading the update");
+  await act(async () => update.resolve(updateFailed));
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  seen("running on the version it had");
+
+  // No technical word, and no version of what runs behind OpenBot, at any point.
+  expect(technicalOn(beats)).toEqual([]);
+
+  // What each part said instead: the row that waits says how far along, and what it is doing.
+  const said = Object.fromEntries(beats.map(({ beat, text }) => [beat, text]));
+  // One journey over the whole Start: what is happening now, the time left, then the rows.
+  expect(said["waking the software"]).toContain(
+    "Starting the software OpenBot runs onAbout a minute left · 0s so far",
+  );
+  expect(said["waking the software"]).toContain(
+    "Getting OpenBot readyStep 3 of 4",
+  );
+  expect(said.updating).toContain(
+    "Getting the update readyAbout 2 minutes left",
+  );
+  expect(said.updating).toContain(
+    "Getting OpenBot readyStep 3 of 4Updating OpenBot. Your Bots and data stay as they are.",
+  );
+  // The download is the journey's: what is happening, and its measure beside the time left. The row
+  // keeps what this part is, and has no measure of its own.
+  expect(said["downloading the update"]).toMatch(
+    /Downloading the update(About \d+ minutes|About a minute|Less than a minute) left · 300\.0 MB of 900\.0 MB · \d+s so far/,
+  );
+  expect(said["downloading the update"].match(/MB of/g)).toHaveLength(1);
+  expect(said["downloading the update"]).toContain(
+    "Getting OpenBot readyStep 3 of 4Updating OpenBot. Your Bots and data stay as they are.",
+  );
+  expect(said["running on the version it had"]).toContain(KEPT_RELEASE);
+});
+
+/*
+ * When setup stops: every failure screen says what happened and what to do, in plain words. The
+ * engine's output and the CLI's words are behind "Technical details" and in the logs a person
+ * copies, never the headline. A product is named only where the person acts in it: Docker Desktop,
+ * a Podman command they run.
+ */
+
+/** A failure's headline as the native side now sends it (`acquire.rs`, `problem.rs`). */
+const NATIVE_FAILURE = {
+  machine: "OpenBot couldn't prepare this computer to run it. Try again.",
+  unreachable:
+    "OpenBot can't reach the software it runs on. If you use Docker Desktop, open it and wait for it to start. Then try again.",
+  lastQuit:
+    "When OpenBot last quit, some of its services didn't stop. They may still be running. Stopping OpenBot again asks them to stop.",
+};
+
+/** What a person reads on a failure screen: not the technical details or the logs' own controls. */
+function readable(view: ReturnType<typeof render>): string {
+  const copy = view.container.cloneNode(true) as HTMLElement;
+  for (const hidden of copy.querySelectorAll(".detail-of, .troubleshooting"))
+    hidden.remove();
+  return copy.textContent ?? "";
+}
+
+/** Where the person acts in Podman: switching to it, or a command they run in it. */
+const ACTS_IN_PODMAN =
+  /Docker Desktop or Podman|To use Podman instead|start Podman|Stop your Podman machine|run podman machine set(?: --[a-z-]+(?: \d+)?)+|your Podman machine/g;
+
+const FAILURE_TECHNICAL = [
+  ...TECHNICAL,
+  /\bcontainers?\b/i,
+  /\brootful\b/i,
+  /\bcluster\b/i,
+];
+
+function failureTechnical(beats: Beat[]) {
+  return beats.flatMap(({ beat, text }) => {
+    const left = text.replace(ACTS_IN_PODMAN, "");
+    return FAILURE_TECHNICAL.filter((word) => word.test(left)).map(
+      (word) => `${beat}: ${left.match(word)?.[0]}`,
+    );
+  });
+}
+
+/** The AI step with setup stopped behind it, on `answer` from the CLI's setup. */
+async function stoppedBehindAi(answer: () => unknown): Promise<string> {
+  setupRootConfiguration("/tmp/plain-failure", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({ set_up_local_eval: answer });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByRole("heading", { name: "Connect your AI" });
+  await view.findByRole("alert", undefined, { timeout: 3000 });
+  const text = readable(view);
+  cleanup();
+  invokeCalls = [];
+  return text;
+}
+
+test("every failure screen says what happened and what to do, in plain words", async () => {
+  const beats: Beat[] = [];
+  const seen = (beat: string, text: string) =>
+    beats.push({ beat, text, behind: null });
+  const blocked =
+    (reason: string, more: Record<string, unknown> = {}) =>
+    () => ({
+      ...localStatus("unknown", "unknown"),
+      outcome: "blocked",
+      stack: null,
+      reason,
+      ...more,
+    });
+
+  // Setup stopping behind the AI step, for what stops it most.
+  for (const reason of [
+    "docker-unavailable",
+    "port-unavailable",
+    "local-command-failed",
+    "local-command-busy",
+    "unsupported-engine",
+    "confirmation-required",
+  ])
+    seen(`AI step, ${reason}`, await stoppedBehindAi(blocked(reason)));
+  seen(
+    "AI step, out of disk on Windows",
+    await stoppedBehindAi(
+      blocked("resources-short", {
+        shortfall: {
+          podman: true,
+          cpu: false,
+          memory: false,
+          disk: true,
+          diskGb: "30",
+          wsl: true,
+          drive: "C:",
+        },
+      }),
+    ),
+  );
+  seen(
+    "AI step, short of memory in Podman",
+    await stoppedBehindAi(
+      blocked("resources-short", {
+        shortfall: { podman: true, cpu: false, memory: true, disk: false },
+      }),
+    ),
+  );
+  for (const category of ["timeout", "unexpected-exit", "unverified", "spawn"])
+    seen(
+      `AI step, ${category}`,
+      await stoppedBehindAi(() => {
+        throw category;
+      }),
+    );
+
+  // The account step, refused the software this computer runs things on.
+  {
+    setupRootConfiguration("/tmp/plain-refused", async () =>
+      emptyConfiguration(),
+    );
+    withLocalCli({
+      local_eval_terms: () => ({
+        status: "blocked",
+        reason: "unsupported-engine",
+        switchEngine: true,
+        said: "Docker Desktop or rootful Podman is required on macOS. This machine runs OrbStack.",
+      }),
+    });
+    const view = await renderApp();
+    await installLocal(view);
+    await view.findByRole("heading", {
+      name: "Switch to Docker Desktop or Podman",
+    });
+    seen("account, refused", readable(view));
+    cleanup();
+    invokeCalls = [];
+  }
+
+  // Install failing while it prepares this computer, with the engine's own words behind it.
+  {
+    const { view, preparation } = await beginPendingInstallation();
+    await act(async () =>
+      preparation.reject({
+        said: NATIVE_FAILURE.machine,
+        detail: "Error: podman machine init openbot: exit status 125",
+      }),
+    );
+    await view.findByRole("button", { name: "Retry installation" });
+    seen("install, failed", readable(view));
+    expect(view.container.textContent).toContain("exit status 125");
+    cleanup();
+    invokeCalls = [];
+  }
+
+  // Start failing, and the notice a start shows after a quit that left something running.
+  {
+    setupConnectedLocalStack(
+      "/tmp/plain-start-failed",
+      localStatus("ready", "valid"),
+    );
+    const previous = invokeHandler;
+    invokeHandler = async (command, args) => {
+      if (command === "start_stack")
+        throw {
+          said: NATIVE_FAILURE.unreachable,
+          detail: "dial unix /var/run/docker.sock: connect: connection refused",
+        };
+      if (command === "last_local_eval_stop_failure")
+        return {
+          said: NATIVE_FAILURE.lastQuit,
+          detail: "the back end stack did not stop when OpenBot last quit",
+        };
+      return previous(command, args);
+    };
+    const view = await renderApp();
+    await waitFor(() =>
+      expect(view.container.textContent).toContain(
+        "can't reach the software it runs on",
+      ),
+    );
+    seen("start, failed", readable(view));
+  }
+
+  expect(failureTechnical(beats)).toEqual([]);
+  // Each says what to do: retry, a setting, a command, or who to ask.
+  for (const { beat, text } of beats)
+    expect({
+      beat,
+      next: /Retry|Try again|try again|Repair|Start OpenBot|Free up|Quit|Open Docker Desktop|Stop your Podman machine|Wait|update|copy the logs|Copy the logs/.test(
+        text,
+      ),
+    }).toEqual({ beat, next: true });
 });
 
 test("a finished install brings the window to the front for the next step", async () => {
@@ -847,9 +1683,10 @@ test("a first run already signed in with the agreement accepted passes the accou
   const view = await renderApp();
   await installLocal(view);
   await view.findByRole("heading", { name: "Connect your AI" });
+  // The CLI's sign-in answered at once from the sign-in it had: asked once, and nothing clicked.
   expect(
-    invokeCalls.some((call) => call.command === "sign_in_to_copilotkit"),
-  ).toBe(false);
+    invokeCalls.filter((call) => call.command === "sign_in_to_copilotkit"),
+  ).toHaveLength(1);
   await waitFor(() => expect(localSequence()).toContain("set_up_local_eval"));
   expect(
     invokeCalls.find((call) => call.command === "set_up_local_eval")?.args,
@@ -878,9 +1715,17 @@ test("the local sequence starts when installation completes and survives the pro
   expect(
     invokeCalls.find((call) => call.command === "set_up_local_eval")?.args,
   ).toMatchObject({ root: "/tmp/local-eval-overlap" });
-  // Working behind this screen says nothing on it: its progress has its own step.
-  expect(view.queryByText(/Setting up OpenBot/)).toBeNull();
-  expect(view.queryByRole("alert", { name: "Back end" })).toBeNull();
+  // Working behind this screen is said on one row, how far along included. Its own rows wait for
+  // their step.
+  expectBehind(
+    view,
+    3,
+    "Setting up OpenBot on this computer. This takes a few minutes the first time.",
+  );
+  expect(
+    view.queryByRole("listitem", { name: "Setting up OpenBot" }),
+  ).toBeNull();
+  expect(view.queryByRole("alert", { name: "Setup" })).toBeNull();
   // A local first run has nothing behind this screen to go back to.
   expect(view.queryByRole("button", { name: "Back" })).toBeNull();
   await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
@@ -892,13 +1737,18 @@ test("the local sequence starts when installation completes and survives the pro
     ]),
   );
   expect(view.queryByText(/Connecting OpenBot/)).toBeNull();
+  expectBehind(
+    view,
+    3,
+    "Setting up OpenBot on this computer. This takes a few minutes the first time.",
+  );
   expect(invokeCalls.some((call) => call.command === "cancel_local_eval")).toBe(
     false,
   );
   expectPlain(view);
 });
 
-test("Continue during setup shows Getting ready, which starts and opens OpenBot by itself", async () => {
+test("Continue during setup shows Finishing setup, which starts and opens OpenBot by itself", async () => {
   setupRootConfiguration("/tmp/local-eval-auto", async () =>
     emptyConfiguration(),
   );
@@ -911,10 +1761,10 @@ test("Continue during setup shows Getting ready, which starts and opens OpenBot 
   const view = await renderApp();
   await installLocal(view);
   await chooseOpenAi(view);
-  await view.findByRole("heading", { name: "Getting ready" });
+  await view.findByRole("heading", { name: "Finishing setup" });
   expect(stepLabel(view)).toBe("Start");
   const row = view.getByRole("listitem", { name: "Setting up OpenBot" });
-  expect(row.textContent).toContain("In progress");
+  expect(row.textContent).toContain("Step 1 of 4");
   expectPlain(view);
   await act(async () => setUp.resolve(localStatus("starting", "valid")));
   await expectHandover();
@@ -1039,9 +1889,13 @@ test("a Claude plan signed in on the provider screen reaches Start with its toke
   await userEvent.click(
     view.getByRole("button", { name: "Finish signing in" }),
   );
-  // A tick for a second, then on by itself.
-  expect((await view.findByText(/✓/)).closest("p")?.textContent).toContain(
-    "Signed in to Anthropic.",
+  // A tick for a second, then on by itself. (The install's row under it has a tick of its own.)
+  await waitFor(() =>
+    expect(
+      view
+        .getAllByText(/✓/)
+        .map((tick) => tick.closest("p")?.textContent ?? ""),
+    ).toContainEqual(expect.stringContaining("Signed in to Anthropic.")),
   );
   await expectHandover(4000);
   expect(getStartStackPayload()).toMatchObject({
@@ -1088,7 +1942,7 @@ test("Continue after Intelligence is ready starts OpenBot with the chosen model"
   await installLocal(view);
   await view.findByRole("heading", { name: "Connect your AI" });
   await waitFor(() => expect(localSequence()).toContain("run_local_eval"));
-  expect(view.queryByRole("alert", { name: "Back end" })).toBeNull();
+  expect(view.queryByRole("alert", { name: "Setup" })).toBeNull();
   expect(localSequence()).not.toContain("start_stack");
   await chooseOpenAi(view);
   await expectHandover();
@@ -1112,7 +1966,7 @@ test("while a CLI step runs only Cancel is offered, and Cancel stops the call an
   const view = await renderApp();
   await installLocal(view);
   await chooseOpenAi(view);
-  await view.findByRole("heading", { name: "Getting ready" });
+  await view.findByRole("heading", { name: "Finishing setup" });
   expect(buttons(view)).toEqual(["Cancel"]);
   expect(view.queryByText("Installation options")).toBeNull();
   await userEvent.click(view.getByRole("button", { name: "Cancel" }));
@@ -1161,18 +2015,18 @@ test("a blocked setup stops at its row in plain words and Retry resumes there", 
   await installLocal(view);
   await view.findByRole("heading", { name: "Connect your AI" });
   // A stop interrupts the screen in front at once, in a card with its reason and Retry.
-  const alert = await view.findByRole("alert", { name: "Back end" });
-  expect(alert.textContent).toContain("Back end setup stopped");
+  const alert = await view.findByRole("alert", { name: "Setup" });
+  expect(alert.textContent).toContain("Setup stopped");
   expect(alert.textContent).toContain(
-    "The back end cannot start until the software it runs on is running.",
+    "The software OpenBot runs on isn't running. Retry to start it.",
   );
   await chooseOpenAi(view);
-  await view.findByRole("heading", { name: "Getting ready" });
+  await view.findByRole("heading", { name: "Finishing setup" });
   // Continue does not retry a blocked step: Retry does.
   expect(setups).toBe(1);
   const row = view.getByRole("listitem", { name: "Setting up OpenBot" });
   expect(row.textContent).toContain(
-    "The back end cannot start until the software it runs on is running.",
+    "The software OpenBot runs on isn't running. Retry to start it.",
   );
   expectPlain(view);
   expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
@@ -1341,7 +2195,7 @@ test("Quit shows Shutting down with each part's row as it starts and ends", asyn
     rowStatus(view, "Stopping OpenBot").getByText("In progress"),
   ).toBeTruthy();
   expect(
-    view.queryByRole("listitem", { name: "Stopping the back end" }),
+    view.queryByRole("listitem", { name: "Stopping OpenBot's services" }),
   ).toBeNull();
   // Nothing to press: the app exits by itself.
   expect(view.queryAllByRole("button")).toHaveLength(0);
@@ -1354,12 +2208,12 @@ test("Quit shows Shutting down with each part's row as it starts and ends", asyn
     rowStatus(view, "Stopping OpenBot").getByText("Complete"),
   ).toBeTruthy();
   expect(
-    rowStatus(view, "Stopping the back end").getByText("In progress"),
+    rowStatus(view, "Stopping OpenBot's services").getByText("In progress"),
   ).toBeTruthy();
   // An older copy arriving late never undoes a newer one.
   await emitQuit({ seq: 3, steps: [complete("stop-openbot")] });
   expect(
-    rowStatus(view, "Stopping the back end").getByText("In progress"),
+    rowStatus(view, "Stopping OpenBot's services").getByText("In progress"),
   ).toBeTruthy();
 
   await emitQuit({
@@ -1367,7 +2221,7 @@ test("Quit shows Shutting down with each part's row as it starts and ends", asyn
     steps: [complete("stop-openbot"), failed("stop-intelligence")],
   });
   expect(
-    rowStatus(view, "Stopping the back end").getByText("Failed"),
+    rowStatus(view, "Stopping OpenBot's services").getByText("Failed"),
   ).toBeTruthy();
   expect(view.getByRole("status").textContent).toBe(
     "Part of it could not be stopped. OpenBot says what happened the next time it opens.",
@@ -1408,7 +2262,7 @@ test("a window sent to the Shutting down page catches up, then follows the rows"
     steps: [complete("stop-openbot"), complete("stop-intelligence")],
   });
   expect(
-    rowStatus(view, "Stopping the back end").getByText("Complete"),
+    rowStatus(view, "Stopping OpenBot's services").getByText("Complete"),
   ).toBeTruthy();
   // Only the catch-up call; nothing that starts or stops anything.
   expect(invokeCalls.map((call) => call.command)).toEqual(["quit_status"]);
@@ -1597,9 +2451,9 @@ test("relaunch with Docker Desktop quit opens it, says so, and starts once it an
   await waitFor(() => expect(docker.wakes).toBe(1));
   await view.findByRole("heading", { name: "Starting OpenBot" });
   await emitDockerHandOff();
-  expectWorking(view, DOCKER_HAND_OFF);
-  const row = view.getByRole("listitem", { name: "Waiting for the back end" });
-  expect(row.textContent).toContain("In progress");
+  expectJourney(view, DOCKER_HAND_OFF);
+  const row = view.getByRole("listitem", { name: "Getting OpenBot ready" });
+  expect(row.textContent).toContain("Step 3 of 4");
   expect(localSequence()).toEqual([]);
   // Docker answers: the hand-off goes, and the back end and OpenBot start.
   await emitDockerSettled(true, "Docker Desktop is running.");
@@ -1613,14 +2467,15 @@ test("relaunch with Docker Desktop quit opens it, says so, and starts once it an
   ]);
   expect(
     view.queryByText(
-      "The back end cannot start until the software it runs on is running.",
+      "The software OpenBot runs on isn't running. Retry to start it.",
     ),
   ).toBeNull();
 });
 
-test("relaunch with the engine machine stopped says it is starting it, in setup's words", async () => {
+test("relaunch with the engine machine stopped says it is starting it, in plain words", async () => {
   // Seen on Windows: Podman's machine was stopped, and for the ten seconds it took to start the
   // screen said only "Waiting for the back end", while the log said "Starting the engine machine".
+  // The screen says it plainly now (`engine::starting_machine_line`); the log keeps the machine.
   setupConnectedLocalStack(
     "/tmp/local-eval-machine-stopped",
     localStatus("ready", "valid"),
@@ -1636,16 +2491,17 @@ test("relaunch with the engine machine stopped says it is starting it, in setup'
     step: "start-machine",
     ok: true,
     running: true,
-    detail: "Starting the engine machine.",
+    detail: "Starting the software OpenBot runs on.",
   });
-  expectWorking(view, "Starting the engine machine.");
+  // Said as the journey's other lines are: a phrase, with no full stop.
+  expectJourney(view, "Starting the software OpenBot runs on");
   await emitProgress({
     step: "start-machine",
     ok: true,
     running: false,
     detail: "The engine machine is running.",
   });
-  expect(view.queryByText("Starting the engine machine.")).toBeNull();
+  expect(view.queryByText("Starting the software OpenBot runs on.")).toBeNull();
   await act(async () => machine.resolve(null));
   await view.findByRole("heading", { name: "OpenBot is running" });
 });
@@ -1839,7 +2695,7 @@ test("relaunch upgrades an older installation to this app's release as part of S
   );
   // Said while the upgrade runs, which can take minutes.
   const said =
-    "Updating OpenBot from v0.3.0 to v0.3.1. Your Bots, sign-ins and data stay as they are.";
+    "Updating OpenBot. Your Bots, sign-ins and data stay as they are.";
   await emitProgress({
     step: "release",
     ok: true,
@@ -1880,13 +2736,13 @@ test("relaunch upgrades an older installation to this app's release as part of S
 });
 
 /*
- * Start's rows are the back end's, and one line under them says what the upgrade is doing. The
- * release row carries that sentence, and each upgrade step now says itself on it as it begins
- * (`upgrade::now_said`). The install and the start report rows of their own as well, and those
- * never take the line over. On Windows the line said "Stopping OpenBot." through a whole start,
- * under a list where every step but the last was complete.
+ * Start updating OpenBot itself, in the Start journey: what the update is doing now, said from the
+ * step running now (`upgrade::now_said`), on the one bar that covers every row. The install and the
+ * start report rows of their own as well, and those never take the line over. On Windows the line
+ * said "Stopping OpenBot." through a whole start, under a list where every step but the last was
+ * complete; later a second row under the journey carried a bar of its own and said the same thing.
  */
-test("the line under Start's rows says the upgrade step running now, never one that finished", async () => {
+test("the journey says the update step running now, never one that finished, on its one bar", async () => {
   setupConnectedLocalStack(
     "/tmp/local-eval-upgrade-steps",
     localStatus("ready", "valid"),
@@ -1899,10 +2755,7 @@ test("the line under Start's rows says the upgrade step running now, never one t
       invokeCalls.some((call) => call.command === "upgrade_and_start"),
     ).toBe(true),
   );
-  const lines = () =>
-    [...view.container.querySelectorAll(".status-line")].map(
-      (line) => line.textContent,
-    );
+  const journey = () => view.getByRole("region", { name: "How far along" });
   const release = (detail: string) => ({
     step: "release",
     ok: true,
@@ -1910,25 +2763,23 @@ test("the line under Start's rows says the upgrade step running now, never one t
     detail,
   });
   // What `upgrade_and_start` reports, in order: the release row as each step begins, and the
-  // install's and the start's own rows between them.
-  const upgrade: [ProgressEvent[], string][] = [
+  // install's and the start's own rows between them. Then what the journey says meanwhile, and the
+  // measure under its bar while a download runs.
+  const upgrade: [ProgressEvent[], string, string?][] = [
     [
       [
         release(
-          "Updating OpenBot from v0.3.0 to v0.3.1. Your Bots, sign-ins and data stay as they are.",
+          "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
         ),
       ],
-      "Updating OpenBot from v0.3.0 to v0.3.1. Your Bots, sign-ins and data stay as they are.",
+      "Getting the update ready",
     ],
-    [[release("Stopping OpenBot.")], "Stopping OpenBot."],
-    [
-      [release("Backing up OpenBot's database.")],
-      "Backing up OpenBot's database.",
-    ],
-    [[release("Downloading OpenBot v0.3.1.")], "Downloading OpenBot v0.3.1."],
+    [[release("Stopping OpenBot.")], "Getting the update ready"],
+    [[release("Backing up your data.")], "Getting the update ready"],
+    [[release("Downloading the update.")], "Downloading the update"],
     [
       [
-        release("Installing OpenBot v0.3.1."),
+        release("Installing the update."),
         {
           step: "engine",
           ok: true,
@@ -1946,8 +2797,20 @@ test("the line under Start's rows says the upgrade step running now, never one t
           ok: true,
           running: true,
           detail: "Downloading local software.",
-          downloadBytes: 1_200_000_000,
+          downloads: {
+            done: 2,
+            total: 5,
+            bytes: 600_000_000,
+            size: 1_200_000_000,
+          },
         },
+      ],
+      "Downloading the update",
+      " · 600.0 MB of 1.2 GB",
+    ],
+    [
+      [
+        { step: "images", ok: true, running: false, detail: "Downloaded." },
         {
           step: "installation",
           ok: true,
@@ -1955,11 +2818,11 @@ test("the line under Start's rows says the upgrade step running now, never one t
           detail: "Installed.",
         },
       ],
-      "Installing OpenBot v0.3.1.",
+      "Installing the update",
     ],
     [
       [
-        release("Starting OpenBot v0.3.1."),
+        release("Starting OpenBot."),
         {
           step: "services",
           ok: true,
@@ -1974,31 +2837,46 @@ test("the line under Start's rows says the upgrade step running now, never one t
           detail: "Waiting for OpenBot to answer.",
         },
       ],
-      "Starting OpenBot v0.3.1.",
+      "Starting the updated OpenBot",
     ],
   ];
-  for (const [events, said] of upgrade) {
+  let fraction = 0;
+  for (const [events, said, bytes] of upgrade) {
     for (const event of events) await emitProgress(event);
     expect(
       view.getByRole("heading", { name: "Starting OpenBot" }),
     ).toBeTruthy();
-    // One line, the step running now, with the spinner.
-    expect(lines()).toEqual([said]);
-    expectWorking(view, said);
+    expect(journey().querySelector(".journey-said")?.textContent).toBe(said);
+    expect(journey().querySelector(".journey-bytes")?.textContent ?? null).toBe(
+      bytes ?? null,
+    );
+    // One bar on the screen, the journey's, and it only moves forward.
+    const bars = view.getAllByRole("progressbar");
+    expect(bars).toHaveLength(1);
+    const value = Number(bars[0]?.getAttribute("value"));
+    expect(value).toBeGreaterThanOrEqual(fraction);
+    fraction = value;
+    // No row of its own for the update: the start's row says what this part is.
+    expect(view.queryByRole("list", { name: "Update progress" })).toBeNull();
+    expect(
+      view.getByRole("listitem", { name: "Opening OpenBot" }).textContent,
+    ).toContain(
+      "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
+    );
   }
   // Nothing an earlier step said is left on the screen.
   for (const finished of [
     "Stopping OpenBot.",
-    "Backing up OpenBot's database.",
-    "Downloading OpenBot v0.3.1.",
-    "Installing OpenBot v0.3.1.",
+    "Backing up your data.",
+    "Downloading the update.",
+    "Installing the update.",
   ])
     expect(view.queryByText(finished)).toBeNull();
   await act(async () =>
     moving.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
   );
   await view.findByRole("heading", { name: "OpenBot is running" });
-  expect(view.queryByText("Starting OpenBot v0.3.1.")).toBeNull();
+  expect(view.queryByText("Starting OpenBot.")).toBeNull();
 });
 
 test("an upgrade that could not put the previous version back is retried from the Retry its sentence names", async () => {
@@ -2082,10 +2960,14 @@ test("relaunch never starts a local stack that is not exactly ready and valid", 
     [
       "unknown",
       "unknown",
-      "The back end started. Its licence and readiness are not reported yet.",
+      "OpenBot started, and hasn't said yet whether it's ready.",
     ],
     ["ready", "expired", "The evaluation licence has expired."],
-    ["degraded", "valid", "The back end is running but not healthy."],
+    [
+      "degraded",
+      "valid",
+      "OpenBot is running but not working properly. Retry to start it again.",
+    ],
   ]) {
     setupConnectedLocalStack(
       `/tmp/local-eval-${readiness}-${licence}`,
@@ -2118,7 +3000,7 @@ const pinnedCli = JSON.parse(
   ),
 );
 const KEPT_RELEASE =
-  "The back end is running 0.16.0-rc.5. Downloading 0.16.0-rc.9 did not finish, so OpenBot tries again the next time it starts.";
+  "The OpenBot update didn't finish downloading, so OpenBot is running the version it had. It tries again the next time it starts.";
 
 /** `local update` as the CLI answers when it stops at the image download again. */
 const updateFailed = {
@@ -2161,7 +3043,9 @@ async function startedOnKeptRelease(
     view.getByRole("heading", { name: "OpenBot is running" }),
   ).toBeTruthy();
   expect(
-    view.queryByText("The back end is running but not healthy."),
+    view.queryByText(
+      "OpenBot is running but not working properly. Retry to start it again.",
+    ),
   ).toBeNull();
   expect(
     view.queryByRole("heading", { name: "OpenBot is stopped" }),
@@ -2186,7 +3070,7 @@ async function startedOnKeptRelease(
  * Found on 0.3.3 on a slow connection. Start began updating the back end from 0.16.0-rc.5 to
  * 0.16.0-rc.9; the CLI stopped downloading one image at its own limit and kept the update on
  * record. Nothing in the cluster had changed and every check passed, but the CLI said `degraded`,
- * and the window said "The back end is running but not healthy." and stopped OpenBot.
+ * and the window said "OpenBot is running but not working properly. Retry to start it again." and stopped OpenBot.
  */
 test("an update that did not finish opens OpenBot on the release the back end runs, and says so", async () => {
   const after = pinnedCli.updateDidNotFinish;
@@ -2239,7 +3123,9 @@ test("a back end whose check fails is still not healthy, with an update on recor
     pinnedCli.apiCheckFails,
   ]);
   const view = await renderApp();
-  await view.findByText("The back end is running but not healthy.");
+  await view.findByText(
+    "OpenBot is running but not working properly. Retry to start it again.",
+  );
   expect(
     view.getByRole("heading", { name: "OpenBot is stopped" }),
   ).toBeTruthy();
@@ -2288,7 +3174,7 @@ test("relaunch waits for Start when auto-start is off, interrupted, or the stack
   }
 });
 
-test("Back from a stopped Getting ready keeps the AI already chosen", async () => {
+test("Back from a stopped Finishing setup keeps the AI already chosen", async () => {
   setupRootConfiguration("/tmp/back-preserves-setup", async () =>
     emptyConfiguration(),
   );
@@ -2303,7 +3189,7 @@ test("Back from a stopped Getting ready keeps the AI already chosen", async () =
   const view = await renderApp();
   await installLocal(view);
   await chooseOpenAi(view);
-  await view.findByRole("heading", { name: "Getting ready" });
+  await view.findByRole("heading", { name: "Finishing setup" });
   await userEvent.click(await view.findByRole("button", { name: "Back" }));
   expect(view.getByRole("heading", { name: "Connect your AI" })).toBeTruthy();
   expect(view.getByRole("radio", { name: /OpenAI/ })).toHaveProperty(
@@ -2531,7 +3417,7 @@ test.each(["model", "intelligence"])(
         name:
           connection === "model"
             ? "Refresh your AI connection"
-            : "Getting ready",
+            : "Finishing setup",
       }),
     ).toBeTruthy();
     expect(
@@ -2567,7 +3453,9 @@ test.each(["model", "intelligence"])(
     const view = await renderApp();
     await view.findByRole("heading", {
       name:
-        connection === "model" ? "Refresh your AI connection" : "Getting ready",
+        connection === "model"
+          ? "Refresh your AI connection"
+          : "Finishing setup",
     });
     expect(
       view
@@ -2801,7 +3689,7 @@ function useInterruptedShutdownSetup() {
 test("a local Intelligence stack left running at Quit is shown without holding auto-start", async () => {
   useInterruptedShutdownSetup();
   const notice = {
-    said: "When OpenBot last quit, it could not stop its back end.",
+    said: "When OpenBot last quit, some of its services didn't stop. They may still be running. Stopping OpenBot again asks them to stop.",
     detail: "Back end stop failed: the CLI timed out",
   };
   const previous = invokeHandler;
@@ -2836,7 +3724,7 @@ test("Stop that fails only for the local Intelligence stack still stops OpenBot"
     expect(view.queryByRole("button", { name: "Stop OpenBot" })).toBeNull(),
   );
   expect(view.getByRole("alert").textContent).toContain(
-    "OpenBot stopped, but could not stop its back end.",
+    "OpenBot stopped, but some of its services didn't. They may still be running.",
   );
 });
 
@@ -2896,6 +3784,64 @@ test("an interrupted shutdown restores saved setup for explicit recovery", async
   ).toBe(false);
   expect(view.queryByText(notice)).toBeNull();
   expect(invokeCalls).toContainEqual({ command: "show_openbot" });
+});
+
+/*
+ * The report: somebody on 1.0.0 could not find which AI they had signed in with, or change it.
+ * Settings' AI model row has a Change, which stops OpenBot and brings this window back. It opens at
+ * the AI screen, the one Change AI connection opens, and the new choice is what starts OpenBot.
+ */
+test("Settings' Change AI connection opens setup at the AI screen and starts with the new choice", async () => {
+  setupConnectedLocalStack(
+    "/tmp/settings-change-ai-connection",
+    localStatus("ready", "valid"),
+    // Stopped in this session, as the Change from Settings leaves it.
+    { autoStart: false },
+  );
+  const previous = invokeHandler;
+  let asked = true;
+  invokeHandler = async (command, args) => {
+    if (command === "take_ai_connection_change") {
+      const answer = asked;
+      asked = false;
+      return answer;
+    }
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await view.findByLabelText("OpenAI API key");
+  expect(
+    view.queryByRole("heading", { name: "OpenBot is stopped" }),
+  ).toBeNull();
+  expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+    false,
+  );
+  await userEvent.type(view.getByLabelText("OpenAI API key"), "new-model-key");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await waitFor(() =>
+    expect(invokeCalls).toContainEqual({ command: "show_openbot" }),
+  );
+  expect(getStartStackPayload()).toMatchObject({
+    model: { apiKey: "new-model-key" },
+  });
+});
+
+test("Back from Settings' Change AI connection shows the stopped screen with Start", async () => {
+  setupConnectedLocalStack(
+    "/tmp/settings-change-ai-connection-back",
+    localStatus("ready", "valid"),
+    { autoStart: false },
+  );
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) =>
+    command === "take_ai_connection_change" ? true : previous(command, args);
+  const view = await renderApp();
+  await view.findByLabelText("OpenAI API key");
+  await userEvent.click(view.getByRole("button", { name: "Back" }));
+  await view.findByRole("heading", { name: "OpenBot is stopped" });
+  expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+    false,
+  );
 });
 
 test("changing the saved model during recovery still opens OpenBot after Start", async () => {
@@ -3179,7 +4125,7 @@ test("starting fresh names every container and volume and removes only that list
     view.getByText(/Restore the previous installation’s folder/),
   ).toBeTruthy();
   for (const volume of volumes) expect(view.getByText(volume)).toBeTruthy();
-  expect(view.getByText(/stopped containers/)).toBeTruthy();
+  expect(view.getByText(/stopped parts of the previous/)).toBeTruthy();
   for (const container of containers)
     expect(view.getByText(container)).toBeTruthy();
   await userEvent.click(startFresh);

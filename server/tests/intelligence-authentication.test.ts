@@ -46,14 +46,16 @@ async function failure() {
   return response.json();
 }
 
-beforeEach(() => {
-  clearDesktopConnectionFailure("model");
-  clearDesktopConnectionFailure("intelligence");
-});
+// The failure state is one per process and the endpoint answers with whichever failure it holds, so
+// every kind is cleared, including one an earlier file in the same process left behind.
+const clearDesktopFailures = () => {
+  for (const connection of ["model", "intelligence", "organization"] as const)
+    clearDesktopConnectionFailure(connection);
+};
+beforeEach(clearDesktopFailures);
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.stop(true)));
-  clearDesktopConnectionFailure("model");
-  clearDesktopConnectionFailure("intelligence");
+  clearDesktopFailures();
 });
 
 describe("Intelligence authentication recovery", () => {

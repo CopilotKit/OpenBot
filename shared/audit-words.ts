@@ -99,6 +99,8 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "app_access.refused": "Ask for an app",
   "app_access.owner_granted": "Share an app",
   "app_access.owner_revoked": "Stop sharing an app",
+  "plugin.grants_translated": "Choose a Bot's actions from a description",
+  "plugin.grants_changed": "Change a Bot's actions in an app",
   "computer.action_allowed": "Use the computer",
   "computer.action_refused": "Use the computer",
   "computer.action_failed": "Use the computer",
@@ -119,6 +121,8 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "computer.browser_cleared": "Clear the browser",
   "computer.updated": "Update the computer",
   "computer.policy_loaded": "Start the computer",
+  "computer.policy_changed": "Change the boundaries",
+  "computer.policy_translated": "Write a boundary from a description",
   "computer.isolation_loaded": "Start the computer",
   "computer.terminated": "Shut down a computer",
   "computer.terminated_inactive": "Shut down an idle computer",
@@ -163,6 +167,9 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "person.deprovisioned": "Remove a person",
   "person.reprovisioned": "Add a person back",
   "audit.exported": "Export events",
+  "audit.asked": "Ask the audit trail",
+  "what_if.asked": "Ask what would happen",
+  "what_if.checked": "Check what would happen",
   "session.signed_in": "Sign in",
   "session.refused": "Sign in",
   "session.break_glass": "Use emergency sign-in",
@@ -183,11 +190,16 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "approval.person_decided": "Decide on an action",
   "approval.withdrawn": "Withdraw a request",
   "approval.rule_changed": "Change an approval rule",
+  "approval.rules_translated": "Write approval rules from a description",
+  "approval.guidance_changed": "Change guidance for auto-review",
   "approval.settings_changed": "Change approval settings",
   "capability.changed": "Change a permission",
+  "capability.changes_translated":
+    "Write permission changes from a description",
   "enterprise.setting_changed": "Change an organization setting",
   "network_policy.changed": "Change the network policy",
   "network_policy.removed": "Remove a network policy",
+  "network_policy.translated": "Write a network allowlist from a description",
   "model.refused": "Use a model",
   "recorder.bearer_refused": "Use the Recorder",
   "recorder.connected": "Connect the Recorder",
@@ -330,4 +342,24 @@ export function auditEventWords(eventType: string): string {
           .replace(/^agent\./, "bot.")
           .replace(/\./g, " "),
       );
+}
+
+/**
+ * The rows an admin filters for most often, in the words the Audit page's views use: "Computer
+ * actions" and "App calls", then how they ended. The event words above say what a
+ * row was for a person reading one row ("Use the computer"); a filter is about a kind of row.
+ */
+const TYPE_WORDS: Record<string, string> = {
+  "computer.action_allowed": "Computer actions, allowed",
+  "computer.action_refused": "Computer actions, blocked",
+  "computer.action_failed": "Computer actions, failed",
+  "computer.action_stopped": "Computer actions, stopped",
+  "mcp.call_succeeded": "App calls, done",
+  "mcp.call_rejected": "App calls, blocked",
+  "mcp.call_failed": "App calls, failed",
+};
+
+/** One event type as a filter names it: a kind of row, then how it ended where that matters. */
+export function auditTypeWords(type: string): string {
+  return TYPE_WORDS[type] ?? auditEventWords(type);
 }

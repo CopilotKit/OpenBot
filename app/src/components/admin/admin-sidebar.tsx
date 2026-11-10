@@ -15,6 +15,7 @@ import {
   IconShieldCheck,
   IconSlash,
   IconUsers,
+  IconZoomQuestion,
 } from "@tabler/icons-react";
 import { Link, type LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
@@ -141,6 +142,11 @@ const GROUPS: {
         title: managePaths("team").auditLabel,
         icon: IconListDetails,
         linkOptions: { to: "/admin/audit" },
+      },
+      {
+        title: "What would happen",
+        icon: IconZoomQuestion,
+        linkOptions: { to: "/admin/what-if" },
       },
     ],
   },

@@ -8,6 +8,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
+import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import {
   PageEmpty,
   PageRows,
@@ -34,6 +35,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { agentListQueryOptions } from "@/lib/agents/queries";
 import { relativeTime } from "@/lib/relative-time";
 import {
   deleteRoutineMutationOptions,
@@ -49,6 +51,7 @@ import {
 } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
+import { NewRoutineButton } from "./new-routine-button";
 
 /**
  * What the last-run cell says, and in what tone.
@@ -233,6 +236,21 @@ export function RoutinesList({
   embedded?: boolean;
 } = {}) {
   const routines = useQuery(routinesQueryOptions());
+  /* Names and faces for the Bot chip, hidden Bots included: a routine outlives hiding its Bot. */
+  const shownBots = useQuery({
+    ...agentListQueryOptions(),
+    enabled: agentId === undefined,
+  });
+  const hiddenBots = useQuery({
+    ...agentListQueryOptions(true),
+    enabled: agentId === undefined,
+  });
+  const bots = new Map(
+    [...(shownBots.data ?? []), ...(hiddenBots.data ?? [])].map((bot) => [
+      bot.id,
+      bot,
+    ]),
+  );
   const setEnabled = useMutation(setRoutineEnabledMutationOptions(queryClient));
   const deleteRoutine = useMutation(deleteRoutineMutationOptions(queryClient));
   const runNow = useMutation(runRoutineNowMutationOptions(queryClient));
@@ -274,17 +292,19 @@ export function RoutinesList({
         </p>
       ) : rows.length === 0 ? (
         <PageEmpty
+          action={<NewRoutineButton agentId={agentId} variant="outline" />}
           icon={IconClock}
           title={agentId ? "No routines for this Bot yet" : "No routines yet"}
         >
           {agentId
-            ? 'Ask it something like "every weekday at 9, send me…" and it shows up here.'
-            : 'Ask a Bot something like "every weekday at 9, send me…" and it shows up here.'}
+            ? 'Set one up with New routine, or ask it something like "every weekday at 9, send me…".'
+            : 'Set one up with New routine, or ask a Bot something like "every weekday at 9, send me…".'}
         </PageEmpty>
       ) : (
         <PageRows>
           {rows.map((routine, index) => {
             const lastRun = lastRunLabel(routine.lastRun);
+            const bot = bots.get(routine.agentId);
             return (
               <Fragment key={routine.id}>
                 {index > 0 ? <Separator /> : null}
@@ -343,6 +363,26 @@ export function RoutinesList({
                         routine.enabled ? "" : "opacity-60",
                       )}
                     >
+                      {/* Every Bot's routines are on one page, so each says whose it is. */}
+                      {agentId === undefined ? (
+                        <Link
+                          params={{ agentId: routine.agentId }}
+                          to="/bots/$agentId/routines"
+                        >
+                          <Chip className="text-foreground transition-colors hover:bg-muted">
+                            {bot ? (
+                              <span aria-hidden="true" className="contents">
+                                <AbstractAvatar
+                                  name={bot.name}
+                                  seed={bot.avatarSeed}
+                                  size={14}
+                                />
+                              </span>
+                            ) : null}
+                            {bot?.name ?? "A Bot"}
+                          </Chip>
+                        </Link>
+                      ) : null}
                       {routine.channel.gone ? (
                         <Chip className="border-destructive/40 text-destructive">
                           Conversation deleted

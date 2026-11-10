@@ -26,8 +26,9 @@ export type CapabilitySetting = {
   groups: Record<string, boolean>;
 };
 
+/** One allowlist entry. Either kind can name ports (`443`, `5432,8000-8100`); without them, every port. */
 export type EgressRule =
-  | { type: "domain"; value: string }
+  | { type: "domain"; value: string; ports?: string }
   | { type: "cidr"; value: string; ports?: string };
 
 export type NetworkMode =
@@ -168,7 +169,63 @@ export const enterpriseKeys = {
    * invalidates this root.
    */
   checkIns: (days: 7 | 30) => ["enterprise", "check-ins", { days }] as const,
+  /* Under the root, so saving a policy, which changes the one in force, asks the replay again. */
+  networkReplay: (candidate: NetworkCandidate) =>
+    ["enterprise", "network-replay", candidate] as const,
 };
+
+/** A network policy as the dialog holds it, not yet saved. */
+export type NetworkCandidate = {
+  scopeKind: "organization" | "group";
+  scopeId: string;
+  mode: NetworkMode;
+  rules: EgressRule[];
+  locked: boolean;
+};
+
+/** One host whose page visits a candidate decides differently from the policy in force. */
+export type NetworkReplayHost = {
+  host: string;
+  /** "block": allowed today, blocked by the candidate. "allow": the other way round. */
+  change: "block" | "allow";
+  visits: number;
+  /** The Bots that made them, by id. */
+  bots: string[];
+  lastVisit: string;
+};
+
+/**
+ * Recent page visits replayed under a candidate network policy, beside the policy in force.
+ * `covered` is the visits by Bots the candidate would apply to; `undecided` is visits to a named host
+ * that only an IP range could allow, which the computer decides with an address the trail doesn't keep.
+ */
+export type NetworkReplayReport = {
+  scanned: number;
+  covered: number;
+  wouldBlock: number;
+  wouldAllow: number;
+  undecided: number;
+  unchanged: number;
+  /** Capped by the server; the counts cover every visit, and `sites` every site. */
+  hosts: NetworkReplayHost[];
+  sites: number;
+};
+
+/**
+ * What a network policy would change, over the page visits on the trail. Writes nothing. A list the
+ * save would refuse is refused here too, with the parser's sentence.
+ */
+export function networkReplayQueryOptions(candidate: NetworkCandidate) {
+  return queryOptions({
+    queryKey: enterpriseKeys.networkReplay(candidate),
+    queryFn: (): Promise<NetworkReplayReport> =>
+      client("/api/admin/enterprise/network/replay", "report", {
+        method: "POST",
+        body: candidate,
+        fallback: "Couldn't check this list against recent page visits.",
+      }),
+  });
+}
 
 export function enterpriseOverviewQueryOptions() {
   return queryOptions({

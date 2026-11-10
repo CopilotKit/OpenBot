@@ -90,11 +90,29 @@ export type Shortfall = {
   cpus?: string;
   memoryGb?: string;
   diskGb?: string;
+  /**
+   * OpenBot's own check after a start that failed: the back end's disk is nearly full, and how
+   * large it is beside `diskGb`.
+   */
+  nearlyFull?: boolean;
+  diskSizeGb?: string;
+  /**
+   * The node still reports low disk with the disk above both lines: space was freed, and the
+   * back end recovers by itself within minutes.
+   */
+  recovering?: boolean;
+  /** Podman on Windows, in WSL: `podman machine set` changes nothing there. */
+  wsl?: boolean;
+  /** The drive that holds its machine's disk, `C:`. */
+  drive?: string;
 };
 
 export type LocalReport = {
   outcome: LocalOutcome;
-  /** With the reason `resources-short`: which resources the CLI found short. */
+  /**
+   * With the reason `resources-short`: which resources the CLI found short. With readiness
+   * `degraded`: a disk OpenBot found short, or recovering, behind a back end that does not answer.
+   */
   shortfall?: Shortfall;
   stack: null | {
     id: string;
@@ -109,6 +127,8 @@ export type LocalReport = {
       /** No migration started: the release that answers is `installedRelease`. */
       prepared: boolean;
       stoppedDownloading: boolean;
+      /** The CLI's name for the step that failed, such as `update-quiesce`, when it recorded one. */
+      failedStep?: string;
     };
     observed: null | {
       running: boolean;
@@ -278,6 +298,117 @@ export async function localEvalDownload(
     : null;
 }
 
+/** The CLI's steps a running setup, start or update has finished, by name, and for how long since. */
+export type LocalSteps = { ended: string[]; quietSeconds: number };
+
+/** A CLI step name, and nothing that could carry more. */
+function stepName(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z][a-z0-9-]{0,63}$/.test(value);
+}
+
+/**
+ * The steps the running call `attempt` has finished, while it runs (`local_eval_steps`), or null.
+ * Only step names: the window turns them into plain words (`journey.ts`).
+ */
+export async function localEvalSteps(
+  attempt: string,
+): Promise<LocalSteps | null> {
+  const found = await invoke<unknown>("local_eval_steps", { attempt });
+  if (!found || typeof found !== "object") return null;
+  const { ended, quietSeconds } = found as Record<string, unknown>;
+  if (!Array.isArray(ended) || typeof quietSeconds !== "number") return null;
+  return { ended: ended.filter(stepName), quietSeconds };
+}
+
+/**
+ * The steps of a back end update that wait long enough to need saying, as the native side names
+ * them (`local_update::UpdateStep`), in the CLI's own words for them.
+ */
+const UPDATE_STEPS = {
+  "update-quiesce": "Pausing OpenBot's services",
+  "dependencies-install": "Updating where OpenBot keeps your data",
+  "dependencies-wait": "Waiting for where OpenBot keeps your data",
+  jobs: "Updating your data",
+  "services-start": "Starting OpenBot's services",
+} as const;
+
+export type LocalUpdateStep = {
+  step: keyof typeof UPDATE_STEPS;
+  /** What the step is, said. */
+  said: string;
+  /** How long the update has been in it. */
+  seconds: number;
+  /** In `jobs`: the Job it waits on, by its name in the cluster. */
+  job: string | null;
+  /** A Job this update started that failed, said as soon as it does. */
+  failedJob: string | null;
+};
+
+/** A Kubernetes object name, and nothing that could carry more. */
+function jobName(value: unknown): string | null {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9.-]{0,252}$/.test(value)
+    ? value
+    : null;
+}
+
+/**
+ * The step the back end update `attempt` is in, once it is in one that waits, or null. The CLI
+ * says nothing while a step runs, and some wait ten minutes, so the row says which one it is.
+ */
+export async function localEvalUpdateStep(
+  attempt: string,
+): Promise<LocalUpdateStep | null> {
+  const found = await invoke<unknown>("local_eval_update_step", { attempt });
+  if (!found || typeof found !== "object") return null;
+  const { step, seconds, job, failedJob } = found as Record<string, unknown>;
+  if (
+    typeof step !== "string" ||
+    !Object.keys(UPDATE_STEPS).includes(step) ||
+    typeof seconds !== "number"
+  )
+    return null;
+  const known = step as keyof typeof UPDATE_STEPS;
+  return {
+    step: known,
+    said: UPDATE_STEPS[known],
+    seconds,
+    job: jobName(job),
+    failedJob: jobName(failedJob),
+  };
+}
+
+/**
+ * The CLI's step names (`failedStep`) in plain words, for "It stopped while …": what the step was
+ * doing for the person, from the phases its own progress shows (`localSetupStepLabel` in the CLI's
+ * `local-setup-progress.ts`). The step's own name is in the log.
+ */
+export function updateStepSaid(step: string): string {
+  if (/^(docker|engine|resource|runtime)-/.test(step))
+    return "checking this computer";
+  if (step.startsWith("release-")) return "choosing the version to install";
+  if (
+    /^(chart-download|image-download|system-image-download|system-image-tag)$/.test(
+      step,
+    )
+  )
+    return "downloading the update";
+  if (step === "chart-render") return "preparing the update";
+  if (/^(cluster-|kubeconfig|ownership-check|running-check)/.test(step))
+    return "preparing this computer";
+  if (step === "secrets-apply") return "applying your settings";
+  if (step.startsWith("update-")) return "pausing OpenBot's services";
+  if (step === "dependencies-install")
+    return "updating where OpenBot keeps your data";
+  if (step === "dependencies-wait")
+    return "waiting for where OpenBot keeps your data";
+  if (step.startsWith("migration-")) return "updating your data";
+  if (/^(hook-|bootstrap-)/.test(step))
+    return "preparing your organization and project";
+  if (/^(services-|stack-|service-status)/.test(step))
+    return "starting OpenBot's services";
+  return "updating";
+}
+
 /**
  * Connects this installation's apps with the CopilotKit sign-in the CLI now holds: CopilotKit
  * makes or replays its Composio project, and the native side keeps the key. Resolves once
@@ -318,6 +449,17 @@ export type LocalTerms =
   | { status: "not-required" | "unavailable" | "signed-out" }
   /** No container engine answers yet, so the CLI says nothing about the account. */
   | { status: "engine-not-ready" }
+  /**
+   * The CLI's preflight refused this computer for a reason waiting does not change, such as
+   * OrbStack on a Mac. `said` is the CLI's own sentence, when it gave one; `switchEngine` when the
+   * engine itself is refused and Docker Desktop or Podman is the fix.
+   */
+  | {
+      status: "blocked";
+      reason: LocalReason;
+      said?: string;
+      switchEngine?: boolean;
+    }
   /** OpenBot's own check: the engine has fewer CPUs or less memory than local setup needs. */
   | ({ status: "engine-too-small" } & Shortfall);
 
@@ -484,7 +626,7 @@ export function splitStopFailure(thrown: unknown): {
 
 export function intelligenceStopProblem(line: string): Problem {
   return {
-    said: "OpenBot stopped, but could not stop its back end.",
+    said: "OpenBot stopped, but some of its services didn't. They may still be running.",
     detail: line,
   };
 }

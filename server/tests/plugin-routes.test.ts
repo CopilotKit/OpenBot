@@ -1619,6 +1619,8 @@ const DEV_ACTOR_ACCOUNT: AccountRef = {
  */
 const RETURN_URL = "http://localhost:3001/connections/composio-linear";
 const ADMIN_RETURN_URL = "http://localhost:3001/admin/plugins/composio-linear";
+const DESKTOP_RETURN_URL =
+  "http://localhost:3001/desktop-return?app=composio-linear";
 
 /**
  * A failure in the shape `vendorSentence` reaches into, with the vendor's sentence at the bottom.
@@ -2336,6 +2338,28 @@ describe("connecting a brokered app", () => {
         toolkit: "linear",
         returnUrl: ADMIN_RETURN_URL,
       },
+    ]);
+  });
+
+  test("a sign-in started in OpenBot Desktop comes back to the page that hands the person back to it", async () => {
+    /*
+     * The Desktop window opens the sign-in in the person's browser, so Composio's redirect lands
+     * there. Sent to the account's page, the person was left on OpenBot in a browser tab. The page
+     * this names confirms the account and brings the window forward. Still a page of this OpenBot,
+     * on its own origin: `from` names where the press was made, never where to go.
+     */
+    const { authorized, connect } = brokeredApp();
+
+    await connect({}, "?returnTo=settings&from=desktop");
+    await connect({}, "?from=https%3A%2F%2Fevil.test");
+
+    expect(authorized).toEqual([
+      {
+        account: ADMIN_ACCOUNT,
+        toolkit: "linear",
+        returnUrl: DESKTOP_RETURN_URL,
+      },
+      { account: ADMIN_ACCOUNT, toolkit: "linear", returnUrl: RETURN_URL },
     ]);
   });
 

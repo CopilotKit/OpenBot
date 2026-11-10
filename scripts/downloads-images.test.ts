@@ -57,7 +57,7 @@ function push(
   };
   const platforms: Record<string, string> = {};
   const entries = [];
-  for (const architecture of ["amd64", "arm64", "unknown"]) {
+  for (const architecture of ["amd64", "arm64", "s390x", "unknown"]) {
     const config = blob(
       JSON.stringify({
         architecture,
@@ -180,7 +180,11 @@ pub fn compose_download() -> Result<Download, Problem> {
 }
 
 /** CloudFront in front of the pretend bucket, as it answers: stored type, 403 for a missing key. */
-function cloudfront(fake: FakeDownloads, hub: ReturnType<typeof github>) {
+function cloudfront(
+  fake: FakeDownloads,
+  hub: ReturnType<typeof github>,
+  ...more: ReturnType<typeof github>[]
+) {
   const bucket = join(
     fake.env.FAKE_STATE as string,
     "s3",
@@ -199,14 +203,20 @@ function cloudfront(fake: FakeDownloads, hub: ReturnType<typeof github>) {
     port: 0,
     fetch(request) {
       const path = new URL(request.url).pathname;
-      if (request.method === "HEAD") requests.push(`HEAD ${path.slice(1)}`);
+      // A registry client asks for a manifest by type; warming asks for the bytes, whatever they are.
+      const asked =
+        request.method === "HEAD" ||
+        (request.headers.get("accept") ?? "").includes("vnd.oci");
+      if (asked) requests.push(`${request.method} ${path.slice(1)}`);
       if (path.startsWith("/github/")) {
         const wanted = path.slice("/github".length);
-        if (wanted === hub.path) return new Response(readFileSync(hub.archive));
-        const file = hub.files[wanted];
-        return file === undefined
-          ? new Response("Not Found", { status: 404 })
-          : new Response(file);
+        for (const release of [hub, ...more]) {
+          if (wanted === release.path)
+            return new Response(readFileSync(release.archive));
+          const file = release.files[wanted];
+          if (file !== undefined) return new Response(file);
+        }
+        return new Response("Not Found", { status: 404 });
       }
       const key = decodeURIComponent(path.slice(1));
       const file = join(
@@ -214,14 +224,14 @@ function cloudfront(fake: FakeDownloads, hub: ReturnType<typeof github>) {
         key.endsWith("/") ? `${key}.slash-object` : key,
       );
       if (!existsSync(file) || refused.has(key)) {
-        if (request.method !== "HEAD") requests.push(`403 ${key}`);
+        if (!asked) requests.push(`403 ${key}`);
         return new Response("<Error><Code>AccessDenied</Code></Error>", {
           status: 403,
           headers: { "content-type": "application/xml" },
         });
       }
       const meta = JSON.parse(readFileSync(join(metas, `${key}.json`), "utf8"));
-      if (request.method !== "HEAD") requests.push(`200 ${key}`);
+      if (!asked) requests.push(`200 ${key}`);
       return new Response(readFileSync(file), {
         headers: {
           "content-type": meta.ContentType,
@@ -299,23 +309,35 @@ test("a release's images are copied under the registry's paths, byte for byte an
 
   const first = await run(fake, env);
   expect(first.code).toBe(0);
-  // Each image's top manifest is asked for through the address before the run succeeds.
+  // Each image's top manifest, every manifest its index names and the referrers of each are asked
+  // for through the address before the run succeeds.
   expect(first.out).toContain(
-    `All 6 images for v0.3.4 answer through ${edge.url}.`,
+    `All 6 images for v0.3.4 answer through ${edge.url}, every manifest and referrers object included.`,
   );
   expect(edge.requests).toContain(
-    `HEAD v2/copilotkit/openbot-supervisor/manifests/${supervisor.digest}`,
+    `GET v2/copilotkit/openbot-supervisor/manifests/${supervisor.digest}`,
   );
+  for (const checked of [
+    `HEAD v2/copilotkit/openbot-supervisor/manifests/${supervisor.platforms.unknown}`,
+    `HEAD v2/copilotkit/openbot-supervisor/referrers/${supervisor.digest}`,
+    `HEAD v2/copilotkit/openbot-supervisor/referrers/${supervisor.platforms.s390x}`,
+  ]) {
+    expect(edge.requests).toContain(checked);
+  }
   expect(edge.requests).toContain(
-    "HEAD v2/docker.io/library/busybox/manifests/1.37",
+    "GET v2/docker.io/library/busybox/manifests/1.37",
   );
   const bucket = fake.bucket();
+  // The whole index: every platform, the attestation included, and the referrers of each.
   const manifests = (repo: string, image: ReturnType<typeof push>) => [
     `v2/${repo}/manifests/${image.digest}`,
-    `v2/${repo}/manifests/${image.platforms.amd64}`,
-    `v2/${repo}/manifests/${image.platforms.arm64}`,
+    `v2/${repo}/referrers/${image.digest}`,
+    ...Object.values(image.platforms).flatMap((digest) => [
+      `v2/${repo}/manifests/${digest}`,
+      `v2/${repo}/referrers/${digest}`,
+    ]),
   ];
-  // Every index, each linux manifest, the tag the app reads, and the ping; no attestation.
+  // Every index, every manifest it names, the tag the app reads, and the ping.
   for (const key of [
     "v2/",
     ...manifests("copilotkit/openbot-server", server),
@@ -338,18 +360,30 @@ test("a release's images are copied under the registry's paths, byte for byte an
     cacheControl: TAG,
     sha256: true,
   });
+  // A referrers object is an empty image index, which says nothing refers to the manifest.
   expect(
-    Object.keys(bucket).some((key) =>
-      key.includes(server.platforms.unknown as string),
-    ),
-  ).toBe(false);
+    bucket[
+      `v2/copilotkit/openbot-server/referrers/${server.platforms.unknown}`
+    ],
+  ).toEqual({
+    content:
+      '{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[]}',
+    contentType: INDEX,
+    cacheControl: TAG,
+    sha256: true,
+  });
+  // Six images, each an index and four manifests (three platforms and an attestation), and three
+  // tags; a referrers object for each manifest.
   expect(
     Object.keys(bucket).filter((key) => key.includes("/manifests/")),
-  ).toHaveLength(21);
-  // Two configs and four layers an image.
+  ).toHaveLength(33);
+  expect(
+    Object.keys(bucket).filter((key) => key.includes("/referrers/")),
+  ).toHaveLength(30);
+  // A config and two layers for each of the four manifests, an image.
   expect(
     Object.keys(bucket).filter((key) => key.includes("/blobs/")),
-  ).toHaveLength(36);
+  ).toHaveLength(72);
   expect(bucket["v2/"]).toEqual({
     content: "{}",
     contentType: "application/json",
@@ -428,7 +462,9 @@ test("a release's images are copied under the registry's paths, byte for byte an
     ].sort(),
   );
   expect(
-    edge.requests.filter((line) => !line.startsWith("HEAD ")).sort(),
+    edge.requests
+      .filter((line) => !line.startsWith("HEAD ") && !line.startsWith("GET "))
+      .sort(),
   ).toEqual(
     Object.keys(bucket)
       .map((key) => `200 ${key}`)
@@ -480,10 +516,9 @@ test("a release's images are copied under the registry's paths, byte for byte an
           "docker.io/pgvector/pgvector": pgvector,
           "ghcr.io/copilotkit/intelligence/app-api": api,
         }[repo] as ReturnType<typeof push>;
-        return [
-          `crane manifest ${repo}@${image.platforms.amd64}`,
-          `crane manifest ${repo}@${image.platforms.arm64}`,
-        ];
+        return Object.values(image.platforms).map(
+          (digest) => `crane manifest ${repo}@${digest}`,
+        );
       }),
     ].sort(),
   );
@@ -496,7 +531,7 @@ test("a release's images are copied under the registry's paths, byte for byte an
   const refused = await run(fake, env);
   expect(refused.code).toBe(1);
   expect(refused.out).toContain(
-    `::error::1 of 6 images for v0.3.4 do not answer through ${edge.url}: ${edge.url}/${stale} (403)`,
+    `::error::1 of the objects for the 6 images for v0.3.4 do not answer through ${edge.url}: ${edge.url}/${stale} (403)`,
   );
   // The check alone, as a person runs it after a release: no AWS, no registry.
   const checked = (bucketless: Record<string, string>) =>
@@ -515,9 +550,129 @@ test("a release's images are copied under the registry's paths, byte for byte an
   const whole = await checked({});
   expect(whole.code).toBe(0);
   expect(whole.out).toContain(
-    `All 6 images for v0.3.4 answer through ${edge.url}.`,
+    `All 6 images for v0.3.4 answer through ${edge.url}, every manifest and referrers object included.`,
   );
   expect(fake.calls().filter((call) => /^(aws|crane) /.test(call)).length).toBe(
     awsBefore,
   );
+}, 30_000);
+
+// A release candidate's installs pull its images too, so they are copied as soon as it is published:
+// asked for by tag, or found by the scheduled run beside the Latest release. A draft is not.
+test("a prerelease's images are copied, by tag or beside Latest; old ones and drafts are not", async () => {
+  const fake = fakeDownloads();
+  cleanups.push(fake.cleanup);
+  const pin = (tag: string, image: ReturnType<typeof push>, repo: string) =>
+    JSON.stringify({
+      version: tag,
+      images: { server: { reference: `ghcr.io/${repo}@${image.digest}` } },
+    });
+  const stable = push(fake, "copilotkit/openbot-server", "v0.3.4");
+  const candidate = push(fake, "copilotkit/openbot-server", "v1.0.0-rc.1");
+  push(fake, "copilotkit/intelligence/app-api", "0.17.0");
+  const stale = push(fake, "copilotkit/openbot-stale", "v0.9.0-rc.1");
+  const older = push(fake, "copilotkit/openbot-older", "v0.3.4-rc.1");
+  const drafted = push(fake, "copilotkit/openbot-draft", "v1.0.0-rc.2");
+  const day = 24 * 60 * 60 * 1000;
+  fake.release("v0.3.4", {
+    "container-images.json": pin("v0.3.4", stable, "copilotkit/openbot-server"),
+  });
+  fake.release(
+    "v1.0.0-rc.1",
+    {
+      "container-images.json": pin(
+        "v1.0.0-rc.1",
+        candidate,
+        "copilotkit/openbot-server",
+      ),
+      "desktop-images.json": JSON.stringify({
+        images: ["ghcr.io/copilotkit/intelligence/app-api:0.17.0"],
+      }),
+    },
+    { prerelease: true },
+  );
+  fake.release(
+    "v0.9.0-rc.1",
+    {
+      "container-images.json": pin(
+        "v0.9.0-rc.1",
+        stale,
+        "copilotkit/openbot-stale",
+      ),
+    },
+    {
+      prerelease: true,
+      createdAt: new Date(Date.now() - 40 * day).toISOString(),
+    },
+  );
+  fake.release(
+    "v0.3.4-rc.1",
+    {
+      "container-images.json": pin(
+        "v0.3.4-rc.1",
+        older,
+        "copilotkit/openbot-older",
+      ),
+    },
+    { prerelease: true },
+  );
+  fake.release(
+    "v1.0.0-rc.2",
+    {
+      "container-images.json": pin(
+        "v1.0.0-rc.2",
+        drafted,
+        "copilotkit/openbot-draft",
+      ),
+    },
+    { prerelease: true, draft: true },
+  );
+  fake.setLatest("v0.3.4");
+  const edge = cloudfront(
+    fake,
+    github(fake, "v0.3.4"),
+    github(fake, "v1.0.0-rc.1"),
+  );
+  const env = {
+    DOWNLOADS_URL: edge.url,
+    DOWNLOADS_GITHUB_URL: `${edge.url}/github`,
+    DOWNLOADS_VERIFY_DELAY: "0",
+  };
+
+  // The scheduled run: Latest, and the candidate newer than it from this month.
+  const scheduled = await run(fake, env);
+  expect(scheduled.code).toBe(0);
+  const keys = Object.keys(fake.bucket());
+  for (const key of [
+    `v2/copilotkit/openbot-server/manifests/${stable.digest}`,
+    `v2/copilotkit/openbot-server/manifests/${candidate.digest}`,
+    `v2/copilotkit/openbot-server/manifests/${candidate.platforms.arm64}`,
+    "v2/copilotkit/intelligence/app-api/manifests/0.17.0",
+    "releases/v1.0.0-rc.1/v1.0.0-rc.1.tar.gz",
+  ]) {
+    expect(keys).toContain(key);
+  }
+  expect(scheduled.out).toContain(
+    `All 2 images for v1.0.0-rc.1 answer through ${edge.url}, every manifest and referrers object included.`,
+  );
+  // Not one older than Latest, one over 30 days old, or a draft; and never latest/.
+  for (const repo of ["openbot-stale", "openbot-older", "openbot-draft"]) {
+    expect(keys.some((key) => key.includes(repo))).toBe(false);
+  }
+  expect(keys.some((key) => key.startsWith("latest/"))).toBe(false);
+
+  // Asked for by tag, the candidate is copied (it is whole already), and the draft is refused.
+  const asked = await run(fake, { ...env, DOWNLOADS_TAG: "v1.0.0-rc.1" });
+  expect(asked.code).toBe(0);
+  expect(asked.out).toContain(
+    "already serves every image and file for v1.0.0-rc.1",
+  );
+  const draft = await run(fake, { ...env, DOWNLOADS_TAG: "v1.0.0-rc.2" });
+  expect(draft.code).toBe(1);
+  expect(draft.out).toContain(
+    "::error::v1.0.0-rc.2 is a draft or not a release version. No image was copied.",
+  );
+  expect(
+    Object.keys(fake.bucket()).some((key) => key.includes("openbot-draft")),
+  ).toBe(false);
 }, 30_000);

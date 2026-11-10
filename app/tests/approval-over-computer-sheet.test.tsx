@@ -88,7 +88,7 @@ const request = (id: string, toolCallId: string, threadId: string) => ({
     policy: {
       behaviour: "ask",
       source: "safety",
-      reason: "Deleting something always asks you first.",
+      reason: "Deleting something asks you first.",
     },
   },
 });
@@ -160,13 +160,18 @@ test("on a narrow window the Computer sheet shows the approval it covers, and an
     name: "Waiting for your approval",
   });
   expect(
-    within(card).getByText("Deleting something always asks you first."),
+    within(card).getByText("Deleting something asks you first."),
   ).toBeTruthy();
   expect(
     within(card)
       .getAllByRole("radio")
       .map((radio) => radio.getAttribute("aria-label")),
-  ).toEqual(["Allow once", "Deny"]);
+  ).toEqual([
+    "Allow once",
+    "Allow for this conversation",
+    "Always allow here",
+    "Deny",
+  ]);
   // Only this conversation's: an approval waiting in another one is not drawn here.
   expect(
     within(sheet).getAllByRole("region", { name: "Waiting for your approval" }),

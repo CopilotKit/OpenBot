@@ -20,6 +20,7 @@
         "resizable": true,
         "titleBarStyle": "Transparent",
         "backgroundThrottling": "disabled",
+        "dragDropEnabled": false,
         "create": false
       }
     ],

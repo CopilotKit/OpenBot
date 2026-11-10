@@ -47,6 +47,13 @@ import {
   hostAccessQueryOptions,
 } from "@/lib/computers/host-access";
 
+/**
+ * The tool pattern the rule form shows as its example. It has to match real tool names, which start
+ * with the app as OpenBot lists it (`composio-gmail/GMAIL_SEND_EMAIL`): the earlier example,
+ * `mcp/gmail/*`, matched no tool at all, so a rule typed from it never applied.
+ */
+export const TOOL_PATTERN_EXAMPLE = "composio-gmail/*";
+
 export const HOST_LABELS: Record<HostCommandPolicy, string> = {
   ask: "Ask every time",
   allow: "Always allow",
@@ -237,7 +244,7 @@ const EMPTY_RULE: ApprovalRuleInput = {
 
 /**
  * An action class and a behaviour, added from a row that opens a dialog. `*` matches anything, so
- * `mcp/gmail/*` is every Gmail tool and a target of `*.example.com` is every page on that site.
+ * `composio-gmail/*` is every Gmail tool and a target of `*.example.com` is every page on that site.
  */
 export function RuleForm({
   label,
@@ -303,8 +310,9 @@ export function RuleForm({
           <DialogHeader>
             <DialogTitle>{label}</DialogTitle>
             <DialogDescription>
-              Use * to match anything. mcp/gmail/* means every Gmail tool. A
-              target of *.example.com means every page on that site.
+              Use * to match anything. An app's tools start with its name, so{" "}
+              {TOOL_PATTERN_EXAMPLE} means every Gmail tool. A target of
+              *.example.com means every page on that site.
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">
@@ -322,7 +330,7 @@ export function RuleForm({
                 {field(
                   "toolRef",
                   "Tool or app",
-                  "mcp/gmail/*, computer_click, host/*",
+                  `${TOOL_PATTERN_EXAMPLE}, computer_click, host/*`,
                 )}
                 {field("effect", "Kind of action", "* , write, read, delegate")}
                 {field("scope", "Target", "*, a site, a folder, a Bot name")}

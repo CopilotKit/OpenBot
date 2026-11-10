@@ -78,6 +78,7 @@ test("the personal edition ignores team approval settings and team rules", async
     enforceAutoReview: false,
     customRulesEnabled: true,
     hostCommandsCap: "allow",
+    actionKinds: {},
   });
   expect(await personal.teamRules()).toEqual([]);
 });

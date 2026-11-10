@@ -1,0 +1,27 @@
+name: Test shard
+description: >-
+  Gives the steps after it TEST_SHARD, so `bun run test:ci` runs only this runner's slice of the
+  suite, and TEST_COUNT_DIR, where it writes that slice's test count for the `tests` check.
+
+# Why an action and not the job's `env:`. The upstream upgrade (scripts/integrate-upstream.ts,
+# ciChecks) runs the `run` steps of ci.yml's `test` job as written, on one runner, and refuses a job
+# whose env or steps hold an expression. A `uses` step is the one thing it skips, so handing the
+# shard over here keeps the `test` job runnable that way, including by a deployment's copy of that
+# script that predates the shards, and an upgrade check still runs the whole suite in one go.
+
+inputs:
+  shard:
+    description: This runner's shard as index/count, for example 2/4.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SHARD: ${{ inputs.shard }}
+      run: |
+        {
+          echo "TEST_SHARD=$SHARD"
+          echo "TEST_COUNT_DIR=$RUNNER_TEMP/test-counts"
+        } >> "$GITHUB_ENV"

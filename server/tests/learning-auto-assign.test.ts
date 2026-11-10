@@ -19,7 +19,11 @@ import {
   ensureLearningContainer,
   keyIntelligence,
 } from "../src/learning/ensure-container";
-import { createLearningSettingsStore } from "../src/learning/settings";
+import { createLearningRuntime } from "../src/learning/runtime";
+import {
+  configuredLearningContainer,
+  createLearningSettingsStore,
+} from "../src/learning/settings";
 import { skillSnapshot } from "./fixtures/learned-skills";
 import {
   type FakeIntelligence,
@@ -225,7 +229,10 @@ describe("automatic Learning container assignment", () => {
     await h.store.write(saved);
     expect(await h.autoAssign.check()).toEqual({ state: "saved" });
     expect(await h.store.read()).toEqual(saved);
-    expect(h.probes).toEqual([]);
+    // A saved container is only asked about, never assigned over, when this Intelligence has it.
+    expect(h.probes).toEqual(
+      saved.defaultTarget ? [saved.defaultTarget.containerId] : [],
+    );
     expect(h.events).toEqual([]);
   });
 
@@ -630,5 +637,242 @@ describe("the boot check on a first install, while Intelligence is still startin
     for (let i = 0; i < 400 && logs.length === 0; i++) await Bun.sleep(5);
     expect(autoAssign.state()).toEqual({ state: "unavailable" });
     expect(logs.map((entry) => entry.outcome)).toEqual(["unavailable"]);
+  });
+});
+
+/*
+ * OpenBot Desktop 1.0.0 on a Mac: every message failed with `REST run request failed:
+ * {"error":"Failed to initialize thread"}`. The folder's `.env` still said
+ * `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID="openbot"` from an earlier setup against hosted
+ * Intelligence, Desktop pointed the server at its own local Intelligence, whose project had no
+ * containers, and every new thread named the missing one. Naming it had also switched automatic
+ * assignment off. Real HTTP and the real runtime client.
+ */
+describe("a Learning container the environment names", () => {
+  const served: FakeIntelligence[] = [];
+  const stops: (() => void)[] = [];
+  afterEach(() => {
+    for (const stop of stops.splice(0)) stop();
+    for (const intelligence of served.splice(0)) intelligence.stop();
+  });
+
+  function boot(containers: string[], options: { enabled?: boolean } = {}) {
+    const intelligence = fakeIntelligence("current", { containers });
+    served.push(intelligence);
+    const client = runtimeKeyClient(
+      intelligence.url,
+      RUNTIME_KEY,
+      "ws://127.0.0.1:9",
+    );
+    // A thread nobody has created yet, as Intelligence answers for one.
+    client.getThread = async () => {
+      const error = new Error("Thread not found");
+      error.name = "PlatformRequestError";
+      Object.assign(error, { status: 404 });
+      throw error;
+    };
+    const configured = configuredLearningContainer({
+      containerId: "support-learning",
+    });
+    const store = createLearningSettingsStore(undefined, configured);
+    const logs: Record<string, unknown>[] = [];
+    const autoAssign = createLearningAutoAssign({
+      enabled: options.enabled ?? true,
+      configured,
+      store,
+      probe: (containerId) => probeLearningContainer(client, containerId),
+      log: (entry) => logs.push(entry),
+      startup: { now: () => 0, sleep: async () => {} },
+    });
+    stops.push(() => autoAssign.stop());
+    const learning = createLearningRuntime({
+      store,
+      client,
+      forgotten: configured.forgotten,
+    });
+    const thread = (threadId: string) =>
+      learning.containerForThread({
+        threadId,
+        agentId: "bot",
+        userId: "person",
+      });
+    return { intelligence, store, autoAssign, logs, thread };
+  }
+
+  async function settle(autoAssign: LearningAutoAssign) {
+    autoAssign.start();
+    for (let i = 0; i < 400 && autoAssign.state().state === "pending"; i++)
+      await Bun.sleep(5);
+    return autoAssign.state();
+  }
+
+  test("one this Intelligence does not have is ignored, with a warning, and new threads go to the assigned container", async () => {
+    const h = boot(["openbot"]);
+    // Before the check, a thread is bound to the name, as every one was on that Mac.
+    expect(await h.thread("first-message")).toBe("support-learning");
+
+    expect(await settle(h.autoAssign)).toEqual({
+      state: "assigned",
+      containerId: "openbot",
+    });
+    expect((await h.store.read()).defaultTarget).toEqual({
+      containerId: "openbot",
+    });
+    expect(h.logs.map((entry) => entry.outcome)).toEqual([
+      "configured_absent",
+      "assigned",
+    ]);
+    expect(h.logs[0]).toMatchObject({
+      variable: "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID",
+      containerId: "support-learning",
+    });
+    expect(String(h.logs[0]?.message)).toContain(
+      'CPK_INTELLIGENCE_LEARNING_CONTAINER_ID is "support-learning"',
+    );
+
+    // A new thread, and the one whose first message failed, both go to a container that is there.
+    for (const threadId of ["second-message", "first-message"]) {
+      const containerId = await h.thread(threadId);
+      expect(containerId).toBe("openbot");
+      expect(h.intelligence.containers.has(String(containerId))).toBe(true);
+    }
+  });
+
+  test("with assignment switched off, it is still ignored rather than failing every thread", async () => {
+    const h = boot(["openbot"], { enabled: false });
+    expect(await settle(h.autoAssign)).toEqual({ state: "off" });
+    expect((await h.store.read()).defaultTarget).toBeNull();
+    expect(await h.thread("a-thread")).toBeUndefined();
+    expect(h.logs.map((entry) => entry.outcome)).toEqual(["configured_absent"]);
+    expect(String(h.logs[0]?.message)).not.toContain("assigns");
+  });
+
+  test("one this Intelligence has stands, and nothing is assigned over it", async () => {
+    const h = boot(["openbot", "support-learning"]);
+    expect(await settle(h.autoAssign)).toEqual({ state: "off" });
+    expect((await h.store.read()).defaultTarget).toEqual({
+      containerId: "support-learning",
+    });
+    expect(await h.thread("a-thread")).toBe("support-learning");
+    expect(h.logs).toEqual([]);
+  });
+});
+
+/*
+ * The same failure from OpenBot's own database. A default container saved while the server talked to
+ * hosted Intelligence (by Admin, or by automatic assignment there) still won once OpenBot Desktop
+ * pointed it at its own local Intelligence, which has no such container, and every message failed
+ * with "Failed to initialize thread". Real HTTP and the real runtime client.
+ */
+describe("a Learning container saved as the default", () => {
+  const served: FakeIntelligence[] = [];
+  const stops: (() => void)[] = [];
+  afterEach(() => {
+    for (const stop of stops.splice(0)) stop();
+    for (const intelligence of served.splice(0)) intelligence.stop();
+  });
+
+  async function boot(containers: string[]) {
+    const intelligence = fakeIntelligence("current", { containers });
+    served.push(intelligence);
+    const client = runtimeKeyClient(
+      intelligence.url,
+      RUNTIME_KEY,
+      "ws://127.0.0.1:9",
+    );
+    // A thread nobody has created yet, as Intelligence answers for one.
+    client.getThread = async () => {
+      const error = new Error("Thread not found");
+      error.name = "PlatformRequestError";
+      Object.assign(error, { status: 404 });
+      throw error;
+    };
+    const store = createLearningSettingsStore();
+    await store.write({
+      enabled: true,
+      defaultTarget: { containerId: "hosted-learning" },
+      agents: {},
+    });
+    const logs: Record<string, unknown>[] = [];
+    const autoAssign = createLearningAutoAssign({
+      enabled: true,
+      store,
+      probe: (containerId) => probeLearningContainer(client, containerId),
+      log: (entry) => logs.push(entry),
+      startup: { now: () => 0, sleep: async () => {} },
+    });
+    stops.push(() => autoAssign.stop());
+    const learning = createLearningRuntime({
+      store,
+      client,
+      forgotten: store.isSetAside,
+    });
+    const thread = (threadId: string) =>
+      learning.containerForThread({
+        threadId,
+        agentId: "bot",
+        userId: "person",
+      });
+    return { intelligence, store, autoAssign, logs, thread };
+  }
+
+  async function settle(autoAssign: LearningAutoAssign) {
+    autoAssign.start();
+    for (let i = 0; i < 400 && autoAssign.state().state === "pending"; i++)
+      await Bun.sleep(5);
+    return autoAssign.state();
+  }
+
+  test("one this Intelligence does not have is ignored, with a warning, and threads go to a container it has", async () => {
+    const h = await boot(["openbot"]);
+    // Before the check, a thread is bound to the saved container, as every one was.
+    expect(await h.thread("first-message")).toBe("hosted-learning");
+
+    expect(await settle(h.autoAssign)).toEqual({
+      state: "assigned",
+      containerId: "openbot",
+    });
+    expect(h.logs.map((entry) => entry.outcome)).toEqual([
+      "saved_absent",
+      "assigned",
+    ]);
+    expect(h.logs[0]).toMatchObject({ containerId: "hosted-learning" });
+    expect(String(h.logs[0]?.message)).toContain(
+      'The saved default Learning container is "hosted-learning"',
+    );
+
+    // Settings show the container in use, not the one this Intelligence does not have.
+    expect((await h.store.read()).defaultTarget).toEqual({
+      containerId: "openbot",
+    });
+    // A new thread, and the one whose first message failed, both go to a container that is there.
+    for (const threadId of ["second-message", "first-message"]) {
+      const containerId = await h.thread(threadId);
+      expect(containerId).toBe("openbot");
+      expect(h.intelligence.containers.has(String(containerId))).toBe(true);
+    }
+
+    // The choice stays saved for the Intelligence it was made on, even through a save of what was read.
+    await h.store.write({
+      ...(await h.store.read()),
+      personalReview: "people",
+    });
+    expect(await h.store.savedDefault()).toEqual({
+      containerId: "hosted-learning",
+    });
+    expect(await h.store.read()).toMatchObject({
+      defaultTarget: { containerId: "openbot" },
+      personalReview: "people",
+    });
+  });
+
+  test("one this Intelligence has stands, and nothing is assigned over it", async () => {
+    const h = await boot(["openbot", "hosted-learning"]);
+    expect(await settle(h.autoAssign)).toEqual({ state: "saved" });
+    expect((await h.store.read()).defaultTarget).toEqual({
+      containerId: "hosted-learning",
+    });
+    expect(await h.thread("a-thread")).toBe("hosted-learning");
+    expect(h.logs).toEqual([]);
   });
 });

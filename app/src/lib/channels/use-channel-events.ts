@@ -85,8 +85,11 @@ export type ChannelActivityEvent = {
    * server older than this.
    */
   firstLine?: string;
-  /** The channel's newly written summary. Absent on an ordinary activity event. */
-  summary?: string;
+  /**
+   * What the channel is called now: a newly written summary, or a rename. Null when a cleared name
+   * leaves it with no summary yet. Absent on an ordinary activity event.
+   */
+  summary?: string | null;
   /** A person's first words, newly written: the row's name until its summary. Absent otherwise. */
   opening?: string;
   /** The channel is gone from every member's roster. Absent on an ordinary activity event. */
