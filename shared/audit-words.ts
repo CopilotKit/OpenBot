@@ -195,6 +195,7 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "enterprise.setting_changed": "Change an organization setting",
   "network_policy.changed": "Change the network policy",
   "network_policy.removed": "Remove a network policy",
+  "network_policy.translated": "Write a network allowlist from a description",
   "model.refused": "Use a model",
   "recorder.bearer_refused": "Use the Recorder",
   "recorder.connected": "Connect the Recorder",

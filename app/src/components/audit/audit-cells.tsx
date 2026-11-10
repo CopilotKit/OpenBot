@@ -824,11 +824,13 @@ export function decisionDetails(
    */
   const named = ruleNameLine(event, storedNames);
   if (named) lines.push(named);
-  // Team rules and a Bot's actions saved from a description say the sentence they were written from.
+  // Rules, a Bot's actions, a network allowlist and permissions saved from a description say
+  // the sentence they were written from, as a boundary does.
   const ruleAuthoring = (payload.authoring ?? {}) as { text?: unknown };
   if (
     (event.eventType === "approval.rule_changed" ||
-      event.eventType === "plugin.grants_changed") &&
+      event.eventType === "plugin.grants_changed" ||
+      event.eventType === "network_policy.changed") &&
     typeof ruleAuthoring.text === "string"
   )
     lines.push(`Written from: “${ruleAuthoring.text}”`);
@@ -1167,6 +1169,8 @@ const DECISIONS: Record<string, string> = {
   "approval.rules_translated": "Drafted, not saved",
   "plugin.grants_translated": "Drafted, not saved",
   "plugin.grants_changed": "Actions saved",
+  // A draft network allowlist, as a boundary's is. Nothing was decided and nothing changed.
+  "network_policy.translated": "Drafted, not saved",
 
   "configuration.changed": "Configuration changed",
   "credential.created": "Credential saved",

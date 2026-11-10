@@ -149,6 +149,15 @@ export type EnterpriseControls = {
   terminateInactiveComputers: () => Promise<{ stopped: string[] } | null>;
   pushNetworkPolicies: () => Promise<void>;
   policyForBot: (botId: string) => Promise<EgressPolicy>;
+  /**
+   * Whose network policy a Bot's computer is under: its owner, as a member with their groups, and
+   * whether their "Cloud network access" capability is on. The lookup `policyForBot` makes, for a
+   * replay of a candidate policy (admin/network-replay.ts). Undefined until the controls have read
+   * their settings.
+   */
+  networkMemberFor: (
+    botId: string,
+  ) => Promise<{ member: Member; cloudNetwork: boolean } | undefined>;
   offboard: (userId: string, by: string) => Promise<void>;
   stop: () => Promise<void>;
 };
@@ -289,7 +298,9 @@ export function decideFromSnapshot(
  * `erp.internal:8080` and matched none of them, so every allowed destination on a non-default port
  * was refused here, before the computer's filter, which reads the host and port apart, was asked.
  */
-function destinationOf(url: string): { host: string; port: number } | null {
+export function destinationOf(
+  url: string,
+): { host: string; port: number } | null {
   try {
     const parsed = new URL(url);
     if (!parsed.hostname) return null;
@@ -442,12 +453,11 @@ export async function installEnterpriseControls(
       ),
     );
 
-  const policyForBot = async (botId: string): Promise<EgressPolicy> => {
-    // A person's own browser has no Bot and no owner to read a policy for, and the organization's is for Bots.
-    if (isPersonBrowserId(botId))
-      return deps.personBrowserPolicy ?? { mode: "deny_all", rules: [] };
+  const networkMemberFor: EnterpriseControls["networkMemberFor"] = async (
+    botId,
+  ) => {
     const current = snapshot;
-    if (!current) return { mode: "deny_all", rules: [] };
+    if (!current) return undefined;
     const [profile] = await deps.database
       .select({ owner: agentProfiles.ownerUserId })
       .from(agentProfiles)
@@ -456,15 +466,24 @@ export async function installEnterpriseControls(
     const member: Member = profile?.owner
       ? await store.member(profile.owner)
       : { role: "user", groups: [] };
-    const cloudNetwork = resolveCapability(
-      current.rows,
+    return {
       member,
-      "cloudNetwork",
-    ).allowed;
+      cloudNetwork: resolveCapability(current.rows, member, "cloudNetwork")
+        .allowed,
+    };
+  };
+
+  const policyForBot = async (botId: string): Promise<EgressPolicy> => {
+    // A person's own browser has no Bot and no owner to read a policy for, and the organization's is for Bots.
+    if (isPersonBrowserId(botId))
+      return deps.personBrowserPolicy ?? { mode: "deny_all", rules: [] };
+    const current = snapshot;
+    const owner = await networkMemberFor(botId);
+    if (!current || !owner) return { mode: "deny_all", rules: [] };
     const { from: _from, ...policy } = effectiveNetworkPolicy(
       current.network,
-      member,
-      cloudNetwork,
+      owner.member,
+      owner.cloudNetwork,
     );
     return deps.duringRecording ? deps.duringRecording(botId, policy) : policy;
   };
@@ -700,6 +719,7 @@ export async function installEnterpriseControls(
     terminateInactiveComputers,
     pushNetworkPolicies,
     policyForBot,
+    networkMemberFor,
     offboard,
     stop: async () => {
       for (const timer of timers) clearInterval(timer);

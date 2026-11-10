@@ -5,6 +5,7 @@ import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
 import { enterpriseControls } from "./admin/controls";
 import { createEnterpriseGate } from "./admin/gate";
+import { createNetworkAllowlistRoutes } from "./admin/network-routes";
 import {
   createEnterpriseAdminRoutes,
   createProactiveAdminRoutes,
@@ -515,10 +516,11 @@ export function createApp(
     learningModel?: LearningModelEndpoint;
     /**
      * The deployment's own model, for writing a boundary from an admin's description
-     * (computer/policy-translate.ts), team approval rules from one (approvals/rule-translate.ts),
-     * a Bot's actions in one app from one (plugins/grant-translate.ts), and for reading an admin's
-     * guidance for auto-review (approvals/reviewer-guidance.ts). Absent,
-     * `/api/computers/policy-translate` is not mounted, and approval rules, app actions and guidance
+     * (computer/policy-translate.ts), team approval rules from one (approvals/rule-translate.ts), a
+     * Bot's actions in one app from one (plugins/grant-translate.ts), the network allowlist from
+     * one (admin/network-translate.ts), and for reading an admin's guidance for auto-review
+     * (approvals/reviewer-guidance.ts). Absent, `/api/computers/policy-translate` is not mounted,
+     * and approval rules, app actions, the network allowlist and guidance
      * say a model is needed.
      */
     boundaryWriter?: ModelCompleter;
@@ -763,6 +765,19 @@ export function createApp(
       "/api/telemetry",
       createProductTelemetryRoutes(requireUser, coworker.productTelemetry),
     );
+  // Before the enterprise routes it shares a prefix with: describing a network allowlist and
+  // replaying one over page visits. The list itself is still saved by `PUT /network` below.
+  app.route(
+    "/api/admin/enterprise/network",
+    createNetworkAllowlistRoutes({
+      requireUser,
+      ...(coworker?.boundaryWriter
+        ? { complete: coworker.boundaryWriter }
+        : {}),
+      ...(auditStore ? { auditStore } : {}),
+      ...(auditReader ? { auditReader } : {}),
+    }),
+  );
   app.route("/api/admin/enterprise", createEnterpriseAdminRoutes(requireUser));
   app.route("/api/admin/proactive", createProactiveAdminRoutes(requireUser));
   app.on(["PUT", "PATCH", "DELETE"], "/api/auth/scim/*", (context) =>
