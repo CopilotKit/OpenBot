@@ -174,6 +174,8 @@ function Setup() {
    * the CopilotKit account step, which runs first.
    */
   const intelligenceQueued = useRef(false);
+  /** Setup's Try again on the account step, which asks that step's own check again too. */
+  const [setupRetries, setSetupRetries] = useState(0);
   const engineReady = steps.some(
     (row) => row.step === "engine" && row.ok && !row.running,
   );
@@ -944,6 +946,9 @@ function Setup() {
           engine={engineNow(steps)}
           // Once signed in, the step explains the password prompt Install waits to raise.
           goAhead={goAhead}
+          // The engine answering and new enough: until then an engine refusal waits for Install.
+          engineSettled={engineReady || installationReady}
+          retried={setupRetries}
           // No slot once the install has failed: its failure is in the card, and nothing will
           // come into the slot until the person starts it again.
           behind={
@@ -965,7 +970,24 @@ function Setup() {
               setStep("model");
             } else void installLocally();
           }}
-          failure={displayedFailure && <Failure problem={displayedFailure} />}
+          failure={
+            displayedFailure && (
+              <Failure
+                problem={displayedFailure}
+                // The install behind this step failed: Try again runs it again, its check of the
+                // software OpenBot runs on and any update or restart included. Nothing else on this
+                // step would, and the account check waits on that software meanwhile.
+                onRetry={
+                  failure && preparation?.status === "failed"
+                    ? () => {
+                        setSetupRetries((count) => count + 1);
+                        void beginLocalInstall();
+                      }
+                    : undefined
+                }
+              />
+            )
+          }
         />
       </main>
     );

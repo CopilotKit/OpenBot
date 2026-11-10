@@ -1272,6 +1272,18 @@ a:hover {
   text-overflow: ellipsis;
 }
 
+/*
+ * A plain line, with no download under it, may take a second line: the row is 68 px of the 132
+ * held, so it still never moves anything. Cut at one line, "The Podman on this computer is too old
+ * for OpenBot, so OpenBot is updating it." read "...so OpenBot is u…" and lost its point.
+ */
+.behind-slot .step:not(:has(> .downloads)) .detail {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+}
+
 .downloads progress {
   width: 100%;
   height: 6px;

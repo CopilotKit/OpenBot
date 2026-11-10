@@ -30,6 +30,22 @@ backup taken before the upgrade instead. Three things change for an existing dep
 
 ### OpenBot Desktop
 
+- **Updating an old Docker Desktop on Windows no longer stops at "could not be checked".** OpenBot
+  downloaded Docker's installer and then could not check its signature, because the installer's
+  folder name has spaces in it, so every update stopped there. The check, and the all-users install
+  after it, now read the path in a way spaces and quotes cannot break. While Docker Desktop is being
+  updated, the account step waits for it and says so, instead of asking you to switch to Docker
+  Desktop. When setup stops there, it shows one failure with one Try again.
+- **Updating an old Podman no longer breaks setup, and a Podman that stops answering is restarted.**
+  On Windows, updating Podman 5.8.9 left the Podman machine OpenBot was using (often your own
+  `podman-machine-default`) running without its Docker API, and setup failed with no way back but
+  restarting that machine yourself. Every Podman machine that was running before the update, yours
+  included, is now running afterwards with its containers, and OpenBot checks that Podman answers
+  before it says it updated it. The row says why it is updating. At every check, including Start
+  and Retry after a relaunch, a Podman machine whose Docker API has gone is stopped and started
+  once, your default machine included. Stop and Quit do the same before they stop OpenBot, so a
+  gone API no longer leaves "OpenBot had trouble shutting down last time." A failure while setup
+  runs behind the account step now has Try again.
 - **OpenBot's own software downloads on the first screen too, before there is anything to run it.**
   On a new Mac or PC, or with Docker Desktop not running, OpenBot's images (about 1.1 GB for the
   default Bot) waited for the engine to start, then downloaded behind it. They now download from

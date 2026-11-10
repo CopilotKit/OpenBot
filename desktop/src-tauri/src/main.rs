@@ -471,9 +471,79 @@ async fn wake_engine(app: tauri::AppHandle, root: String) -> Result<(), Problem>
         return Ok(());
     }
     let asked = std::time::Instant::now();
-    let woken = wake_installation_engine(&app, preparation::saved_engine(&root)).await;
+    let saved = preparation::saved_engine(&root);
+    let woken = match wake_installation_engine(&app, saved).await {
+        Ok(()) => heal_installation_engine(&app, saved).await,
+        failed => failed,
+    };
     logging::outcome("wake engine", asked, &woken);
     woken
+}
+
+/**
+A Podman machine that answers `podman` while its Docker API has gone, stopped and started once
+before the back end is asked (`engine_versions::answering_now`).
+
+The back end's own check reaches the engine through that API and says only "docker_unavailable",
+and setup then waited on it. Setup and Start heal it in their own check (`engine_new_enough`); this
+is the same for a relaunch, and for Retry after it, which runs this again. Said on the machine's row.
+*/
+async fn heal_installation_engine<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    saved: Option<engine::Engine>,
+) -> Result<(), Problem> {
+    if !cfg!(any(target_os = "macos", target_os = "windows"))
+        || saved == Some(engine::Engine::Docker)
+    {
+        return Ok(());
+    }
+    let progress_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let found = engine::detect_saved(saved);
+        let Some(address) = found.address.filter(|_| found.responding) else {
+            return Ok(());
+        };
+        let engine = address.engine;
+        let back = || {};
+        let cancelled = || false;
+        let mut updates = engine_versions::OnThisMachine {
+            address,
+            cache: stack::default_root(),
+            back: &back,
+            cancelled: &cancelled,
+        };
+        let mut said = false;
+        let healed = engine_versions::answering_now(
+            engine,
+            std::env::consts::OS,
+            &mut updates,
+            &mut |line| {
+                said = true;
+                report_running_line(&progress_app, "start-machine", line, None)
+            },
+        );
+        if said {
+            match &healed {
+                Ok(_) => report_plain(
+                    &progress_app,
+                    "start-machine",
+                    true,
+                    engine::engine_ready_line().said,
+                ),
+                Err(problem) => {
+                    report_plain(&progress_app, "start-machine", false, problem.said.clone())
+                }
+            }
+        }
+        healed.map(|_| ())
+    })
+    .await
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot could not start the software it runs on. Try again.",
+            error.to_string(),
+        )
+    })?
 }
 
 /// Return a responding engine only after Compose is present too.
@@ -2496,8 +2566,15 @@ async fn engine_ready(
     app: &tauri::AppHandle,
     saved: Option<engine::Engine>,
 ) -> Result<engine::Address, Problem> {
-    let address = engine_answering(app, saved).await?;
-    engine_new_enough(app, address.clone()).await?;
+    let (address, answering) = engine_answering(app, saved).await?;
+    // The row is said done once the engine is also new enough, not when it first answers. The
+    // window starts the account's licence check and Intelligence's setup on it, and an engine about
+    // to be updated refuses both: Docker Desktop 4.31 calls itself "Docker Desktop (containerized)",
+    // which the CLI does not run on, and a Windows tester was told to switch to Docker Desktop
+    // while OpenBot was updating it.
+    if !engine_new_enough(app, address.clone()).await? {
+        report_line(app, "engine", true, answering);
+    }
     Ok(address)
 }
 
@@ -2507,12 +2584,13 @@ The engine at `address` new enough to run OpenBot, updated for the person when i
 At setup and at every Start, before Compose reads the project: an older Compose stops there with
 "Compose config exited with exit status: 15", which nobody can act on. Docker Desktop and OpenBot's
 Podman are updated here; only what cannot be updated for them is one plain step on the row. Said on
-the `engine` row, and nothing is said when nothing needed doing. See `engine_versions`.
+the `engine` row, and nothing is said when nothing needed doing: whether the row was said, which
+`engine_ready` needs to know. See `engine_versions`.
 */
 async fn engine_new_enough<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     address: engine::Address,
-) -> Result<(), Problem> {
+) -> Result<bool, Problem> {
     let engine = address.engine;
     let progress_app = app.clone();
     let back_app = app.clone();
@@ -2560,11 +2638,20 @@ async fn engine_new_enough<R: tauri::Runtime>(
     match checked {
         Ok(engine_versions::Checked::NewEnough(readings)) => {
             log::info!("[engine] versions: {}", readings.said(engine));
-            Ok(())
+            Ok(false)
+        }
+        // Its machine was stopped and started on the row: the row ends, saying it is ready.
+        Ok(engine_versions::Checked::Restarted(readings)) => {
+            log::info!(
+                "[engine] versions: {}; answering after its machine restarted",
+                readings.said(engine)
+            );
+            report_plain(app, "engine", true, engine::engine_ready_line().said);
+            Ok(true)
         }
         Ok(engine_versions::Checked::Updated { said, .. }) => {
             report_plain(app, "engine", true, said);
-            Ok(())
+            Ok(true)
         }
         Err(problem) => {
             report_plain(app, "engine", false, problem.said.clone());
@@ -2573,10 +2660,12 @@ async fn engine_new_enough<R: tauri::Runtime>(
     }
 }
 
+/// The engine answering, and the `engine` row's line for when it is also new enough, which
+/// `engine_ready` says once it is.
 async fn engine_answering(
     app: &tauri::AppHandle,
     saved: Option<engine::Engine>,
-) -> Result<engine::Address, Problem> {
+) -> Result<(engine::Address, engine::StepLine), Problem> {
     report_running_plain(app, "engine", "Checking the software OpenBot needs.");
     let found = engine::detect_saved(saved);
     desktop_telemetry::observe_engine(app, &found);
@@ -2620,8 +2709,8 @@ async fn engine_answering(
                 })??;
             }
             local_eval::use_engine(&ready.address);
-            report(app, "engine", true, ready.detail);
-            return Ok(ready.address);
+            let line = unregistered_line("engine", true, false, ready.detail);
+            return Ok((ready.address, line));
         }
         Ok(None) => {}
         Err(problem) => {
@@ -2708,8 +2797,8 @@ async fn engine_answering(
     if let Some(address) = answering_after_install(&after, engine::Address::composes)? {
         desktop_telemetry::observe_engine(app, &after);
         local_eval::use_engine(&address);
-        report(app, "engine", true, after.detail);
-        return Ok(address);
+        let line = unregistered_line("engine", true, false, after.detail);
+        return Ok((address, line));
     }
 
     // One at a time, and each only if the last one worked. Written as a loop over an array once,
@@ -2790,8 +2879,7 @@ async fn engine_answering(
             )
         })?;
     local_eval::use_engine(&address);
-    report_line(app, "engine", true, engine::engine_ready_line());
-    Ok(address)
+    Ok((address, engine::engine_ready_line()))
 }
 
 /// Called while holding startup so Quit cannot retire the service during its acquisition.
@@ -4572,7 +4660,10 @@ where
 fn down_owned_containers(shell: &Shell, root: &Path) -> Result<(), String> {
     let containers = shell.containers.lock().unwrap();
     match containers.as_ref() {
-        Some(owned) => stack::down(&owned.address, root),
+        Some(owned) => {
+            answering_before_down(&owned.address);
+            stack::down(&owned.address, root)
+        }
         None if shell.stopped_container_root.lock().unwrap().as_deref() == Some(root) => Ok(()),
         None if root.join("docker-compose.yml").exists() => Err(
             "OpenBot has no runtime ownership for this installation. Stop its containers using the original engine and context before starting OpenBot again.".into(),
@@ -4585,6 +4676,45 @@ fn down_owned_containers(shell: &Shell, root: &Path) -> Result<(), String> {
 /// Start records ownership before Compose up, including partial failures. Quit must still
 /// retire those runs, but an old Compose file alone is not a failed shutdown by this session.
 /// Explicit Stop keeps the unknown-runtime error so it cannot claim an unverified cleanup.
+/**
+A Podman machine whose Docker API has gone, stopped and started once before `compose down`, which
+reaches the engine through that API (`engine_versions::answering_now`). The containers that were
+running in it, OpenBot's among them, are started with it, and Compose then stops OpenBot's as it
+always does.
+
+On a live Windows run, with the machine's `win-sshproxy` gone, Quit's `compose down` failed on the
+missing pipe, the back end's stop was refused as "docker_unavailable", and the next launch opened on
+"OpenBot had trouble shutting down last time." What still fails after this is reported as before.
+*/
+fn answering_before_down(address: &engine::Address) {
+    // Only a machine that answers `podman` while its API has gone. One that does not answer at all
+    // may have been stopped by the person, and Quit never starts it.
+    if address.engine != engine::Engine::Podman || !address.responds() {
+        return;
+    }
+    let back = || {};
+    let cancelled = || false;
+    let mut updates = engine_versions::OnThisMachine {
+        address: address.clone(),
+        cache: stack::default_root(),
+        back: &back,
+        cancelled: &cancelled,
+    };
+    match engine_versions::answering_now(
+        address.engine,
+        std::env::consts::OS,
+        &mut updates,
+        &mut |line| log::info!("[stop] {}", line.log_entry()),
+    ) {
+        Ok(true) => log::info!("[stop] the engine answers again after its machine restarted"),
+        Ok(false) => {}
+        Err(problem) => log::warn!(
+            "[stop] the engine does not answer: {}",
+            problem.detail.as_deref().unwrap_or(&problem.said)
+        ),
+    }
+}
+
 fn down_containers_on_quit(shell: &Shell, root: &Path) -> Result<(), String> {
     if shell.containers.lock().unwrap().is_none() {
         return Ok(());

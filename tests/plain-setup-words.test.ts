@@ -72,12 +72,12 @@ const ALLOWED: { file: string; word: RegExp; why: string }[] = [
   {
     file: "desktop/src-tauri/src/install.rs",
     word: /Podman/,
-    why: "the person installs Podman Desktop or the podman package, or asks IT to allow it",
+    why: "the person installs Podman Desktop or the podman package, or asks IT to allow it, or sees the Podman they installed being updated",
   },
   {
     file: "desktop/src-tauri/src/engine_versions.rs",
     word: /Podman/,
-    why: "the person updates or removes a Podman they installed, which OpenBot can't update for them",
+    why: "the person updates or removes a Podman they installed, which OpenBot can't update for them, or is told the Podman OpenBot updated isn't answering",
   },
   {
     file: "desktop/src-tauri/src/acquire.rs",
