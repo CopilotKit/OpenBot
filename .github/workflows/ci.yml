@@ -625,6 +625,25 @@ jobs:
       - run: docker compose --env-file /dev/null --profile harness config --format json >/dev/null
         env:
           PICKED_HARNESS_IMAGE: openbot-agent-langgraph-agui:test
+      # Docker Desktop shipped Compose v2.24.5 in early 2024, and that version refuses the whole
+      # project when any service's image is blank, profile or not. The desktop app runs
+      # `compose config` before it starts, so this is the oldest Compose it has to get past.
+      - name: Compose v2.24.5 reads the file with no harness picked
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            x86_64) arch=x86_64; sum=94355be1d1d395040bbda1490f98d5c7627c30798a7955e1f2a78fda33a4b3e1 ;;
+            aarch64) arch=aarch64; sum=535e90ff9a7f24384f8a38f9f9ad49125485af7ae5ffda7226d091e5b8126948 ;;
+            *) echo "no pinned Compose v2.24.5 for $(uname -m)" >&2; exit 1 ;;
+          esac
+          compose="$RUNNER_TEMP/docker-compose-2.24.5"
+          curl -fsSL --retry 3 -o "$compose" "https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-linux-$arch"
+          echo "$sum  $compose" | sha256sum -c -
+          chmod +x "$compose"
+          "$compose" version
+          unset PICKED_HARNESS_IMAGE
+          "$compose" -f docker-compose.yml -f desktop/src-tauri/telemetry.compose.yml --env-file /dev/null config --format json >/dev/null
+          PICKED_HARNESS_IMAGE=openbot-agent-langgraph-agui:test "$compose" --env-file /dev/null --profile harness config --format json >/dev/null
 
   build:
     name: build
