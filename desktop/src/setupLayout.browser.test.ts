@@ -264,6 +264,42 @@ async function measure(page: Page) {
  * now: the page is never taller than it, the window is never asked to grow, and a step taller than
  * the room it has scrolls inside its card.
  */
+/**
+ * The longest lines the background row is given, as the native side says them, and whether each
+ * sends the person to another window. Kept in step with `docker_desktop_update.rs`,
+ * `docker_desktop.rs`, `install.rs` and `engine.rs`.
+ */
+const LONGEST_ROW_LINES: [string, boolean][] = [
+  [
+    "The Docker Desktop on this computer is too old for OpenBot, so OpenBot is updating it. Windows will ask for your approval.",
+    true,
+  ],
+  [
+    "The Docker Desktop on this computer is too old for OpenBot, so OpenBot is updating it. Your Mac will ask for your password.",
+    true,
+  ],
+  [
+    "The Docker Desktop on this computer is too old for OpenBot, so OpenBot is updating it. About 25 minutes left.",
+    false,
+  ],
+  [
+    "The Podman on this computer is too old for OpenBot, so OpenBot is updating it. Your Mac will ask for your password.",
+    true,
+  ],
+  [
+    "Docker Desktop is starting in its own window. If it asks you to accept its terms or sign in, do that there. OpenBot comes back when Docker is ready.",
+    true,
+  ],
+  [
+    "Docker Desktop hasn't started yet. It may be waiting for you in its own window. Accept its terms or sign in there, and OpenBot carries on by itself.",
+    true,
+  ],
+  [
+    "Preparing this computer to run OpenBot. If a window asks to install a Windows feature OpenBot needs, allow it. Windows then asks for your approval and a restart.",
+    true,
+  ],
+];
+
 describe.skipIf(!asked)("the window through a first run", () => {
   for (const [width, height] of [
     [1000, 800],
@@ -472,6 +508,32 @@ describe.skipIf(!asked)(
           await minutesIn(licence);
           await licence.waitForTimeout(1200);
           const seen: (number | undefined)[] = [];
+          // The longest lines that reach this row, each read whole: an engine update with its
+          // prompt (on Windows G they were cut at "...so OpenBo…"), and Docker Desktop's own window
+          // ("...when Docker is…"). Each in full, and the step's button where it was.
+          for (const [detail, elsewhere] of LONGEST_ROW_LINES) {
+            await emit(licence, {
+              step: "engine",
+              ok: true,
+              running: true,
+              elsewhere,
+              detail,
+            });
+            const row = licence.locator(".behind-slot .step .detail", {
+              hasText: detail,
+            });
+            await row.waitFor();
+            expect({
+              detail,
+              cut: await licence.evaluate(() => {
+                const shown = document.querySelector(
+                  ".behind-slot .step .detail",
+                ) as HTMLElement;
+                return shown.scrollHeight > shown.clientHeight + 1;
+              }),
+            }).toEqual({ detail, cut: false });
+            seen.push(await top(licence, "Accept"));
+          }
           // A plain line.
           await emit(licence, {
             step: "images",

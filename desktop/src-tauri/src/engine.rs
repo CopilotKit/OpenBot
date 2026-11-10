@@ -57,6 +57,9 @@ pub struct StepLine {
     pub said: String,
     pub elsewhere: bool,
     pub asks: bool,
+    /// The engine itself is being updated (`engine_versions`): the window asks nothing of it until
+    /// the update is done. An engine being updated refuses what is asked of it.
+    pub updating: bool,
     pub detail: Option<String>,
 }
 
@@ -67,6 +70,7 @@ impl StepLine {
             said: said.into(),
             elsewhere: false,
             asks: false,
+            updating: false,
             detail: None,
         }
     }
@@ -77,6 +81,7 @@ impl StepLine {
             said: said.into(),
             elsewhere: true,
             asks: false,
+            updating: false,
             detail: None,
         }
     }
@@ -87,8 +92,15 @@ impl StepLine {
             said: said.into(),
             elsewhere: false,
             asks: true,
+            updating: false,
             detail: None,
         }
+    }
+
+    /// A line said while the engine itself is being updated: see `updating`.
+    pub fn updating(mut self) -> Self {
+        self.updating = true;
+        self
     }
 
     /// The technical words for the log, beside the plain line the window shows.

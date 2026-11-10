@@ -59,7 +59,7 @@ pub fn updating_line(minutes: Option<u64>) -> StepLine {
         Some(minutes) => format!("{UPDATING_WHY} About {minutes} minutes left."),
         None => UPDATING_WHY.to_string(),
     };
-    StepLine::here(said)
+    StepLine::here(said).updating()
 }
 
 /// How long installing takes once the download is done, for the estimate. Docker says the Mac
@@ -833,12 +833,82 @@ pub fn update(
             plan.release.version
         )),
     );
-    apply(&plan, progress, back, cancelled)?;
+    keeping_containers(
+        running_containers,
+        || apply(&plan, progress, back, cancelled),
+        start_again,
+    )?;
     // Over half a gigabyte, and nothing reads it again.
     if let Some(folder) = plan.installer.parent() {
         let _ = std::fs::remove_dir_all(folder);
     }
     Ok(())
+}
+
+/**
+The update, with the containers running before it running after it.
+
+Quitting Docker Desktop stops every container in it, the person's own included, as Docker's own
+updater does: on a Windows tester's computer their `my-web` came back "Exited (255)" after the
+update. So the containers running now are recorded before Docker Desktop is quit, and started again
+once the new one answers, as a Podman machine's are (`acquire::start_machine_named`). A failed update
+starts nothing: Docker may not be running to start them in.
+*/
+fn keeping_containers(
+    running: impl FnOnce() -> Vec<String>,
+    update: impl FnOnce() -> Result<(), Problem>,
+    start: impl FnOnce(&[String]),
+) -> Result<(), Problem> {
+    let ids = running();
+    log::info!(
+        "[docker update] {} container(s) running before the update",
+        ids.len()
+    );
+    update()?;
+    if !ids.is_empty() {
+        start(&ids);
+    }
+    Ok(())
+}
+
+/// The containers running in Docker now, by id.
+fn running_containers() -> Vec<String> {
+    Address::new(Engine::Docker, None)
+        .command()
+        .args(["ps", "--quiet", "--no-trunc"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Start `ids` again in the updated Docker Desktop. One that will not start is the log's: Docker
+/// and OpenBot are what setup needs, and the person's container is still there to start.
+fn start_again(ids: &[String]) {
+    let started = Address::new(Engine::Docker, None)
+        .command()
+        .arg("start")
+        .args(ids)
+        .output();
+    match started {
+        Ok(output) if output.status.success() => log::info!(
+            "[docker update] started {} container(s) again after the update",
+            ids.len()
+        ),
+        Ok(output) => log::warn!(
+            "[docker update] could not start containers again: {}",
+            crate::quiet::said(&output.stderr)
+        ),
+        Err(error) => log::warn!("[docker update] could not start containers again: {error}"),
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -853,8 +923,9 @@ fn apply(
     loop {
         progress(
             StepLine::elsewhere(format!(
-                "{UPDATING_WHY} Your Mac will ask for your password so OpenBot can update Docker."
+                "{UPDATING_WHY} Your Mac will ask for your password."
             ))
+            .updating()
             .logged("Installing Docker Desktop; macOS asks for the password."),
         );
         std::thread::sleep(crate::install::BEFORE_PROMPT);
@@ -898,8 +969,9 @@ fn apply(
                 .logged("Installing Docker Desktop for this account.")
         } else {
             StepLine::elsewhere(format!(
-                "{UPDATING_WHY} Windows will ask for your approval so OpenBot can update Docker."
+                "{UPDATING_WHY} Windows will ask for your approval."
             ))
+            .updating()
             .logged("Installing Docker Desktop for all users; Windows asks for approval.")
         });
         let installed = run_installer(&plan.installer, per_user);
@@ -1305,5 +1377,53 @@ Internal requirements count=1 size=180
         assert!(subject.contains("O=Microsoft Corporation"), "{answer}");
         // A Microsoft signature is not Docker's.
         assert!(!signed_by_docker_on_windows(&answer));
+    }
+
+    /// The person's containers running before Docker Desktop is updated are started again after
+    /// it, and only once the update is done: a Windows tester's came back "Exited (255)".
+    #[test]
+    fn the_containers_running_before_the_update_are_started_after_it() {
+        let ids = || {
+            vec![
+                "af06cb230bc4188cc297c3f25afaa2b63f61d3010ed9c0412ef7b461f8729937".to_string(),
+                "8b48835f981b".to_string(),
+            ]
+        };
+        let order = std::cell::RefCell::new(Vec::new());
+        keeping_containers(
+            || {
+                order.borrow_mut().push("recorded".to_string());
+                ids()
+            },
+            || {
+                order.borrow_mut().push("updated".to_string());
+                Ok(())
+            },
+            |started| {
+                order
+                    .borrow_mut()
+                    .push(format!("started {}", started.len()))
+            },
+        )
+        .unwrap();
+        assert_eq!(*order.borrow(), ["recorded", "updated", "started 2"]);
+
+        // A failed update starts nothing and is the failure.
+        let started = std::cell::Cell::new(false);
+        let failed = keeping_containers(
+            ids,
+            || {
+                Err(Problem::with(
+                    "Docker's installer stopped before it finished.",
+                    "1603",
+                ))
+            },
+            |_| started.set(true),
+        );
+        assert!(failed.is_err());
+        assert!(!started.get());
+
+        // Nothing running, nothing started.
+        keeping_containers(Vec::new, || Ok(()), |_| panic!("nothing to start")).unwrap();
     }
 }

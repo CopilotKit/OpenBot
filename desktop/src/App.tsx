@@ -948,6 +948,9 @@ function Setup() {
           goAhead={goAhead}
           // The engine answering and new enough: until then an engine refusal waits for Install.
           engineSettled={engineReady || installationReady}
+          engineUpdating={steps.some(
+            (row) => row.step === "engine" && row.running && row.updating,
+          )}
           retried={setupRetries}
           // No slot once the install has failed: its failure is in the card, and nothing will
           // come into the slot until the person starts it again.

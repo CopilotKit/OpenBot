@@ -30,6 +30,19 @@ backup taken before the upgrade instead. Three things change for an existing dep
 
 ### OpenBot Desktop
 
+- **Start says in the log what it is waiting on, and why it gave up.** A Start that waited five
+  minutes for OpenBot's services and then said "OpenBot didn't get ready in time" left nothing in
+  the log in between. Each wait now writes what it asked (the address or the back end's status),
+  each new answer and the same one again once a minute, and why it ended, with how long it took and
+  the last answer.
+- **Updating Docker Desktop keeps your containers running, and its lines can be read whole.**
+  Containers that were running before OpenBot updated Docker Desktop are started again once it is
+  back. The background row now shows the update's lines and Docker Desktop's own messages in full,
+  and the account step no longer asks the old Docker Desktop for your licence while it is being
+  updated.
+- **Quit with Podman's connection gone still stops cleanly.** When the Podman machine OpenBot uses
+  had lost its Docker API, Quit could not stop the back end and the next launch said some services
+  didn't stop. Stop and Quit now restart that machine once before they stop anything.
 - **Updating an old Docker Desktop on Windows no longer stops at "could not be checked".** OpenBot
   downloaded Docker's installer and then could not check its signature, because the installer's
   folder name has spaces in it, so every update stopped there. The check, and the all-users install

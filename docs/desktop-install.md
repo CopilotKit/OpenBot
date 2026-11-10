@@ -174,12 +174,15 @@ fill a gap. Three rules hold that boundary:
   (`engine_versions::ensure`, `acquire::engine_answers`). The machine is the one OpenBot reaches,
   through Podman's default connection when detection found it there (`acquire::machine_reached`). A
   relaunch does the same before the back end is asked (`wake_engine`), whose own check says only
-  that Docker is unavailable, and Stop and Quit do it before `compose down`. The install's `engine`
-  row is said done only after this check, so the account's licence check and the back end's setup,
-  which start on it, never run against an engine about to be updated. A Docker
+  that Docker is unavailable, and Stop and Quit do it once before both their stops (`compose
+  down` and the back end's `local stop`). The install's `engine` row is said done only after this
+  check, so the back end's setup, which starts on it, never runs against an engine about to be
+  updated. While a row says the engine is updating, the account's licence check is not asked; one
+  refused before that waits for the engine instead of asking again. A Docker
   Desktop that is too old (4.31 and earlier) is updated to Docker's newest release with Docker's
   own installer command line, after its checksum and Docker's signature are checked
-  (`src-tauri/src/docker_desktop_update.rs`). Docker's terms are never accepted for the person. Only
+  (`src-tauri/src/docker_desktop_update.rs`). The containers running before Docker Desktop is quit
+  are started again once it answers. Docker's terms are never accepted for the person. Only
   what cannot be updated (a Docker that is not Docker Desktop, an old Podman on an Intel Mac, a
   macOS or Windows too old for the newest Docker Desktop) is one plain step. Linux is left as it is.
   `cargo run --example engine_update_check` shows what the app would do on a machine without
