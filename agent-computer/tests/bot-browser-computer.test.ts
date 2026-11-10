@@ -579,7 +579,7 @@ describe.skipIf(!asked)(
       await call("/control/release", { body: { requestId } });
     }, 60_000);
 
-    test("handing the wheel back ends the recording, then disconnects the Recorder, before the hand-back answers", async () => {
+    test("handing the wheel backends the recording, then disconnects the Recorder, before the hand-back answers", async () => {
       const requestId = await takeWheel("user-1");
       expect((await start("user-1", "Handed back")).status).toBe(200);
       calls.length = 0;

@@ -319,7 +319,7 @@ function onRelease(installedRelease: string, updateTo: string | null) {
   return { ...base, stack: base.stack && { ...base.stack, installedRelease } };
 }
 
-test("a back end an older app installed is updated to this app's release before OpenBot starts on it", async () => {
+test("a backend an older app installed is updated to this app's release before OpenBot starts on it", async () => {
   const updating = deferred<LocalReport>();
   let calls = 0;
   invokeHandler = async (command, args) => {
@@ -369,7 +369,7 @@ test("a back end an older app installed is updated to this app's release before 
  * stack stopped. Updated while stopped, the CLI waited three minutes for services that were not
  * running and failed. It is started first, as any stopped stack is, and updated once it is up.
  */
-test("a stopped back end an older app installed is started first, then updated", async () => {
+test("a stopped backend an older app installed is started first, then updated", async () => {
   const stopped = {
     ...onRelease("0.16.0-rc.8", "0.16.0-rc.9"),
     readiness: "stopped" as const,
@@ -405,7 +405,7 @@ test("a stopped back end an older app installed is started first, then updated",
   ]);
 });
 
-test("a back end already on this app's release is not updated", async () => {
+test("a backend already on this app's release is not updated", async () => {
   invokeHandler = answers({
     run_local_eval: [onRelease("0.16.0-rc.9", null)],
   });
@@ -422,7 +422,7 @@ test("a back end already on this app's release is not updated", async () => {
   expect(commands()).toEqual(["run_local_eval:status"]);
 });
 
-test("an update that fails says so and starts OpenBot on the release the back end still has", async () => {
+test("an update that fails says so and starts OpenBot on the release the backend still has", async () => {
   for (const failed of [
     report({
       outcome: "failed",
@@ -1313,7 +1313,7 @@ test("a relaunch whose start fails on a nearly full disk names the disk on its r
  * running, which says `degraded`, and the row said only "OpenBot is running but not working properly. Retry to start it again."
  * while k3s still reported low disk. `local_eval::checked_when_unhealthy` now says why.
  */
-test("a back end running but not healthy after low disk says it is recovering, and Retry asks again", async () => {
+test("a backend running but not healthy after low disk says it is recovering, and Retry asks again", async () => {
   const recovering = report({
     readiness: "degraded",
     licence: "valid",

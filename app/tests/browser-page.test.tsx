@@ -1284,11 +1284,11 @@ test("a recording Intelligence refused, or one still on its way, is never said t
         {
           sending: true,
           retrying:
-            "OpenBot's back end is busy or unreachable. Retrying; nothing is lost.",
+            "OpenBot's backend is busy or unreachable. Retrying; nothing is lost.",
         },
         shape === "native"
-          ? "Check example.com headingNot saved to your Learning space yet. OpenBot's back end is busy or unreachable. Retrying; nothing is lost."
-          : "“Check example.com heading” wasn't saved to your Learning space yet. OpenBot's back end is busy or unreachable. Retrying; nothing is lost.",
+          ? "Check example.com headingNot saved to your Learning space yet. OpenBot's backend is busy or unreachable. Retrying; nothing is lost."
+          : "“Check example.com heading” wasn't saved to your Learning space yet. OpenBot's backend is busy or unreachable. Retrying; nothing is lost.",
       ],
     ] as const) {
       cleanup();

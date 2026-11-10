@@ -31,6 +31,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import type { AgentProfile } from "@/lib/agents/queries";
+import { shownSubtitle } from "@/lib/agents/subtitle";
 import {
   setBotNotifyMutationOptions,
   setBotPausedMutationOptions,
@@ -80,7 +81,12 @@ export function BotProfile({
       <div className="mt-6 flex items-center gap-3">
         <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={40} />
         <div className="min-w-0">
-          {agent.title && <p className="truncate font-medium">{agent.title}</p>}
+          {/* Up to three lines, so a phone shows the whole of a subtitle like the starter's. */}
+          {agent.title && (
+            <p className="line-clamp-3 text-pretty font-medium">
+              {shownSubtitle(agent.title)}
+            </p>
+          )}
           <p className="line-clamp-2 text-muted-foreground text-sm">
             {agent.roleDescription}
           </p>

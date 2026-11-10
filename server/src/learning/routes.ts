@@ -458,7 +458,7 @@ export function createLearningRoutes(
         {
           error:
             failure.status === 502
-              ? "Learning in the back end is unavailable. Check the project permissions and endpoint, then retry."
+              ? "Learning in the backend is unavailable. Check the project permissions and endpoint, then retry."
               : failure.error,
         },
         failure.status,
@@ -595,7 +595,7 @@ export function createLearningRoutes(
       return context.json(
         {
           error:
-            "Couldn't read this person's Skills from the back end just now. Try again.",
+            "Couldn't read this person's Skills from the backend just now. Try again.",
         },
         503,
       );
@@ -937,7 +937,7 @@ export function createLearningRoutes(
   const skillsUnavailable = (kind: "off" | "unavailable") =>
     kind === "off"
       ? "Automatic learning is turned off. Turn it on to see published skills."
-      : "Couldn't load published Skills from the back end. Try again.";
+      : "Couldn't load published Skills from the backend. Try again.";
   /** The Skills published to the container, by name and description. */
   routes.get("/skills", async (context) => {
     const skills = dependencies.skills;

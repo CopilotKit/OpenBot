@@ -138,31 +138,31 @@ const DEFAULT_RETRY_ESCALATE_MS = 1_800_000;
 
 // The table's sentences (Task 11 "Error handling"); the pass rows' own sentences live in grant.ts PASS_HINTS.
 const BUSY =
-  "OpenBot's back end is busy or unreachable. Retrying; nothing is lost.";
+  "OpenBot's backend is busy or unreachable. Retrying; nothing is lost.";
 const MARKETPLACE =
-  "OpenBot's back end needs its marketplace licence before it can capture. Retrying; nothing is lost.";
+  "OpenBot's backend needs its marketplace licence before it can capture. Retrying; nothing is lost.";
 const ENTITLEMENT =
-  "OpenBot's back end could not confirm this organization's licence (entitlement_unavailable). Retrying; nothing is lost.";
+  "OpenBot's backend could not confirm this organization's licence (entitlement_unavailable). Retrying; nothing is lost.";
 const GATEWAY_OFF =
-  "Learning capture is off: OpenBot's back end has trajectory capture turned off.";
+  "Learning capture is off: OpenBot's backend has trajectory capture turned off.";
 const PASS_REFUSED =
-  "Learning capture is off: OpenBot's back end refused the capture pass.";
+  "Learning capture is off: OpenBot's backend refused the capture pass.";
 const NOT_ENABLED =
-  "Learning capture is paused: OpenBot's back end says this organization's licence does not include Product Trajectories, or that its billing is blocked.";
+  "Learning capture is paused: OpenBot's backend says this organization's licence does not include Product Trajectories, or that its billing is blocked.";
 const MESSAGES_REFUSED =
-  "Learning capture is off: OpenBot's back end refused the recorder's messages.";
+  "Learning capture is off: OpenBot's backend refused the recorder's messages.";
 const SESSIONS_ENDED =
-  "Learning capture is paused: OpenBot's back end ended this person's capture sessions.";
+  "Learning capture is paused: OpenBot's backend ended this person's capture sessions.";
 const joinRefusedSentence = (reason: string) =>
-  `Learning capture is paused: OpenBot's back end refused to open the capture channel (${reason}).`;
+  `Learning capture is paused: OpenBot's backend refused to open the capture channel (${reason}).`;
 const messagesRefusedSentence = (reason: string) =>
-  `Learning capture is paused: OpenBot's back end refused the recorder's messages (${reason}).`;
+  `Learning capture is paused: OpenBot's backend refused the recorder's messages (${reason}).`;
 const sessionEndedSentence = (reason: string) =>
-  `Learning capture is paused: OpenBot's back end ended the capture session (${reason}).`;
+  `Learning capture is paused: OpenBot's backend ended the capture session (${reason}).`;
 /** Names the origin Intelligence saw, the id this copy runs under: the Recorder's fixed id unpacked, under policy or
  * from the Chrome Web Store, and the id Edge Add-ons assigned it in Edge, never the fixed one in its place. */
 const checkOriginSentence = () =>
-  `OpenBot's back end refused the connection. If it sets CHECK_ORIGIN, that list must include chrome-extension://${chrome.runtime.id}.`;
+  `OpenBot's backend refused the connection. If it sets CHECK_ORIGIN, that list must include chrome-extension://${chrome.runtime.id}.`;
 
 type WireEvent = CapturedEvent & { value: Record<string, JsonValue> };
 
@@ -419,7 +419,7 @@ export async function createStreamer(
 ): Promise<Streamer> {
   if (!session.title.trim()) {
     throw new Error(
-      "A recording needs a title: OpenBot's back end refuses an outcome without a workflow.",
+      "A recording needs a title: OpenBot's backend refuses an outcome without a workflow.",
     );
   }
   const timers = deps.timers ?? realTimers;
@@ -1363,7 +1363,7 @@ export async function createStreamer(
     async rotate(next) {
       if (!next.title.trim()) {
         throw new Error(
-          "A recording needs a title: OpenBot's back end refuses an outcome without a workflow.",
+          "A recording needs a title: OpenBot's backend refuses an outcome without a workflow.",
         );
       }
       const previous = recordingId;

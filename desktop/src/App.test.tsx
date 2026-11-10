@@ -82,6 +82,7 @@ mock.module("./Mark", () => ({
 }));
 
 const { App } = await import("./App");
+const { SELF_CONTAINED } = await import("./CopilotKitAccount");
 const { ShuttingDownWindow, isShuttingDownPage } = await import(
   "./ShuttingDown"
 );
@@ -716,12 +717,10 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   await installLocal(view);
   // The first step. OpenBot needs no account, so it installs behind it, exactly once; nothing
   // of Intelligence's runs before the agreement. The browser sign-in starts without a click.
-  await view.findByRole("heading", { name: "Sign in to CopilotKit" });
+  await view.findByRole("heading", { name: "Self-contained OpenBot" });
   await view.findByText("Finish signing in to CopilotKit in your browser…");
   expect(
-    view.getByText(
-      "Your conversations and files are stored on this computer. Signing in does not send them to CopilotKit.",
-    ),
+    view.getByText(/Your conversations and files stay on this computer/),
   ).toBeTruthy();
   expect(stepLabel(view)).toBe("Account");
   await waitFor(() =>
@@ -932,7 +931,7 @@ test("the account step waits for a container engine Install is still setting up,
   await installLocal(view);
   await view.findByRole(
     "button",
-    { name: "Sign in to CopilotKit" },
+    { name: "Sign in for a free local license key" },
     { timeout: 6000 },
   );
   expect(asked).toBe(2);
@@ -1018,7 +1017,7 @@ test("the install behind the account step is said on every part of it, signing i
   engineAnswers = true;
   await view.findByRole(
     "button",
-    { name: "Sign in to CopilotKit" },
+    { name: "Sign in for a free local license key" },
     { timeout: 5000 },
   );
   expectBehind(view, 1, "Installing the software OpenBot runs on.");
@@ -1089,11 +1088,15 @@ function behindNow(view: ReturnType<typeof render>): string | null {
 }
 
 function technicalOn(beats: Beat[]) {
-  return beats.flatMap(({ beat, text }) =>
-    TECHNICAL.filter((word) => word.test(text)).map(
-      (word) => `${beat}: ${text.match(word)?.[0]}`,
-    ),
-  );
+  return beats.flatMap(({ beat, text }) => {
+    // The Account step's lede names CopilotKit Intelligence by product decision, as the one
+    // entry in `SHOWN_BY_DECISION` (tests/no-intelligence-in-user-copy.test.ts) records. Only
+    // that exact sentence is excused; the word anywhere else on any screen still fails.
+    const plain = text.replaceAll(SELF_CONTAINED, "");
+    return TECHNICAL.filter((word) => word.test(plain)).map(
+      (word) => `${beat}: ${plain.match(word)?.[0]}`,
+    );
+  });
 }
 
 /** What each part of a first run said, from the first screen to OpenBot opening. */
@@ -1567,7 +1570,7 @@ test("every failure screen says what happened and what to do, in plain words", a
       if (command === "last_local_eval_stop_failure")
         return {
           said: NATIVE_FAILURE.lastQuit,
-          detail: "the back end stack did not stop when OpenBot last quit",
+          detail: "the backend stack did not stop when OpenBot last quit",
         };
       return previous(command, args);
     };
@@ -1799,7 +1802,7 @@ function intelligenceCalls() {
   );
 }
 
-test("a first local run offers the back end dashboard to the app page and opens OpenBot", async () => {
+test("a first local run offers the backend dashboard to the app page and opens OpenBot", async () => {
   setupRootConfiguration("/tmp/local-eval-view", async () =>
     emptyConfiguration(),
   );
@@ -3072,7 +3075,7 @@ async function startedOnKeptRelease(
  * record. Nothing in the cluster had changed and every check passed, but the CLI said `degraded`,
  * and the window said "OpenBot is running but not working properly. Retry to start it again." and stopped OpenBot.
  */
-test("an update that did not finish opens OpenBot on the release the back end runs, and says so", async () => {
+test("an update that did not finish opens OpenBot on the release the backend runs, and says so", async () => {
   const after = pinnedCli.updateDidNotFinish;
   // The same stack before the update: ready on rc.5, with rc.9 to install.
   const before = {
@@ -3095,7 +3098,7 @@ test("an update that did not finish opens OpenBot on the release the back end ru
   expect(localActions()).toEqual(["status", "update", "status"]);
 });
 
-test("the next Start tries the update again on a back end that is still running", async () => {
+test("the next Start tries the update again on a backend that is still running", async () => {
   withUnfinishedUpdate("/tmp/local-eval-update-again-running", [
     pinnedCli.updateDidNotFinish,
   ]);
@@ -3118,7 +3121,7 @@ test("the next Start after Quit tries the update again, and never asks the CLI t
   expect(localActions()).toEqual(["status", "update", "status"]);
 });
 
-test("a back end whose check fails is still not healthy, with an update on record or not", async () => {
+test("a backend whose check fails is still not healthy, with an update on record or not", async () => {
   withUnfinishedUpdate("/tmp/local-eval-update-check-fails", [
     pinnedCli.apiCheckFails,
   ]);
@@ -3445,7 +3448,7 @@ test.each(["model", "intelligence"])(
           said:
             connection === "model"
               ? "That saved OpenAI API key is no longer available."
-              : "OpenBot's connection to its back end on this computer is no longer available. Set up the back end again.",
+              : "OpenBot's connection to its backend on this computer is no longer available. Set up the backend again.",
           connection,
         };
       return previous(command, args);
@@ -3690,7 +3693,7 @@ test("a local Intelligence stack left running at Quit is shown without holding a
   useInterruptedShutdownSetup();
   const notice = {
     said: "When OpenBot last quit, some of its services didn't stop. They may still be running. Stopping OpenBot again asks them to stop.",
-    detail: "Back end stop failed: the CLI timed out",
+    detail: "Backend stop failed: the CLI timed out",
   };
   const previous = invokeHandler;
   invokeHandler = async (command, args) => {
@@ -3713,7 +3716,7 @@ test("Stop that fails only for the local Intelligence stack still stops OpenBot"
   invokeHandler = async (command, args) => {
     if (command === "last_failure") return null;
     if (command === "stop_stack")
-      throw "Back end stop failed: the CLI timed out";
+      throw "Backend stop failed: the CLI timed out";
     return previous(command, args);
   };
   const view = await renderApp();
@@ -3734,7 +3737,7 @@ test("Stop that fails for OpenBot itself keeps OpenBot running", async () => {
   invokeHandler = async (command, args) => {
     if (command === "last_failure") return null;
     if (command === "stop_stack")
-      throw "Compose down failed: busy\nBack end stop failed: the CLI timed out";
+      throw "Compose down failed: busy\nBackend stop failed: the CLI timed out";
     return previous(command, args);
   };
   const view = await renderApp();

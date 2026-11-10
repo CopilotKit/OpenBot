@@ -102,7 +102,7 @@ test("recordings show title, date and how each ended", async () => {
   expect(view.getByText("Still sending")).toBeTruthy();
   // Never reads as a success: an outcome that never arrived says so.
   expect(view.getByText("No result")).toBeTruthy();
-  expect(view.getByText("Not in the back end")).toBeTruthy();
+  expect(view.getByText("Not in the backend")).toBeTruthy();
   expect(view.getByText("Stopped early: signed out")).toBeTruthy();
   expect(view.getByText("Stopped early: browser closed")).toBeTruthy();
   expect(view.getByText("Stopped early: disconnected")).toBeTruthy();
@@ -133,12 +133,12 @@ test("an Intelligence without recordings says so in one line", async () => {
     </QueryClientProvider>,
   );
   await view.findByText(
-    "The back end isn't available, so your recordings can't be listed.",
+    "The backend isn't available, so your recordings can't be listed.",
   );
   expect(view.queryByText(/No recordings yet/)).toBeNull();
 });
 
-test("an unavailable back end says so instead of listing rows", async () => {
+test("an unavailable backend says so instead of listing rows", async () => {
   pages[""] = {
     recordings: [],
     nextCursor: null,
@@ -149,7 +149,7 @@ test("an unavailable back end says so instead of listing rows", async () => {
       <YourRecordings />
     </QueryClientProvider>,
   );
-  await view.findByText(/Couldn't reach the back end/);
+  await view.findByText(/Couldn't reach the backend/);
   expect(view.queryByText(/No recordings yet/)).toBeNull();
 });
 
@@ -186,7 +186,7 @@ test("a later page that cannot be reached says so below the rows, and Show more 
   );
   await view.findByText("Refund an order");
   fireEvent.click(view.getByText("Show more"));
-  await view.findByText(/Couldn't reach the back end/);
+  await view.findByText(/Couldn't reach the backend/);
   expect(view.getByText("Refund an order")).toBeTruthy();
   expect(view.getByText("Show more")).toBeTruthy();
   pages.c2 = {
@@ -195,7 +195,7 @@ test("a later page that cannot be reached says so below the rows, and Show more 
   };
   fireEvent.click(view.getByText("Show more"));
   await view.findByText("Close a ticket");
-  expect(view.queryByText(/Couldn't reach the back end/)).toBeNull();
+  expect(view.queryByText(/Couldn't reach the backend/)).toBeNull();
   expect(view.getByText("Refund an order")).toBeTruthy();
 });
 
@@ -291,7 +291,7 @@ test("the list asks again every few seconds while a recording is still sending, 
   expect(interval("succeeded")).toBe(false);
 });
 
-test("the list asks again every few seconds while a stopped recording has not reached the back end yet", () => {
+test("the list asks again every few seconds while a stopped recording has not reached the backend yet", () => {
   // A recording the Recorder holds and sends later has no row until it lands (OpenBot Desktop, 2026-11-07).
   const refetchInterval = recordingsQueryOptions({ waiting: true })
     .refetchInterval as (query: unknown) => number | false;

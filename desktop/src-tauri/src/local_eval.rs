@@ -1487,9 +1487,10 @@ fn engine_size(address: &crate::engine::Address) -> Option<(u64, u64)> {
 /**
 The engine's disk inside a container, the way the CLI measures it: `df -Pk /` in a container of an
 image the engine already has, so nothing is downloaded. An engine with no image that has a shell
-gives no answer, and disk is then not judged.
+gives no answer, and disk is then not judged. Also what `update_ready` measures before it downloads
+an update's images ahead of time.
 */
-fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
+pub fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
     let images = engine_output(
         address,
         &["image", "ls", "--quiet", "--no-trunc"],
@@ -2614,6 +2615,13 @@ fn engine_command(engine: Option<&CliEngine>) -> std::process::Command {
     command
 }
 
+/// `engine_command` on the engine the app last named, for `update_ready`, which downloads into
+/// the back end's node as `local update` does.
+pub fn node_engine() -> impl Fn() -> std::process::Command + Send + Sync + 'static {
+    let engine = recorded_engine();
+    move || engine_command(engine.as_ref())
+}
+
 /// Only `INHERITED`, OpenBot's Docker configuration, the engines' directories on `PATH` and the
 /// variables that name the engine.
 fn cli_environment(
@@ -3098,8 +3106,8 @@ fn execute_child(
             if !letting_finish {
                 letting_finish = true;
                 log::warn!(
-                    "[local update] asked to stop after it began changing the back end with Helm: \
-                     letting it finish, since stopping it there leaves the back end half updated"
+                    "[local update] asked to stop after it began changing the backend with Helm: \
+                     letting it finish, since stopping it there leaves the backend half updated"
                 );
             }
         }
@@ -3238,7 +3246,7 @@ impl UpdateWatch {
         }
         if self.log.committed() && self.finishing.is_none() {
             log::info!(
-                "[local update] it is changing the back end with Helm now; Cancel and Quit let it finish"
+                "[local update] it is changing the backend with Helm now; Cancel and Quit let it finish"
             );
             self.finishing = Some(Finishing::begin());
         }
@@ -3532,7 +3540,7 @@ pub fn close_for_quit_reporting(finishing: impl FnOnce()) -> bool {
     loop {
         if update_finishing() {
             if let Some(say) = finishing.take() {
-                log::info!("[quit] letting the back end update finish before OpenBot quits");
+                log::info!("[quit] letting the backend update finish before OpenBot quits");
                 say();
             }
         } else if RUNNING.load(Ordering::SeqCst) == 0 || Instant::now() >= until {
@@ -3542,7 +3550,7 @@ pub fn close_for_quit_reporting(finishing: impl FnOnce()) -> bool {
     }
     let waited = finishing.is_none();
     if waited {
-        log::info!("[quit] the back end update ended");
+        log::info!("[quit] the backend update ended");
     }
     waited
 }
@@ -3818,7 +3826,7 @@ fn update_repairing(
         return first;
     }
     log::warn!(
-        "[local update] failed; checking whether an update stopped earlier left the back end needing repair"
+        "[local update] failed; checking whether an update stopped earlier left the backend needing repair"
     );
     match repair_stack(stack) {
         Ok(repaired) if repaired.changed() => {
@@ -3846,7 +3854,7 @@ fn uncordoned(stack: &StackId, when: &str) {
         || engine_command(engine.as_ref()),
         stack.as_str(),
     ) {
-        Ok(true) => log::info!("[local update] uncordoned the back end's node {when}"),
+        Ok(true) => log::info!("[local update] uncordoned the backend's node {when}"),
         Ok(false) => {}
         Err(why) => log::info!("[local update] node not checked {when}: {why}"),
     }
@@ -3955,6 +3963,13 @@ fn cli_images_of(cli: &PinnedCli) -> Option<crate::local_images::CliImages> {
     crate::local_images::cli_images(&String::from_utf8_lossy(&bytes))
 }
 
+/// What the CLI this app runs pulls when it updates a stack (`cli_images_of`), for `update_ready`,
+/// which downloads the next release's images by the same repositories. None without a CLI whose
+/// images can be read.
+pub fn bundled_cli_images() -> Option<crate::local_images::CliImages> {
+    cli_images_of(&installed().ok()?)
+}
+
 /**
 Download `images` into `stack`'s node before the CLI pulls them. True when it downloaded, false when
 there was nothing it could do, which leaves the pull to the CLI as before: a release other than
@@ -4049,7 +4064,7 @@ fn repaired_before(stack: &StackId, saved: Stack) -> Stack {
         .is_some_and(|observed| observed.running);
     if past_first_step && running {
         log::info!(
-            "[update repair] an update is on record past its first step; checking the back end before it resumes"
+            "[update repair] an update is on record past its first step; checking the backend before it resumes"
         );
         match repair_stack(stack) {
             Ok(repaired) => log::info!("[update repair] {repaired:?}"),
@@ -4356,7 +4371,7 @@ fn forget(cli: &PinnedCli, stack: &StackId, cancel: &Cancel) -> Result<(), Failu
         return Err(Failure::InvalidStatus);
     }
     log::info!(
-        "[local setup] forgot {}, whose private files were gone; setting the back end up again",
+        "[local setup] forgot {}, whose private files were gone; setting the backend up again",
         stack.as_str()
     );
     Ok(())
@@ -9598,7 +9613,7 @@ fn main() {
 
         let text = crate::troubleshooting::gather(crate::troubleshooting::Sources {
             desktop: "OpenBot Desktop 1.0.0 (Built 2026-11-08 06:40 UTC from 52ea4b5)".into(),
-            failure: Some("The back end could not start.".into()),
+            failure: Some("The backend could not start.".into()),
             log_folder: Some(&logs),
             home: Some(&home),
             engine: engine_in_use(),
@@ -9607,7 +9622,7 @@ fn main() {
         // `~/.copilotkit/cli.log`, with Windows' separators on Windows.
         let cli_log = format!("~{0}.copilotkit{0}cli.log", std::path::MAIN_SEPARATOR);
         for expected in [
-            "Failed: The back end could not start.",
+            "Failed: The backend could not start.",
             "Container engine: docker 28.5.1. 10 CPUs and 20.5 GiB of memory, 0 GiB free of 1006.8 GiB in a container; short of disk (nearly full).",
             "$ docker system df\nTYPE",
             "Images          14        3         18.2GB    12.1GB (66%)",

@@ -333,6 +333,29 @@ describe("agent profile store integration", () => {
     expect(row.configuration.endpoint).toBeUndefined();
   });
 
+  /*
+   * The new starter wording is display only (app/src/lib/agents/subtitle.ts). The store hands every
+   * reader the subtitle as stored: the Bot's voice call is told it, a New Bot interview reads it,
+   * and an edit to any other field sends it back. Mapped here, an edit would store the new wording
+   * and the Bot would be told it.
+   */
+  test("a subtitle stored under LangChain's earlier name is read as stored", async () => {
+    const owner = await createUser();
+    const withoutManaged = createAgentProfileStore(database, undefined);
+    const created = await withoutManaged.create(owner, {
+      name: "Seeded Before The Rename",
+      title: "Everyday life. Powered by LangChain (LangGraph).",
+      roleDescription: "Help with everyday errands.",
+      visibility: "private",
+      systemPrompt: "Help with everyday errands.",
+    });
+    createdAgentIds.push(created.id);
+
+    expect((await withoutManaged.get(owner, created.id))?.title).toBe(
+      "Everyday life. Powered by LangChain (LangGraph).",
+    );
+  });
+
   test("an edit moves the instruction such a coworker actually runs on", async () => {
     const owner = await createUser();
     const withoutManaged = createAgentProfileStore(database, undefined);

@@ -1,3 +1,4 @@
+import type { UpdateReadiness } from "@openbot/shared/desktop-updates";
 import { queryOptions } from "@tanstack/react-query";
 import { desktopShell } from "./shell";
 
@@ -68,6 +69,11 @@ export type DesktopAppUpdate = {
    * updater. Absent from a desktop app older than the field, which still answers a check.
    */
   updatesItself?: boolean;
+  /**
+   * How ready the newer version is to install: downloading in the background, or all here. Null
+   * before the app starts on it, and absent from a desktop app older than the field.
+   */
+  ready?: UpdateReadiness | null;
 };
 
 /**
@@ -75,7 +81,12 @@ export type DesktopAppUpdate = {
  * A newer version is named even if this person closed the banner on it, because they asked.
  */
 export type DesktopAppUpdateCheck =
-  | { found: "available"; version: string; current: string }
+  | {
+      found: "available";
+      version: string;
+      current: string;
+      ready?: UpdateReadiness | null;
+    }
   | { found: "upToDate"; current: string }
   | { found: "installing"; version: string; current: string }
   /** This build never updates itself: an internal or candidate build. */
@@ -178,7 +189,13 @@ export function desktopAppUpdateQueryOptions() {
     queryFn: (): Promise<DesktopAppUpdate> => invokeDesktop("update_offer"),
     enabled: desktopShell() !== null,
     retry: false,
-    refetchInterval: (query) => (query.state.data?.installing ? 500 : 60_000),
+    // Every five seconds while it downloads in the background, so its share moves on screen.
+    refetchInterval: (query) =>
+      query.state.data?.installing
+        ? 500
+        : query.state.data?.ready?.state === "preparing"
+          ? 5_000
+          : 60_000,
   });
 }
 
@@ -244,8 +261,8 @@ export function diagnostics(
     `  processes: ${parts(status.processes)}`,
     `  containers: ${parts(status.containers)}`,
     status.intelligenceStack
-      ? `Back end: ${status.intelligenceStack}, ${readiness ?? "not checked"}`
-      : "Back end: not on this computer",
+      ? `Backend: ${status.intelligenceStack}, ${readiness ?? "not checked"}`
+      : "Backend: not on this computer",
     ...(status.intelligenceStack
       ? [`  containers: ${parts(status.intelligenceContainers)}`]
       : []),
