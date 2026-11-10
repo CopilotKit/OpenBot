@@ -4911,14 +4911,16 @@ Windows opened a bare browser window of its own. The configuration says `"create
 /**
 Where the main window's buttons sit on macOS: 20pt in from the left, and low enough that their middle
 lines up with the first row of OpenBot's sidebar header (its name and +), which the page
-moves right to clear them (app/src/styles.css, `data-desktop-titlebar`).
+moves right to clear them (app/src/styles.css, `data-desktop-titlebar`). That row's middle is 32pt
+down (the inset sidebar's 8pt, the header's 8pt, then half its 32pt row), and on macOS 26 the
+circles' middle lands about 1.5pt below `y`, so `y` is 31.
 
 Set on the builder, not per page, because tao keeps it and puts the buttons back after anything that
 moves them (a resize, leaving full screen), and Tauri 2.12 can't change it after the window exists.
 So the setup screens have the buttons here too, where nothing of theirs is near them.
 */
 #[cfg(target_os = "macos")]
-const TRAFFIC_LIGHTS: tauri::LogicalPosition<f64> = tauri::LogicalPosition { x: 20.0, y: 35.0 };
+const TRAFFIC_LIGHTS: tauri::LogicalPosition<f64> = tauri::LogicalPosition { x: 20.0, y: 31.0 };
 
 fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
     let Some(config) = app
