@@ -850,7 +850,7 @@ const requiredTerms = {
   organizationName: "Acme",
 };
 
-test("setup that needs a CopilotKit sign-in offers it in the window, then carries on by itself", async () => {
+test("setup that needs a sign-in offers it in the window, then carries on by itself", async () => {
   invokeHandler = answers({
     // Blocked on the sign-in, then set up once it is done.
     set_up_local_eval: [blockedOnSignIn, report()],
@@ -861,7 +861,7 @@ test("setup that needs a CopilotKit sign-in offers it in the window, then carrie
   });
   const screen = view();
   await userEvent.click(
-    await screen.findByRole("button", { name: "Sign in to CopilotKit" }),
+    await screen.findByRole("button", { name: "Sign in to OpenBot" }),
   );
   await waitFor(() =>
     expect(row(screen, START).textContent).toContain("Complete"),
@@ -910,7 +910,7 @@ test("a setup refused for a full Docker disk says so, with Retry", async () => {
   expect(setup).not.toContain("partway through");
 });
 
-test("a CopilotKit sign-in that does not finish says so and can be tried again", async () => {
+test("a sign-in that does not finish says so and can be tried again", async () => {
   invokeHandler = answers({
     set_up_local_eval: [blockedOnSignIn],
     sign_in_to_copilotkit: [{ signedIn: false }],
@@ -918,16 +918,16 @@ test("a CopilotKit sign-in that does not finish says so and can be tried again",
   });
   const screen = view();
   await userEvent.click(
-    await screen.findByRole("button", { name: "Sign in to CopilotKit" }),
+    await screen.findByRole("button", { name: "Sign in to OpenBot" }),
   );
   await screen.findByText("Sign-in did not finish. Try again.");
   expect(
-    screen.getByRole("button", { name: "Sign in to CopilotKit" }),
+    screen.getByRole("button", { name: "Sign in to OpenBot" }),
   ).toBeTruthy();
   expect(commands().filter((c) => c === "set_up_local_eval")).toHaveLength(1);
 });
 
-test("a CopilotKit sign-in waiting on the browser shows its code and page, and Cancel stops it", async () => {
+test("a sign-in waiting on the browser shows its code and page, and Cancel stops it", async () => {
   const page = {
     url: "https://dashboard.copilotkit.ai/cli-auth/device?user_code=WXYZ-2345",
     userCode: "WXYZ-2345",
@@ -941,9 +941,12 @@ test("a CopilotKit sign-in waiting on the browser shows its code and page, and C
   });
   const screen = view();
   await userEvent.click(
-    await screen.findByRole("button", { name: "Sign in to CopilotKit" }),
+    await screen.findByRole("button", { name: "Sign in to OpenBot" }),
   );
   await screen.findByText("WXYZ-2345");
+  expect(
+    screen.getByText("Finish signing in to OpenBot in your browser…"),
+  ).toBeTruthy();
   expect(
     screen
       .getByRole("link", { name: "Open the sign-in page" })
@@ -962,16 +965,16 @@ test("a CopilotKit sign-in waiting on the browser shows its code and page, and C
     },
   });
   expect(
-    await screen.findByRole("button", { name: "Sign in to CopilotKit" }),
+    await screen.findByRole("button", { name: "Sign in to OpenBot" }),
   ).toBeTruthy();
   expect(screen.queryByText("WXYZ-2345")).toBeNull();
 });
 
 /*
- * The sign-in setup stops for is a CopilotKit sign-in, so it shows CopilotKit's logotype, before and
- * while it waits on the browser. It showed none.
+ * The sign-in setup stops for leads with OpenBot by CopilotKit, before and while it waits on the
+ * browser, as the Account step does. It showed none, then CopilotKit's logotype alone.
  */
-test("a CopilotKit sign-in setup stops for shows CopilotKit's logotype, before and while it waits", async () => {
+test("a sign-in setup stops for leads with OpenBot by CopilotKit, before and while it waits", async () => {
   invokeHandler = answers({
     set_up_local_eval: [blockedOnSignIn],
     sign_in_to_copilotkit: [new Promise(() => {})],
@@ -984,15 +987,22 @@ test("a CopilotKit sign-in setup stops for shows CopilotKit's logotype, before a
     cancel_local_eval: [null],
   });
   const screen = view();
-  const logo = () => screen.getByRole("img", { name: "CopilotKit" });
+  const leads = () => {
+    const card = screen.getByText("Sign in to finish setting up OpenBot.")
+      .parentElement as HTMLElement;
+    expect(card.querySelector(".lockup")?.textContent).toBe(
+      "OpenBotby CopilotKit",
+    );
+    expect(screen.queryByRole("img", { name: "CopilotKit" })).toBeNull();
+  };
   await userEvent.click(
-    await screen.findByRole("button", { name: "Sign in to CopilotKit" }),
+    await screen.findByRole("button", { name: "Sign in to OpenBot" }),
   );
   await screen.findByText("WXYZ-2345");
-  expect(logo().getAttribute("src")).toBe("/copilotkit-logo.svg");
+  leads();
   await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-  await screen.findByRole("button", { name: "Sign in to CopilotKit" });
-  expect(logo().getAttribute("src")).toBe("/copilotkit-logo.svg");
+  await screen.findByRole("button", { name: "Sign in to OpenBot" });
+  leads();
 });
 
 test("setup that needs the agreement shows it, and only Accept sets up again with that version", async () => {
@@ -1005,7 +1015,7 @@ test("setup that needs the agreement shows it, and only Accept sets up again wit
   });
   const screen = view();
   await screen.findByText(
-    "To run OpenBot on this computer, accept the CopilotKit license agreement.",
+    "To run OpenBot on this computer, accept the OpenBot by CopilotKit license agreement.",
   );
   expect(
     screen.getByRole("link", { name: "Read the license agreement" }),
@@ -1064,7 +1074,7 @@ test("no build sends the person to a terminal", async () => {
     });
     const screen = view();
     await screen.findByRole("button", {
-      name: blocked === blockedOnTerms ? "Accept" : "Sign in to CopilotKit",
+      name: blocked === blockedOnTerms ? "Accept" : "Sign in to OpenBot",
     });
     expect(screen.queryByText(/copilotkit |Terminal/)).toBeNull();
     cleanup();

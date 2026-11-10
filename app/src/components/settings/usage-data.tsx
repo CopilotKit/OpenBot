@@ -45,7 +45,7 @@ export function UsageDataSection() {
             <ItemDescription className="line-clamp-none">
               {offByEnvironment
                 ? "Turned off on this computer. OpenBot sends no usage data."
-                : "OpenBot sends CopilotKit usage data, linked to your CopilotKit account. It never sends your conversations, files or keys. Changes apply the next time OpenBot starts."}{" "}
+                : "OpenBot sends usage data, linked to your OpenBot account. It never sends your conversations, files or keys. Changes apply the next time OpenBot starts."}{" "}
               <a
                 className="underline underline-offset-2 hover:text-foreground"
                 href={USAGE_DATA_DOC}

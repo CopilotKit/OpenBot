@@ -2,36 +2,46 @@
 export type Section = "Account" | "Install" | "AI" | "Start";
 
 /*
- * Setup signs in to CopilotKit, installs, connects an AI, and starts. A section can hold several
+ * Setup signs in, installs, connects an AI, and starts. A section can hold several
  * screens (Account is the sign-in and then the agreement), which is why these are names and not
  * "Step 1 of 4": a step that holds two steps reads as a miscount.
  */
 const SECTIONS: Section[] = ["Account", "Install", "AI", "Start"];
 
 /**
+ * OpenBot's mark and name, with "by CopilotKit" beside it where the company is named: it reads
+ * OpenBot by CopilotKit, never CopilotKit alone. Decoration: the window's title already says the
+ * name, so it is hidden from assistive technology rather than read on every screen.
+ */
+export function Lockup({ byCopilotKit = false }: { byCopilotKit?: boolean }) {
+  return (
+    <div className="lockup" aria-hidden="true">
+      <div className="orb" />
+      <span>OpenBot</span>
+      {byCopilotKit && <span className="lockup-by">by CopilotKit</span>}
+    </div>
+  );
+}
+
+/**
  * Where you are in setup, and what is left: every section by name, the current one marked.
  *
  * Beside OpenBot's mark and name, so every step says which product is being set up, including the
- * step that signs in to a CopilotKit account. The name is decoration here: the window's title
- * already says it, so it is hidden from assistive technology rather than read on every screen.
+ * step that signs in.
  */
 export function Sections({
   at,
   byCopilotKit = false,
 }: {
   at: Section;
-  /** "by CopilotKit" beside OpenBot's name, on the step that asks for a CopilotKit sign-in. */
+  /** "by CopilotKit" beside OpenBot's name, on the step that asks for a sign-in. */
   byCopilotKit?: boolean;
 }) {
   const names = SECTIONS;
   const current = names.indexOf(at);
   return (
     <div className="setup-header">
-      <div className="lockup" aria-hidden="true">
-        <div className="orb" />
-        <span>OpenBot</span>
-        {byCopilotKit && <span className="lockup-by">by CopilotKit</span>}
-      </div>
+      <Lockup byCopilotKit={byCopilotKit} />
       <ol className="steps-of sections" aria-label="Setup">
         {names.map((name, index) => (
           <li

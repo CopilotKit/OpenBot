@@ -82,7 +82,6 @@ mock.module("./Mark", () => ({
 }));
 
 const { App } = await import("./App");
-const { SELF_CONTAINED } = await import("./CopilotKitAccount");
 const { ShuttingDownWindow, isShuttingDownPage } = await import(
   "./ShuttingDown"
 );
@@ -588,15 +587,15 @@ test("the first screen is Install, with nothing to choose", async () => {
   expect(localCliCalls()).toEqual([]);
 });
 
-test("the first screen says what usage data OpenBot sends, before the CopilotKit sign-in links it", async () => {
+test("the first screen says what usage data OpenBot sends, before the sign-in links it", async () => {
   setupRootConfiguration("/tmp/local-eval-welcome-usage", async () =>
     emptyConfiguration(),
   );
   withLocalCli({});
   const view = await renderApp();
-  const notice = view.getByText(/OpenBot sends CopilotKit usage data/);
+  const notice = view.getByText(/OpenBot sends usage data/);
   expect(notice.textContent).toBe(
-    "OpenBot sends CopilotKit usage data, linked to your CopilotKit account. It never sends your conversations, files or keys. You can turn this off in Settings. What OpenBot sends",
+    "OpenBot sends usage data, linked to your OpenBot account. It never sends your conversations, files or keys. You can turn this off in Settings. What OpenBot sends",
   );
   const link = view.getByRole("link", { name: "What OpenBot sends" });
   expect(link.getAttribute("href")).toBe(
@@ -758,7 +757,7 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
   );
 });
 
-test("a signed-out first run signs in to CopilotKit and accepts the agreement as its own step, before choosing an AI", async () => {
+test("a signed-out first run signs in and accepts the agreement as its own step, before choosing an AI", async () => {
   setupRootConfiguration("/tmp/local-eval-account", async () =>
     emptyConfiguration(),
   );
@@ -780,7 +779,7 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   // The first step. OpenBot needs no account, so it installs behind it, exactly once; nothing
   // of Intelligence's runs before the agreement. The browser sign-in starts without a click.
   await view.findByRole("heading", { name: "Self-contained OpenBot" });
-  await view.findByText("Finish signing in to CopilotKit in your browser…");
+  await view.findByText("Finish signing in to OpenBot in your browser…");
   expect(
     view.getByText(/Your conversations and files stay on this computer/),
   ).toBeTruthy();
@@ -795,7 +794,7 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   await view.findByRole("heading", { name: "Accept the license agreement" });
   expect(
     view.getByText(
-      "To run OpenBot on this computer, accept the CopilotKit license agreement.",
+      "To run OpenBot on this computer, accept the OpenBot by CopilotKit license agreement.",
     ),
   ).toBeTruthy();
   expect(
@@ -808,7 +807,7 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   await userEvent.click(view.getByRole("button", { name: "Accept" }));
   await view.findByRole("heading", { name: "Connect your AI" });
   expect(stepLabel(view)).toBe("AI");
-  expect(view.queryByText(/needs your CopilotKit account/)).toBeNull();
+  expect(view.queryByText(/Sign in to finish setting up OpenBot/)).toBeNull();
   // Signed in, this installation's apps were connected before moving on.
   expect(
     invokeCalls
@@ -832,7 +831,7 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
 });
 
 /**
- * A new Mac sat on "Checking your CopilotKit account…" for the whole of Podman's install, and no
+ * A new Mac sat on "Checking your OpenBot account…" for the whole of Podman's install, and no
  * browser opened: the check ran the CLI's `onboard local-terms`, which checks the engine first. The
  * CLI's `login` needs no engine. So the sign-in starts the moment the step opens, and the engine is
  * waited for only after it, for the agreement.
@@ -863,7 +862,7 @@ test("the account step opens the CopilotKit sign-in at once, without waiting for
 
   // The browser sign-in, first, with nothing asked of the engine before it. Under it, what is
   // installing meanwhile.
-  await view.findByText("Finish signing in to CopilotKit in your browser…");
+  await view.findByText("Finish signing in to OpenBot in your browser…");
   expect(view.getByText("WXYZ-2345")).toBeTruthy();
   expectBehind(view, 1, DOWNLOADING_SOFTWARE);
   const accountCalls = () =>
@@ -916,7 +915,7 @@ test("macOS's password prompt is explained and comes without a click, and a clos
   });
   const view = await renderApp();
   await installLocal(view);
-  await view.findByText("Checking your CopilotKit account…");
+  await view.findByText("Checking your OpenBot account…");
 
   // Downloaded while the person signs in, then said before the prompt, with nothing to click.
   await emitProgress({
@@ -997,7 +996,7 @@ test("the account step waits for a container engine Install is still setting up,
     { timeout: 6000 },
   );
   expect(asked).toBe(2);
-  expect(view.queryByText(/Couldn.t check your CopilotKit account/)).toBeNull();
+  expect(view.queryByText(/Couldn.t check your OpenBot account/)).toBeNull();
 }, 15000);
 
 // What the native side says as it opens Docker Desktop: `docker_desktop::HAND_OFF`.
@@ -1010,7 +1009,7 @@ function broughtToFront() {
 
 test("the account step says Docker Desktop is starting while Install waits on it, until Docker answers", async () => {
   // Dogfooding 0.3.3: Install opened Docker Desktop, whose window came to the front. OpenBot's,
-  // behind it on the account step, said only "Checking your CopilotKit account…" for minutes.
+  // behind it on the account step, said only "Checking your OpenBot account…" for minutes.
   setupRootConfiguration("/tmp/hand-off-docker", async () =>
     emptyConfiguration(),
   );
@@ -1032,7 +1031,7 @@ test("the account step says Docker Desktop is starting while Install waits on it
   });
   expectBehind(view, 1, DOCKER_HAND_OFF);
   // One line, saying what the wait is for.
-  expect(view.queryByText("Checking your CopilotKit account…")).toBeNull();
+  expect(view.queryByText("Checking your OpenBot account…")).toBeNull();
   expect(view.getAllByText(DOCKER_HAND_OFF)).toHaveLength(1);
 
   // Docker answers: the line goes. Until the account check hears the engine, the step says what
@@ -1072,7 +1071,7 @@ test("the install behind the account step is said on every part of it, signing i
   });
   // What the account check waits on, in Install's own words, said once.
   expectBehind(view, 1, "Installing the software OpenBot runs on.");
-  expect(view.queryByText("Checking your CopilotKit account…")).toBeNull();
+  expect(view.queryByText("Checking your OpenBot account…")).toBeNull();
   expect(view.queryAllByRole("status")).toHaveLength(0);
 
   // Signed out, the step is about signing in, and the install behind it is still said.
@@ -1097,7 +1096,7 @@ test("the install behind the account step is said on every part of it, signing i
  * technical words beside it, and the back end's releases by `log_update_due`.
  */
 
-/** Words a person setting OpenBot up doesn't know, and the back end's versions. */
+/** Words a person setting OpenBot up doesn't know, the back end's versions, and CopilotKit alone. */
 const TECHNICAL = [
   /Podman/i,
   /\bWSL\b/,
@@ -1112,6 +1111,9 @@ const TECHNICAL = [
   /\bCLI\b/,
   /\bCompose\b/,
   /0\.16\.0/,
+  // The company alone. It is named only as OpenBot by CopilotKit, which the Account step's header
+  // reads as "OpenBotby CopilotKit" here: two spans, set apart by the stylesheet.
+  /(?<!OpenBot\s*by\s+)CopilotKit/,
 ];
 
 /** The native side's lines while it prepares this computer (`engine.rs`, `install.rs`). */
@@ -1150,15 +1152,11 @@ function behindNow(view: ReturnType<typeof render>): string | null {
 }
 
 function technicalOn(beats: Beat[]) {
-  return beats.flatMap(({ beat, text }) => {
-    // The Account step's lede names CopilotKit Intelligence by product decision, as the one
-    // entry in `SHOWN_BY_DECISION` (tests/no-intelligence-in-user-copy.test.ts) records. Only
-    // that exact sentence is excused; the word anywhere else on any screen still fails.
-    const plain = text.replaceAll(SELF_CONTAINED, "");
-    return TECHNICAL.filter((word) => word.test(plain)).map(
-      (word) => `${beat}: ${plain.match(word)?.[0]}`,
-    );
-  });
+  return beats.flatMap(({ beat, text }) =>
+    TECHNICAL.filter((word) => word.test(text)).map(
+      (word) => `${beat}: ${text.match(word)?.[0]}`,
+    ),
+  );
 }
 
 /** What each part of a first run said, from the first screen to OpenBot opening. */
@@ -1202,7 +1200,7 @@ async function walkFirstRun(platform: "macOS" | "Windows"): Promise<Beat[]> {
   seen("welcome");
 
   await installLocal(view);
-  await view.findByText("Finish signing in to CopilotKit in your browser…");
+  await view.findByText("Finish signing in to OpenBot in your browser…");
   seen("signing in");
   await running("install-engine", NATIVE.looking);
   seen("signing in, looking");
