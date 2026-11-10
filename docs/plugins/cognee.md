@@ -1,10 +1,10 @@
 # Cognee
 
 [Cognee](https://www.cognee.ai) gives a Bot long-term memory for the material it works with. Ask a
-Bot to remember a decision, a set of notes or a file (up to 10 MB), and Cognee builds a knowledge
-graph from it. Later, in any conversation and with any Bot that has this connector, a Bot can search
-that graph and answer from it. All of it is stored and searched **as the person asking**, in their
-own Cognee account.
+Bot to remember a decision, a set of notes or a file, and Cognee builds a knowledge graph from it.
+Later, in any conversation and with any Bot that has this connector, a Bot can search that graph and
+answer from it. All of it is stored and searched **as the person asking**, in their own Cognee
+account.
 
 It sits beside the memory OpenBot keeps in CopilotKit Intelligence and does not replace it. OpenBot's
 own memory keeps facts about the person, which they can review and edit. Cognee keeps what the
