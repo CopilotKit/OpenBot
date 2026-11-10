@@ -107,6 +107,7 @@ describe("an address that opened memory", () => {
       routeTree: root.addChildren([
         page("/bots", "Bots"),
         page("/bots/$agentId/access", "What it can do"),
+        page("/bots/$agentId/routines", "Routines"),
         page("/bots/$agentId/memory", "Bot memory", BotMemoryRoute),
         page("/capabilities/memory", "Memory", CapabilitiesMemoryRoute),
         page("/memory", "Old memory", LegacyMemoryRoute),
@@ -131,10 +132,10 @@ describe("an address that opened memory", () => {
     }
   });
 
-  test("goes to the Bot's What it can do page, where its check-ins are, in the personal edition", async () => {
+  test("goes to the Bot's Routines, where its check-ins are, in the personal edition", async () => {
     const { view, path } = await land("personal", "/bots/expenses/memory");
-    await waitFor(() => expect(path()).toBe("/bots/expenses/access"));
-    expect(await view.findByText("What it can do")).toBeTruthy();
+    await waitFor(() => expect(path()).toBe("/bots/expenses/routines"));
+    expect(await view.findByText("Routines")).toBeTruthy();
   });
 
   test("still opens memory in the team edition", async () => {
@@ -202,7 +203,7 @@ describe("the Bots page", () => {
 });
 
 describe("a Bot's What it can do page", () => {
-  test("holds its check-ins in the personal edition, which has no Memory page to hold them", async () => {
+  test("holds no check-ins in the personal edition: they are rows of the Bot's Routines", async () => {
     servingNothing();
     const params = spyOn(BotAccessRoute, "useParams").mockImplementation(
       (() => ({ agentId: "expenses" })) as never,
@@ -216,15 +217,14 @@ describe("a Bot's What it can do page", () => {
       expect(
         await view.findByRole("heading", { name: "What it can do" }),
       ).toBeTruthy();
-      expect(
-        await view.findByRole("heading", { name: "Check-ins" }),
-      ).toBeTruthy();
+      await settleReactWork();
+      expect(view.queryByRole("heading", { name: "Check-ins" })).toBeNull();
     } finally {
       params.mockRestore();
     }
   });
 
-  test("leaves check-ins on the Memory page in the team edition", async () => {
+  test("holds no check-ins in the team edition either", async () => {
     servingNothing();
     const params = spyOn(BotAccessRoute, "useParams").mockImplementation(
       (() => ({ agentId: "expenses" })) as never,

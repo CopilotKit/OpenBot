@@ -38,7 +38,9 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { GoalSchedules } from "@/components/routines/goal-schedules";
 import { markdownComponents } from "@/lib/markdown";
+import type { RoutineRecord } from "@/lib/routines/queries";
 import {
   type ResponsibilityRecord,
   responsibilityActionMutationOptions,
@@ -63,7 +65,7 @@ export const STATUS: Record<
   completed: { label: "Completed", icon: IconCircleCheck },
 };
 
-const SOURCE_LABEL: Record<Source, string> = {
+export const SOURCE_LABEL: Record<Source, string> = {
   manual: "Manual",
   slack: "Slack",
   github: "GitHub",
@@ -107,14 +109,17 @@ export function summaryFor(
 /**
  * Everything about one responsibility, opened from its row: what can be done to it now (pause, run,
  * complete — each immediate), its wording (a draft, saved by the footer), where it stands, what
- * starts it, and its runs.
+ * starts it (its schedules, events and triggers), and its runs.
  */
 export function ResponsibilityDialog({
   goal,
   onClose,
+  routines = [],
 }: {
   goal: ResponsibilityRecord;
   onClose: () => void;
+  /** The routines that run it: on the Routines list they are its starts, changed here. */
+  routines?: readonly RoutineRecord[];
 }) {
   const formId = useId();
   const [showRuns, setShowRuns] = useState(false);
@@ -363,6 +368,7 @@ export function ResponsibilityDialog({
             </div>
           ) : null}
 
+          <GoalSchedules routines={routines} />
           <Triggers goal={goal} />
           <Runs
             channelId={goal.channelId}

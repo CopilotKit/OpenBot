@@ -249,6 +249,8 @@ type RoutineDto = {
   enabled: boolean;
   nextRunAt: string;
   lastRun: { status: RoutineRunOutcome | null; at: string | null } | null;
+  /** The goal it runs, or null. The Routines page shows it as a start of that goal, not a row. */
+  goalId: string | null;
 };
 
 export const SWEEP_SILENCE_MS = MINIMUM_INTERVAL_MS;
@@ -288,6 +290,7 @@ function routineDto(routine: RoutineSummary): RoutineDto {
           at: routine.lastRun.finishedAt?.toISOString() ?? null,
         }
       : null,
+    goalId: routine.goalId,
   };
 }
 

@@ -233,7 +233,7 @@ test("a long title is cut to one line with an ellipsis, and the whole of it show
   expect(title.parentElement?.className).toContain("min-w-0");
 });
 
-test("a goal's activity row says Goal and opens the Bot's goals", async () => {
+test("a goal's activity row says Goal and opens the Bot's routines", async () => {
   const [running] = items(1, "Close the month");
   const view = glance({
     inProgress: [{ ...(running as ActivityItem), kind: "responsibility" }],
@@ -242,7 +242,7 @@ test("a goal's activity row says Goal and opens the Bot's goals", async () => {
   });
   const title = await view.findByText("Close the month 1");
   const row = title.closest("a");
-  expect(row?.getAttribute("href")).toBe("/bots/scout/responsibilities");
+  expect(row?.getAttribute("href")).toBe("/bots/scout/routines");
   expect(row?.textContent).toContain("Goal · running");
   expect(row?.textContent).not.toMatch(/responsibilit/i);
 });

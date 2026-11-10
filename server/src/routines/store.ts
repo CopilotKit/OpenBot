@@ -53,6 +53,7 @@ import {
   routineSweeps,
   routines,
 } from "../db/schema";
+import { routineRunsGoal } from "../responsibilities/types";
 import { describeCron, nextOccurrence, ScheduleRefusedError } from "./schedule";
 
 const SWEEP_ID = "routines";
@@ -156,6 +157,12 @@ export type RoutineSummary = {
   channelDeleted: boolean;
   /** The most recent firing, or null when it has never fired. */
   lastRun: { status: RoutineRunOutcome | null; finishedAt: Date | null } | null;
+  /**
+   * The goal it runs, or null when it runs none. Resolved by `routineRunsGoal`, the rule the goal
+   * store and Activity read, so a routine made before routines recorded their goal reports the one
+   * its instruction names. The Routines page draws such a routine as a start of that goal's row.
+   */
+  goalId: string | null;
 };
 
 export type RoutineInput = {
@@ -950,6 +957,18 @@ export function createRoutineStore(database: Database): RoutineStore {
           });
         }
       }
+      // The owner's goals, capped at 100 by the goal store, to say which one each routine runs.
+      const goals =
+        rows.length > 0
+          ? await database
+              .select({
+                id: responsibilities.id,
+                title: responsibilities.title,
+                agentId: responsibilities.agentId,
+              })
+              .from(responsibilities)
+              .where(eq(responsibilities.ownerUserId, ownerUserId))
+          : [];
 
       return rows.map(
         ({
@@ -981,6 +1000,12 @@ export function createRoutineStore(database: Database): RoutineStore {
                 }),
           channelDeleted: channelExists === null || channelDeletedAt !== null,
           lastRun: lastRuns.get(routine.id) ?? null,
+          goalId:
+            goals.find(
+              (goal) =>
+                goal.agentId === routine.agentId &&
+                routineRunsGoal(routine, goal),
+            )?.id ?? null,
         }),
       );
     },

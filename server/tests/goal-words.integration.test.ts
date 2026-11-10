@@ -146,10 +146,10 @@ describe("a goal's run", () => {
 });
 
 describe("a goal's triggers, in a conversation", () => {
-  test("are offered in a goal's words, pointing at the Goals page", () => {
+  test("are offered in a goal's words, pointing at the Routines page", () => {
     const offered = JSON.stringify(TRIGGER_TOOLS);
     expect(offered).not.toMatch(SAYS_RESPONSIBILITY);
-    expect(offered).toContain("the Bot's Goals page");
+    expect(offered).toContain("the Bot's Routines page");
   });
 });
 

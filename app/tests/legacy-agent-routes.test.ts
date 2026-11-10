@@ -30,7 +30,7 @@ test("pages that left the sidebar send people to where their contents went", () 
     "/approvals": "/settings/approvals",
     "/memory": "/capabilities/memory",
     "/reachability": "/settings/notifications",
-    "/responsibilities": "/bots",
+    "/responsibilities": "/settings/routines",
     "/group/new": "/channel/new",
   });
 });

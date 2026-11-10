@@ -165,10 +165,8 @@ function Rail({
   /** Whether the rail carries the Bots badge: at desktop width, where the rail is on screen. */
   showBadge: boolean;
 }) {
-  // OpenDots draws Routines itself, as its own screen just above, so not a second time from the list.
-  const navigation = useNavigationItems().filter(
-    (item) => item.id !== "routines",
-  );
+  // OpenDots draws Routines itself, as its own screen just above. The shared list has no Routines.
+  const navigation = useNavigationItems();
   return (
     <nav
       aria-label="Workspace navigation"

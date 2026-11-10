@@ -2,7 +2,6 @@ import {
   type Icon,
   IconBolt,
   IconBox,
-  IconClock,
   IconPlug,
   IconSettings,
   IconShieldLock,
@@ -22,30 +21,18 @@ import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
  * `section` says where OpenBot's sidebar puts each entry: `primary` destinations sit in its footer,
  * `account` ones in the menu under the person's name. A skin may group them its own way.
  *
- * Bots, Routines, Capabilities and Connections are each somebody's own, which is why they sit beside
- * each other and not inside Admin. Routines are the work your Bots do on a schedule, every Bot's on
- * one page, where somebody who wants a Bot to do something every morning looks first. Capabilities
- * are your skills and what your Bots remember about you; Connections are the apps a Bot reaches as
- * you. Capabilities links to `/capabilities` rather than a tab, so it stays lit on both of its tabs.
+ * Bots, Capabilities and Connections are each somebody's own, which is why they sit beside each
+ * other and not inside Admin. Capabilities are your skills and what your Bots remember about you;
+ * Connections are the apps a Bot reaches as you, the every-Bot page of Apps. Every Bot's routines
+ * are in Settings, with the rest of what is set for every Bot (`docs/how-openbot-works.md`).
+ * Capabilities links to `/capabilities` rather than a tab, so it stays lit on both of its tabs.
  */
 export type NavigationItem =
   | {
       kind?: undefined;
-      id:
-        | "bots"
-        | "routines"
-        | "capabilities"
-        | "connections"
-        | "admin"
-        | "settings";
+      id: "bots" | "capabilities" | "connections" | "admin" | "settings";
       label: string;
-      to:
-        | "/bots"
-        | "/routines"
-        | "/capabilities"
-        | "/connections"
-        | "/admin"
-        | "/settings";
+      to: "/bots" | "/capabilities" | "/connections" | "/admin" | "/settings";
       icon: Icon;
       section: "primary" | "account";
       /** Admin routes are guarded on the server; the entry is hidden from people who cannot open them. */
@@ -85,13 +72,6 @@ export const NAVIGATION: readonly NavigationItem[] = [
     label: "Bots",
     to: "/bots",
     icon: IconBolt,
-    section: "primary",
-  },
-  {
-    id: "routines",
-    label: "Routines",
-    to: "/routines",
-    icon: IconClock,
     section: "primary",
   },
   {

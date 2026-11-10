@@ -50,7 +50,7 @@ const BOT_TABS: Record<string, string> = {
   approvals: "Approvals",
   memory: "Memory",
   reach: "Reach",
-  responsibilities: "Goals",
+  responsibilities: "Routines",
   routines: "Routines",
   sharing: "Sharing",
 };

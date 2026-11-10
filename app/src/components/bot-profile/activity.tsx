@@ -73,7 +73,7 @@ function linkFor(item: ActivityItem, agentId: string) {
     case "question":
       return <Link params={{ agentId }} to="/bots/$agentId" />;
     case "responsibility":
-      return <Link params={{ agentId }} to="/bots/$agentId/responsibilities" />;
+      return <Link params={{ agentId }} to="/bots/$agentId/routines" />;
     case "routine":
       return <Link params={{ agentId }} to="/bots/$agentId/routines" />;
     default:

@@ -593,7 +593,7 @@ describe("the frame", () => {
       "/s/ideas",
     );
     expect(
-      tabs.getByRole("link", { name: "Goals" }).getAttribute("aria-current"),
+      tabs.getByRole("link", { name: "Routines" }).getAttribute("aria-current"),
     ).toBe("page");
     expect(tabs.getByRole("link", { name: "Apps" }).getAttribute("href")).toBe(
       "/connections",
@@ -603,7 +603,7 @@ describe("the frame", () => {
   test.each([
     ["/s/activity", "Activity"],
     ["/s/ideas", "Ideas"],
-    ["/s/goals", "Goals"],
+    ["/s/goals", "Routines"],
     ["/connections", "Apps"],
     ["/channel/c-muse", "Chat"],
     ["/routines", null],
@@ -903,7 +903,7 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
     );
   });
 
-  test("Goals shows the centre Bot's routines and responsibilities", async () => {
+  test("Routines shows the centre Bot's routines and goals in one list", async () => {
     serve();
     renderAt("/s/goals");
     expect(await page().findByText("Send me the headlines")).toBeTruthy();
@@ -911,7 +911,7 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
     expect(page().queryByText("Watch the competition")).toBeNull();
   });
 
-  test("a routine is paused from Goals through OpenBot's own switch", async () => {
+  test("a routine is paused from Routines through OpenBot's own switch", async () => {
     const calls = serve();
     renderAt("/s/goals");
     fireEvent.click(

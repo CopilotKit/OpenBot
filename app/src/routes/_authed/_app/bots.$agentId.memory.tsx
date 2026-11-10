@@ -1,18 +1,17 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { BotSubpage } from "@/components/bot-profile/bot-subpage";
 import { MemorySources } from "@/components/memory/sources";
-import { ProactiveResearchSettings } from "@/components/suggestions/proactive-panel";
 import { deploymentOffersMemory } from "@/lib/deployment/queries";
 
 export const Route = createFileRoute("/_authed/_app/bots/$agentId/memory")({
   /*
-   * The personal edition has no memory (see `offersMemory`). This Bot's check-ins, the other half of
-   * this page, are on What it can do there, so an old link to this page opens that.
+   * The personal edition has no memory (see `offersMemory`). This page once held the Bot's
+   * check-ins too, which are on its Routines page now, so an old link there opens that.
    */
   beforeLoad: async ({ context, params }) => {
     if (!(await deploymentOffersMemory(context.queryClient))) {
       throw redirect({
-        to: "/bots/$agentId/access",
+        to: "/bots/$agentId/routines",
         params: { agentId: params.agentId },
         replace: true,
       });
@@ -26,7 +25,7 @@ function MemoryPage() {
   return (
     <BotSubpage
       agentId={agentId}
-      description="Choose which apps this Bot learns from and manage its check-ins."
+      description="Choose which apps this Bot learns from."
       title="Memory"
     >
       {(agent) => (
@@ -42,7 +41,6 @@ function MemoryPage() {
             .
           </p>
           <MemorySources agentId={agent.id} />
-          <ProactiveResearchSettings agentId={agent.id} />
         </>
       )}
     </BotSubpage>

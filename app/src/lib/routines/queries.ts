@@ -40,6 +40,12 @@ export type RoutineRecord = {
     status: "succeeded" | "failed" | "skipped" | null;
     at: string | null;
   } | null;
+  /**
+   * The goal it runs, or null. The server resolves it, older routines included, so the Routines
+   * list draws such a routine as a start of that goal's row (`lib/routines/merged.ts`). Absent from
+   * a server that predates it, which reads as running none.
+   */
+  goalId?: string | null;
 };
 
 export type SweepRecord = {

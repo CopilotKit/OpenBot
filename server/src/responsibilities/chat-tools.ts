@@ -111,7 +111,7 @@ export const GOAL_TOOLS: readonly McpToolShape[] = Object.freeze([
       "you carry on with over time and report on in a conversation. Use it whenever they ask for a goal.",
       "",
       "A goal has no schedule of its own. It runs when somebody asks (Run now on its card on the Bot's",
-      "Goals page, or `run_goal`) and when an event wakes it: a trigger you add with `create_trigger`, or",
+      "Routines page, or `run_goal`) and when an event wakes it: a trigger you add with `create_trigger`, or",
       "one of its `subscriptions`. Work done at set times is a routine (`create_routine`); a goal and a",
       "routine can work together. Say which it is when you tell the person what you set up.",
       "",

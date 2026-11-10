@@ -1,22 +1,14 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { BotSubpage } from "@/components/bot-profile/bot-subpage";
-import { BotResponsibilities } from "@/components/responsibilities/responsibilities";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
+/** A Bot's goals are rows of its Routines list now. */
 export const Route = createFileRoute(
   "/_authed/_app/bots/$agentId/responsibilities",
 )({
-  component: ResponsibilitiesPage,
+  beforeLoad: ({ params }) => {
+    throw redirect({
+      to: "/bots/$agentId/routines",
+      params: { agentId: params.agentId },
+      replace: true,
+    });
+  },
 });
-
-function ResponsibilitiesPage() {
-  const { agentId } = Route.useParams();
-  return (
-    <BotSubpage
-      agentId={agentId}
-      description="Review this Bot’s ongoing goals, what triggered each run, and its results."
-      title="Goals"
-    >
-      {(agent) => <BotResponsibilities agentId={agent.id} />}
-    </BotSubpage>
-  );
-}

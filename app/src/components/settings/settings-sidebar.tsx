@@ -4,6 +4,7 @@ import {
   IconBook,
   IconBrowser,
   IconChecks,
+  IconClock,
   IconDeviceDesktop,
   IconHistory,
   IconLayoutGrid,
@@ -63,6 +64,12 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
     title: "Notifications",
     icon: IconBell,
     linkOptions: { to: "/settings/notifications" },
+  },
+  {
+    /* Every Bot's routines, goals and check-ins in one list, and the switch for all check-ins. */
+    title: "Routines",
+    icon: IconClock,
+    linkOptions: { to: "/settings/routines" },
   },
   {
     /* Whether Bots ask first, and rules for every Bot. Team settings are an administrator's. */

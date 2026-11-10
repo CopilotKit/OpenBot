@@ -8,6 +8,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type * as React from "react";
 import { RoutineComposerButton } from "@/components/routines/new-routine-button";
 import { RoutinesConnectionPage } from "@/components/routines/routines-connection-page";
@@ -64,6 +65,11 @@ function draw(element: React.ReactNode, page: RoutinesPage) {
   global.fetch = (async (input: RequestInfo | URL) => {
     const path = String(input);
     if (path.startsWith("/api/routines")) return Response.json(page);
+    // The same list draws goals and check-ins; none here.
+    if (path === "/api/responsibilities")
+      return Response.json({ responsibilities: [] });
+    if (path === "/api/proactive/settings")
+      return Response.json({ settings: [], allowed: true });
     if (path.startsWith("/api/agents"))
       return Response.json({
         agents: path.includes("hidden=true")
@@ -96,7 +102,7 @@ test("Connections > Routines says what Routines is and leads to the Routines pag
     ),
   ).toBeTruthy();
   const row = await view.findByRole("link", { name: /Your routines/ });
-  expect(row.getAttribute("href")).toBe("/routines");
+  expect(row.getAttribute("href")).toBe("/settings/routines");
   expect(await within(row).findByText("2 routines, 1 on.")).toBeTruthy();
   expect(
     view.getByRole("button", { name: "New routine" }).getAttribute("href"),
@@ -105,24 +111,26 @@ test("Connections > Routines says what Routines is and leads to the Routines pag
   expect(view.queryByText(/create_routine/)).toBeNull();
 });
 
+/** The empty list's New menu, opened, and where its Routine item leads. */
+async function newRoutineHref(view: ReturnType<typeof draw>) {
+  const user = userEvent.setup({ document });
+  await user.click(await view.findByRole("button", { name: /^New/ }));
+  const menu = await view.findByRole("menu");
+  return within(menu)
+    .getByRole("menuitem", { name: "Routine" })
+    .getAttribute("href");
+}
+
 test("an empty Routines page offers New routine, and a Bot's own page starts it for that Bot", async () => {
   const empty = { routines: [], sweep: SWEEP };
   const page = draw(<RoutinesList />, empty);
-  expect(
-    (await page.findByRole("button", { name: "New routine" })).getAttribute(
-      "href",
-    ),
-  ).toBe("/routines/new");
+  expect(await newRoutineHref(page)).toBe("/routines/new");
   cleanup();
   queryClient.clear();
 
   const botPage = draw(<RoutinesList agentId="lead-desk" />, empty);
   expect(await botPage.findByText("No routines for this Bot yet")).toBeTruthy();
-  expect(
-    (await botPage.findByRole("button", { name: "New routine" })).getAttribute(
-      "href",
-    ),
-  ).toBe("/routines/new?agentId=lead-desk");
+  expect(await newRoutineHref(botPage)).toBe("/routines/new?agentId=lead-desk");
 });
 
 test("the Routines page says which Bot each routine belongs to", async () => {

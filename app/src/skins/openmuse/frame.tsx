@@ -50,7 +50,7 @@ const TABS: { id: MuseTab; label: string; icon: MuseIcon }[] = [
   { id: "chat", label: "Chat", icon: IconMessageCircle },
   { id: "activity", label: "Activity", icon: IconTable },
   { id: "ideas", label: "Ideas", icon: IconBulb },
-  { id: "goals", label: "Goals", icon: IconSquareCheck },
+  { id: "goals", label: "Routines", icon: IconSquareCheck },
   { id: "apps", label: "Apps", icon: IconTriangleSquareCircle },
 ];
 
@@ -271,7 +271,7 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
   );
 }
 
-/** Activity, Ideas and Goals are this skin's own screens; Apps is OpenBot's Connections. */
+/** Activity, Ideas and Routines are this skin's own screens; Apps is OpenBot's Connections. */
 function TabLink({
   tab,
   label,

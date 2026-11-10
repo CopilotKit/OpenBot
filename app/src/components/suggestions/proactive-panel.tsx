@@ -55,25 +55,18 @@ import {
   proactiveSuggestionsQueryOptions,
 } from "@/lib/proactive";
 import { relativeTime } from "@/lib/relative-time";
+import { CHECK_IN_INTERVALS, intervalLabel } from "@/lib/routines/merged";
 import { useUserPreferences } from "@/lib/settings/message-list";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import { SuggestionRow } from "./suggestion-row";
 
-const intervals = [
-  { minutes: 60, label: "Every hour" },
-  { minutes: 240, label: "Every 4 hours" },
-  { minutes: 720, label: "Twice a day" },
-  { minutes: 1440, label: "Once a day" },
-];
+const intervals = CHECK_IN_INTERVALS;
 /** The label map, so a closed trigger says "Every 4 hours" rather than 240. */
 const intervalItems = intervals.map((interval) => ({
   value: interval.minutes,
   label: interval.label,
 }));
-const intervalLabel = (minutes: number) =>
-  intervals.find((interval) => interval.minutes === minutes)?.label ??
-  `Every ${minutes} minutes`;
 /** How many suggestions show before the rest fold behind "Show more". */
 const SUGGESTIONS_SHOWN = 3;
 
@@ -155,7 +148,7 @@ export function SuggestionsInbox({
  * Why no Bot checks in for this person whatever its own setting says, or null when they do: an
  * admin turned check-ins off for them, or they turned them off for all their Bots.
  */
-function useCheckInsBlocked(): string | null {
+export function useCheckInsBlocked(): string | null {
   const allowed = useQuery(proactiveAllowedQueryOptions());
   const preferences = useUserPreferences();
   if (allowed.data === false) return "Turned off by your admin";
@@ -210,9 +203,9 @@ export function ProactiveResearchSettings({
               You turned off check-ins for all your Bots in{" "}
               <Link
                 className="underline underline-offset-4"
-                to="/settings/notifications"
+                to="/settings/routines"
               >
-                Notifications
+                Routines
               </Link>
               .
             </>
@@ -268,7 +261,7 @@ export function ProactiveResearchSettings({
  * check-ins, and only the person's own conversations with the Bot: a task's conversation holds one
  * piece of work, and is no place for check-ins to reach them.
  */
-function TurnOnResearchDialog({
+export function TurnOnResearchDialog({
   fixedBot,
   onClose,
 }: {
@@ -481,21 +474,28 @@ export function lastCheckInLine(run: LastCheckIn | null | undefined) {
  * was skipped or couldn't finish says why on a line of its own, since that is something to act on,
  * and the focus, in the person's own words and often long, comes last on one line.
  */
-function SettingRow({
+export function SettingRow({
   setting,
   botName,
   blocked,
+  showBot = true,
+  label,
 }: {
   setting: ProactiveSetting;
   botName: string;
   blocked: string | null;
+  /** Off on one Bot's own list, where every row is that Bot's. */
+  showBot?: boolean;
+  /** A small word beside the title, as the Routines list marks a check-in among its routines. */
+  label?: string;
 }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   const change = useMutation(
     changeProactiveSettingMutationOptions(queryClient),
   );
-  const summary = `${intervalLabel(setting.intervalMinutes)} · ${checkInStatus(setting, blocked)}`;
+  // When it starts, what it does, and where it stands: the Routines list's sentence for a check-in.
+  const summary = `${intervalLabel(setting.intervalMinutes)} · Tells you · ${checkInStatus(setting, blocked)}`;
   const last = lastCheckInLine(setting.lastRun);
   const outcome = setting.lastRun?.outcome;
   /*
@@ -527,9 +527,16 @@ function SettingRow({
         </ItemMedia>
         <ItemContent>
           {/* What it watches leads, where it watches one thing; the Bot is who watches it. */}
-          <ItemTitle>{setting.subject || botName}</ItemTitle>
+          <ItemTitle>
+            {setting.subject || botName}
+            {label ? (
+              <span className="font-normal text-muted-foreground text-xs">
+                {label}
+              </span>
+            ) : null}
+          </ItemTitle>
           <ItemDescription>
-            {setting.subject ? `${botName} · ${summary}` : summary}
+            {setting.subject && showBot ? `${botName} · ${summary}` : summary}
           </ItemDescription>
           {last && (outcome === "skipped" || outcome === "failed") ? (
             <ItemDescription

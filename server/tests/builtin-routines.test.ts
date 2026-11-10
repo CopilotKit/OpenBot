@@ -67,6 +67,7 @@ const SUMMARY: RoutineSummary = {
     status: "succeeded",
     finishedAt: new Date("2026-01-02T08:00:03.000Z"),
   },
+  goalId: null,
 };
 
 type Recorded =

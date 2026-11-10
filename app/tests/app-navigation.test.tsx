@@ -195,12 +195,8 @@ test.each(["user", "admin"] as const)(
         to,
       })),
     ).toEqual(expected(role, "primary"));
-    // Scheduled work has its own place beside Bots, where somebody looking for it looks first.
-    expect(
-      within(footer)
-        .getByRole("link", { name: "Routines" })
-        .getAttribute("href"),
-    ).toBe("/routines");
+    // Every Bot's routines are in Settings, with the rest of what is set for every Bot.
+    expect(within(footer).queryByRole("link", { name: "Routines" })).toBeNull();
     // Bots keeps its count of what waits on the person, and only Bots has one.
     const badge = within(footer).getByRole("img", {
       name: "1 thing needs you",
@@ -254,7 +250,6 @@ test("Admin is in the list for admins only", () => {
   expect(ids(undefined)).not.toContain("admin");
   expect(ids("user")).toEqual([
     "bots",
-    "routines",
     "capabilities",
     "connections",
     "settings",
@@ -271,7 +266,6 @@ test("the personal edition has no Admin or Capabilities, and a feature list in A
   // Skills and Memory open from the Bots page instead.
   expect(personal.map((item) => item.id)).toEqual([
     "bots",
-    "routines",
     "connections",
     "team-features",
     "settings",

@@ -6,7 +6,6 @@ import {
   IconDeviceMobile,
   IconPuzzle,
   IconSettings,
-  IconTargetArrow,
   IconUsersGroup,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -42,13 +41,13 @@ import { memorySourcesQueryOptions } from "@/lib/memory";
 import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import { responsibilitiesQueryOptions } from "@/lib/responsibilities";
+import { mergeRoutines } from "@/lib/routines/merged";
 import { routinesQueryOptions } from "@/lib/routines/queries";
 import { teamBotsQueryOptions } from "@/lib/team-bots";
 import { connectorCount } from "./access";
 
 type Row = {
   to:
-    | "/bots/$agentId/responsibilities"
     | "/bots/$agentId/reach"
     | "/bots/$agentId/memory"
     | "/bots/$agentId/approvals"
@@ -88,21 +87,6 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
 
   const allRows: Row[] = [
     {
-      to: "/bots/$agentId/responsibilities",
-      title: "Goals",
-      icon: IconTargetArrow,
-      summary: goals.data
-        ? countLabel(
-            goals.data.filter(
-              (goal) => goal.agentId === agent.id && goal.status === "active",
-            ).length,
-            "active",
-            "active",
-            "None active",
-          )
-        : "",
-    },
-    {
       to: "/bots/$agentId/reach",
       title: "Reaching you",
       icon: IconDeviceMobile,
@@ -116,24 +100,19 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
           )
         : "",
     },
-    // Not where memory isn't offered: there this Bot's check-ins are on What it can do.
+    // Only where memory is offered: the personal edition has none.
     ...(memory
       ? [
           {
             to: "/bots/$agentId/memory" as const,
             title: "Memory",
             icon: IconBrain,
-            summary:
-              sources.data && research.data
-                ? memorySummary(
-                    sources.data.filter((source) => source.agentId === agent.id)
-                      .length,
-                    research.data.some(
-                      (setting) =>
-                        setting.agentId === agent.id && setting.enabled,
-                    ),
-                  )
-                : "",
+            summary: sources.data
+              ? memorySummary(
+                  sources.data.filter((source) => source.agentId === agent.id)
+                    .length,
+                )
+              : "",
           },
         ]
       : []),
@@ -157,15 +136,21 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
       to: "/bots/$agentId/routines",
       title: "Routines",
       icon: IconClock,
-      summary: routines.data
-        ? countLabel(
-            routines.data.routines.filter((row) => row.agentId === agent.id)
-              .length,
-            "routine",
-            "routines",
-            "No routines",
-          )
-        : "",
+      // Its routines, goals and check-ins, counted as the Routines list draws them.
+      summary:
+        routines.data && goals.data && research.data
+          ? countLabel(
+              mergeRoutines({
+                routines: routines.data.routines,
+                goals: goals.data,
+                checkIns: research.data,
+                agentId: agent.id,
+              }).length,
+              "routine",
+              "routines",
+              "No routines",
+            )
+          : "",
     },
     {
       to: "/bots/$agentId/access",
@@ -198,17 +183,15 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
     },
   ];
   /*
-   * THREE ROWS IN THE PERSONAL EDITION. Approval rules, Responsibilities and check-ins are sections
-   * of the access page there, renamed What it can do, so one page answers what a Bot can do. Reaching
-   * you is Slack, Teams and text, and Memory is what its local Intelligence isn't licensed for: the
-   * personal edition has neither.
+   * THREE ROWS IN THE PERSONAL EDITION. Approval rules is a section of the access page there, renamed
+   * What it can do. Reaching you is Slack, Teams and text, and Memory is what its local back end
+   * isn't licensed for: the personal edition has neither.
    */
   const rows = personal
     ? allRows.flatMap((row): Row[] =>
         row.to === "/bots/$agentId/access"
           ? [{ ...row, title: "What it can do" }]
-          : row.to === "/bots/$agentId/responsibilities" ||
-              row.to === "/bots/$agentId/reach" ||
+          : row.to === "/bots/$agentId/reach" ||
               row.to === "/bots/$agentId/approvals"
             ? []
             : [row],

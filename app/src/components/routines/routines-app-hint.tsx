@@ -11,7 +11,7 @@ export function RoutinesAppHint() {
       <span className="truncate">e.g. “every weekday at 9, send me…”</span>
       <Link
         className="shrink-0 font-medium text-foreground underline-offset-2 hover:underline"
-        to="/routines"
+        to="/settings/routines"
       >
         Open Routines
       </Link>

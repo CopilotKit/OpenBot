@@ -1,4 +1,5 @@
 import {
+  IconChevronRight,
   IconClock,
   IconHistory,
   IconPlayerPause,
@@ -14,6 +15,16 @@ import {
   PageRows,
   PageSection,
 } from "@/components/layout/page-shell";
+import {
+  ResponsibilityDialog,
+  SOURCE_LABEL,
+  STATUS,
+} from "@/components/responsibilities/responsibility-dialog";
+import { KIND_LABEL } from "@/components/responsibilities/triggers";
+import {
+  SettingRow,
+  useCheckInsBlocked,
+} from "@/components/suggestions/proactive-panel";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -35,8 +46,19 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
+import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import { relativeTime } from "@/lib/relative-time";
+import {
+  type ResponsibilityRecord,
+  responsibilitiesQueryOptions,
+  triggersQueryOptions,
+} from "@/lib/responsibilities";
+import {
+  goalStarts,
+  type MergedRoutine,
+  mergeRoutines,
+} from "@/lib/routines/merged";
 import {
   deleteRoutineMutationOptions,
   runRoutineNowMutationOptions,
@@ -51,7 +73,7 @@ import {
 } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
-import { NewRoutineButton } from "./new-routine-button";
+import { NewRoutineMenu } from "./new-routine-button";
 
 /**
  * What the last-run cell says, and in what tone.
@@ -219,61 +241,341 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
   );
 }
 
+type BotDirectory = Map<string, AgentProfile>;
+
+/** Whose a row is, on the every-Bot list: a chip with the Bot's face and name, to its Routines. */
+function BotChip({ agentId, bots }: { agentId: string; bots: BotDirectory }) {
+  const bot = bots.get(agentId);
+  return (
+    <Link params={{ agentId }} to="/bots/$agentId/routines">
+      <Chip className="text-foreground transition-colors hover:bg-muted">
+        {bot ? (
+          <span aria-hidden="true" className="contents">
+            <AbstractAvatar name={bot.name} seed={bot.avatarSeed} size={14} />
+          </span>
+        ) : null}
+        {bot?.name ?? "A Bot"}
+      </Chip>
+    </Link>
+  );
+}
+
 /**
- * The signed-in person's standing instructions: a switch to stop one taking effect, and a delete
- * that ends it for good.
+ * A routine's row: what it does (its title, else its instruction), when it starts (its schedule),
+ * and that it acts. A switch to pause it, Run now, its history, and Delete, as the row always had.
+ */
+function RoutineItem({
+  routine,
+  showBot,
+  bots,
+  historyOpen,
+  onToggleHistory,
+  onDelete,
+}: {
+  routine: RoutineRecord;
+  showBot: boolean;
+  bots: BotDirectory;
+  historyOpen: boolean;
+  onToggleHistory: (open: boolean) => void;
+  onDelete: () => void;
+}) {
+  const setEnabled = useMutation(setRoutineEnabledMutationOptions(queryClient));
+  const runNow = useMutation(runRoutineNowMutationOptions(queryClient));
+  const lastRun = lastRunLabel(routine.lastRun);
+  return (
+    <Item size="sm">
+      <ItemMedia variant="icon">
+        {routine.enabled ? <IconClock /> : <IconPlayerPause />}
+      </ItemMedia>
+      {/* Paused reads at a glance: the content dims, and a chip below says the word. */}
+      <ItemContent className={routine.enabled ? "" : "opacity-60"}>
+        {/*
+         * What it does heads the row, and when it starts takes a line of its own under it, so a
+         * narrow window never squeezes the name to fit the schedule.
+         */}
+        <ItemTitle className="line-clamp-2">
+          {routine.title ?? routine.instruction}
+        </ItemTitle>
+        <ItemDescription>
+          {routine.schedule} · {routine.timezone} · Acts
+        </ItemDescription>
+        {routine.title ? (
+          <ItemDescription>{routine.instruction}</ItemDescription>
+        ) : null}
+      </ItemContent>
+      <ItemActions>
+        {/*
+         * Binary and immediate: it takes effect when switched, there is no save. Disabled only
+         * while its own write is in flight, so switching one routine does not freeze the rest.
+         */}
+        <Switch
+          aria-label={`Enable the routine scheduled ${routine.schedule}`}
+          checked={routine.enabled}
+          disabled={setEnabled.isPending}
+          onCheckedChange={(next) =>
+            setEnabled.mutate({ id: routine.id, enabled: next })
+          }
+        />
+      </ItemActions>
+      {/* Two sets, where it stands and what can be done to it, so they wrap onto a line of their
+          own rather than crowding the title. */}
+      <ItemFooter className="flex-wrap">
+        <div
+          className={cn(
+            "flex flex-wrap items-center gap-1.5",
+            routine.enabled ? "" : "opacity-60",
+          )}
+        >
+          {showBot ? <BotChip agentId={routine.agentId} bots={bots} /> : null}
+          {routine.channel.gone ? (
+            <Chip className="border-destructive/40 text-destructive">
+              Conversation deleted
+            </Chip>
+          ) : (
+            // Where it posts is a place, so the chip goes there.
+            <Link
+              params={{ channelId: routine.channel.id }}
+              to="/channel/$channelId"
+            >
+              <Chip className="text-muted-foreground transition-colors hover:text-foreground">
+                {routine.channel.title ?? "Untitled conversation"}
+              </Chip>
+            </Link>
+          )}
+          <Chip className={lastRun.className}>
+            <span className={cn("size-1.5 rounded-full", lastRun.dot)} />
+            {lastRun.text}
+          </Chip>
+          {/*
+           * Enabled only: the store recomputes nextRunAt on cron/timezone change or re-enable, so a
+           * disabled routine's stamp is frozen in the past. Paused takes its place, so the switch's
+           * state has a word as well as a position.
+           */}
+          {!routine.enabled ? (
+            <Chip className="text-muted-foreground">Paused</Chip>
+          ) : new Date(routine.nextRunAt).getTime() <= Date.now() ? (
+            /*
+             * A stamp in the past is a firing the sweep has not picked up, and "Next 5 hours ago"
+             * is nonsense. Said as what it is: due, and visibly waiting.
+             */
+            <Chip className="text-amber-600 dark:text-amber-500">
+              <span className="size-1.5 animate-pulse rounded-full bg-amber-500" />
+              Due
+            </Chip>
+          ) : (
+            <Chip className="text-muted-foreground">
+              Next {relativeTime(routine.nextRunAt)}
+            </Chip>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          {/*
+           * Run now is the Test button, and it does real work: the Bot carries out the instruction
+           * in the channel right away. Offered only while the routine is on.
+           */}
+          <Button
+            aria-label={`Run the routine scheduled ${routine.schedule} now`}
+            disabled={!routine.enabled || runNow.isPending}
+            onClick={() =>
+              runNow.mutate(routine.id, {
+                onSuccess: () => onToggleHistory(true),
+              })
+            }
+            size="sm"
+            title={
+              routine.enabled
+                ? "Runs it now, for real. The Bot does the work and posts in the conversation."
+                : "This routine is paused. Turn it on first."
+            }
+            type="button"
+            variant="outline"
+          >
+            <IconPlayerPlay />
+            Run now
+          </Button>
+          <Button
+            aria-expanded={historyOpen}
+            aria-label={`Run history for the routine scheduled ${routine.schedule}`}
+            onClick={() => onToggleHistory(!historyOpen)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <IconHistory />
+            History
+          </Button>
+          <Button
+            aria-label={`Delete the routine scheduled ${routine.schedule}`}
+            onClick={onDelete}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <IconTrash />
+            Delete
+          </Button>
+        </div>
+      </ItemFooter>
+      {setEnabled.error || runNow.error ? (
+        <p className="basis-full text-destructive text-sm" role="alert">
+          {setEnabled.error?.message ?? runNow.error?.message}
+        </p>
+      ) : null}
+      {historyOpen ? (
+        <div className="basis-full border-border border-t pt-2">
+          <RoutineRuns routine={routine} />
+        </div>
+      ) : null}
+    </Item>
+  );
+}
+
+/**
+ * A goal's row: what it is (its title), when it starts (its schedules, events and triggers, or
+ * when you ask), that it acts, and until when (its outcome). Its status and progress are on the
+ * row. It opens the goal's dialog, where its schedules are switched and deleted too.
  *
- * Scoped by `agentId` on a Bot's Routines page, unscoped on the Routines page. One query either way —
- * the list is owner-scoped and small, so the scope is a filter here rather than a second endpoint.
+ * A chevron rather than a Switch, although pausing is binary: the row opens a dialog, and a Switch
+ * inside a row that is itself a button would be a control nested in a control.
+ */
+function GoalItem({
+  goal,
+  routines,
+  botName,
+  onOpen,
+}: {
+  goal: ResponsibilityRecord;
+  routines: readonly RoutineRecord[];
+  /** Absent on one Bot's own list. */
+  botName?: string;
+  onOpen: () => void;
+}) {
+  const triggers = useQuery(triggersQueryOptions(goal.id));
+  const Icon = STATUS[goal.status].icon;
+  const starts =
+    goal.status === "active"
+      ? goalStarts(
+          goal,
+          triggers.data
+            ?.filter((trigger) => trigger.enabled)
+            .map((trigger) => `${KIND_LABEL[trigger.kind]} trigger`),
+          routines,
+          (subscription) =>
+            `${SOURCE_LABEL[subscription.source]} ${subscription.eventType}`,
+        )
+      : null;
+  const line = [
+    botName,
+    goal.status === "paused"
+      ? "Paused. Nothing starts it until you resume it"
+      : goal.status === "completed"
+        ? "Completed"
+        : starts,
+    goal.status === "active" ? "Acts" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <Item render={<button onClick={onOpen} type="button" />} size="sm">
+      <ItemMedia variant="icon">
+        <Icon />
+      </ItemMedia>
+      <ItemContent className={goal.status === "active" ? "" : "opacity-60"}>
+        <ItemTitle>
+          {goal.title}
+          <span className="font-normal text-muted-foreground text-xs">
+            Goal
+          </span>
+        </ItemTitle>
+        <ItemDescription>{line}</ItemDescription>
+        {goal.successCriteria ? (
+          <ItemDescription className="line-clamp-1">
+            Until: {goal.successCriteria}
+          </ItemDescription>
+        ) : null}
+        {goal.progress && goal.status !== "completed" ? (
+          <ItemDescription className="line-clamp-1">
+            Progress: {goal.progress}
+          </ItemDescription>
+        ) : null}
+      </ItemContent>
+      <ItemActions>
+        <IconChevronRight className="size-4 text-muted-foreground" />
+      </ItemActions>
+    </Item>
+  );
+}
+
+const EMPTY_BODY =
+  "Ask a Bot and it makes one. “Every Monday, send me last week's numbers” is a routine. “Get the docs ready for the launch” is a goal. “Watch the launch brief and tell me what changes” is a check-in.";
+
+/**
+ * Every routine a Bot has, in one list: its routines, its goals, and its check-ins, each row the
+ * same four-part sentence (`lib/routines/merged.ts`). Built from the three reads each kind already
+ * has, so each row opens and changes its own record the way it always did.
+ *
+ * Scoped by `agentId` on a Bot's Routines page, unscoped in Settings → Routines. One query per kind
+ * either way: each is owner-scoped and small, so the scope is a filter here.
  */
 export function RoutinesList({
   agentId,
   embedded = false,
 }: {
-  /** Show only the routines this Bot carries out. Absent shows all of the person's. */
+  /** Show only this Bot's. Absent shows all of the person's, each with its Bot. */
   agentId?: string;
   /** Where the page section's own top margin is somebody else's spacing. */
   embedded?: boolean;
 } = {}) {
   const routines = useQuery(routinesQueryOptions());
-  /* Names and faces for the Bot chip, hidden Bots included: a routine outlives hiding its Bot. */
-  const shownBots = useQuery({
-    ...agentListQueryOptions(),
-    enabled: agentId === undefined,
-  });
+  const goals = useQuery(responsibilitiesQueryOptions());
+  const checkIns = useQuery(proactiveSettingsQueryOptions());
+  const blocked = useCheckInsBlocked();
+  /* Names and faces for each row's Bot, hidden Bots included: a routine outlives hiding its Bot. */
+  const shownBots = useQuery(agentListQueryOptions());
   const hiddenBots = useQuery({
     ...agentListQueryOptions(true),
     enabled: agentId === undefined,
   });
-  const bots = new Map(
+  const bots: BotDirectory = new Map(
     [...(shownBots.data ?? []), ...(hiddenBots.data ?? [])].map((bot) => [
       bot.id,
       bot,
     ]),
   );
-  const setEnabled = useMutation(setRoutineEnabledMutationOptions(queryClient));
   const deleteRoutine = useMutation(deleteRoutineMutationOptions(queryClient));
-  const runNow = useMutation(runRoutineNowMutationOptions(queryClient));
   /** Which routine's run history is open. One at a time keeps the list scannable. */
   const [historyId, setHistoryId] = useState<string | null>(null);
   /** The routine a delete is being confirmed for, or null. Its own dialog rather than one per row. */
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
-  const rows = (routines.data?.routines ?? []).filter(
-    (row) => agentId === undefined || row.agentId === agentId,
-  );
+  /** The goal whose dialog is open. Looked up from the query, so it follows every refetch. */
+  const [goalId, setGoalId] = useState<string | null>(null);
+
+  const rows = mergeRoutines({
+    routines: routines.data?.routines ?? [],
+    goals: goals.data ?? [],
+    checkIns: checkIns.data ?? [],
+    agentId,
+  });
+  const showBot = agentId === undefined;
   const sweep = routines.data?.sweep;
-  const noWorker = nothingIsFiring(sweep, rows.length);
-  const confirming = rows.find((row) => row.id === confirmingId) ?? null;
+  const scheduled = rows.filter((row) => row.kind === "routine").length;
+  const noWorker = nothingIsFiring(sweep, scheduled);
+  const confirming =
+    routines.data?.routines.find((row) => row.id === confirmingId) ?? null;
+  const openGoal = rows.find(
+    (row): row is Extract<MergedRoutine, { kind: "goal" }> =>
+      row.kind === "goal" && row.id === goalId,
+  );
+  const pending = routines.isPending || goals.isPending || checkIns.isPending;
+  const failed = [
+    routines.error ? "routines" : null,
+    goals.error ? "goals" : null,
+    checkIns.error ? "check-ins" : null,
+  ].filter((name): name is string => name !== null);
 
   return (
     <PageSection className={embedded ? "mt-0" : undefined}>
-      {setEnabled.error || runNow.error ? (
-        <p className="mt-4 text-destructive text-sm" role="alert">
-          {setEnabled.error?.message ?? runNow.error?.message}
-        </p>
-      ) : null}
-
-      {/* A fact about the deployment rather than a row to act on, so said as a sentence. */}
+      {/* A fact about OpenBot rather than a row to act on, so said as a sentence. */}
       {noWorker ? (
         <p className="mt-4 text-muted-foreground text-sm" role="alert">
           <span className="font-medium text-amber-600 dark:text-amber-500">
@@ -285,225 +587,78 @@ export function RoutinesList({
         </p>
       ) : null}
 
-      {/* Pending renders nothing: the empty-state sentence would otherwise flash for the fetch. */}
-      {routines.isPending ? null : routines.error ? (
+      {/* One read failing leaves the other two listed, and says which part is missing. */}
+      {failed.length > 0 ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your routines. Reload the page.
+          Couldn't load your {failed.join(" and ")}. Reload the page.
         </p>
-      ) : rows.length === 0 ? (
-        <PageEmpty
-          action={<NewRoutineButton agentId={agentId} variant="outline" />}
-          icon={IconClock}
-          title={agentId ? "No routines for this Bot yet" : "No routines yet"}
-        >
-          {agentId
-            ? 'Set one up with New routine, or ask it something like "every weekday at 9, send me…".'
-            : 'Set one up with New routine, or ask a Bot something like "every weekday at 9, send me…".'}
-        </PageEmpty>
+      ) : null}
+
+      {/* Pending renders nothing: the empty state would otherwise flash for the fetch. */}
+      {pending ? null : rows.length === 0 ? (
+        failed.length > 0 ? null : (
+          <PageEmpty
+            action={<NewRoutineMenu agentId={agentId} variant="outline" />}
+            icon={IconClock}
+            title={agentId ? "No routines for this Bot yet" : "No routines yet"}
+          >
+            {EMPTY_BODY}
+          </PageEmpty>
+        )
       ) : (
         <PageRows>
-          {rows.map((routine, index) => {
-            const lastRun = lastRunLabel(routine.lastRun);
-            const bot = bots.get(routine.agentId);
-            return (
-              <Fragment key={routine.id}>
-                {index > 0 ? <Separator /> : null}
-                <Item size="sm">
-                  <ItemMedia variant="icon">
-                    {routine.enabled ? <IconClock /> : <IconPlayerPause />}
-                  </ItemMedia>
-                  {/* Paused reads at a glance: the content dims, and a chip below says the word. */}
-                  <ItemContent className={routine.enabled ? "" : "opacity-60"}>
-                    {/*
-                     * Named by the person, the name heads the row and the schedule takes a line of
-                     * its own under it, so a narrow window never squeezes the name to fit it.
-                     */}
-                    {routine.title ? (
-                      <>
-                        <ItemTitle>{routine.title}</ItemTitle>
-                        <p className="text-muted-foreground text-xs">
-                          {routine.schedule} · {routine.timezone}
-                        </p>
-                      </>
-                    ) : (
-                      <ItemTitle>
-                        {routine.schedule}
-                        <span className="font-normal text-muted-foreground text-xs">
-                          {routine.timezone}
-                        </span>
-                      </ItemTitle>
-                    )}
-                    <ItemDescription>{routine.instruction}</ItemDescription>
-                  </ItemContent>
-                  <ItemActions>
-                    {/*
-                     * Binary and immediate: it takes effect when switched, there is no save.
-                     * Disabled only while its own write is in flight, so switching one routine
-                     * does not freeze the rest of the list — the same idiom the per-tool plugins
-                     * page uses for its per-Bot grant switches.
-                     */}
-                    <Switch
-                      aria-label={`Enable the routine scheduled ${routine.schedule}`}
-                      checked={routine.enabled}
-                      disabled={
-                        setEnabled.isPending &&
-                        setEnabled.variables?.id === routine.id
-                      }
-                      onCheckedChange={(next) =>
-                        setEnabled.mutate({ id: routine.id, enabled: next })
-                      }
-                    />
-                  </ItemActions>
-                  {/* Two sets — where it stands, and what can be done to it — so they wrap onto a
-                      line of their own rather than crowding the title. */}
-                  <ItemFooter className="flex-wrap">
-                    <div
-                      className={cn(
-                        "flex flex-wrap items-center gap-1.5",
-                        routine.enabled ? "" : "opacity-60",
-                      )}
-                    >
-                      {/* Every Bot's routines are on one page, so each says whose it is. */}
-                      {agentId === undefined ? (
-                        <Link
-                          params={{ agentId: routine.agentId }}
-                          to="/bots/$agentId/routines"
-                        >
-                          <Chip className="text-foreground transition-colors hover:bg-muted">
-                            {bot ? (
-                              <span aria-hidden="true" className="contents">
-                                <AbstractAvatar
-                                  name={bot.name}
-                                  seed={bot.avatarSeed}
-                                  size={14}
-                                />
-                              </span>
-                            ) : null}
-                            {bot?.name ?? "A Bot"}
-                          </Chip>
-                        </Link>
-                      ) : null}
-                      {routine.channel.gone ? (
-                        <Chip className="border-destructive/40 text-destructive">
-                          Conversation deleted
-                        </Chip>
-                      ) : (
-                        // Where it posts is a place, so the chip goes there.
-                        <Link
-                          params={{ channelId: routine.channel.id }}
-                          to="/channel/$channelId"
-                        >
-                          <Chip className="text-muted-foreground transition-colors hover:text-foreground">
-                            {routine.channel.title ?? "Untitled conversation"}
-                          </Chip>
-                        </Link>
-                      )}
-                      <Chip className={lastRun.className}>
-                        <span
-                          className={cn("size-1.5 rounded-full", lastRun.dot)}
-                        />
-                        {lastRun.text}
-                      </Chip>
-                      {/*
-                       * Enabled only: the store recomputes nextRunAt on cron/timezone change or
-                       * re-enable, so a disabled routine's stamp is frozen in the past — rendering
-                       * it unguarded would announce a stale "3 days ago" as the next run. Paused
-                       * takes its place, so the switch's state has a word as well as a position.
-                       */}
-                      {!routine.enabled ? (
-                        <Chip className="text-muted-foreground">Paused</Chip>
-                      ) : new Date(routine.nextRunAt).getTime() <=
-                        Date.now() ? (
-                        /*
-                         * A stamp in the past is a firing the sweep has not picked up, and "Next 5
-                         * hours ago" is nonsense. Said as what it is: due, and visibly waiting.
-                         */
-                        <Chip className="text-amber-600 dark:text-amber-500">
-                          <span className="size-1.5 animate-pulse rounded-full bg-amber-500" />
-                          Due
-                        </Chip>
-                      ) : (
-                        <Chip className="text-muted-foreground">
-                          Next {relativeTime(routine.nextRunAt)}
-                        </Chip>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      {/*
-                       * Run now is the Test button, and it does real work: the Bot carries out the
-                       * instruction in the channel right away. Offered only while the routine is
-                       * on, because a paused routine never runs.
-                       */}
-                      <Button
-                        aria-label={`Run the routine scheduled ${routine.schedule} now`}
-                        disabled={
-                          !routine.enabled ||
-                          (runNow.isPending && runNow.variables === routine.id)
-                        }
-                        onClick={() =>
-                          runNow.mutate(routine.id, {
-                            onSuccess: () => setHistoryId(routine.id),
-                          })
-                        }
-                        size="sm"
-                        title={
-                          routine.enabled
-                            ? "Runs it now, for real. The Bot does the work and posts in the conversation."
-                            : "This routine is paused. Turn it on first."
-                        }
-                        type="button"
-                        variant="outline"
-                      >
-                        <IconPlayerPlay />
-                        Run now
-                      </Button>
-                      <Button
-                        aria-expanded={historyId === routine.id}
-                        aria-label={`Run history for the routine scheduled ${routine.schedule}`}
-                        onClick={() =>
-                          setHistoryId(
-                            historyId === routine.id ? null : routine.id,
-                          )
-                        }
-                        size="sm"
-                        type="button"
-                        variant="ghost"
-                      >
-                        <IconHistory />
-                        History
-                      </Button>
-                      <Button
-                        aria-label={`Delete the routine scheduled ${routine.schedule}`}
-                        onClick={() => {
-                          deleteRoutine.reset();
-                          setConfirmingId(routine.id);
-                        }}
-                        size="sm"
-                        type="button"
-                        variant="ghost"
-                      >
-                        <IconTrash />
-                        Delete
-                      </Button>
-                    </div>
-                  </ItemFooter>
-                  {historyId === routine.id ? (
-                    <div className="basis-full border-border border-t pt-2">
-                      <RoutineRuns routine={routine} />
-                    </div>
-                  ) : null}
-                </Item>
-              </Fragment>
-            );
-          })}
+          {rows.map((row, index) => (
+            <Fragment key={`${row.kind}:${row.id}`}>
+              {index > 0 ? <Separator /> : null}
+              {row.kind === "routine" ? (
+                <RoutineItem
+                  bots={bots}
+                  historyOpen={historyId === row.id}
+                  onDelete={() => {
+                    deleteRoutine.reset();
+                    setConfirmingId(row.id);
+                  }}
+                  onToggleHistory={(open) => setHistoryId(open ? row.id : null)}
+                  routine={row.routine}
+                  showBot={showBot}
+                />
+              ) : row.kind === "goal" ? (
+                <GoalItem
+                  botName={
+                    showBot
+                      ? (bots.get(row.agentId)?.name ?? "A Bot")
+                      : undefined
+                  }
+                  goal={row.goal}
+                  onOpen={() => setGoalId(row.id)}
+                  routines={row.routines}
+                />
+              ) : (
+                <SettingRow
+                  blocked={blocked}
+                  botName={bots.get(row.agentId)?.name ?? "A Bot"}
+                  label="Check-in"
+                  setting={row.checkIn}
+                  showBot={showBot}
+                />
+              )}
+            </Fragment>
+          ))}
         </PageRows>
       )}
 
+      {openGoal ? (
+        <ResponsibilityDialog
+          goal={openGoal.goal}
+          key={openGoal.id}
+          onClose={() => setGoalId(null)}
+          routines={openGoal.routines}
+        />
+      ) : null}
+
       {/*
        * One dialog for the whole list rather than one per row, keyed by which routine is being
-       * confirmed. It names the schedule, not the id or the instruction, because the schedule is
-       * the word a person reads first on the row and the one most likely to tell two routines apart
-       * at a glance.
+       * confirmed. It names the schedule, the word a person reads first on the row.
        */}
       <Dialog
         onOpenChange={(open) => {

@@ -537,7 +537,7 @@ test("personal: the sheet lists every app that is turned on, with nothing to unt
     within(list)
       .getByRole("link", { name: "Open Routines" })
       .getAttribute("href"),
-  ).toBe("/routines");
+  ).toBe("/settings/routines");
   expect(
     view.getByText("Every Bot can use every app you turn on in Connections."),
   ).toBeTruthy();

@@ -34,6 +34,7 @@ function summary(overrides: Partial<RoutineSummary> = {}): RoutineSummary {
       status: "succeeded",
       finishedAt: new Date("2026-08-26T09:00:00.000Z"),
     },
+    goalId: null,
     ...overrides,
   };
 }
@@ -156,10 +157,20 @@ describe("GET /", () => {
           enabled: true,
           nextRunAt: "2026-08-27T09:00:00.000Z",
           lastRun: { status: "succeeded", at: "2026-08-26T09:00:00.000Z" },
+          goalId: null,
         },
       ],
     });
     expect(store.calls).toEqual([["listFor", actor.id]]);
+  });
+
+  test("says which goal a routine runs, so the page draws it as that goal's start", async () => {
+    const store = fakeStore({
+      listFor: async () => [summary({ goalId: "goal-1" })],
+    });
+    const response = await appFor(store).request("http://openbot.test/");
+
+    expect((await json(response)).routines[0].goalId).toBe("goal-1");
   });
 
   test("carries no lastRun when the routine has never fired", async () => {

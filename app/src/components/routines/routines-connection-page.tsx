@@ -49,7 +49,7 @@ export function RoutinesConnectionPage() {
       {/* One destination, so no heading: it would only repeat the row's own title. */}
       <PageSection>
         <PageRows className="mt-0">
-          <Item render={<Link to="/routines" />} size="sm">
+          <Item render={<Link to="/settings/routines" />} size="sm">
             <ItemMedia variant="icon">
               <IconClock />
             </ItemMedia>

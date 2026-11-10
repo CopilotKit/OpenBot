@@ -1,6 +1,6 @@
 import { useForm } from "@tanstack/react-form";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, linkOptions, useNavigate } from "@tanstack/react-router";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { PageCard, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
@@ -85,6 +85,13 @@ export function NewRoutinePage({
   channelId?: string;
 }) {
   const navigate = useNavigate();
+  // Back to the Routines list it came from: the Bot's own, or every Bot's in Settings.
+  const back = presetAgentId
+    ? linkOptions({
+        to: "/bots/$agentId/routines",
+        params: { agentId: presetAgentId },
+      })
+    : linkOptions({ to: "/settings/routines" });
   const agents = useQuery(agentListQueryOptions());
   const channels = useInfiniteQuery(channelListQueryOptions());
   const createRoutine = useMutation(createRoutineMutationOptions(queryClient));
@@ -114,7 +121,7 @@ export function NewRoutinePage({
         timezone: timeZone,
         channelId: value.channelId,
       });
-      await navigate({ to: "/routines" });
+      await navigate(back);
     },
   });
 
@@ -124,7 +131,7 @@ export function NewRoutinePage({
 
   return (
     <PageShell
-      backButton={{ label: "Routines", linkProps: { to: "/routines" } }}
+      backButton={{ label: "Routines", linkProps: back }}
       description="Pick a Bot, say what it should do, and choose when. It posts what it did in a conversation with you."
       title="New routine"
     >
@@ -139,7 +146,7 @@ export function NewRoutinePage({
           footer={
             <>
               <Button
-                render={(props) => <Link {...props} to="/routines" />}
+                render={(props) => <Link {...props} {...back} />}
                 variant="outline"
               >
                 Cancel

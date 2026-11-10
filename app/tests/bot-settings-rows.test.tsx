@@ -188,7 +188,7 @@ test("someone a Bot was published to sees Sharing, where its link is", async () 
   expect(await view.findByText("Whole team")).toBeTruthy();
 });
 
-test("the rows for goals, reach, memory and rules say what this Bot has and open their pages", async () => {
+test("the rows for routines, reach, memory and rules say what this Bot has and open their pages", async () => {
   serving("user");
   const view = draw(BOT);
   const row = async (title: string, summary: string, path: string) => {
@@ -197,7 +197,7 @@ test("the rows for goals, reach, memory and rules say what this Bot has and open
       `/bots/expenses/${path}`,
     );
   };
-  await row("Goals", "1 active", "responsibilities");
+  await row("Routines", "3 routines", "routines");
   await row("Reaching you", "Slack", "reach");
   await row("Memory", "1 source", "memory");
   await row("Approval rules", "1 rule", "approvals");
