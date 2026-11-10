@@ -195,6 +195,16 @@ impl Ports {
         ours: &std::collections::HashSet<u16>,
         harness: Option<u16>,
     ) -> std::io::Result<Self> {
+        self.reserve(ours, harness).map(|(ports, _held)| ports)
+    }
+
+    /// [`Ports::available`], with the listeners that proved each port free still bound. Dropping
+    /// them gives the ports back, which is what `available` does before Compose publishes them.
+    fn reserve(
+        self,
+        ours: &std::collections::HashSet<u16>,
+        harness: Option<u16>,
+    ) -> std::io::Result<(Self, Vec<std::net::TcpListener>)> {
         let mut held = Vec::new();
         let mut chosen = std::collections::HashSet::new();
         let mut choose = |preferred| -> std::io::Result<u16> {
@@ -226,7 +236,7 @@ impl Ports {
                 std::io::Error::other("could not allocate distinct local ports")
             }))
         };
-        Ok(Self {
+        let ports = Self {
             app: choose(self.app)?,
             server: choose(self.server)?,
             postgres: choose(self.postgres)?,
@@ -237,7 +247,8 @@ impl Ports {
             harness: harness
                 .map(|default| choose(self.harness.unwrap_or(default)))
                 .transpose()?,
-        })
+        };
+        Ok((ports, held))
     }
 }
 
@@ -447,7 +458,7 @@ mod port_tests {
             supervisor: port,
             harness: Some(port),
         };
-        let chosen = preferred.available(&HashSet::new(), Some(port)).unwrap();
+        let (chosen, held) = preferred.reserve(&HashSet::new(), Some(port)).unwrap();
         let values: HashSet<u16> = chosen
             .settings()
             .values()
@@ -455,9 +466,25 @@ mod port_tests {
             .collect();
         assert_eq!(values.len(), 8);
         assert!(!values.contains(&port));
+        // Checked on the binds that chose them, still open. Given back and bound again here, a
+        // port can still be taken: a process another test is starting holds a copy of every open
+        // socket until it execs.
+        let bound: HashSet<std::net::SocketAddr> = held
+            .iter()
+            .map(|listener| listener.local_addr().unwrap())
+            .collect();
+        let ipv6 = TcpListener::bind("[::1]:0").is_ok();
         for value in values {
-            assert!(bind_loopbacks(value).is_ok(), "port {value} is unavailable");
+            assert!(
+                bound.contains(&(std::net::Ipv4Addr::LOCALHOST, value).into()),
+                "port {value} is not bound on 127.0.0.1"
+            );
+            assert!(
+                !ipv6 || bound.contains(&(std::net::Ipv6Addr::LOCALHOST, value).into()),
+                "port {value} is not bound on [::1]"
+            );
         }
+        drop(held);
         assert!(
             TcpStream::connect(foreign.local_addr().unwrap()).is_ok(),
             "foreign listener must remain untouched"
@@ -479,6 +506,13 @@ mod port_tests {
 
     #[test]
     fn saved_ports_survive_reopen_and_only_a_new_conflict_moves() {
+        // Ports given back and then bound again are the scenario, so it runs where no other test
+        // can be starting a process that holds them for a moment.
+        if crate::test_support::isolated_process(
+            "env::port_tests::saved_ports_survive_reopen_and_only_a_new_conflict_moves",
+        ) {
+            return;
+        }
         let _ports = crate::test_support::hold_ports();
         let root = crate::test_support::temp_root("saved-local-ports");
         std::fs::create_dir_all(&root).unwrap();
@@ -554,8 +588,7 @@ mod port_tests {
     }
 
     /// What the engine's port forwarder does after a quit: holds the port a moment, then lets go.
-    fn held_for(port: u16, ms: u64) -> std::thread::JoinHandle<()> {
-        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).unwrap();
+    fn held_for(listener: TcpListener, ms: u64) -> std::thread::JoinHandle<()> {
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(ms));
             drop(listener);
@@ -567,16 +600,14 @@ mod port_tests {
         // 2026-11-08: OpenBot quit and opened again at once moved its app from 3010 to 49381,
         // because the last run's port was still held when Start chose.
         let _ports = crate::test_support::hold_ports();
-        let port = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
+        // One listener from choosing the port to letting it go: never given back in between.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
         let preferred = Ports {
             app: port,
             ..Ports::default()
         };
-        let letting_go = held_for(port, 800);
+        let letting_go = held_for(listener, 800);
         let chosen = preferred
             .for_start(
                 &HashSet::from([port]),
