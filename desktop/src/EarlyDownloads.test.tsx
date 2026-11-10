@@ -181,7 +181,11 @@ test("a disk too full to download to is said plainly, with what is free and what
 });
 
 test("the line says what is known, and only the first screen says when it is all downloaded", () => {
-  const downloading = { state: "downloading" as const, bytes: GB, size: 2 * GB };
+  const downloading = {
+    state: "downloading" as const,
+    bytes: GB,
+    size: 2 * GB,
+  };
   expect(earlyDownloadsSaid(downloading, true)).toBe("Downloading OpenBot.");
   expect(
     earlyDownloadsSaid(downloading, false, { left: 40, slow: false }),
