@@ -47,14 +47,17 @@ use crate::problem::Problem;
 /// Docker Desktop checked here, 4.27.2 and 4.98.0 among them.
 pub const TEAM_ID: &str = "9BNSXJN65R";
 
+/// Why Docker Desktop is updating, said first on every line while it does: it is the person's own
+/// app, and they see it close and come back.
+pub const UPDATING_WHY: &str =
+    "The Docker Desktop on this computer is too old for OpenBot, so OpenBot is updating it.";
+
 /// What a person reads while Docker updates. `minutes` is the estimate, when there is one.
 pub fn updating_line(minutes: Option<u64>) -> StepLine {
     let said = match minutes {
-        Some(0 | 1) => "Updating Docker so OpenBot can run. About a minute left.".to_string(),
-        Some(minutes) => {
-            format!("Updating Docker so OpenBot can run. About {minutes} minutes left.")
-        }
-        None => "Updating Docker so OpenBot can run.".to_string(),
+        Some(0 | 1) => format!("{UPDATING_WHY} About a minute left."),
+        Some(minutes) => format!("{UPDATING_WHY} About {minutes} minutes left."),
+        None => UPDATING_WHY.to_string(),
     };
     StepLine::here(said)
 }
@@ -809,9 +812,9 @@ fn apply(
     quit(progress, cancelled)?;
     loop {
         progress(
-            StepLine::elsewhere(
-                "Your Mac will ask for your password so OpenBot can update Docker.",
-            )
+            StepLine::elsewhere(format!(
+                "{UPDATING_WHY} Your Mac will ask for your password so OpenBot can update Docker."
+            ))
             .logged("Installing Docker Desktop; macOS asks for the password."),
         );
         std::thread::sleep(crate::install::BEFORE_PROMPT);
@@ -854,8 +857,10 @@ fn apply(
             updating_line(Some(INSTALL_ALLOWANCE.as_secs() / 60))
                 .logged("Installing Docker Desktop for this account.")
         } else {
-            StepLine::elsewhere("Windows will ask for your approval so OpenBot can update Docker.")
-                .logged("Installing Docker Desktop for all users; Windows asks for approval.")
+            StepLine::elsewhere(format!(
+                "{UPDATING_WHY} Windows will ask for your approval so OpenBot can update Docker."
+            ))
+            .logged("Installing Docker Desktop for all users; Windows asks for approval.")
         });
         let installed = run_installer(&plan.installer, per_user);
         back();
@@ -1171,11 +1176,13 @@ Internal requirements count=1 size=180
         assert_eq!(minutes_left(10, None, Duration::from_secs(60)), None);
         assert_eq!(
             updating_line(Some(5)).said,
-            "Updating Docker so OpenBot can run. About 5 minutes left."
+            "The Docker Desktop on this computer is too old for OpenBot, so OpenBot is updating \
+             it. About 5 minutes left."
         );
         assert_eq!(
             updating_line(Some(1)).said,
-            "Updating Docker so OpenBot can run. About a minute left."
+            "The Docker Desktop on this computer is too old for OpenBot, so OpenBot is updating \
+             it. About a minute left."
         );
     }
 

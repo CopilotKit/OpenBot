@@ -965,7 +965,21 @@ function Setup() {
               setStep("model");
             } else void installLocally();
           }}
-          failure={displayedFailure && <Failure problem={displayedFailure} />}
+          failure={
+            displayedFailure && (
+              <Failure
+                problem={displayedFailure}
+                // The install behind this step failed: Try again runs it again, its check of the
+                // software OpenBot runs on and any update or restart included. Nothing else on this
+                // step would, and the account check waits on that software meanwhile.
+                onRetry={
+                  failure && preparation?.status === "failed"
+                    ? () => void beginLocalInstall()
+                    : undefined
+                }
+              />
+            )
+          }
         />
       </main>
     );

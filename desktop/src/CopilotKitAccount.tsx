@@ -376,8 +376,11 @@ export function CopilotKitAccount({
           is at. Nobody is asked to click before a prompt: a closed one has its card, with Try
           again. */}
       {asking && <PodmanGoAhead asking={goAhead} />}
+      {/* Not while setup's failure is shown: the install that brings the engine up has stopped,
+          and a spinner saying it is coming waited forever under it. Its Try again starts it. */}
       {waitingForEngine
-        ? !behind && (
+        ? !behind &&
+          !failure && (
             <StatusLine>
               {engine ?? handOff ?? "Preparing this computer…"}
             </StatusLine>

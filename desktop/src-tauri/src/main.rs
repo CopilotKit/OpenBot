@@ -2562,6 +2562,15 @@ async fn engine_new_enough<R: tauri::Runtime>(
             log::info!("[engine] versions: {}", readings.said(engine));
             Ok(())
         }
+        // Its machine was stopped and started on the row: the row ends, saying it is ready.
+        Ok(engine_versions::Checked::Restarted(readings)) => {
+            log::info!(
+                "[engine] versions: {}; answering after its machine restarted",
+                readings.said(engine)
+            );
+            report_plain(app, "engine", true, engine::engine_ready_line().said);
+            Ok(())
+        }
         Ok(engine_versions::Checked::Updated { said, .. }) => {
             report_plain(app, "engine", true, said);
             Ok(())

@@ -722,6 +722,263 @@ pub fn download_dir(cache: &Path) -> std::path::PathBuf {
     cache.join("openbot-engine")
 }
 
+/*
+ * A MACHINE WHOSE API HAS GONE, AND HOW IT COMES BACK.
+ *
+ * `podman` reaches a machine over SSH. Compose does not: `podman compose` sets `DOCKER_HOST` to the
+ * machine's own Docker API, the named pipe on Windows and the socket on macOS that `machine inspect`
+ * names (Podman's `cmd/podman/compose.go`, `composeDockerHost`, and `getMachineConn`, which ends in
+ * `extractConnectionString`). So a machine can answer `podman` while every pull and every Compose
+ * call fails, which is what a live Windows run found: Podman's 6.1.1 MSI, run over 5.8.9, stopped
+ * the person's own machine's `win-sshproxy.exe` and left the machine running. Pulls then failed at
+ * "failed to connect to the docker API at npipe:////./pipe/podman-machine-default".
+ *
+ * Nothing but `podman machine start` starts that proxy (`WSLStubber.PostStartNetworking`, which
+ * calls `machine.LaunchWinProxy`), and a machine that is already running refuses to start ("unable to
+ * start: already running", `shim.Start`). `machine stop` carries on past a proxy that is already gone
+ * (`WSLStubber.StopVM` only warns). So the way back is to stop the machine and start it again. On a
+ * Mac the API socket is `gvproxy`'s, which `machine start` starts in the same way.
+ *
+ * Stopping a machine stops the containers in it, the person's own included. The ones that were
+ * running are started again with it, so the machine comes back as it was.
+ */
+
+/// The machines running now, by name: OpenBot's and the person's own alike.
+pub fn running_machines() -> Result<Vec<String>, String> {
+    running_in(&podman(&["machine", "list", "--format", "json"])?)
+}
+
+pub(crate) fn running_in(listing: &str) -> Result<Vec<String>, String> {
+    #[derive(Deserialize)]
+    struct Listed {
+        #[serde(rename = "Name")]
+        name: String,
+        #[serde(rename = "Running", default)]
+        running: bool,
+    }
+    let machines: Vec<Listed> = serde_json::from_str(listing).map_err(|error| {
+        format!("could not read podman machine list JSON: {error}; stdout: {listing}")
+    })?;
+    Ok(machines
+        .into_iter()
+        .filter(|machine| machine.running)
+        .map(|machine| machine.name)
+        .collect())
+}
+
+/// The containers running in a machine, by connection, to start again after it restarts.
+///
+/// Both of its connections: a machine has a rootless engine and a rootful one (see
+/// `connection_for`), and somebody's containers may be in either.
+pub type Containers = Vec<(String, Vec<String>)>;
+
+/// The containers running in the machine `name` now. Asked over SSH, which still answers when the
+/// machine's API has gone.
+pub fn running_containers(name: &str) -> Containers {
+    [connection_for(name, false), connection_for(name, true)]
+        .into_iter()
+        .filter_map(|connection| {
+            let ids = podman(&["--connection", &connection, "ps", "--quiet"]).ok()?;
+            let ids: Vec<String> = ids.lines().map(str::to_string).collect();
+            (!ids.is_empty()).then_some((connection, ids))
+        })
+        .collect()
+}
+
+/// Stop the machine `name`.
+pub fn stop_machine_named(name: &str) -> Result<(), String> {
+    podman(&["machine", "stop", name]).map(|_| ())
+}
+
+/// Start the machine `name`, then the containers that were running in it.
+///
+/// OpenBot's own machine starts as `start_machine` starts it, which also sets up its networking. A
+/// container that will not start again is the log's: the machine and its API are what OpenBot
+/// needs, and the person's container is still there to start.
+pub fn start_machine_named(name: &str, containers: &Containers) -> Result<(), String> {
+    if name == MACHINE {
+        let started = start_machine();
+        if !started.ok {
+            return Err(started.detail.unwrap_or(started.said));
+        }
+    } else {
+        match podman(&["machine", "start", name]) {
+            Ok(_) => {}
+            Err(error) if error.contains("already running") => {}
+            Err(error) => return Err(error),
+        }
+    }
+    for (connection, ids) in containers {
+        let mut args = vec!["--connection", connection.as_str(), "start"];
+        args.extend(ids.iter().map(String::as_str));
+        match podman(&args) {
+            Ok(_) => log::info!(
+                "[engine] started {} container(s) on {connection} again",
+                ids.len()
+            ),
+            Err(error) => log::warn!("[engine] could not start containers again: {error}"),
+        }
+    }
+    Ok(())
+}
+
+/// The machine `name` is running and its Docker API answers, or why not.
+pub fn machine_api_answers(name: &str) -> Result<(), String> {
+    api_answers_in(&podman(&["machine", "inspect", name])?, name, ping_api)
+}
+
+/// The engine at `address` answers, and so does the Docker API Compose will use through it, or why
+/// not. Only a Podman machine has an API of its own to ask; anything else is asked as before.
+pub fn engine_answers(address: &Address) -> Result<(), String> {
+    if !address.responds() {
+        return Err(format!(
+            "{} does not answer on {}",
+            address.engine.binary(),
+            address
+                .connection
+                .as_deref()
+                .unwrap_or("its default connection")
+        ));
+    }
+    let Some(connection) = address
+        .connection
+        .as_deref()
+        .filter(|_| address.engine == Engine::Podman)
+    else {
+        return Ok(());
+    };
+    let machine = machine_of(connection);
+    match podman(&["machine", "inspect", machine]) {
+        Ok(listing) => api_answers_in(&listing, machine, ping_api),
+        // Not a machine's connection (a remote host somebody added): there is no API of its own.
+        Err(_) => Ok(()),
+    }
+}
+
+fn api_answers_in(
+    listing: &str,
+    machine: &str,
+    ping: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    if let Some(state) = machine_state(listing, machine)? {
+        if !state.eq_ignore_ascii_case("running") {
+            return Err(format!("{machine} is {state}"));
+        }
+    }
+    match machine_facts(listing, machine)?.api {
+        Some(api) => ping(&api),
+        // An API inspect does not name is not one OpenBot can ask, nor one Compose can find.
+        None => Ok(()),
+    }
+}
+
+fn machine_state(listing: &str, machine: &str) -> Result<Option<String>, String> {
+    let machines: Vec<Value> = serde_json::from_str(listing)
+        .map_err(|error| format!("could not read podman machine inspect JSON: {error}"))?;
+    Ok(machines
+        .iter()
+        .find(|entry| entry.get("Name").and_then(Value::as_str) == Some(machine))
+        .and_then(|entry| entry.get("State"))
+        .and_then(Value::as_str)
+        .map(str::to_string))
+}
+
+/// How long one `/_ping` has to be answered.
+const PING_WITHIN: std::time::Duration = std::time::Duration::from_secs(5);
+
+const PING: &[u8] = b"GET /_ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+
+/// Ask the Docker API at `api` (`unix://` or `npipe://`) for `/_ping`, as a Docker client does.
+///
+/// On a thread of its own: a named pipe opened as a file has no read timeout, and an API that
+/// accepts and never answers must not hold setup.
+pub fn ping_api(api: &str) -> Result<(), String> {
+    let (sent, answer) = std::sync::mpsc::channel();
+    let address = api.to_string();
+    std::thread::spawn(move || {
+        let _ = sent.send(ask_api(&address));
+    });
+    let status = answer.recv_timeout(PING_WITHIN).map_err(|_| {
+        format!(
+            "{api}: no answer to /_ping within {}s",
+            PING_WITHIN.as_secs()
+        )
+    })??;
+    if status.starts_with("HTTP/1.1 200 ") || status.starts_with("HTTP/1.0 200 ") {
+        Ok(())
+    } else {
+        Err(format!("{api}: /_ping answered \"{status}\""))
+    }
+}
+
+/// The status line the API at `api` answers `/_ping` with.
+fn ask_api(api: &str) -> Result<String, String> {
+    let failed = |error: std::io::Error| format!("{api}: {error}");
+    if let Some(path) = api.strip_prefix("unix://") {
+        return ask_socket(path).map_err(failed);
+    }
+    if let Some(pipe) = api.strip_prefix("npipe://") {
+        // `npipe:////./pipe/name` is `\\.\pipe\name`: see `pipe_address`.
+        return ask_pipe(&pipe.replace('/', "\\")).map_err(failed);
+    }
+    Err(format!("{api}: not an API address OpenBot can ask"))
+}
+
+#[cfg(unix)]
+fn ask_socket(path: &str) -> std::io::Result<String> {
+    let mut stream = std::os::unix::net::UnixStream::connect(path)?;
+    stream.set_read_timeout(Some(PING_WITHIN))?;
+    stream.set_write_timeout(Some(PING_WITHIN))?;
+    status_line(&mut stream)
+}
+
+#[cfg(not(unix))]
+fn ask_socket(_: &str) -> std::io::Result<String> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "a Unix socket is not an API this computer opens",
+    ))
+}
+
+/// A named pipe, opened as Windows opens any file. ERROR_FILE_NOT_FOUND is the pipe gone.
+#[cfg(windows)]
+fn ask_pipe(path: &str) -> std::io::Result<String> {
+    let mut pipe = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)?;
+    status_line(&mut pipe)
+}
+
+#[cfg(not(windows))]
+fn ask_pipe(_: &str) -> std::io::Result<String> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "a named pipe is not an API this computer opens",
+    ))
+}
+
+/// Send the ping, and read until the status line is in. The rest of the answer is not needed, so a
+/// server that keeps the connection open after it is not waited on.
+fn status_line(stream: &mut (impl std::io::Read + std::io::Write)) -> std::io::Result<String> {
+    stream.write_all(PING)?;
+    let mut said = Vec::new();
+    let mut chunk = [0u8; 512];
+    while !said.windows(2).any(|pair| pair == b"\r\n") && said.len() < 4096 {
+        let read = stream.read(&mut chunk)?;
+        if read == 0 {
+            break;
+        }
+        said.extend_from_slice(&chunk[..read]);
+    }
+    Ok(String::from_utf8_lossy(&said)
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1530,6 +1787,124 @@ mod tests {
             &Address::new(Engine::Podman, Some("openbot-root".into())),
             false
         ));
+    }
+
+    /// `podman machine inspect` as Podman 6.1.1 prints it on a Mac (`openbot-s1`, captured), and
+    /// the same machine running.
+    fn inspected(state: &str) -> String {
+        serde_json::json!([{
+            "Name": "openbot-s1",
+            "State": state,
+            "Rootful": false,
+            "ConnectionInfo": {
+                "PodmanSocket": {
+                    "Path": "/var/folders/15/cbm93f0549jbtwnp4vn063r00000gn/T/podman/openbot-s1-api.sock"
+                },
+                "PodmanPipe": null
+            },
+            "UserModeNetworking": true
+        }])
+        .to_string()
+    }
+
+    /// A machine's API is asked where Compose will reach it, and only while the machine runs.
+    #[test]
+    fn a_machines_api_is_asked_where_compose_reaches_it() {
+        let mut asked = None;
+        api_answers_in(&inspected("running"), "openbot-s1", |api| {
+            asked = Some(api.to_string());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            asked.as_deref(),
+            Some("unix:///var/folders/15/cbm93f0549jbtwnp4vn063r00000gn/T/podman/openbot-s1-api.sock")
+        );
+        let stopped = api_answers_in(&inspected("stopped"), "openbot-s1", |_| {
+            panic!("a stopped machine has no API to ask")
+        });
+        assert_eq!(stopped.unwrap_err(), "openbot-s1 is stopped");
+        assert!(
+            api_answers_in(&inspected("running"), "openbot-s1", |_| Err("gone".into())).is_err()
+        );
+    }
+
+    /// The ping, against a real socket: an API that answers 200, one that has gone, and one that
+    /// answers something else.
+    #[test]
+    #[cfg(unix)]
+    fn the_api_ping_tells_an_answering_api_from_a_gone_one() {
+        use std::io::{Read, Write};
+        use std::os::unix::net::UnixListener;
+        let root = temp_root("ping");
+        std::fs::create_dir_all(&root).unwrap();
+        let serve = |name: &str, answer: &'static [u8]| {
+            let socket = root.join(name);
+            let listener = UnixListener::bind(&socket).unwrap();
+            std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0u8; 256];
+                let read = stream.read(&mut request).unwrap();
+                assert!(request[..read].starts_with(b"GET /_ping HTTP/1.1\r\n"));
+                stream.write_all(answer).unwrap();
+                // Held open after the status line: the ping does not wait for the rest.
+                std::thread::sleep(std::time::Duration::from_secs(10));
+            });
+            format!("unix://{}", socket.display())
+        };
+        let answering = serve(
+            "answering.sock",
+            b"HTTP/1.1 200 OK\r\nApi-Version: 1.41\r\nContent-Length: 2\r\n\r\nOK",
+        );
+        let started = std::time::Instant::now();
+        ping_api(&answering).unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+
+        let refusing = serve(
+            "refusing.sock",
+            b"HTTP/1.1 500 Internal Server Error\r\n\r\n",
+        );
+        assert!(ping_api(&refusing).unwrap_err().contains("500"));
+
+        // The socket file gone, as the pipe was on Windows: a Docker client cannot connect.
+        let gone = format!("unix://{}", root.join("gone.sock").display());
+        assert!(ping_api(&gone).unwrap_err().starts_with(&gone));
+        assert!(ping_api("tcp://127.0.0.1:2375").is_err());
+    }
+
+    /// The ping, against a real named pipe served by PowerShell's `NamedPipeServerStream`, and a
+    /// pipe that is not there, which is what the live Windows run found after the update.
+    #[test]
+    #[cfg(windows)]
+    fn the_api_ping_opens_a_named_pipe() {
+        let name = format!("openbot-ping-test-{}", std::process::id());
+        let script = format!(
+            "$pipe = New-Object System.IO.Pipes.NamedPipeServerStream('{name}', \
+             [System.IO.Pipes.PipeDirection]::InOut); \
+             $pipe.WaitForConnection(); \
+             $buffer = New-Object byte[] 256; [void]$pipe.Read($buffer, 0, 256); \
+             $crlf = [string][char]13 + [char]10; \
+             $answer = [System.Text.Encoding]::ASCII.GetBytes('HTTP/1.1 200 OK' + $crlf + \
+             'Content-Length: 2' + $crlf + $crlf + 'OK'); \
+             $pipe.Write($answer, 0, $answer.Length); $pipe.Flush(); Start-Sleep -Seconds 5; $pipe.Dispose()"
+        );
+        let mut server = crate::quiet::command("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .spawn()
+            .unwrap();
+        let api = pipe_address(&format!("\\\\.\\pipe\\{name}"));
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let answered = loop {
+            match ping_api(&api) {
+                Ok(()) => break Ok(()),
+                Err(error) if std::time::Instant::now() > until => break Err(error),
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(200)),
+            }
+        };
+        let _ = server.kill();
+        answered.unwrap();
+        let gone = ping_api("npipe:////./pipe/openbot-ping-test-gone").unwrap_err();
+        assert!(gone.contains("(os error 2)"), "{gone}");
     }
 
     #[test]

@@ -30,6 +30,14 @@ backup taken before the upgrade instead. Three things change for an existing dep
 
 ### OpenBot Desktop
 
+- **Updating an old Podman no longer breaks setup, and a Podman that stops answering is restarted.**
+  On Windows, updating Podman 5.8.9 left the Podman machine OpenBot was using (often your own
+  `podman-machine-default`) running without its Docker API, and setup failed with no way back but
+  restarting that machine yourself. Every Podman machine that was running before the update, yours
+  included, is now running afterwards with its containers, and OpenBot checks that Podman answers
+  before it says it updated it. The row says why it is updating. At every check, a Podman machine
+  whose Docker API has gone is stopped and started once, and a failure while setup runs behind the
+  account step now has Try again.
 - **OpenBot's own software downloads on the first screen too, before there is anything to run it.**
   On a new Mac or PC, or with Docker Desktop not running, OpenBot's images (about 1.1 GB for the
   default Bot) waited for the engine to start, then downloaded behind it. They now download from

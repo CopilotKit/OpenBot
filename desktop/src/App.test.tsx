@@ -1000,6 +1000,65 @@ test("the account step waits for a container engine Install is still setting up,
   expect(view.queryByText(/Couldn.t check your CopilotKit account/)).toBeNull();
 }, 15000);
 
+/*
+ * A live Windows run: the install behind the account step updated the person's Podman, and its
+ * machine stopped answering. The step showed the failure with nothing to press, and once signed in
+ * it said "Preparing this computer…" under it forever, waiting for an engine nothing was bringing
+ * up. Try again runs the install again, its engine check and its restart included.
+ */
+test("an install that failed behind the account step offers Try again, which runs it again", async () => {
+  setupRootConfiguration("/tmp/account-install-retry", async () =>
+    emptyConfiguration(),
+  );
+  let preparation = deferred<void>();
+  let engineAnswers = false;
+  withLocalCli({
+    prepare_installation: () => preparation.promise,
+    local_eval_terms: () =>
+      engineAnswers ? ACCEPTED_TERMS : { status: "engine-not-ready" },
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByRole("heading", { name: "Setting up this computer" });
+
+  await act(async () =>
+    preparation.reject({
+      said: "OpenBot updated Podman, but Podman isn't answering. Try again.",
+      detail:
+        "npipe:////./pipe/podman-machine-default: The system cannot find the file specified. (os error 2)",
+    }),
+  );
+  const card = await view.findByRole("alert");
+  expect(card.textContent).toContain("Podman isn't answering");
+  // Nothing says the engine is still coming while the install that brings it has stopped.
+  expect(view.queryByText("Preparing this computer…")).toBeNull();
+  expect(
+    installationCalls().filter(
+      (call) => call.command === "prepare_installation",
+    ),
+  ).toHaveLength(1);
+
+  preparation = deferred<void>();
+  await userEvent.click(
+    within(card).getByRole("button", { name: "Try again" }),
+  );
+  expect(
+    installationCalls().filter(
+      (call) => call.command === "prepare_installation",
+    ),
+  ).toHaveLength(2);
+  expect(view.queryByRole("alert")).toBeNull();
+
+  // This time the engine answers, and setup goes on from the account step by itself.
+  engineAnswers = true;
+  await act(async () => preparation.resolve());
+  await view.findByRole(
+    "heading",
+    { name: "Connect your AI" },
+    { timeout: 6000 },
+  );
+}, 15000);
+
 // What the native side says as it opens Docker Desktop: `docker_desktop::HAND_OFF`.
 const DOCKER_HAND_OFF =
   "Docker Desktop is starting in its own window. If it asks you to accept its terms or sign in, do that there. OpenBot comes back when Docker is ready.";

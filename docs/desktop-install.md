@@ -162,7 +162,16 @@ fill a gap. Three rules hold that boundary:
   compares them with the minimums in `src-tauri/src/engine_versions.rs`: Compose 2.27.2 (the first
   with `config --environment`, which Start uses), Docker Engine 20.10 and, on macOS and Windows,
   Podman 6.1. A Podman that is too old gets OpenBot's own pinned installer run over it, and an old
-  Compose gets OpenBot's own placed in front of it; machines and their data are kept. A Docker
+  Compose gets OpenBot's own placed in front of it; machines and their data are kept. Every Podman
+  machine running before the update, the person's own included, is running afterwards with its
+  Docker API answering: on Windows each is stopped before the MSI and started after it, and any
+  whose API does not answer is stopped and started, with the containers that were running in it
+  (`install::update_podman`). The row says why: "The Podman on this computer is too old for
+  OpenBot, so OpenBot is updating it." Nothing is called updated until the engine answers. At every
+  check on macOS and Windows, a Podman machine that answers `podman` (over SSH) while its Docker API,
+  the pipe or socket Compose uses, does not is stopped and started once ("Restarting the software
+  OpenBot runs on."), and one that still does not answer is a failure with Try again
+  (`engine_versions::ensure`, `acquire::engine_answers`). A Docker
   Desktop that is too old (4.31 and earlier) is updated to Docker's newest release with Docker's
   own installer command line, after its checksum and Docker's signature are checked
   (`src-tauri/src/docker_desktop_update.rs`). Docker's terms are never accepted for the person. Only
