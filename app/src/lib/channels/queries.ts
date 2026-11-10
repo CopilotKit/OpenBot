@@ -66,7 +66,10 @@ export type ChannelWork =
 
 /** A channel plus what the roster renders about it. */
 export type ChannelSummary = AgentChannel & {
-  /** A few words about the conversation, or null. The roster falls back to `name`. */
+  /**
+   * What the conversation is called, or null: the name its owner gave it, else a few words the
+   * server wrote about it. The roster falls back to `opening`, then `name`.
+   */
   summary: string | null;
   /**
    * The person's first words in the conversation, as one plain line, or null. What it is called
@@ -81,6 +84,11 @@ export type ChannelSummary = AgentChannel & {
   pinned: boolean;
   /** ISO-8601 when this member last had the channel open, or null for never. The caller's, only. */
   lastReadAt: string | null;
+  /**
+   * Whether this member started the conversation and so may rename it. The server's answer, which
+   * it enforces too. Absent from a server that predates renaming, which reads as no.
+   */
+  canRename?: boolean;
   /**
    * Whether a turn is running in this channel right now.
    *

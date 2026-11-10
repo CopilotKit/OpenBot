@@ -36,7 +36,11 @@ import {
   ne,
   sql,
 } from "drizzle-orm";
-import { conversationName, ROSTER_ORDER } from "../channels/routes";
+import {
+  conversationCalled,
+  conversationName,
+  ROSTER_ORDER,
+} from "../channels/routes";
 import { oneLine } from "../channels/text";
 import type { Database } from "../db/client";
 import {
@@ -597,7 +601,7 @@ export function createRoutineStore(database: Database): RoutineStore {
     return await handle
       .select({
         id: channels.id,
-        summary: channels.summary,
+        summary: conversationCalled,
         opening: channels.opening,
         lastMessage: channels.lastMessage,
       })
@@ -901,7 +905,7 @@ export function createRoutineStore(database: Database): RoutineStore {
         .select({
           routine: routines,
           channelName: conversationName,
-          channelSummary: channels.summary,
+          channelSummary: conversationCalled,
           channelOpening: channels.opening,
           channelLastMessage: channels.lastMessage,
           channelDeletedAt: channels.deletedAt,
