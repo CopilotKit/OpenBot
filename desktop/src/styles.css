@@ -1202,13 +1202,30 @@ a:hover {
 }
 
 /*
- * The background install's row, last in the step (`BehindSlot`). Its height is held for the row's
- * tallest form, a line of three rows or a download bar under two, so the row coming, changing or
- * going never moves anything or grows the window.
+ * The background install's row, last in the step (`BehindSlot`). ONE height, its tallest form's
+ * (its name, one line, and a download bar with its bytes under them), whatever it says: a plain
+ * line, a download, unpacking, waiting for you, installed. Each line is one line, cut short with
+ * an ellipsis rather than wrapping onto a second. On Windows F, Continue, pinned in the same foot,
+ * moved up 14 px and back with no input as the row went from a plain line (118 px) to a download
+ * (132 px) and back. A card that says setup stopped is the one thing that may make it taller.
  */
 .behind-slot {
   margin-top: 24px;
-  min-height: 118px;
+  height: 132px;
+}
+
+.behind-slot:has(> .local-alert) {
+  height: auto;
+  min-height: 132px;
+}
+
+.behind-slot .step-label,
+.behind-slot .step .detail,
+.behind-slot .step .downloads > span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .behind-slot > .steps {

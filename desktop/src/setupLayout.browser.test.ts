@@ -45,7 +45,7 @@ type Page = {
   goto(url: string): Promise<unknown>;
   getByRole(role: string, options?: { name: string; exact?: boolean }): Locator;
   locator(selector: string, options?: { hasText?: string }): Locator;
-  getByText(text: string, options?: { exact?: boolean }): Locator;
+  getByText(text: string | RegExp, options?: { exact?: boolean }): Locator;
   getByLabel(text: string, options: { exact: boolean }): Locator;
   evaluate<T, A = undefined>(run: (arg: A) => T, arg?: A): Promise<T>;
   waitForTimeout(ms: number): Promise<void>;
@@ -72,7 +72,10 @@ const emit = (name, payload) => {
 fake.emit = emit;
 const relaunch = location.hash === "#start";
 const signingIn = location.hash === "#signin";
-const licence = location.hash === "#licence";
+const installing = location.hash === "#licence-installing";
+const licence = location.hash === "#licence" || installing;
+let finishInstall;
+const installed = new Promise((resolve) => (finishInstall = resolve));
 let finishSetUp;
 const setUp = new Promise((resolve) => (finishSetUp = resolve));
 const stack = {
@@ -89,6 +92,7 @@ const status = (readiness, licence) => ({
   outcome: "completed", stack, reason: null, readiness, licence, licenceExpiresAt: null, checksPassed: false,
 });
 fake.finishSetUp = () => finishSetUp(status("starting", "valid"));
+fake.finishInstall = () => finishInstall(null);
 const none = { openai: false, anthropic: false };
 export function convertFileSrc(path) { return path; }
 fake.calls = [];
@@ -121,7 +125,7 @@ export async function invoke(command) {
       ];
     case "prepare_installation":
       emit("setup:progress", { step: "engine", ok: true, running: false, detail: "The software OpenBot runs on is ready." });
-      return new Promise((resolve) => setTimeout(() => resolve(null), 50));
+      return installing ? installed : new Promise((resolve) => setTimeout(() => resolve(null), 50));
     case "sign_in_to_copilotkit":
       return signingIn ? new Promise(() => {}) : { signedIn: true };
     case "copilotkit_sign_in_page":
@@ -415,6 +419,159 @@ describe.skipIf(!asked)("a setup step's foot", () => {
     }, 40_000);
   }
 });
+
+/*
+ * Seen on Windows F: on "Connect your AI", Continue moved up 14 px and back down with no input. It
+ * shares the pinned foot with the background row, which was 118 px as a plain line and 132 px with
+ * a download's bar and bytes. The row has one height now, so the action above it never moves.
+ */
+describe.skipIf(!asked)(
+  "the foot holds still as the background row changes",
+  () => {
+    for (const [width, height] of [
+      [1016, 839],
+      [720, 560],
+    ] as const) {
+      test(`at ${width}x${height}, Accept and Continue never move through every state of the row`, async () => {
+        const top = async (page: Page, name: string) =>
+          (await page.getByRole("button", { name, exact: true }).boundingBox())
+            ?.y;
+        const emit = (page: Page, payload: Record<string, unknown>) =>
+          page.evaluate(
+            (sent) =>
+              (
+                globalThis as unknown as {
+                  __fake: { emit: (name: string, payload: unknown) => void };
+                }
+              ).__fake.emit("setup:progress", sent),
+            payload,
+          );
+        /*
+         * Minutes into the install, as on F ("Step 3 of 4 · 3m 26s elapsed"): the wider badge is
+         * what pushed the row's name onto a second line there, and the row from 118 px to 132.
+         */
+        const minutesIn = (page: Page) =>
+          page.evaluate(() => {
+            const real = Date.now;
+            Date.now = () => real() + 10 * 60 * 1000;
+            // Wider type than this browser sets: on Windows F the row's name or its line took a
+            // second line, and the row grew 14 px. A little letter spacing does the same here.
+            const wider = document.createElement("style");
+            wider.textContent = ".behind-slot { letter-spacing: 0.12em; }";
+            document.head.append(wider);
+          });
+        const licence = await browser.newPage({ viewport: { width, height } });
+        try {
+          await open(licence, "#licence-installing");
+          await licence
+            .getByRole("button", { name: "Install", exact: true })
+            .click();
+          await licence
+            .getByRole("heading", { name: "Accept the license agreement" })
+            .waitFor();
+          await minutesIn(licence);
+          await licence.waitForTimeout(1200);
+          const seen: (number | undefined)[] = [];
+          // A plain line.
+          await emit(licence, {
+            step: "images",
+            ok: true,
+            running: true,
+            detail: "Checking what OpenBot needs to download.",
+          });
+          await licence
+            .getByText("Checking what OpenBot needs to download.")
+            .waitFor();
+          seen.push(await top(licence, "Accept"));
+          // Downloading, with its bar and bytes.
+          await emit(licence, {
+            step: "images",
+            ok: true,
+            running: true,
+            detail: "Downloading OpenBot.",
+            downloads: {
+              done: 1,
+              total: 5,
+              bytes: 300_000_000,
+              size: 1_100_000_000,
+              bytesPerSecond: 9_000_000,
+            },
+          });
+          await licence
+            .getByText("300.0 MB of 1.1 GB", { exact: false })
+            .waitFor();
+          seen.push(await top(licence, "Accept"));
+          // Unpacking.
+          await emit(licence, {
+            step: "images",
+            ok: true,
+            running: true,
+            detail: "Downloading OpenBot.",
+            downloads: {
+              done: 3,
+              total: 5,
+              bytes: 1_100_000_000,
+              size: 1_100_000_000,
+            },
+          });
+          await licence.getByText(/Unpacking OpenBot/).waitFor();
+          seen.push(await top(licence, "Accept"));
+          // Installed, and the rest waiting for the person.
+          await licence.evaluate(() =>
+            (
+              globalThis as unknown as { __fake: { finishInstall: () => void } }
+            ).__fake.finishInstall(),
+          );
+          await licence.getByText(/Waiting for you/).waitFor();
+          seen.push(await top(licence, "Accept"));
+          expect(seen.every((y) => y !== undefined && y === seen[0])).toBe(
+            true,
+          );
+        } finally {
+          await licence.close();
+        }
+
+        const page = await browser.newPage({ viewport: { width, height } });
+        try {
+          await open(page);
+          await page
+            .getByRole("button", { name: "Install", exact: true })
+            .click();
+          await page
+            .getByRole("heading", { name: "Connect your AI" })
+            .waitFor();
+          await minutesIn(page);
+          await page.waitForTimeout(1200);
+          const seen: (number | undefined)[] = [];
+          // A plain line: setting up, with nothing downloading.
+          await page.getByText(/Setting up OpenBot on this computer/).waitFor();
+          seen.push(await top(page, "Continue"));
+          // Downloading the rest, with its bar and bytes.
+          await page.evaluate(() => {
+            (
+              globalThis as unknown as { __fake: { download: unknown } }
+            ).__fake.download = { done: 400_000_000, total: 1_600_000_000 };
+          });
+          await page.getByText("400.0 MB of 1.6 GB").waitFor();
+          seen.push(await top(page, "Continue"));
+          // Installed.
+          await page.evaluate(() =>
+            (
+              globalThis as unknown as { __fake: { finishSetUp: () => void } }
+            ).__fake.finishSetUp(),
+          );
+          await page.getByText("OpenBot is installed").waitFor();
+          seen.push(await top(page, "Continue"));
+          expect(seen.every((y) => y !== undefined && y === seen[0])).toBe(
+            true,
+          );
+        } finally {
+          await page.close();
+        }
+      }, 40_000);
+    }
+  },
+);
 
 describe.skipIf(!asked)("the AI step while OpenBot installs behind it", () => {
   for (const [width, height] of [
