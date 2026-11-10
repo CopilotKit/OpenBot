@@ -300,13 +300,25 @@ pub fn machine_exists() -> Result<bool, String> {
 /// `image` is the machine image already downloaded (`early_downloads`), which Podman builds the
 /// machine from instead of pulling its own from quay.io: `--image` takes a local path, and unpacks a
 /// compressed one itself. `None` leaves the pull to Podman, as before.
+///
+/// On Windows, `machine init` registers a WSL distribution, and the first one a person registers
+/// opens WSL's own welcome window. `before_init` turns that window off first: see
+/// `windows::skip_wsl_welcome`.
 pub fn create_machine(
     cpus: u32,
     memory_mib: u32,
     disk_gib: u32,
     image: Option<&Path>,
 ) -> StepOutcome {
-    create_machine_with(cpus, memory_mib, disk_gib, image, machine_exists, podman)
+    create_machine_with(
+        cpus,
+        memory_mib,
+        disk_gib,
+        image,
+        machine_exists,
+        crate::windows::skip_wsl_welcome,
+        podman,
+    )
 }
 
 fn create_machine_with(
@@ -315,6 +327,7 @@ fn create_machine_with(
     disk_gib: u32,
     image: Option<&Path>,
     exists: impl FnOnce() -> Result<bool, String>,
+    before_init: impl FnOnce(),
     mut run: impl FnMut(&[&str]) -> Result<String, String>,
 ) -> StepOutcome {
     match exists() {
@@ -329,6 +342,7 @@ fn create_machine_with(
         args.extend(["--image".to_string(), image.to_string_lossy().into_owned()]);
     }
     let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+    before_init();
     match run(&refs) {
         Ok(_) => StepOutcome::went(Step::CreateMachine, format!("{MACHINE} created.")),
         Err(error) => StepOutcome::stopped(Step::CreateMachine, &error),
@@ -808,6 +822,7 @@ mod tests {
             20,
             None,
             || machine_exists_with(|| Ok(listing.into())),
+            || {},
             |_args| {
                 init_called = true;
                 Err("machine openbot already exists".into())
@@ -834,6 +849,7 @@ mod tests {
                     Err("podman machine list exited with status 125; stdout: denied".into())
                 })
             },
+            || {},
             |_args| {
                 init_called = true;
                 Ok(String::new())
@@ -868,6 +884,7 @@ mod tests {
                 20,
                 None,
                 || machine_exists_with(|| Ok(listing.into())),
+                || {},
                 |_args| panic!("machine init must not run after malformed list output"),
             );
             assert!(!result.ok, "{result:?}");
@@ -891,6 +908,7 @@ mod tests {
             64,
             None,
             || Ok(false),
+            || {},
             |args| {
                 captured = args.iter().map(|arg| (*arg).to_string()).collect();
                 Ok(String::new())
@@ -916,6 +934,7 @@ mod tests {
             60,
             Some(image),
             || Ok(false),
+            || {},
             |args| {
                 captured = args.iter().map(|arg| (*arg).to_string()).collect();
                 Ok(String::new())
@@ -927,6 +946,41 @@ mod tests {
             &captured[captured.len() - 2..],
             ["--image", "/cache/podman-machine.aarch64.applehv.raw.zst"]
         );
+    }
+
+    /// WSL opens its own "Welcome to Windows Subsystem for Linux" window the first time a person
+    /// registers a distribution, and `podman machine init` registers one. It is turned off first,
+    /// and only when a machine is about to be made: an existing machine registers nothing.
+    #[test]
+    fn wsl_welcome_window_is_turned_off_before_the_machine_is_made() {
+        let calls = std::cell::RefCell::new(Vec::<String>::new());
+        let result = create_machine_with(
+            4,
+            6144,
+            60,
+            None,
+            || Ok(false),
+            || calls.borrow_mut().push("wsl welcome off".into()),
+            |args| {
+                calls.borrow_mut().push(args[..2].join(" "));
+                Ok(String::new())
+            },
+        );
+        assert!(result.ok, "{result:?}");
+        assert_eq!(*calls.borrow(), ["wsl welcome off", "machine init"]);
+
+        calls.borrow_mut().clear();
+        let existing = create_machine_with(
+            4,
+            6144,
+            60,
+            None,
+            || Ok(true),
+            || calls.borrow_mut().push("wsl welcome off".into()),
+            |args| panic!("nothing runs against an existing machine: {args:?}"),
+        );
+        assert!(existing.ok, "{existing:?}");
+        assert!(calls.borrow().is_empty(), "{:?}", calls.borrow());
     }
 
     #[test]
@@ -985,6 +1039,7 @@ mod tests {
             60,
             None,
             || machine_exists_with(|| Ok(listing.into())),
+            || {},
             |args| panic!("nothing runs against an existing machine: {args:?}"),
         );
         assert!(result.ok, "{result:?}");
