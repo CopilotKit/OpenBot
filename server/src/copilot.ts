@@ -12,14 +12,15 @@ import {
 } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import {
-  APPROVAL_GUIDANCE,
-  COMPONENT_GUIDANCE,
   type ComputerGuidance,
   frameworkGuidance,
   modelGuidance,
-  ORCHESTRATION_GUIDANCE,
-  PROVENANCE_GUIDANCE,
+  promptSection,
+  ROLE_SCOPE_GUIDANCE,
+  type RunMode,
+  runModeGuidance,
   todayGuidance,
+  workingGuidance,
 } from "@openbot/shared/bot-prompt";
 import {
   defaultModelFor,
@@ -62,6 +63,7 @@ import {
   planModelForEnvironment,
 } from "./agents/plan-model";
 import type { AgentActor } from "./agents/profile-types";
+import { runModeOf } from "./agents/run-mode";
 import {
   type RefusingProvider,
   sayingProviderRefusals,
@@ -302,40 +304,48 @@ export function standingRoleMessage(
     id: `${STANDING_ROLE_ID_PREFIX}${profile.id}`,
     role: "system",
     content: [
-      [
-        `You are ${profile.name}, ${title}${titleEnd} ${selfAddressGuidance(profile.name)}`,
-        ...(framework ? [frameworkGuidance(framework)] : []),
-      ].join(" "),
-      profile.roleDescription,
-      ...(instructions ? [instructions] : []),
-      "This standing role applies in every channel. Treat channel messages as task-specific instructions within it.",
-      /*
-       * Shared by every remote Bot. Its own role describes the work, and OpenBot adds this
-       * guidance to the same message. The compliance Bot that answered a filing question with
-       * thresholds and deadlines and no source was a `remote-ag-ui` agent whose entire prompt was
-       * "Investigate policies, transaction monitoring, and control evidence."
-       */
-      PROVENANCE_GUIDANCE,
-      // When to answer with a component, which a remote Bot is offered through the run's tools.
-      COMPONENT_GUIDANCE,
-      // When to share its work out to subagents, which OpenBot runs for it through the same tools.
-      ORCHESTRATION_GUIDANCE,
-      // And for the same reason, how to read the untrusted-content envelope its tool results carry.
-      UNTRUSTED_GUIDANCE,
-    ].join("\n\n"),
+      ...promptSection(
+        "identity",
+        [
+          `You are ${profile.name}, ${title}${titleEnd} ${selfAddressGuidance(profile.name)}`,
+          ...(framework ? [frameworkGuidance(framework)] : []),
+        ].join(" "),
+      ),
+      ...promptSection(
+        "role",
+        [
+          profile.roleDescription,
+          ...(instructions ? [instructions] : []),
+          ROLE_SCOPE_GUIDANCE,
+        ].join("\n\n"),
+      ),
+    ]
+      .join("\n\n")
+      .concat(BROUGHT_BOT_GUIDANCE),
   };
 }
 
 /**
- * The guidance {@link standingRoleMessage} ends with, which every Bot OpenBot runs itself is given
- * anyway (see {@link builtInAgentConfiguration}): left off a role run here so it is not said twice.
+ * The working rules every brought Bot is sent after its role, the same ones a Bot OpenBot runs is
+ * given (`workingGuidance`): how to work, when to ask, where answers come from, how to answer, when
+ * to use subagents, and what untrusted content is.
+ *
+ * Shared by every remote Bot, whatever runs it. Its own role describes the work, and OpenBot adds
+ * these to the same message, the one every framework reads as its instructions. The compliance Bot
+ * that answered a filing question with thresholds and deadlines and no source was a `remote-ag-ui`
+ * agent whose entire prompt was "Investigate policies, transaction monitoring, and control
+ * evidence." And the Claude Agent SDK harness hands this message to Claude Code as its whole system
+ * prompt (`agent-claude-sdk/src/replay.py`), which replaces Claude Code's own: without the
+ * how-to-work and asking sections a Claude SDK Bot lost "act when you have enough" and "report what
+ * you skipped" along with it.
+ *
+ * Left off a role run on OpenBot's own runner (`onOpenBotRunner`), which is given the built-in
+ * version instead, so it is not said twice.
  */
-const STANDING_GUIDANCE = `\n\n${[
-  PROVENANCE_GUIDANCE,
-  COMPONENT_GUIDANCE,
-  ORCHESTRATION_GUIDANCE,
-  UNTRUSTED_GUIDANCE,
-].join("\n\n")}`;
+const BROUGHT_BOT_GUIDANCE = `\n\n${workingGuidance({
+  brought: true,
+  untrusted: UNTRUSTED_GUIDANCE,
+}).join("\n\n")}`;
 
 /**
  * A Bot as OpenBot's own runner builds it, whatever it runs on elsewhere: what a check-in runs.
@@ -357,8 +367,8 @@ export function onOpenBotRunner(agent: RegisteredAgent): RegisteredAgent {
     id: agent.id,
     name: agent.name,
     type: "built_in",
-    systemPrompt: agent.standingMessage.content.endsWith(STANDING_GUIDANCE)
-      ? agent.standingMessage.content.slice(0, -STANDING_GUIDANCE.length)
+    systemPrompt: agent.standingMessage.content.endsWith(BROUGHT_BOT_GUIDANCE)
+      ? agent.standingMessage.content.slice(0, -BROUGHT_BOT_GUIDANCE.length)
       : agent.standingMessage.content,
   };
 }
@@ -620,8 +630,13 @@ export function standingInstructionsGuidance(
   const trimmed = instructions?.trim() ?? "";
   if (trimmed.length === 0) return null;
 
+  /*
+   * "Their own instructions", not "standing instructions": "standing" also named a brought Bot's
+   * role and a routine, three different things in one prompt. Wrapped in its own section by the
+   * caller.
+   */
   return [
-    `The person you are working with has standing instructions that apply in every channel and every task, alongside your role: ${trimmed}`,
+    `The person you are working with has written instructions of their own, for every conversation and every task, alongside your role: ${trimmed}`,
     "Where the two conflict, the role decides what you do and these decide how you do it.",
   ].join("\n\n");
 }
@@ -687,6 +702,15 @@ export function builtInAgentConfiguration(
    * on. Absent says nothing about apps. See `grantedToolGuidance`.
    */
   apps?: readonly BotApp[],
+  /**
+   * What this run is, beyond its tools. Appended last for the positional reason `buildAgents` gives.
+   *
+   * `mode` says whether anybody is watching (`runModeOf`): a routine or a check-in is told it runs
+   * unattended. `usesComputer` says whether this run was offered a computer tool. Absent means
+   * nobody knows yet (a Bot built before its first request), and the computer guidance goes in
+   * whenever the deployment has a computer, as it always did.
+   */
+  run: { mode?: RunMode; usesComputer?: boolean } = {},
 ): BuiltInAgentConfiguration {
   if (!apiKey && !planModel) {
     return {
@@ -738,68 +762,86 @@ export function builtInAgentConfiguration(
   return {
     model: wrapped ?? planModel ?? `${model.provider}/${model.defaultModel}`,
     /*
-     * The package's role, then the person's own standing instructions, then what this Bot actually
-     * holds, then the computer, then the date.
+     * Tagged sections in a fixed order: who it is, its role, the person's own instructions, the
+     * working rules every Bot gets, what this Bot holds, its computer, its learned skills, then
+     * what this run is (unattended or not), the model and the date, and the picked skill.
      *
-     * The grants go BEFORE the computer prose on purpose. That prose is long and emphatic about the
-     * browser and mentions connectors nowhere, so a Bot that read it last reached for the browser
-     * even when it held a tool for the exact system being asked about.
+     * The grants go BEFORE the computer prose on purpose. That prose is long and about the browser
+     * and mentions connectors nowhere, so a Bot that read it last reached for the browser even when
+     * it held a tool for the exact system being asked about.
      *
-     * The person's instructions go straight after the role and before all of it, because they are
-     * the other half of the same question — who you are and who you are working for — and because
-     * their precedence sentence only means anything next to the role it defers to.
+     * The person's instructions go straight after the role, because they are the other half of the
+     * same question — who you are and who you are working for — and because their precedence
+     * sentence only means anything next to the role it defers to.
+     *
+     * The run mode goes after everything that is the same for every run of this Bot, so a routine's
+     * prompt shares its prefix with a person's chat for a provider's cache.
      */
     prompt: [
       /*
-       * Who it is, first. Left off only where the prompt already says it: a remote Bot run here for
-       * a check-in (`onOpenBotRunner`) carries its standing role, which names it the same way.
+       * Who it is, first. A remote Bot run here for a check-in (`onOpenBotRunner`) carries its
+       * standing role, which is already in sections and names it the same way.
        */
-      ...(agent.systemPrompt.includes(selfAddressGuidance(agent.name))
-        ? []
-        : [identityGuidance(agent.name, agent.title, agent.framework)]),
-      agent.systemPrompt,
-      ...(standing ? [standing] : []),
+      ...(agent.systemPrompt.startsWith("<identity>")
+        ? [agent.systemPrompt]
+        : [
+            ...(agent.systemPrompt.includes(selfAddressGuidance(agent.name))
+              ? []
+              : promptSection(
+                  "identity",
+                  identityGuidance(agent.name, agent.title, agent.framework),
+                )),
+            ...promptSection(
+              "role",
+              `${agent.systemPrompt}\n\n${ROLE_SCOPE_GUIDANCE}`,
+            ),
+          ]),
+      ...promptSection("person_instructions", standing),
       /*
-       * Unconditional, unlike the two below it.
-       *
-       * Those describe things a deployment may or may not have. This describes how to answer at all,
-       * and a Bot with no tools and no computer needs it most: it has nothing to read, so everything
-       * it says comes from its own knowledge, and saying so is the only honest move available.
+       * Unconditional: how to work, when to ask (OpenBot asks before consequential actions, so the
+       * Bot does not ask as well), where answers come from (a Bot with no tools needs that most: all
+       * it says is its own knowledge), when to draw a component, when to use subagents, and how to
+       * read the untrusted-content envelope every outside result arrives in.
        */
-      PROVENANCE_GUIDANCE,
-      // When to answer with a component. Also unconditional: the tools it names vary, the rule not.
-      COMPONENT_GUIDANCE,
-      // When to give work to subagents. Worded for a run that holds the tool, which most do.
-      ORCHESTRATION_GUIDANCE,
-      // OpenBot asks the person before consequential actions, so the Bot does not ask as well.
-      APPROVAL_GUIDANCE,
-      // How to read the untrusted-content envelope every outside result arrives in.
-      UNTRUSTED_GUIDANCE,
-      ...(grantedToolGuidance(tools, connectedVendors, shown, apps)
-        ? [grantedToolGuidance(tools, connectedVendors, shown, apps)]
-        : []),
-      ...(computerGuidance
-        ? [
+      ...workingGuidance({ untrusted: UNTRUSTED_GUIDANCE }),
+      ...promptSection(
+        "apps",
+        grantedToolGuidance(tools, connectedVendors, shown, apps),
+      ),
+      /*
+       * Only for a run that holds the computer. A third of the prompt is about the browser, and a
+       * Linear-and-Notion routine that never opens one read all of it ahead of its own job.
+       */
+      ...(computerGuidance && run.usesComputer !== false
+        ? promptSection(
+            "computer",
             computerGuidance({
               search: holdsWebSearch(tools),
               personal: currentEdition() === "personal",
             }),
-          ]
+          )
         : []),
-      ...(learnedSkills?.catalog ? [learnedSkills.catalog] : []),
+      ...promptSection("learned_skills", learnedSkills?.catalog),
+      // A routine or a check-in, with nobody watching. Nothing for a person's own turn.
+      ...promptSection("run_mode", runModeGuidance(run.mode ?? "attended")),
       /*
-       * The model it answers on, as the person sees it named. Near the end with the date: it changes
-       * only when the model does, and a new model starts a new cache anyway.
+       * The model it answers on, as the person sees it named, and the date. Near the end: the model
+       * changes only when the person picks another, and a new model starts a new cache anyway. The
+       * date last, so everything above stays one prefix a provider can cache. See `todayGuidance`.
        */
-      ...(model.label ? [modelGuidance(model.label)] : []),
-      // Last, so everything above stays one prefix a provider can cache. See `todayGuidance`.
-      todayGuidance(now, timeZone),
+      ...promptSection(
+        "model_and_date",
+        [
+          ...(model.label ? [modelGuidance(model.label)] : []),
+          todayGuidance(now, timeZone),
+        ].join("\n\n"),
+      ),
       /*
        * After the date, because it changes with the message: the skill the person picked for this
        * one. Here, in the prompt this deployment writes, because a system row the browser sent is
        * dropped before the model (`forwardSystemMessages` is never set). See `picked-skill.ts`.
        */
-      ...(pickedSkill ? [pickedSkill] : []),
+      ...promptSection("picked_skill", pickedSkill),
     ].join("\n\n"),
     ...(planModel ? {} : { apiKey: apiKey ?? undefined }),
     // The run's thinking effort, when the person picked one the model takes. A plan's harness is
@@ -845,6 +887,11 @@ export function builtInAgentConfiguration(
         }
       : {}),
   };
+}
+
+/** One of the computer's own tools, which the surface offers by these names (`computer/schema.ts`). */
+function isComputerTool(tool: { name: string }): boolean {
+  return tool.name.startsWith("computer_");
 }
 
 /**
@@ -1283,6 +1330,8 @@ async function buildAgent(
     return new UnavailableAgent(agent);
   }
 
+  // Whether anybody is watching this run: a routine or a check-in is told it runs unattended.
+  const mode = runModeOf(initiator);
   const granted = await loadTools(agent.id);
   /*
    * Best-effort, like the vendors: a failed read leaves the Bot told what its tools say, as before,
@@ -1582,6 +1631,15 @@ async function buildAgent(
       timeZone,
       pickedSkill,
       apps,
+      {
+        mode,
+        /*
+         * Whether this run was offered the computer, known once the request is: the browser offers
+         * the computer tools only to a Bot the person may drive, and a background turn only to one
+         * whose owner's computer it may use. Unknown before the first request.
+         */
+        ...(input ? { usesComputer: input.tools.some(isComputerTool) } : {}),
+      },
     );
     // What really waits: nothing, when the model could not be wrapped and is sent every tool.
     const held = searchesTools(
@@ -1708,6 +1766,8 @@ async function buildAgent(
         passing.length === 0 &&
         pinned.size === 0 &&
         input.tools.length === 0 &&
+        // `whole` carries the computer guidance, and this run holds no computer tool.
+        !computerGuidance &&
         !timeZone &&
         !pickedSkill
         ? whole
@@ -2338,9 +2398,19 @@ function remoteAgentWithStandingRole(
           ...agent.standingMessage,
           content: [
             agent.standingMessage.content,
-            ...(label ? [modelGuidance(label)] : []),
-            todayGuidance(new Date(), runTimeZone(input.forwardedProps)),
-            ...(pickedSkill ? [pickedSkill] : []),
+            /*
+             * A routine firing on a Bot that runs elsewhere is unattended too, and told so the way
+             * a built-in Bot is. A check-in never reaches here: it runs on OpenBot's own runner.
+             */
+            ...promptSection("run_mode", runModeGuidance(runModeOf(initiator))),
+            ...promptSection(
+              "model_and_date",
+              [
+                ...(label ? [modelGuidance(label)] : []),
+                todayGuidance(new Date(), runTimeZone(input.forwardedProps)),
+              ].join("\n\n"),
+            ),
+            ...promptSection("picked_skill", pickedSkill),
           ].join("\n\n"),
         };
         const prepared: RunAgentInput = {

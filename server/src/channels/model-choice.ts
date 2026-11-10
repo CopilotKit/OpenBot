@@ -161,7 +161,15 @@ export function createModelChoices(deps: {
      * otherwise the default, which is the middle of the provider's current line. Bound to the
      * person running it: the thread is theirs, so another person's pick is never read.
      */
-    async forRun(actorId: string, threadId: string): Promise<RunChoice> {
+    async forRun(
+      actorId: string,
+      threadId: string,
+      /**
+       * A run nobody is watching (`runModeOf`): with no effort picked, it thinks at `high` where the
+       * model takes it, since early stops are more frequent at `low` and `medium`.
+       */
+      options: { unattended?: boolean } = {},
+    ): Promise<RunChoice> {
       const [row] = enabled()
         ? await database
             .select({ saved: intelligenceChannelMappings.modelSelection })
@@ -174,7 +182,10 @@ export function createModelChoices(deps: {
             )
             .limit(1)
         : [];
-      return catalogue.choose(applicable(row?.saved));
+      return catalogue.choose(
+        applicable(row?.saved),
+        options.unattended ? "high" : undefined,
+      );
     },
   };
 }

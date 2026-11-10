@@ -569,7 +569,7 @@ export function ComputerTools() {
   useFrontendTool({
     name: "computer_request_secret",
     description:
-      "Ask the person for ONE value you must not be told: a password, a one-time code, a card number. " +
+      "Ask the person for a single value you must not be told: a password, a one-time code, a card number. " +
       "Focus the field first with computer_click, then call this with the ref of that field and a " +
       "short label for what you need. They type it into a masked box that goes straight to the page. " +
       "You will never see the value, and you must not ask for it any other way. Prefer this over a " +

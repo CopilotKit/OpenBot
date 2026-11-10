@@ -6,11 +6,15 @@ import { HttpAgent } from "@ag-ui/client";
 import { LLMock } from "@copilotkit/aimock";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
 import {
-  APPROVAL_GUIDANCE,
+  ASKING_GUIDANCE,
+  BROUGHT_BOT_ASKING_GUIDANCE,
   COMPONENT_GUIDANCE,
   computerGuidance,
+  HOW_TO_WORK_GUIDANCE,
   ORCHESTRATION_GUIDANCE,
   PROVENANCE_GUIDANCE,
+  ROLE_SCOPE_GUIDANCE,
+  runModeGuidance,
   todayGuidance,
 } from "@openbot/shared/bot-prompt";
 import { defaultModelFor } from "@openbot/shared/model-providers";
@@ -44,6 +48,24 @@ import { testEnvironment } from "./support/environment";
 /** What every built-in Bot reads first: its name, and that a request for it is for it. */
 const identity = (name: string) =>
   `You are ${name}, a Bot in OpenBot. ${selfAddressGuidance(name)}`;
+
+/** The tags of a prompt's sections, in the order the Bot reads them. */
+const sectionsOf = (prompt: string) =>
+  [...prompt.matchAll(/^<([a-z_]+)>$/gm)].map((match) => match[1]);
+
+/** One section's body, or undefined when the prompt has no such section. */
+const sectionOf = (prompt: string, tag: string) =>
+  prompt.match(new RegExp(`^<${tag}>\\n([\\s\\S]*?)\\n</${tag}>$`, "m"))?.[1];
+
+/** The working rules every Bot gets after its role, in their fixed order. */
+const WORKING_SECTIONS = [
+  "how_to_work",
+  "asking",
+  "sources",
+  "answer_format",
+  "subagents",
+  "untrusted_content",
+];
 
 /**
  * The Bot under test, or a failure that says it was never built.
@@ -330,32 +352,49 @@ describe("registered Copilot agents", () => {
   });
 
   test("configures an OpenAI built-in agent", () => {
-    expect(
-      builtInAgentConfiguration(
-        {
-          id: "general-assistant",
-          name: "General Assistant",
-          type: "built_in",
-          systemPrompt: "Be helpful.",
-        },
-        { provider: "openai", defaultModel: "gpt-5.6-terra" },
-        "openai-secret",
-        [],
-        undefined,
-        [],
-        undefined,
-        undefined,
-        undefined,
-        new Set(),
-        new Date("2026-11-05T15:44:00Z"),
-      ),
-    ).toEqual({
+    const configuration = builtInAgentConfiguration(
+      {
+        id: "general-assistant",
+        name: "General Assistant",
+        type: "built_in",
+        systemPrompt: "Be helpful.",
+      },
+      { provider: "openai", defaultModel: "gpt-5.6-terra" },
+      "openai-secret",
+      [],
+      undefined,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      new Set(),
+      new Date("2026-11-05T15:44:00Z"),
+    );
+    expect(configuration).toMatchObject({
       model: "openai/gpt-5.6-terra",
-      // The provenance rule is unconditional, so even a Bot with no tools and no computer carries
-      // it. That Bot needs it most: nothing it says was read anywhere. The date is unconditional too.
-      prompt: `${identity("General Assistant")}\n\nBe helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}\n\n${APPROVAL_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}\n\n${todayGuidance(new Date("2026-11-05T15:44:00Z"))}`,
       apiKey: "openai-secret",
     });
+    const prompt = String((configuration as { prompt?: unknown }).prompt);
+    // Who it is, its role, then the working rules, then the date. The working rules are
+    // unconditional, so even a Bot with no tools and no computer carries them: that Bot needs the
+    // provenance rule most, since nothing it says was read anywhere.
+    expect(sectionsOf(prompt)).toEqual([
+      "identity",
+      "role",
+      ...WORKING_SECTIONS,
+      "model_and_date",
+    ]);
+    expect(sectionOf(prompt, "identity")).toBe(identity("General Assistant"));
+    expect(sectionOf(prompt, "role")).toBe(
+      `Be helpful.\n\n${ROLE_SCOPE_GUIDANCE}`,
+    );
+    expect(sectionOf(prompt, "how_to_work")).toBe(HOW_TO_WORK_GUIDANCE);
+    expect(sectionOf(prompt, "asking")).toBe(ASKING_GUIDANCE);
+    expect(sectionOf(prompt, "sources")).toBe(PROVENANCE_GUIDANCE);
+    expect(sectionOf(prompt, "untrusted_content")).toBe(UNTRUSTED_GUIDANCE);
+    expect(sectionOf(prompt, "model_and_date")).toBe(
+      todayGuidance(new Date("2026-11-05T15:44:00Z")),
+    );
   });
 
   test("fails an unavailable built-in agent through the AG-UI lifecycle", async () => {
@@ -668,22 +707,41 @@ describe("standing agent roles", () => {
   };
 
   test("builds a stable, framework-neutral standing role message", () => {
-    expect(standingRoleMessage(profile)).toEqual({
-      id: "standing-role:agent_expense",
-      role: "system",
-      content: [
-        `You are Expense Manager, Finance Operations. ${selfAddressGuidance("Expense Manager")}`,
-        "Review receipts, categorize expenses, and prepare reimbursement reports.",
-        "This standing role applies in every channel. Treat channel messages as task-specific instructions within it.",
-        // For a remote Bot this message is the whole instruction, so the provenance rule has to
-        // travel in it or the Bot never hears it. Referenced rather than restated, so the assertion
-        // stays exact without pinning the wording twice.
-        PROVENANCE_GUIDANCE,
-        COMPONENT_GUIDANCE,
-        ORCHESTRATION_GUIDANCE,
-        UNTRUSTED_GUIDANCE,
-      ].join("\n\n"),
-    });
+    const message = standingRoleMessage(profile);
+    expect(message.id).toBe("standing-role:agent_expense");
+    expect(message.role).toBe("system");
+    // For a remote Bot this message is the whole instruction, so the working rules every Bot gets
+    // have to travel in it or the Bot never hears them.
+    expect(sectionsOf(message.content)).toEqual([
+      "identity",
+      "role",
+      ...WORKING_SECTIONS,
+    ]);
+    expect(sectionOf(message.content, "identity")).toBe(
+      `You are Expense Manager, Finance Operations. ${selfAddressGuidance("Expense Manager")}`,
+    );
+    expect(sectionOf(message.content, "role")).toBe(
+      `Review receipts, categorize expenses, and prepare reimbursement reports.\n\n${ROLE_SCOPE_GUIDANCE}`,
+    );
+    expect(sectionOf(message.content, "how_to_work")).toBe(
+      HOW_TO_WORK_GUIDANCE,
+    );
+    // Told OpenBot asks for what OpenBot gives it, and nothing about tools of its own.
+    expect(sectionOf(message.content, "asking")).toBe(
+      BROUGHT_BOT_ASKING_GUIDANCE,
+    );
+    expect(sectionOf(message.content, "sources")).toBe(PROVENANCE_GUIDANCE);
+    expect(sectionOf(message.content, "answer_format")).toBe(
+      COMPONENT_GUIDANCE,
+    );
+    expect(sectionOf(message.content, "subagents")).toBe(
+      ORCHESTRATION_GUIDANCE,
+    );
+    expect(sectionOf(message.content, "untrusted_content")).toBe(
+      UNTRUSTED_GUIDANCE,
+    );
+    // Stable: the same profile gives the same message, so a replayed copy can be recognised.
+    expect(standingRoleMessage(profile)).toEqual(message);
   });
 
   test("sends one standing role message ahead of the conversation", async () => {
@@ -935,18 +993,19 @@ describe("standing agent roles", () => {
     const sent = endpoint.requests.at(-1) as
       | { messages?: { content?: string }[] }
       | undefined;
-    expect(sent?.messages?.[0]?.content).toBe(
-      [
-        `You are Expense Manager, Finance Operations. ${selfAddressGuidance("Expense Manager")}`,
-        "Reconcile corporate card statements.",
-        "This standing role applies in every channel. Treat channel messages as task-specific instructions within it.",
-        PROVENANCE_GUIDANCE,
-        COMPONENT_GUIDANCE,
-        ORCHESTRATION_GUIDANCE,
-        UNTRUSTED_GUIDANCE,
-        // And what day it is, last, as every Bot is told. In UTC: no browser said a zone.
-        todayGuidance(new Date()),
-      ].join("\n\n"),
+    const content = sent?.messages?.[0]?.content ?? "";
+    expect(sectionOf(content, "role")).toBe(
+      `Reconcile corporate card statements.\n\n${ROLE_SCOPE_GUIDANCE}`,
+    );
+    expect(sectionsOf(content)).toEqual([
+      "identity",
+      "role",
+      ...WORKING_SECTIONS,
+      // And what day it is, last, as every Bot is told. In UTC: no browser said a zone.
+      "model_and_date",
+    ]);
+    expect(sectionOf(content, "model_and_date")).toBe(
+      todayGuidance(new Date()),
     );
   });
 
@@ -957,7 +1016,7 @@ describe("standing agent roles", () => {
   function onTheWire(message: ReturnType<typeof standingRoleMessage>) {
     return {
       ...message,
-      content: `${message.content}\n\n${todayGuidance(new Date())}`,
+      content: `${message.content}\n\n<model_and_date>\n${todayGuidance(new Date())}\n</model_and_date>`,
     };
   }
 
@@ -1638,6 +1697,67 @@ describe("what a built-in Bot is told about searching", () => {
     expect(prompt).toContain("Be helpful.");
     expect(prompt).not.toContain("computer_navigate");
   });
+
+  /*
+   * A third of the prompt is about the browser, and a Linear-and-Notion routine that never opens one
+   * read all of it ahead of its own job. A run holds the computer when it is offered one of its
+   * tools: the browser offers them only to a Bot the person may drive, and a background turn only to
+   * one whose owner's computer it may use. Asserted on the prompt the model is sent, through the
+   * runtime's own map, because the decision is made per run.
+   */
+  test("a run is told about the computer only when it was offered one of its tools", async () => {
+    const recorder = new LLMock();
+    const originalBase = process.env.OPENAI_BASE_URL;
+    try {
+      process.env.OPENAI_BASE_URL = await recorder.start();
+      recorder.onMessage(/.*/, { content: "Done." });
+      const agents = await createRequestAgents(
+        async () => ({ id: "owner", role: "user" }),
+        createActorAgentResolver({
+          loadAgents: async () => [
+            {
+              id: "general-assistant",
+              name: "General Assistant",
+              type: "built_in" as const,
+              systemPrompt: "Be helpful.",
+            },
+          ],
+          model: { provider: "openai", defaultModel: "gpt-5.6-terra" },
+          resolveModelApiKey: async () => "openai-secret",
+          computerGuidance: () => "COMPUTER GUIDANCE",
+        }),
+      )({ request: new Request("http://127.0.0.1/api/copilotkit") });
+      const promptOfRun = async (tools: RunAgentInput["tools"]) => {
+        const agent = built(agents, "general-assistant").clone();
+        agent.setMessages([{ id: "ask", role: "user", content: "Hello" }]);
+        await agent.runAgent({
+          tools,
+          forwardedProps: { openbotAskedRun: true },
+        });
+        const sent = recorder.getRequests().at(-1)?.body as {
+          messages?: { role?: string; content?: unknown }[];
+        };
+        return String(
+          sent?.messages?.find((message) => message.role === "developer")
+            ?.content,
+        );
+      };
+
+      expect(await promptOfRun([])).not.toContain("COMPUTER GUIDANCE");
+      const navigate = {
+        name: "computer_navigate",
+        description: "Open a web page.",
+        parameters: { type: "object", properties: {} },
+      };
+      expect(sectionOf(await promptOfRun([navigate]), "computer")).toBe(
+        "COMPUTER GUIDANCE",
+      );
+    } finally {
+      if (originalBase === undefined) delete process.env.OPENAI_BASE_URL;
+      else process.env.OPENAI_BASE_URL = originalBase;
+      await recorder.stop();
+    }
+  });
 });
 
 /**
@@ -1758,10 +1878,16 @@ describe("when a Bot answers with a component", () => {
       model,
       "openai-secret",
     );
-    const prompt = "prompt" in configuration ? configuration.prompt : undefined;
+    const prompt = String(
+      "prompt" in configuration ? configuration.prompt : undefined,
+    );
 
     // It points at "the rules above", so the order is part of the rule.
-    expect(prompt).toContain(`${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}`);
+    const sections = sectionsOf(prompt);
+    expect(sections.indexOf("answer_format")).toBe(
+      sections.indexOf("sources") + 1,
+    );
+    expect(sectionOf(prompt, "answer_format")).toBe(COMPONENT_GUIDANCE);
   });
 
   test("a remote Bot carries it in its standing role", () => {
@@ -1770,8 +1896,10 @@ describe("when a Bot answers with a component", () => {
 
   test("names kinds of answer, never a tool a turn might not hold", () => {
     const guidance = COMPONENT_GUIDANCE.toLowerCase().replace(/\s+/g, " ");
-    for (const kind of ["a chart", "a checklist", "a record card", "choose"])
+    for (const kind of ["a chart", "a checklist", "a record card"])
       expect(guidance).toContain(kind);
+    // Not a cue to ask: a choice card is a question, and when to ask is the asking section's rule.
+    expect(guidance).not.toContain("choice card");
     expect(guidance).toContain("answer directly in markdown by default");
     expect(guidance).toContain("when the person explicitly asks for it");
     expect(guidance).toContain(
@@ -1854,8 +1982,17 @@ describe("when a Bot answers with a component", () => {
 
       expect(recorder.getRequests()).toHaveLength(1);
       expect(endpoint.requests).toHaveLength(1);
-      // Both standing rules a background turn has to carry: when to draw, and when to share out.
-      for (const guidance of [COMPONENT_GUIDANCE, ORCHESTRATION_GUIDANCE]) {
+      /*
+       * The rules a background turn has to carry: when to draw, when to share out, and how to work.
+       * And, because a routine fires with nobody watching, the unattended run mode with the shape
+       * its final answer takes, on the Bot OpenBot runs and on the one it does not alike.
+       */
+      for (const guidance of [
+        COMPONENT_GUIDANCE,
+        ORCHESTRATION_GUIDANCE,
+        HOW_TO_WORK_GUIDANCE,
+        runModeGuidance("routine"),
+      ]) {
         const quoted = JSON.stringify(guidance).slice(1, -1);
         expect(JSON.stringify(recorder.getRequests()[0]?.body)).toContain(
           quoted,
@@ -1876,6 +2013,101 @@ describe("when a Bot answers with a component", () => {
  * component rule does (a background turn is asserted with it above), and a check-in, which runs a
  * remote Bot on OpenBot's own runner, carries it once rather than twice.
  */
+/**
+ * A Claude Agent SDK Bot is told how to work the way a built-in one is.
+ *
+ * The harness hands the server's own system messages to Claude Code as its whole system prompt
+ * (`agent-claude-sdk/src/replay.py`), which replaces Claude Code's own, so whatever this deployment
+ * does not send, the Bot does not have. Here a routine fires on one and the endpoint's request is
+ * kept as `agent-claude-sdk/tests/fixtures/server-instructions.json`; the harness's own test
+ * (`test_openbot_instructions.py`) runs that file through the adapter and checks Claude Code starts
+ * with these sections. The two halves meet in the file, so the fixture is compared here byte for
+ * byte, and a change to the prompt rewrites it with `OPENBOT_WRITE_FIXTURES=1`.
+ */
+describe("a Claude Agent SDK Bot on a routine", () => {
+  const FIXTURE = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../agent-claude-sdk/tests/fixtures/server-instructions.json",
+  );
+
+  test("is sent how to work, when to ask and the unattended run mode, as the harness reads them", async () => {
+    setSystemTime(new Date("2026-11-09T12:00:00Z"));
+    await using endpoint = fakeAgUiEndpoint();
+    try {
+      const harness = registeredAgentFromRow({
+        ...riskRow,
+        configuration: { endpoint: endpoint.url, harness: "claude-agent-sdk" },
+      });
+      if (!harness) throw new Error("Expected the harness Bot to register.");
+      const resolver = createActorAgentResolver({
+        loadAgents: async () => [harness],
+        model: { provider: "openai", defaultModel: "gpt-5.6-terra" },
+        resolveModelApiKey: async () => "openai-secret",
+      });
+      const runTurn = createTurnRunner({
+        admission: async () => new AbortController().signal,
+        intelligence: {
+          getOrCreateThread: async () => undefined,
+          getThreadMessages: async () => ({ messages: [] }),
+          ɵacquireThreadLock: async () => undefined,
+          ɵrenewThreadLock: async () => undefined,
+          ɵcleanupThreadLock: async () => undefined,
+        },
+        runner: {
+          run: ({ agent, input }) =>
+            new Observable((subscriber) => {
+              agent
+                .runAgent(input, {
+                  onEvent: ({ event }) => subscriber.next(event),
+                })
+                .then(
+                  () => subscriber.complete(),
+                  (error) => subscriber.error(error),
+                );
+            }),
+          stop: async () => true,
+        },
+        buildAgentFor: ({ ownerUserId, agentId, initiator }) =>
+          resolver.resolveAgentForActor(
+            { id: ownerUserId, role: "user" },
+            agentId,
+            { initiator },
+          ),
+      });
+      await runTurn({
+        ownerUserId: "owner",
+        routineId: "routine-cycle-plan",
+        agentId: harness.id,
+        threadId: "thread-cycle-plan",
+        instruction: "Plan next cycle from the candidates page.",
+      });
+
+      const sent = endpoint.requests[0] as {
+        messages: { id: string; role: string; content: string }[];
+      };
+      const instructions = sent.messages.filter(
+        (message) =>
+          message.id.startsWith("standing-role:") ||
+          message.id.startsWith("granted-tools:"),
+      );
+      const role = instructions[0]?.content ?? "";
+      expect(role).toContain(
+        "The agent framework you run on is Claude Agent SDK.",
+      );
+      expect(sectionOf(role, "how_to_work")).toBe(HOW_TO_WORK_GUIDANCE);
+      expect(sectionOf(role, "asking")).toBe(BROUGHT_BOT_ASKING_GUIDANCE);
+      expect(sectionOf(role, "run_mode")).toBe(runModeGuidance("routine"));
+
+      const fixture = `${JSON.stringify({ messages: instructions }, null, 2)}\n`;
+      if (process.env.OPENBOT_WRITE_FIXTURES === "1")
+        await Bun.write(FIXTURE, fixture);
+      expect(await Bun.file(FIXTURE).text()).toBe(fixture);
+    } finally {
+      setSystemTime();
+    }
+  });
+});
+
 describe("when a Bot gives work to subagents", () => {
   const model = { provider: "openai" as const, defaultModel: "gpt-5.6-terra" };
 
@@ -1890,10 +2122,14 @@ describe("when a Bot gives work to subagents", () => {
       model,
       "openai-secret",
     );
-    const prompt = "prompt" in configuration ? configuration.prompt : undefined;
-    expect(prompt).toContain(
-      `${COMPONENT_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}`,
+    const prompt = String(
+      "prompt" in configuration ? configuration.prompt : undefined,
     );
+    const sections = sectionsOf(prompt);
+    expect(sections.indexOf("subagents")).toBe(
+      sections.indexOf("answer_format") + 1,
+    );
+    expect(sectionOf(prompt, "subagents")).toBe(ORCHESTRATION_GUIDANCE);
   });
 
   test("a remote Bot carries it in its standing role", () => {
@@ -1908,7 +2144,7 @@ describe("when a Bot gives work to subagents", () => {
       "A single question, one search, or a lookup that takes a handful of tool calls, do yourself.",
     );
     expect(guidance).toContain(
-      "Never work on the same thing yourself while a subagent works on it",
+      "Do not work on the same thing yourself while a subagent works on it",
     );
   });
 
@@ -1935,7 +2171,11 @@ describe("when a Bot gives work to subagents", () => {
       "prompt" in configuration ? (configuration.prompt ?? "") : "";
     expect(prompt.split(ORCHESTRATION_GUIDANCE)).toHaveLength(2);
     expect(prompt.split(COMPONENT_GUIDANCE)).toHaveLength(2);
-    expect(prompt).toStartWith("You are Risk, Risk & Compliance.");
+    expect(prompt.split(HOW_TO_WORK_GUIDANCE)).toHaveLength(2);
+    expect(prompt).toStartWith("<identity>\nYou are Risk, Risk & Compliance.");
+    // On OpenBot's runner every tool it holds is OpenBot's, so it is told OpenBot asks for all of them.
+    expect(sectionOf(prompt, "asking")).toBe(ASKING_GUIDANCE);
+    expect(sectionsOf(prompt).filter((tag) => tag === "role")).toHaveLength(1);
   });
 });
 
@@ -1974,7 +2214,9 @@ describe("what day it is", () => {
       now,
     );
     const prompt = "prompt" in configuration ? configuration.prompt : "";
-    expect(prompt).toEndWith(`\n\n${todayGuidance(now)}`);
+    expect(prompt).toEndWith(
+      `<model_and_date>\n${todayGuidance(now)}\n</model_and_date>`,
+    );
   });
 
   /*
@@ -2099,7 +2341,8 @@ describe("what day it is", () => {
           sent?.messages?.find((message) => message.role === "developer")
             ?.content,
         );
-        expect(prompt.split("\n\n").at(-1)).toStartWith(expected);
+        expect(sectionOf(prompt, "model_and_date")).toStartWith(expected);
+        expect(sectionsOf(prompt).at(-1)).toBe("model_and_date");
         expect(prompt).not.toContain(
           expected === LOCAL_DAY ? UTC_DAY : LOCAL_DAY,
         );
@@ -2109,8 +2352,12 @@ describe("what day it is", () => {
           harness.requests[0] as { messages?: { content?: string }[] }
         )?.messages?.[0]?.content;
         expect(role).toStartWith(standingRoleMessage(riskRow).content);
-        const lastParagraph = role?.split("\n\n").at(-1);
-        expect(lastParagraph).toStartWith(expected);
+        expect(sectionOf(role ?? "", "model_and_date")).toStartWith(expected);
+        expect(sectionsOf(role ?? "").at(-1)).toBe("model_and_date");
+
+        // A person's own turn is watched, so neither kind of Bot is told it runs unattended.
+        expect(sectionsOf(prompt)).not.toContain("run_mode");
+        expect(sectionsOf(role ?? "")).not.toContain("run_mode");
 
         // And the plan's harness is handed the built-in prompt with it.
         expect(JSON.stringify(plan.requests[0])).toContain(
@@ -2164,8 +2411,8 @@ describe("a person's standing instructions", () => {
   test("carries the block, its precedence sentence, and the person's own words", () => {
     const prompt = promptWith("Write in British English.");
 
-    expect(prompt).toContain(
-      "The person you are working with has standing instructions that apply in every channel and every task, alongside your role: Write in British English.",
+    expect(sectionOf(prompt, "person_instructions")).toStartWith(
+      "The person you are working with has written instructions of their own, for every conversation and every task, alongside your role: Write in British English.",
     );
     /*
      * The precedence sentence is part of the block rather than decoration. Two standing instructions
@@ -2191,15 +2438,18 @@ describe("a person's standing instructions", () => {
 
     // The role, then who it is working for, then what it holds, then its hands. Asserted as
     // positions rather than as presence, because the order is the part that was decided.
-    expect(prompt.indexOf("Be helpful.")).toBeLessThan(
-      prompt.indexOf("standing instructions that apply in every channel"),
-    );
-    expect(
-      prompt.indexOf("standing instructions that apply in every channel"),
-    ).toBeLessThan(prompt.indexOf("google-drive"));
-    expect(prompt.indexOf("google-drive")).toBeLessThan(
-      prompt.indexOf("Computer guidance."),
-    );
+    expect(sectionsOf(prompt)).toEqual([
+      "identity",
+      "role",
+      "person_instructions",
+      ...WORKING_SECTIONS,
+      "apps",
+      "computer",
+      "model_and_date",
+    ]);
+    expect(sectionOf(prompt, "role")).toStartWith("Be helpful.");
+    expect(sectionOf(prompt, "apps")).toContain("google-drive");
+    expect(sectionOf(prompt, "computer")).toBe("Computer guidance.");
   });
 
   test.each([[null], [undefined], [""], ["   \n  "]])(
@@ -2207,12 +2457,15 @@ describe("a person's standing instructions", () => {
     (instructions) => {
       const prompt = promptWith(instructions as string | null);
 
-      expect(prompt).not.toContain("standing instructions");
-      // Byte for byte what a deployment had before any of this existed, which is what most people
-      // on most days get: the Bot's name, its role, and the guidance every Bot is given.
-      expect(prompt).toBe(
-        `${identity("General Assistant")}\n\nBe helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${COMPONENT_GUIDANCE}\n\n${ORCHESTRATION_GUIDANCE}\n\n${APPROVAL_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}\n\n${todayGuidance(NOW)}`,
-      );
+      expect(prompt).not.toContain("instructions of their own");
+      // What a deployment had before any of this existed, which is what most people on most days
+      // get: the Bot's name, its role, and the guidance every Bot is given.
+      expect(sectionsOf(prompt)).toEqual([
+        "identity",
+        "role",
+        ...WORKING_SECTIONS,
+        "model_and_date",
+      ]);
     },
   );
 
@@ -2280,7 +2533,7 @@ describe("a person's standing instructions", () => {
       roleDescription: "Investigate policies and controls.",
     }).content;
 
-    expect(content).not.toContain("standing instructions that apply");
+    expect(content).not.toContain("instructions of their own");
   });
 
   async function runWithInstructions(loadInstructions: LoadInstructions) {
@@ -2350,7 +2603,7 @@ describe("a person's standing instructions", () => {
         );
       });
       expect(reads).toBe(1);
-      expect(sent.modelRequest).not.toContain("standing instructions");
+      expect(sent.modelRequest).not.toContain("instructions of their own");
       expect(diagnostic).toHaveBeenCalledTimes(1);
       expect(diagnostic).toHaveBeenCalledWith({
         error: "standing_instruction_read_failed",
@@ -2383,11 +2636,11 @@ describe("a person's standing instructions", () => {
           return instructions;
         });
         expect(reads).toBe(1);
-        expect(sent.modelRequest.includes("standing instructions")).toBe(
+        expect(sent.modelRequest.includes("instructions of their own")).toBe(
           instructions !== null,
         );
         if (instructions) expect(sent.modelRequest).toContain(instructions);
-        expect(sent.remoteRequest).not.toContain("standing instructions");
+        expect(sent.remoteRequest).not.toContain("instructions of their own");
         expect(sent.remoteRequest).not.toContain("Write in British English.");
         expect(diagnostic).not.toHaveBeenCalled();
       } finally {

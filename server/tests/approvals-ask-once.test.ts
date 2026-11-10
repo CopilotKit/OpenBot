@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
-  APPROVAL_GUIDANCE,
+  ASKING_GUIDANCE,
+  BROUGHT_BOT_ASKING_GUIDANCE,
   DESTRUCTIVE_TOOL_NOTE,
 } from "@openbot/shared/bot-prompt";
 import { safetyRequirement } from "../src/approvals/policy";
@@ -46,18 +47,27 @@ const prompt = (() => {
 
 describe("a Bot OpenBot runs leaves the asking to OpenBot", () => {
   test("it is told OpenBot asks before consequential actions, and not to ask first", () => {
-    expect(prompt).toContain(APPROVAL_GUIDANCE);
-    expect(APPROVAL_GUIDANCE).toContain("do not ask them first");
+    expect(prompt).toContain(ASKING_GUIDANCE);
+    expect(ASKING_GUIDANCE).toContain("do not ask them first");
   });
 
-  test("a remote Bot is not told so: its own tools don't go through OpenBot's gate", () => {
+  test("a remote Bot is told so only for what OpenBot gives it: its own tools don't go through OpenBot's gate", () => {
     const role = standingRoleMessage({
       id: "risk",
       name: "Risk",
       title: "Risk desk",
       roleDescription: "Investigate policies.",
     });
-    expect(role.content).not.toContain(APPROVAL_GUIDANCE);
+    expect(role.content).not.toContain(ASKING_GUIDANCE);
+    expect(role.content).toContain(BROUGHT_BOT_ASKING_GUIDANCE);
+    const said = BROUGHT_BOT_ASKING_GUIDANCE.replace(/\s+/g, " ");
+    expect(said).toContain(
+      "When you use the apps and tools OpenBot gives you, OpenBot asks the person itself before you delete",
+    );
+    // Its own tools are not covered, so it still asks before one of them does something final.
+    expect(said).toContain(
+      "Tools of your own that OpenBot did not give you are not covered: ask before one of those does something that cannot be undone.",
+    );
   });
 
   // Each action the guidance names, as a button a Bot presses: the policy must ask about every one.
@@ -71,7 +81,7 @@ describe("a Bot OpenBot runs leaves the asking to OpenBot", () => {
   ] as const)(
     "the guidance says OpenBot asks before you %s, and it does",
     (said, button, behaviour) => {
-      expect(APPROVAL_GUIDANCE.replace(/\s+/g, " ")).toContain(said);
+      expect(ASKING_GUIDANCE.replace(/\s+/g, " ")).toContain(said);
       expect(safetyRequirement(click(button))?.behaviour).toBe(behaviour);
     },
   );
@@ -88,7 +98,7 @@ describe("a Bot OpenBot runs leaves the asking to OpenBot", () => {
   });
 
   test("the guidance promises a card for deleting in the person's apps, never on the Bot's own computer", () => {
-    const guidance = APPROVAL_GUIDANCE.replace(/\s+/g, " ");
+    const guidance = ASKING_GUIDANCE.replace(/\s+/g, " ");
     expect(guidance).toContain(
       "before you delete, archive, send, share or post anything in their apps or on websites",
     );
@@ -110,7 +120,7 @@ describe("a Bot OpenBot runs leaves the asking to OpenBot", () => {
   });
 
   test("the guidance says OpenBot asks before you archive, and it does", () => {
-    expect(APPROVAL_GUIDANCE.replace(/\s+/g, " ")).toContain(
+    expect(ASKING_GUIDANCE.replace(/\s+/g, " ")).toContain(
       "delete, archive, send",
     );
     expect(safetyRequirement(app("HUBSPOT_ARCHIVE_CONTACT"))?.behaviour).toBe(
@@ -119,7 +129,7 @@ describe("a Bot OpenBot runs leaves the asking to OpenBot", () => {
   });
 
   test("a tool its app marks destructive says so on itself, in the words the guidance names, and OpenBot asks", () => {
-    const guidance = APPROVAL_GUIDANCE.replace(/\s+/g, " ");
+    const guidance = ASKING_GUIDANCE.replace(/\s+/g, " ");
     expect(guidance).toContain(
       "before you use a tool that says it deletes or overwrites something",
     );

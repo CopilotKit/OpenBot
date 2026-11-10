@@ -738,6 +738,34 @@ describe("a run's model and effort", () => {
     ).toEqual({ model: "gpt-4o", label: "GPT-4o", listed: true });
   });
 
+  /*
+   * A routine runs with nobody watching, and models stop early more often at low and medium effort,
+   * so with no effort picked it asks for high where the model takes it. The person's own pick still
+   * wins, and a model that takes no effort is sent none.
+   */
+  test("a run nobody is watching thinks at high where the model takes it, unless the person picked", async () => {
+    const catalogue = await openAI();
+    expect(await catalogue.choose(null, "high")).toEqual({
+      model: "gpt-6.1-terra",
+      label: "GPT-6.1 Terra",
+      effort: "high",
+      listed: true,
+    });
+    expect(
+      await catalogue.choose({ model: "gpt-6.1-sol", effort: "low" }, "high"),
+    ).toEqual({
+      model: "gpt-6.1-sol",
+      label: "GPT-6.1 Sol",
+      effort: "low",
+      listed: true,
+    });
+    expect(await catalogue.choose({ model: "gpt-4o" }, "high")).toEqual({
+      model: "gpt-4o",
+      label: "GPT-4o",
+      listed: true,
+    });
+  });
+
   test("a model no longer offered falls back to the default, with an effort only if the default takes it", async () => {
     expect(
       await (await openAI()).choose({ model: "gpt-4-0613", effort: "max" }),
