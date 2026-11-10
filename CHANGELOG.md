@@ -30,6 +30,35 @@ backup taken before the upgrade instead. Three things change for an existing dep
 
 ### OpenBot Desktop
 
+- **Setup says what it's doing in plain words, and what's installing behind every step.** The
+  setup window said "Preparing the engine machine", "Installing Podman", "Waiting for the back end"
+  and "Updating the back end to 0.16.0-rc.10", and a tester waiting on the first step couldn't tell
+  whether it was stuck. Each line now says what OpenBot is doing for you ("Preparing this computer
+  to run OpenBot. This takes a few minutes the first time.", "Getting OpenBot ready", "Updating
+  OpenBot"), and the Desktop log keeps the technical detail beside it. The Account and AI steps
+  show one row for the install running behind them: what it's doing, step N of 4, the time so far,
+  and the time left while it downloads. That row has its own slot under the step's form, so the AI
+  step's fields no longer jump when a download starts or ends, and the window no longer grows or
+  moves. When setup, a start or an update stops, the card says what happened and what to do in the
+  same plain words ("OpenBot has 30 GB of free disk. It needs 40 GB. Free up space on drive C:,
+  then Retry."), with the engine's own output under Technical details and in the logs you can
+  copy. Docker Desktop and Podman are named only where you act in them. The Start screen no longer
+  sits on "Waiting for the back end · 13s elapsed" for minutes: one journey over the whole start
+  says what is happening now ("Starting OpenBot's services", "Updating your data", "Downloading
+  the update · 300.0 MB of 900.0 MB"), with one bar that only moves forward and "About 2 minutes
+  left" from how long each part measured on a real machine. A part that runs long slows the bar
+  and says "Taking longer than usual, still working" instead of a wrong time, and a slow download
+  no longer counts against the step it holds up. Updating OpenBot on Start says "Downloading the
+  update" and "Installing the update" rather than a release name, its download's total no longer
+  shrinks partway, and the card is held from the top, so nothing already on screen moves as rows
+  and downloads come and go. The bar follows how long each part actually takes, so a long download
+  is most of it and moves it, and the time left never jumps up. Once a download's bytes are in, its
+  row says which part is unpacking ("Unpacking OpenBot (4 of 5)") under a bar that is never full
+  while a part is left, with the time so far and the time left. Quit shows the same bar and time
+  left. The window keeps the size and place it opened with, and a step taller than it scrolls
+  inside its card; a reopened window comes back where it was. The license step links "Read the
+  license agreement" without the agreement's id, and no step line shows a release name or the
+  engine's own output.
 - **A first install on a Mac starts the first time, and a reinstall sets its back end up again.**
   Three things a from-zero install of 1.0.0 hit on a Mac with Docker Desktop:
   - The first Start could stop with "Something went wrong" because Docker Desktop refused the
@@ -57,20 +86,21 @@ backup taken before the upgrade instead. Three things change for an existing dep
   Mac the Account step waited for Install to put Podman in before any browser sign-in opened, and
   the "osascript wants to make changes" password box came up by itself over it. The CopilotKit
   sign-in now opens in your browser as soon as the Account step opens: the CLI's sign-in needs no
-  engine, and only the license agreement waits for one. Podman downloads meanwhile. Once you're
-  signed in, the step says "OpenBot installs Podman, which runs OpenBot's back end on this
-  computer. macOS asks for your password once to install it." and the password box comes up only
-  when you choose Continue. It now says "OpenBot needs your password to install Podman, which runs
-  OpenBot's back end." Closing it without a password offers Continue again instead of stopping
-  Install. Windows and Linux install as before.
+  engine, and only the license agreement waits for one. Podman downloads meanwhile. Before macOS
+  asks, the step says "Your Mac will ask for your password so OpenBot can install what it needs to
+  run.", and the password box comes up by itself a moment later, with no button to press first.
+  It now says "OpenBot needs your password to install the software it runs on." Closing it
+  without a password says plainly that OpenBot needs it and asks again by itself, or at once with
+  Try again, instead of stopping Install. On Windows, turning on Windows Subsystem for Linux starts
+  by itself the same way; the restart after it still waits for you, so you don't lose unsaved work.
 - **A back end update that was stopped partway no longer breaks every later Start.** Quitting
   while the back end updated could leave it half updated, and every Start after that failed with
   "Local update-quiesce failed (exit 1)". OpenBot now lets an update finish once it has begun
-  changing the back end ("Finishing the back end update" on the Shutting down screen), repairs a
+  changing the back end ("Finishing the OpenBot update" on the Shutting down screen), repairs a
   back end an earlier update left half done, rolls back one Helm left mid-upgrade, uncordons a
-  back end node left unschedulable, and tries the update once more. While it runs, the row names
-  the step it is waiting on and for how long, and a failed database job is said as soon as it
-  fails. A failed update says the step it stopped at, and that your data is kept.
+  back end node left unschedulable, and tries the update once more. While it runs, the Start
+  screen says what it is doing and how long is left, and a failed part of the update is said as
+  soon as it fails. A failed update says where it stopped, and that your data is kept.
 - **The Account step says when it is waiting for Install to set up the engine.** On a new Mac it
   said "Checking your CopilotKit account…" for minutes while Install put Podman in, because the
   license agreement check needs a running engine. It now says "You're signed in. OpenBot is setting

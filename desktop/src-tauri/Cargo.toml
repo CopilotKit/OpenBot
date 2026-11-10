@@ -47,6 +47,8 @@ tauri-plugin-deep-link = "2"
 portable-pty = "0.9.0"
 tauri-plugin-opener = "2.5.5"
 tauri-plugin-dialog = "2"
+# Puts each window back where the person left it: its size, its place and whether it was maximized.
+tauri-plugin-window-state = "2"
 # A Bot's notifications from OpenBot's own page, shown by the system. The window's web view cannot
 # grant the page's Notification API (WKWebView answers "denied" without asking), so this plugin
 # stands in for it. See `allow_app_page` in main.rs.
