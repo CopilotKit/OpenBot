@@ -331,6 +331,59 @@ pub fn stable_host_path(
     current_exe: &Path,
     appimage: Option<&Path>,
 ) -> Result<PathBuf, Problem> {
+    stable_host_path_with(os, current_exe, appimage, translocation_mount)
+}
+
+/// The mount a translocated app runs from, as `statfs` reports it for `path`: where it is mounted
+/// (`f_mntonname`) and what is mounted there (`f_mntfromname`). Gatekeeper's App Translocation
+/// mounts the app's real folder read-only, with `nullfs`, at a random folder under
+/// `AppTranslocation`, and the app runs from `<that folder>/d/<App>.app`. Apple's own Security code
+/// finds a translocated app's original path the same way (`libsecurity_translocate`).
+#[cfg(target_os = "macos")]
+fn translocation_mount(path: &Path) -> Option<(PathBuf, PathBuf)> {
+    use std::os::unix::ffi::OsStrExt as _;
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut mount = std::mem::MaybeUninit::<libc::statfs>::uninit();
+    // SAFETY: `path` is NUL-terminated and `mount` is a valid place for one `statfs` to be written.
+    if unsafe { libc::statfs(path.as_ptr(), mount.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    // SAFETY: `statfs` returned 0, so it filled `mount`.
+    let mount = unsafe { mount.assume_init() };
+    let text = |chars: &[libc::c_char]| {
+        // SAFETY: both fields are fixed arrays the kernel NUL-terminates.
+        let said = unsafe { std::ffi::CStr::from_ptr(chars.as_ptr()) };
+        PathBuf::from(std::ffi::OsStr::from_bytes(said.to_bytes()))
+    };
+    Some((text(&mount.f_mntonname), text(&mount.f_mntfromname)))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn translocation_mount(_path: &Path) -> Option<(PathBuf, PathBuf)> {
+    None
+}
+
+/// Where a translocated Mac app really is: `/Applications/OpenBot.app/Contents/MacOS/openbot-desktop`
+/// for `<mount>/d/OpenBot.app/Contents/MacOS/openbot-desktop`, when `<mount>` holds the app copied
+/// from `/Applications/OpenBot.app`. None when the path is not inside that mount.
+fn untranslocated(current_exe: &Path, mounted_on: &Path, mounted_from: &Path) -> Option<PathBuf> {
+    let inside = current_exe.strip_prefix(mounted_on).ok()?;
+    let mut parts = inside.components();
+    // `d`, then the bundle itself, which the mount's source names.
+    let (Some(_), Some(bundle)) = (parts.next(), parts.next()) else {
+        return None;
+    };
+    (mounted_from.file_name() == Some(bundle.as_os_str()) && mounted_from.is_absolute())
+        .then(|| mounted_from.join(parts.as_path()))
+}
+
+/// `stable_host_path`, with how a path's mount is read given, so a test can name a translocation.
+fn stable_host_path_with(
+    os: Os,
+    current_exe: &Path,
+    appimage: Option<&Path>,
+    mount_of: impl Fn(&Path) -> Option<(PathBuf, PathBuf)>,
+) -> Result<PathBuf, Problem> {
     let exe = current_exe.to_string_lossy();
     match os {
         Os::Linux => {
@@ -344,9 +397,18 @@ pub fn stable_host_path(
                 Ok(current_exe.to_path_buf())
             }
         }
-        Os::Mac if exe.contains("/AppTranslocation/") => Err(Problem::plain(
-            "Move OpenBot Desktop to Applications to let the Recorder find it.",
-        )),
+        /*
+         * Gatekeeper runs a downloaded app that still carries its quarantine from a random,
+         * read-only copy until Finder moves it: one copied into Applications with `cp` or `ditto`
+         * runs translocated too. That copy is gone once the app quits, so the manifest names the
+         * app where it really is. Only a copy still on the disk image it came on asks to be moved.
+         */
+        Os::Mac if exe.contains("/AppTranslocation/") => mount_of(current_exe)
+            .and_then(|(on, from)| untranslocated(current_exe, &on, &from))
+            .filter(|original| !original.starts_with("/Volumes"))
+            .ok_or_else(|| {
+                Problem::plain("Move OpenBot Desktop to Applications to let the Recorder find it.")
+            }),
         Os::Mac | Os::Windows => Ok(current_exe.to_path_buf()),
     }
 }
@@ -926,6 +988,65 @@ mod tests {
             got.unwrap_err().said,
             "Move OpenBot Desktop to Applications to let the Recorder find it."
         );
+    }
+
+    /// OpenBot Desktop 1.0.0, copied into Applications with `ditto` from its disk image and opened:
+    /// Gatekeeper ran it translocated, and the Recorder said "Move OpenBot Desktop to Applications"
+    /// to an app that was in Applications. The mount is as `mount` showed it that night. Unix paths,
+    /// which Windows does not count as absolute.
+    #[cfg(unix)]
+    #[test]
+    fn a_translocated_app_that_is_in_applications_names_its_real_path() {
+        let mount = "/private/var/folders/15/cbm93f0549jbtwnp4vn063r00000gn/T/AppTranslocation/E35D6529-FB65-4C85-BC60-D38960D7E85A";
+        let exe = PathBuf::from(format!(
+            "{mount}/d/OpenBot.app/Contents/MacOS/openbot-desktop"
+        ));
+        let mounted = |from: &'static str| {
+            move |path: &Path| {
+                assert!(path.starts_with(mount), "{}", path.display());
+                Some((PathBuf::from(mount), PathBuf::from(from)))
+            }
+        };
+        assert_eq!(
+            stable_host_path_with(Os::Mac, &exe, None, mounted("/Applications/OpenBot.app"))
+                .unwrap(),
+            PathBuf::from("/Applications/OpenBot.app/Contents/MacOS/openbot-desktop")
+        );
+        assert_eq!(
+            stable_host_path_with(
+                Os::Mac,
+                &exe,
+                None,
+                mounted("/Users/a/Applications/OpenBot.app")
+            )
+            .unwrap(),
+            PathBuf::from("/Users/a/Applications/OpenBot.app/Contents/MacOS/openbot-desktop")
+        );
+        // Still on the disk image, which goes when it is ejected: that one is asked to move.
+        assert_eq!(
+            stable_host_path_with(Os::Mac, &exe, None, mounted("/Volumes/OpenBot/OpenBot.app"))
+                .unwrap_err()
+                .said,
+            "Move OpenBot Desktop to Applications to let the Recorder find it."
+        );
+        // A mount that is not this app's, or none at all, is never guessed through.
+        for unrelated in [
+            stable_host_path_with(Os::Mac, &exe, None, mounted("/Applications/Other.app")),
+            stable_host_path_with(Os::Mac, &exe, None, |_| None),
+        ] {
+            assert!(unrelated.is_err());
+        }
+    }
+
+    /// The real `statfs` on this Mac: a folder that is not translocated is its own mount's, never
+    /// an AppTranslocation one.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn statfs_reads_the_mount_a_path_is_on() {
+        let (on, from) = translocation_mount(Path::new("/Applications")).unwrap();
+        assert!(on.is_absolute(), "{}", on.display());
+        assert!(!from.as_os_str().is_empty());
+        assert!(!on.to_string_lossy().contains("AppTranslocation"));
     }
 
     #[test]

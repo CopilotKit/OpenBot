@@ -2925,7 +2925,11 @@ thread_local! {
 fn logs_its_ending(arguments: &[&str]) -> bool {
     matches!(
         arguments,
-        ["local", "setup" | "start" | "update" | "stop", ..]
+        [
+            "local",
+            "setup" | "start" | "update" | "stop" | "delete",
+            ..
+        ]
     )
 }
 
@@ -4109,26 +4113,243 @@ fn stack_set_up_in(
 ///
 /// A setup that resumes a stack whose node is there downloads its images first (`local_images`):
 /// on a slow line that is how a first setup that stopped in its image download finishes.
+///
+/// A setup that stopped because this folder's stack lost its private files starts that stack over,
+/// or says in plain words what to do (`lost_stack`).
 pub fn setup_installed(
     attempt: &str,
     installation: &std::path::Path,
     accepted: Option<&EulaVersion>,
-) -> Result<(Report, String), Failure> {
+) -> Result<(Report, String), SetupStopped> {
     let id = attempt;
     let attempt = Attempt::register(attempt);
     one_at_a_time(&attempt.0, Limits::for_setup(), |remaining| {
         let cli = installed()?;
-        let report = setup_with(
-            &cli,
-            id,
-            installation,
-            accepted,
-            (Limits::for_setup(), remaining),
-            &attempt.0,
-            crate::local_images::Limits::standard(),
-        )?;
-        Ok((report, cli.sha256().to_owned()))
+        let set_up = || {
+            setup_with(
+                &cli,
+                id,
+                installation,
+                accepted,
+                (Limits::for_setup(), remaining),
+                &attempt.0,
+                crate::local_images::Limits::standard(),
+            )
+        };
+        let report = set_up()?;
+        let report = match lost_stack(&cli, &report, installation, &attempt.0)? {
+            None => report,
+            Some(Lost::Said(problem)) => return Ok(Err(problem)),
+            // A delete that did not finish leaves the setup failed, as it was.
+            Some(Lost::Forgettable(stack)) => match forget(&cli, &stack, &attempt.0) {
+                Ok(()) => set_up()?,
+                Err(Failure::Cancelled) => return Err(Failure::Cancelled),
+                Err(_) => report,
+            },
+        };
+        Ok(Ok((report, cli.sha256().to_owned())))
     })
+    .map_err(SetupStopped::Failure)?
+    .map_err(SetupStopped::Said)
+}
+
+/// Why `setup_installed` gave no report: the CLI's own static category, or OpenBot's plain words.
+#[derive(Debug, PartialEq, Eq)]
+pub enum SetupStopped {
+    Failure(Failure),
+    Said(crate::problem::Problem),
+}
+
+/// What setup does about a stack that lost the files it resumes from.
+enum Lost {
+    /// The stack is this folder's alone and its files are gone: forgotten, and set up again.
+    Forgettable(StackId),
+    /// Kept as it is, with what the person can do about it.
+    Said(crate::problem::Problem),
+}
+
+/// The private files the CLI resumes a stack from, in `local-evaluation/<stack>`.
+#[derive(Debug, PartialEq, Eq)]
+enum PrivateFiles {
+    Present,
+    /// `setup.json` or `secrets.json` is not there.
+    Missing,
+    /// There, but not readable as the CLI writes it.
+    Damaged,
+}
+
+/**
+Whether `local setup` can still resume a stack from `folder`, its private folder. The CLI's own test,
+before it touches anything (Intelligence `apps/cli/src/services/local-setup.ts`): `setup.json` holds
+the stack's licence and `secrets.json` its keys, and with either gone it refuses with "Restore the
+private setup and credentials files before resuming this stack", never making new keys.
+*/
+fn private_files(folder: &std::path::Path) -> PrivateFiles {
+    let read = |name: &str| std::fs::read(folder.join(name));
+    let gone = |result: &std::io::Result<Vec<u8>>| matches!(result, Err(error) if error.kind() == std::io::ErrorKind::NotFound);
+    let (setup, secrets) = (read("setup.json"), read("secrets.json"));
+    if gone(&setup) || gone(&secrets) {
+        return PrivateFiles::Missing;
+    }
+    let licensed = setup
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|setup| {
+            setup
+                .get("licenseToken")
+                .and_then(Value::as_str)
+                .map(|token| !token.is_empty())
+        })
+        .unwrap_or(false);
+    if licensed && secrets.is_ok() {
+        PrivateFiles::Present
+    } else {
+        PrivateFiles::Damaged
+    }
+}
+
+/**
+A failed `local setup` for a stack that can no longer be resumed.
+
+Found on OpenBot Desktop 1.0.0, reinstalled after the earlier installation's folder, app data and
+back end were deleted. The CLI still recorded a stack for `~/OpenBot`, and its private folder was
+gone, so every setup stopped with "Restore the private setup and credentials files before resuming
+this stack" and the window said "Back end setup stopped", with nothing the person could do.
+
+The stack is the one the CLI records for this folder (`appPaths`, by real path). With its private
+files missing and no other app using it, nothing can ever resume it, so it is forgotten and set up
+again. With them damaged, or with another app on it, it is kept and the person is told what to do.
+None for every other failure, and for a stack whose files are there.
+*/
+fn lost_stack(
+    cli: &PinnedCli,
+    report: &Report,
+    installation: &std::path::Path,
+    cancel: &Cancel,
+) -> Result<Option<Lost>, Failure> {
+    if report.outcome != Outcome::Failed || report.reason != Some(Reason::LocalCommandFailed) {
+        return Ok(None);
+    }
+    let (code, bytes) = match execute(
+        cli,
+        &LIST_ARGUMENTS,
+        None,
+        Limits::for_action(Action::Status),
+        cancel,
+    ) {
+        Ok(answer) => answer,
+        Err(Failure::Cancelled) => return Err(Failure::Cancelled),
+        Err(_) => return Ok(None),
+    };
+    let Ok((Outcome::Completed, wire)) = parse_envelope("local list", code, &bytes) else {
+        return Ok(None);
+    };
+    let Ok(folder) = installation.canonicalize() else {
+        return Ok(None);
+    };
+    let is_here = |path: &str| {
+        std::path::Path::new(path)
+            .canonicalize()
+            .is_ok_and(|path| path == folder)
+    };
+    for saved in wire
+        .get("stacks")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let paths: Vec<&str> = saved
+            .get("appPaths")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|path| path.get("path").and_then(Value::as_str))
+            .collect();
+        if !paths.iter().any(|path| is_here(path)) {
+            continue;
+        }
+        let Some(stack) = saved
+            .get("id")
+            .and_then(Value::as_str)
+            .and_then(|id| StackId::parse(id).ok())
+        else {
+            return Ok(None);
+        };
+        let Some(private) = crate::local_update::stack_dir(stack.as_str()) else {
+            return Ok(None);
+        };
+        let shared = paths.iter().any(|path| !is_here(path));
+        let files = private_files(&private);
+        log::warn!(
+            "[local setup] {}'s private files are {files:?}{}",
+            stack.as_str(),
+            if shared {
+                "; another app uses it too"
+            } else {
+                ""
+            }
+        );
+        return Ok(match files {
+            PrivateFiles::Present => None,
+            PrivateFiles::Missing if !shared => Some(Lost::Forgettable(stack)),
+            PrivateFiles::Missing => Some(Lost::Said(crate::problem::Problem::with(
+                format!(
+                    "The back end OpenBot uses is missing its saved settings, and another app on \
+                     this computer uses it too. Restore {} from a backup, then try again.",
+                    private.display()
+                ),
+                format!("{} lost setup.json or secrets.json", stack.as_str()),
+            ))),
+            PrivateFiles::Damaged => Some(Lost::Said(crate::problem::Problem::with(
+                format!(
+                    "The back end's saved settings can't be read. Restore {} from a backup, or \
+                     delete that folder to set the back end up again from the start. Then try again.",
+                    private.display()
+                ),
+                format!("{}: setup.json or secrets.json is unreadable", stack.as_str()),
+            ))),
+        });
+    }
+    Ok(None)
+}
+
+/// `local delete --stack <stack> --confirm-delete <stack> --json`: the CLI's own way to forget a
+/// stack. It removes the stack's cluster when k3d still lists one, its private folder and its
+/// record, and leaves every other stack as it is.
+pub fn forget_arguments(stack: &StackId) -> [&str; 7] {
+    [
+        "local",
+        "delete",
+        "--stack",
+        stack.as_str(),
+        "--confirm-delete",
+        stack.as_str(),
+        "--json",
+    ]
+}
+
+/// Forget `stack` (`forget_arguments`). Anything but a completed delete leaves setup failed.
+fn forget(cli: &PinnedCli, stack: &StackId, cancel: &Cancel) -> Result<(), Failure> {
+    let (code, bytes) = execute(
+        cli,
+        &forget_arguments(stack),
+        None,
+        Limits::for_action(Action::Stop),
+        cancel,
+    )?;
+    let (outcome, _) = parse_envelope("local delete", code, &bytes)?;
+    if outcome != Outcome::Completed {
+        log::warn!(
+            "[local setup] the CLI did not forget {}: {outcome:?}",
+            stack.as_str()
+        );
+        return Err(Failure::InvalidStatus);
+    }
+    log::info!(
+        "[local setup] forgot {}, whose private files were gone; setting the back end up again",
+        stack.as_str()
+    );
+    Ok(())
 }
 
 /// `configure_learning_model` against the installed CLI, in its turn like every other call.
@@ -5633,12 +5854,12 @@ mod tests {
         std::fs::create_dir_all(&installation).unwrap();
         assert_eq!(
             setup_installed("setup-no-cli", &installation, None).map(|(report, _)| report),
-            Err(Failure::Unavailable)
+            Err(SetupStopped::Failure(Failure::Unavailable))
         );
         cancel("setup-cancelled");
         assert_eq!(
             setup_installed("setup-cancelled", &installation, None).map(|(report, _)| report),
-            Err(Failure::Cancelled)
+            Err(SetupStopped::Failure(Failure::Cancelled))
         );
         std::fs::remove_dir_all(installation).unwrap();
     }

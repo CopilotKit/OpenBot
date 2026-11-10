@@ -1775,6 +1775,9 @@ async fn prepare_installation_inner(
         let address = tauri::async_runtime::block_on(engine_ready(&app, saved))?.pin()?;
         attempt.require_current()?;
         tauri::async_runtime::block_on(deployment_ready(&app, &root))?;
+        // Made now, minutes before the first Start mounts it: Docker Desktop's file sharing refused
+        // one made a moment before `up` (`stack::make_sign_in_folder`).
+        stack::make_sign_in_folder(&root)?;
         // Saved once the folder is there, before any image is pulled into the engine. Every later
         // install and start uses this engine: see `preparation::saved_engine`.
         if saved.is_none() {
@@ -3096,16 +3099,9 @@ async fn start_stack_inner<R: tauri::Runtime>(
         // minted above.
         secrets.insert("OPENBOT_DESKTOP_HOST_TOKEN".into(), host_token.clone());
 
-        // Compose's bind mount of the sign-in folder does not create it, because Docker would make
-        // it as root on Linux and this app could then not write a sign-in into it. So it is made
-        // here, as the person, before anything asks for it.
-        let sign_in_folder = root.join(".openbot");
-        std::fs::create_dir_all(&sign_in_folder).map_err(|error| {
-            Problem::with(
-                "OpenBot could not prepare its sign-in folder.",
-                format!("{}: {error}", sign_in_folder.display()),
-            )
-        })?;
+        // Compose's bind mount of the sign-in folder does not create it. Installation made it;
+        // made again here in case it went since. See `stack::make_sign_in_folder`.
+        stack::make_sign_in_folder(&root)?;
 
         // Installation already verified these images. Start only raises the local containers;
         // its no-pull policy sends missing assets back to the installation step.
@@ -6753,6 +6749,22 @@ enum SetupError {
     Unrecorded(Problem),
 }
 
+impl From<local_eval::Failure> for SetupError {
+    fn from(failure: local_eval::Failure) -> Self {
+        SetupError::Failure(failure)
+    }
+}
+
+/// A setup OpenBot stopped itself is said like a stack it could not record: in plain words.
+impl From<local_eval::SetupStopped> for SetupError {
+    fn from(stopped: local_eval::SetupStopped) -> Self {
+        match stopped {
+            local_eval::SetupStopped::Failure(failure) => SetupError::Failure(failure),
+            local_eval::SetupStopped::Said(problem) => SetupError::Unrecorded(problem),
+        }
+    }
+}
+
 /**
 `local setup` for this installation, and the stack it made recorded as OpenBot's.
 
@@ -6781,7 +6793,7 @@ async fn set_up_local_eval<R: tauri::Runtime>(
             .map_err(|_| SetupError::Failure(local_eval::Failure::Spawn))?;
         know_cli_engine(&root);
         set_up_local_eval_at(&root, |folder| {
-            local_eval::setup_installed(&attempt, folder, accepted.as_ref())
+            local_eval::setup_installed(&attempt, folder, accepted.as_ref()).map_err(Into::into)
         })
     })
     .await
@@ -6968,9 +6980,9 @@ make OpenBot its owner.
 */
 fn set_up_local_eval_at<S>(root: &Path, setup: S) -> Result<local_eval::Report, SetupError>
 where
-    S: FnOnce(&Path) -> Result<(local_eval::Report, String), local_eval::Failure>,
+    S: FnOnce(&Path) -> Result<(local_eval::Report, String), SetupError>,
 {
-    let (report, cli_sha256) = setup(root).map_err(SetupError::Failure)?;
+    let (report, cli_sha256) = setup(root)?;
     let Some(stack) = report
         .stack
         .as_ref()
@@ -13800,7 +13812,7 @@ mod tests {
         );
         assert_eq!(local_eval_state::read(&root, None), None);
         assert!(matches!(
-            set_up_local_eval_at(&root, |_| Err(local_eval::Failure::Timeout)),
+            set_up_local_eval_at(&root, |_| Err(local_eval::Failure::Timeout.into())),
             Err(SetupError::Failure(local_eval::Failure::Timeout))
         ));
         assert_eq!(local_eval_state::read(&root, None), None);
@@ -16125,6 +16137,224 @@ fn main() {
         app.state::<desktop_telemetry::DesktopTelemetry>().deliver();
         assert!(sink.next(std::time::Duration::from_secs(2)).is_none());
         let _ = std::fs::remove_dir_all(&cli.dir);
+    }
+
+    /// A CLI that answers each `local` command it is asked with what the pinned CLI (6bfaa0f)
+    /// printed for it, from the file of that name beside it. After a `local delete`, `list` and
+    /// `setup` answer from their `-after` files. Every call is written to `calls`.
+    #[cfg(unix)]
+    const SCRIPTED_CLI: &str = r#"
+fn main() {
+    let dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--warm") {
+        return;
+    }
+    let mut calls = std::fs::read_to_string(dir.join("calls")).unwrap_or_default();
+    calls.push_str(&args.join(" "));
+    calls.push('\n');
+    std::fs::write(dir.join("calls"), calls).unwrap();
+    let deleted = dir.join("deleted").exists();
+    let (file, code) = match args.get(1).map(String::as_str) {
+        Some("list") => (if deleted { "list-after" } else { "list" }, 0),
+        Some("setup") if deleted => ("setup-after", 2),
+        Some("setup") => ("setup", 1),
+        Some("delete") => {
+            std::fs::write(dir.join("deleted"), "").unwrap();
+            ("delete", 0)
+        }
+        _ => std::process::exit(3),
+    };
+    print!("{}", std::fs::read_to_string(dir.join(file)).unwrap());
+    std::process::exit(code);
+}
+"#;
+
+    /**
+    OpenBot Desktop 1.0.0, installed again after the earlier installation's `~/OpenBot`, app data
+    and back end were deleted: the CopilotKit CLI still recorded a stack for `~/OpenBot`, whose
+    private folder was gone. Every `local setup` stopped with "Restore the private setup and
+    credentials files before resuming this stack", and the window said "Back end setup stopped".
+
+    Through the window's own `set_up_local_eval`, against the CLI's real answers:
+    - files gone, the stack this folder's alone: the CLI forgets that stack and setup starts fresh,
+      here as far as the CopilotKit sign-in. Another stack the CLI records is never touched.
+    - files there: the failure is the CLI's, as before. Nothing is deleted.
+    - files damaged, or another app on the stack: plain words, and nothing is deleted.
+    */
+    #[cfg(unix)]
+    #[test]
+    fn a_stack_that_lost_its_private_files_is_set_up_again() {
+        if crate::test_support::isolated_process(
+            "tests::a_stack_that_lost_its_private_files_is_set_up_again",
+        ) {
+            return;
+        }
+        const STACK: &str = "local-0123456789abcdef01234567";
+        const OTHER: &str = "local-5c600753e1ea594f035cb25c";
+        // As the pinned CLI printed them on a Mac, for a stack whose private folder was deleted.
+        const SETUP_FAILED: &str = r#"{"version":1,"command":"local setup","status":"failed","error":{"code":"LOCAL_COMMAND_FAILED","message":"Restore the private setup and credentials files before resuming this stack. Saved data was not changed."},"nextAction":{"reason":"local_command_failed","summary":"The local command did not finish. Check local status for the recorded failed step, then resume the command. No automatic rollback was requested.","instructions":["Inspect the recorded stack with npx --prefer-offline --yes https://pkg.pr.new/CopilotKit/Intelligence/copilotkit@6bfaa0f local status --json."],"resumeCommand":"npx --prefer-offline --yes https://pkg.pr.new/CopilotKit/Intelligence/copilotkit@6bfaa0f local setup --json","url":null,"linkLabel":null,"linkFile":null,"caveats":[],"requiredEnvVars":[],"artifacts":[]},"diagnostics":[]}"#;
+        const SETUP_FRESH: &str = r#"{"version":1,"command":"local setup","status":"blocked","error":null,"nextAction":{"reason":"authentication_required","summary":"Run `copilotkit login`, then resume local setup to obtain an evaluation license.","instructions":["Complete sign-in, then rerun the local command with the same inputs."],"resumeCommand":"copilotkit login","url":null,"linkLabel":null,"linkFile":null,"caveats":[],"requiredEnvVars":[],"artifacts":[]},"diagnostics":[]}"#;
+        let listed = |id: &str, paths: &[&Path]| {
+            serde_json::json!({
+                "id": id,
+                "appPaths": paths.iter().map(|path| serde_json::json!({ "path": path, "missing": false })).collect::<Vec<_>>(),
+                "installedRelease": "0.16.0-rc.10", "step": "ready", "engine": "docker-desktop",
+                "urls": { "api": "http://localhost:51622", "dashboard": "http://localhost:51623", "gateway": "ws://localhost:51624" },
+                "failedStep": null, "update": null,
+            })
+        };
+        let listing = |stacks: Vec<serde_json::Value>| {
+            serde_json::json!({ "version": 1, "command": "local list", "status": "completed", "stacks": stacks, "nextAction": null, "error": null, "diagnostics": [] }).to_string()
+        };
+
+        let empty = temp_root("openbot-lost-stack-path");
+        std::fs::create_dir_all(&empty).unwrap();
+        std::env::set_var("PATH", &empty);
+        let cli = temp_root("openbot-lost-stack-cli");
+        std::fs::create_dir_all(&cli).unwrap();
+        std::fs::write(cli.join("cli.rs"), SCRIPTED_CLI).unwrap();
+        let program = cli.join("cli");
+        crate::test_support::compile_fixture(&cli.join("cli.rs"), &program);
+        assert!(std::process::Command::new(&program)
+            .arg("--warm")
+            .status()
+            .unwrap()
+            .success());
+        use sha2::Digest;
+        let digest: String = sha2::Sha256::digest(std::fs::read(&program).unwrap())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_PROGRAM", &program);
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_PROGRAM_SHA256", digest);
+        std::env::remove_var("OPENBOT_DEV_LOCAL_EVAL_ENTRY");
+        let home = temp_root("openbot-lost-stack-home");
+        std::env::set_var("HOME", &home);
+        std::env::remove_var("XDG_CONFIG_HOME");
+        let private = openbot_desktop_lib::local_update::stack_dir(STACK).unwrap();
+        let other_private = openbot_desktop_lib::local_update::stack_dir(OTHER).unwrap();
+        std::fs::create_dir_all(&other_private).unwrap();
+
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .manage(desktop_telemetry::DesktopTelemetry::for_tests(
+                temp_root("openbot-lost-stack-telemetry"),
+                false,
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let root = temp_root("openbot-lost-stack-installation");
+        std::fs::create_dir_all(&root).unwrap();
+        let kite = temp_root("openbot-lost-stack-another-app");
+        std::fs::create_dir_all(&kite).unwrap();
+        let set_up = |label: &str, here: Vec<serde_json::Value>| {
+            for file in ["calls", "deleted"] {
+                let _ = std::fs::remove_file(cli.join(file));
+            }
+            let mut stacks = here.clone();
+            stacks.push(listed(OTHER, &[&kite]));
+            std::fs::write(cli.join("list"), listing(stacks)).unwrap();
+            std::fs::write(
+                cli.join("list-after"),
+                listing(vec![listed(OTHER, &[&kite])]),
+            )
+            .unwrap();
+            std::fs::write(cli.join("setup"), SETUP_FAILED).unwrap();
+            std::fs::write(cli.join("setup-after"), SETUP_FRESH).unwrap();
+            std::fs::write(
+                cli.join("delete"),
+                serde_json::json!({ "version": 1, "command": "local delete", "status": "completed", "stack": here.first(), "connections": { "restored": [], "conflicts": [], "preserved": [] }, "clusterAlreadyAbsent": true, "nextAction": null, "error": null, "diagnostics": [] }).to_string(),
+            )
+            .unwrap();
+            let report = tauri::async_runtime::block_on(set_up_local_eval(
+                app.handle().clone(),
+                format!("openbot-lost-stack-{label}"),
+                root.display().to_string(),
+                None,
+            ));
+            let calls = std::fs::read_to_string(cli.join("calls")).unwrap_or_default();
+            (report, calls)
+        };
+        let deletes = |calls: &str| {
+            calls
+                .lines()
+                .filter(|call| call.contains(" delete "))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+
+        // Gone, and this folder's alone: forgotten by the CLI, then set up from the start.
+        let (report, calls) = set_up("gone", vec![listed(STACK, &[&root])]);
+        let report = report.unwrap_or_else(|error| panic!("{error:?}\n{calls}"));
+        assert_eq!(report.outcome, local_eval::Outcome::Blocked, "{calls}");
+        assert_eq!(
+            report.reason,
+            Some(local_eval::Reason::AuthenticationRequired)
+        );
+        assert_eq!(
+            deletes(&calls),
+            [format!(
+                "local delete --stack {STACK} --confirm-delete {STACK} --json"
+            )],
+            "{calls}"
+        );
+        assert_eq!(calls.matches("local setup").count(), 2, "{calls}");
+        assert!(
+            other_private.is_dir(),
+            "another stack's files are never touched"
+        );
+
+        // There: the CLI's own failure, as before, and nothing deleted.
+        std::fs::create_dir_all(&private).unwrap();
+        std::fs::write(
+            private.join("setup.json"),
+            r#"{"licenseToken":"synthetic"}"#,
+        )
+        .unwrap();
+        std::fs::write(private.join("secrets.json"), "{}").unwrap();
+        let (report, calls) = set_up("there", vec![listed(STACK, &[&root])]);
+        let report = report.unwrap_or_else(|error| panic!("{error:?}\n{calls}"));
+        assert_eq!(report.outcome, local_eval::Outcome::Failed);
+        assert_eq!(report.reason, Some(local_eval::Reason::LocalCommandFailed));
+        assert!(deletes(&calls).is_empty(), "{calls}");
+
+        // Damaged: plain words naming the folder, and nothing deleted.
+        std::fs::write(private.join("setup.json"), "{").unwrap();
+        let (report, calls) = set_up("damaged", vec![listed(STACK, &[&root])]);
+        let Err(SetupError::Unrecorded(problem)) = report else {
+            panic!("{report:?}\n{calls}");
+        };
+        assert!(
+            problem
+                .said
+                .starts_with("The back end's saved settings can't be read."),
+            "{problem:?}"
+        );
+        assert!(
+            problem.said.contains(&private.display().to_string()),
+            "{problem:?}"
+        );
+        assert!(deletes(&calls).is_empty(), "{calls}");
+        assert!(private.join("setup.json").is_file());
+
+        // Gone, but another app uses the stack too: plain words, and nothing deleted.
+        std::fs::remove_dir_all(&private).unwrap();
+        let (report, calls) = set_up("shared", vec![listed(STACK, &[&root, &kite])]);
+        let Err(SetupError::Unrecorded(problem)) = report else {
+            panic!("{report:?}\n{calls}");
+        };
+        assert!(
+            problem
+                .said
+                .contains("another app on this computer uses it too"),
+            "{problem:?}"
+        );
+        assert!(deletes(&calls).is_empty(), "{calls}");
+
+        for folder in [empty, cli, home, root, kite] {
+            let _ = std::fs::remove_dir_all(folder);
+        }
     }
 
     /// The Account step's sign-in said nothing: 22 installs that stopped there sent no event. A
