@@ -34,10 +34,11 @@
 //!   already runs.
 //! - **macOS.** The package writes to `/opt/podman` and needs administrator rights, so the person
 //!   sees one standard macOS authorization prompt. There is no way around that prompt and no reason
-//!   to want one: it is the same dialog every other installer raises. It is never raised unexplained:
-//!   the package downloads while the person signs in, then the step waits (`GoAhead`) while OpenBot's
-//!   window says what comes next and why, and raises the prompt only once they choose Continue. The
-//!   prompt itself names OpenBot and says why, in plain words (`PODMAN_PASSWORD_PROMPT`).
+//!   to want one: it is the same dialog every other installer raises. It is never raised unexplained,
+//!   and never behind a click: the package downloads while the person signs in, then the step says
+//!   the prompt is coming and why, leaves it a moment to be read, and raises it by itself
+//!   (`install_with_password`). A prompt closed without a password is asked again (`GoAhead`). The
+//!   prompt itself says why in OpenBot's words (`PODMAN_PASSWORD_PROMPT`).
 //! - **Linux.** Podman there is not a binary but a set of them (`conmon`, `crun`, `netavark`,
 //!   `slirp4netns`), wired to the distribution's own paths, so downloading one file would produce
 //!   something that runs nothing. The distribution's package manager installs it, through
@@ -270,33 +271,34 @@ pub fn podman_downloading() -> StepLine {
     StepLine::here("Downloading the software OpenBot runs on.").logged("Downloading Podman.")
 }
 
-/// The step row's line while it waits for the person's go-ahead to install Podman. The window
-/// shows its own explanation and Continue beside it.
-pub fn podman_go_ahead() -> StepLine {
-    StepLine::asks("The software OpenBot runs on is downloaded and ready to install.")
-        .logged("Podman is downloaded and ready to install; waiting for Continue.")
-}
-
-/// The same wait, after the person closed macOS's password prompt without a password.
+/// After the person closed macOS's password prompt without a password: said plainly, with Try
+/// again in the window, and asked again by itself after `ASK_AGAIN_AFTER`.
 pub fn podman_declined() -> StepLine {
-    StepLine::asks("macOS didn't get your password, so the software isn't installed yet.")
-        .logged("The password prompt was closed, so Podman isn't installed yet; asking again.")
+    StepLine::asks(
+        "OpenBot needs your password to install what it needs to run. It asks again in a moment, \
+         or choose Try again.",
+    )
+    .logged("The password prompt was closed, so Podman isn't installed yet; asking again.")
 }
 
 /// What macOS's password prompt says, under the name of the process that raised it.
 pub const PODMAN_PASSWORD_PROMPT: &str =
     "OpenBot needs your password to install the software it runs on.";
 
+/// How long the line saying the prompt is coming stays on screen before the prompt covers it.
+pub const BEFORE_PROMPT: Duration = Duration::from_millis(2500);
+
+/// How long after a closed prompt OpenBot asks again by itself.
+pub const ASK_AGAIN_AFTER: Duration = Duration::from_secs(15);
+
 /**
-The person's go-ahead for a step that raises the system's password prompt.
+Asking again, after the person closed the system's password prompt: now, when they choose Try
+again in the window, or by itself after a while.
 
-The prompt came up by itself in the middle of the Account step, over a screen about something else,
-before the person knew what Podman was or why it needed their password. Apple's guidance for a screen
-before a system prompt is to explain it there, with one button that opens the prompt. So the step
-says it is asking (`StepLine::asks`), the window explains, and the prompt waits for Continue.
-
-Only a go-ahead given while a step asks counts: a click left over from an earlier ask never lets a
-later prompt through unexplained. Each go-ahead is used once.
+The person is never asked to click before the prompt. The step says what is coming and why, gives
+it a moment to be read, and raises the prompt (`install_with_password`). Only a prompt closed without
+a password waits here, and not for long. A Try again given while nothing waits counts for nothing,
+so a click left over never brings a prompt early.
 */
 pub struct GoAhead {
     state: Mutex<Asked>,
@@ -328,7 +330,7 @@ impl GoAhead {
         self.state.lock().unwrap_or_else(|held| held.into_inner())
     }
 
-    /// The person chose Continue. True when a step was asking for it.
+    /// The person chose Try again. True when a step was waiting to ask again.
     pub fn give(&self) -> bool {
         let mut state = self.state();
         if *state != Asked::Waiting {
@@ -339,37 +341,48 @@ impl GoAhead {
         true
     }
 
-    /// Ask, then wait for the go-ahead. `ask` says so to the window. `cancelled` ends the wait.
-    pub fn wait(&self, ask: impl FnOnce(), cancelled: &dyn Fn() -> bool) -> Result<(), Problem> {
+    /// Say why, then wait until Try again or `limit`, whichever comes first. `cancelled` (Stop or
+    /// Quit) ends the wait with nothing asked.
+    pub fn wait(
+        &self,
+        limit: Duration,
+        ask: impl FnOnce(),
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), Problem> {
         *self.state() = Asked::Waiting;
         ask();
+        let until = std::time::Instant::now() + limit;
         let mut state = self.state();
         loop {
-            if *state == Asked::Given {
+            if *state == Asked::Given || std::time::Instant::now() >= until {
                 *state = Asked::Nothing;
                 return Ok(());
             }
             if cancelled() {
                 *state = Asked::Nothing;
-                return Err(Problem::with(
-                    "OpenBot stopped before installing the software it runs on. Start again when \
-                     you're ready.",
-                    "stopped while waiting for Continue to install Podman",
-                ));
+                return Err(stopped_before_installing());
             }
             state = self
                 .changed
-                .wait_timeout(state, Duration::from_millis(200))
+                .wait_timeout(state, Duration::from_millis(100))
                 .unwrap_or_else(|held| held.into_inner())
                 .0;
         }
     }
 }
 
-/// The go-ahead Install waits on before macOS asks for the password to install Podman.
+fn stopped_before_installing() -> Problem {
+    Problem::with(
+        "OpenBot stopped before installing the software it runs on. Start again when you're \
+         ready.",
+        "stopped before the password prompt to install Podman",
+    )
+}
+
+/// The Try again Install listens for after the password prompt was closed.
 pub static PODMAN_GO_AHEAD_GATE: GoAhead = GoAhead::new();
 
-/// The window's Continue under the explanation. True when Install was waiting for it.
+/// The window's Try again. True when Install was waiting to ask again.
 pub fn allow_podman_install() -> bool {
     PODMAN_GO_AHEAD_GATE.give()
 }
@@ -385,34 +398,50 @@ enum Prompted {
 }
 
 /**
-Download Podman's package, wait for the person's go-ahead, then raise the password prompt.
+Download Podman's package, say the password prompt is coming and why, then raise it.
 
-The download needs nobody, so it runs while the person signs in. Only the prompt waits for them. A
-prompt closed without a password asks again, with the explanation, rather than failing Install
-behind a screen that has no way to start it again.
+No click first. The download needs nobody, so it runs while the person signs in. Then the step says
+"Your Mac will ask for your password so OpenBot can install what it needs to run." and leaves it
+`before_prompt` to be read before the prompt covers it. A prompt closed without a password is said
+plainly and asked again, by itself after `ask_again_after` or at once on Try again, rather than
+failing Install behind a screen with no way to start it again.
 */
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn install_after_go_ahead(
+#[allow(clippy::too_many_arguments)]
+fn install_with_password(
     fetch: impl FnOnce() -> Result<PathBuf, Problem>,
     progress: &mut dyn FnMut(StepLine),
-    gate: &GoAhead,
+    again: &GoAhead,
     cancelled: &dyn Fn() -> bool,
     mut prompt: impl FnMut(&str) -> Prompted,
     back: &dyn Fn(),
+    before_prompt: Duration,
+    ask_again_after: Duration,
 ) -> Result<(), Problem> {
     progress(podman_downloading());
     let package = fetch()?;
     let script = podman_install_script(&package);
-    let mut asking = podman_go_ahead();
     loop {
-        gate.wait(|| progress(asking.clone()), cancelled)?;
         progress(podman_install_said("macos"));
+        // Read first: the prompt comes up over everything.
+        let until = std::time::Instant::now() + before_prompt;
+        while std::time::Instant::now() < until {
+            if cancelled() {
+                return Err(stopped_before_installing());
+            }
+            std::thread::sleep(Duration::from_millis(50).min(before_prompt));
+        }
+        if cancelled() {
+            return Err(stopped_before_installing());
+        }
         let prompted = prompt(&script);
         // The prompt was in front of OpenBot's window, however it ended.
         back();
         match prompted {
             Prompted::Installed => return Ok(()),
-            Prompted::Declined => asking = podman_declined(),
+            Prompted::Declined => {
+                again.wait(ask_again_after, || progress(podman_declined()), cancelled)?
+            }
             Prompted::Failed(problem) => return Err(problem),
         }
     }
@@ -444,13 +473,11 @@ fn applescript_string(text: &str) -> String {
 pub fn podman_install_said(os: &str) -> StepLine {
     match os {
         "macos" => StepLine::elsewhere(
-            "Installing the software OpenBot runs on. Enter your Mac password when macOS asks \
-             for it.",
+            "Your Mac will ask for your password so OpenBot can install what it needs to run.",
         )
         .logged("Installing Podman's package; macOS asks for the password."),
         "linux" => StepLine::elsewhere(
-            "Installing the software OpenBot runs on. Enter your password when your system asks \
-             for it.",
+            "Your computer will ask for your password so OpenBot can install what it needs to run.",
         )
         .logged("Installing Podman with pkexec; the system asks for the password."),
         _ => {
@@ -747,13 +774,15 @@ fn install_podman(
     back: &dyn Fn(),
     cancelled: &dyn Fn() -> bool,
 ) -> Result<(), Problem> {
-    install_after_go_ahead(
+    install_with_password(
         || fetch_verified(&podman_download()?, into),
         progress,
         &PODMAN_GO_AHEAD_GATE,
         cancelled,
         run_administrator_script,
         back,
+        BEFORE_PROMPT,
+        ASK_AGAIN_AFTER,
     )
 }
 
@@ -1523,7 +1552,6 @@ esac
     fn every_line_shown_while_preparing_this_computer_is_plain_and_the_log_keeps_the_detail() {
         let lines = [
             podman_downloading(),
-            podman_go_ahead(),
             podman_declined(),
             podman_install_said("macos"),
             podman_install_said("linux"),
@@ -1597,73 +1625,61 @@ esac
             self.0.lock().unwrap().clone()
         }
 
-        /// The window: waits until the step asks for the `nth` time, then until the person reads
-        /// it, then chooses Continue. Nothing may have been prompted by then.
-        fn continue_when_asked(&self, gate: &std::sync::Arc<GoAhead>, nth: usize) {
-            let deadline = std::time::Instant::now() + Duration::from_secs(10);
-            while self
-                .all()
-                .iter()
-                .filter(|seen| seen.starts_with("asks: "))
-                .count()
-                < nth
-            {
-                assert!(std::time::Instant::now() < deadline, "{:?}", self.all());
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            std::thread::sleep(Duration::from_millis(300));
-            let prompts = self.all().iter().filter(|seen| *seen == "prompt").count();
-            assert_eq!(
-                prompts,
-                nth - 1,
-                "the prompt came up before Continue: {:?}",
-                self.all()
-            );
-            assert!(gate.give());
+        /// Each time a prompt came up, how long after the line before it.
+        fn prompts(&self) -> usize {
+            self.all().iter().filter(|seen| *seen == "prompt").count()
         }
     }
 
-    /// The person met macOS's password prompt over the Account step, mid-sign-in, with nothing on
-    /// screen saying what it was for. The package downloads first, then the step asks and waits;
-    /// the prompt comes up only after Continue, and says in OpenBot's words why it is there.
+    const SAY_FIRST: &str =
+        "elsewhere: Your Mac will ask for your password so OpenBot can install what it needs to run.";
+
+    /// David's direction for 1.0.1: no Continue before the password prompt. The person is told what
+    /// is coming and why, has a moment to read it, and the prompt comes up by itself. Here nothing
+    /// in the window ever gives a go-ahead, and the prompt still comes, after the line and the pause.
     #[test]
-    fn the_password_prompt_waits_for_continue_and_says_why() {
-        let gate = std::sync::Arc::new(GoAhead::new());
+    fn the_password_prompt_comes_after_its_explanation_without_a_click() {
+        let gate = GoAhead::new();
         let seen = Seen::default();
-        let window = {
-            let (gate, seen) = (gate.clone(), seen.clone());
-            std::thread::spawn(move || seen.continue_when_asked(&gate, 1))
-        };
+        let said_at = std::sync::Mutex::new(None);
         let mut scripts = Vec::new();
-        let installed = install_after_go_ahead(
+        let installed = install_with_password(
             || {
                 seen.add("downloaded");
                 Ok(PathBuf::from(PACKAGE))
             },
-            &mut |line| seen.line(line),
+            &mut |line| {
+                if line.elsewhere {
+                    *said_at.lock().unwrap() = Some(std::time::Instant::now());
+                }
+                seen.line(line)
+            },
             &gate,
             &|| false,
             |script| {
+                let waited = said_at.lock().unwrap().unwrap().elapsed();
+                assert!(waited >= Duration::from_millis(200), "{waited:?}");
                 seen.add("prompt");
                 scripts.push(script.to_owned());
                 Prompted::Installed
             },
             &|| seen.add("back"),
+            Duration::from_millis(200),
+            Duration::from_secs(60),
         );
-        window.join().unwrap();
         assert!(installed.is_ok(), "{installed:?}");
         assert_eq!(
             seen.all(),
             [
                 "here: Downloading the software OpenBot runs on.",
                 "downloaded",
-                "asks: The software OpenBot runs on is downloaded and ready to install.",
-                "elsewhere: Installing the software OpenBot runs on. Enter your Mac password when \
-                 macOS asks for it.",
+                SAY_FIRST,
                 "prompt",
                 "back",
             ]
         );
+        // Nothing asked the person to click: no line asked for their go-ahead.
+        assert!(!seen.all().iter().any(|line| line.starts_with("asks: ")));
         assert_eq!(
             scripts,
             [concat!(
@@ -1674,21 +1690,14 @@ esac
         );
     }
 
-    /// Closing the prompt without a password is a decision. Install did fail on it, behind an
-    /// Account step with no way to start it again; now the step asks again, and says why.
+    /// Closing the prompt without a password is a decision, and recoverable: no failure, the step
+    /// says plainly that OpenBot needs it, and asks again by itself after a short wait.
     #[test]
-    fn a_closed_password_prompt_asks_again() {
-        let gate = std::sync::Arc::new(GoAhead::new());
+    fn a_closed_password_prompt_asks_again_by_itself_without_an_error() {
+        let gate = GoAhead::new();
         let seen = Seen::default();
-        let window = {
-            let (gate, seen) = (gate.clone(), seen.clone());
-            std::thread::spawn(move || {
-                seen.continue_when_asked(&gate, 1);
-                seen.continue_when_asked(&gate, 2);
-            })
-        };
         let mut answers = [Prompted::Declined, Prompted::Installed].into_iter();
-        let installed = install_after_go_ahead(
+        let installed = install_with_password(
             || Ok(PathBuf::from(PACKAGE)),
             &mut |line| seen.line(line),
             &gate,
@@ -1698,46 +1707,83 @@ esac
                 answers.next().unwrap()
             },
             &|| seen.add("back"),
+            Duration::from_millis(10),
+            Duration::from_millis(300),
         );
-        window.join().unwrap();
         assert!(installed.is_ok(), "{installed:?}");
         assert_eq!(
             seen.all(),
             [
                 "here: Downloading the software OpenBot runs on.",
-                "asks: The software OpenBot runs on is downloaded and ready to install.",
-                "elsewhere: Installing the software OpenBot runs on. Enter your Mac password when \
-                 macOS asks for it.",
+                SAY_FIRST,
                 "prompt",
                 "back",
-                "asks: macOS didn't get your password, so the software isn't installed yet.",
-                "elsewhere: Installing the software OpenBot runs on. Enter your Mac password when \
-                 macOS asks for it.",
+                "asks: OpenBot needs your password to install what it needs to run. It asks again \
+                 in a moment, or choose Try again.",
+                SAY_FIRST,
                 "prompt",
                 "back",
             ]
         );
     }
 
-    /// Stop or Quit while the step waits ends the wait, and no prompt comes up after it.
+    /// Try again, in the window after a closed prompt, asks again at once.
     #[test]
-    fn stopping_while_it_asks_raises_no_prompt() {
-        let gate = GoAhead::new();
+    fn try_again_after_a_closed_prompt_asks_at_once() {
+        let gate = std::sync::Arc::new(GoAhead::new());
+        let seen = Seen::default();
+        let window = {
+            let (gate, seen) = (gate.clone(), seen.clone());
+            std::thread::spawn(move || {
+                let deadline = std::time::Instant::now() + Duration::from_secs(10);
+                while !seen.all().iter().any(|line| line.starts_with("asks: ")) {
+                    assert!(std::time::Instant::now() < deadline);
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                assert!(gate.give());
+            })
+        };
+        let started = std::time::Instant::now();
+        let mut answers = [Prompted::Declined, Prompted::Installed].into_iter();
+        let installed = install_with_password(
+            || Ok(PathBuf::from(PACKAGE)),
+            &mut |line| seen.line(line),
+            &gate,
+            &|| false,
+            |_| {
+                seen.add("prompt");
+                answers.next().unwrap()
+            },
+            &|| {},
+            Duration::from_millis(10),
+            Duration::from_secs(60),
+        );
+        window.join().unwrap();
+        assert!(installed.is_ok(), "{installed:?}");
+        assert_eq!(seen.prompts(), 2);
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    /// Stop or Quit while the line is being read, or while it waits to ask again, raises no prompt.
+    #[test]
+    fn stopping_before_the_prompt_raises_none() {
         let seen = Seen::default();
         let stopped = std::sync::atomic::AtomicBool::new(false);
-        let failed = install_after_go_ahead(
+        let failed = install_with_password(
             || Ok(PathBuf::from(PACKAGE)),
             &mut |line| {
                 seen.line(line);
                 stopped.store(true, std::sync::atomic::Ordering::SeqCst);
             },
-            &gate,
+            &GoAhead::new(),
             &|| stopped.load(std::sync::atomic::Ordering::SeqCst),
             |_| {
                 seen.add("prompt");
                 Prompted::Installed
             },
             &|| seen.add("back"),
+            Duration::from_millis(200),
+            Duration::from_secs(60),
         )
         .unwrap_err();
         assert_eq!(
@@ -1745,21 +1791,18 @@ esac
             "OpenBot stopped before installing the software it runs on. Start again when you're \
              ready."
         );
-        assert!(
-            !seen.all().contains(&"prompt".to_owned()),
-            "{:?}",
-            seen.all()
-        );
+        assert_eq!(seen.prompts(), 0, "{:?}", seen.all());
     }
 
-    /// A Continue left over from an earlier ask, or sent twice, never lets a later prompt through.
+    /// A Try again left over from earlier, or sent twice, never brings a prompt early.
     #[test]
-    fn a_continue_with_nothing_asking_counts_for_nothing() {
+    fn a_try_again_with_nothing_waiting_counts_for_nothing() {
         let gate = GoAhead::new();
         assert!(!gate.give());
         let asked_once = std::sync::atomic::AtomicUsize::new(0);
-        // The earlier click is not taken: the wait still needs one given while it asks.
+        // The earlier click is not taken: the wait ends only by the limit or the stop.
         let waited = gate.wait(
+            Duration::from_secs(60),
             || {
                 asked_once.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             },

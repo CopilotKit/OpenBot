@@ -30,8 +30,7 @@ sequenceDiagram
   N->>N: engine, deployment download, image pulls
   W->>N: sign_in_to_copilotkit (Account opens)
   N->>C: login (no engine needed; opens the browser)
-  P->>W: Continue (macOS only, when Podman needs installing)
-  W->>N: allow_podman_install (the password prompt comes up)
+  Note over W,N: macOS only, when Podman needs installing: the window says the password prompt<br/>is coming and why, and it comes up by itself a moment later
   W->>N: local_eval_terms, once an engine answers
   N->>C: onboard local-terms
   P->>W: Accept the evaluation agreement
@@ -139,13 +138,18 @@ fill a gap. Three rules hold that boundary:
 - **Install before sign-in, sign-in before the engine.** Downloading software needs no account, and
   it is the slow part. Starting it on the first click means the person signs in while it runs. The
   sign-in waits for nothing: someone who leaves while Podman installs has still signed in.
-- **No password prompt without an explanation first.** On macOS, Podman's package needs an
-  administrator, so macOS asks for the person's password. Install downloads the package, then waits
-  (`install::GoAhead`) while the window says what comes next and why, with one Continue button, as
-  Apple's guidance for a screen before a system prompt asks. The prompt names OpenBot and Podman
-  (`do shell script ... with prompt`). Closing it without a password asks again. Windows installs
-  Podman for the person's own account with no prompt. When WSL is missing, the step says that
-  Windows asks for administrator approval before Podman's own installer raises it.
+- **No password prompt without an explanation first, and no click before one.** On macOS, Podman's
+  package needs an administrator, so macOS asks for the person's password. Install downloads the
+  package, says "Your Mac will ask for your password so OpenBot can install what it needs to run.",
+  leaves it a moment to be read (`install::BEFORE_PROMPT`), and raises the prompt by itself. An
+  install step informs the person and moves forward. The prompt says why in OpenBot's words
+  (`do shell script ... with prompt`). Closing it without a password is said plainly, with Try
+  again, and Install asks again by itself after a short wait (`install::GoAhead`,
+  `ASK_AGAIN_AFTER`). Windows installs Podman for the person's own account with no prompt. When
+  WSL is missing, the Windows blocker says what Windows will ask and starts the change by itself;
+  a declined administrator prompt is asked again the same way. The restart after it is the one
+  step that waits for the person's click: OpenBot never restarts the computer on its own, because
+  the person may have unsaved work open.
 - **Licence work after acceptance.** Intelligence setup waits for the evaluation agreement, and
   uses the version of the terms the person accepted.
 - **One engine for both.** OpenBot and Intelligence share one container engine. The app uses, in

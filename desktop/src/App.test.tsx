@@ -779,22 +779,23 @@ test("the account step opens the CopilotKit sign-in at once, without waiting for
   expect(accountCalls()).toContain("local_eval_terms");
 });
 
-// What Install says as it downloads the software OpenBot runs on, while it waits for Continue, and
-// once it has it (`install::podman_downloading`, `podman_go_ahead`, `podman_install_said`).
+// What Install says as it downloads the software OpenBot runs on, before macOS asks for the
+// password, and after a prompt the person closed (`install::podman_downloading`,
+// `podman_install_said`, `podman_declined`).
 const DOWNLOADING_SOFTWARE = "Downloading the software OpenBot runs on.";
-const PODMAN_READY =
-  "The software OpenBot runs on is downloaded and ready to install.";
 const PODMAN_PROMPTING =
-  "Installing the software OpenBot runs on. Enter your Mac password when macOS asks for it.";
-const PODMAN_HEADING = "Install the software OpenBot needs";
+  "Your Mac will ask for your password so OpenBot can install what it needs to run.";
+const PODMAN_DECLINED =
+  "OpenBot needs your password to install what it needs to run. It asks again in a moment, or choose Try again.";
 
 /**
- * macOS asked for the person's password over the Account step, mid-sign-in, before they knew what
- * Podman was. Install now downloads it and waits; the person signs in first, then reads what comes
- * next and why, and Continue is what raises the prompt.
+ * David's direction for 1.0.1: no Continue before macOS asks for the password. #1385 put one
+ * there; an install step informs the person and moves forward. Install says what is coming and
+ * why, and the prompt comes by itself (`install::install_with_password`). A prompt closed without a
+ * password is said plainly, with Try again, and Install asks again by itself.
  */
-test("macOS asks for the password only after the person reads why and chooses Continue, once signed in", async () => {
-  setupRootConfiguration("/tmp/local-eval-podman-go-ahead", async () =>
+test("macOS's password prompt is explained and comes without a click, and a closed one is asked again", async () => {
+  setupRootConfiguration("/tmp/local-eval-podman-no-gate", async () =>
     emptyConfiguration(),
   );
   const browser = deferred<{ signedIn: boolean }>();
@@ -809,39 +810,13 @@ test("macOS asks for the password only after the person reads why and chooses Co
   await installLocal(view);
   await view.findByText("Checking your CopilotKit account…");
 
-  // Downloaded while the person signs in. Nothing about it is asked of them in the meantime.
+  // Downloaded while the person signs in, then said before the prompt, with nothing to click.
   await emitProgress({
     step: "install-engine",
     ok: true,
     running: true,
-    asks: true,
-    detail: PODMAN_READY,
+    detail: DOWNLOADING_SOFTWARE,
   });
-  expect(view.queryByRole("heading", { name: PODMAN_HEADING })).toBeNull();
-  expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
-  // The background install's row says it waits, and on what.
-  expectBehind(view, 1, PODMAN_READY, { waiting: true });
-
-  // Signed in: what happens next and why, with one button, and nothing raised until it is chosen.
-  await act(async () => browser.resolve({ signedIn: true }));
-  await view.findByRole("heading", { name: PODMAN_HEADING });
-  expect(
-    view.getByText(
-      "OpenBot needs one more piece of software to run on this computer. macOS asks for your password once to install it.",
-    ),
-  ).toBeTruthy();
-  expectBehind(view, 1, PODMAN_READY, { waiting: true });
-  expect(
-    view.getAllByRole("button").map((button) => button.textContent),
-  ).toEqual(["Continue"]);
-  const allowed = () =>
-    invokeCalls.filter((call) => call.command === "allow_podman_install");
-  expect(allowed()).toHaveLength(0);
-
-  await userEvent.click(view.getByRole("button", { name: "Continue" }));
-  expect(allowed()).toHaveLength(1);
-
-  // Install raises the prompt, and the step says what to do in it.
   await emitProgress({
     step: "install-engine",
     ok: true,
@@ -849,8 +824,44 @@ test("macOS asks for the password only after the person reads why and chooses Co
     elsewhere: true,
     detail: PODMAN_PROMPTING,
   });
-  expect(view.queryByRole("heading", { name: PODMAN_HEADING })).toBeNull();
+  expectBehind(view, 1, PODMAN_PROMPTING);
   expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
+  expect(view.queryByRole("button", { name: "Try again" })).toBeNull();
+  await act(async () => browser.resolve({ signedIn: true }));
+  await view.findByRole("heading", { name: "Setting up this computer" });
+  expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
+  expect(view.queryByRole("button", { name: "Try again" })).toBeNull();
+  const allowed = () =>
+    invokeCalls.filter((call) => call.command === "allow_podman_install");
+  expect(allowed()).toHaveLength(0);
+
+  // The person closed the prompt: said plainly, not as a failure, with Try again.
+  await emitProgress({
+    step: "install-engine",
+    ok: true,
+    running: true,
+    asks: true,
+    detail: PODMAN_DECLINED,
+  });
+  const card = await view.findByRole("region", {
+    name: "Your password is needed",
+  });
+  expect(card.textContent).toContain(PODMAN_DECLINED);
+  expect(view.queryByRole("alert")).toBeNull();
+  await userEvent.click(view.getByRole("button", { name: "Try again" }));
+  expect(allowed()).toHaveLength(1);
+
+  // Asked again: the card goes, and the line before the prompt is back.
+  await emitProgress({
+    step: "install-engine",
+    ok: true,
+    running: true,
+    elsewhere: true,
+    detail: PODMAN_PROMPTING,
+  });
+  expect(
+    view.queryByRole("region", { name: "Your password is needed" }),
+  ).toBeNull();
   expectBehind(view, 1, PODMAN_PROMPTING);
 });
 
@@ -1000,7 +1011,7 @@ const NATIVE = {
   checking: "Checking the software OpenBot needs.",
   looking: "Looking for the software OpenBot runs on.",
   downloading: DOWNLOADING_SOFTWARE,
-  goAhead: PODMAN_READY,
+  declined: PODMAN_DECLINED,
   prompting: PODMAN_PROMPTING,
   installingWindows: "Installing the software OpenBot runs on.",
   // The row of a finished install keeps Install's own words: never shown, and checked here.
@@ -1086,15 +1097,16 @@ async function walkFirstRun(platform: "macOS" | "Windows"): Promise<Beat[]> {
   await running("install-engine", NATIVE.downloading);
   seen("signing in, downloading");
   if (platform === "macOS") {
-    await running("install-engine", NATIVE.goAhead, { asks: true });
-    seen("signing in, ready to install");
-    // Signed in: what macOS asks next, and why, with Continue.
-    await act(async () => browser.resolve({ signedIn: true }));
-    await view.findByRole("button", { name: "Continue" });
-    seen("before the password prompt");
-    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+    // Said before macOS asks for the password, with nothing to click, then asked.
     await running("install-engine", NATIVE.prompting, { elsewhere: true });
+    seen("signing in, before the password prompt");
+    await act(async () => browser.resolve({ signedIn: true }));
+    await view.findByRole("heading", { name: "Setting up this computer" });
     seen("password prompt");
+    // Closed without a password: said, with Try again, and asked again.
+    await running("install-engine", NATIVE.declined, { asks: true });
+    seen("password prompt closed");
+    await running("install-engine", NATIVE.prompting, { elsewhere: true });
   } else {
     await running("install-engine", NATIVE.installingWindows);
     seen("signing in, installing");
@@ -1197,9 +1209,10 @@ for (const platform of ["macOS", "Windows"] as const) {
       "signing in, downloading": `Step 1 of 4 | ${NATIVE.downloading}`,
       ...(mac
         ? {
-            "signing in, ready to install": `Step 1 of 4 · Waiting for you | ${NATIVE.goAhead}`,
-            "before the password prompt": `Step 1 of 4 · Waiting for you | ${NATIVE.goAhead}`,
+            "signing in, before the password prompt": `Step 1 of 4 | ${NATIVE.prompting}`,
             "password prompt": `Step 1 of 4 | ${NATIVE.prompting}`,
+            "password prompt closed":
+              "Step 1 of 4 · Waiting for you | Waiting for your password.",
             "preparing this computer": `Step 1 of 4 | ${NATIVE.preparingMac}`,
           }
         : {

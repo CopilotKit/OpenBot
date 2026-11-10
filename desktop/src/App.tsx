@@ -729,8 +729,8 @@ function Setup() {
     if (localAuto) local.start();
   }, [localAuto, resumingStart]);
 
-  // Install waits for the person before macOS asks for their password: whichever screen they are
-  // on says why, with Continue. See `install::GoAhead`.
+  // The person closed macOS's password prompt: whichever screen they are on says so, with Try
+  // again, while Install asks again by itself. See `install::GoAhead`.
   const goAhead = goAheadNow(steps);
 
   /*
@@ -828,8 +828,8 @@ function Setup() {
             steps={plainInstallSteps(steps, busy)}
             showElapsed={false}
           />
-          {/* Install waits for the person before macOS asks for their password. Its row says so. */}
-          {goAhead && <PodmanGoAhead asking={goAhead} quiet />}
+          {/* The person closed macOS's password prompt: said, with Try again. */}
+          {goAhead && <PodmanGoAhead asking={goAhead} />}
           {/* Intelligence sets itself up alongside, once the install has Docker answering. */}
           <LocalStatus sequence={local} />
           {displayedFailure && <Failure problem={displayedFailure} />}

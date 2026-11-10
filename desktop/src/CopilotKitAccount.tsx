@@ -16,11 +16,7 @@ import {
   signInToCopilotKit,
 } from "./localEvalCli";
 import { engineTooSmallSaid } from "./localReadiness";
-import {
-  ContinueToPodman,
-  PODMAN_EXPLAINED,
-  PODMAN_HEADING,
-} from "./PodmanGoAhead";
+import { PodmanGoAhead } from "./PodmanGoAhead";
 import { InlineFailure, type Problem } from "./Problem";
 import { Sections } from "./Sections";
 import {
@@ -242,8 +238,6 @@ export function CopilotKitAccount({
   const checkAgain = useRef(check);
   checkAgain.current = check;
 
-  /** Signed in during this step: from here on, the step is about the agreement and the engine. */
-  const signedIn = useRef(false);
   /**
    * The CLI's `login`: done at once when it already has a sign-in, otherwise it opens the browser
    * and waits for the person to approve. Then the agreement.
@@ -259,7 +253,6 @@ export function CopilotKitAccount({
       if (attempt.current !== started.attempt) return;
       attempt.current = null;
       if (!signed) return failed();
-      signedIn.current = true;
       checkAgain.current();
     } catch {
       if (attempt.current !== started.attempt) return;
@@ -294,12 +287,9 @@ export function CopilotKitAccount({
   const appsFailed = seen.at === "apps-failed";
   const refused = seen.at === "unsupported-engine" ? seen : null;
   const waitingForEngine = seen.at === "waiting-for-engine";
-  // Signed in, and Install waits for the person before macOS asks for their password. Not while
-  // they sign in: only the step that needs them waits for them, and the sign-in comes first.
-  const asking =
-    goAhead !== null &&
-    signedIn.current &&
-    (waitingForEngine || seen.at === "checking");
+  // The person closed macOS's password prompt: said in a card of its own, with Try again, on
+  // whatever this step shows. Install asks again by itself meanwhile.
+  const asking = goAhead !== null;
   return (
     <div className="sheet">
       {/* OpenBot is what is being set up, so its mark heads this step as it heads every other.
@@ -307,34 +297,30 @@ export function CopilotKitAccount({
       <Sections at="Account" />
       <CopilotKitLogo />
       <h1>
-        {asking
-          ? PODMAN_HEADING
-          : agreement
-            ? "Accept the license agreement"
-            : connecting
-              ? "Setting up your apps"
-              : appsFailed
-                ? "Connect your apps"
-                : refused
-                  ? refused.switchEngine
-                    ? "Switch to Docker Desktop or Podman"
-                    : "Change this computer's setup"
-                  : waitingForEngine
-                    ? "Setting up this computer"
-                    : "Sign in to CopilotKit"}
+        {agreement
+          ? "Accept the license agreement"
+          : connecting
+            ? "Setting up your apps"
+            : appsFailed
+              ? "Connect your apps"
+              : refused
+                ? refused.switchEngine
+                  ? "Switch to Docker Desktop or Podman"
+                  : "Change this computer's setup"
+                : waitingForEngine
+                  ? "Setting up this computer"
+                  : "Sign in to CopilotKit"}
       </h1>
       <p className="lede">
-        {asking
-          ? PODMAN_EXPLAINED
-          : agreement
-            ? `To run OpenBot on this computer, accept the CopilotKit license agreement for ${agreement.organizationName}.`
-            : connecting || appsFailed
-              ? "OpenBot uses your CopilotKit account to set up apps like Gmail and Slack."
-              : refused
-                ? refused.said
-                : waitingForEngine
-                  ? SETTING_UP_ENGINE
-                  : "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the license agreement."}
+        {agreement
+          ? `To run OpenBot on this computer, accept the CopilotKit license agreement for ${agreement.organizationName}.`
+          : connecting || appsFailed
+            ? "OpenBot uses your CopilotKit account to set up apps like Gmail and Slack."
+            : refused
+              ? refused.said
+              : waitingForEngine
+                ? SETTING_UP_ENGINE
+                : "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the license agreement."}
       </p>
       {refused?.switchEngine && (
         <ol className="blocker-steps">
@@ -358,8 +344,7 @@ export function CopilotKitAccount({
         !connecting &&
         !appsFailed &&
         !refused &&
-        !waitingForEngine &&
-        !asking && (
+        !waitingForEngine && (
           <p className="footnote">
             Your conversations and files are stored on this computer. Signing in
             does not send them to CopilotKit.
@@ -368,22 +353,17 @@ export function CopilotKitAccount({
 
       {/* The agreement waits on the engine. While it does, this says what Install is doing to bring
           it up, as Install's own row says it. While Docker Desktop starts or a password prompt is
-          up, it says what the person may have to do in that window, whatever the step is at. When
-          Install waits for the person instead, it says that, and Continue goes on to the prompt. */}
-      {asking ? (
-        <>
-          {!behind && <StatusLine working={false}>{goAhead}</StatusLine>}
-          <ContinueToPodman key={goAhead} />
-        </>
-      ) : waitingForEngine ? (
-        !behind && (
-          <StatusLine>
-            {engine ?? handOff ?? "Preparing this computer…"}
-          </StatusLine>
-        )
-      ) : (
-        handOff && !behind && <StatusLine>{handOff}</StatusLine>
-      )}
+          coming or up, it says what the person may have to do in that window, whatever the step
+          is at. Nobody is asked to click before a prompt: a closed one has its card, with Try
+          again. */}
+      {asking && <PodmanGoAhead asking={goAhead} />}
+      {waitingForEngine
+        ? !behind && (
+            <StatusLine>
+              {engine ?? handOff ?? "Preparing this computer…"}
+            </StatusLine>
+          )
+        : handOff && !behind && <StatusLine>{handOff}</StatusLine>}
       {seen.at === "checking" && !handOff && !asking && (
         <StatusLine>Checking your CopilotKit account…</StatusLine>
       )}

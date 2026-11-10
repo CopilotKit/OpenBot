@@ -35,8 +35,8 @@ export type Progress = {
    */
   elsewhere?: boolean;
   /**
-   * The step waits for the person's go-ahead in this window before it raises the system's password
-   * prompt (`install::GoAhead`). See `goAheadNow`.
+   * The step waits on the person in this window: they closed the system's password prompt, and
+   * Install asks again by itself or on Try again (`install::GoAhead`). See `goAheadNow`.
    */
   asks?: boolean;
   /**
@@ -84,9 +84,9 @@ export function engineNow(steps: Progress[]): string | null {
 }
 
 /**
- * The line of a step that waits for the person's go-ahead before macOS asks for their password
- * ("Podman is downloaded and ready to install."), or null. The screens explain what comes next
- * and offer Continue (`PodmanGoAhead`).
+ * The line of a step that waits on the person after they closed macOS's password prompt ("OpenBot
+ * needs your password to install what it needs to run…"), or null. The screens say it in a card
+ * with Try again (`PodmanGoAhead`). Nothing waits on the person before a prompt.
  */
 export function goAheadNow(steps: Progress[]): string | null {
   const asking = [...steps]
@@ -473,10 +473,16 @@ export function installingBehind({
       ? PREPARING.has(now.step)
       : !steps.some((step) => !PREPARING.has(step.step));
     if (preparing) {
-      return row(1, now?.detail || "Preparing this computer to run OpenBot.", {
-        waiting: now?.asks === true,
-        startedAt: since ?? undefined,
-      });
+      // A closed password prompt has its own card, with Try again: the row says only what it
+      // waits for.
+      const waiting = now?.asks === true;
+      return row(
+        1,
+        waiting
+          ? "Waiting for your password."
+          : now?.detail || "Preparing this computer to run OpenBot.",
+        { waiting, startedAt: since ?? undefined },
+      );
     }
     const downloads =
       now?.downloads && showsDownload(now.downloads) ? now.downloads : null;

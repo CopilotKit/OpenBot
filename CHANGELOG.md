@@ -38,12 +38,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   Mac the Account step waited for Install to put Podman in before any browser sign-in opened, and
   the "osascript wants to make changes" password box came up by itself over it. The CopilotKit
   sign-in now opens in your browser as soon as the Account step opens: the CLI's sign-in needs no
-  engine, and only the license agreement waits for one. Podman downloads meanwhile. Once you're
-  signed in, the step says "OpenBot needs one more piece of software to run on this computer.
-  macOS asks for your password once to install it." and the password box comes up only when you
-  choose Continue. It now says "OpenBot needs your password to install the software it runs on."
-  Closing it without a password offers Continue again instead of stopping
-  Install. Windows and Linux install as before.
+  engine, and only the license agreement waits for one. Podman downloads meanwhile. Before macOS
+  asks, the step says "Your Mac will ask for your password so OpenBot can install what it needs to
+  run.", and the password box comes up by itself a moment later, with no button to press first.
+  It now says "OpenBot needs your password to install the software it runs on." Closing it
+  without a password says plainly that OpenBot needs it and asks again by itself, or at once with
+  Try again, instead of stopping Install. On Windows, turning on Windows Subsystem for Linux starts
+  by itself the same way; the restart after it still waits for you, so you don't lose unsaved work.
 - **A back end update that was stopped partway no longer breaks every later Start.** Quitting
   while the back end updated could leave it half updated, and every Start after that failed with
   "Local update-quiesce failed (exit 1)". OpenBot now lets an update finish once it has begun

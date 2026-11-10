@@ -665,13 +665,13 @@ fn bring_setup_to_front(app: tauri::AppHandle, why: String) {
     bring_to_front(&app, &why);
 }
 
-/// The person chose Continue under the setup window's explanation of the password prompt, so
-/// Install may raise it now. See `install::GoAhead`. False when nothing was waiting for it.
+/// The person chose Try again after closing the password prompt, so Install asks again now rather
+/// than after its short wait. See `install::GoAhead`. False when nothing was waiting for it.
 #[tauri::command]
 fn allow_podman_install() -> bool {
     let waiting = install::allow_podman_install();
     log::info!(
-        "[install] Continue to install Podman{}",
+        "[install] Try again to install Podman{}",
         if waiting {
             ""
         } else {
