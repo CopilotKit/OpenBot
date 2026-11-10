@@ -156,7 +156,7 @@ export function readiness(ready: AppUpdate["ready"]): string {
       ready.total > 0
         ? Math.min(99, Math.floor((ready.done / ready.total) * 100))
         : 0;
-    return `OpenBot is downloading it in the background (${share}%). You can keep working.`;
+    return `OpenBot is downloading it in the background (${share}%).`;
   }
   return "Updating downloads the new version and restarts OpenBot.";
 }

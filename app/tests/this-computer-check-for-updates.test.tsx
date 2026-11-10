@@ -206,7 +206,7 @@ test("a newer version says it is downloading in the background, then that it is 
   const view = await checkForUpdates();
   await waitFor(async () =>
     expect((await view.findByRole("status")).textContent).toBe(
-      "OpenBot 0.3.3 is available and downloading in the background (30%).",
+      "OpenBot 0.3.3 is downloading in the background (30%).",
     ),
   );
   // Nothing waits for it: Update and restart works now.

@@ -201,7 +201,7 @@ test("a newer version says it is downloading in the background, then that it is 
   };
   const view = await check();
   expect((await view.findByRole("status")).textContent).toBe(
-    "OpenBot 0.3.3 is available and downloading in the background (25%). You are running 0.3.2.",
+    "OpenBot 0.3.3 is downloading in the background (25%). You are running 0.3.2.",
   );
   // Update and restart does not wait for it.
   expect(view.getByRole("button", { name: "Update and restart" })).toBeTruthy();

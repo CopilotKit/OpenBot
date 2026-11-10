@@ -19,6 +19,10 @@ export type UpdateReadiness =
  * What OpenBot Desktop says of a newer version, with how ready it is. The banner in OpenBot's page,
  * Settings › This computer and the setup window all say it in these words. While it downloads the
  * share shown stops at 99%, so 100% is only ever said as "ready to install".
+ *
+ * Short enough for the banner's one line beside Update and restart at the default window width,
+ * for a release's version, so the page under the banner never moves as the state changes
+ * (app/tests/update-banner-layout.test.tsx).
  */
 export function updateOffered(
   version: string,
@@ -32,7 +36,7 @@ export function updateOffered(
       ready.total > 0
         ? Math.min(99, Math.floor((ready.done / ready.total) * 100))
         : 0;
-    return `OpenBot ${version} is available and downloading in the background (${share}%).`;
+    return `OpenBot ${version} is downloading in the background (${share}%).`;
   }
   return `OpenBot ${version} is available.`;
 }

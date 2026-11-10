@@ -102,7 +102,7 @@ test("while the new version downloads in the background it says how far, then th
     await view.findByRole("heading", { name: "OpenBot 0.3.2 is available" }),
   ).toBeTruthy();
   expect(view.container.textContent).toContain(
-    "You are running 0.3.1. OpenBot is downloading it in the background (60%). You can keep working.",
+    "You are running 0.3.1. OpenBot is downloading it in the background (60%).",
   );
   // Nothing waits for it.
   expect(view.getByRole("button", { name: "Update and restart" })).toBeTruthy();

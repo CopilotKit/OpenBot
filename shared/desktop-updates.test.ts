@@ -36,7 +36,7 @@ test("a newer version says how ready it is, in one plain sentence", () => {
   expect(updateOffered("1.0.1", null)).toBe("OpenBot 1.0.1 is available.");
   expect(
     updateOffered("1.0.1", { state: "preparing", done: 40, total: 100 }),
-  ).toBe("OpenBot 1.0.1 is available and downloading in the background (40%).");
+  ).toBe("OpenBot 1.0.1 is downloading in the background (40%).");
   // Never 100% until every byte is in and the app says it is ready.
   expect(
     updateOffered("1.0.1", { state: "preparing", done: 999, total: 1000 }),

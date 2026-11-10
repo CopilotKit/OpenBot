@@ -30,17 +30,16 @@ backup taken before the upgrade instead. Three things change for an existing dep
 
 ### OpenBot Desktop
 
-- **An update downloads its images before you click Update.** As soon as the update feed names a
-  newer OpenBot, OpenBot Desktop downloads the new version's images in the background while the
-  current one keeps running: OpenBot's own images for the Bots this installation runs, and, when
-  the back end changes, the back end's images into its node, kept there for the update. The click
-  then costs the stop, the backup, the migrations and the start, with nothing to download but the
-  app itself. The update offer, Settings › This computer and the setup window say "OpenBot 1.0.1
-  is available and downloading in the background (40%)", then "OpenBot 1.0.1 is ready to install.
-  It takes a few minutes." It downloads one image at a time, stops while OpenBot starts, stops or
-  updates, never stops or restarts anything that runs, and downloads nothing when the disk would
-  be left short (the log says why, and the update downloads them as before). Builds that do not
-  update themselves (candidates and internal builds) download nothing ahead.
+- **An update downloads before you click Update.** As soon as a newer OpenBot is out, OpenBot
+  Desktop downloads what the new version runs in the background while you keep working: the parts
+  for the Bots you use, and the back end's when it changes too, kept until you update. Clicking
+  Update then stops OpenBot, backs it up, updates it and starts it again, with nothing big left to
+  download. The update offer, Settings › This computer and the setup window say "OpenBot 1.0.1 is
+  downloading in the background (40%).", then "OpenBot 1.0.1 is ready to install. It
+  takes a few minutes." It downloads one part at a time, waits while OpenBot starts, stops or
+  updates, never stops or restarts anything you are using, and downloads nothing when the disk is
+  short of room (the Desktop log says why, and the update downloads as before). Candidates and
+  internal builds, which do not update themselves, download nothing ahead.
 - **downloads.copilotkit.ai serves each release's `desktop-images.json`.** It answered 403, so the
   list of a release's images could only come from GitHub.
 - **Setup says what it's doing in plain words, and what's installing behind every step.** The

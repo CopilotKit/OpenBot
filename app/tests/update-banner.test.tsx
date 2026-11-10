@@ -132,7 +132,7 @@ test("while the new version downloads in the background it says how far, then th
   const view = show();
   const bar = await view.findByRole("complementary", banner);
   expect(bar.textContent).toContain(
-    "OpenBot 0.3.2 is available and downloading in the background (45%).",
+    "OpenBot 0.3.2 is downloading in the background (45%).",
   );
   // It never holds the update back: Update and restart is there all along.
   expect(view.getByRole("button", { name: "Update and restart" })).toBeTruthy();
