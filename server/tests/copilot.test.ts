@@ -18,6 +18,7 @@ import {
   todayGuidance,
 } from "@openbot/shared/bot-prompt";
 import { defaultModelFor } from "@openbot/shared/model-providers";
+import { checklistNotice } from "@openbot/shared/run-notices";
 import { createTurnRunner } from "@openbot/toolkit/run-turn";
 import { EMPTY, lastValueFrom, Observable } from "rxjs";
 import { z } from "zod";
@@ -2105,6 +2106,78 @@ describe("a Claude Agent SDK Bot on a routine", () => {
     } finally {
       setSystemTime();
     }
+  });
+  test("is told a multi-part routine's checklist in its instructions, worded as a built-in Bot's", async () => {
+    await using endpoint = fakeAgUiEndpoint();
+    const harness = registeredAgentFromRow({
+      ...riskRow,
+      configuration: { endpoint: endpoint.url, harness: "claude-agent-sdk" },
+    });
+    if (!harness) throw new Error("Expected the harness Bot to register.");
+    const resolver = createActorAgentResolver({
+      loadAgents: async () => [harness],
+      model: { provider: "openai", defaultModel: "gpt-5.6-terra" },
+      resolveModelApiKey: async () => "openai-secret",
+    });
+    const runTurn = createTurnRunner({
+      admission: async () => new AbortController().signal,
+      intelligence: {
+        getOrCreateThread: async () => undefined,
+        getThreadMessages: async () => ({ messages: [] }),
+        ɵacquireThreadLock: async () => undefined,
+        ɵrenewThreadLock: async () => undefined,
+        ɵcleanupThreadLock: async () => undefined,
+      },
+      runner: {
+        run: ({ agent, input }) =>
+          new Observable((subscriber) => {
+            agent
+              .runAgent(input, {
+                onEvent: ({ event }) => subscriber.next(event),
+              })
+              .then(
+                () => subscriber.complete(),
+                (error) => subscriber.error(error),
+              );
+          }),
+        stop: async () => true,
+      },
+      buildAgentFor: ({ ownerUserId, agentId, initiator }) =>
+        resolver.resolveAgentForActor(
+          { id: ownerUserId, role: "user" },
+          agentId,
+          { initiator },
+        ),
+    });
+    const parts = [
+      "Read the current cycle in Linear.",
+      "Read the Cycle 65 candidates page in Notion.",
+      "Match every candidate line to its Linear issue.",
+      "Rank the triage list.",
+    ];
+    await runTurn({
+      ownerUserId: "owner",
+      routineId: "routine-cycle-plan",
+      agentId: harness.id,
+      threadId: "thread-cycle-plan-parts",
+      instruction: [
+        "Plan the next cycle:",
+        ...parts.map((part, n) => `${n + 1}. ${part}`),
+      ].join("\n"),
+    });
+
+    const sent = endpoint.requests[0] as {
+      messages: { id: string; role: string; content: unknown }[];
+    };
+    const role = sent.messages.find((message) =>
+      message.id.startsWith("standing-role:"),
+    );
+    expect(sectionOf(String(role?.content), "routine_checklist")).toBe(
+      checklistNotice(parts),
+    );
+    // In the instructions and not on the firing, which a harness can echo into the conversation.
+    const firing = sent.messages.findLast((message) => message.role === "user");
+    expect(JSON.stringify(firing?.content)).not.toContain("This routine has");
   });
 });
 

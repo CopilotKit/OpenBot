@@ -28,6 +28,7 @@ import {
 } from "@openbot/shared/model-providers";
 import { MODEL_TOOL_LIMIT } from "@openbot/shared/model-tool-limit";
 import { runTimeZone } from "@openbot/shared/person-time-zone";
+import { checklistNotice } from "@openbot/shared/run-notices";
 import { SUBAGENT_TOOL } from "@openbot/shared/subagent";
 import {
   BuiltInAgentWithSaneHistory,
@@ -37,6 +38,7 @@ import {
   RunBuiltAgent,
   UnavailableAgent,
 } from "@openbot/toolkit/copilotkit/agents";
+import { firingChecklist } from "@openbot/toolkit/copilotkit/firing-checklist";
 import { UNATTENDED_STEPS } from "@openbot/toolkit/copilotkit/last-step";
 import { createIntelligenceThreadLock } from "@openbot/toolkit/copilotkit/thread-lock";
 import type { GrantedTool, ToolExecution } from "@openbot/toolkit/granted-tool";
@@ -2430,6 +2432,13 @@ function remoteAgentWithStandingRole(
              * a built-in Bot is. A check-in never reaches here: it runs on OpenBot's own runner.
              */
             ...promptSection("run_mode", runModeGuidance(runModeOf(initiator))),
+            /*
+             * A multi-part routine's checklist, worded as a built-in Bot's is (`firingChecklist`).
+             * Here rather than on the firing itself, which a harness can echo back into the
+             * conversation. Only the words: this deployment cannot hold a loop it does not run to
+             * closing it.
+             */
+            ...promptSection("routine_checklist", routineChecklistOf(messages)),
             ...promptSection(
               "model_and_date",
               [
@@ -3304,4 +3313,10 @@ export function mountCopilotRuntime(
       return read.messages;
     },
   };
+}
+
+/** The checklist a routine's firing in these messages carries, as words, or nothing. */
+function routineChecklistOf(messages: Message[]): string | undefined {
+  const { parts } = firingChecklist(messages);
+  return parts.length > 0 ? checklistNotice(parts) : undefined;
 }
