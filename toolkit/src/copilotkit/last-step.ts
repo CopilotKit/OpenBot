@@ -228,6 +228,12 @@ export function answersOnLastStep(
     let text = "";
     let called = false;
     let earlier: Usage | undefined;
+    /**
+     * Whether the person has already been shown words this step, which a second ask's first words
+     * are set apart from by a paragraph break, so "I'll fetch the rest now." and what follows it do
+     * not run together into one sentence.
+     */
+    let apart = false;
     const renamed = (part: Part): Part =>
       asked > 0 && "id" in part && isNamedPart(part.type)
         ? ({ ...part, id: `${part.id}-${asked}` } as Part)
@@ -242,6 +248,15 @@ export function answersOnLastStep(
             return;
           }
           if (part.type === "stream-start" && asked > 0) continue;
+          if (part.type === "text-delta" && apart && part.delta) {
+            apart = false;
+            const delta = `
+
+${part.delta.trimStart()}`;
+            text += delta;
+            controller.enqueue(renamed({ ...part, delta }));
+            return;
+          }
           if (part.type === "text-delta") text += part.delta;
           if (
             part.type === "tool-call" ||
@@ -277,6 +292,7 @@ export function answersOnLastStep(
           reader = next.stream.getReader();
           current = nextCall;
           asked += 1;
+          apart = text.trim().length > 0;
           text = "";
           earlier = usage;
         }

@@ -251,10 +251,19 @@ describe("a run that ends on a promise", () => {
   test("is sent back at most twice in a row, then the run ends", async () => {
     modelAnswers(() => ({ content: "I'll fetch the rest now." }));
 
-    await chat("Check ENG-1 and ENG-2.");
+    const messages = await chat("Check ENG-1 and ENG-2.");
 
     expect(asked).toHaveLength(1 + 2);
     expect(lookups).toEqual([]);
+    // Each ask's words are set apart from the last, not run together into one sentence.
+    const said = messages
+      .filter((message) => message.role === "assistant")
+      .map((message) => message.content ?? "")
+      .join("");
+    expect(said).not.toContain("now.I'll");
+    expect(said).toContain(
+      "I'll fetch the rest now.\n\nI'll fetch the rest now.",
+    );
   });
 
   test("is counted again from nothing after a tool call", async () => {
