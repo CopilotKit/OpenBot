@@ -3,10 +3,36 @@ import { IconCircleCheck } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
+  type ActionKind,
   approvalInboxOptions,
+  type ConversationGrant,
   revokeConversationGrantMutationOptions,
 } from "@/lib/approvals";
 import { queryClient } from "@/query-client";
+
+/** A kind of action, as the start of a sentence about where it is allowed. */
+const KIND_WORDS: Record<ActionKind, string> = {
+  deleting: "Deleting",
+  sending: "Sending to other people",
+  sharing: "Sharing",
+  publishing: "Posting",
+  payments: "Paying",
+  credentials: "Changing sign-in details",
+  security_settings: "Changing security settings",
+};
+
+/**
+ * What a conversation answer allows, as its line says it. An app's tool by its name, "Send message
+ * on Slack". A step on a website covers that kind of step there, whichever button it presses, so it
+ * says the kind: "Sending to other people on chat.example.com". A plain "Click on …" would read as
+ * every click.
+ */
+function allowedWords(grant: ConversationGrant): string {
+  if (grant.toolRef.startsWith("computer_") && grant.kind)
+    return `${KIND_WORDS[grant.kind]} on ${grant.scope}`;
+  const phrase = approvalPhrase(grant);
+  return phrase.charAt(0).toUpperCase() + phrase.slice(1);
+}
 
 /**
  * What the person allowed for this conversation, above its composer: one line per action, each with
@@ -31,8 +57,7 @@ export function ConversationAllowances({ threadId }: { threadId: string }) {
       className="flex flex-col gap-1 pb-2"
     >
       {grants.map((grant) => {
-        const phrase = approvalPhrase(grant);
-        const action = phrase.charAt(0).toUpperCase() + phrase.slice(1);
+        const action = allowedWords(grant);
         return (
           <div
             className="flex min-w-0 items-center gap-2 rounded-lg border bg-muted/40 py-1 pr-1 pl-2.5 text-sm"

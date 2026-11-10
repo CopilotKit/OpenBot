@@ -113,3 +113,21 @@ test("another conversation's answer isn't shown here", async () => {
     view.queryByRole("region", { name: "Allowed in this conversation" }),
   ).toBeNull();
 });
+
+test("a step on a website says the kind it allows there, not every click", async () => {
+  grants = [
+    {
+      ...slackSend,
+      id: "grant-2",
+      toolRef: "computer_click",
+      scope: "chat.example.com",
+    },
+  ];
+  const view = draw("thread-1");
+  const line = await view.findByRole("region", {
+    name: "Allowed in this conversation",
+  });
+  expect(line.textContent).toContain(
+    "Sending to other people on chat.example.com is allowed in this conversation.",
+  );
+});
