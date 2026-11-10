@@ -162,7 +162,9 @@ fill a gap. Three rules hold that boundary:
   the networking OpenBot's containers need to reach Intelligence (user-mode networking and the
   host-gateway setting). So OpenBot passes such a machine over and makes and uses its own rootful
   machine, `openbot`, as on a computer with none (`engine::passed_over_machine`). On Windows it runs
-  beside the person's, which keeps running untouched. On a Mac, where Podman runs one machine at a
+  beside the person's, which keeps running untouched. While `openbot` starts, the app holds the name
+  of Docker's default pipe, `\\.\pipe\docker_engine`, which Podman otherwise gives to the first
+  machine that starts, so `openbot` gets only its own pipe (`acquire::DOCKER_PIPE`). On a Mac, where Podman runs one machine at a
   time, a rootless machine of the person's is the only kind passed over: the window says OpenBot
   needs its own and offers to pause theirs while OpenBot runs, and nothing is paused until they
   choose **Pause my Podman**. Quit then stops `openbot` and starts theirs again with the containers

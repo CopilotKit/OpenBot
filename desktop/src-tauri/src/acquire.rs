@@ -551,15 +551,34 @@ fn rootful_host_gateway_config_script(ip: Ipv4Addr) -> String {
     )
 }
 
-fn start_machine_with(
+/**
+The named pipe Docker's clients use by default on Windows, `\\.\pipe\docker_engine`.
+
+Docker Desktop serves it, and so does the first Podman machine to start while it is free:
+`launchWinProxy` (Podman 6.1.1, `pkg/machine/machine_windows.go`) hands it to that machine's
+`win-sshproxy` whenever `PipeNameAvailable("docker_engine", 250ms)` finds no pipe by that name, and
+no setting turns that off. OpenBot's machine runs beside the person's on Windows (see
+`own_machine`). On a live Windows run it started first after a Podman update and took the pipe, so
+the person's Docker clients reached OpenBot's machine, and Docker Desktop would have found its pipe
+taken. So the name is held while OpenBot's machine starts, and Podman gives OpenBot's machine its
+own pipe only, `\\.\pipe\podman-openbot`, the one OpenBot uses (`MachineFacts::api`).
+*/
+pub const DOCKER_PIPE: &str = "docker_engine";
+
+fn start_machine_with<H>(
     mut run: impl FnMut(&[&str]) -> Result<String, String>,
     target_is_windows: bool,
+    hold_docker_pipe: impl FnOnce() -> H,
 ) -> StepOutcome {
     let rootful = match prepare_user_mode_networking_before_start(&mut run, target_is_windows) {
         Ok(networking) => networking.is_some_and(|networking| networking.rootful),
         Err(error) => return StepOutcome::stopped(Step::StartMachine, &error),
     };
-    let started = match run(&["machine", "start", MACHINE]) {
+    // Held only for the start itself, then let go for Docker Desktop or the person's own machine.
+    let held = target_is_windows.then(hold_docker_pipe);
+    let started = run(&["machine", "start", MACHINE]);
+    drop(held);
+    let started = match started {
         Ok(_) => format!("{MACHINE} started."),
         Err(error) if error.contains("already running") => {
             format!("{MACHINE} was already running.")
@@ -573,7 +592,68 @@ fn start_machine_with(
 }
 
 pub fn start_machine() -> StepOutcome {
-    start_machine_with(podman, cfg!(target_os = "windows"))
+    start_machine_with(podman, cfg!(target_os = "windows"), || {
+        let held = hold_pipe_name(DOCKER_PIPE);
+        log::info!(
+            "[engine] {DOCKER_PIPE} {} while {MACHINE} starts",
+            if held.is_some() {
+                "held, so Podman gives it to no machine,"
+            } else {
+                "already served by another program"
+            }
+        );
+        held
+    })
+}
+
+/// A named pipe this process holds by name, and lets go of when dropped.
+#[cfg(windows)]
+pub struct HeldPipe(windows::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl Drop for HeldPipe {
+    fn drop(&mut self) {
+        // SAFETY: the handle is the pipe `hold_pipe_name` created, closed once, here.
+        unsafe {
+            let _ = windows::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+
+/// Hold `\\.\pipe\<name>` by creating it, or None when something already serves that name.
+///
+/// One instance, created as the first one, so it is never a second instance of somebody else's
+/// pipe. Nothing ever connects to it on purpose: a client that tries is turned away once it closes,
+/// and the name is free again the moment this is dropped.
+#[cfg(windows)]
+pub fn hold_pipe_name(name: &str) -> Option<HeldPipe> {
+    use windows::core::HSTRING;
+    use windows::Win32::Storage::FileSystem::{FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX};
+    use windows::Win32::System::Pipes::{
+        CreateNamedPipeW, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
+    };
+    let path = HSTRING::from(format!(r"\\.\pipe\{name}"));
+    // SAFETY: a plain call with a valid wide string and no security attributes; the handle is
+    // checked before it is kept.
+    let handle = unsafe {
+        CreateNamedPipeW(
+            &path,
+            PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+            PIPE_TYPE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+            1,
+            0,
+            0,
+            0,
+            None,
+        )
+    };
+    (!handle.is_invalid()).then_some(HeldPipe(handle))
+}
+
+/// Named pipes are Windows'. Nothing to hold elsewhere.
+#[cfg(not(windows))]
+pub fn hold_pipe_name(_name: &str) -> Option<()> {
+    None
 }
 
 /// Turn Podman's own words into an instruction, where we know one.
@@ -1372,6 +1452,7 @@ mod tests {
                 }
             },
             true,
+            || (),
         );
         assert!(started.ok, "{started:?}");
         assert!(
@@ -1413,6 +1494,7 @@ mod tests {
                 }
             },
             true,
+            || (),
         );
         assert!(started.ok, "{started:?}");
         let script = calls.last().unwrap().last().unwrap().clone();
@@ -1426,6 +1508,80 @@ mod tests {
             "{script}"
         );
         assert!(!script.contains("--user"), "{script}");
+    }
+
+    /// The live Windows run: OpenBot's machine started first after a Podman update and Podman gave
+    /// it `\\.\pipe\docker_engine`, so the person's Docker clients reached OpenBot's machine. The
+    /// name is held for exactly the `machine start`, and only on Windows.
+    #[test]
+    fn docker_pipe_is_held_for_exactly_the_machine_start_on_windows() {
+        struct Held(std::rc::Rc<std::cell::Cell<bool>>);
+        impl Drop for Held {
+            fn drop(&mut self) {
+                self.0.set(false);
+            }
+        }
+        for target_is_windows in [true, false] {
+            let holding = std::rc::Rc::new(std::cell::Cell::new(false));
+            let mut during_start = None;
+            let mut held_elsewhere = false;
+            let inspect = serde_json::json!([{
+                "Name": "openbot",
+                "State": "stopped",
+                "UserModeNetworking": true,
+                "Rootful": true
+            }])
+            .to_string();
+            let started = start_machine_with(
+                |args| {
+                    if args == ["machine", "start", "openbot"] {
+                        during_start = Some(holding.get());
+                    } else if holding.get() {
+                        held_elsewhere = true;
+                    }
+                    match args {
+                        ["machine", "inspect", "openbot"] => Ok(inspect.clone()),
+                        ["machine", "ssh", "openbot", "getent", ..] => {
+                            Ok("192.168.127.254 STREAM host.containers.internal\n".into())
+                        }
+                        _ => Ok(String::new()),
+                    }
+                },
+                target_is_windows,
+                || {
+                    holding.set(true);
+                    Held(holding.clone())
+                },
+            );
+            assert!(started.ok, "{started:?}");
+            assert_eq!(during_start, Some(target_is_windows));
+            assert!(!held_elsewhere, "held only for the start");
+            assert!(!holding.get(), "let go once it started");
+        }
+    }
+
+    /// The real pipe, as Podman looks for it: `PipeNameAvailable` asks whether
+    /// `\\.\pipe\<name>` exists and treats anything but "not found" as taken. Held, it is there and
+    /// cannot be held twice; let go, it is gone.
+    #[cfg(windows)]
+    #[test]
+    fn a_held_pipe_name_is_taken_until_it_is_let_go() {
+        let name = format!("openbot-held-pipe-test-{}", std::process::id());
+        let path = format!(r"\\.\pipe\{name}");
+        let not_found = |path: &str| {
+            std::fs::metadata(path)
+                .err()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        };
+        assert!(not_found(&path));
+        let held = hold_pipe_name(&name).expect("the name is free");
+        assert!(!not_found(&path), "Podman would find it taken");
+        assert!(hold_pipe_name(&name).is_none(), "never a second instance");
+        drop(held);
+        assert!(
+            not_found(&path),
+            "free again for Docker Desktop or the person's machine"
+        );
     }
 
     #[test]
@@ -1528,6 +1684,7 @@ mod tests {
                 }
             },
             true,
+            || (),
         );
 
         assert!(result.ok, "{result:?}");
