@@ -13,6 +13,7 @@ import {
   type ChannelSummary,
   channelKeys,
 } from "@/lib/channels/queries";
+import { UNANSWERED } from "@/lib/copilot/repair-history";
 import { queryClient } from "@/query-client";
 import {
   ANSWERED_EARLY,
@@ -46,7 +47,8 @@ const channel: AgentChannel = {
   active: true,
   lastMessageAt: "2026-11-09T00:00:00.000Z",
 };
-const INTERRUPTED = "the surface was interrupted";
+/** What a call nothing answered is sent as. */
+const INTERRUPTED = UNANSWERED;
 
 /** How many of the 20 answers the thread's store holds now. */
 let storedAnswers = ANSWERED_EARLY;

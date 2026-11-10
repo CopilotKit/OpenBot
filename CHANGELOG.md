@@ -152,6 +152,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   off. Every such call is still on the audit trail. Admins can set each kind to ask every time, or
   to be done by members themselves, in Admin → Approvals. A password changed on a website is still
   yours to do. This reverses #998's "always asks" rule.
+- **A Bot's lookups come back, even in a big batch.** A Bot that asks an app for many things at
+  once now has at most 5 of them out at a time, and the rest wait their turn, so the app is not hit
+  with a burst it answers with timeouts and rate limits. A lookup the Bot already made in the same
+  run, with the same details, is answered from the first result, which says it was already
+  fetched, instead of going to the app again. A lookup that times out or that the app turns away
+  for the moment (too many requests, or its own server error) is tried twice more over a few
+  seconds before the Bot hears of it. Anything that changes something in an app is never retried
+  on its own, because it may already have happened. A step that did not run now always tells the
+  Bot the same thing: what happened, and to run it again if it still needs it or say in its answer
+  that it could not get it.
 - **Coming back to a conversation while a Bot is part way through its lookups no longer loses
   them.** A Bot that sent 20 lookups at once, opened again while 9 were still running, showed only
   the 11 that had answered, and the next message told the Bot the other 9 had been "interrupted
