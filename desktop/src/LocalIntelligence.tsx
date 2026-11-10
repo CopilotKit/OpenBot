@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { CopilotKitSignInWait } from "./CopilotKitSignInWait";
 import { ExternalLink } from "./ExternalLink";
 import {
+  backEndWaitEnded,
   cancelLocalEval,
   chatGate,
   connectLocalEval,
@@ -510,6 +511,7 @@ export function useLocalSequence({
     };
     const stuck = (found: LocalReport) => {
       if (generation.current === token) {
+        backEndWaitEnded(said(found));
         update({ blocked: { said: said(found), reason: found.reason } });
       }
       return null;
@@ -610,12 +612,11 @@ export function useLocalSequence({
         return stuck(found);
       }
       if (tries >= pollDelays.length) {
-        update({
-          blocked: {
-            said: "OpenBot didn't get ready in time. Retry to check again.",
-            reason: null,
-          },
-        });
+        const timedOut =
+          "OpenBot didn't get ready in time. Retry to check again.";
+        // The log says how long it waited and what the back end last said (`back_end_wait_ended`).
+        backEndWaitEnded(timedOut);
+        update({ blocked: { said: timedOut, reason: null } });
         return null;
       }
       if (!(await pause(pollDelays[tries], token))) return null;

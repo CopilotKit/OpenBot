@@ -174,9 +174,14 @@ function statusCalls() {
 }
 
 /** The steps the sequence ran. Asking how far a download has got is not one. */
+/** The step's calls, in order. Not the download poll, nor what it tells the log. */
 function commands() {
   return invokeCalls
-    .filter((call) => call.command !== "local_eval_download")
+    .filter(
+      (call) =>
+        call.command !== "local_eval_download" &&
+        call.command !== "back_end_wait_ended",
+    )
     .map((call) =>
       call.command === "run_local_eval"
         ? `${call.command}:${(call.args as { action: string }).action}`
@@ -1171,6 +1176,16 @@ test("polling is bounded, and says so when Intelligence never became ready", asy
   );
   expect(statusCalls()).toHaveLength(3);
   expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  // The log says why the wait ended, with how long it took and what the back end last said
+  // (`back_end_wait_ended`): a five-minute wait on Windows had left no line at all.
+  expect(
+    invokeCalls.filter((call) => call.command === "back_end_wait_ended"),
+  ).toEqual([
+    {
+      command: "back_end_wait_ended",
+      args: { why: "OpenBot didn't get ready in time. Retry to check again." },
+    },
+  ]);
 });
 
 test("Cancel stops the running CLI call by its own attempt, and Retry resumes there", async () => {

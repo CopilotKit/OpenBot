@@ -778,6 +778,7 @@ pub fn update_podman(
 /// The row's line while Podman updates: why it is updating, since it is the person's own Podman.
 pub fn podman_updating() -> StepLine {
     StepLine::here("The Podman on this computer is too old for OpenBot, so OpenBot is updating it.")
+        .updating()
 }
 
 /// A line the installer says, as the update says it. Work OpenBot does by itself says why it is
@@ -788,8 +789,15 @@ fn while_updating(line: StepLine) -> StepLine {
         return line;
     }
     let why = podman_updating().said;
+    // The installer's prompt, said short after why: "...so OpenBot is updating it. Your Mac will
+    // ask for your password." The whole of both did not fit the background row.
     let said = if line.elsewhere {
-        format!("{why} {}", line.said)
+        format!(
+            "{why} {}",
+            line.said
+                .split_once(" so OpenBot")
+                .map_or(line.said.clone(), |(prompt, _)| format!("{prompt}."))
+        )
     } else {
         why
     };
@@ -797,6 +805,7 @@ fn while_updating(line: StepLine) -> StepLine {
     StepLine {
         said,
         detail: Some(detail),
+        updating: true,
         ..line
     }
 }
@@ -2301,6 +2310,26 @@ esac
         assert!(said
             .iter()
             .any(|line| line.detail.as_deref() == Some("Installing Podman.")));
+    }
+
+    /// During an update the Mac's password prompt is said after why, short enough for the row:
+    /// "...so OpenBot is updating it. Your Mac will ask for your password." The installer's own
+    /// words go to the log, and the line stays one about the engine being updated.
+    #[test]
+    fn the_password_prompt_during_an_update_says_why_first_and_fits() {
+        let line = while_updating(podman_install_said("macos"));
+        assert_eq!(
+            line.said,
+            "The Podman on this computer is too old for OpenBot, so OpenBot is updating it. Your \
+             Mac will ask for your password."
+        );
+        assert!(line.elsewhere && line.updating);
+        assert_eq!(
+            line.detail.as_deref(),
+            Some("Installing Podman's package; macOS asks for the password.")
+        );
+        // A go-ahead the person gives in OpenBot's own window is said as it is.
+        assert_eq!(while_updating(podman_declined()), podman_declined());
     }
 
     /// A machine the installer took the API from is stopped and started even when it was not

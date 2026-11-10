@@ -257,6 +257,9 @@ struct Progress {
     /// The step waits for the person's go-ahead in this window: see `install::GoAhead`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     asks: bool,
+    /// The engine itself is being updated: see `engine::StepLine::updating`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    updating: bool,
 }
 
 #[derive(Serialize)]
@@ -720,6 +723,7 @@ fn report_line<R: tauri::Runtime>(
             downloads: None,
             elsewhere: false,
             asks: false,
+            updating: false,
         },
     );
 }
@@ -835,6 +839,7 @@ fn report_running_line<R: tauri::Runtime>(
         said: detail,
         elsewhere,
         asks,
+        updating,
         detail: _,
     } = line;
     setup_phase(step);
@@ -860,6 +865,7 @@ fn report_running_line<R: tauri::Runtime>(
             downloads: None,
             elsewhere,
             asks,
+            updating,
         },
     );
 }
@@ -1048,6 +1054,7 @@ fn report_running_downloads<R: tauri::Runtime>(
             downloads: Some(downloads),
             elsewhere: line.elsewhere,
             asks: line.asks,
+            updating: line.updating,
         },
     );
 }
@@ -1079,6 +1086,7 @@ fn report_downloads<R: tauri::Runtime>(
             downloads: Some(downloads),
             elsewhere: false,
             asks: false,
+            updating: false,
         },
     );
 }
@@ -4255,12 +4263,21 @@ fn stop_for_update<R: tauri::Runtime>(
 /// Stop as the button and the menu bar run it.
 fn stop_everything_for(shell: &Shell, fallback_root: &Path) -> Stopped {
     let root = root_for_stop(shell, fallback_root);
+    let (down, intelligence) = healed_once_before(
+        |root: &Path| {
+            if let Some(address) = engine_for_stop(shell, root) {
+                answering_before_stop(&address);
+            }
+        },
+        |root: &Path| down_owned_containers(shell, root),
+        intelligence_step(Shutdown::Stop),
+    );
     stop_everything_then(
         shell,
         &root,
         stack::stop_processes_under,
-        |root| down_owned_containers(shell, root),
-        intelligence_step(Shutdown::Stop),
+        down,
+        intelligence,
     )
 }
 
@@ -4271,12 +4288,21 @@ where
 {
     // A ChatGPT sign-in left waiting would keep its container, and the callback port, after Quit.
     openbot_desktop_lib::plan::release_chatgpt_callback_port();
+    let (down, intelligence) = healed_once_before(
+        |root: &Path| {
+            if let Some(address) = engine_for_stop(shell, root) {
+                answering_before_stop(&address);
+            }
+        },
+        |root: &Path| down_containers_on_quit(shell, root),
+        intelligence_step(Shutdown::Quit),
+    );
     exit_cleanup_reporting(
         shell,
         &stack::default_root(),
         stack::stop_processes_under,
-        |root| down_containers_on_quit(shell, root),
-        intelligence_step(Shutdown::Quit),
+        down,
+        intelligence,
         progress,
     )
 }
@@ -4390,6 +4416,7 @@ impl QuitStatus {
             downloads: None,
             elsewhere: false,
             asks: false,
+            updating: false,
         };
         match self.steps.iter_mut().find(|known| known.step == row.step) {
             Some(known) => *known = row,
@@ -4660,10 +4687,7 @@ where
 fn down_owned_containers(shell: &Shell, root: &Path) -> Result<(), String> {
     let containers = shell.containers.lock().unwrap();
     match containers.as_ref() {
-        Some(owned) => {
-            answering_before_down(&owned.address);
-            stack::down(&owned.address, root)
-        }
+        Some(owned) => stack::down(&owned.address, root),
         None if shell.stopped_container_root.lock().unwrap().as_deref() == Some(root) => Ok(()),
         None if root.join("docker-compose.yml").exists() => Err(
             "OpenBot has no runtime ownership for this installation. Stop its containers using the original engine and context before starting OpenBot again.".into(),
@@ -4677,16 +4701,17 @@ fn down_owned_containers(shell: &Shell, root: &Path) -> Result<(), String> {
 /// retire those runs, but an old Compose file alone is not a failed shutdown by this session.
 /// Explicit Stop keeps the unknown-runtime error so it cannot claim an unverified cleanup.
 /**
-A Podman machine whose Docker API has gone, stopped and started once before `compose down`, which
-reaches the engine through that API (`engine_versions::answering_now`). The containers that were
-running in it, OpenBot's among them, are started with it, and Compose then stops OpenBot's as it
-always does.
+A Podman machine whose Docker API has gone, stopped and started once before Stop or Quit stops
+anything (`engine_versions::answering_now`). Both stops reach the engine through that API:
+OpenBot's `compose down`, and the back end's `local stop`, which the CLI refuses as
+"docker_unavailable" without it. The containers that were running in the machine, OpenBot's and the
+back end's among them, are started with it, and the two stops then stop them as they always do.
 
-On a live Windows run, with the machine's `win-sshproxy` gone, Quit's `compose down` failed on the
-missing pipe, the back end's stop was refused as "docker_unavailable", and the next launch opened on
-"OpenBot had trouble shutting down last time." What still fails after this is reported as before.
+On a live Windows run, with the machine's `win-sshproxy` gone, Quit failed both, and the next launch
+opened on "When OpenBot last quit, some of its services didn't stop". What still fails after this
+is reported as before.
 */
-fn answering_before_down(address: &engine::Address) {
+fn answering_before_stop(address: &engine::Address) {
     // Only a machine that answers `podman` while its API has gone. One that does not answer at all
     // may have been stopped by the person, and Quit never starts it.
     if address.engine != engine::Engine::Podman || !address.responds() {
@@ -4713,6 +4738,68 @@ fn answering_before_down(address: &engine::Address) {
             problem.detail.as_deref().unwrap_or(&problem.said)
         ),
     }
+}
+
+/// The engine Stop and Quit stop things on: OpenBot's own containers' while they run, otherwise
+/// the one the installation at `root` was set up on, when it answers.
+fn engine_for_stop(shell: &Shell, root: &Path) -> Option<engine::Address> {
+    // Only a Podman machine on a Mac or a PC has an API of its own to lose.
+    if !cfg!(any(target_os = "macos", target_os = "windows")) {
+        return None;
+    }
+    let owned = shell
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|owned| owned.address.clone());
+    // Without OpenBot's own containers, only an installation on Podman is asked about: nothing else
+    // has a machine to restart, and a Stop with nothing to stop runs no engine command.
+    owned.or_else(|| {
+        if preparation::saved_engine(root) != Some(engine::Engine::Podman) {
+            return None;
+        }
+        let found = engine::detect_saved(Some(engine::Engine::Podman));
+        found.address.filter(|_| found.responding)
+    })
+}
+
+/// `down` and `intelligence`, the two stops, each after one `heal` shared between them: whichever
+/// runs first heals, and the other finds it done. Both stops need the engine's API, and a machine
+/// is restarted at most once for the two.
+/// One of Stop's stops, as `stop_everything_then` and `exit_cleanup_reporting` take it.
+type StopStep<'a> = Box<dyn FnOnce(&Path) -> Result<(), String> + 'a>;
+
+fn healed_once_before<'a, H, D, I>(
+    heal: H,
+    down: D,
+    intelligence: I,
+) -> (StopStep<'a>, StopStep<'a>)
+where
+    H: FnOnce(&Path) + 'a,
+    D: FnOnce(&Path) -> Result<(), String> + 'a,
+    I: FnOnce(&Path) -> Result<(), String> + 'a,
+{
+    let heal = std::rc::Rc::new(std::cell::RefCell::new(Some(heal)));
+    let once = {
+        let heal = heal.clone();
+        move |root: &Path| {
+            if let Some(heal) = heal.borrow_mut().take() {
+                heal(root);
+            }
+        }
+    };
+    let again = once.clone();
+    (
+        Box::new(move |root: &Path| {
+            once(root);
+            down(root)
+        }),
+        Box::new(move |root: &Path| {
+            again(root);
+            intelligence(root)
+        }),
+    )
 }
 
 fn down_containers_on_quit(shell: &Shell, root: &Path) -> Result<(), String> {
@@ -7672,9 +7759,41 @@ async fn run_local_eval<R: tauri::Runtime>(
     {
         desktop_telemetry::setup_failed(&app, failure);
     }
+    if action == local_eval::Action::Status {
+        for line in
+            local_eval::status_waited(&mut back_end_wait(), std::time::Instant::now(), &report)
+        {
+            log::info!("{line}");
+        }
+    }
     let report = report?;
     learn_dashboards(&app, report.stack.iter());
     Ok(report)
+}
+
+/// The window's wait for the back end to report ready, as the log says it (`logging::WaitLog`):
+/// every `local status` answer as it changes, and why the wait ended. A Start on Windows waited
+/// five minutes and gave up with nothing in the log between.
+static BACK_END_WAIT: Mutex<Option<openbot_desktop_lib::logging::WaitLog>> = Mutex::new(None);
+
+fn back_end_wait() -> std::sync::MutexGuard<'static, Option<openbot_desktop_lib::logging::WaitLog>>
+{
+    BACK_END_WAIT
+        .lock()
+        .unwrap_or_else(|held| held.into_inner())
+}
+
+/// The window stopped waiting for the back end, and why: the sentence it shows (`waitForReady`),
+/// such as "OpenBot didn't get ready in time. Retry to check again." Written with how long it
+/// waited and the last status, so the log says why Start gave up.
+#[tauri::command]
+fn back_end_wait_ended(why: String) {
+    let mut wait = back_end_wait();
+    let now = std::time::Instant::now();
+    match wait.take() {
+        Some(waited) => log::warn!("{}", waited.ended(now, &format!("gave up: {why}"))),
+        None => log::warn!("[wait] the back end: gave up before any status answered: {why}"),
+    }
 }
 
 /// The back end update last written to the log, so a status polled every few seconds says it once.
@@ -9988,6 +10107,7 @@ fn main() {
         .plugin(outside_links_guard())
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
+            back_end_wait_ended,
             start_early_downloads,
             early_downloads_now,
             record_setup_event,
@@ -14629,6 +14749,58 @@ mod tests {
             assert_eq!(phases.into_inner(), expected, "{ownership:?}");
             let _ = std::fs::remove_dir_all(root);
         }
+    }
+
+    /// D's Quit: the machine's API pipe had gone, so OpenBot's compose down and the back end's
+    /// local stop both failed ("docker_unavailable") and the next launch said some services didn't
+    /// stop. Now one heal comes first, shared by both stops: the machine is restarted once, both
+    /// stops succeed, and there is no failure to record.
+    #[test]
+    fn quit_with_the_api_gone_heals_once_then_both_stops_succeed() {
+        let root = local_eval_root(
+            "openbot-quit-heals-first",
+            Some(local_eval_state::Ownership::Created),
+        );
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(root.clone());
+        let api = std::cell::Cell::new(false);
+        let restarts = std::cell::Cell::new(0);
+        let needs_api = |which: &str| {
+            if api.get() {
+                Ok(())
+            } else {
+                Err(format!("{which}: blocked, docker_unavailable"))
+            }
+        };
+        let (down, intelligence) = healed_once_before(
+            |_: &Path| {
+                restarts.set(restarts.get() + 1);
+                api.set(true);
+            },
+            |_: &Path| needs_api("compose down"),
+            |_: &Path| needs_api("local stop"),
+        );
+        let stopped =
+            exit_cleanup_reporting(&shell, &root, |_| Ok(0), down, intelligence, |_, _| {});
+        assert_eq!(restarts.get(), 1);
+        assert_eq!(stopped.lines(), Vec::<String>::new());
+
+        // OpenBot already stopped, as on D: the back end's stop still comes after the heal.
+        api.set(false);
+        restarts.set(0);
+        let (down, intelligence) = healed_once_before(
+            |_: &Path| {
+                restarts.set(restarts.get() + 1);
+                api.set(true);
+            },
+            |_: &Path| Ok(()),
+            |_: &Path| needs_api("local stop"),
+        );
+        let stopped =
+            exit_cleanup_reporting(&shell, &root, |_| Ok(0), down, intelligence, |_, _| {});
+        assert_eq!(restarts.get(), 1);
+        assert_eq!(stopped.lines(), Vec::<String>::new());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

@@ -21,6 +21,7 @@ type ProgressEvent = {
   running?: boolean;
   elsewhere?: boolean;
   asks?: boolean;
+  updating?: boolean;
   downloadBytes?: number;
   downloads?: {
     done: number;
@@ -1095,19 +1096,25 @@ test("an old engine refused while Install updates it shows the update, and one T
     step: "engine",
     ok: true,
     running: true,
+    updating: true,
     detail: DOCKER_UPDATING,
   });
   await view.findByRole("heading", { name: "Setting up this computer" });
+  const askedBeforeTheUpdate = invokeCalls.filter(
+    (call) => call.command === "local_eval_terms",
+  ).length;
   expectBehind(view, 1, DOCKER_UPDATING);
   expect(
     view.queryByRole("heading", { name: "Switch to Docker Desktop or Podman" }),
   ).toBeNull();
   expect(view.queryByText("docker context use desktop-linux")).toBeNull();
-  // Asked again while it waits, and still not said.
+  // Not asked at all while the update runs: the old engine would only refuse it. On the tester's
+  // computer it answered "(containerized)" fourteen times in forty seconds.
   await act(async () => new Promise((settle) => setTimeout(settle, 2500)));
+  expect(askedBeforeTheUpdate).toBeLessThanOrEqual(1);
   expect(
-    invokeCalls.filter((call) => call.command === "local_eval_terms").length,
-  ).toBeGreaterThan(1);
+    invokeCalls.filter((call) => call.command === "local_eval_terms"),
+  ).toHaveLength(askedBeforeTheUpdate);
   expect(
     view.queryByRole("heading", { name: "Switch to Docker Desktop or Podman" }),
   ).toBeNull();

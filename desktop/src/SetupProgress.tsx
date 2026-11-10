@@ -50,6 +50,11 @@ export type Progress = {
    */
   asks?: boolean;
   /**
+   * The engine itself is being updated (`engine::StepLine::updating`). Nothing is asked of it
+   * until the update is done: an engine being updated refuses what is asked.
+   */
+  updating?: boolean;
+  /**
    * Where this step is among the parts of what it belongs to, said while it runs: "Step 2 of 4".
    * A row list shows the parts done and the one running; this says how many are left.
    */
