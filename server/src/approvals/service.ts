@@ -180,12 +180,15 @@ export function createApprovalService(
   ): Promise<ApprovalPolicyOutcome | undefined> {
     const policy = store.policy;
     if (!policy) return undefined;
-    const [preferences, team, teamRules, personal] = await Promise.all([
-      policy.preferences(candidate.actorId),
-      policy.teamSettings(),
-      policy.teamRules(),
-      store.rules(candidate.actorId),
-    ]);
+    const [preferences, team, teamRules, personal, guidance] =
+      await Promise.all([
+        policy.preferences(candidate.actorId),
+        policy.teamSettings(),
+        policy.teamRules(),
+        store.rules(candidate.actorId),
+        // The admin's guidance for auto-review, which the reviewer reads below the built-in rules.
+        policy.reviewerGuidance?.() ?? null,
+      ]);
     const continuation = candidate.continuation ?? currentApprovalContext();
     // Only this conversation's answers: one given in another conversation never reaches this one.
     const conversation =
@@ -206,6 +209,7 @@ export function createApprovalService(
       autoReview: preferences.autoReview || team.enforceAutoReview,
       askBeforeChanges: preferences.enabled,
       ...(options.review ? { model: options.review } : {}),
+      ...(guidance ? { guidance } : {}),
     });
     // An unremarkable read is not a verdict anybody asked for; everything else is on the trail.
     if (
@@ -230,6 +234,11 @@ export function createApprovalService(
   }
   return {
     store,
+    /**
+     * The reviewer model the gate asks, so a replay of auto-review over past requests asks the very
+     * same one (./reviewer-guidance.ts). Absent where none is configured, and then the gate fails closed.
+     */
+    reviewer: options.review,
     async frontendAction(ownerUserId: string, botId: string, input: unknown) {
       if (!frontend)
         throw new ApprovalRefusedError(

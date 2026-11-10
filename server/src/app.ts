@@ -25,6 +25,7 @@ import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
 import { createApprovalRoutes } from "./approvals/routes";
+import { createReviewerGuidanceRoutes } from "./approvals/reviewer-guidance";
 import { createApprovalRuleDraftRoutes } from "./approvals/rule-translate";
 import type { RuleVocabulary } from "./approvals/rule-vocabulary";
 import type { ApprovalService } from "./approvals/service";
@@ -514,10 +515,11 @@ export function createApp(
     learningModel?: LearningModelEndpoint;
     /**
      * The deployment's own model, for writing a boundary from an admin's description
-     * (computer/policy-translate.ts), team approval rules from one (approvals/rule-translate.ts) and
-     * a Bot's actions in one app from one (plugins/grant-translate.ts). Absent,
-     * `/api/computers/policy-translate` is not mounted, and approval rules and app actions say a
-     * model is needed.
+     * (computer/policy-translate.ts), team approval rules from one (approvals/rule-translate.ts),
+     * a Bot's actions in one app from one (plugins/grant-translate.ts), and for reading an admin's
+     * guidance for auto-review (approvals/reviewer-guidance.ts). Absent,
+     * `/api/computers/policy-translate` is not mounted, and approval rules, app actions and guidance
+     * say a model is needed.
      */
     boundaryWriter?: ModelCompleter;
     /**
@@ -1897,6 +1899,18 @@ export function createApp(
           : {}),
         ...(auditStore ? { auditStore } : {}),
         ...(auditReader ? { auditReader } : {}),
+      }),
+    );
+  // Before `/api/approvals` too: the admin's guidance for auto-review, checked, replayed and saved.
+  if (coworker?.approvals)
+    app.route(
+      "/api/approvals/team/guidance",
+      createReviewerGuidanceRoutes({
+        requireUser,
+        service: coworker.approvals,
+        ...(coworker.boundaryWriter
+          ? { complete: coworker.boundaryWriter }
+          : {}),
       }),
     );
   if (coworker?.approvals)

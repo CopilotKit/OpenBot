@@ -667,6 +667,14 @@ export const auditEventTypes = [
    * `explanation`, `warning`, `checked`, `attempts` and, for rows that did not check, `error`.
    */
   "approval.rules_translated",
+  /**
+   * An admin saved guidance for auto-review, or removed it (approvals/reviewer-guidance.ts). The
+   * reviewer reads it with every action it reviews, below the built-in safety requirements.
+   * Target `approval_settings` `team`; payload `actor`, `change` (`saved` or `removed`), `before` and
+   * `after` (the guidance either side, null for none), and on a save `reading`: `summary` and
+   * `explanation`, the independent reading of the words the admin saw before saving.
+   */
+  "approval.guidance_changed",
   /*
    * Enterprise controls (server/src/admin). Every switch an administrator flips is on the trail with
    * who flipped it, because the table only holds the current answer.
