@@ -5,6 +5,7 @@ import {
 } from "@tabler/icons-react";
 import { createContext, type ReactNode, useContext, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
+import { BrandName } from "@/components/edition/brand-name";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Popover,
@@ -132,7 +133,7 @@ export function OnboardingFrame({
         <div className="hidden lg:flex lg:items-center lg:justify-between lg:gap-4">
           <div className="text-sm flex items-center gap-2 font-semibold">
             <AgentOrb size="24px" />
-            {appConfig.brand.productName}
+            <BrandName>{appConfig.brand.productName}</BrandName>
           </div>
           {titles.length > 1 ? (
             <StepMenu
@@ -325,7 +326,9 @@ function StepMenu({
                       at + 1
                     )}
                   </span>
-                  <span className="min-w-0 truncate">{title}</span>
+                  <span className="min-w-0 truncate">
+                    <BrandName>{title}</BrandName>
+                  </span>
                   {done ? (
                     <span className="sr-only">, done</span>
                   ) : !current && !pickable ? (
@@ -433,7 +436,7 @@ export function StepIntro({
   return (
     <div className="mx-auto flex w-full max-w-md flex-col items-center text-center lg:mx-0 lg:items-start lg:text-left">
       <h1 className="text-3xl font-semibold tracking-tight text-pretty [overflow-wrap:anywhere] focus:outline-none">
-        {title}
+        {typeof title === "string" ? <BrandName>{title}</BrandName> : title}
       </h1>
       {children ? (
         <div className="text-base mt-3 flex max-w-md flex-col gap-2 text-pretty text-muted-foreground">

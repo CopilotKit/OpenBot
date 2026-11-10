@@ -1267,8 +1267,9 @@ const TECHNICAL = [
   /\bCompose\b/,
   /0\.16\.0/,
   // The company alone. It is named only as OpenBot by CopilotKit, which the Account step's header
-  // reads as "OpenBotby CopilotKit" here: two spans, set apart by the stylesheet.
-  /(?<!OpenBot\s*by\s+)CopilotKit/,
+  // reads as "OpenBot™by CopilotKit" here: two spans, set apart by the stylesheet, the first with
+  // its trademark sign.
+  /(?<!OpenBot™?\s*by\s+)CopilotKit/,
 ];
 
 /** The native side's lines while it prepares this computer (`engine.rs`, `install.rs`). */

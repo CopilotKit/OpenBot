@@ -367,7 +367,7 @@ test("somebody trying OpenBot alone has three steps: Welcome, Book a demo, then 
 
   expect(stepNames(await openSteps(view))).toEqual([
     "Welcome to OpenBot",
-    "OpenBot for Business",
+    "OpenBot for Business™",
     "What should we call you?",
   ]);
 });
@@ -410,7 +410,7 @@ test("on every step, its name in the list of steps is its heading", async () => 
   }
   expect(seen).toEqual([
     "Welcome to OpenBot",
-    "OpenBot for Business",
+    "OpenBot for Business™",
     "What should we call you?",
   ]);
 });

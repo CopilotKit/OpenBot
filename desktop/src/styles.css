@@ -1446,6 +1446,20 @@ a:hover {
   margin-bottom: 28px;
 }
 
+/*
+ * The trademark sign on OpenBot's name, as open.bot sets it and as the app's `Trademark` does: a
+ * small superscript in the name's own colour, its top level with the capitals, that leaves the line
+ * where it was. Never under 8px, so it still reads beside the header's 16px name.
+ */
+.lockup .trademark {
+  vertical-align: 0.4em;
+  letter-spacing: 0;
+  margin-left: 0.1em;
+  font-size: max(0.45em, 8px);
+  font-weight: 500;
+  line-height: 0;
+}
+
 .lockup span {
   font-size: var(--text-lg);
   line-height: 22px;
