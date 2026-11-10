@@ -75,6 +75,8 @@ export function setNetworkPolicyMutationOptions(queryClient: QueryClient) {
       mode: NetworkMode;
       rules: EgressRule[];
       locked: boolean;
+      /** The sentence the list was written from, recorded with the save. */
+      authoring?: { source: "english"; text: string };
     }) => {
       await client("/api/admin/enterprise/network", {
         method: "PUT",
