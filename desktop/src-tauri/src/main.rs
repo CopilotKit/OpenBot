@@ -754,8 +754,13 @@ fn report_running_line<R: tauri::Runtime>(
 /// behind. So the deprecated call, through `set_focus`, is the one used. `AppHandle::show` first
 /// unhides an app hidden with Command-H, which `set_focus` does not.
 ///
-/// On Windows `set_focus` gets past the foreground lock (tao's `force_window_active`).
-/// `set_focus` does nothing to a hidden or minimised window, hence `show` and `unminimize` first.
+/// On Windows it is `SetForegroundWindow`, and when Windows refuses it (another app holds the
+/// foreground, as the browser does during sign-in) the taskbar button flashes instead. Never tao's
+/// `set_focus` there: past a refusal it presses and releases Alt to get by the foreground lock
+/// (`force_window_active`), and a lone Alt can put a WebView2 window into menu mode, which only a
+/// click, Alt+Tab or Esc ends. On Windows F setup froze for minutes right after "[front] the engine
+/// machine is prepared" with the browser in front. `set_focus` does nothing to a hidden or
+/// minimised window, hence `show` and `unminimize` first.
 fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
     log::info!("[front] {why}");
     #[cfg(target_os = "macos")]
@@ -765,7 +770,58 @@ fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
     };
     let _ = window.show();
     let _ = window.unminimize();
+    #[cfg(windows)]
+    {
+        let hwnd = window.hwnd().ok().map(|hwnd| hwnd.0 as isize);
+        let why = why.to_owned();
+        // On the window's own thread, as `notice::bring_to_front` is.
+        let _ = app.run_on_main_thread(move || {
+            let front = come_forward(
+                || {
+                    hwnd.is_some_and(|hwnd| {
+                        use windows::Win32::Foundation::HWND;
+                        use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
+                        // SAFETY: `hwnd` is this window's live handle, read just now.
+                        unsafe { SetForegroundWindow(HWND(hwnd as *mut core::ffi::c_void)) }
+                            .as_bool()
+                    })
+                },
+                || {
+                    let _ = window
+                        .request_user_attention(Some(tauri::UserAttentionType::Informational));
+                },
+            );
+            if front == Front::Flashed {
+                log::info!(
+                    "[front] {why}: Windows kept another window in front; flashed the taskbar"
+                );
+            }
+        });
+    }
+    #[cfg(not(windows))]
     let _ = window.set_focus();
+}
+
+/// How OpenBot's window came forward on Windows (`bring_to_front`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
+enum Front {
+    /// `SetForegroundWindow` put it in front.
+    Came,
+    /// Windows refused, and the taskbar button flashes for the person to come to it.
+    Flashed,
+}
+
+/// Bring the window forward with `set_foreground`, and if Windows refuses, `flash` its taskbar
+/// button. Nothing else: no key pressed or released on the person's behalf.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn come_forward(set_foreground: impl FnOnce() -> bool, flash: impl FnOnce()) -> Front {
+    if set_foreground() {
+        Front::Came
+    } else {
+        flash();
+        Front::Flashed
+    }
 }
 
 /// The setup window asks to come to the front: its installation finished or failed, and the next
@@ -5076,14 +5132,16 @@ Windows opened a bare browser window of its own. The configuration says `"create
 /**
 Where the main window's buttons sit on macOS: 20pt in from the left, and low enough that their middle
 lines up with the first row of OpenBot's sidebar header (its name and +), which the page
-moves right to clear them (app/src/styles.css, `data-desktop-titlebar`).
+moves right to clear them (app/src/styles.css, `data-desktop-titlebar`). That row's middle is 32pt
+down (the inset sidebar's 8pt, the header's 8pt, then half its 32pt row), and on macOS 26 the
+circles' middle lands about 1.5pt below `y`, so `y` is 31.
 
 Set on the builder, not per page, because tao keeps it and puts the buttons back after anything that
 moves them (a resize, leaving full screen), and Tauri 2.12 can't change it after the window exists.
 So the setup screens have the buttons here too, where nothing of theirs is near them.
 */
 #[cfg(target_os = "macos")]
-const TRAFFIC_LIGHTS: tauri::LogicalPosition<f64> = tauri::LogicalPosition { x: 20.0, y: 35.0 };
+const TRAFFIC_LIGHTS: tauri::LogicalPosition<f64> = tauri::LogicalPosition { x: 20.0, y: 31.0 };
 
 fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
     let Some(config) = app
@@ -5103,13 +5161,14 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
     #[cfg(target_os = "macos")]
     let builder = builder.traffic_light_position(TRAFFIC_LIGHTS);
     /*
-     * Hidden until it is where it belongs. `tauri_plugin_window_state` puts it back at the size and
-     * place it had as it is built, and `fit_main_window_to_screen` brings it onto a screen that is
-     * there; only then is it shown. Shown as built, it flashed blank at Windows' default spot for a
-     * moment and then jumped (52,52 to 360,90 on Windows D).
+     * Built visible, as the configured window always was. It was built hidden and shown once it
+     * was in place (to spare a reopened window a moment at the system's default spot), and on
+     * Windows that froze setup: the WebView2 page under a window first created hidden stopped
+     * taking native updates a few seconds after a download line appeared, for minutes, until the
+     * window was activated or clicked. `tauri_plugin_window_state` puts it back at the size and
+     * place it had as it is built, and `fit_main_window_to_screen` brings it onto a screen.
      */
     let window = builder
-        .visible(false)
         .on_new_window(move |destination, _features| {
             outside_links::new_window(&destination, |to| {
                 use tauri_plugin_opener::OpenerExt;
@@ -5121,7 +5180,6 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
     // At the level kept from the last launch before anything paints (`zoom`).
     let _ = window.set_zoom(saved_zoom(app));
     fit_main_window_to_screen(app);
-    let _ = window.show();
     Ok(())
 }
 
@@ -13375,6 +13433,49 @@ mod tests {
         assert_eq!(onto_a_screen(rect(-5000.0, 0.0, 1016.0, 839.0), &[]), None);
     }
 
+    /// Another app holds the foreground (the browser, signing in): Windows refuses
+    /// `SetForegroundWindow`, and the taskbar button flashes. Nothing else happens: no key is
+    /// pressed or released on the person's behalf. tao's `set_focus` pressed Alt there, and a lone
+    /// Alt can leave a WebView2 window in menu mode; on Windows F setup froze for minutes after
+    /// "[front] the engine machine is prepared" with the browser in front.
+    #[test]
+    fn coming_forward_with_another_window_in_front_flashes_and_sends_no_input() {
+        let done = std::cell::RefCell::new(Vec::new());
+        let front = come_forward(
+            || {
+                done.borrow_mut().push("set foreground");
+                false
+            },
+            || done.borrow_mut().push("flash the taskbar"),
+        );
+        assert_eq!(front, Front::Flashed);
+        assert_eq!(*done.borrow(), ["set foreground", "flash the taskbar"]);
+        // Allowed in front: nothing flashes.
+        let done = std::cell::RefCell::new(Vec::new());
+        let front = come_forward(
+            || {
+                done.borrow_mut().push("set foreground");
+                true
+            },
+            || done.borrow_mut().push("flash the taskbar"),
+        );
+        assert_eq!(front, Front::Came);
+        assert_eq!(*done.borrow(), ["set foreground"]);
+        // On Windows, `bring_to_front` never reaches tao's `set_focus` (its Alt press), and
+        // nothing in this file sends key input of its own.
+        let main = include_str!("main.rs");
+        let body = &main[main.find("fn bring_to_front<").unwrap()..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        let windows = &body[body.find("#[cfg(windows)]").unwrap()..];
+        let windows = &windows[..windows.find("#[cfg(not(windows))]").unwrap()];
+        assert!(!windows.contains("set_focus"), "{windows}");
+        assert!(body.contains("#[cfg(not(windows))]\n    let _ = window.set_focus();"));
+        let tests = main.find("#[cfg(test)]\nmod tests").unwrap_or(main.len());
+        for input in ["SendInput", "keybd_event", "VK_MENU"] {
+            assert!(!main[..tests].contains(input), "{input}");
+        }
+    }
+
     /// Windows cascades a window with no position of its own down and right on every launch. On
     /// a 1080p screen with a 48 px taskbar the third launch put a 1016 by 839 window's top at 234,
     /// its bottom at 1073, past the work area's 1032, and the account row behind the taskbar.
@@ -13448,15 +13549,14 @@ mod tests {
         );
         assert_eq!(window.label(), "main");
 
-        // Built hidden, put where it belongs, then shown: never a flash at the system's default
-        // spot before it moves (Windows D, reopening).
+        // Never built hidden: on Windows a WebView2 page under a window first created hidden
+        // stopped taking native updates mid-setup, for minutes, until the window was activated
+        // (1.0.1 release candidate). Built visible, then put on a screen.
         let body = &main[main.find("fn build_main_window").unwrap()..];
         let body = &body[..body.find("\n}\n").unwrap()];
-        let hidden = body.find(".visible(false)").expect("built hidden");
-        let built = body.find(".build()?").unwrap();
-        let fitted = body.find("fit_main_window_to_screen(app)").expect("fitted");
-        let shown = body.find("window.show()").expect("shown");
-        assert!(hidden < built && built < fitted && fitted < shown, "{body}");
+        assert!(!body.contains(".visible(false)"), "{body}");
+        assert!(!body.contains(".show()"), "{body}");
+        assert!(body.contains("fit_main_window_to_screen(app)"), "{body}");
         assert!(window.is_visible().unwrap_or(true));
     }
 
