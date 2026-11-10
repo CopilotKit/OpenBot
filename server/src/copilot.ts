@@ -35,6 +35,7 @@ import {
   RunBuiltAgent,
   UnavailableAgent,
 } from "@openbot/toolkit/copilotkit/agents";
+import { UNATTENDED_STEPS } from "@openbot/toolkit/copilotkit/last-step";
 import { createIntelligenceThreadLock } from "@openbot/toolkit/copilotkit/thread-lock";
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { parametersFor } from "@openbot/toolkit/granted-tool";
@@ -46,6 +47,7 @@ import {
   type PlatformRun,
   stopRecorder,
 } from "@openbot/toolkit/run-stop";
+import { runsUnattended } from "@openbot/toolkit/initiator";
 import { historyOrEmpty } from "@openbot/toolkit/thread-history";
 import { defer, from, switchMap } from "rxjs";
 import { z } from "zod";
@@ -687,6 +689,12 @@ export function builtInAgentConfiguration(
    * on. Absent says nothing about apps. See `grantedToolGuidance`.
    */
   apps?: readonly BotApp[],
+  /**
+   * Nobody is watching this run: a routine's firing or a check-in (`runsUnattended`). It may take
+   * up to `UNATTENDED_STEPS.most` steps rather than chat's {@link TOOL_STEPS}; which step it answers
+   * on is decided per run, from the routine's parts (`unattendedLastStep`).
+   */
+  unattended = false,
 ): BuiltInAgentConfiguration {
   if (!apiKey && !planModel) {
     return {
@@ -841,7 +849,9 @@ export function builtInAgentConfiguration(
               ),
           })),
           // Each search is a step of its own, so a run that searches gets two more.
-          maxSteps: searching ? TOOL_STEPS + SEARCH_STEPS : TOOL_STEPS,
+          maxSteps:
+            (unattended ? UNATTENDED_STEPS.most : TOOL_STEPS) +
+            (searching ? SEARCH_STEPS : 0),
         }
       : {}),
   };
@@ -851,7 +861,9 @@ export function builtInAgentConfiguration(
  * How many turns of the tool loop one run may take.
  *
  * Enough for a Bot to search, read what came back, search again on a better term, and answer.
- * Beyond that a model is not making progress, and every extra step is somebody's money.
+ * Beyond that a model is not making progress, and every extra step is somebody's money. That holds
+ * for chat, where a person is there to say "carry on"; a run nobody is watching gets
+ * `UNATTENDED_STEPS` instead, and either is told when it reaches its last (`answersOnLastStep`).
  */
 const TOOL_STEPS = 8;
 
@@ -1284,6 +1296,8 @@ async function buildAgent(
   }
 
   const granted = await loadTools(agent.id);
+  // A routine's firing or a check-in: nobody is watching, so the run has to finish on its own.
+  const unattended = runsUnattended(initiator);
   /*
    * Best-effort, like the vendors: a failed read leaves the Bot told what its tools say, as before,
    * and must not stop the run. Never log the thrown value: database errors can carry row contents.
@@ -1582,6 +1596,7 @@ async function buildAgent(
       timeZone,
       pickedSkill,
       apps,
+      unattended,
     );
     // What really waits: nothing, when the model could not be wrapped and is sent every tool.
     const held = searchesTools(
@@ -1591,6 +1606,7 @@ async function buildAgent(
       : new Set<string>();
     const admit = admitTools(held, runModel);
     return new BuiltInAgentWithSaneHistory(configuration, {
+      ...(unattended ? { unattended } : {}),
       /*
        * A provider's refusal is told in words, naming the provider, rather than as the SDK's text, a
        * "Forbidden" or a retry count. Out of credit keeps its own sentence, from `model-billing.ts`.
