@@ -213,6 +213,14 @@ start an OpenBot of your own (server and app), and run the binary with
 its own OpenBot. Give the run its own `HOME` as well, so nothing it does can reach an installed
 OpenBot in `~/OpenBot`. Release builds never read the variable.
 
+To try the background download of an update (`desktop/src-tauri/src/update_ready.rs`) on a test
+machine, start an **internal** build with `OPENBOT_TEST_UPDATE_FEED` set to a folder holding a
+`latest.json` (only its `version` is read) and the `desktop-images.json` of the build it names. The
+build reads that folder as its update feed: it logs `[update ready] using a test feed from <folder>`,
+offers the version, and downloads its images in the background. It installs nothing, since an
+internal build has no updater: install the next build by hand. A stable or candidate build never
+reads the variable.
+
 After it attaches `latest.json`, and marks the release Latest when it should (see below), the
 signing workflow fetches the GitHub address the way the app does, following redirects, and fails
 unless the answer is JSON whose `version` is the release version and which lists `darwin-aarch64`,
@@ -607,7 +615,7 @@ all from this address and go to GitHub only when it does not answer
 
 | Key | What | Cache-Control |
 |---|---|---|
-| `releases/<tag>/container-images.json`, `releases/<tag>/OpenBot-darwin-*.app.tar.gz` | the release's image pins and Mac updater archives (in `downloads-sync.sh`) | a year, immutable |
+| `releases/<tag>/container-images.json`, `releases/<tag>/desktop-images.json`, `releases/<tag>/OpenBot-darwin-*.app.tar.gz` | the release's image pins, the list of every image the app may pull for it (which an older app reads to get the release ready before its Update click) and the Mac updater archives (in `downloads-sync.sh`) | a year, immutable |
 | `releases/<tag>/<tag>.tar.gz` | the source archive a deployment is laid out from, as `github.com/CopilotKit/OpenBot/archive/refs/tags/<tag>.tar.gz` serves it | a year, immutable |
 | `tools/podman/v<version>/<file>`, `tools/compose/v<version>/<file>` | every Podman installer and Compose binary the release's `desktop/src-tauri/src/install.rs` pins, under the upstream file name, checked against those pins | a year, immutable |
 | `v2/` | `{}` (`application/json`), so a registry client's first request answers | five minutes |

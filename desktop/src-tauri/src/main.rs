@@ -23,7 +23,7 @@ use openbot_desktop_lib::{
     preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
-    telemetry, tray, troubleshooting, upgrade, windows as win,
+    telemetry, tray, troubleshooting, update_ready, upgrade, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -120,6 +120,8 @@ struct Shell {
     waiting_notice_page: Mutex<Option<String>>,
     /// A newer OpenBot Desktop, as the feed last said, and an install of it under way.
     app_update: app_update::Known,
+    /// Wakes the thread that gets a newer version ready when the feed names one.
+    update_ready: update_ready::Nudge,
 }
 
 /// The deployment whose Compose up may have created containers, including a partial failure.
@@ -1501,6 +1503,9 @@ fn watch_for_app_updates<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Some(feed) = app_update_feed(app) else {
         let version = &app.package_info().version;
         log::info!("[app update] {version} is offered no updates; no update check");
+        if let Some(folder) = app_update_test_feed(app) {
+            watch_test_feed(app, folder);
+        }
         return;
     };
     let handle = app.clone();
@@ -1524,11 +1529,222 @@ fn watch_for_app_updates<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
                         }
                     }
                     handle.state::<Shell>().app_update.record(&answer);
+                    if matches!(answer, Ok(Some(_))) {
+                        handle.state::<Shell>().update_ready.nudge();
+                    }
                 },
             )
         });
     if let Err(error) = watching {
         log::error!("[app update] could not start checking for updates: {error}");
+    }
+}
+
+/**
+Get the newer version the feed names ready while this one runs (`update_ready`), on a thread of its
+own: a try as soon as the feed names one, and every `app_update::TICK` after, until it is ready. A
+try waits while OpenBot is not running, or while something the person started needs the engine
+(`update_ready_paused`), so the first one after a launch comes once Start is done. Once ready, each
+try only checks that it still is. A build that is offered no updates never starts it.
+*/
+fn get_updates_ready<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    // An internal build pointed at a test feed reads its list from there.
+    let test = app_update_test_feed(app);
+    if app_update_feed(app).is_none() && test.is_none() {
+        return;
+    }
+    let handle = app.clone();
+    let getting = std::thread::Builder::new()
+        .name("openbot-update-ready".into())
+        .spawn(move || {
+            let mut lists: Option<(semver::Version, update_ready::Announced)> = None;
+            let mut said: Option<String> = None;
+            loop {
+                handle.state::<Shell>().update_ready.wait(app_update::TICK);
+                try_getting_update_ready(&handle, test.as_deref(), &mut lists, &mut said);
+            }
+        });
+    if let Err(error) = getting {
+        log::error!("[update ready] could not start getting updates ready: {error}");
+    }
+}
+
+/// Whether a try at getting an update ready waits, or stops before its next image: OpenBot is not
+/// running, or is starting, stopping, updating or quitting.
+fn update_ready_paused<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    use std::sync::atomic::Ordering::SeqCst;
+    let shell = app.state::<Shell>();
+    shell.starting.load(SeqCst)
+        || shell.updating.load(SeqCst)
+        || shell.app_update.installing()
+        || !matches!(*shell.quit.phase.lock().unwrap(), QuitPhase::Idle)
+        || shell.root.lock().unwrap().is_none()
+        || shell.containers.lock().unwrap().is_none()
+}
+
+/// One try at getting the newer version ready, said in the log once per change of outcome.
+fn try_getting_update_ready<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    test: Option<&Path>,
+    lists: &mut Option<(semver::Version, update_ready::Announced)>,
+    said: &mut Option<String>,
+) {
+    let mut say = |line: String, warn: bool| {
+        if said.as_deref() != Some(line.as_str()) {
+            if warn {
+                log::warn!("{line}");
+            } else {
+                log::info!("{line}");
+            }
+            *said = Some(line);
+        }
+    };
+    let shell = app.state::<Shell>();
+    let Some(version) = shell.app_update.newer() else {
+        shell.app_update.not_ready();
+        return;
+    };
+    if update_ready_paused(app) {
+        return;
+    }
+    let Some((root, address)) = shell
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|running| (running.root.clone(), running.address.clone()))
+    else {
+        return;
+    };
+    let list = match lists.as_ref().filter(|(listed, _)| *listed == version) {
+        Some((_, list)) => list.clone(),
+        None => {
+            let repository = deployment_release::distribution(&root)
+                .map(|policy| policy.repository)
+                .unwrap_or_else(|_| "CopilotKit/OpenBot".into());
+            let read = match test {
+                Some(folder) => update_ready::read_test_list(folder),
+                None => deployment::get(&update_ready::list_url(&repository, &version))
+                    .and_then(|body| update_ready::read_list(&body, &version)),
+            };
+            match read {
+                Ok(list) => {
+                    *lists = Some((version.clone(), list.clone()));
+                    list
+                }
+                Err(error) => {
+                    say(
+                        format!("[update ready] could not read what {version} downloads: {error}"),
+                        true,
+                    );
+                    return;
+                }
+            }
+        }
+    };
+    let installed = preparation::installed_images(&root).unwrap_or_default();
+    let engine = local_eval::node_engine();
+    let node = local_eval_state::read(&root, None)
+        .map(|state| openbot_desktop_lib::local_images::Node::for_stack(&engine, &state.stack));
+    let current = local_eval::bundled_cli_images();
+    let ahead = update_ready::Ahead {
+        version: &version,
+        list: &list,
+        engine: &address,
+        installed: &installed,
+        back_end: node.as_ref().zip(current.as_ref()),
+        disk: &|| local_eval::engine_disk(&address),
+        computer_free: &|| update_ready::computer_free(&address),
+        limits: openbot_desktop_lib::local_images::Limits::standard(),
+    };
+    // Stopped when OpenBot needs the engine, or the feed names another version meanwhile.
+    let stop = || update_ready_paused(app) || shell.app_update.newer().as_ref() != Some(&version);
+    let outcome = update_ready::get_ready(&ahead, &stop, &mut |done, total| {
+        shell
+            .app_update
+            .readying(&version, app_update::Readiness::Preparing { done, total })
+    });
+    match outcome {
+        update_ready::Outcome::Ready => {
+            shell
+                .app_update
+                .readying(&version, app_update::Readiness::Ready);
+            say(
+                format!("[update ready] {version} is ready to install"),
+                false,
+            );
+        }
+        update_ready::Outcome::Skipped(why) => {
+            shell.app_update.not_ready();
+            say(
+                format!(
+                    "[update ready] not downloading {version} ahead of the update: {why}; the update downloads it"
+                ),
+                true,
+            );
+        }
+        update_ready::Outcome::Stopped => {
+            shell.app_update.not_ready();
+            log::info!("[update ready] stopped getting {version} ready; it goes on later");
+        }
+        update_ready::Outcome::NotYet(why) => {
+            shell.app_update.not_ready();
+            say(
+                format!("[update ready] {version} is not ready yet: {why}; trying again later"),
+                true,
+            );
+        }
+    }
+}
+
+/// The test feed an internal build was pointed at (`app_update::TEST_FEED`), from the environment
+/// the app was started in. None on a stable or candidate build, whatever the environment says.
+fn app_update_test_feed<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
+    app_update::test_feed(&app.package_info().version, |name| std::env::var_os(name))
+}
+
+/**
+Read an internal build's test feed (`app_update::TEST_FEED`) at launch and every `app_update::TICK`,
+as a release build reads its update feed, and keep what it names newer, so the background download
+(`get_updates_ready`) runs for it. Nothing installs from it: an internal build has no updater.
+*/
+fn watch_test_feed<R: tauri::Runtime>(app: &tauri::AppHandle<R>, folder: PathBuf) {
+    log::info!("[update ready] using a test feed from {}", folder.display());
+    let handle = app.clone();
+    let watching = std::thread::Builder::new()
+        .name("openbot-test-feed".into())
+        .spawn(move || {
+            let current = handle.package_info().version.clone();
+            let mut said: Option<String> = None;
+            app_update::watch(
+                app_update::Schedule::new(app_update::TICK),
+                std::time::SystemTime::now,
+                |tick| {
+                    std::thread::sleep(tick);
+                    true
+                },
+                || {
+                    let answer = app_update::test_newer(&current, &folder);
+                    let line = match &answer {
+                        Ok(Some(newer)) => format!("[update ready] the test feed names {newer}"),
+                        Ok(None) => "[update ready] the test feed names nothing newer".into(),
+                        Err(error) => {
+                            format!("[update ready] could not read the test feed: {error}")
+                        }
+                    };
+                    if said.as_deref() != Some(line.as_str()) {
+                        log::info!("{line}");
+                        said = Some(line);
+                    }
+                    handle.state::<Shell>().app_update.record(&answer);
+                    if matches!(answer, Ok(Some(_))) {
+                        handle.state::<Shell>().update_ready.nudge();
+                    }
+                },
+            )
+        });
+    if let Err(error) = watching {
+        log::error!("[update ready] could not start reading the test feed: {error}");
     }
 }
 
@@ -1546,17 +1762,22 @@ fn app_update_feed<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<app_u
 async fn check_app_update_now<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<app_update::Asked, String> {
+    let handle = app.clone();
     let asked = tauri::async_runtime::spawn_blocking(move || {
         app_update::ask(
-            app_update_feed(&app).as_ref(),
-            &app.package_info().version,
-            &app.state::<Shell>().app_update,
+            app_update_feed(&handle).as_ref(),
+            &handle.package_info().version,
+            &handle.state::<Shell>().app_update,
         )
     })
     .await
     .map_err(|error| error.to_string())?;
     if let Ok(found) = &asked {
         log::info!("[app update] checked when asked: {found:?}");
+    }
+    // Got ready at once, rather than at the next tick.
+    if let Ok(app_update::Asked::Available { .. }) = &asked {
+        app.state::<Shell>().update_ready.nudge();
     }
     asked
 }
@@ -9459,6 +9680,7 @@ fn main() {
             }
             // The banner and the setup window's offer both read this, never the network.
             watch_for_app_updates(app.handle());
+            get_updates_ready(app.handle());
             desktop_telemetry::initialize(app.handle());
             if let Some(root) = app
                 .path()
@@ -9709,6 +9931,47 @@ mod check_for_updates_tests {
         .map(|body| body.deserialize().unwrap())
     }
 
+    /// The test feed reaches only an internal build, through the start the app itself makes: a
+    /// stable build started with `OPENBOT_TEST_UPDATE_FEED` set is offered nothing from it, and an
+    /// internal build started the same way is offered what it names.
+    #[test]
+    fn only_an_internal_build_is_offered_what_the_test_feed_names() {
+        let folder = crate::test_support::temp_root("test-feed-wiring");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("latest.json"), r#"{"version": "9.9.9"}"#).unwrap();
+        std::env::set_var(app_update::TEST_FEED, &folder);
+        let started = |version: &str| {
+            let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+            context.package_info_mut().version = semver::Version::parse(version).unwrap();
+            let app = tauri::test::mock_builder()
+                .manage(Shell::default())
+                .build(context)
+                .unwrap();
+            watch_for_app_updates(app.handle());
+            app
+        };
+        let stable = started("1.0.1");
+        let candidate = started("1.0.1-rc.2");
+        let internal = started("1.0.1-internal.731.gabc123456789");
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while internal.state::<Shell>().app_update.newer().is_none() {
+            assert!(
+                std::time::Instant::now() < until,
+                "the internal build read its test feed"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        std::env::remove_var(app_update::TEST_FEED);
+        assert_eq!(
+            internal.state::<Shell>().app_update.newer(),
+            Some(semver::Version::parse("9.9.9").unwrap())
+        );
+        assert_eq!(stable.state::<Shell>().app_update.newer(), None);
+        assert_eq!(candidate.state::<Shell>().app_update.newer(), None);
+        assert_eq!(app_update_status(stable.handle()).version, None);
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+
     /// The bug: on a signed 0.3.2, the setup window's Check desktop shell update asked an old
     /// mechanism release builds do not carry, and said "Signed desktop shell updates are not
     /// configured." A release build now answers from the feed its updater installs from.
@@ -9722,7 +9985,9 @@ mod check_for_updates_tests {
         let (app, window) = app(Some(&feed_at("0.3.3")));
         assert_eq!(
             check(&window),
-            Ok(serde_json::json!({ "found": "available", "version": "0.3.3", "current": "0.1.0" }))
+            Ok(
+                serde_json::json!({ "found": "available", "version": "0.3.3", "current": "0.1.0", "ready": null })
+            )
         );
         // Kept, so the banner offers the same version.
         assert_eq!(
