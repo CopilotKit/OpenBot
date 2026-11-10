@@ -175,8 +175,8 @@ account are the same decision when one person makes both:
   client typed first wait behind **Show apps that need setup**, and a search finds them too. With a
   broker set up, the last tile browses its directory of more apps.
 - Connecting an app gives **every Bot every tool** it lists, including the ones that change things.
-  Ordinary changes just happen. Deleting, sending, sharing and posting ask first in the
-  conversation (Allow once or Deny), and paying or buying is handed to you. Turn on **Ask before
+  Ordinary changes just happen. Deleting, sending, sharing, posting and paying ask first in the
+  conversation, where you can allow each once, for the conversation, or always. Turn on **Ask before
   making changes** in Settings → Approvals to be asked about every change. See
   [Approvals](approvals.md). An app can't be taken from one Bot; turning it off takes it from all of
   them. See `server/src/plugins/personal-defaults.ts`.

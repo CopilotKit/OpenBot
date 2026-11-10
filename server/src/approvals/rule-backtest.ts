@@ -60,6 +60,7 @@ const RANK: Record<string, number> = {
 /** What the person answered, where they were asked. */
 export type PersonAnswer =
   | "allow_once"
+  | "allow_conversation"
   | "allow_always"
   | "deny"
   | "handled"

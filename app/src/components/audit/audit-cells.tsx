@@ -580,8 +580,13 @@ function approvalText(event: AuditEvent): string | undefined {
       ? PERSON_DECISIONS[payload.decision]
       : undefined;
   if (event.eventType === "approval.evaluated") {
-    const behaviour = (payload.outcome as { behaviour?: unknown } | undefined)
-      ?.behaviour;
+    const outcome = payload.outcome as
+      | { behaviour?: unknown; source?: unknown }
+      | undefined;
+    // Allowed by the person's own answer earlier in the conversation, not by a rule.
+    if (outcome?.source === "conversation" && outcome.behaviour === "allow")
+      return "Allowed for this conversation";
+    const behaviour = outcome?.behaviour;
     return typeof behaviour === "string"
       ? GATE_DECISIONS[behaviour]
       : undefined;
@@ -591,6 +596,7 @@ function approvalText(event: AuditEvent): string | undefined {
 
 const PERSON_DECISIONS: Record<string, string> = {
   allow_once: "Allowed once by a person",
+  allow_conversation: "Allowed for this conversation by a person",
   allow_always: "Always allowed by a person",
   deny: "Denied by a person",
   handled: "Done by a person",

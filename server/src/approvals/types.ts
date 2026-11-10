@@ -8,12 +8,57 @@ import {
 import type { AuditEventInput, AuditInitiator } from "../audit";
 import { cutAtCodeUnits } from "../channels/text";
 
-/** `handled` answers a hand-off: the person did it themselves, so it is never executed for them. */
+/**
+ * `handled` answers a hand-off: the person did it themselves, so it is never executed for them.
+ * `allow_conversation` allows this action now and for the rest of this conversation: the same tool,
+ * the same Bot, the same target and account, in this conversation only (see `conversationGrant`).
+ */
 export type ApprovalDecision =
   | "allow_once"
+  | "allow_conversation"
   | "allow_always"
   | "deny"
   | "handled";
+export const APPROVAL_DECISIONS = [
+  "allow_once",
+  "allow_conversation",
+  "allow_always",
+  "deny",
+  "handled",
+] as const satisfies readonly ApprovalDecision[];
+/**
+ * The kinds of action OpenBot recognises by name and asks about whatever the person's own switch
+ * says (`safetyRequirement` in ./policy). Open by default: the person can allow one once, for the
+ * conversation, or always. An admin can close each kind (`ApprovalTeamSettings.actionKinds`).
+ */
+export type ActionKind =
+  | "deleting"
+  | "sending"
+  | "sharing"
+  | "publishing"
+  | "payments"
+  | "credentials"
+  | "security_settings";
+export const ACTION_KINDS = [
+  "deleting",
+  "sending",
+  "sharing",
+  "publishing",
+  "payments",
+  "credentials",
+  "security_settings",
+] as const satisfies readonly ActionKind[];
+/**
+ * What the admin lets members do about one kind of action. `open` (the default) asks, and the person
+ * can allow it once, for the conversation, or always. `ask` asks every time, with Allow once and Deny
+ * only. `hand_off` leaves it to the person to do themselves.
+ */
+export type ActionKindPolicy = "open" | "ask" | "hand_off";
+export const ACTION_KIND_POLICIES = [
+  "open",
+  "ask",
+  "hand_off",
+] as const satisfies readonly ActionKindPolicy[];
 /**
  * What a matching custom rule does, in Dot's four behaviours: take action without asking; take
  * action only when the person explicitly asked for that exact action in this run's request; ask
@@ -40,6 +85,8 @@ export type ApprovalPolicyOutcome = {
     | "default"
     /** The person already declined this action, or an equivalent, earlier in this conversation. */
     | "person_declined"
+    /** The person allowed this action for the rest of this conversation (`conversationGrant`). */
+    | "conversation"
     /**
      * A task started from a check-in item: every change it makes asks first, whatever the person's
      * "Ask before making changes" says (tasks/turn.ts). Kept apart from `default` so turning that
@@ -48,6 +95,13 @@ export type ApprovalPolicyOutcome = {
     | "task";
   reason: string;
   ruleId?: string;
+  /** The kind of action OpenBot recognised this as, where it is one (see `ActionKind`). */
+  kind?: ActionKind;
+  /**
+   * The admin closed this kind to standing answers: it asks every time, so the card offers Allow
+   * once and Deny only (`offersStandingRule`).
+   */
+  closed?: true;
   review?: {
     verdict: "proceed" | "needs_approval" | "hand_off";
     preApproved: boolean;
@@ -141,10 +195,34 @@ export type ApprovalRule = {
   behaviour: RuleBehaviour;
   /** The one account the rule is for, or null for the app whichever account; see `ruleMatches`. */
   account?: string | null;
+  /**
+   * The kind of action the rule was saved from, by "Always allow here" on that kind's card, or null.
+   * An allow reaches an action of a kind only when it was saved from that kind (see `reachesKind`).
+   */
+  kind?: ActionKind | null;
   revokedAt: Date | null;
   createdAt: Date;
 };
-export type ApprovalTeamRule = Omit<ApprovalRule, "ownerUserId"> & {
+/**
+ * "Allow for this conversation": one action (Bot, tool, target, account), in one conversation, for
+ * one person. It ends when the person turns it off or deletes the conversation, and reaches no other
+ * conversation, Bot or tool.
+ */
+export type ApprovalConversationGrant = {
+  id: string;
+  ownerUserId: string;
+  threadId: string;
+  /** The request it was given on. */
+  approvalId: string;
+  botId: string;
+  toolRef: string;
+  effect: string;
+  scope: string;
+  account: string | null;
+  kind: ActionKind | null;
+  createdAt: Date;
+};
+export type ApprovalTeamRule = Omit<ApprovalRule, "ownerUserId" | "kind"> & {
   createdBy: string | null;
 };
 export type ApprovalRuleInput = {
@@ -169,6 +247,8 @@ export type ApprovalTeamSettings = {
   enforceAutoReview: boolean;
   customRulesEnabled: boolean;
   hostCommandsCap: HostCommandPolicy;
+  /** The kinds the admin closed. A kind not named is `open`. */
+  actionKinds: Partial<Record<ActionKind, ActionKindPolicy>>;
 };
 /** Rules, preferences and team settings. Optional on the store so older fakes keep working. */
 export type ApprovalPolicyStore = {
@@ -238,6 +318,20 @@ export type ApprovalPolicyStore = {
     match: (action: ApprovalAction) => boolean,
     options?: { resume?: boolean },
   ): Promise<string[]>;
+  /**
+   * The person's "Allow for this conversation" answers still in force in this conversation: not
+   * turned off, and the conversation not deleted. Optional so older fakes keep working.
+   */
+  conversationGrants?(
+    ownerUserId: string,
+    threadId: string,
+  ): Promise<ApprovalConversationGrant[]>;
+  /** Every one of this person's conversation answers still in force, for the inbox. */
+  allConversationGrants?(
+    ownerUserId: string,
+  ): Promise<ApprovalConversationGrant[]>;
+  /** Turn one off. Owner-scoped: another person's id is not found. Audited. */
+  revokeConversationGrant?(ownerUserId: string, id: string): Promise<void>;
   /** One audit row per settled action, so every verdict can be read back. */
   recordDecision(input: {
     ownerUserId: string;

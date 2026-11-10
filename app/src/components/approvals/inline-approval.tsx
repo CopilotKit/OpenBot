@@ -31,6 +31,13 @@ const CHOICE_WORDS: Record<
     done: "Allowed once",
     tone: "positive",
   },
+  allow_conversation: {
+    label: "Allow for this conversation",
+    description:
+      "The Bot does it now, and again in this conversation without asking.",
+    done: "Allowed for this conversation",
+    tone: "positive",
+  },
   allow_always: {
     label: "Always allow here",
     description: "The Bot does it now, and here without asking from now on.",
@@ -91,7 +98,7 @@ export function InlineApproval({
       : [
           "allow_once",
           ...(offersStandingRule(request.action)
-            ? (["allow_always"] as ApprovalDecision[])
+            ? (["allow_conversation", "allow_always"] as ApprovalDecision[])
             : []),
           "deny",
         ];
