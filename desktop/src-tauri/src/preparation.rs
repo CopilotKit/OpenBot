@@ -82,6 +82,14 @@ pub fn installation(root: &Path) -> Option<Launch> {
     })
 }
 
+/// The images the last finished install of `root` pulled, from its completed-installation record,
+/// valid or not: the images this installation runs, for getting the next release's ready ahead of
+/// an update (`update_ready`). None without a record.
+pub fn installed_images(root: &Path) -> Option<Vec<String>> {
+    let record: Prepared = serde_json::from_slice(&std::fs::read(root.join(FILE)).ok()?).ok()?;
+    Some(record.images)
+}
+
 #[derive(Serialize, Deserialize)]
 struct SavedEngine {
     engine: Engine,
