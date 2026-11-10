@@ -1570,7 +1570,7 @@ test("every failure screen says what happened and what to do, in plain words", a
       if (command === "last_local_eval_stop_failure")
         return {
           said: NATIVE_FAILURE.lastQuit,
-          detail: "the back end stack did not stop when OpenBot last quit",
+          detail: "the backend stack did not stop when OpenBot last quit",
         };
       return previous(command, args);
     };
@@ -1802,7 +1802,7 @@ function intelligenceCalls() {
   );
 }
 
-test("a first local run offers the back end dashboard to the app page and opens OpenBot", async () => {
+test("a first local run offers the backend dashboard to the app page and opens OpenBot", async () => {
   setupRootConfiguration("/tmp/local-eval-view", async () =>
     emptyConfiguration(),
   );
@@ -3075,7 +3075,7 @@ async function startedOnKeptRelease(
  * record. Nothing in the cluster had changed and every check passed, but the CLI said `degraded`,
  * and the window said "OpenBot is running but not working properly. Retry to start it again." and stopped OpenBot.
  */
-test("an update that did not finish opens OpenBot on the release the back end runs, and says so", async () => {
+test("an update that did not finish opens OpenBot on the release the backend runs, and says so", async () => {
   const after = pinnedCli.updateDidNotFinish;
   // The same stack before the update: ready on rc.5, with rc.9 to install.
   const before = {
@@ -3098,7 +3098,7 @@ test("an update that did not finish opens OpenBot on the release the back end ru
   expect(localActions()).toEqual(["status", "update", "status"]);
 });
 
-test("the next Start tries the update again on a back end that is still running", async () => {
+test("the next Start tries the update again on a backend that is still running", async () => {
   withUnfinishedUpdate("/tmp/local-eval-update-again-running", [
     pinnedCli.updateDidNotFinish,
   ]);
@@ -3121,7 +3121,7 @@ test("the next Start after Quit tries the update again, and never asks the CLI t
   expect(localActions()).toEqual(["status", "update", "status"]);
 });
 
-test("a back end whose check fails is still not healthy, with an update on record or not", async () => {
+test("a backend whose check fails is still not healthy, with an update on record or not", async () => {
   withUnfinishedUpdate("/tmp/local-eval-update-check-fails", [
     pinnedCli.apiCheckFails,
   ]);
@@ -3448,7 +3448,7 @@ test.each(["model", "intelligence"])(
           said:
             connection === "model"
               ? "That saved OpenAI API key is no longer available."
-              : "OpenBot's connection to its back end on this computer is no longer available. Set up the back end again.",
+              : "OpenBot's connection to its backend on this computer is no longer available. Set up the backend again.",
           connection,
         };
       return previous(command, args);
@@ -3693,7 +3693,7 @@ test("a local Intelligence stack left running at Quit is shown without holding a
   useInterruptedShutdownSetup();
   const notice = {
     said: "When OpenBot last quit, some of its services didn't stop. They may still be running. Stopping OpenBot again asks them to stop.",
-    detail: "Back end stop failed: the CLI timed out",
+    detail: "Backend stop failed: the CLI timed out",
   };
   const previous = invokeHandler;
   invokeHandler = async (command, args) => {
@@ -3716,7 +3716,7 @@ test("Stop that fails only for the local Intelligence stack still stops OpenBot"
   invokeHandler = async (command, args) => {
     if (command === "last_failure") return null;
     if (command === "stop_stack")
-      throw "Back end stop failed: the CLI timed out";
+      throw "Backend stop failed: the CLI timed out";
     return previous(command, args);
   };
   const view = await renderApp();
@@ -3737,7 +3737,7 @@ test("Stop that fails for OpenBot itself keeps OpenBot running", async () => {
   invokeHandler = async (command, args) => {
     if (command === "last_failure") return null;
     if (command === "stop_stack")
-      throw "Compose down failed: busy\nBack end stop failed: the CLI timed out";
+      throw "Compose down failed: busy\nBackend stop failed: the CLI timed out";
     return previous(command, args);
   };
   const view = await renderApp();

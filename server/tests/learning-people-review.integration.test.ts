@@ -310,7 +310,7 @@ test("an admin reads a person's published skill", async () => {
   const failed = await failing.request("/people/ana/skills/send-invoice");
   expect(failed.status).toBe(503);
   expect(((await failed.json()) as { error: string }).error).toContain(
-    "the back end",
+    "the backend",
   );
 });
 

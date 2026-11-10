@@ -482,7 +482,7 @@ export function createMemoryStore(
         // Intelligence keeps the content and nothing else, so there is nothing to pause or review.
         if (patch.enabled !== undefined)
           throw new MemoryRefusedError(
-            "A memory kept in the back end can be edited or forgotten, not paused.",
+            "A memory kept in the backend can be edited or forgotten, not paused.",
           );
         const remoteId = id.slice(INTELLIGENCE_ID_PREFIX.length);
         if (!patch.content) {

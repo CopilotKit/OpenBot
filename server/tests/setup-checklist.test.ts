@@ -256,7 +256,7 @@ describe("setup rows", () => {
       fix: null,
     });
     expect(row(admin, "intelligence").detail).toBe(
-      "The back end has no valid licence. Set COPILOTKIT_LICENSE_TOKEN on the back end's own deployment.",
+      "The backend has no valid licence. Set COPILOTKIT_LICENSE_TOKEN on the backend's own deployment.",
     );
     // The boot log's Helm keys stay in the log.
     expect(row(admin, "intelligence").detail).not.toContain("appApi");
@@ -276,7 +276,7 @@ describe("setup rows", () => {
     );
     expect(row(rows, "intelligence")).toMatchObject({
       status: "needs_setup",
-      detail: "OpenBot couldn't reach its back end. Check its address and key.",
+      detail: "OpenBot couldn't reach its backend. Check its address and key.",
       fix: {
         kind: "env",
         names: [

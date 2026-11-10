@@ -1045,7 +1045,7 @@ test("Stop queues the outcome in the document, and the recording waits as a drai
 test("a recording the document could not send at all never reads as sent: Stop says nothing reached Intelligence", async () => {
   const id = await record();
   const NOT_SENT =
-    "Nothing of this recording reached OpenBot's back end: the Recorder could not start sending it. Try recording again.";
+    "Nothing of this recording reached OpenBot's backend: the Recorder could not start sending it. Try recording again.";
   holdStop = true;
   const stopping = page({ type: "page.stop" });
   await until(
@@ -1693,7 +1693,7 @@ test("Start over on the notice records a new recording whose count starts again"
 
 // ---- Start over ------------------------------------------------------------------------------
 
-test("Start over sends the recording it leaves to OpenBot's back end with a failed outcome and records into a new trajectory", async () => {
+test("Start over sends the recording it leaves to OpenBot's backend with a failed outcome and records into a new trajectory", async () => {
   const old = await record();
   const oldTrajectory = trajectoryOf(old);
   const content = contentPort(7);
@@ -1819,7 +1819,7 @@ test("once Intelligence takes events again the popup says Streaming, and nothing
   const id = await record();
   const trajectory = trajectoryOf(id);
   const busy =
-    "OpenBot's back end is busy or unreachable. Retrying; nothing is lost.";
+    "OpenBot's backend is busy or unreachable. Retrying; nothing is lost.";
   doc?.postMessage({
     type: "offscreen.status",
     capture: {

@@ -600,7 +600,7 @@ export function licenceExpiresSoon(
 }
 
 /** How main.rs starts an Intelligence stop failure (`INTELLIGENCE_STOP_FAILED`). */
-export const intelligenceStopFailed = "Back end stop failed: ";
+export const intelligenceStopFailed = "Backend stop failed: ";
 
 /**
  * Splits a Stop failure into OpenBot's own lines and the local Intelligence stack's. OpenBot has

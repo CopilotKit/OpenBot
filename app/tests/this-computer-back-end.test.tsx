@@ -62,14 +62,14 @@ afterAll(async () => {
   await GlobalRegistrator.unregister();
 });
 
-test("the Back end says what it keeps without mentioning memory", async () => {
+test("the Backend says what it keeps without mentioning memory", async () => {
   const Page = ThisComputerRoute.options.component as ComponentType;
   const view = render(
     <QueryClientProvider client={queryClient}>
       <Page />
     </QueryClientProvider>,
   );
-  const heading = await view.findByRole("heading", { name: "Back end" });
+  const heading = await view.findByRole("heading", { name: "Backend" });
   const section = heading.closest("section") as HTMLElement;
   expect(
     within(section).getByText(

@@ -591,7 +591,7 @@ test.each([
   ["", 0],
   [", even when the document is slow to store the outcome", 30],
 ])(
-  "a recording disconnect finds running stops as a sign-out stops one, kept for its person, and goes to OpenBot's back end once the browser is connected again%s",
+  "a recording disconnect finds running stops as a sign-out stops one, kept for its person, and goes to OpenBot's backend once the browser is connected again%s",
   async (_, delayMs) => {
     await launcher().connect({
       connection: connection(),
@@ -1164,7 +1164,7 @@ test("a stopped recording whose capture pass keeps failing reports why while it 
     recordingId: recordingId ?? "",
     sending: true,
     retrying:
-      "OpenBot's back end is busy or unreachable. Retrying; nothing is lost.",
+      "OpenBot's backend is busy or unreachable. Retrying; nothing is lost.",
   });
   // OpenBot answers again: the reason goes, and so does the rest of the recording.
   passRefusal = null;

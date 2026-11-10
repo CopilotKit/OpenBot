@@ -93,9 +93,10 @@ const ALLOWED: { file: string; word: RegExp; why: string }[] = [
 
 /**
  * Not read: the Status window, opened from the tray once OpenBot is running, names each part for
- * whoever is troubleshooting. It is not part of setup, start or update.
+ * whoever is troubleshooting, with the part names only it uses (`partNames.ts`). It is not part of
+ * setup, start or update.
  */
-const NOT_SETUP = ["desktop/src/StatusWindow.tsx"];
+const NOT_SETUP = ["desktop/src/StatusWindow.tsx", "desktop/src/partNames.ts"];
 
 const LOGGING = /^(console\.\w+|log|logger\.\w+|this\.log|options\.log)$/;
 
