@@ -18,6 +18,7 @@ import {
 import { PluginPage } from "@/components/manage/plugin-page";
 import {
   BrokeredAccountRow,
+  NotConnected,
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
 import { GrantList } from "@/components/plugins/grant-list";
@@ -122,9 +123,16 @@ export const Route = createFileRoute("/_authed/_app/connections/$key")({
    */
   validateSearch: (
     search: Record<string, unknown>,
-  ): { linked?: string; action?: string } => ({
+  ): { linked?: string; action?: string; connect?: true } => ({
     ...searchTextEntry("linked", search.linked),
     ...searchTextEntry("action", search.action),
+    /*
+     * `?connect=true` is Browse apps sending somebody here to finish adding an app that takes a
+     * key: the page opens with the key form. Read once and dropped, so a reload does not reopen it.
+     */
+    ...(search.connect === true || search.connect === "true"
+      ? { connect: true as const }
+      : {}),
   }),
 });
 
@@ -134,9 +142,17 @@ export const Route = createFileRoute("/_authed/_app/connections/$key")({
  */
 function RouteComponent() {
   const { key } = Route.useParams();
-  const { linked, action } = Route.useSearch();
+  const { linked, action, connect } = Route.useSearch();
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  // Held for this visit, keyed on the app, and dropped from the address below.
+  const [arrival] = useState(() => ({ key, connect: connect === true }));
+  const startConnect = arrival.key === key && arrival.connect;
+  const navigate = Route.useNavigate();
+  useEffect(() => {
+    if (connect === undefined) return;
+    navigate({ search: ({ connect: _c, ...rest }) => rest, replace: true });
+  }, [connect, navigate]);
   if (key === "github" || key === "slack") {
     return <IdentityConnectionPage linked={linked} provider={key} />;
   }
@@ -145,11 +161,12 @@ function RouteComponent() {
    * which Bots use them, because one person makes all of those decisions. A per-action
    * authorization (`?action=`) keeps its own page, which is what that flow comes back to.
    */
-  if (personal && action === undefined) return <PluginPage pluginKey={key} />;
-  return <AppConnectionPage />;
+  if (personal && action === undefined)
+    return <PluginPage pluginKey={key} startConnect={startConnect} />;
+  return <AppConnectionPage startConnect={startConnect} />;
 }
 
-function AppConnectionPage() {
+function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
   const { key } = useParams({
     from: "/_authed/_app/connections/$key",
   });
@@ -521,6 +538,7 @@ function AppConnectionPage() {
               account={brokeredAccount}
               edition={paths.edition}
               reader="person"
+              startConnect={startConnect}
               /* Said beside the button rather than after it: disconnecting ends the account at
                  Composio, so what it undoes is not the row here but the grant on your own mailbox,
                  and connecting again is a fresh consent. */
@@ -652,23 +670,26 @@ function AppConnectionPage() {
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : (
-                /*
-                 * The arrow says this leaves OpenBot. It does: the next thing on screen is the
-                 * vendor's own consent page, and a control that navigates away should look like one.
-                 */
-                <Button
-                  disabled={!enabled || connect.isPending}
-                  onClick={() => {
-                    setNotice(null);
-                    connect.mutate(key);
-                  }}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  Connect
-                  <IconArrowUpRight />
-                </Button>
+                <>
+                  {enabled ? <NotConnected /> : null}
+                  {/*
+                   * The arrow says this leaves OpenBot. It does: the next thing on screen is the
+                   * vendor's own consent page, and a control that navigates away should look like one.
+                   */}
+                  <Button
+                    disabled={!enabled || connect.isPending}
+                    onClick={() => {
+                      setNotice(null);
+                      connect.mutate(key);
+                    }}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    Connect
+                    <IconArrowUpRight />
+                  </Button>
+                </>
               )}
             </ItemActions>
           </Item>

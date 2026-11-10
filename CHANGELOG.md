@@ -223,6 +223,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Personal edition
 
+- **Adding an app in Browse apps signs you in to it.** Add on an app you sign in to, such as Slack,
+  GitHub or Gmail, turned the row to "Added" and signed nobody in, so a Bot then said the app wasn't
+  connected. Add now adds the app and opens its sign-in in a new tab, as a Bot's Connect card does.
+  Add on an app that takes a key opens its page with the key form. In either edition, an app that
+  is added and not signed in to reads **Not connected** beside **Connect** in Browse apps, on
+  Connections and on the app's page, where it read "Added" or showed Connect alone. The team
+  edition's Add is still the admin's act and reads "Added, not connected" until the admin connects
+  their own account. GitHub on Connections no longer reads Connected off the GitHub sign-in alone
+  while its tools are not connected.
 - **Settings → Learning says Waiting for your review only when a skill is waiting.** With
   **Approve new skills automatically** on, the heading showed while Learning was in progress and
   after it finished, though nothing waited. The section is now **New skills** until a learned skill

@@ -987,6 +987,23 @@ function KeyGuideNote({
 }
 
 /**
+ * The word beside Connect on an app that is added and not signed in to yet.
+ *
+ * Said in words beside the button, so a row whose app is on never reads as done by its switch or
+ * its title alone. It is what the Bot says about the same app.
+ */
+export function NotConnected() {
+  return (
+    <span
+      className="text-muted-foreground text-xs"
+      data-testid="account-not-connected"
+    >
+      Not connected
+    </span>
+  );
+}
+
+/**
  * The row itself, for a `PageRows` card on either screen.
  *
  * The `Item` and, for an app whose secret a person types, the dialog that takes it. Where the row
@@ -1003,8 +1020,14 @@ export function BrokeredAccountRow({
   notice,
   provider,
   reader = "admin",
+  startConnect = false,
   title,
 }: {
+  /**
+   * Open the key form on arrival, once, for an app that takes a key and isn't connected: Browse
+   * apps sends somebody here straight after adding one. A sign-in app is started where it was added.
+   */
+  startConnect?: boolean;
   /**
    * Which edition draws this screen (`managePaths().edition`). The personal edition's one person is
    * told to set connecting apps up themselves, never to ask an admin.
@@ -1087,6 +1110,24 @@ export function BrokeredAccountRow({
   useEffect(() => {
     if (account.fieldsSubmitted) setAsking(false);
   }, [account.fieldsSubmitted]);
+
+  /* The key form on arrival, when asked for: see `startConnect`. Once per visit. */
+  const started = useRef(false);
+  const { requestFields } = account;
+  useEffect(() => {
+    if (!startConnect || started.current) return;
+    if (!account.configured || account.connected || account.kind !== "fields")
+      return;
+    started.current = true;
+    setAsking(true);
+    requestFields();
+  }, [
+    startConnect,
+    account.configured,
+    account.connected,
+    account.kind,
+    requestFields,
+  ]);
 
   /*
    * THE PERSON'S ACCOUNTS AT THE APP, BY NAME, once the row is connected. While the list is loading
@@ -1268,31 +1309,34 @@ export function BrokeredAccountRow({
                 )}
               </>
             ) : (
-              /* The arrow says this leaves OpenBot for the vendor's consent page. It does, for
-                 every app but a key app. */
-              <Button
-                disabled={account.connecting}
-                onClick={() => {
-                  /*
-                   * A key app goes nowhere: it opens the form below and asks the app what belongs in
-                   * it. The question is asked on every open rather than once, because what an app
-                   * publishes is the vendor's and may differ from what it published last time.
-                   */
-                  if (account.kind === "fields") {
-                    setAsking(true);
-                    account.requestFields();
-                    return;
-                  }
-                  account.connect();
-                }}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                Connect
-                {/* A key app opens a form here and leaves for nowhere, so no arrow. */}
-                {account.kind === "fields" ? null : <IconArrowUpRight />}
-              </Button>
+              <>
+                <NotConnected />
+                {/* The arrow says this leaves OpenBot for the vendor's consent page. It does, for
+                 every app but a key app. */}
+                <Button
+                  disabled={account.connecting}
+                  onClick={() => {
+                    /*
+                     * A key app goes nowhere: it opens the form below and asks the app what belongs in
+                     * it. The question is asked on every open rather than once, because what an app
+                     * publishes is the vendor's and may differ from what it published last time.
+                     */
+                    if (account.kind === "fields") {
+                      setAsking(true);
+                      account.requestFields();
+                      return;
+                    }
+                    account.connect();
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  Connect
+                  {/* A key app opens a form here and leaves for nowhere, so no arrow. */}
+                  {account.kind === "fields" ? null : <IconArrowUpRight />}
+                </Button>
+              </>
             )}
           </ItemActions>
         )}
