@@ -157,8 +157,23 @@ fill a gap. Three rules hold that boundary:
   which it opens; otherwise Podman, which it installs and runs as a rootful machine, because k3d
   needs a rootful engine. The choice is saved with the installation, and later runs use only that
   engine (`src-tauri/src/install.rs`, `acquire.rs`).
+- **An engine too old to run OpenBot is updated for the person.** At setup and at every Start,
+  before Compose reads the project, the app reads the engine's version and its Compose version and
+  compares them with the minimums in `src-tauri/src/engine_versions.rs`: Compose 2.27.2 (the first
+  with `config --environment`, which Start uses), Docker Engine 20.10 and, on macOS and Windows,
+  Podman 6.1. A Podman that is too old gets OpenBot's own pinned installer run over it, and an old
+  Compose gets OpenBot's own placed in front of it; machines and their data are kept. A Docker
+  Desktop that is too old (4.31 and earlier) is updated to Docker's newest release with Docker's
+  own installer command line, after its checksum and Docker's signature are checked
+  (`src-tauri/src/docker_desktop_update.rs`). Docker's terms are never accepted for the person. Only
+  what cannot be updated (a Docker that is not Docker Desktop, an old Podman on an Intel Mac, a
+  macOS or Windows too old for the newest Docker Desktop) is one plain step. Linux is left as it is.
+  `cargo run --example engine_update_check` shows what the app would do on a machine without
+  changing anything.
 - **Everything fetched is pinned.** Engine installers, Compose, the CLI and Node are pinned by
-  digest. A mismatch is refused, never run.
+  digest. A mismatch is refused, never run. Docker Desktop's update is the exception, because only
+  Docker's newest release is offered: it is checked against its build's published checksum and
+  Docker's code signature instead.
 - **A small installer, a downloaded deployment.** The installer is the app and the bundled CLI.
   The deployment is `docker-compose.yml`, out of the release's source tarball at a tag, laid out
   under the installation folder; everything else, server, app, worker, computer and tenant package,

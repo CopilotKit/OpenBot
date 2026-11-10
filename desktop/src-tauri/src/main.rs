@@ -18,8 +18,9 @@ mod zoom;
 mod test_support;
 
 use openbot_desktop_lib::{
-    acquire, app_update, deployment, deployment_release, docker_config, engine, env as openbot_env,
-    harness, host_access, install, local_eval, local_eval_state, logging, preparation,
+    acquire, app_update, deployment, deployment_release, docker_config, engine, engine_versions,
+    env as openbot_env, harness, host_access, install, local_eval, local_eval_state, logging,
+    preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
     telemetry, tray, troubleshooting, upgrade, windows as win,
@@ -358,6 +359,26 @@ fn wake_saved_engine(
                 Ok(())
             }
         }
+    }
+}
+
+/// What Start does to the engine before Compose reads the project, in this order: bring the
+/// installation's engine up (`wake_saved_engine`), then make sure it is new enough to run OpenBot,
+/// updating it for the person when it is not (`engine_new_enough`).
+///
+/// Before Compose, because an old Compose stops at its first look at the project ("Compose config
+/// exited with exit status: 15"). Not while OpenBot's own containers are up: the caller skips this,
+/// so Docker Desktop is never quit from under a running OpenBot. An engine still not answering is
+/// left to the check after this one, which says so.
+async fn engine_before_compose(
+    wake: impl AsyncFnOnce() -> Result<(), Problem>,
+    answering: impl AsyncFnOnce() -> Option<engine::Address>,
+    new_enough: impl AsyncFnOnce(engine::Address) -> Result<(), Problem>,
+) -> Result<(), Problem> {
+    wake().await?;
+    match answering().await {
+        Some(address) => new_enough(address).await,
+        None => Ok(()),
     }
 }
 
@@ -2092,7 +2113,91 @@ async fn prepare_installation_inner(
 /// nothing moving in it reads as a hang.
 /// `saved` is the engine the installation was set up on: only that one is looked at, started or
 /// installed. With none saved, `install::install_engine_with` chooses.
+///
+/// Answering is not enough: the engine is then checked for versions new enough to run OpenBot,
+/// and updated for the person when it is not (`engine_new_enough`).
 async fn engine_ready(
+    app: &tauri::AppHandle,
+    saved: Option<engine::Engine>,
+) -> Result<engine::Address, Problem> {
+    let address = engine_answering(app, saved).await?;
+    engine_new_enough(app, address.clone()).await?;
+    Ok(address)
+}
+
+/**
+The engine at `address` new enough to run OpenBot, updated for the person when it is not.
+
+At setup and at every Start, before Compose reads the project: an older Compose stops there with
+"Compose config exited with exit status: 15", which nobody can act on. Docker Desktop and OpenBot's
+Podman are updated here; only what cannot be updated for them is one plain step on the row. Said on
+the `engine` row, and nothing is said when nothing needed doing. See `engine_versions`.
+*/
+async fn engine_new_enough<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    address: engine::Address,
+) -> Result<(), Problem> {
+    let engine = address.engine;
+    let progress_app = app.clone();
+    let back_app = app.clone();
+    // Stop and Quit move the ticket on: a wait for the person ends with them.
+    let watching = app.clone();
+    let ticket = app
+        .state::<Shell>()
+        .start_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let checked = tauri::async_runtime::spawn_blocking(move || {
+        let back = || {
+            bring_to_front(
+                &back_app,
+                "the engine update no longer needs another window",
+            )
+        };
+        let cancelled = || {
+            watching
+                .state::<Shell>()
+                .start_generation
+                .load(std::sync::atomic::Ordering::SeqCst)
+                != ticket
+        };
+        let mut updates = engine_versions::OnThisMachine {
+            address,
+            cache: stack::default_root(),
+            back: &back,
+            cancelled: &cancelled,
+        };
+        engine_versions::ensure(
+            engine,
+            std::env::consts::OS,
+            win::machine_arch(),
+            &mut updates,
+            &mut |line| report_running_line(&progress_app, "engine", line, None),
+        )
+    })
+    .await
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot could not check the software it runs on. Try again.",
+            format!("the engine version check did not run: {error}"),
+        )
+    })?;
+    match checked {
+        Ok(engine_versions::Checked::NewEnough(readings)) => {
+            log::info!("[engine] versions: {}", readings.said(engine));
+            Ok(())
+        }
+        Ok(engine_versions::Checked::Updated { said, .. }) => {
+            report_plain(app, "engine", true, said);
+            Ok(())
+        }
+        Err(problem) => {
+            report_plain(app, "engine", false, problem.said.clone());
+            Err(problem)
+        }
+    }
+}
+
+async fn engine_answering(
     app: &tauri::AppHandle,
     saved: Option<engine::Engine>,
 ) -> Result<engine::Address, Problem> {
@@ -3047,8 +3152,23 @@ async fn start_stack_inner<R: tauri::Runtime>(
     let saved = preparation::saved_engine(&root);
     let owned = shell.containers.lock().unwrap().is_some();
     if !owned {
-        wake_installation_engine(&app, saved).await?;
-        attempt.require_current()?;
+        engine_before_compose(
+            async || {
+                wake_installation_engine(&app, saved).await?;
+                attempt.require_current()
+            },
+            async || {
+                tauri::async_runtime::spawn_blocking(move || engine::detect_saved(saved))
+                    .await
+                    .ok()
+                    .and_then(|status| status.address.filter(|_| status.responding))
+            },
+            async |address| {
+                engine_new_enough(&app, address).await?;
+                attempt.require_current()
+            },
+        )
+        .await?;
     }
 
     // Minted before Compose, because the server is a container now and Compose is how it gets its
@@ -12365,6 +12485,66 @@ mod tests {
         assert_eq!(run(None, true, false, false), none);
         // Linux runs Podman natively: there is no machine to start.
         assert_eq!(run(Some(Podman), false, false, true), none);
+    }
+
+    /// The tester's Start: Docker Desktop 4.27.2 answered, and Compose v2.24.5 stopped at its first
+    /// look at the project. The engine is now woken, then checked and updated, before Compose.
+    #[test]
+    fn start_wakes_the_engine_then_makes_it_new_enough_before_compose() {
+        use std::cell::RefCell;
+        let docker = || engine::Address::new(engine::Engine::Docker, None);
+        let run = |answers: bool, wake: Result<(), Problem>, check: Result<(), Problem>| {
+            let done = RefCell::new(Vec::new());
+            let result = tauri::async_runtime::block_on(engine_before_compose(
+                async || {
+                    done.borrow_mut().push("wake");
+                    wake
+                },
+                async || {
+                    done.borrow_mut().push("look");
+                    answers.then(docker)
+                },
+                async |address| {
+                    assert_eq!(
+                        address,
+                        docker(),
+                        "the engine that answered is the one checked"
+                    );
+                    done.borrow_mut().push("new enough");
+                    check
+                },
+            ));
+            (result, done.into_inner())
+        };
+
+        let (result, done) = run(true, Ok(()), Ok(()));
+        assert!(result.is_ok());
+        assert_eq!(done, ["wake", "look", "new enough"]);
+
+        // An update that could not be made stops Start there, with its own words, before Compose.
+        let (result, done) = run(
+            true,
+            Ok(()),
+            Err(Problem::plain(
+                "Docker on this computer is too old to run OpenBot. Update Docker, then start \
+                 OpenBot again.",
+            )),
+        );
+        assert!(result
+            .unwrap_err()
+            .said
+            .starts_with("Docker on this computer is too old"));
+        assert_eq!(done, ["wake", "look", "new enough"]);
+
+        // A wake that failed is the failure; nothing is checked.
+        let (result, done) = run(true, Err(Problem::plain("machine did not start")), Ok(()));
+        assert_eq!(result.unwrap_err().said, "machine did not start");
+        assert_eq!(done, ["wake"]);
+
+        // Nothing answering: the check after this one says so, and no update is tried.
+        let (result, done) = run(false, Ok(()), Ok(()));
+        assert!(result.is_ok());
+        assert_eq!(done, ["wake", "look"]);
     }
 
     #[test]
