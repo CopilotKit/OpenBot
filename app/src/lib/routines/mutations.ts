@@ -1,13 +1,20 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { channelKeys } from "@/lib/channels/queries";
 import { client } from "@/lib/client";
+import { createProactiveSetting, proactiveKeys } from "@/lib/proactive";
+import {
+  createResponsibility,
+  responsibilityAction,
+  responsibilityKeys,
+} from "@/lib/responsibilities";
 import { NEW_CONVERSATION } from "./form";
+import { type RoutinePlan, runGoalInstruction } from "./plan";
 import { routineKeys } from "./queries";
 
 /**
  * Writes against a person's own standing instructions.
  *
- * Create is here, through the same store call a Bot's `create_routine` makes; there is no edit.
+ * Create is here, as a plan the form made, through the same store calls a Bot's tools make; there is no edit.
  * Changing a routine is conversational, through the `RoutineTools` a Bot calls mid-chat. See
  * `server/src/routines/routes.ts` for the full reasoning.
  */
@@ -30,53 +37,162 @@ export type RoutineInput = {
   channelId: string;
 };
 
+/** The goal exists but its routine or first run did not happen: the screen must not offer to create it again. */
+export class SavedButRefused extends Error {}
+
 /**
- * New routine.
+ * Starts a new conversation when asked, and takes it back if nothing was saved in it.
  *
- * With `NEW_CONVERSATION`, the conversation it posts in is started first, as the person and the
- * Bot, and named after the routine so the sidebar says what it is for. A routine the server then
- * refuses takes that conversation back with it: an empty conversation nobody asked for is not
- * what a refused form should leave behind.
+ * With `NEW_CONVERSATION`, the conversation is started first, as the person and the Bot, and named
+ * after `name`. `write` gets the channel to use and a `saved` callback it calls once the write has
+ * landed. If `write` throws before `saved` was called, the started conversation is removed (best
+ * effort) and the error is rethrown: an empty conversation nobody asked for is not what a refused
+ * form should leave behind.
  */
-export function createRoutineMutationOptions(queryClient: QueryClient) {
+async function withConversation<T>(
+  agentId: string,
+  channelId: string,
+  name: string,
+  write: (channelId: string, saved: () => void) => Promise<T>,
+): Promise<T> {
+  let started: string | null = null;
+  if (channelId === NEW_CONVERSATION) {
+    const response = await client("/api/channels", {
+      method: "POST",
+      body: { agentIds: [agentId] },
+      fallback: "Couldn't start a conversation for this routine.",
+    });
+    started = ((await response.json()) as { channel: { id: string } }).channel
+      .id;
+    // Best effort: a conversation that keeps its default name still works.
+    await client(`/api/channels/${started}/title`, {
+      method: "PUT",
+      body: { title: Array.from(name.trim()).slice(0, 60).join("") },
+      fallback: "Couldn't name the conversation.",
+    }).catch(() => undefined);
+  }
+  let kept = false;
+  try {
+    return await write(started ?? channelId, () => {
+      kept = true;
+    });
+  } catch (error) {
+    if (started && !kept) {
+      await client(`/api/channels/${started}`, {
+        method: "DELETE",
+        fallback: "Couldn't remove the conversation.",
+      }).catch(() => undefined);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Carries out what the form's answers made, in one mutation.
+ *
+ * A routine is one write, a check-in is one write, and a goal is up to three: the goal, the routine
+ * that runs it on a schedule, and a first run. The conversation is started once and every write
+ * uses it. A goal that was saved keeps its conversation even when its schedule is refused: the goal
+ * is paused instead, so nothing the person made disappears.
+ */
+export function createFromPlanMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: async (input: RoutineInput): Promise<{ id: string }> => {
-      let started: string | null = null;
-      if (input.channelId === NEW_CONVERSATION) {
-        const response = await client("/api/channels", {
-          method: "POST",
-          body: { agentIds: [input.agentId] },
-          fallback: "Couldn't start a conversation for this routine.",
-        });
-        started = ((await response.json()) as { channel: { id: string } })
-          .channel.id;
-        const name = input.title?.trim() || input.instruction.trim();
-        // Best effort: a conversation that keeps its default name still works.
-        await client(`/api/channels/${started}/title`, {
-          method: "PUT",
-          body: { title: Array.from(name).slice(0, 60).join("") },
-          fallback: "Couldn't name the conversation.",
-        }).catch(() => undefined);
+    mutationFn: async (plan: RoutinePlan): Promise<void> => {
+      if (plan.kind === "routine") {
+        const { routine } = plan;
+        await withConversation(
+          routine.agentId,
+          routine.channelId,
+          routine.title?.trim() || routine.instruction.trim(),
+          async (channelId, saved) => {
+            await client("/api/routines", {
+              method: "POST",
+              body: { ...routine, channelId },
+              fallback: "Couldn't set up that routine. Try again.",
+            });
+            saved();
+          },
+        );
+        return;
       }
-      try {
-        return await client<{ id: string }>("/api/routines", "routine", {
-          method: "POST",
-          body: { ...input, channelId: started ?? input.channelId },
-          fallback: "Couldn't set up that routine. Try again.",
-        });
-      } catch (error) {
-        if (started) {
-          await client(`/api/channels/${started}`, {
-            method: "DELETE",
-            fallback: "Couldn't remove the conversation.",
-          }).catch(() => undefined);
-        }
-        throw error;
+
+      if (plan.kind === "check-in") {
+        const { checkIn } = plan;
+        await withConversation(
+          checkIn.agentId,
+          checkIn.channelId,
+          checkIn.subject.trim() || checkIn.focus.trim(),
+          async (channelId, saved) => {
+            await createProactiveSetting({ ...checkIn, channelId });
+            saved();
+          },
+        );
+        return;
       }
+
+      const { goal: input, schedule, runNow } = plan;
+      await withConversation(
+        input.agentId,
+        input.channelId,
+        input.title,
+        async (channelId, saved) => {
+          const goal = await createResponsibility({ ...input, channelId });
+          saved();
+          const { id } = goal;
+
+          if (schedule) {
+            try {
+              await client("/api/routines", {
+                method: "POST",
+                body: {
+                  agentId: input.agentId,
+                  channelId,
+                  goalId: id,
+                  instruction: runGoalInstruction(goal.title, id),
+                  cron: schedule.cron,
+                  timezone: schedule.timezone,
+                  // The routine store refuses a title over 100 characters.
+                  ...(Array.from(goal.title).length <= 100
+                    ? { title: goal.title }
+                    : {}),
+                },
+                fallback: "Couldn't set up that routine. Try again.",
+              });
+            } catch (error) {
+              const refusal =
+                error instanceof Error ? error.message : String(error);
+              const paused = await responsibilityAction(id, "pause").then(
+                () => true,
+                () => false,
+              );
+              throw new SavedButRefused(
+                paused
+                  ? `It's saved but paused, on the Routines page. Its schedule was refused: ${refusal}`
+                  : `It's saved on the Routines page, but it won't run on its own. Its schedule was refused: ${refusal}`,
+              );
+            }
+          }
+
+          if (runNow) {
+            try {
+              await responsibilityAction(id, "run");
+            } catch (error) {
+              const message =
+                error instanceof Error ? error.message : String(error);
+              throw new SavedButRefused(
+                `It's saved on the Routines page, but it didn't start: ${message}`,
+              );
+            }
+          }
+        },
+      );
     },
-    onSuccess: () =>
+    // onSettled, not onSuccess: a goal paused after a refusal still has to show on the list.
+    onSettled: () =>
       Promise.all([
-        invalidateRoutines(queryClient),
+        queryClient.invalidateQueries({ queryKey: routineKeys.all }),
+        queryClient.invalidateQueries({ queryKey: responsibilityKeys.all }),
+        queryClient.invalidateQueries({ queryKey: proactiveKeys.settings }),
         queryClient.invalidateQueries({ queryKey: channelKeys.all }),
       ]),
   });
