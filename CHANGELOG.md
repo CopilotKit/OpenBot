@@ -30,6 +30,12 @@ backup taken before the upgrade instead. Three things change for an existing dep
 
 ### OpenBot Desktop
 
+- **OpenBot's own software downloads on the first screen too, before there is anything to run it.**
+  On a new Mac or PC, or with Docker Desktop not running, OpenBot's images (about 1.1 GB for the
+  default Bot) waited for the engine to start, then downloaded behind it. They now download from
+  the first screen with everything else, into the same cache, checked against their digests and
+  carried on after a quit. Once the engine answers, Install loads them into it, so the step after
+  it no longer downloads them. Anything that didn't download or load is downloaded then, as before.
 - **The big downloads start on the first screen, before you click Install.** Nothing used to
   download until Install, and then one thing at a time: on a new Mac, Podman, then the 937 MB
   engine image with no progress shown, then 1.1 GB of OpenBot's software. Now the engine image,
