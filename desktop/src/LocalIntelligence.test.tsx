@@ -184,7 +184,7 @@ function row(screen: ReturnType<typeof view>, name: string) {
 
 const SETUP = "Setting up OpenBot";
 const CONNECT = "Connecting OpenBot";
-const WAIT = "Waiting for the back end";
+const WAIT = "Getting OpenBot ready";
 const START = "Starting OpenBot";
 
 test("the whole sequence runs by itself: set up, connect, wait for ready and valid, start", async () => {
@@ -238,7 +238,7 @@ test("a first setup shows its download on its row and on the screen in front of 
   };
   const screen = view({ prepare: true });
   await waitFor(() =>
-    expect(row(screen, SETUP).textContent).toContain("In progress"),
+    expect(row(screen, SETUP).textContent).toContain("Step 1 of 4"),
   );
   arrived = { done: 245_000_000, total: 690_000_000 };
   await waitFor(
@@ -247,16 +247,14 @@ test("a first setup shows its download on its row and on the screen in front of 
     { timeout: 3_000 },
   );
   const setting = within(row(screen, SETUP));
-  expect(setting.getByText("Downloading the back end.")).toBeTruthy();
+  expect(setting.getByText("Downloading the rest of OpenBot.")).toBeTruthy();
   const bar = setting.getByRole("progressbar", { name: "Download progress" });
   expect(bar.getAttribute("value")).toBe("245000000");
   expect(bar.getAttribute("max")).toBe("690000000");
   // The screen in front (Install, or Connect your AI) shows the same download while it runs.
-  const behind = within(
-    screen.getByRole("list", { name: "Back end download" }),
-  );
+  const behind = within(screen.getByRole("list", { name: "OpenBot download" }));
   expect(
-    behind.getByRole("listitem", { name: "Downloading the back end" })
+    behind.getByRole("listitem", { name: "Downloading the rest of OpenBot" })
       .textContent,
   ).toContain("245.0 MB of 690.0 MB");
   expect(
@@ -278,7 +276,7 @@ test("a first setup shows its download on its row and on the screen in front of 
   await waitFor(() => expect(screen.queryByRole("progressbar")).toBeNull(), {
     timeout: 3_000,
   });
-  expect(screen.queryByRole("list", { name: "Back end download" })).toBeNull();
+  expect(screen.queryByRole("list", { name: "OpenBot download" })).toBeNull();
 });
 
 test("a recorded, connected stack skips straight to waiting", async () => {
@@ -327,7 +325,7 @@ test("a back end an older app installed is updated to this app's release before 
   // One plain line while it runs, on the back end's own row.
   await waitFor(() =>
     expect(row(screen, WAIT).textContent).toContain(
-      "Updating the back end to 0.16.0-rc.9. Its data stays.",
+      "Updating OpenBot. Your Bots and data stay as they are. This usually takes a few minutes.",
     ),
   );
   expect(started).toEqual([]);
@@ -344,7 +342,7 @@ test("a back end an older app installed is updated to this app's release before 
     )?.args,
   ).toMatchObject({ stack: "local-abc123" });
   expect(
-    screen.queryByRole("listitem", { name: "Updating the back end" }),
+    screen.queryByRole("listitem", { name: "Updating OpenBot" }),
   ).toBeNull();
 });
 
@@ -443,8 +441,8 @@ test("an update that fails says so and starts OpenBot on the release the back en
       "run_local_eval:update",
       "run_local_eval:status",
     ]);
-    expect(row(screen, "Updating the back end").textContent).toContain(
-      "The back end could not be updated to 0.16.0-rc.9. Your data is kept, and OpenBot tries again the next time it starts.",
+    expect(row(screen, "Updating OpenBot").textContent).toContain(
+      "OpenBot couldn't finish updating, so it runs the version it had. Your data is kept, and OpenBot tries again the next time it starts.",
     );
     expect(calls).toBe(2);
     cleanup();
@@ -455,7 +453,8 @@ test("an update that fails says so and starts OpenBot on the release the back en
 /**
  * Found on OpenBot Desktop, 0.16.0-rc.9 to rc.10: every Start after an interrupted update failed
  * with the same generic line, while the CLI had recorded exactly where it stopped. The row now
- * names that step from the record, in the CLI's own words, and says the data is kept.
+ * says where it stopped from the record, in plain words, and that the data is kept. The step's own
+ * name is the log's.
  */
 test("an update that fails says the step it stopped at and that the data is kept", async () => {
   const stoppedAt = {
@@ -491,8 +490,8 @@ test("an update that fails says the step it stopped at and that the data is kept
   };
   const screen = view({ stack: "local-abc123", connected: true });
   await waitFor(() =>
-    expect(row(screen, "Updating the back end").textContent).toContain(
-      `The back end could not be updated to 0.16.0-rc.10. It stopped at "Stopping the back end's services" (update-quiesce). Your data is kept, and OpenBot tries again the next time it starts.`,
+    expect(row(screen, "Updating OpenBot").textContent).toContain(
+      "OpenBot couldn't finish updating, so it runs the version it had. It stopped while pausing OpenBot's services. Your data is kept, and OpenBot tries again the next time it starts.",
     ),
   );
 });
@@ -502,6 +501,9 @@ test("an update that fails says the step it stopped at and that the data is kept
  * else on the row, while the CLI waited on its databases and Jobs (up to ten minutes each) and
  * logged nothing until each ended. The row now says which step it is in, and for how long.
  */
+const UPDATING_SAID =
+  "Updating OpenBot. Your Bots and data stay as they are. This usually takes a few minutes.";
+
 test("a running update says which step it is waiting on, and for how long", async () => {
   const updating = deferred<LocalReport>();
   invokeHandler = async (command, args) => {
@@ -517,19 +519,18 @@ test("a running update says which step it is waiting on, and for how long", asyn
   };
   const screen = view({ stack: "local-abc123", connected: true });
   await waitFor(() =>
-    expect(row(screen, WAIT).textContent).toContain(
-      "Updating the back end to 0.16.0-rc.10. Its data stays.",
-    ),
+    expect(row(screen, WAIT).textContent).toContain(UPDATING_SAID),
   );
   updateStep = { step: "dependencies-wait", seconds: 130 };
   await waitFor(
     () =>
       expect(row(screen, WAIT).textContent).toContain(
-        "Updating the back end to 0.16.0-rc.10. Its data stays. Waiting for databases and storage, 2m 10s.",
+        `${UPDATING_SAID} Waiting for where OpenBot keeps your data, 2m 10s so far.`,
       ),
     { timeout: 3_000 },
   );
-  // In the chart's Jobs: the one it waits on, and a failed one at once, not ten minutes later.
+  // In the chart's Jobs: what they are for (their names are the log's), and a failed one at once,
+  // not ten minutes later.
   updateStep = {
     step: "jobs",
     seconds: 5,
@@ -538,7 +539,7 @@ test("a running update says which step it is waiting on, and for how long", asyn
   await waitFor(
     () =>
       expect(row(screen, WAIT).textContent).toContain(
-        "Running the database jobs (cpki-bootstrap-ef56ab78), 5s.",
+        `${UPDATING_SAID} Updating your data, 5s so far.`,
       ),
     { timeout: 3_000 },
   );
@@ -551,7 +552,7 @@ test("a running update says which step it is waiting on, and for how long", asyn
   await waitFor(
     () =>
       expect(row(screen, WAIT).textContent).toContain(
-        "Running the database jobs, 40s. The back end's job cpki-bootstrap-ef56ab78 failed, so this update will stop. The back end's tool waits up to 10 minutes for it first. Your data is kept.",
+        "Updating your data, 40s so far. Part of the update didn't work, so it will stop. OpenBot waits up to 10 minutes for it first. Your data is kept.",
       ),
     { timeout: 3_000 },
   );
@@ -567,7 +568,7 @@ test("a running update says which step it is waiting on, and for how long", asyn
   updating.resolve(onRelease("0.16.0-rc.10", null));
   await waitFor(() =>
     expect(row(screen, WAIT).textContent).not.toContain(
-      "Waiting for databases",
+      "Waiting for where OpenBot keeps",
     ),
   );
 });
@@ -621,7 +622,7 @@ test("after Quit, the unfinished update starts the stack, and the release it had
         apiUrl: "http://localhost:18082",
         gatewayWsUrl: "ws://localhost:14401",
         notice:
-          "The back end is running 0.16.0-rc.5. Downloading 0.16.0-rc.9 did not finish, so OpenBot tries again the next time it starts.",
+          "The OpenBot update didn't finish downloading, so OpenBot is running the version it had. It tries again the next time it starts.",
       },
     ]),
   );
@@ -671,7 +672,7 @@ test("a retried update shows its download, and a stall keeps the line that it di
         apiUrl: "http://localhost:18082",
         gatewayWsUrl: "ws://localhost:14401",
         notice:
-          "The back end is running 0.16.0-rc.5. Downloading 0.16.0-rc.9 did not finish, so OpenBot tries again the next time it starts.",
+          "The OpenBot update didn't finish downloading, so OpenBot is running the version it had. It tries again the next time it starts.",
       },
     ]),
   );
@@ -707,7 +708,7 @@ test("an update says how much of its download has arrived, so a slow line reads 
   });
   await waitFor(() =>
     expect(row(screen, WAIT).textContent).toContain(
-      "Updating the back end to 0.16.0-rc.9. Its data stays.",
+      "Updating OpenBot. Your Bots and data stay as they are. This usually takes a few minutes.",
     ),
   );
   arrived = { done: 48_200_000, total: 147_000_000 };
@@ -718,7 +719,7 @@ test("an update says how much of its download has arrived, so a slow line reads 
   );
   // The same bar Install shows, driven by the bytes, out of the whole download.
   const waiting = within(row(screen, WAIT));
-  expect(waiting.getByText("Downloading the back end update.")).toBeTruthy();
+  expect(waiting.getByText("Downloading the update.")).toBeTruthy();
   const bar = waiting.getByRole("progressbar", { name: "Download progress" });
   expect(bar.getAttribute("value")).toBe("48200000");
   expect(bar.getAttribute("max")).toBe("147000000");
@@ -727,7 +728,7 @@ test("an update says how much of its download has arrived, so a slow line reads 
   await waitFor(
     () =>
       expect(row(screen, WAIT).textContent).toContain(
-        "Updating the back end to 0.16.0-rc.9. Its data stays.",
+        "Updating OpenBot. Your Bots and data stay as they are. This usually takes a few minutes.",
       ),
     { timeout: 3_000 },
   );
@@ -766,8 +767,8 @@ test("an update whose download stopped says so, and that the next start continue
     },
   });
   await waitFor(() => expect(started).toEqual([startableUrls]));
-  expect(row(screen, "Updating the back end").textContent).toContain(
-    "The back end update stopped downloading, so the back end stays on 0.16.0-rc.5. OpenBot continues the download where it left off the next time it starts.",
+  expect(row(screen, "Updating OpenBot").textContent).toContain(
+    "The update stopped downloading, so OpenBot runs the version it had. It picks up the download the next time it starts.",
   );
   expect(calls).toBe(2);
 });
@@ -1007,7 +1008,7 @@ test("an acceptance setup does not take is said once, not offered again", async 
   });
   const screen = view();
   await userEvent.click(await screen.findByRole("button", { name: "Accept" }));
-  await screen.findByText(/The back end did not take the acceptance/);
+  await screen.findByText(/OpenBot couldn't record your acceptance/);
   expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
   expect(
     invokeCalls.filter((call) => call.command === "set_up_local_eval"),
@@ -1121,7 +1122,9 @@ test("polling is bounded, and says so when Intelligence never became ready", asy
     connected: true,
     pollDelays: [0, 0],
   });
-  await screen.findByText("The back end did not report ready in time.");
+  await screen.findByText(
+    "OpenBot didn't get ready in time. Retry to check again.",
+  );
   expect(statusCalls()).toHaveLength(3);
   expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
 });
@@ -1344,8 +1347,8 @@ test("a start that fails says OpenBot did not start, not that Intelligence stopp
   });
   const card = await screen.findByRole("alert", { name: "OpenBot" });
   expect(card.textContent).toContain("OpenBot did not start");
-  expect(card.textContent).toContain("The back end is ready");
-  expect(card.textContent).not.toContain("Back end setup stopped");
+  expect(card.textContent).toContain("Everything else is ready");
+  expect(card.textContent).not.toContain("Setup stopped");
   expect(within(card).getByRole("button", { name: "Retry" })).toBeTruthy();
 });
 
@@ -1419,7 +1422,7 @@ test("prepare runs to ready and waits for the go-ahead, which starts at once", a
   await waitFor(() =>
     expect(row(screen, WAIT).textContent).toContain("Complete"),
   );
-  expect(screen.queryByRole("alert", { name: "Back end" })).toBeNull();
+  expect(screen.queryByRole("alert", { name: "Setup" })).toBeNull();
   expect(screen.queryByRole("listitem", { name: START })).toBeNull();
   expect(started).toEqual([]);
   // No Start OpenBot once it has run: the go-ahead comes from the screen in front.
@@ -1435,9 +1438,9 @@ test("the screen in front hears nothing while Intelligence works, and a stop int
   });
   const working = view({ prepare: true });
   await waitFor(() =>
-    expect(row(working, SETUP).textContent).toContain("In progress"),
+    expect(row(working, SETUP).textContent).toContain("Step 1 of 4"),
   );
-  expect(working.queryByRole("alert", { name: "Back end" })).toBeNull();
+  expect(working.queryByRole("alert", { name: "Setup" })).toBeNull();
   cleanup();
   invokeCalls = [];
 
@@ -1448,8 +1451,8 @@ test("the screen in front hears nothing while Intelligence works, and a stop int
     cancel_local_eval: [null],
   });
   const failed = view({ prepare: true });
-  const stopped = await failed.findByRole("alert", { name: "Back end" });
-  expect(stopped.textContent).toContain("Back end setup stopped");
+  const stopped = await failed.findByRole("alert", { name: "Setup" });
+  expect(stopped.textContent).toContain("Setup stopped");
   expect(stopped.textContent).toContain("A port the back end needs is in use.");
   expect(within(stopped).getByRole("button", { name: "Retry" })).toBeTruthy();
   // The logs to paste into an AI assistant, beside the card that says it stopped.
@@ -1468,7 +1471,7 @@ test("the screen in front hears nothing while Intelligence works, and a stop int
     cancel_local_eval: [null],
   });
   const waiting = view({ prepare: true });
-  const needs = await waiting.findByRole("alert", { name: "Back end" });
+  const needs = await waiting.findByRole("alert", { name: "Setup" });
   expect(needs.textContent).toContain("Setup needs you");
   expect(
     await within(needs).findByRole("button", { name: "Accept" }),

@@ -47,11 +47,17 @@ use serde::{Deserialize, Serialize};
 ///
 /// `asks` when the step waits for the person's go-ahead in OpenBot's own window before it raises
 /// such a prompt (`install::GoAhead`). The window explains what comes next, with one button.
+///
+/// `said` is what the person reads, in plain words: what OpenBot is doing for them. `detail` is the
+/// same moment in the log's words, with the names a person never needs on screen (Podman, the
+/// engine machine, WSL). The window shows only `said`; the log keeps both (`log_entry`). A tester
+/// read "Preparing the engine machine" for minutes and could not tell whether setup was stuck.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StepLine {
     pub said: String,
     pub elsewhere: bool,
     pub asks: bool,
+    pub detail: Option<String>,
 }
 
 impl StepLine {
@@ -61,6 +67,7 @@ impl StepLine {
             said: said.into(),
             elsewhere: false,
             asks: false,
+            detail: None,
         }
     }
 
@@ -70,6 +77,7 @@ impl StepLine {
             said: said.into(),
             elsewhere: true,
             asks: false,
+            detail: None,
         }
     }
 
@@ -79,8 +87,67 @@ impl StepLine {
             said: said.into(),
             elsewhere: false,
             asks: true,
+            detail: None,
         }
     }
+
+    /// The technical words for the log, beside the plain line the window shows.
+    pub fn logged(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+
+    /// What the Desktop log writes for this line: the technical detail when there is one, then
+    /// what the window said, so the log reads as the window did and loses nothing.
+    pub fn log_entry(&self) -> String {
+        match &self.detail {
+            Some(detail) => format!("{detail} (window: {})", self.said),
+            None => self.said.clone(),
+        }
+    }
+}
+
+/// Preparing the machine OpenBot's containers run in (`podman machine init`). Minutes the first
+/// time: it downloads the machine's disk.
+///
+/// On Windows, Podman's own installer for WSL comes first when WSL is missing: its dialog, then
+/// Windows' administrator prompt, then a restart. Said before it happens, on whichever screen the
+/// person is on: those windows come to the front over OpenBot's.
+pub fn preparing_machine_line(os: &str) -> StepLine {
+    if os == "windows" {
+        StepLine::elsewhere(
+            "Preparing this computer to run OpenBot. If a window asks to install a Windows \
+             feature OpenBot needs, allow it. Windows then asks for your approval and a restart.",
+        )
+        .logged(
+            "Preparing the engine machine (podman machine init). If Windows Subsystem for Linux \
+             is missing, Podman offers to install it. Windows then asks for administrator approval \
+             and a restart.",
+        )
+    } else {
+        StepLine::here(
+            "Preparing this computer to run OpenBot. This takes a few minutes the first time.",
+        )
+        .logged("Preparing the engine machine (podman machine init).")
+    }
+}
+
+/// Starting that machine (`podman machine start`): at install, and on a start after a restart.
+pub fn starting_machine_line() -> StepLine {
+    StepLine::here("Starting the software OpenBot runs on.")
+        .logged("Starting the engine machine (podman machine start).")
+}
+
+/// Waiting for the engine to answer once its machine is up.
+pub fn checking_engine_line() -> StepLine {
+    StepLine::here("Checking that the software OpenBot runs on is ready.")
+        .logged("Waiting for the engine to answer.")
+}
+
+/// The engine answers: what the row says once it is done.
+pub fn engine_ready_line() -> StepLine {
+    StepLine::here("The software OpenBot runs on is ready.")
+        .logged("The container engine is answering.")
 }
 
 /// Which engine is in use, because the answer changes what is mounted and what is reported.

@@ -10,24 +10,34 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **Setup says what it's doing in plain words, and what's installing behind every step.** The
+  setup window said "Preparing the engine machine", "Installing Podman", "Waiting for the back end"
+  and "Updating the back end to 0.16.0-rc.10", and a tester waiting on the first step couldn't tell
+  whether it was stuck. Each line now says what OpenBot is doing for you ("Preparing this computer
+  to run OpenBot. This takes a few minutes the first time.", "Getting OpenBot ready", "Updating
+  OpenBot"), and the Desktop log keeps the technical detail beside it. The Account and AI steps
+  show one row for the install running behind them: what it's doing, step N of 4, the time so far,
+  and the time left while it downloads. That row has its own slot under the step's form, so the AI
+  step's fields no longer jump when a download starts or ends, and the window no longer grows or
+  moves.
 - **Sign-in comes first, and macOS asks for your password only after OpenBot says why.** On a new
   Mac the Account step waited for Install to put Podman in before any browser sign-in opened, and
   the "osascript wants to make changes" password box came up by itself over it. The CopilotKit
   sign-in now opens in your browser as soon as the Account step opens: the CLI's sign-in needs no
   engine, and only the license agreement waits for one. Podman downloads meanwhile. Once you're
-  signed in, the step says "OpenBot installs Podman, which runs OpenBot's back end on this
-  computer. macOS asks for your password once to install it." and the password box comes up only
-  when you choose Continue. It now says "OpenBot needs your password to install Podman, which runs
-  OpenBot's back end." Closing it without a password offers Continue again instead of stopping
+  signed in, the step says "OpenBot needs one more piece of software to run on this computer.
+  macOS asks for your password once to install it." and the password box comes up only when you
+  choose Continue. It now says "OpenBot needs your password to install the software it runs on."
+  Closing it without a password offers Continue again instead of stopping
   Install. Windows and Linux install as before.
 - **A back end update that was stopped partway no longer breaks every later Start.** Quitting
   while the back end updated could leave it half updated, and every Start after that failed with
   "Local update-quiesce failed (exit 1)". OpenBot now lets an update finish once it has begun
-  changing the back end ("Finishing the back end update" on the Shutting down screen), repairs a
+  changing the back end ("Finishing the OpenBot update" on the Shutting down screen), repairs a
   back end an earlier update left half done, rolls back one Helm left mid-upgrade, uncordons a
-  back end node left unschedulable, and tries the update once more. While it runs, the row names
-  the step it is waiting on and for how long, and a failed database job is said as soon as it
-  fails. A failed update says the step it stopped at, and that your data is kept.
+  back end node left unschedulable, and tries the update once more. While it runs, the row says
+  what the step it is waiting on is doing and for how long, and a failed part of the update is said
+  as soon as it fails. A failed update says where it stopped, and that your data is kept.
 - **The Account step says when it is waiting for Install to set up the engine.** On a new Mac it
   said "Checking your CopilotKit account…" for minutes while Install put Podman in, because the
   license agreement check needs a running engine. It now says "You're signed in. OpenBot is setting

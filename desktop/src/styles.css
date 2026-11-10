@@ -1130,6 +1130,38 @@ a:hover {
   animation: step-spin 0.8s linear infinite;
 }
 
+/*
+ * The background install's row, last in the step (`BehindSlot`). Its height is held for the row's
+ * tallest form, a line of three rows or a download bar under two, so the row coming, changing or
+ * going never moves anything or grows the window.
+ */
+.behind-slot {
+  margin-top: 24px;
+  min-height: 118px;
+}
+
+.behind-slot > .steps {
+  margin-top: 0;
+}
+
+/* Under a row with no buttons in it, as while the account step waits: one gap, not two. */
+.row:empty + .behind-slot {
+  margin-top: 0;
+}
+
+.behind-slot > .local-alert {
+  margin: 12px 0 0;
+}
+
+/* A step that waits on the person, not on work: the spinner's ring, standing still. */
+.step-waiting {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--ring);
+  border-radius: 50%;
+}
+
 @keyframes step-spin {
   to {
     transform: rotate(360deg);

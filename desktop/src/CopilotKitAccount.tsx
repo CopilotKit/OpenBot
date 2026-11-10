@@ -16,10 +16,19 @@ import {
   signInToCopilotKit,
 } from "./localEvalCli";
 import { engineTooSmallSaid } from "./localReadiness";
-import { ContinueToPodman, PODMAN_EXPLAINED } from "./PodmanGoAhead";
+import {
+  ContinueToPodman,
+  PODMAN_EXPLAINED,
+  PODMAN_HEADING,
+} from "./PodmanGoAhead";
 import { InlineFailure, type Problem } from "./Problem";
 import { Sections } from "./Sections";
-import { StatusLine } from "./SetupProgress";
+import {
+  BehindSlot,
+  type Progress,
+  SetupProgress,
+  StatusLine,
+} from "./SetupProgress";
 import { Command } from "./WindowsBlocker";
 
 type Seen =
@@ -85,6 +94,7 @@ export function CopilotKitAccount({
   handOff = null,
   engine = null,
   goAhead = null,
+  behind,
 }: {
   /** The installation folder the apps are connected for. */
   root: string;
@@ -105,6 +115,13 @@ export function CopilotKitAccount({
    * offers Continue.
    */
   goAhead?: string | null;
+  /**
+   * What is installing behind this step, as one row: what it is doing, how far along, and for how
+   * long (`installingBehind`). Shown under every part of the step, so the person always knows
+   * OpenBot is still installing. It carries the engine's line and any hand-off, so those are not
+   * said twice. Its slot is held even while it is null; without it, there is none.
+   */
+  behind?: Progress | null;
   /** Signed in and agreed: the version accepted here, or null when nothing needed accepting. */
   onDone: (acceptedVersion: string | null) => void;
   /** A failure from setup itself, shown inside this card rather than under it. */
@@ -287,7 +304,7 @@ export function CopilotKitAccount({
       <CopilotKitLogo />
       <h1>
         {asking
-          ? "Install Podman"
+          ? PODMAN_HEADING
           : agreement
             ? "Accept the license agreement"
             : connecting
@@ -351,15 +368,17 @@ export function CopilotKitAccount({
           Install waits for the person instead, it says that, and Continue goes on to the prompt. */}
       {asking ? (
         <>
-          <StatusLine working={false}>{goAhead}</StatusLine>
+          {!behind && <StatusLine working={false}>{goAhead}</StatusLine>}
           <ContinueToPodman key={goAhead} />
         </>
       ) : waitingForEngine ? (
-        <StatusLine>
-          {engine ?? handOff ?? "Preparing this computer…"}
-        </StatusLine>
+        !behind && (
+          <StatusLine>
+            {engine ?? handOff ?? "Preparing this computer…"}
+          </StatusLine>
+        )
       ) : (
-        handOff && <StatusLine>{handOff}</StatusLine>
+        handOff && !behind && <StatusLine>{handOff}</StatusLine>
       )}
       {seen.at === "checking" && !handOff && !asking && (
         <StatusLine>Checking your CopilotKit account…</StatusLine>
@@ -432,6 +451,14 @@ export function CopilotKitAccount({
           </button>
         )}
       </div>
+      {/* Last, under whatever the step asks: OpenBot is still installing meanwhile. */}
+      {behind !== undefined && (
+        <BehindSlot>
+          {behind && (
+            <SetupProgress steps={[behind]} label="Background install" />
+          )}
+        </BehindSlot>
+      )}
     </div>
   );
 }

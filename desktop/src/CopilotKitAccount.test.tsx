@@ -269,8 +269,12 @@ test("a closed password prompt is asked again, with Continue", async () => {
       goAhead={goAhead}
     />
   );
-  const screen = render(account("Podman is downloaded and ready to install."));
-  await screen.findByRole("heading", { name: "Install Podman" });
+  const screen = render(
+    account("The software OpenBot runs on is downloaded and ready to install."),
+  );
+  await screen.findByRole("heading", {
+    name: "Install the software OpenBot needs",
+  });
   await userEvent.click(screen.getByRole("button", { name: "Continue" }));
   expect(
     (screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement)
@@ -278,11 +282,13 @@ test("a closed password prompt is asked again, with Continue", async () => {
   ).toBe(true);
 
   screen.rerender(
-    account("macOS didn't get your password, so Podman isn't installed yet."),
+    account(
+      "macOS didn't get your password, so the software isn't installed yet.",
+    ),
   );
   expect(
     screen.getByText(
-      "macOS didn't get your password, so Podman isn't installed yet.",
+      "macOS didn't get your password, so the software isn't installed yet.",
     ),
   ).toBeTruthy();
   const again = screen.getByRole("button", {

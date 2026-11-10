@@ -35,6 +35,7 @@ import {
   type Progress,
   SetupProgress,
   StatusLine,
+  timeLeft,
 } from "./SetupProgress";
 
 type Call<T> = { attempt: string; answer: Promise<T> };
@@ -75,12 +76,24 @@ const unreadable: Problem = {
 
 type Phase = "setup" | "connect" | "wait" | "start";
 
+/*
+ * In the person's words: the back end, its releases and the CLI are the log's business. Every row
+ * says what OpenBot is doing for them, and the running one how far along it is ("Step 3 of 4").
+ */
 const PHASES: [Phase, string][] = [
   ["setup", "Setting up OpenBot"],
   ["connect", "Connecting OpenBot"],
-  ["wait", "Waiting for the back end"],
+  ["wait", "Getting OpenBot ready"],
   ["start", "Starting OpenBot"],
 ];
+
+/** What a running row says when nothing more particular is happening: roughly how long it takes. */
+const TAKES: Record<Phase, string> = {
+  setup: "This takes a few minutes the first time.",
+  connect: "",
+  wait: "This can take a few minutes.",
+  start: "",
+};
 
 /** The readiness sentence for one CLI answer or failure category. */
 function said(intelligence: LocalReport | LocalFailure): string {
@@ -153,18 +166,17 @@ const idle: State = {
 };
 
 /** The row an update that failed is said on, under the back end's. */
-const UPDATING = "Updating the back end";
+const UPDATING = "Updating OpenBot";
 
 /**
- * An update that failed, and where it stopped once the CLI's record says (`failedStep`). Its data
- * is kept either way: `local update` never deletes it, and the next Start repairs what a stopped
- * update left and tries again.
+ * An update that failed, and where it stopped once the CLI's record says (`failedStep`), in plain
+ * words. The step's own name and the releases are in the log (`log_update_due`). Its data is kept
+ * either way: `local update` never deletes it, and the next Start repairs what a stopped update left
+ * and tries again.
  */
-function updateFailedSaid(to: string, step: string | null): string {
-  const where = step
-    ? ` It stopped at "${updateStepSaid(step)}" (${step}).`
-    : "";
-  return `The back end could not be updated to ${to}.${where} Your data is kept, and OpenBot tries again the next time it starts.`;
+function updateFailedSaid(step: string | null): string {
+  const where = step ? ` It stopped while ${updateStepSaid(step)}.` : "";
+  return `OpenBot couldn't finish updating, so it runs the version it had.${where} Your data is kept, and OpenBot tries again the next time it starts.`;
 }
 
 export type LocalSequence = State & {
@@ -283,6 +295,8 @@ export function useLocalSequence({
     let following = true;
     let shown = false;
     let next: ReturnType<typeof setTimeout> | null = null;
+    // The first answer with bytes in it, so the speed so far can say how long is left.
+    let first: { at: number; bytes: number } | null = null;
     /*
      * Only while the run it reports on is current. Halting it (the window closed, or Cancel) only asks the CLI to stop,
      * and the call it followed settles once the CLI has, so a poll that waited for that went on asking every second from
@@ -297,10 +311,21 @@ export function useLocalSequence({
             if (!current()) return;
             if (found) {
               shown = true;
+              const at = Date.now();
+              first ??= { at, bytes: found.done };
+              const seconds = (at - first.at) / 1000;
+              const download: Downloads = {
+                bytes: found.done,
+                size: found.total,
+                ...(seconds >= 3 && found.done > first.bytes
+                  ? { bytesPerSecond: (found.done - first.bytes) / seconds }
+                  : {}),
+              };
+              const left = timeLeft(download);
               // The row's bar and "48.0 MB of 147.0 MB", as Install shows its own download.
               update({
-                detail: `${saying}.`,
-                download: { bytes: found.done, size: found.total },
+                detail: left ? `${saying}. ${left}` : `${saying}.`,
+                download,
               });
             } else if (shown) {
               shown = false;
@@ -344,18 +369,18 @@ export function useLocalSequence({
    */
   async function updateIntelligence(
     id: string,
-    to: string,
-    from: string,
     token: number,
   ): Promise<boolean> {
-    const updating = `Updating the back end to ${to}. Its data stays.`;
+    // The releases it updates from and to are in the log (`log_update_due`), not on the screen.
+    const updating =
+      "Updating OpenBot. Your Bots and data stay as they are. This usually takes a few minutes.";
     update({ detail: updating, download: null });
     const started = runLocalEval("update", id);
     attempt.current = started.attempt;
     const unfollow = followDownload(
       started.attempt,
       token,
-      "Downloading the back end update",
+      "Downloading the update",
       updating,
     );
     const unfollowSteps = followUpdateSteps(started.attempt, token, updating);
@@ -380,8 +405,8 @@ export function useLocalSequence({
       updateFailed: updated
         ? null
         : stalled
-          ? `The back end update stopped downloading, so the back end stays on ${from}. OpenBot continues the download where it left off the next time it starts.`
-          : updateFailedSaid(to, null),
+          ? "The update stopped downloading, so OpenBot runs the version it had. It picks up the download the next time it starts."
+          : updateFailedSaid(null),
     });
     return true;
   }
@@ -405,12 +430,12 @@ export function useLocalSequence({
         .then(
           (found) => {
             if (!current() || !found || now.current.download) return;
-            const job = found.job ? ` (${found.job})` : "";
+            // The Job's name is in the log (`watch_jobs`): the row says what the step is for.
             const failed = found.failedJob
-              ? ` The back end's job ${found.failedJob} failed, so this update will stop. The back end's tool waits up to 10 minutes for it first. Your data is kept.`
+              ? " Part of the update didn't work, so it will stop. OpenBot waits up to 10 minutes for it first. Your data is kept."
               : "";
             update({
-              detail: `${updating} ${found.said}${job}, ${formatElapsed(found.seconds)}.${failed}`,
+              detail: `${updating} ${found.said}, ${formatElapsed(found.seconds)} so far.${failed}`,
             });
           },
           () => {},
@@ -481,16 +506,9 @@ export function useLocalSequence({
       ) {
         updatedIntelligence = true;
         woken = found.readiness === "stopped";
-        const going = await updateIntelligence(
-          id,
-          found.updateTo,
-          found.stack.installedRelease,
-          token,
-        );
+        const going = await updateIntelligence(id, token);
         if (!going) return null;
-        if (
-          now.current.updateFailed === updateFailedSaid(found.updateTo, null)
-        ) {
+        if (now.current.updateFailed === updateFailedSaid(null)) {
           failedTo = found.updateTo;
         }
         continue;
@@ -498,7 +516,7 @@ export function useLocalSequence({
       // Where the update that just failed stopped, from the record the CLI kept of it.
       const failedStep = unfinished?.failedStep;
       if (failedTo && failedStep) {
-        update({ updateFailed: updateFailedSaid(failedTo, failedStep) });
+        update({ updateFailed: updateFailedSaid(failedStep) });
       }
       failedTo = null;
       if (isReady(found)) {
@@ -541,7 +559,7 @@ export function useLocalSequence({
       if (tries >= pollDelays.length) {
         update({
           blocked: {
-            said: "The back end did not report ready in time.",
+            said: "OpenBot didn't get ready in time. Retry to check again.",
             reason: null,
           },
         });
@@ -609,7 +627,7 @@ export function useLocalSequence({
         const unfollow = followDownload(
           started.attempt,
           token,
-          "Downloading the back end",
+          "Downloading the rest of OpenBot",
           null,
         );
         const report = await call(
@@ -738,9 +756,10 @@ export function useLocalSequence({
                 step: label,
                 ok: true,
                 running: true,
-                detail: state.detail ?? "",
+                detail: state.detail ?? TAKES[phase],
                 downloads: state.download ?? undefined,
                 startedAt: state.since ?? undefined,
+                position: { at: index + 1, of: PHASES.length },
               }
             : stopped
               ? { step: label, ok: false, detail: state.blocked?.said ?? "" }
@@ -782,7 +801,7 @@ export function LocalIntelligence({
   const { at, running, stopped, problem } = sequence;
 
   return (
-    <section aria-label="Back end on this computer">
+    <section aria-label="OpenBot on this computer">
       <SetupProgress steps={sequence.steps} />
       {handOff && <StatusLine>{handOff}</StatusLine>}
       <LocalNeeds sequence={sequence} />
@@ -815,21 +834,30 @@ export function LocalIntelligence({
  * at once, because finding out only at that later step would waste the minutes since: one they
  * clear themselves (signing in, accepting the agreement) with its action, anything else with Retry.
  */
-export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
+export function LocalStatus({
+  sequence,
+  download = true,
+}: {
+  sequence: LocalSequence;
+  /** Its download's row too. Off where the background install's row says it already. */
+  download?: boolean;
+}) {
   if (!sequence.stopped) {
-    // The back end downloads behind the screen in front: say how far, so the wait is visible.
-    if (!sequence.running || !sequence.download) return null;
+    // The rest of OpenBot downloads behind the screen in front: say how far, so the wait is visible.
+    if (!download || !sequence.running || !sequence.download) return null;
     return (
       <SetupProgress
-        label="Back end download"
+        label="OpenBot download"
         showElapsed={false}
         steps={[
           {
-            step: "Downloading the back end",
+            step: "Downloading the rest of OpenBot",
             ok: true,
             running: true,
-            detail: "",
+            detail: timeLeft(sequence.download) ?? "",
             downloads: sequence.download,
+            // The install's third part, alongside the second on the Install step.
+            position: { at: 3, of: 4 },
           },
         ]}
       />
@@ -842,14 +870,14 @@ export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
     <section
       className={`local-alert${needs ? " needs" : ""}`}
       role="alert"
-      aria-label={openBot ? "OpenBot" : "Back end"}
+      aria-label={openBot ? "OpenBot" : "Setup"}
     >
       <h2>
         {needs
           ? "Setup needs you"
           : openBot
             ? "OpenBot did not start"
-            : "Back end setup stopped"}
+            : "Setup stopped"}
       </h2>
       {needs ? (
         <LocalNeeds sequence={sequence} />
@@ -857,7 +885,7 @@ export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
         <>
           <p>
             {openBot
-              ? "The back end is ready. Retry starts OpenBot again."
+              ? "Everything else is ready. Retry starts OpenBot again."
               : (sequence.blocked?.said ?? sequence.problem?.said)}
           </p>
           <div className="row">
@@ -958,7 +986,7 @@ function SignInToCopilotKit({ onSignedIn }: { onSignedIn: () => void }) {
   return (
     <div className="local-needs">
       <CopilotKitLogo />
-      <p>OpenBot's back end needs your CopilotKit account.</p>
+      <p>OpenBot needs your CopilotKit account to finish setting up.</p>
       {waiting ? (
         <CopilotKitSignInWait
           attempt={waiting}
@@ -1021,9 +1049,8 @@ function AcceptTerms({
     return (
       <div className="local-needs">
         <p className="footnote">
-          The back end did not take the acceptance from OpenBot. If a coding
-          agent or a script opened OpenBot, quit it, open it yourself, and
-          accept again.
+          OpenBot couldn't record your acceptance. If a coding agent or a script
+          opened OpenBot, quit it, open it yourself, and accept again.
         </p>
         <div className="row">
           <button type="button" onClick={onRetry}>
