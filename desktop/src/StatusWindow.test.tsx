@@ -142,6 +142,19 @@ test("Open log folder asks the desktop app to open its own log folder", async ()
   ).toContain(`Logs${logFolder}`);
 });
 
+test("the Status window offers the troubleshooting logs, with no failure", async () => {
+  invokeHandler = answers({ save_troubleshooting_logs: null });
+  const view = render(<StatusWindow readEveryMs={60_000} />);
+  await userEvent.click(
+    await view.findByRole("button", { name: "Save to a file" }),
+  );
+  expect(
+    invokeCalls
+      .filter((call) => call.command === "save_troubleshooting_logs")
+      .map((call) => call.args),
+  ).toEqual([{ failure: null }]);
+});
+
 test("a log folder that couldn't be opened says where to find it", async () => {
   invokeHandler = async (command) => {
     if (command === "open_log_folder") throw "no file manager answered";
