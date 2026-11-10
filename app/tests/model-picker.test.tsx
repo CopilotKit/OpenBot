@@ -562,28 +562,80 @@ test("sending waits for the model save and refuses a failed save", async () => {
   expect(saved["conversation-a"]).toEqual({ model: "gpt-4o", effort: null });
 });
 
-test("picking a model that thinks leaves the popup open on its efforts, and picking one closes it", async () => {
+/**
+ * The picker inside a composer, as `composer.tsx` lays it out: the message box above, the picker
+ * in the controls under it.
+ */
+function InComposer() {
+  return (
+    <div data-slot="composer">
+      <div data-slot="composer-input">
+        {/* biome-ignore lint/a11y/useSemanticElements: the composer's message box is this. */}
+        <div
+          aria-label="Message"
+          aria-multiline="true"
+          contentEditable
+          role="textbox"
+          suppressContentEditableWarning
+          tabIndex={0}
+        />
+      </div>
+      <Conversation />
+    </div>
+  );
+}
+
+/*
+ * Found on Windows by two testers: picking a model that thinks left the popup open, for its
+ * efforts, and the next click, meant for the message box, landed on another model in the list.
+ * Both ended up on a model they never chose. Picking closes it now, as a menu closes, and the
+ * message box has the focus; a model's efforts are a reopen away.
+ */
+test("picking a model closes the popup and puts the person back in the message box", async () => {
   saved["conversation-a"] = { model: "gpt-6.1-terra", effort: null };
-  const { view, user, popup } = await openPicker(/GPT-6\.1 Terra/);
+  const view = render(<InComposer />, { wrapper });
+  const user = userEvent.setup({ document });
+  await user.click(
+    await view.findByRole("combobox", { name: /GPT-6\.1 Terra/ }),
+  );
+  const popup = await view.findByRole("dialog");
+  // A model that thinks, which once kept the popup open.
   await user.click(within(popup).getByRole("option", { name: "GPT-6 Sol" }));
   await waitFor(() => expect(writes).toHaveLength(1));
-  // Still open, now offering GPT-6 Sol's efforts.
-  const open = view.getByRole("dialog");
-  expect(
-    within(thinking(open) as HTMLElement)
-      .getAllByRole("option")
-      .map((option) => option.textContent),
-  ).toEqual(["Default", "Low", "Medium", "High"]);
-  // Every model is still listed: picking one did not turn the search into its name.
-  expect(
-    within(within(open).getByRole("group", { name: "Models" })).getAllByRole(
-      "option",
-    ),
-  ).toHaveLength(4);
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  const message = view.getByRole("textbox", { name: "Message" });
+  await waitFor(() => expect(document.activeElement).toBe(message));
+  // The next click goes to the message box: nothing else is picked.
+  await user.click(message);
+  await act(async () => {});
+  expect(writes).toEqual([
+    { channelId: "conversation-a", model: "gpt-6-sol", effort: null },
+  ]);
+  expect(document.activeElement).toBe(message);
 
-  await user.click(within(open).getByRole("option", { name: "High" }));
+  // Its efforts are there on reopening, and picking one closes it the same way.
+  await user.click(view.getByRole("combobox", { name: /GPT-6 Sol/ }));
+  const again = await view.findByRole("dialog");
+  await user.click(within(again).getByRole("option", { name: "High" }));
   await waitFor(() => expect(writes).toHaveLength(2));
   await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(message));
+});
+
+test("Esc and a click outside close the popup without picking", async () => {
+  saved["conversation-a"] = { model: "gpt-6.1-terra", effort: null };
+  const view = render(<InComposer />, { wrapper });
+  const user = userEvent.setup({ document });
+  const trigger = await view.findByRole("combobox", { name: /GPT-6\.1 Terra/ });
+  await user.click(trigger);
+  await view.findByRole("dialog");
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  await user.click(trigger);
+  await view.findByRole("dialog");
+  await user.click(view.getByRole("textbox", { name: "Message" }));
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  expect(writes).toEqual([]);
 });
 
 test("picking a model that takes no effort closes the popup", async () => {

@@ -34,6 +34,17 @@ import {
 import type { ModelCatalogue, ModelOption } from "@/lib/models/queries";
 import { cn } from "@/lib/utils";
 
+/** The composer's message box around `inside`, if it is in one. */
+function messageBox(inside: HTMLElement | null): HTMLElement | null {
+  return (
+    inside
+      ?.closest('[data-slot="composer"]')
+      ?.querySelector<HTMLElement>(
+        '[data-slot="composer-input"] [role="textbox"]',
+      ) ?? null
+  );
+}
+
 /** One row of the popup: a model, or a thinking effort for the model in use. */
 type Choice =
   | { kind: "model"; model: ModelOption }
@@ -89,6 +100,12 @@ function ModelMark({ model }: { model: ModelOption }) {
  * The tooltip and the button's accessible name say the model and its effort ("GPT-6.1 Terra ·
  * High"). The popup is searchable, because a provider's own list runs to dozens,
  * newest first as the server sends it, with OpenBot's own model marked.
+ *
+ * PICKING CLOSES IT, as a menu closes, and puts the person back in the message box. A model's
+ * efforts are a reopen away, in the column beside the models. On Windows the popup once stayed
+ * open after a model was picked, for its efforts, and the person's next click, meant for the
+ * message box, landed on another model in the list: two testers ended up on a model they never
+ * chose. Esc and a click outside close it too.
  *
  * TWO COLUMNS, ONE LIST, as T3 Code lays it out: the search and the models on the left, and the
  * model in use's efforts in a "Thinking" column on the right. A listbox option cannot hold a second
@@ -154,12 +171,9 @@ function Picker({
   /** What is typed in the search, to say when no model matches: the efforts always do. */
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
-  /*
-   * PICKING A MODEL LEAVES THE POPUP OPEN when that model thinks, so its efforts can be chosen next
-   * in the column beside it; picking an effort is the last step and closes it. Set when a model is
-   * picked and read by the close that the same press asks for.
-   */
-  const stayOpen = useRef(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  /** A choice was just picked: the close it asks for puts focus in the message box. */
+  const picked = useRef(false);
   const current: Choice = useMemo(
     () => ({ kind: "model", model: selected }),
     [selected],
@@ -208,15 +222,10 @@ function Picker({
         choice.kind === "model" ? choice.model.label : choice.label
       }
       onInputValueChange={setQuery}
-      onOpenChange={(next, details) => {
-        const keep =
-          !next && stayOpen.current && details.reason === "item-press";
-        stayOpen.current = false;
-        if (!keep) setOpen(next);
-      }}
+      onOpenChange={setOpen}
       onValueChange={(choice) => {
         if (!choice) return;
-        stayOpen.current = choice.kind === "model" && thinks(choice.model);
+        picked.current = true;
         onChange(
           choice.kind === "model"
             ? switchModel({ model: selected.id, effort }, choice.model)
@@ -234,6 +243,7 @@ function Picker({
              * this one is a ghost button like its neighbours in the row.
              */
             <ComboboxPrimitive.Trigger
+              ref={trigger}
               aria-label={
                 effortText
                   ? `Model: ${selected.label}, thinking: ${effortText}`
@@ -263,6 +273,12 @@ function Picker({
             ? "w-[30rem] grid-cols-[minmax(0,1fr)_11rem]"
             : "w-72 grid-cols-1",
         )}
+        // After a pick, the message box, where the person goes next; otherwise back to the trigger.
+        finalFocus={() => {
+          const toMessage = picked.current;
+          picked.current = false;
+          return (toMessage && messageBox(trigger.current)) || true;
+        }}
         side="top"
         sideOffset={8}
       >
