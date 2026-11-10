@@ -101,11 +101,13 @@ function ModelMark({ model }: { model: ModelOption }) {
  * High"). The popup is searchable, because a provider's own list runs to dozens,
  * newest first as the server sends it, with OpenBot's own model marked.
  *
- * PICKING CLOSES IT, as a menu closes, and puts the person back in the message box. A model's
- * efforts are a reopen away, in the column beside the models. On Windows the popup once stayed
- * open after a model was picked, for its efforts, and the person's next click, meant for the
- * message box, landed on another model in the list: two testers ended up on a model they never
- * chose. Esc and a click outside close it too.
+ * PICKING A MODEL THAT TAKES NO EFFORT CLOSES IT, as a menu closes, and puts the person back in
+ * the message box. Picking one that does keeps it open ON ITS EFFORTS ALONE: the models and the
+ * search go, so the popup is the small "Thinking" column and nothing in it is another model.
+ * Picking an effort then closes it, back to the message box. On Windows the popup once stayed open
+ * on both columns after a model was picked, and the person's next click, meant for the message
+ * box, landed on another model in the list: two testers ended up on a model they never chose. Esc
+ * and a click outside close it too; reopened, it shows both columns again.
  *
  * TWO COLUMNS, ONE LIST, as T3 Code lays it out: the search and the models on the left, and the
  * model in use's efforts in a "Thinking" column on the right. A listbox option cannot hold a second
@@ -174,6 +176,12 @@ function Picker({
   const trigger = useRef<HTMLButtonElement>(null);
   /** A choice was just picked: the close it asks for puts focus in the message box. */
   const picked = useRef(false);
+  /*
+   * A model that thinks was just picked: the close that press asks for is turned down, and the
+   * popup shows that model's efforts alone (`effortStep`) until it closes.
+   */
+  const stayOpen = useRef(false);
+  const [effortStep, setEffortStep] = useState(false);
   const current: Choice = useMemo(
     () => ({ kind: "model", model: selected }),
     [selected],
@@ -194,8 +202,9 @@ function Picker({
     // A provider that does not say which effort is its default still has one: offer it by name.
     if (!selected.defaultEffort)
       efforts.unshift({ kind: "effort", effort: null, label: "Default" });
-    return [models, { value: "thinking", items: efforts }];
-  }, [catalogue.models, selected]);
+    const thinking: ChoiceGroup = { value: "thinking", items: efforts };
+    return effortStep ? [thinking] : [models, thinking];
+  }, [catalogue.models, selected, effortStep]);
 
   const matches = (model: ModelOption, typed: string) =>
     contains(model.label, typed) || contains(model.id, typed);
@@ -203,6 +212,8 @@ function Picker({
     query.trim() !== "" &&
     !catalogue.models.some((model) => matches(model, query));
   const twoColumns = groups.length > 1;
+  /** On the efforts alone: only the "Thinking" column shows. */
+  const effortsOnly = effortStep && thinks(selected);
 
   const effortText = running ? effortLabel(running) : null;
   const shown = effortText
@@ -222,10 +233,22 @@ function Picker({
         choice.kind === "model" ? choice.model.label : choice.label
       }
       onInputValueChange={setQuery}
-      onOpenChange={setOpen}
+      onOpenChange={(next, details) => {
+        const keep =
+          !next && stayOpen.current && details.reason === "item-press";
+        stayOpen.current = false;
+        if (keep) {
+          setEffortStep(true);
+          return;
+        }
+        // Opened or closed: both columns, the next time it shows.
+        setEffortStep(false);
+        setOpen(next);
+      }}
       onValueChange={(choice) => {
         if (!choice) return;
-        picked.current = true;
+        stayOpen.current = choice.kind === "model" && thinks(choice.model);
+        picked.current = !stayOpen.current;
         onChange(
           choice.kind === "model"
             ? switchModel({ model: selected.id, effort }, choice.model)
@@ -269,9 +292,11 @@ function Picker({
         className={cn(
           // A grid: the search over the models on the left, the efforts down the right.
           "grid grid-rows-[auto_minmax(0,1fr)] *:data-[slot=input-group]:m-2 *:data-[slot=input-group]:mb-1",
-          twoColumns
-            ? "w-[30rem] grid-cols-[minmax(0,1fr)_11rem]"
-            : "w-72 grid-cols-1",
+          effortsOnly
+            ? "w-44 grid-cols-1"
+            : twoColumns
+              ? "w-[30rem] grid-cols-[minmax(0,1fr)_11rem]"
+              : "w-72 grid-cols-1",
         )}
         // After a pick, the message box, where the person goes next; otherwise back to the trigger.
         finalFocus={() => {
@@ -283,11 +308,12 @@ function Picker({
         sideOffset={8}
       >
         <ComboboxInput
-          className="col-start-1 row-start-1"
+          // On the efforts alone there is no model to search for: it stays only to keep the keys.
+          className={effortsOnly ? "sr-only" : "col-start-1 row-start-1"}
           placeholder="Search models"
           showTrigger={false}
         />
-        {noModels ? (
+        {noModels && !effortsOnly ? (
           <p className="col-start-1 row-start-2 px-3 py-6 text-center text-muted-foreground text-sm">
             No models match.
           </p>
@@ -324,7 +350,12 @@ function Picker({
               </ComboboxGroup>
             ) : (
               <ComboboxGroup
-                className="col-start-2 row-span-2 row-start-1 min-h-0 overflow-y-auto border-l p-1.5"
+                className={cn(
+                  "min-h-0 overflow-y-auto p-1.5",
+                  effortsOnly
+                    ? "col-start-1 row-span-2 row-start-1"
+                    : "col-start-2 row-span-2 row-start-1 border-l",
+                )}
                 items={group.items}
                 key="thinking"
               >

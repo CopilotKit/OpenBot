@@ -586,12 +586,13 @@ function InComposer() {
 }
 
 /*
- * Found on Windows by two testers: picking a model that thinks left the popup open, for its
- * efforts, and the next click, meant for the message box, landed on another model in the list.
- * Both ended up on a model they never chose. Picking closes it now, as a menu closes, and the
- * message box has the focus; a model's efforts are a reopen away.
+ * Found on Windows by two testers: picking a model that thinks left the popup open on both
+ * columns, for its efforts, and the next click, meant for the message box, landed on another
+ * model in the list. Both ended up on a model they never chose. A model that takes no effort
+ * closes the popup into the message box; one that does keeps it open on its efforts alone, with
+ * no model left to click, and picking an effort closes it into the message box.
  */
-test("picking a model closes the popup and puts the person back in the message box", async () => {
+test("picking a model that takes no effort closes the popup and puts the person back in the message box", async () => {
   saved["conversation-a"] = { model: "gpt-6.1-terra", effort: null };
   const view = render(<InComposer />, { wrapper });
   const user = userEvent.setup({ document });
@@ -599,8 +600,7 @@ test("picking a model closes the popup and puts the person back in the message b
     await view.findByRole("combobox", { name: /GPT-6\.1 Terra/ }),
   );
   const popup = await view.findByRole("dialog");
-  // A model that thinks, which once kept the popup open.
-  await user.click(within(popup).getByRole("option", { name: "GPT-6 Sol" }));
+  await user.click(within(popup).getByRole("option", { name: "GPT-4o" }));
   await waitFor(() => expect(writes).toHaveLength(1));
   await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
   const message = view.getByRole("textbox", { name: "Message" });
@@ -609,17 +609,47 @@ test("picking a model closes the popup and puts the person back in the message b
   await user.click(message);
   await act(async () => {});
   expect(writes).toEqual([
-    { channelId: "conversation-a", model: "gpt-6-sol", effort: null },
+    { channelId: "conversation-a", model: "gpt-4o", effort: null },
   ]);
-  expect(document.activeElement).toBe(message);
+});
 
-  // Its efforts are there on reopening, and picking one closes it the same way.
-  await user.click(view.getByRole("combobox", { name: /GPT-6 Sol/ }));
-  const again = await view.findByRole("dialog");
-  await user.click(within(again).getByRole("option", { name: "High" }));
+test("picking a model that thinks keeps the popup on its efforts alone, so no other model can be picked", async () => {
+  saved["conversation-a"] = { model: "gpt-6.1-terra", effort: null };
+  const view = render(<InComposer />, { wrapper });
+  const user = userEvent.setup({ document });
+  await user.click(
+    await view.findByRole("combobox", { name: /GPT-6\.1 Terra/ }),
+  );
+  const popup = await view.findByRole("dialog");
+  await user.click(within(popup).getByRole("option", { name: "GPT-6 Sol" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  // Still open, on GPT-6 Sol's efforts and nothing else: no model is there to be clicked.
+  const open = view.getByRole("dialog");
+  expect(
+    within(open)
+      .getAllByRole("option")
+      .map((option) => option.textContent),
+  ).toEqual(["Default", "Low", "Medium", "High"]);
+  expect(within(open).queryByRole("group", { name: "Models" })).toBeNull();
+
+  // Picking an effort closes it, into the message box.
+  await user.click(within(open).getByRole("option", { name: "High" }));
   await waitFor(() => expect(writes).toHaveLength(2));
   await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  const message = view.getByRole("textbox", { name: "Message" });
   await waitFor(() => expect(document.activeElement).toBe(message));
+  await user.click(message);
+  await act(async () => {});
+  expect(writes).toEqual([
+    { channelId: "conversation-a", model: "gpt-6-sol", effort: null },
+    { channelId: "conversation-a", model: "gpt-6-sol", effort: "high" },
+  ]);
+
+  // Reopened, both columns are back.
+  await user.click(view.getByRole("combobox", { name: /GPT-6 Sol/ }));
+  const again = await view.findByRole("dialog");
+  expect(within(again).getByRole("group", { name: "Models" })).toBeTruthy();
+  expect(thinking(again)).not.toBeNull();
 });
 
 test("Esc and a click outside close the popup without picking", async () => {
