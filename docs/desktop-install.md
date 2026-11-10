@@ -171,7 +171,8 @@ fill a gap. Three rules hold that boundary:
   check on macOS and Windows, a Podman machine that answers `podman` (over SSH) while its Docker API,
   the pipe or socket Compose uses, does not is stopped and started once ("Restarting the software
   OpenBot runs on."), and one that still does not answer is a failure with Try again
-  (`engine_versions::ensure`, `acquire::engine_answers`). A Docker
+  (`engine_versions::ensure`, `acquire::engine_answers`). A relaunch does the same before the back
+  end is asked (`wake_engine`), whose own check says only that Docker is unavailable. A Docker
   Desktop that is too old (4.31 and earlier) is updated to Docker's newest release with Docker's
   own installer command line, after its checksum and Docker's signature are checked
   (`src-tauri/src/docker_desktop_update.rs`). Docker's terms are never accepted for the person. Only

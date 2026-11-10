@@ -346,11 +346,7 @@ pub fn ensure(
     let before = updates.read();
     let said = match decide(engine, &before, os, arch) {
         Verdict::NewEnough => {
-            let machines = engine == Engine::Podman && (os == "macos" || os == "windows");
-            if !machines {
-                return Ok(Checked::NewEnough(before));
-            }
-            return Ok(match answering(engine, false, updates, progress)? {
+            return Ok(match answering_now(engine, os, updates, progress)? {
                 false => Checked::NewEnough(before),
                 true => Checked::Restarted(before),
             });
@@ -449,6 +445,21 @@ fn answering(
                 format!("{first}; after its machine was restarted: {again}"),
             )
         })
+}
+
+/// `answering`, where nothing was updated: at every check (`ensure`), and when OpenBot's back end is
+/// about to be asked (`wake_engine`), whose own check says only that Docker is unavailable. Only a
+/// Podman machine on macOS or Windows is asked. Whether it was restarted.
+pub fn answering_now(
+    engine: Engine,
+    os: &str,
+    updates: &mut dyn Updates,
+    progress: &mut dyn FnMut(StepLine),
+) -> Result<bool, Problem> {
+    if engine != Engine::Podman || (os != "macos" && os != "windows") {
+        return Ok(false);
+    }
+    answering(engine, false, updates, progress)
 }
 
 fn not_answering(engine: Engine, updated: bool, detail: String) -> Problem {
@@ -1089,6 +1100,12 @@ mod tests {
         );
         assert_eq!(fake.done, ["read", "answers", "restart", "answers"]);
         assert_eq!(said, ["Restarting the software OpenBot runs on."]);
+
+        // The same before the back end is asked on a relaunch, where no versions are read.
+        let mut fake = Fake::new(vec![podman_6_1_1()]);
+        fake.api = false;
+        assert!(answering_now(Engine::Podman, "macos", &mut fake, &mut |_| {}).unwrap());
+        assert_eq!(fake.done, ["answers", "restart", "answers"]);
 
         // One that still does not answer is the failure, with Try again, which runs all this again.
         let mut fake = Fake::new(vec![podman_6_1_1()]);

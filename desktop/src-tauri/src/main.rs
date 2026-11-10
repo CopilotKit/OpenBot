@@ -471,9 +471,79 @@ async fn wake_engine(app: tauri::AppHandle, root: String) -> Result<(), Problem>
         return Ok(());
     }
     let asked = std::time::Instant::now();
-    let woken = wake_installation_engine(&app, preparation::saved_engine(&root)).await;
+    let saved = preparation::saved_engine(&root);
+    let woken = match wake_installation_engine(&app, saved).await {
+        Ok(()) => heal_installation_engine(&app, saved).await,
+        failed => failed,
+    };
     logging::outcome("wake engine", asked, &woken);
     woken
+}
+
+/**
+A Podman machine that answers `podman` while its Docker API has gone, stopped and started once
+before the back end is asked (`engine_versions::answering_now`).
+
+The back end's own check reaches the engine through that API and says only "docker_unavailable",
+and setup then waited on it. Setup and Start heal it in their own check (`engine_new_enough`); this
+is the same for a relaunch, and for Retry after it, which runs this again. Said on the machine's row.
+*/
+async fn heal_installation_engine<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    saved: Option<engine::Engine>,
+) -> Result<(), Problem> {
+    if !cfg!(any(target_os = "macos", target_os = "windows"))
+        || saved == Some(engine::Engine::Docker)
+    {
+        return Ok(());
+    }
+    let progress_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let found = engine::detect_saved(saved);
+        let Some(address) = found.address.filter(|_| found.responding) else {
+            return Ok(());
+        };
+        let engine = address.engine;
+        let back = || {};
+        let cancelled = || false;
+        let mut updates = engine_versions::OnThisMachine {
+            address,
+            cache: stack::default_root(),
+            back: &back,
+            cancelled: &cancelled,
+        };
+        let mut said = false;
+        let healed = engine_versions::answering_now(
+            engine,
+            std::env::consts::OS,
+            &mut updates,
+            &mut |line| {
+                said = true;
+                report_running_line(&progress_app, "start-machine", line, None)
+            },
+        );
+        if said {
+            match &healed {
+                Ok(_) => report_plain(
+                    &progress_app,
+                    "start-machine",
+                    true,
+                    engine::engine_ready_line().said,
+                ),
+                Err(problem) => {
+                    report_plain(&progress_app, "start-machine", false, problem.said.clone())
+                }
+            }
+        }
+        healed.map(|_| ())
+    })
+    .await
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot could not start the software it runs on. Try again.",
+            error.to_string(),
+        )
+    })?
 }
 
 /// Return a responding engine only after Compose is present too.
