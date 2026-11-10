@@ -20,19 +20,25 @@ export function desktopTelemetryProperties(
     if (value && allowed.some((item) => item === value))
       properties[output] = value;
   }
-  for (const [input, output] of [
-    ["OPENBOT_VERSION", "openbot_version"],
-    ["OPENBOT_OS_VERSION", "openbot_os_version"],
+  for (const [input, output, pattern] of [
+    // The app's own version keeps a release candidate's label, as `1.0.0-rc.5`: a closed word and
+    // at most one number, never free text.
+    ["OPENBOT_VERSION", "openbot_version", APP_VERSION],
+    ["OPENBOT_OS_VERSION", "openbot_os_version", NUMERIC_VERSION],
   ] as const) {
     const value = env[input];
     if (
       value &&
       value.length <= 32 &&
       value.trim() === value &&
-      /^\d+(?:\.\d+){1,3}$/.test(value)
+      pattern.test(value)
     ) {
       properties[output] = value;
     }
   }
   return properties;
 }
+
+const NUMERIC_VERSION = /^\d+(?:\.\d+){1,3}$/;
+const APP_VERSION =
+  /^\d+(?:\.\d+){1,3}(?:-(?:alpha|beta|rc|dev|pre|preview|canary)(?:\.\d{1,9})?)?$/;

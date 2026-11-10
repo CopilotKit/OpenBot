@@ -453,7 +453,7 @@ pub struct Context {
     #[serde(rename = "openbot_distribution")]
     pub distribution: Distribution,
     #[serde(rename = "openbot_version")]
-    pub app_version: NumericVersion,
+    pub app_version: AppVersion,
     #[serde(rename = "openbot_platform")]
     pub platform: Platform,
     #[serde(rename = "openbot_arch")]
@@ -528,6 +528,147 @@ impl Serialize for NumericVersion {
 }
 
 impl<'de> Deserialize<'de> for NumericVersion {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(serde::de::Error::custom)
+    }
+}
+
+/**
+The app's own version as released: a numeric version, and for a release candidate or other
+pre-release its label, as in `1.0.0-rc.5`. Cut at the first `-`, every 1.0 release candidate said
+`1.0.0`.
+
+The label is a closed word (`alpha`, `beta`, `rc`, `dev`, `pre`, `preview`, `canary`) with at most
+one number after a dot. Anything else after the `-` is not sent: only the numeric part is, as before.
+*/
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppVersion {
+    pub numeric: NumericVersion,
+    pub prerelease: Option<(PrereleaseLabel, Option<u32>)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrereleaseLabel {
+    Alpha,
+    Beta,
+    Rc,
+    Dev,
+    Pre,
+    Preview,
+    Canary,
+}
+
+impl PrereleaseLabel {
+    fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "alpha" => Self::Alpha,
+            "beta" => Self::Beta,
+            "rc" => Self::Rc,
+            "dev" => Self::Dev,
+            "pre" => Self::Pre,
+            "preview" => Self::Preview,
+            "canary" => Self::Canary,
+            _ => return None,
+        })
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Alpha => "alpha",
+            Self::Beta => "beta",
+            Self::Rc => "rc",
+            Self::Dev => "dev",
+            Self::Pre => "pre",
+            Self::Preview => "preview",
+            Self::Canary => "canary",
+        }
+    }
+}
+
+impl AppVersion {
+    /// Exactly a numeric version with an optional closed pre-release label; anything else fails.
+    pub fn parse(value: &str) -> Result<Self> {
+        let (numeric, label) = match value.split_once('-') {
+            Some((numeric, label)) => (numeric, Some(label)),
+            None => (value, None),
+        };
+        let numeric = NumericVersion::parse(numeric)?;
+        let prerelease = match label {
+            None => None,
+            Some(label) => {
+                let (word, number) = match label.split_once('.') {
+                    Some((word, number)) => (word, Some(number)),
+                    None => (label, None),
+                };
+                let word = PrereleaseLabel::parse(word).ok_or_else(|| {
+                    TelemetryError::InvalidState("unknown pre-release label".into())
+                })?;
+                let number = number
+                    .map(|number| {
+                        if number.is_empty()
+                            || number.len() > 9
+                            || !number.bytes().all(|byte| byte.is_ascii_digit())
+                        {
+                            return Err(TelemetryError::InvalidState(
+                                "pre-release number is not numeric".into(),
+                            ));
+                        }
+                        number.parse::<u32>().map_err(|_| {
+                            TelemetryError::InvalidState("pre-release number is too large".into())
+                        })
+                    })
+                    .transpose()?;
+                Some((word, number))
+            }
+        };
+        Ok(Self {
+            numeric,
+            prerelease,
+        })
+    }
+
+    /// The version the app was built as, keeping a release candidate's label. A label outside the
+    /// closed set keeps only the numeric part, as every version did before. None when even that
+    /// is not a numeric version.
+    pub fn from_package(value: &str) -> Option<Self> {
+        Self::parse(value).ok().or_else(|| {
+            NumericVersion::parse(value.split(['-', '+']).next()?)
+                .ok()
+                .map(|numeric| Self {
+                    numeric,
+                    prerelease: None,
+                })
+        })
+    }
+}
+
+impl std::fmt::Display for AppVersion {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.numeric)?;
+        if let Some((label, number)) = self.prerelease {
+            write!(formatter, "-{}", label.as_str())?;
+            if let Some(number) = number {
+                write!(formatter, ".{number}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Serialize for AppVersion {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for AppVersion {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -717,13 +858,35 @@ pub enum EventData {
         duration_ms: u64,
         bytes: Option<u64>,
     },
+    /// Setup or a Start stopped. `step` is the last screen the window showed; `failing_step` is
+    /// the part of the work that failed, by the names the setup window's rows use. The CLI's own
+    /// closed reason or failure category, and what an engine too small had against what it needs,
+    /// when known. Never a sentence, a path or anything the CLI printed.
     SetupFailed {
         step: Step,
         error_class: SetupErrorClass,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        failing_step: Option<FailingStep>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cli_reason: Option<CliReason>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cli_failure: Option<CliFailure>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resources: Option<Resources>,
     },
     Activated,
     SetupAbandoned {
         step: Step,
+    },
+    /// The Account step's CopilotKit sign-in: started, and how it ended, with how long the person
+    /// was in their browser. `restored` is an account check that found this computer already
+    /// signed in, once a launch.
+    SignIn {
+        outcome: SignInOutcome,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cli_failure: Option<CliFailure>,
     },
 }
 
@@ -740,6 +903,7 @@ impl EventData {
             Self::SetupFailed { .. } => "oss.desktop.setup_failed",
             Self::Activated => "oss.desktop.activated",
             Self::SetupAbandoned { .. } => "oss.desktop.setup_abandoned",
+            Self::SignIn { .. } => "oss.desktop.sign_in",
         }
     }
 }
@@ -908,17 +1072,256 @@ pub enum SetupErrorClass {
     InvalidConfiguration,
     NetworkUnavailable,
     PermissionDenied,
+    /// The engine has fewer CPUs, or less memory or free disk, than local setup needs.
+    InsufficientResources,
+    /// An engine or platform local setup does not run on, such as OrbStack, or rootless Podman.
+    UnsupportedEngine,
     Unknown,
 }
 
+/// The part of setup that failed, by the step names the setup window's rows use (`report`), and
+/// the back end's own CLI calls.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FailingStep {
+    /// Start, before any of its steps.
+    Start,
+    Engine,
+    InstallEngine,
+    CreateMachine,
+    StartMachine,
+    HealthGate,
+    Deployment,
+    Release,
+    Images,
+    Installation,
+    Env,
+    Ports,
+    Cleanup,
+    Services,
+    CarryOver,
+    Answering,
+    Stopped,
+    Windows,
+    Linux,
+    Open,
+    Quit,
+    /// The Account step's check of the engine and the CLI's preflight, before the agreement.
+    AccountCheck,
+    LocalSetup,
+    LocalStart,
+    LocalUpdate,
+    LocalConnect,
+    LearningModel,
+    /// A step name this build does not list.
+    Other,
+}
+
+impl FailingStep {
+    /// The step a setup row names, such as `install-engine`.
+    pub fn from_row(step: &str) -> Self {
+        match step {
+            "start" => Self::Start,
+            "engine" => Self::Engine,
+            "install-engine" => Self::InstallEngine,
+            "create-machine" => Self::CreateMachine,
+            "start-machine" => Self::StartMachine,
+            "health-gate" => Self::HealthGate,
+            "deployment" => Self::Deployment,
+            "release" => Self::Release,
+            "images" => Self::Images,
+            "installation" => Self::Installation,
+            "env" => Self::Env,
+            "ports" => Self::Ports,
+            "cleanup" => Self::Cleanup,
+            "services" => Self::Services,
+            "carry-over" => Self::CarryOver,
+            "answering" => Self::Answering,
+            "stopped" => Self::Stopped,
+            "windows" => Self::Windows,
+            "linux" => Self::Linux,
+            "open" => Self::Open,
+            "quit" => Self::Quit,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// The CLI's own reason for stopping, from its closed set (`local_eval::Reason`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CliReason {
+    AuthenticationRequired,
+    EulaAcceptanceRequired,
+    EulaUnavailable,
+    EulaDeclined,
+    ReleaseUnavailable,
+    FeatureDisabled,
+    UnsupportedPlatform,
+    UnsupportedEngine,
+    PortUnavailable,
+    DockerUnavailable,
+    UpdateRecoveryRequired,
+    IncompatibleRelease,
+    LocalCommandBusy,
+    LocalCommandFailed,
+    ConfirmationRequired,
+    DashboardUnavailable,
+    BrowserOpenFailed,
+    ResourcesShort,
+    Unrecognized,
+}
+
+/// Why a CLI call produced no report, from the desktop's closed set (`local_eval::Failure`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CliFailure {
+    Unavailable,
+    Unverified,
+    InvalidStack,
+    Spawn,
+    Timeout,
+    Cancelled,
+    OutputLimit,
+    InvalidJson,
+    UnsupportedVersion,
+    UnexpectedCommand,
+    InvalidStatus,
+    MissingStack,
+    UnsafeEndpoint,
+    ContractMismatch,
+    UnexpectedExit,
+    InvalidAcceptance,
+    RootlessPodman,
+    DownloadStalled,
+}
+
+/**
+What the engine had against what local setup needs, for a setup that stopped on it. CPUs in
+thousandths of a CPU, memory and disk in MiB. `*_short` says which resource is below; an
+`available` that was not measured is absent. `disk_nearly_full` is the back end's own disk below
+k3s's lines rather than below the 40 GiB setup needs.
+*/
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Resources {
+    pub cpu_short: bool,
+    pub memory_short: bool,
+    pub disk_short: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disk_nearly_full: bool,
+    pub cpu_needed_millis: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_available_millis: Option<u64>,
+    pub memory_needed_mib: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_available_mib: Option<u64>,
+    pub disk_needed_mib: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_available_mib: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SignInOutcome {
+    Started,
+    Completed,
+    Failed,
+    Cancelled,
+    /// The account check found this computer already signed in.
+    Restored,
+}
+
+/// Every `FailingStep`, as sent.
+const FAILING_STEPS: &[&str] = &[
+    "start",
+    "engine",
+    "install_engine",
+    "create_machine",
+    "start_machine",
+    "health_gate",
+    "deployment",
+    "release",
+    "images",
+    "installation",
+    "env",
+    "ports",
+    "cleanup",
+    "services",
+    "carry_over",
+    "answering",
+    "stopped",
+    "windows",
+    "linux",
+    "open",
+    "quit",
+    "account_check",
+    "local_setup",
+    "local_start",
+    "local_update",
+    "local_connect",
+    "learning_model",
+    "other",
+];
+
+const CLI_REASONS: &[&str] = &[
+    "authentication_required",
+    "eula_acceptance_required",
+    "eula_unavailable",
+    "eula_declined",
+    "release_unavailable",
+    "feature_disabled",
+    "unsupported_platform",
+    "unsupported_engine",
+    "port_unavailable",
+    "docker_unavailable",
+    "update_recovery_required",
+    "incompatible_release",
+    "local_command_busy",
+    "local_command_failed",
+    "confirmation_required",
+    "dashboard_unavailable",
+    "browser_open_failed",
+    "resources_short",
+    "unrecognized",
+];
+
+const CLI_FAILURES: &[&str] = &[
+    "unavailable",
+    "unverified",
+    "invalid_stack",
+    "spawn",
+    "timeout",
+    "cancelled",
+    "output_limit",
+    "invalid_json",
+    "unsupported_version",
+    "unexpected_command",
+    "invalid_status",
+    "missing_stack",
+    "unsafe_endpoint",
+    "contract_mismatch",
+    "unexpected_exit",
+    "invalid_acceptance",
+    "rootless_podman",
+    "download_stalled",
+];
+
+/// A numeric version, and for the app's own version a closed pre-release label (`AppVersion`).
+pub const APP_VERSION_PATTERN: &str =
+    r"^\d+(?:\.\d+){1,3}(?:-(?:alpha|beta|rc|dev|pre|preview|canary)(?:\.\d{1,9})?)?$";
+
 pub fn schema_json() -> serde_json::Value {
+    let steps = [
+        "welcome", "harness", "install", "account", "model", "connect", "ask",
+    ];
     serde_json::json!({
         "schema_version": STATE_SCHEMA_VERSION,
         "event_name_prefix": "oss.desktop.",
         "numeric_version_pattern": r"^\d+(?:\.\d+){1,3}$",
         "context": {
             "openbot_distribution": ["desktop"],
-            "openbot_version": { "pattern": r"^\d+(?:\.\d+){1,3}$" },
+            "openbot_version": { "pattern": APP_VERSION_PATTERN },
             "openbot_platform": ["windows", "macos", "linux", "other"],
             "openbot_arch": ["x86_64", "aarch64", "other"],
             "openbot_os_version": { "optional": true, "pattern": r"^\d+(?:\.\d+){1,3}$" },
@@ -926,16 +1329,33 @@ pub fn schema_json() -> serde_json::Value {
             "runtime_env": ["development", "production", "test"]
         },
         "events": {
-            "step_viewed": { "step": ["welcome", "harness", "install", "model", "connect", "ask"] },
+            "step_viewed": { "step": steps },
             "harness_chosen": { "harness": ["crewai", "llamaindex", "agno", "langgraph", "google_adk", "pydantic_ai", "microsoft_agent_framework", "claude_agent_sdk", "strands", "ag2", "langroid", "mastra", "byo_url"] },
             "model_chosen": { "provider": ["openai", "anthropic", "google", "xai", "compatible", "none"], "credential_path": ["subscription", "api_key", "oauth", "none"], "custom_base_url": "bool" },
             "engine_detected": { "engine": ["docker", "podman", "none"], "responding": "bool" },
             "engine_installed": { "engine": ["docker", "podman", "none"], "outcome": ["success", "failure"] },
             "windows_stage": { "outcome": ["ready", "wsl_absent", "wsl_one", "wsl_no_kernel", "virtual_machine_platform_disabled", "virtualization_disabled", "nested_virtualization_unavailable", "not_administrator", "check_failed"] },
             "image_pull": { "outcome": ["success", "failure"], "duration_ms": "u64", "bytes": "option_u64" },
-            "setup_failed": { "step": ["welcome", "harness", "install", "model", "connect", "ask"], "error_class": ["engine_unavailable", "engine_install_failed", "image_pull_failed", "invalid_configuration", "network_unavailable", "permission_denied", "unknown"] },
+            "setup_failed": {
+                "step": steps,
+                "error_class": ["engine_unavailable", "engine_install_failed", "image_pull_failed", "invalid_configuration", "network_unavailable", "permission_denied", "insufficient_resources", "unsupported_engine", "unknown"],
+                "failing_step": FAILING_STEPS,
+                "cli_reason": CLI_REASONS,
+                "cli_failure": CLI_FAILURES,
+                "resources": {
+                    "cpu_short": "bool", "memory_short": "bool", "disk_short": "bool", "disk_nearly_full": "bool",
+                    "cpu_needed_millis": "u64", "cpu_available_millis": "option_u64",
+                    "memory_needed_mib": "u64", "memory_available_mib": "option_u64",
+                    "disk_needed_mib": "u64", "disk_available_mib": "option_u64"
+                }
+            },
             "activated": {},
-            "setup_abandoned": { "step": ["welcome", "harness", "install", "model", "connect", "ask"] }
+            "setup_abandoned": { "step": steps },
+            "sign_in": {
+                "outcome": ["started", "completed", "failed", "cancelled", "restored"],
+                "duration_ms": "option_u64",
+                "cli_failure": CLI_FAILURES
+            }
         }
     })
 }
@@ -1048,7 +1468,7 @@ mod tests {
     fn context(version: &str, engine: Engine) -> Context {
         Context {
             distribution: Distribution::Desktop,
-            app_version: NumericVersion::parse(version).unwrap(),
+            app_version: AppVersion::parse(version).unwrap(),
             platform: Platform::Macos,
             arch: Architecture::Aarch64,
             os_version: Some(NumericVersion::parse("14.5.0").unwrap()),
@@ -1301,6 +1721,78 @@ mod tests {
         .is_err());
     }
 
+    /// The new parts of `setup_failed` and `sign_in` are closed: enums and numbers, nothing a
+    /// sentence, a path, an email or a key can ride in. A queue saved by an older version, whose
+    /// `setup_failed` has only a step and a class, still reads.
+    #[test]
+    fn setup_failed_and_sign_in_take_only_closed_values() {
+        let failed = serde_json::json!({
+            "kind": "setup_failed",
+            "step": "account",
+            "error_class": "insufficient_resources",
+            "failing_step": "local_setup",
+            "cli_reason": "resources_short",
+            "resources": {
+                "cpu_short": false, "memory_short": false, "disk_short": true,
+                "cpu_needed_millis": 4000, "cpu_available_millis": 9800,
+                "memory_needed_mib": 4096, "memory_available_mib": 19353,
+                "disk_needed_mib": 40960, "disk_available_mib": 0
+            }
+        });
+        let event = serde_json::from_value::<EventData>(failed.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&event).unwrap(), failed);
+        assert_eq!(event.event_name(), "oss.desktop.setup_failed");
+        for (path, value) in [
+            (
+                "detail",
+                serde_json::json!("/Users/someone/OpenBot: no space left on device"),
+            ),
+            ("failing_step", serde_json::json!("compose up -d failed")),
+            ("cli_reason", serde_json::json!("the CLI's own sentence")),
+            (
+                "cli_failure",
+                serde_json::json!("exit 1: someone@example.invalid"),
+            ),
+            ("email", serde_json::json!("someone@example.invalid")),
+        ] {
+            let mut private = failed.clone();
+            private[path] = value;
+            assert!(
+                serde_json::from_value::<EventData>(private).is_err(),
+                "{path}"
+            );
+        }
+        let mut private = failed.clone();
+        private["resources"]["drive"] = serde_json::json!("C:\\Users\\someone");
+        assert!(serde_json::from_value::<EventData>(private).is_err());
+        // An older queue's event.
+        assert!(serde_json::from_value::<EventData>(serde_json::json!({
+            "kind": "setup_failed", "step": "install", "error_class": "unknown"
+        }))
+        .is_ok());
+
+        let sign_in =
+            serde_json::json!({ "kind": "sign_in", "outcome": "cancelled", "duration_ms": 1200 });
+        let event = serde_json::from_value::<EventData>(sign_in.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&event).unwrap(), sign_in);
+        assert_eq!(event.event_name(), "oss.desktop.sign_in");
+        for (path, value) in [
+            (
+                "outcome",
+                serde_json::json!("signed in as someone@example.invalid"),
+            ),
+            ("email", serde_json::json!("someone@example.invalid")),
+            ("account_id", serde_json::json!("a".repeat(64))),
+        ] {
+            let mut private = sign_in.clone();
+            private[path] = value;
+            assert!(
+                serde_json::from_value::<EventData>(private).is_err(),
+                "{path}"
+            );
+        }
+    }
+
     #[test]
     fn model_provider_categories_round_trip_and_match_the_closed_schema() {
         let schema = schema_json();
@@ -1400,9 +1892,37 @@ mod tests {
             EventData::SetupFailed {
                 step: Step::Install,
                 error_class: SetupErrorClass::ImagePullFailed,
+                failing_step: None,
+                cli_reason: None,
+                cli_failure: None,
+                resources: None,
+            },
+            EventData::SetupFailed {
+                step: Step::Account,
+                error_class: SetupErrorClass::InsufficientResources,
+                failing_step: Some(FailingStep::LocalSetup),
+                cli_reason: Some(CliReason::ResourcesShort),
+                cli_failure: Some(CliFailure::DownloadStalled),
+                resources: Some(Resources {
+                    cpu_short: true,
+                    memory_short: false,
+                    disk_short: true,
+                    disk_nearly_full: true,
+                    cpu_needed_millis: 4000,
+                    cpu_available_millis: Some(2000),
+                    memory_needed_mib: 4096,
+                    memory_available_mib: None,
+                    disk_needed_mib: 40960,
+                    disk_available_mib: Some(1024),
+                }),
             },
             EventData::Activated,
             EventData::SetupAbandoned { step: Step::Ask },
+            EventData::SignIn {
+                outcome: SignInOutcome::Cancelled,
+                duration_ms: Some(12),
+                cli_failure: Some(CliFailure::Cancelled),
+            },
         ]
     }
 

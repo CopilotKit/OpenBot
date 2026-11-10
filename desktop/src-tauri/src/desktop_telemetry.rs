@@ -1,5 +1,6 @@
 //! Tauri integration for the setup emitter. Network work stays off the event loop.
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use openbot_desktop_lib::{engine, local_eval, quiet, telemetry, usage_data};
@@ -13,6 +14,13 @@ pub struct DesktopTelemetry {
     /// CLI command with its own analytics, so a confirmed pair is not asked about again until a
     /// new sign-in, a rotated installation, or the next launch.
     linked: Mutex<Option<(String, String)>>,
+    /// Setup failures recorded in this launch, so a failed Start or install whose step already
+    /// said so is not recorded a second time by its catch-all (`unreported_failure`).
+    failures: AtomicU64,
+    /// The Account step's last refusal recorded, so a check the window asks again is one event.
+    account_refusal: Mutex<Option<telemetry::EventData>>,
+    /// A sign-in completed or an account was found signed in this launch: `restored` is said once.
+    signed_in: AtomicBool,
 }
 
 impl DesktopTelemetry {
@@ -22,7 +30,55 @@ impl DesktopTelemetry {
             emitter,
             identity_link: Mutex::new(()),
             linked: Mutex::new(None),
+            failures: AtomicU64::new(0),
+            account_refusal: Mutex::new(None),
+            signed_in: AtomicBool::new(false),
         }
+    }
+
+    /// `for_tests`, sending to `endpoint` (a loopback test sink).
+    #[cfg(test)]
+    pub(crate) fn for_tests_sending(
+        data_dir: std::path::PathBuf,
+        sharing: bool,
+        endpoint: String,
+    ) -> Self {
+        let emitter = telemetry::Telemetry::open_with_env(
+            data_dir,
+            tests::context(),
+            telemetry::Config {
+                enabled: true,
+                endpoint: Some(endpoint),
+                max_queue: 256,
+            },
+            if sharing {
+                telemetry::EnvOverride::Enabled
+            } else {
+                telemetry::EnvOverride::Disabled
+            },
+        )
+        .unwrap();
+        Self::new(emitter)
+    }
+
+    /// Send what is queued now, past a background flush that skipped an event recorded while it
+    /// was already sending. Bounded: an unreachable sink leaves the queue as it is.
+    #[cfg(test)]
+    pub(crate) fn deliver(&self) {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !self.queued().is_empty() && std::time::Instant::now() < until {
+            let _ = self.emitter.flush();
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    /// Every event queued and not yet sent, or nothing when not sharing.
+    #[cfg(test)]
+    pub(crate) fn queued(&self) -> Vec<telemetry::EventData> {
+        self.emitter
+            .snapshot()
+            .map(|state| state.queue.into_iter().map(|event| event.data).collect())
+            .unwrap_or_default()
     }
 
     /// An emitter in `data_dir`, sharing or not, for tests that drive the app's commands.
@@ -106,7 +162,9 @@ pub fn initialize<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 }
 
 fn context(version: &str) -> Option<telemetry::Context> {
-    use telemetry::{Architecture, Distribution, Engine, NumericVersion, Platform, RuntimeEnv};
+    use telemetry::{
+        AppVersion, Architecture, Distribution, Engine, NumericVersion, Platform, RuntimeEnv,
+    };
     let platform = match std::env::consts::OS {
         "macos" => Platform::Macos,
         "windows" => Platform::Windows,
@@ -141,7 +199,8 @@ fn context(version: &str) -> Option<telemetry::Context> {
         });
     Some(telemetry::Context {
         distribution: Distribution::Desktop,
-        app_version: NumericVersion::parse(version.split('-').next()?).ok()?,
+        // The whole version, a release candidate's label included (`AppVersion`).
+        app_version: AppVersion::from_package(version)?,
         platform,
         arch: match std::env::consts::ARCH {
             "aarch64" => Architecture::Aarch64,
@@ -198,7 +257,7 @@ pub fn set_usage_data<R: tauri::Runtime>(
     set_usage_data_in(&directory, state.as_deref(), share)
 }
 
-fn set_usage_data_in(
+pub(crate) fn set_usage_data_in(
     directory: &std::path::Path,
     state: Option<&DesktopTelemetry>,
     share: bool,
@@ -272,8 +331,54 @@ pub fn finish_account_check<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     result: Result<local_eval::Terms, local_eval::Failure>,
 ) -> Result<local_eval::Terms, local_eval::Failure> {
+    account_checked(app, &result);
     let app = app.clone();
     finish_account_check_with(result, move || link_account_background(&app))
+}
+
+/**
+The Account step's check, in usage data. An account found signed in, when no sign-in has said so
+this launch, is a `restored` sign-in. A check that stops setup (an engine too small, one local setup
+does not run on, a CLI that failed) is a `setup_failed` at `account_check`, once for as long as the
+window keeps getting the same answer: it asks again every few seconds while it waits.
+*/
+fn account_checked<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    result: &Result<local_eval::Terms, local_eval::Failure>,
+) {
+    let Some(state) = app.try_state::<DesktopTelemetry>() else {
+        return;
+    };
+    if matches!(
+        result,
+        Ok(local_eval::Terms::Required { .. } | local_eval::Terms::NotRequired)
+    ) && !state.signed_in.swap(true, Ordering::SeqCst)
+    {
+        record(
+            app,
+            telemetry::EventData::SignIn {
+                outcome: telemetry::SignInOutcome::Restored,
+                duration_ms: None,
+                cli_failure: None,
+            },
+        );
+    }
+    let refusal = terms_failure(result);
+    let event = refusal
+        .as_ref()
+        .map(|failure| failure.event(telemetry::Step::Account));
+    {
+        let Ok(mut last) = state.account_refusal.lock() else {
+            return;
+        };
+        if *last == event {
+            return;
+        }
+        last.clone_from(&event);
+    }
+    if let Some(failure) = refusal {
+        setup_failed(app, failure);
+    }
 }
 
 fn finish_account_check_with(
@@ -300,6 +405,7 @@ pub fn finish_sign_in<R: tauri::Runtime>(
             if let Ok(mut linked) = state.linked.lock() {
                 *linked = None;
             }
+            state.signed_in.store(true, Ordering::SeqCst);
         }
     }
     let app = app.clone();
@@ -459,20 +565,453 @@ pub fn runtime_env<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> BTreeMap<Str
         .unwrap_or_default()
 }
 
-pub fn failure<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    error_class: telemetry::SetupErrorClass,
-) {
+/// One setup failure, every part of it a closed value: never a sentence, a path or CLI output.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetupFailure {
+    pub failing_step: telemetry::FailingStep,
+    pub error_class: telemetry::SetupErrorClass,
+    pub cli_reason: Option<telemetry::CliReason>,
+    pub cli_failure: Option<telemetry::CliFailure>,
+    pub resources: Option<telemetry::Resources>,
+}
+
+impl SetupFailure {
+    pub fn new(
+        failing_step: telemetry::FailingStep,
+        error_class: telemetry::SetupErrorClass,
+    ) -> Self {
+        Self {
+            failing_step,
+            error_class,
+            cli_reason: None,
+            cli_failure: None,
+            resources: None,
+        }
+    }
+
+    fn event(&self, step: telemetry::Step) -> telemetry::EventData {
+        telemetry::EventData::SetupFailed {
+            step,
+            error_class: self.error_class,
+            failing_step: Some(self.failing_step),
+            cli_reason: self.cli_reason,
+            cli_failure: self.cli_failure,
+            resources: self.resources.clone(),
+        }
+    }
+}
+
+/// Record a setup failure, at the last setup screen the window showed (Install when none).
+pub fn setup_failed<R: tauri::Runtime>(app: &tauri::AppHandle<R>, failure: SetupFailure) {
     let Some(state) = app.try_state::<DesktopTelemetry>() else {
         return;
     };
+    state.failures.fetch_add(1, Ordering::SeqCst);
     let step = state
         .emitter
         .snapshot()
         .ok()
         .and_then(|state| state.last_step)
         .unwrap_or(telemetry::Step::Install);
-    record(app, telemetry::EventData::SetupFailed { step, error_class });
+    record(app, failure.event(step));
+}
+
+/// How many setup failures this launch has recorded, to compare after a Start or install.
+pub fn failures_recorded<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> u64 {
+    app.try_state::<DesktopTelemetry>()
+        .map_or(0, |state| state.failures.load(Ordering::SeqCst))
+}
+
+/**
+A Start or install that failed after `before` with none of its steps having recorded why: one
+`setup_failed`, at the part of the work it was in, with a class read from the problem's words. A
+Start cancelled by Stop is the person's choice, not a failure, and is not recorded.
+*/
+pub fn unreported_failure<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    before: u64,
+    failing_step: telemetry::FailingStep,
+    problem: &crate::Problem,
+    cancelled: bool,
+) {
+    if cancelled || failures_recorded(app) != before {
+        return;
+    }
+    let text = format!(
+        "{}\n{}",
+        problem.said,
+        problem.detail.as_deref().unwrap_or("")
+    );
+    setup_failed(
+        app,
+        SetupFailure::new(failing_step, class_of_row(failing_step, &text)),
+    );
+}
+
+/// The class of a failure at `step`: what the step is about, else what its words say.
+pub fn class_of_row(step: telemetry::FailingStep, text: &str) -> telemetry::SetupErrorClass {
+    use telemetry::{FailingStep as S, SetupErrorClass as C};
+    let by_step = match step {
+        S::InstallEngine => C::EngineInstallFailed,
+        S::Engine | S::CreateMachine | S::StartMachine | S::HealthGate => C::EngineUnavailable,
+        S::Env | S::Ports => C::InvalidConfiguration,
+        S::Images => C::ImagePullFailed,
+        _ => C::Unknown,
+    };
+    match (by_step, class_of_text(text)) {
+        // The words say more than the step does: a permission or a full disk under any step.
+        (_, Some(said @ (C::PermissionDenied | C::InsufficientResources))) => said,
+        (C::Unknown, Some(said)) => said,
+        (by_step, _) => by_step,
+    }
+}
+
+/**
+A failure's class from its words, as engines, registries and the operating system say them. Only the
+class leaves this function; the words are never recorded.
+*/
+pub fn class_of_text(text: &str) -> Option<telemetry::SetupErrorClass> {
+    use telemetry::SetupErrorClass as C;
+    let text = text.to_ascii_lowercase();
+    let any = |needles: &[&str]| needles.iter().any(|needle| text.contains(needle));
+    if any(&[
+        "no space left on device",
+        "disk is full",
+        "not enough space",
+        "insufficient disk",
+        "out of memory",
+        "cannot allocate memory",
+        "insufficient memory",
+    ]) {
+        return Some(C::InsufficientResources);
+    }
+    if any(&[
+        "pull access denied",
+        "manifest unknown",
+        "manifest for",
+        "error pulling",
+        "failed to pull",
+        "toomanyrequests",
+        "error response from daemon: pull",
+        "no matching manifest",
+        "unauthorized: authentication required",
+        "could not download",
+    ]) {
+        return Some(C::ImagePullFailed);
+    }
+    if any(&[
+        "no such host",
+        "could not resolve",
+        "temporary failure in name resolution",
+        "name resolution",
+        "network is unreachable",
+        "tls handshake timeout",
+        "i/o timeout",
+        "dial tcp",
+        "connection reset",
+        "econnreset",
+        "enotfound",
+        "eai_again",
+        "certificate verify failed",
+        "x509:",
+        "proxyconnect",
+        "offline",
+    ]) {
+        return Some(C::NetworkUnavailable);
+    }
+    if any(&[
+        "permission denied",
+        "access is denied",
+        "access denied",
+        "operation not permitted",
+        "eacces",
+        "eperm",
+        "requires administrator",
+        "not an administrator",
+    ]) {
+        return Some(C::PermissionDenied);
+    }
+    if any(&[
+        "cannot connect to the docker daemon",
+        "is the docker daemon running",
+        "docker daemon is not running",
+        "engine is not answering",
+        "cannot connect to podman",
+        "podman machine is not running",
+    ]) {
+        return Some(C::EngineUnavailable);
+    }
+    None
+}
+
+pub fn cli_failure(failure: local_eval::Failure) -> telemetry::CliFailure {
+    use local_eval::Failure as F;
+    use telemetry::CliFailure as T;
+    match failure {
+        F::Unavailable => T::Unavailable,
+        F::Unverified => T::Unverified,
+        F::InvalidStack => T::InvalidStack,
+        F::Spawn => T::Spawn,
+        F::Timeout => T::Timeout,
+        F::Cancelled => T::Cancelled,
+        F::OutputLimit => T::OutputLimit,
+        F::InvalidJson => T::InvalidJson,
+        F::UnsupportedVersion => T::UnsupportedVersion,
+        F::UnexpectedCommand => T::UnexpectedCommand,
+        F::InvalidStatus => T::InvalidStatus,
+        F::MissingStack => T::MissingStack,
+        F::UnsafeEndpoint => T::UnsafeEndpoint,
+        F::ContractMismatch => T::ContractMismatch,
+        F::UnexpectedExit => T::UnexpectedExit,
+        F::InvalidAcceptance => T::InvalidAcceptance,
+        F::RootlessPodman => T::RootlessPodman,
+        F::DownloadStalled => T::DownloadStalled,
+    }
+}
+
+pub fn cli_reason(reason: local_eval::Reason) -> telemetry::CliReason {
+    use local_eval::Reason as R;
+    use telemetry::CliReason as T;
+    match reason {
+        R::AuthenticationRequired => T::AuthenticationRequired,
+        R::EulaAcceptanceRequired => T::EulaAcceptanceRequired,
+        R::EulaUnavailable => T::EulaUnavailable,
+        R::EulaDeclined => T::EulaDeclined,
+        R::ReleaseUnavailable => T::ReleaseUnavailable,
+        R::FeatureDisabled => T::FeatureDisabled,
+        R::UnsupportedPlatform => T::UnsupportedPlatform,
+        R::UnsupportedEngine => T::UnsupportedEngine,
+        R::PortUnavailable => T::PortUnavailable,
+        R::DockerUnavailable => T::DockerUnavailable,
+        R::UpdateRecoveryRequired => T::UpdateRecoveryRequired,
+        R::IncompatibleRelease => T::IncompatibleRelease,
+        R::LocalCommandBusy => T::LocalCommandBusy,
+        R::LocalCommandFailed => T::LocalCommandFailed,
+        R::ConfirmationRequired => T::ConfirmationRequired,
+        R::DashboardUnavailable => T::DashboardUnavailable,
+        R::BrowserOpenFailed => T::BrowserOpenFailed,
+        R::ResourcesShort => T::ResourcesShort,
+        R::Unrecognized => T::Unrecognized,
+    }
+}
+
+fn class_of_cli_failure(failure: local_eval::Failure) -> telemetry::SetupErrorClass {
+    use local_eval::Failure as F;
+    use telemetry::SetupErrorClass as C;
+    match failure {
+        F::DownloadStalled => C::NetworkUnavailable,
+        F::RootlessPodman => C::UnsupportedEngine,
+        F::Unavailable | F::Unverified => C::InvalidConfiguration,
+        _ => C::Unknown,
+    }
+}
+
+fn class_of_cli_reason(reason: local_eval::Reason) -> telemetry::SetupErrorClass {
+    use local_eval::Reason as R;
+    use telemetry::SetupErrorClass as C;
+    match reason {
+        R::ResourcesShort => C::InsufficientResources,
+        R::UnsupportedEngine | R::UnsupportedPlatform => C::UnsupportedEngine,
+        R::DockerUnavailable => C::EngineUnavailable,
+        R::PortUnavailable => C::InvalidConfiguration,
+        R::ReleaseUnavailable | R::DashboardUnavailable => C::NetworkUnavailable,
+        _ => C::Unknown,
+    }
+}
+
+/// A blocked answer that is the normal next step (sign in, accept the agreement), the person's own
+/// choice, or the CLI busy with another call: not a failure.
+fn blocked_normally(reason: Option<local_eval::Reason>) -> bool {
+    use local_eval::Reason as R;
+    matches!(
+        reason,
+        Some(
+            R::AuthenticationRequired
+                | R::EulaAcceptanceRequired
+                | R::EulaDeclined
+                | R::LocalCommandBusy
+        )
+    )
+}
+
+const MIB: u64 = 1024 * 1024;
+
+/// What local setup needs, as `local_eval`'s minimums say it.
+fn needed(cpu_short: bool, memory_short: bool, disk_short: bool) -> telemetry::Resources {
+    telemetry::Resources {
+        cpu_short,
+        memory_short,
+        disk_short,
+        disk_nearly_full: false,
+        cpu_needed_millis: local_eval::MIN_ENGINE_CPUS * 1000,
+        cpu_available_millis: None,
+        memory_needed_mib: local_eval::MIN_ENGINE_MEMORY_BYTES / MIB,
+        memory_available_mib: None,
+        disk_needed_mib: local_eval::MIN_ENGINE_FREE_DISK_BYTES / MIB,
+        disk_available_mib: None,
+    }
+}
+
+/// A shortfall the CLI or OpenBot's check after a failed call named, with the numbers it said: CPUs,
+/// and GiB to one decimal.
+pub fn resources_of_shortfall(shortfall: &local_eval::Shortfall) -> telemetry::Resources {
+    let number = |said: &Option<String>, scale: f64| {
+        said.as_deref()
+            .and_then(|said| said.parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .map(|value| (value * scale).floor() as u64)
+    };
+    telemetry::Resources {
+        disk_nearly_full: shortfall.nearly_full,
+        cpu_available_millis: number(&shortfall.cpus, 1000.0),
+        memory_available_mib: number(&shortfall.memory_gb, 1024.0),
+        disk_available_mib: number(&shortfall.disk_gb, 1024.0),
+        ..needed(shortfall.cpu, shortfall.memory, shortfall.disk)
+    }
+}
+
+/// What the Account step measured of an engine too small (`local_eval::engine_size_terms`).
+pub fn resources_of_measure(
+    cpu: bool,
+    memory: bool,
+    disk: bool,
+    measured: &local_eval::EngineMeasure,
+) -> telemetry::Resources {
+    telemetry::Resources {
+        cpu_available_millis: Some(measured.cpus.saturating_mul(1000)),
+        memory_available_mib: Some(measured.memory_bytes / MIB),
+        disk_available_mib: measured.free_disk_bytes.map(|free| free / MIB),
+        ..needed(cpu, memory, disk)
+    }
+}
+
+/// A failed CLI call: its category, and its class. Cancelled is the person's or Stop's doing.
+fn call_failure(
+    failing_step: telemetry::FailingStep,
+    failure: local_eval::Failure,
+) -> Option<SetupFailure> {
+    (failure != local_eval::Failure::Cancelled).then(|| SetupFailure {
+        cli_failure: Some(cli_failure(failure)),
+        ..SetupFailure::new(failing_step, class_of_cli_failure(failure))
+    })
+}
+
+/// A CLI report that failed, or blocked on anything but the next normal step, as a setup failure.
+fn reported_failure(
+    failing_step: telemetry::FailingStep,
+    outcome: local_eval::Outcome,
+    reason: Option<local_eval::Reason>,
+    shortfall: Option<&local_eval::Shortfall>,
+) -> Option<SetupFailure> {
+    let failed = match outcome {
+        local_eval::Outcome::Completed => false,
+        local_eval::Outcome::Failed => true,
+        local_eval::Outcome::Blocked => !blocked_normally(reason),
+    };
+    if !failed {
+        return None;
+    }
+    let mut failure = SetupFailure::new(
+        failing_step,
+        reason.map_or(telemetry::SetupErrorClass::Unknown, class_of_cli_reason),
+    );
+    failure.cli_reason = reason.map(cli_reason);
+    if let Some(shortfall) = shortfall.filter(|short| short.cpu || short.memory || short.disk) {
+        failure.error_class = telemetry::SetupErrorClass::InsufficientResources;
+        failure.resources = Some(resources_of_shortfall(shortfall));
+    }
+    Some(failure)
+}
+
+/// `local setup`, `start` or `update` as the window ran it: a failure, or None.
+pub fn report_failure(
+    failing_step: telemetry::FailingStep,
+    result: &Result<local_eval::Report, local_eval::Failure>,
+) -> Option<SetupFailure> {
+    match result {
+        Ok(report) => reported_failure(
+            failing_step,
+            report.outcome,
+            report.reason,
+            report.shortfall.as_ref(),
+        ),
+        Err(failure) => call_failure(failing_step, *failure),
+    }
+}
+
+/// `local connect`: a failure, or None.
+pub fn connection_failure(
+    result: &Result<local_eval::Connection, local_eval::Failure>,
+) -> Option<SetupFailure> {
+    let step = telemetry::FailingStep::LocalConnect;
+    match result {
+        Ok(connection) => reported_failure(step, connection.outcome, connection.reason, None),
+        Err(failure) => call_failure(step, *failure),
+    }
+}
+
+/// The Account step's check: a failure when it stops setup, or None when it is waiting or fine.
+pub fn terms_failure(
+    result: &Result<local_eval::Terms, local_eval::Failure>,
+) -> Option<SetupFailure> {
+    let step = telemetry::FailingStep::AccountCheck;
+    match result {
+        Ok(local_eval::Terms::Blocked { reason, .. }) => Some(SetupFailure {
+            cli_reason: Some(cli_reason(*reason)),
+            ..SetupFailure::new(step, class_of_cli_reason(*reason))
+        }),
+        Ok(local_eval::Terms::EngineTooSmall {
+            cpu,
+            memory,
+            disk,
+            measured,
+            ..
+        }) => Some(SetupFailure {
+            resources: Some(resources_of_measure(*cpu, *memory, *disk, measured)),
+            ..SetupFailure::new(step, telemetry::SetupErrorClass::InsufficientResources)
+        }),
+        Ok(_) => None,
+        Err(failure) => call_failure(step, *failure),
+    }
+}
+
+/// The browser sign-in has started.
+pub fn sign_in_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    record(
+        app,
+        telemetry::EventData::SignIn {
+            outcome: telemetry::SignInOutcome::Started,
+            duration_ms: None,
+            cli_failure: None,
+        },
+    );
+}
+
+/// How the browser sign-in ended, after `took`.
+pub fn sign_in_ended<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    result: &Result<local_eval::AccountSignIn, local_eval::Failure>,
+    took: std::time::Duration,
+) {
+    record(app, sign_in_outcome(result, took));
+}
+
+fn sign_in_outcome(
+    result: &Result<local_eval::AccountSignIn, local_eval::Failure>,
+    took: std::time::Duration,
+) -> telemetry::EventData {
+    use telemetry::SignInOutcome as O;
+    let (outcome, failure) = match result {
+        Ok(signed) if signed.signed_in => (O::Completed, None),
+        Ok(_) => (O::Failed, None),
+        Err(local_eval::Failure::Cancelled) => (O::Cancelled, None),
+        Err(failure) => (O::Failed, Some(cli_failure(*failure))),
+    };
+    telemetry::EventData::SignIn {
+        outcome,
+        duration_ms: Some(u64::try_from(took.as_millis()).unwrap_or(u64::MAX)),
+        cli_failure: failure,
+    }
 }
 
 pub fn pull_completed<R: tauri::Runtime>(
@@ -499,7 +1038,9 @@ pub fn shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 
 /// A CLI pinned as this debug build's developer CLI, exactly as `local_eval::installed` checks one,
 /// that records each call and answers `telemetry link` with `skipped`. With `slow`, it takes longer
-/// to answer than the handshake's eight-second budget. Only for a test in its own process.
+/// to answer than the handshake's eight-second budget. `answer` makes it answer every call with
+/// that output and exit code instead, as the real CLI answers a `local setup` that failed. Only for
+/// a test in its own process.
 #[cfg(test)]
 pub(crate) mod fake_cli {
     use std::path::PathBuf;
@@ -518,6 +1059,11 @@ fn main() {
     std::fs::write(dir.join("calls"), calls).unwrap();
     if dir.join("slow").exists() {
         std::thread::sleep(std::time::Duration::from_secs(30));
+    }
+    if let Ok(answer) = std::fs::read_to_string(dir.join("answer")) {
+        print!("{answer}");
+        let code = std::fs::read_to_string(dir.join("exit")).unwrap_or_default();
+        std::process::exit(code.trim().parse().unwrap_or(0));
     }
     println!("{{\"type\":\"skipped\"}}");
 }
@@ -553,6 +1099,12 @@ fn main() {
             Self { dir }
         }
 
+        /// Answer every later call with `stdout` and `exit`.
+        pub(crate) fn answer(&self, stdout: &str, exit: i32) {
+            std::fs::write(self.dir.join("answer"), stdout).unwrap();
+            std::fs::write(self.dir.join("exit"), exit.to_string()).unwrap();
+        }
+
         /// Every call so far, one line each, arguments space-separated.
         pub(crate) fn calls(&self) -> String {
             std::fs::read_to_string(self.dir.join("calls")).unwrap_or_default()
@@ -560,6 +1112,65 @@ fn main() {
 
         pub(crate) fn forget_calls(&self) {
             let _ = std::fs::remove_file(self.dir.join("calls"));
+        }
+    }
+}
+
+/// A telemetry ingest on 127.0.0.1 for tests: each event the emitter posts, as its JSON body and
+/// the installation id it was sent under.
+#[cfg(test)]
+pub(crate) mod sink {
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    pub(crate) struct Sink {
+        pub(crate) endpoint: String,
+        received: mpsc::Receiver<(String, serde_json::Value)>,
+    }
+
+    impl Sink {
+        pub(crate) fn start() -> Self {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let endpoint = format!("http://{}/ingest", listener.local_addr().unwrap());
+            let (sent, received) = mpsc::channel();
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    let Ok(mut stream) = stream else { return };
+                    let mut reader = BufReader::new(stream.try_clone().unwrap());
+                    let (mut length, mut id) = (0usize, String::new());
+                    loop {
+                        let mut line = String::new();
+                        if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                            break;
+                        }
+                        let lower = line.to_ascii_lowercase();
+                        if let Some(value) = lower.strip_prefix("content-length:") {
+                            length = value.trim().parse().unwrap_or(0);
+                        }
+                        if lower.starts_with("x-copilotkit-telemetry-id:") {
+                            id = line["x-copilotkit-telemetry-id:".len()..].trim().to_owned();
+                        }
+                    }
+                    let mut body = vec![0; length];
+                    reader.read_exact(&mut body).unwrap();
+                    let _ = stream.write_all(
+                        b"HTTP/1.1 202 Accepted\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}",
+                    );
+                    if sent
+                        .send((id, serde_json::from_slice(&body).unwrap()))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            });
+            Self { endpoint, received }
+        }
+
+        /// The next event posted within `wait`.
+        pub(crate) fn next(&self, wait: Duration) -> Option<(String, serde_json::Value)> {
+            self.received.recv_timeout(wait).ok()
         }
     }
 }
@@ -1019,10 +1630,308 @@ mod tests {
         assert_eq!(calls, 2);
     }
 
+    /// Every 1.0 release candidate said `1.0.0`: the version was cut at its first `-`. The whole
+    /// version is sent now, a release candidate's label included, and anything after a `-` that is
+    /// not a closed label is still cut off, so no text can ride along in it.
+    #[test]
+    fn the_app_version_keeps_its_release_candidate_label() {
+        let version = |package: &str| super::context(package).unwrap().app_version.to_string();
+        assert_eq!(version("1.0.0-rc.5"), "1.0.0-rc.5");
+        assert_eq!(version("1.0.0"), "1.0.0");
+        assert_eq!(version("0.3.4-beta"), "0.3.4-beta");
+        assert_eq!(version("1.2.3-private-name"), "1.2.3");
+        assert_eq!(version("1.2.3-rc.1.2"), "1.2.3");
+        assert_eq!(version("1.2.3+build.7"), "1.2.3");
+        let emitter = telemetry::Telemetry::open_with_env(
+            temp_root("app-version"),
+            super::context("1.0.0-rc.5").unwrap(),
+            telemetry::Config::disabled_for_tests(),
+            telemetry::EnvOverride::Enabled,
+        )
+        .unwrap();
+        assert_eq!(
+            emitter
+                .runtime_env()
+                .get("OPENBOT_VERSION")
+                .map(String::as_str),
+            Some("1.0.0-rc.5")
+        );
+        let pattern = regex::Regex::new(telemetry::APP_VERSION_PATTERN).unwrap();
+        for sent in ["1.0.0-rc.5", "1.0.0", "0.3.4-beta", "1.2.3"] {
+            assert!(pattern.is_match(sent), "{sent}");
+        }
+        for refused in [
+            "1.2-private-name",
+            "1.0.0-rc.x",
+            "/Users/someone",
+            "1.0.0-rc.5\n",
+        ] {
+            assert!(!pattern.is_match(refused), "{refused}");
+            assert!(telemetry::AppVersion::parse(refused).is_err(), "{refused}");
+        }
+    }
+
+    /// The classes a failure's words map to, on what engines, registries and the system say. A
+    /// row whose step says nothing (deployment, services, answering, cleanup) gets the words'
+    /// class rather than `unknown`; a permission or a full disk wins over any step's class.
+    #[test]
+    fn a_failure_is_classed_by_its_step_and_then_its_words() {
+        use telemetry::{FailingStep as S, SetupErrorClass as C};
+        for (text, class) in [
+            ("Error response from daemon: pull access denied for openbot-agent-langgraph-agui, repository does not exist or may require 'docker login'", Some(C::ImagePullFailed)),
+            ("Error response from daemon: manifest for ghcr.io/copilotkit/openbot-server:1.0.0 not found: manifest unknown", Some(C::ImagePullFailed)),
+            ("toomanyrequests: You have reached your pull rate limit.", Some(C::ImagePullFailed)),
+            ("Get \"https://registry-1.docker.io/v2/\": dial tcp: lookup registry-1.docker.io: no such host", Some(C::NetworkUnavailable)),
+            ("net/http: TLS handshake timeout", Some(C::NetworkUnavailable)),
+            ("permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock", Some(C::PermissionDenied)),
+            ("Access is denied.", Some(C::PermissionDenied)),
+            ("failed to register layer: write /usr/lib/x: no space left on device", Some(C::InsufficientResources)),
+            ("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?", Some(C::EngineUnavailable)),
+            ("Part of OpenBot stopped during startup.", None),
+        ] {
+            assert_eq!(class_of_text(text), class, "{text}");
+        }
+        assert_eq!(
+            class_of_row(S::Services, "Part of OpenBot stopped during startup."),
+            C::Unknown
+        );
+        assert_eq!(
+            class_of_row(S::Deployment, "dial tcp: lookup github.com: no such host"),
+            C::NetworkUnavailable
+        );
+        assert_eq!(
+            class_of_row(S::InstallEngine, "The installer failed."),
+            C::EngineInstallFailed
+        );
+        assert_eq!(
+            class_of_row(S::InstallEngine, "permission denied"),
+            C::PermissionDenied
+        );
+        assert_eq!(
+            class_of_row(S::Engine, "dial tcp: i/o timeout"),
+            C::EngineUnavailable
+        );
+        assert_eq!(class_of_row(S::Images, "something"), C::ImagePullFailed);
+    }
+
+    /// What the CLI answers maps to a failure only when it stops setup: the agreement, a sign-in
+    /// and a cancel are the person's next step or choice. A resource the CLI found short carries
+    /// what it measured against what setup needs.
+    #[test]
+    fn cli_answers_are_failures_only_when_they_stop_setup() {
+        use telemetry::{FailingStep as S, SetupErrorClass as C};
+        let report = |outcome, reason, shortfall| {
+            Ok(local_eval::Report {
+                outcome,
+                stack: None,
+                reason,
+                readiness: local_eval::Readiness::Unknown,
+                licence: local_eval::Licence::Unknown,
+                licence_expires_at: None,
+                update_to: None,
+                checks_passed: false,
+                shortfall,
+            })
+        };
+        for normal in [
+            local_eval::Reason::AuthenticationRequired,
+            local_eval::Reason::EulaAcceptanceRequired,
+        ] {
+            assert_eq!(
+                report_failure(
+                    S::LocalSetup,
+                    &report(local_eval::Outcome::Blocked, Some(normal), None)
+                ),
+                None
+            );
+        }
+        assert_eq!(
+            report_failure(
+                S::LocalSetup,
+                &report(local_eval::Outcome::Completed, None, None)
+            ),
+            None
+        );
+        assert_eq!(
+            report_failure(S::LocalSetup, &Err(local_eval::Failure::Cancelled)),
+            None
+        );
+        assert_eq!(
+            report_failure(S::LocalStart, &Err(local_eval::Failure::DownloadStalled)),
+            Some(SetupFailure {
+                cli_failure: Some(telemetry::CliFailure::DownloadStalled),
+                ..SetupFailure::new(S::LocalStart, C::NetworkUnavailable)
+            })
+        );
+        let short = local_eval::Shortfall {
+            disk: true,
+            cpus: Some("9.8".into()),
+            memory_gb: Some("18.9".into()),
+            disk_gb: Some("0".into()),
+            ..local_eval::Shortfall::default()
+        };
+        let failed = report_failure(
+            S::LocalSetup,
+            &report(
+                local_eval::Outcome::Failed,
+                Some(local_eval::Reason::ResourcesShort),
+                Some(short),
+            ),
+        )
+        .unwrap();
+        assert_eq!(failed.error_class, C::InsufficientResources);
+        assert_eq!(
+            failed.cli_reason,
+            Some(telemetry::CliReason::ResourcesShort)
+        );
+        assert_eq!(
+            failed.resources,
+            Some(telemetry::Resources {
+                cpu_short: false,
+                memory_short: false,
+                disk_short: true,
+                disk_nearly_full: false,
+                cpu_needed_millis: 4000,
+                cpu_available_millis: Some(9800),
+                memory_needed_mib: 4096,
+                memory_available_mib: Some(19353),
+                disk_needed_mib: 40960,
+                disk_available_mib: Some(0),
+            })
+        );
+        // #1358's screen for an engine local setup does not run on, such as OrbStack.
+        assert_eq!(
+            terms_failure(&Ok(local_eval::Terms::Blocked {
+                reason: local_eval::Reason::UnsupportedEngine,
+                said: Some("OrbStack is not supported".into()),
+                switch_engine: true,
+            })),
+            Some(SetupFailure {
+                cli_reason: Some(telemetry::CliReason::UnsupportedEngine),
+                ..SetupFailure::new(S::AccountCheck, C::UnsupportedEngine)
+            })
+        );
+        assert_eq!(
+            terms_failure(&Ok(local_eval::Terms::EngineNotReady {
+                cause: "docker_unavailable"
+            })),
+            None
+        );
+    }
+
+    /// The Account step's check, asked every few seconds: an engine too small is one
+    /// `setup_failed` with what was measured against what setup needs, for as long as the answer
+    /// stays the same; an account found signed in is one `restored` sign-in, and none after a
+    /// sign-in this launch completed.
+    #[test]
+    fn the_account_check_says_a_refusal_once_and_a_restored_account_once() {
+        if crate::test_support::isolated_process(
+            "desktop_telemetry::tests::the_account_check_says_a_refusal_once_and_a_restored_account_once",
+        ) {
+            return;
+        }
+        std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
+        std::env::remove_var("DO_NOT_TRACK");
+        // The links a sign-in and an account check start reach this CLI, never a real one.
+        let _cli = fake_cli::FakeCli::pinned("account-check-cli", false);
+        let app = tauri::test::mock_builder()
+            .manage(DesktopTelemetry::for_tests(
+                temp_root("account-check"),
+                true,
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let handle = app.handle().clone();
+        let small = || {
+            Ok(local_eval::Terms::EngineTooSmall {
+                podman: true,
+                cpu: false,
+                memory: true,
+                disk: false,
+                wsl: false,
+                drive: None,
+                measured: local_eval::EngineMeasure {
+                    cpus: 4,
+                    memory_bytes: 2 * 1024 * 1024 * 1024,
+                    free_disk_bytes: Some(100 * 1024 * 1024 * 1024),
+                },
+            })
+        };
+        for _ in 0..3 {
+            let _ = finish_account_check(&handle, small());
+        }
+        let required = || {
+            Ok(local_eval::Terms::Required {
+                accepted: false,
+                version: "1".into(),
+                url: "https://example.invalid/terms".into(),
+                organization_name: "Synthetic".into(),
+            })
+        };
+        for _ in 0..3 {
+            let _ = finish_account_check(&handle, required());
+        }
+        let queued = app.state::<DesktopTelemetry>().queued();
+        assert_eq!(
+            queued,
+            vec![
+                telemetry::EventData::SetupFailed {
+                    step: telemetry::Step::Install,
+                    error_class: telemetry::SetupErrorClass::InsufficientResources,
+                    failing_step: Some(telemetry::FailingStep::AccountCheck),
+                    cli_reason: None,
+                    cli_failure: None,
+                    resources: Some(telemetry::Resources {
+                        cpu_short: false,
+                        memory_short: true,
+                        disk_short: false,
+                        disk_nearly_full: false,
+                        cpu_needed_millis: 4000,
+                        cpu_available_millis: Some(4000),
+                        memory_needed_mib: 4096,
+                        memory_available_mib: Some(2048),
+                        disk_needed_mib: 40960,
+                        disk_available_mib: Some(102400),
+                    }),
+                },
+                telemetry::EventData::SignIn {
+                    outcome: telemetry::SignInOutcome::Restored,
+                    duration_ms: None,
+                    cli_failure: None,
+                },
+            ]
+        );
+        // A completed sign-in this launch: the check after it is not a restored account.
+        let fresh = tauri::test::mock_builder()
+            .manage(DesktopTelemetry::for_tests(
+                temp_root("account-check-fresh"),
+                true,
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let _ = finish_sign_in(
+            fresh.handle(),
+            Ok(local_eval::AccountSignIn { signed_in: true }),
+        );
+        let _ = finish_account_check(fresh.handle(), required());
+        assert_eq!(fresh.state::<DesktopTelemetry>().queued(), vec![]);
+        // Opted out: nothing at all.
+        let off = tauri::test::mock_builder()
+            .manage(DesktopTelemetry::for_tests(
+                temp_root("account-check-off"),
+                false,
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let _ = finish_account_check(off.handle(), small());
+        let _ = finish_account_check(off.handle(), required());
+        assert!(off.state::<DesktopTelemetry>().emitter.snapshot().is_err());
+    }
+
     pub(super) fn context() -> telemetry::Context {
         telemetry::Context {
             distribution: telemetry::Distribution::Desktop,
-            app_version: telemetry::NumericVersion::parse("1.2.3").unwrap(),
+            app_version: telemetry::AppVersion::parse("1.2.3").unwrap(),
             platform: telemetry::Platform::Macos,
             arch: telemetry::Architecture::Aarch64,
             os_version: None,
@@ -1160,6 +2069,29 @@ mod tests {
         }));
         fixture.invoke(serde_json::json!({
             "kind": "activated"
+        }));
+        // The desktop sends these itself, from where it sees the failure or the sign-in; the
+        // window cannot send them, with or without the new fields.
+        fixture.invoke(serde_json::json!({
+            "kind": "setup_failed",
+            "step": "account",
+            "error_class": "unknown"
+        }));
+        fixture.invoke(serde_json::json!({
+            "kind": "setup_failed",
+            "step": "account",
+            "error_class": "unknown",
+            "failing_step": "local_setup",
+            "detail": "/Users/someone/OpenBot: no space left on device"
+        }));
+        fixture.invoke(serde_json::json!({
+            "kind": "sign_in",
+            "outcome": "completed"
+        }));
+        fixture.invoke(serde_json::json!({
+            "kind": "sign_in",
+            "outcome": "completed",
+            "email": "someone@example.invalid"
         }));
 
         let queued = fixture.queued();
