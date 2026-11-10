@@ -591,7 +591,28 @@ function approvalText(event: AuditEvent): string | undefined {
       ? GATE_DECISIONS[behaviour]
       : undefined;
   }
+  // An admin's guidance for auto-review, saved or taken away. Nothing was decided about an action.
+  if (event.eventType === "approval.guidance_changed")
+    return payload.after === null ? "Guidance removed" : "Guidance saved";
   return undefined;
+}
+
+/**
+ * What a guidance save says under its decision: the words saved, and how the reading the admin saw
+ * put them, or the words a removal took away.
+ */
+function guidanceLines(payload: Record<string, unknown>): string[] {
+  const reading = (payload.reading ?? {}) as { summary?: unknown };
+  if (typeof payload.after === "string")
+    return [
+      `Guidance: “${payload.after}”`,
+      ...(typeof reading.summary === "string" && reading.summary
+        ? [`Read as: ${reading.summary}`]
+        : []),
+    ];
+  return typeof payload.before === "string"
+    ? [`Removed: “${payload.before}”`]
+    : [];
 }
 
 const PERSON_DECISIONS: Record<string, string> = {
@@ -811,6 +832,8 @@ export function decisionDetails(
     typeof ruleAuthoring.text === "string"
   )
     lines.push(`Written from: “${ruleAuthoring.text}”`);
+  if (event.eventType === "approval.guidance_changed")
+    lines.push(...guidanceLines(payload));
   if (
     decision.mode === "dry-run" &&
     decision.allowed === false &&

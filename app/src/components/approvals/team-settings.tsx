@@ -5,6 +5,7 @@ import {
   IconEyeCheck,
   IconKey,
   IconLock,
+  IconNotes,
   IconSend,
   IconShare,
   IconSparkles,
@@ -40,6 +41,7 @@ import {
   teamApprovalSettingsMutationOptions,
   updateTeamApprovalRuleMutationOptions,
 } from "@/lib/approvals";
+import { reviewerGuidanceQueryOptions } from "@/lib/reviewer-guidance/queries";
 import { queryClient } from "@/query-client";
 import { HOST_LABELS, LabelSelect, RuleForm, RuleRow } from "./rules";
 import { SharedUseRequests } from "./shared-use-requests";
@@ -85,6 +87,7 @@ const ACTION_KIND_LABELS: Record<ActionKindPolicy, string> = {
  */
 export function TeamApprovalSettings() {
   const inbox = useQuery(approvalInboxOptions());
+  const guidance = useQuery(reviewerGuidanceQueryOptions());
   const team = useMutation(teamApprovalSettingsMutationOptions(queryClient));
   const addTeamRule = useMutation(
     createTeamApprovalRuleMutationOptions(queryClient),
@@ -129,6 +132,26 @@ export function TeamApprovalSettings() {
                     team.mutate({ enforceAutoReview })
                   }
                 />
+              </ItemActions>
+            </Item>
+            <Separator />
+            <Item render={<Link to="/admin/approvals/guidance" />} size="sm">
+              <ItemMedia variant="icon">
+                <IconNotes />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>Guidance for auto-review</ItemTitle>
+                <ItemDescription>
+                  {guidance.isPending
+                    ? null
+                    : guidance.error
+                      ? "Couldn't load the guidance."
+                      : (guidance.data ??
+                        "None. Tell the reviewer what your organization needs a person for.")}
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <IconChevronRight className="size-4 text-muted-foreground" />
               </ItemActions>
             </Item>
             <Separator />

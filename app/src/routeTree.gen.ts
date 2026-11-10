@@ -67,6 +67,7 @@ import { Route as AuthedAppGroupNewRouteImport } from './routes/_authed/_app/gro
 import { Route as AuthedAppSScreenRouteImport } from './routes/_authed/_app/s/$screen'
 import { Route as AuthedAppStartStartIdRouteImport } from './routes/_authed/_app/start.$startId'
 import { Route as AuthedAdminApprovalsDescribeRouteImport } from './routes/_authed/admin/approvals_.describe'
+import { Route as AuthedAdminApprovalsGuidanceRouteImport } from './routes/_authed/admin/approvals_.guidance'
 import { Route as AuthedAdminBoundariesIndexRouteImport } from './routes/_authed/admin/boundaries_.$index'
 import { Route as AuthedAdminBoundariesNewRouteImport } from './routes/_authed/admin/boundaries_.new'
 import { Route as AuthedAdminComponentsIndexRouteImport } from './routes/_authed/admin/components/index'
@@ -404,6 +405,12 @@ const AuthedAdminApprovalsDescribeRoute =
     path: '/approvals/describe',
     getParentRoute: () => AuthedAdminRouteRoute,
   } as any)
+const AuthedAdminApprovalsGuidanceRoute =
+  AuthedAdminApprovalsGuidanceRouteImport.update({
+    id: '/approvals_/guidance',
+    path: '/approvals/guidance',
+    getParentRoute: () => AuthedAdminRouteRoute,
+  } as any)
 const AuthedAdminBoundariesIndexRoute =
   AuthedAdminBoundariesIndexRouteImport.update({
     id: '/boundaries_/$index',
@@ -687,6 +694,7 @@ export interface FileRoutesByFullPath {
   '/s/$screen': typeof AuthedAppSScreenRoute
   '/start/$startId': typeof AuthedAppStartStartIdRoute
   '/admin/approvals/describe': typeof AuthedAdminApprovalsDescribeRoute
+  '/admin/approvals/guidance': typeof AuthedAdminApprovalsGuidanceRoute
   '/admin/boundaries/$index': typeof AuthedAdminBoundariesIndexRoute
   '/admin/boundaries/new': typeof AuthedAdminBoundariesNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
@@ -780,6 +788,7 @@ export interface FileRoutesByTo {
   '/s/$screen': typeof AuthedAppSScreenRoute
   '/start/$startId': typeof AuthedAppStartStartIdRoute
   '/admin/approvals/describe': typeof AuthedAdminApprovalsDescribeRoute
+  '/admin/approvals/guidance': typeof AuthedAdminApprovalsGuidanceRoute
   '/admin/boundaries/$index': typeof AuthedAdminBoundariesIndexRoute
   '/admin/boundaries/new': typeof AuthedAdminBoundariesNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
@@ -880,6 +889,7 @@ export interface FileRoutesById {
   '/_authed/_app/s/$screen': typeof AuthedAppSScreenRoute
   '/_authed/_app/start/$startId': typeof AuthedAppStartStartIdRoute
   '/_authed/admin/approvals_/describe': typeof AuthedAdminApprovalsDescribeRoute
+  '/_authed/admin/approvals_/guidance': typeof AuthedAdminApprovalsGuidanceRoute
   '/_authed/admin/boundaries_/$index': typeof AuthedAdminBoundariesIndexRoute
   '/_authed/admin/boundaries_/new': typeof AuthedAdminBoundariesNewRoute
   '/_authed/admin/components/$name': typeof AuthedAdminComponentsNameRoute
@@ -978,6 +988,7 @@ export interface FileRouteTypes {
     | '/s/$screen'
     | '/start/$startId'
     | '/admin/approvals/describe'
+    | '/admin/approvals/guidance'
     | '/admin/boundaries/$index'
     | '/admin/boundaries/new'
     | '/admin/components/$name'
@@ -1071,6 +1082,7 @@ export interface FileRouteTypes {
     | '/s/$screen'
     | '/start/$startId'
     | '/admin/approvals/describe'
+    | '/admin/approvals/guidance'
     | '/admin/boundaries/$index'
     | '/admin/boundaries/new'
     | '/admin/components/$name'
@@ -1170,6 +1182,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/s/$screen'
     | '/_authed/_app/start/$startId'
     | '/_authed/admin/approvals_/describe'
+    | '/_authed/admin/approvals_/guidance'
     | '/_authed/admin/boundaries_/$index'
     | '/_authed/admin/boundaries_/new'
     | '/_authed/admin/components/$name'
@@ -1628,6 +1641,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAdminApprovalsDescribeRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
+    '/_authed/admin/approvals_/guidance': {
+      id: '/_authed/admin/approvals_/guidance'
+      path: '/approvals/guidance'
+      fullPath: '/admin/approvals/guidance'
+      preLoaderRoute: typeof AuthedAdminApprovalsGuidanceRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
     '/_authed/admin/boundaries_/$index': {
       id: '/_authed/admin/boundaries_/$index'
       path: '/boundaries/$index'
@@ -1921,6 +1941,7 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminSkillsRoute: typeof AuthedAdminSkillsRoute
   AuthedAdminIndexRoute: typeof AuthedAdminIndexRoute
   AuthedAdminApprovalsDescribeRoute: typeof AuthedAdminApprovalsDescribeRoute
+  AuthedAdminApprovalsGuidanceRoute: typeof AuthedAdminApprovalsGuidanceRoute
   AuthedAdminBoundariesIndexRoute: typeof AuthedAdminBoundariesIndexRoute
   AuthedAdminBoundariesNewRoute: typeof AuthedAdminBoundariesNewRoute
   AuthedAdminComponentsNameRoute: typeof AuthedAdminComponentsNameRoute
@@ -1953,6 +1974,7 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminSkillsRoute: AuthedAdminSkillsRoute,
   AuthedAdminIndexRoute: AuthedAdminIndexRoute,
   AuthedAdminApprovalsDescribeRoute: AuthedAdminApprovalsDescribeRoute,
+  AuthedAdminApprovalsGuidanceRoute: AuthedAdminApprovalsGuidanceRoute,
   AuthedAdminBoundariesIndexRoute: AuthedAdminBoundariesIndexRoute,
   AuthedAdminBoundariesNewRoute: AuthedAdminBoundariesNewRoute,
   AuthedAdminComponentsNameRoute: AuthedAdminComponentsNameRoute,

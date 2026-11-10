@@ -250,6 +250,16 @@ export type ApprovalTeamSettings = {
   /** The kinds the admin closed. A kind not named is `open`. */
   actionKinds: Partial<Record<ActionKind, ActionKindPolicy>>;
 };
+/**
+ * A save of the admin's guidance for auto-review: the words, or null to remove them, and the
+ * independent reading of the words the admin saw before saving (./reviewer-guidance.ts).
+ */
+export type ReviewerGuidanceChange = {
+  text: string | null;
+  /** The admin's email, as the trail's other admin rows name them. */
+  actor?: string;
+  reading?: { summary: string | null; explanation: string };
+};
 /** Rules, preferences and team settings. Optional on the store so older fakes keep working. */
 export type ApprovalPolicyStore = {
   preferences(ownerUserId: string): Promise<ApprovalPreferences>;
@@ -298,6 +308,19 @@ export type ApprovalPolicyStore = {
    * asked and what they answered. Admin reads only. Optional so older fakes keep working.
    */
   recentRequests?(limit: number): Promise<ApprovalRecord[]>;
+  /**
+   * The admin's guidance for auto-review, or null for none. Read by the gate for every review and by
+   * the admin's screen; never part of what members read. Optional so older fakes keep working.
+   */
+  reviewerGuidance?(): Promise<string | null>;
+  /**
+   * Save the admin's guidance, or remove it with `text: null`, with one `approval.guidance_changed`
+   * row naming who, the guidance before and after, and how it was read when it was saved.
+   */
+  setReviewerGuidance?(
+    by: string,
+    change: ReviewerGuidanceChange,
+  ): Promise<string | null>;
   /** The newest request in this conversation for an equivalent action, other than this call. */
   findEquivalent(input: {
     ownerUserId: string;

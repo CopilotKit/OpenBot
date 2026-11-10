@@ -617,6 +617,13 @@
       "when": 1794272949123,
       "tag": "0087_approval_conversation_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1794274563155,
+      "tag": "0088_approval_reviewer_guidance",
+      "breakpoints": true
     }
   ]
 }
