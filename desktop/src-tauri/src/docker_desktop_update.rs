@@ -218,10 +218,56 @@ pub fn signed_by_docker_on_mac(codesign_dv: &str) -> bool {
         .any(|line| line.trim() == format!("TeamIdentifier={TEAM_ID}"))
 }
 
+/*
+ * A PATH GOES INTO POWERSHELL IN AN ENVIRONMENT VARIABLE, NEVER AFTER `-Command`.
+ *
+ * PowerShell joins every argument after `-Command` into the command text, so `$args` is empty and
+ * the path becomes code. Docker's installer is downloaded to "...\245422\Docker Desktop
+ * Installer.exe": on a live Windows run (Docker Desktop 4.31.1, updating to 4.98.0) the signature
+ * check exited 1 on a parse error at that path, with nothing on stdout, and every update stopped
+ * with "could not be checked". The same query reading the path from the environment answered
+ * "Valid|CN=Docker Inc, O=Docker Inc, ...". A variable is read as it is, spaces and quotes included.
+ */
+
+/// The environment variable the signature check reads the installer's path from.
+pub const VERIFY_PATH: &str = "OPENBOT_VERIFY_PATH";
+
+/// The environment variable the all-users install reads the installer's path from.
+pub const INSTALLER_PATH: &str = "OPENBOT_INSTALLER_PATH";
+
 /// What PowerShell is asked about the installer's Authenticode signature: its status, and the
-/// subject of the certificate that signed it, as `<status>|<subject>`.
-pub const AUTHENTICODE_QUERY: &str = "$s = Get-AuthenticodeSignature -LiteralPath $args[0]; \
-                                      '{0}|{1}' -f $s.Status, $s.SignerCertificate.Subject";
+/// subject of the certificate that signed it, as `<status>|<subject>`. The path is `VERIFY_PATH`.
+pub const AUTHENTICODE_QUERY: &str =
+    "$s = Get-AuthenticodeSignature -LiteralPath $env:OPENBOT_VERIFY_PATH; \
+     '{0}|{1}' -f $s.Status, $s.SignerCertificate.Subject";
+
+/// Windows PowerShell running `script`, with `path` in the environment variable `variable`.
+///
+/// `PSModulePath` is left for Windows PowerShell to build: a PowerShell 7 parent passes its own
+/// down, whose modules Windows PowerShell cannot load (as `provider_oauth` found).
+pub fn powershell_with_path(script: &str, variable: &str, path: &Path) -> std::process::Command {
+    let mut command = crate::quiet::command("powershell");
+    command
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env(variable, path)
+        .env_remove("PSModulePath");
+    command
+}
+
+/// The all-users install: Windows' approval prompt, then Docker's installer as an administrator,
+/// waited for, its exit code PowerShell's. The installer's path is `INSTALLER_PATH`.
+pub fn elevated_install(installer: &Path, arguments: &[String]) -> std::process::Command {
+    let quoted: Vec<String> = arguments
+        .iter()
+        .map(|argument| format!("'{}'", argument.replace('\'', "''")))
+        .collect();
+    let script = format!(
+        "$p = Start-Process -FilePath $env:{INSTALLER_PATH} -ArgumentList {} -Verb RunAs -Wait \
+         -PassThru; exit $p.ExitCode",
+        quoted.join(",")
+    );
+    powershell_with_path(&script, INSTALLER_PATH, installer)
+}
 
 /// Whether the answer to `AUTHENTICODE_QUERY` is a valid signature by Docker Inc.
 pub fn signed_by_docker_on_windows(answer: &str) -> bool {
@@ -556,14 +602,7 @@ pub fn verify_mac(dmg: &Path) -> Result<Mounted, Problem> {
 
 /// The answer to `AUTHENTICODE_QUERY` about the file at `path`, or what PowerShell said instead.
 pub fn authenticode(path: &Path) -> Result<String, String> {
-    let output = crate::quiet::command("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            AUTHENTICODE_QUERY,
-        ])
-        .arg(path)
+    let output = powershell_with_path(AUTHENTICODE_QUERY, VERIFY_PATH, path)
         .output()
         .map_err(|error| format!("Get-AuthenticodeSignature: {error}"))?;
     let answer = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -743,20 +782,7 @@ fn run_installer(installer: &Path, per_user: bool) -> Installed {
     let output = if per_user {
         crate::quiet::command(installer).args(&arguments).output()
     } else {
-        // Windows' approval prompt, then Docker's installer as an administrator, waited for.
-        let quoted: Vec<String> = arguments
-            .iter()
-            .map(|argument| format!("'{}'", argument.replace('\'', "''")))
-            .collect();
-        let script = format!(
-            "$p = Start-Process -FilePath $args[0] -ArgumentList {} -Verb RunAs -Wait -PassThru; \
-             exit $p.ExitCode",
-            quoted.join(",")
-        );
-        crate::quiet::command("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-            .arg(installer)
-            .output()
+        elevated_install(installer, &arguments).output()
     };
     match output {
         Ok(output) if output.status.success() => Installed::Done,
@@ -1211,6 +1237,43 @@ Internal requirements count=1 size=180
             Some("https://desktop.docker.com/win/main/amd64/appcast.xml")
         );
         assert_eq!(appcast_url("linux", "x86_64"), None);
+    }
+
+    /// The path is in the environment, not after `-Command`, for the check and for the install.
+    #[test]
+    fn a_path_reaches_powershell_in_the_environment_not_after_the_command() {
+        let installer = Path::new(
+            r"C:\Users\Administrator\OpenBot\openbot-engine\docker-desktop\245422\Docker Desktop Installer.exe",
+        );
+        let shape = |command: &std::process::Command, variable: &str| {
+            let args: Vec<String> = command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect();
+            assert_eq!(args.len(), 4, "{args:?}");
+            assert_eq!(&args[..3], ["-NoProfile", "-NonInteractive", "-Command"]);
+            assert!(args[3].contains(&format!("$env:{variable}")), "{}", args[3]);
+            assert!(!args[3].contains("$args"), "{}", args[3]);
+            let envs: Vec<_> = command.get_envs().collect();
+            assert!(envs.contains(&(std::ffi::OsStr::new(variable), Some(installer.as_os_str()))));
+            assert!(envs.contains(&(std::ffi::OsStr::new("PSModulePath"), None)));
+        };
+        shape(
+            &powershell_with_path(AUTHENTICODE_QUERY, VERIFY_PATH, installer),
+            VERIFY_PATH,
+        );
+        let install = elevated_install(installer, &install_arguments("windows", false, None));
+        shape(&install, INSTALLER_PATH);
+        let script = install
+            .get_args()
+            .nth(3)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(
+            script.contains("-ArgumentList 'install','--quiet' -Verb RunAs"),
+            "{script}"
+        );
     }
 
     /*
