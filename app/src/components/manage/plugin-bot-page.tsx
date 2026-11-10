@@ -19,6 +19,7 @@ import {
   sharedSectionSentence,
 } from "@/components/plugins/shared-approval-fields";
 import { SkippedToolsNotice } from "@/components/plugins/skipped-tools-notice";
+import { DescribeGrants } from "@/components/manage/describe-grants";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -447,6 +448,28 @@ export function PluginBotPage({
         </PageEmpty>
       ) : (
         <>
+          {/*
+           * The whole set in a sentence, above the switches that set it one action at a time. Not for
+           * an app every Bot always has: there is nothing to choose.
+           */}
+          {alwaysOn ? null : (
+            <DescribeGrants
+              agentId={agentId}
+              appKey={key}
+              appTitle={appTitle}
+              botName={botName}
+              sharedNeeded={
+                shared && !sharedApp?.approval
+                  ? (sharedApp?.needed ?? {
+                      audience: "team",
+                      outsideInput: false,
+                      members: [],
+                    })
+                  : null
+              }
+            />
+          )}
+
           <Input
             aria-label={`Search ${appTitle} actions`}
             className="mt-6"
