@@ -72,6 +72,7 @@ const emit = (name, payload) => {
 fake.emit = emit;
 const relaunch = location.hash === "#start";
 const signingIn = location.hash === "#signin";
+const licence = location.hash === "#licence";
 let finishSetUp;
 const setUp = new Promise((resolve) => (finishSetUp = resolve));
 const stack = {
@@ -128,7 +129,7 @@ export async function invoke(command) {
         ? { url: "https://dashboard.copilotkit.ai/cli-auth/device?user_code=WXYZ-2345", userCode: "WXYZ-2345" }
         : null;
     case "local_eval_terms":
-      return { status: "required", accepted: true, version: "developer-edition-2026-10-01-web", url: "https://copilotkit.ai/legal/developer-edition", organizationName: "Acme" };
+      return { status: "required", accepted: !licence, version: "developer-edition-2026-10-01-web", url: "https://copilotkit.ai/legal/developer-edition", organizationName: "Acme" };
     case "set_up_local_eval":
       return setUp;
     case "local_eval_download":
@@ -312,22 +313,56 @@ describe.skipIf(!asked)("the window through a first run", () => {
  * seen only by scrolling. It is pinned to the bottom of the card's visible area now, and Continue
  * still scrolls into view above it.
  */
-describe.skipIf(!asked)("the background install's row", () => {
+/*
+ * Seen on Windows F (a 1016x839 window): "Connect your AI" was taller than the window and scrolled
+ * in its card. First the "Installing OpenBot in the background" row sat below the fold; then, with
+ * only that row pinned, Continue sat under it with a grey sliver showing until the person
+ * scrolled. A step's foot is pinned now: its action and the background row, both in view, with the
+ * step scrolling above them.
+ */
+describe.skipIf(!asked)("a setup step's foot", () => {
   for (const [width, height] of [
     [1016, 839],
     [720, 560],
   ] as const) {
-    test(`at ${width}x${height}, is in view on the Account and AI steps, and never covers Continue`, async () => {
-      const inView = async (page: Page) => {
-        const row = await page
-          .getByRole("listitem", {
-            name: "Installing OpenBot in the background",
-          })
-          .boundingBox();
-        expect(row).not.toBeNull();
-        expect(row?.y ?? -1).toBeGreaterThanOrEqual(0);
-        expect((row?.y ?? 0) + (row?.height ?? 0)).toBeLessThanOrEqual(height);
-        return row;
+    test(`at ${width}x${height}, its action and the background row are in view and uncovered on Account, Licence and AI`, async () => {
+      const inView = async (_page: Page, box: Box, what: string) => {
+        expect({ what, found: box !== null }).toEqual({ what, found: true });
+        expect({ what, top: (box?.y ?? -1) >= 0 }).toEqual({ what, top: true });
+        expect({
+          what,
+          bottom: (box?.y ?? 0) + (box?.height ?? 0) <= height,
+        }).toEqual({ what, bottom: true });
+      };
+      const background = async (page: Page) =>
+        inView(
+          page,
+          await page
+            .getByRole("listitem", {
+              name: "Installing OpenBot in the background",
+            })
+            .boundingBox(),
+          "the background row",
+        );
+      /** The button is in view, and what is at its middle is the button: nothing covers it. */
+      const pressable = async (page: Page, name: string) => {
+        const button = page.getByRole("button", { name, exact: true });
+        await inView(page, await button.boundingBox(), name);
+        const covered = await page.evaluate((label) => {
+          const found = [...document.querySelectorAll("button")].find(
+            (button) => button.textContent?.trim() === label,
+          );
+          if (!found) return "missing";
+          const box = found.getBoundingClientRect();
+          const top = document.elementFromPoint(
+            box.left + box.width / 2,
+            box.top + box.height / 2,
+          );
+          return top && (top === found || found.contains(top))
+            ? null
+            : (top?.textContent ?? "nothing").slice(0, 60);
+        }, name);
+        expect({ name, coveredBy: covered }).toEqual({ name, coveredBy: null });
       };
       const account = await browser.newPage({ viewport: { width, height } });
       try {
@@ -339,9 +374,24 @@ describe.skipIf(!asked)("the background install's row", () => {
           .getByRole("heading", { name: "Sign in to CopilotKit" })
           .waitFor();
         await account.waitForTimeout(600);
-        await inView(account);
+        await background(account);
       } finally {
         await account.close();
+      }
+      const licence = await browser.newPage({ viewport: { width, height } });
+      try {
+        await open(licence, "#licence");
+        await licence
+          .getByRole("button", { name: "Install", exact: true })
+          .click();
+        await licence
+          .getByRole("heading", { name: "Accept the license agreement" })
+          .waitFor();
+        await licence.waitForTimeout(600);
+        await pressable(licence, "Accept");
+        await background(licence);
+      } finally {
+        await licence.close();
       }
       const page = await browser.newPage({ viewport: { width, height } });
       try {
@@ -350,29 +400,19 @@ describe.skipIf(!asked)("the background install's row", () => {
           .getByRole("button", { name: "Install", exact: true })
           .click();
         await page.getByRole("heading", { name: "Connect your AI" }).waitFor();
+        await page.waitForTimeout(600);
+        // Before a choice, and after it, with its form open and the step scrolling above.
+        await pressable(page, "Continue");
+        await background(page);
         await page.getByText("Any OpenAI-compatible endpoint").click();
         await page.getByLabel("Base URL", { exact: true }).waitFor();
         await page.waitForTimeout(600);
-        await inView(page);
-        // Scrolled to its end, Continue is in view above the row, not under it.
-        await page.evaluate(() => {
-          const sheet = document.querySelector("main > .sheet") as HTMLElement;
-          sheet.scrollTop = sheet.scrollHeight;
-        });
-        await page.waitForTimeout(200);
-        const row = await inView(page);
-        const go = await page
-          .getByRole("button", { name: "Continue", exact: true })
-          .boundingBox();
-        expect(go).not.toBeNull();
-        expect((go?.y ?? 0) + (go?.height ?? 0)).toBeLessThanOrEqual(
-          row?.y ?? 0,
-        );
-        expect(go?.y ?? -1).toBeGreaterThanOrEqual(0);
+        await pressable(page, "Continue");
+        await background(page);
       } finally {
         await page.close();
       }
-    }, 30_000);
+    }, 40_000);
   }
 });
 

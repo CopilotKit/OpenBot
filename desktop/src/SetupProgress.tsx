@@ -358,6 +358,7 @@ function useDownloadWhere(downloads: Downloads | null): DownloadWhere | null {
     watched.waited,
     watched.perPart,
     watched.steady,
+    watched.allIn,
   );
 }
 
@@ -655,6 +656,18 @@ export function installingBehind({
  */
 export function BehindSlot({ children }: { children?: ReactNode }) {
   return <div className="behind-slot">{children}</div>;
+}
+
+/**
+ * The foot of a setup step: its actions (Continue, Accept, Try again) and the background install's
+ * row, pinned to the bottom of the card's view while the step scrolls above them.
+ *
+ * On Windows F the AI step was taller than the window: first the background row sat below the
+ * fold, then, with only that row pinned, Continue sat under it with a grey sliver showing until
+ * the person scrolled. Both are in view now, on every step that has them.
+ */
+export function StepFooter({ children }: { children?: ReactNode }) {
+  return <div className="step-footer">{children}</div>;
 }
 
 export function formatDownloadBytes(bytes: number): string {
