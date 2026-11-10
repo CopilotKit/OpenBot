@@ -36,7 +36,7 @@ pub(crate) struct Server {
 impl Server {
     pub(crate) fn start(answer: impl Fn(&Seen, usize) -> Reply + Send + Sync + 'static) -> Self {
         let ports = crate::test_support::hold_ports();
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = below_the_ephemeral_ports();
         let address = format!("http://{}", listener.local_addr().unwrap());
         let seen = Arc::new(Mutex::new(Vec::new()));
         let body_bytes = Arc::new(AtomicUsize::new(0));
@@ -71,6 +71,22 @@ impl Server {
     pub(crate) fn sent(&self) -> usize {
         self.body_bytes.load(Ordering::SeqCst)
     }
+}
+
+/**
+A listener on a port below the range the system hands out for port 0.
+
+This server closes each connection first, so each one leaves its port in TIME_WAIT for a while after
+the test. On a port the system hands out, that broke `env`'s port tests, which bind port 0 and then
+probe the port they got without SO_REUSEADDR: the probe found it taken. Below that range, nothing
+asks the system for it.
+*/
+fn below_the_ephemeral_ports() -> TcpListener {
+    let start = 20_000 + (std::process::id() % 8_000) as u16;
+    (0..2_000u16)
+        .map(|step| 20_000 + (start - 20_000 + step * 7) % 10_000)
+        .find_map(|port| TcpListener::bind(("127.0.0.1", port)).ok())
+        .expect("a free port from 20000 to 29999")
 }
 
 fn serve(

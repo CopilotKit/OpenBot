@@ -42,6 +42,18 @@ backup taken before the upgrade instead. Three things change for an existing dep
   from the downloaded image instead of fetching its own. With less free disk than OpenBot needs,
   the first screen says how much is free and how much is needed, and the downloads start once
   there is room. Nothing is installed before you are asked.
+- **An update downloads before you click Update.** As soon as a new version of OpenBot is out,
+  OpenBot Desktop downloads what it runs in the background while you keep working: the parts for
+  the Bots you use, and the back end's when it changes too, kept until you update. Clicking Update
+  then stops OpenBot, backs it up, updates it and starts it again, with nothing big left to
+  download. The update offer, Settings › This computer and the setup window say the new version
+  "is downloading in the background (40%).", then that it "is ready to install. It takes a few
+  minutes." It downloads one part at a time, waits while OpenBot starts, stops or updates, never
+  stops or restarts anything you are using, and downloads nothing when the disk is short of room
+  (the Desktop log says why, and the update downloads as before). Candidates and internal builds,
+  which do not update themselves, download nothing ahead.
+- **downloads.copilotkit.ai serves each release's `desktop-images.json`.** It answered 403, so the
+  list of a release's images could only come from GitHub.
 - **Setup says what it's doing in plain words, and what's installing behind every step.** The
   setup window said "Preparing the engine machine", "Installing Podman", "Waiting for the back end"
   and "Updating the back end to 0.16.0-rc.10", and a tester waiting on the first step couldn't tell
