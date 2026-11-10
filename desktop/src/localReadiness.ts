@@ -256,7 +256,7 @@ export function engineTooSmallSaid(shortfall: Shortfall): string {
 
 // Compiler-enforced: a new upstream reason or failure breaks the build here.
 const reasonRows: Record<LocalReason, ReadinessRow> = {
-  "authentication-required": blocked("Sign in to CopilotKit.", "sign-in"),
+  "authentication-required": blocked("Sign in to OpenBot.", "sign-in"),
   // Acceptance is an explicit step of its own; retrying start cannot satisfy it.
   "eula-acceptance-required": blocked(
     "The license agreement hasn't been accepted yet.",

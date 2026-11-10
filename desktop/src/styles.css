@@ -797,27 +797,6 @@ button.sign-in-with {
   height: 100%;
 }
 
-/*
- * CopilotKit's logotype, leading the screens that sign in to a CopilotKit account. 30px, so the
- * drawn logotype clears the brand's 28px minimum, with half its height kept clear below it.
- */
-.copilotkit-logo {
-  display: block;
-  align-self: flex-start;
-  margin: 0 0 16px;
-}
-
-.copilotkit-logo img {
-  display: block;
-  height: 30px;
-  width: auto;
-}
-
-/* Under a card's heading, the same half-height kept clear above it as below. */
-.local-needs .copilotkit-logo {
-  margin-top: 12px;
-}
-
 /* The app's tabs: a muted track with the active tab raised in the card colour. */
 .segmented {
   display: inline-flex;
@@ -1460,18 +1439,24 @@ a:hover {
   letter-spacing: -0.015em;
 }
 
-/* The lockup at the top of every setup step: smaller, as the app's sidebar header sets it. */
-.setup-header .lockup {
+/*
+ * The lockup at the top of every setup step, and on the sign-in a stopped setup asks for: smaller,
+ * as the app's sidebar header sets it.
+ */
+.setup-header .lockup,
+.local-needs .lockup {
   margin: 0;
   gap: 8px;
 }
 
-.setup-header .orb {
+.setup-header .orb,
+.local-needs .orb {
   width: 22px;
   height: 22px;
 }
 
-.setup-header .lockup span {
+.setup-header .lockup span,
+.local-needs .lockup span {
   font-size: var(--text-base);
   line-height: 20px;
   font-weight: 600;
@@ -1479,10 +1464,16 @@ a:hover {
 }
 
 /* "by CopilotKit" beside the name: the same size, quieter, so OpenBot still leads. */
-.setup-header .lockup span.lockup-by {
+.setup-header .lockup span.lockup-by,
+.local-needs .lockup span.lockup-by {
   font-weight: 400;
   color: var(--text-secondary);
   margin-left: -2px;
+}
+
+/* On the sign-in card, under its heading: the same space above it as below. */
+.local-needs .lockup {
+  margin: 12px 0;
 }
 
 /* The developer half of a failure: present, and never the headline. */

@@ -14,8 +14,8 @@ export const USAGE_DATA_DOC =
  * and where the button is. Install sets up OpenBot and CopilotKit Intelligence on this computer;
  * everything else waits for a screen that needs it.
  *
- * The usage-data notice is here because this is the first screen, and the CopilotKit sign-in that
- * links the data to an account is the next. Settings > General turns it off.
+ * The usage-data notice is here because this is the first screen, and the sign-in that links the
+ * data to an account is the next. Settings > General turns it off.
  *
  * The big downloads start while this screen shows, before Install is clicked, and its line says how
  * far they are (`EarlyDownloadsLine`).
@@ -46,9 +46,8 @@ export function Welcome({
       </div>
       <EarlyDownloadsLine firstScreen />
       <p className="footnote">
-        OpenBot sends CopilotKit usage data, linked to your CopilotKit account.
-        It never sends your conversations, files or keys. You can turn this off
-        in Settings.{" "}
+        OpenBot sends usage data, linked to your OpenBot account. It never sends
+        your conversations, files or keys. You can turn this off in Settings.{" "}
         <ExternalLink href={USAGE_DATA_DOC}>What OpenBot sends</ExternalLink>
       </p>
       {failure}

@@ -122,7 +122,7 @@ const orbStack = JSON.parse(
 );
 
 /**
- * 1.0.0 sat on "Checking your CopilotKit account…" for 15 minutes on a Mac with OrbStack, asking
+ * 1.0.0 sat on "Checking your OpenBot account…" for 15 minutes on a Mac with OrbStack, asking
  * every 2 seconds, then said only that it couldn't check the account. The refusal is said at once,
  * with what to do about it, and nothing is asked again until Try again.
  */
@@ -146,9 +146,9 @@ test("an engine local setup doesn't run on is said at once, with how to switch",
   expect(screen.queryByText(/rootful/)).toBeNull();
   expect(screen.getByText("docker context use desktop-linux")).toBeTruthy();
   expect(
-    screen.queryByText("Couldn’t check your CopilotKit account. Try again."),
+    screen.queryByText("Couldn’t check your OpenBot account. Try again."),
   ).toBeNull();
-  expect(screen.queryByText("Checking your CopilotKit account…")).toBeNull();
+  expect(screen.queryByText("Checking your OpenBot account…")).toBeNull();
 
   // Not waited out: no second check comes by itself.
   await new Promise((settle) => setTimeout(settle, 2500));
@@ -188,7 +188,7 @@ function expectWorking(screen: ReturnType<typeof render>, said: string) {
 }
 
 /**
- * 1.0.0 on a new Mac said only "Checking your CopilotKit account…" for minutes while Install put
+ * 1.0.0 on a new Mac said only "Checking your OpenBot account…" for minutes while Install put
  * Podman in behind this step. Signed in first, it says what the agreement is waiting on, in
  * Install's own words as Install moves on. Then it goes on to the agreement by itself.
  */
@@ -228,14 +228,14 @@ test("while Install sets up the engine, the signed-in account step says so, then
     screen.getByRole("heading", { name: "Setting up this computer" }),
   ).toBeTruthy();
   expectWorking(screen, "Preparing the engine machine.");
-  expect(screen.queryByText("Checking your CopilotKit account…")).toBeNull();
+  expect(screen.queryByText("Checking your OpenBot account…")).toBeNull();
 
   // Install moves on, and so does what the step says. Asking again, it still says it.
   screen.rerender(account("Starting the engine machine."));
   expectWorking(screen, "Starting the engine machine.");
   await waitFor(() => expect(asked).toBe(2), { timeout: 3000 });
   expectWorking(screen, "Starting the engine machine.");
-  expect(screen.queryByText("Checking your CopilotKit account…")).toBeNull();
+  expect(screen.queryByText("Checking your OpenBot account…")).toBeNull();
   answerSecond(noEngine);
 
   // The engine answers: the agreement.
@@ -311,11 +311,11 @@ test("a refused engine with no sentence from the CLI says so in OpenBot's words"
 test("a sign-in waiting on the browser shows its code and a way back to the page", async () => {
   waitingSignIn();
   const screen = await startSigningIn();
-  await screen.findByText("Finish signing in to CopilotKit in your browser…");
+  await screen.findByText("Finish signing in to OpenBot in your browser…");
   expect((await screen.findByText(PAGE.userCode)).tagName).toBe("STRONG");
   expect(
     screen.getByText(
-      "If your browser shows the CopilotKit dashboard after you choose an organization, open the sign-in page again.",
+      "If your browser shows a dashboard after you choose an organization, open the sign-in page again.",
     ),
   ).toBeTruthy();
   const link = screen.getByRole("link", { name: "Open the sign-in page" });
@@ -368,7 +368,7 @@ test("the sign-in leads with OpenBot, while it waits and once stopped", async ()
   ).toBeTruthy();
   expect(screen.getByText(/requires a free license key/)).toBeTruthy();
   expect(
-    screen.getByText(/does NOT send traffic data to CopilotKit/),
+    screen.getByText(/does NOT send traffic data to OpenBot by CopilotKit\./),
   ).toBeTruthy();
   expect(screen.getByText("by CopilotKit")).toBeTruthy();
   expect(screen.queryByRole("img", { name: "CopilotKit" })).toBeNull();

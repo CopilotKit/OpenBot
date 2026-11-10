@@ -66,20 +66,6 @@ const NOT_SHOWN: { file: string; text: string; why: string }[] = [
   },
 ];
 
-/**
- * Shown text that names CopilotKit Intelligence on purpose. One entry, by exact text: OpenBot
- * Desktop's Account step, where the name says what the free license key is for and matches the
- * CopilotKit sign-in page that opens next. Everywhere else it is still the back end (see
- * .claude/skills/openbot-copy). A new entry is a product decision, not a way past this test.
- */
-const SHOWN_BY_DECISION: { file: string; text: string; why: string }[] = [
-  {
-    file: "desktop/src/CopilotKitAccount.tsx",
-    text: "This version of OpenBot runs self-contained on this computer. It uses a local version of CopilotKit Intelligence, which requires a free license key.",
-    why: "the Account step names what the sign-in gets a license key for",
-  },
-];
-
 /** Calls whose arguments are written to a log, never shown. */
 const LOGGING =
   /^(console\.\w+|log|logger\.\w+|this\.log|options\.log|note|once|sayUnavailable)$/;
@@ -197,7 +183,7 @@ function shown(word = WORD): string[] {
 }
 
 const isNotShown = (hit: string) =>
-  [...NOT_SHOWN, ...SHOWN_BY_DECISION].some(
+  NOT_SHOWN.some(
     (entry) => hit.startsWith(`${entry.file}:`) && hit.includes(entry.text),
   );
 
@@ -223,9 +209,93 @@ test("no text a person reads says back end in two words", () => {
   ).toEqual([]);
 });
 
+/**
+ * "CopilotKit" alone, where a person reads it. Product copy says OpenBot, and "OpenBot by
+ * CopilotKit" where the company has to be named: the license agreement, a privacy line, the Account
+ * step's header (see .claude/skills/openbot-copy). Not caught: an address
+ * (`github.com/CopilotKit/OpenBot`) or a name inside one (`X-CopilotKit-Telemetry-Id`), which a
+ * person follows or never sees.
+ */
+const COPILOTKIT = /(?<!OpenBot\s+by\s+)(?<![\w/.-])CopilotKit(?![\w/-])/;
+
+/**
+ * Text that says CopilotKit and is never shown, or says it beside OpenBot's name. Each entry must
+ * still match, so one that goes stale is removed rather than kept as a hole.
+ */
+const COPILOTKIT_ALLOWED: { file: string; text: string; why: string }[] = [
+  {
+    file: "desktop/src/Sections.tsx",
+    text: "by CopilotKit",
+    why: "the Account step's header, beside OpenBot's name: it reads OpenBot by CopilotKit",
+  },
+  {
+    file: "server/src/config.ts",
+    text: "CopilotKit Intelligence is required and is not configured",
+    why: "a boot refusal, printed to the operator's terminal before the server listens",
+  },
+  {
+    file: "server/src/request-actor.ts",
+    text: "A CopilotKit run requires",
+    why: "a refusal of a run with no signed-in user, which the signed-in app never makes",
+  },
+  {
+    file: "server/src/learning/ensure-container.ts",
+    text: "CopilotKit",
+    why: "the operator's Learning setup, which names the CopilotKit CLI the operator runs",
+  },
+];
+
+test("no text a person reads says CopilotKit, except as OpenBot by CopilotKit", () => {
+  expect(
+    shown(COPILOTKIT).filter(
+      (hit) =>
+        !COPILOTKIT_ALLOWED.some(
+          (entry) =>
+            hit.startsWith(`${entry.file}:`) && hit.includes(entry.text),
+        ),
+    ),
+  ).toEqual([]);
+});
+
+test("every exception for CopilotKit still matches", () => {
+  const found = shown(COPILOTKIT);
+  expect(
+    COPILOTKIT_ALLOWED.filter(
+      (entry) =>
+        !found.some(
+          (hit) => hit.startsWith(`${entry.file}:`) && hit.includes(entry.text),
+        ),
+    ),
+  ).toEqual([]);
+});
+
+test("the CopilotKit scan catches the name alone and passes OpenBot by CopilotKit and addresses", () => {
+  for (const said of [
+    "Sign in to CopilotKit",
+    "OpenBot sends CopilotKit usage data",
+    "CopilotKit's dashboard",
+    "Your CopilotKit🪁 account",
+  ])
+    expect({ said, caught: COPILOTKIT.test(said) }).toEqual({
+      said,
+      caught: true,
+    });
+  for (const said of [
+    "accept the OpenBot by CopilotKit license agreement",
+    "the OpenBot by\n        CopilotKit license agreement",
+    "https://github.com/CopilotKit/OpenBot/issues/new/choose",
+    "X-CopilotKit-Telemetry-Id",
+    "@copilotkit/react-core",
+  ])
+    expect({ said, caught: COPILOTKIT.test(said) }).toEqual({
+      said,
+      caught: false,
+    });
+});
+
 test("every exception for text that is never shown still matches", () => {
   const found = shown();
-  const stale = [...NOT_SHOWN, ...SHOWN_BY_DECISION].filter(
+  const stale = NOT_SHOWN.filter(
     (entry) =>
       !found.some(
         (hit) => hit.startsWith(`${entry.file}:`) && hit.includes(entry.text),
