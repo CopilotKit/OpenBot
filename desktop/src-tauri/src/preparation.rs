@@ -318,13 +318,30 @@ pub fn installation_pull_set(
     release: &Path,
     harness: Option<&HarnessChoice>,
 ) -> Result<Vec<String>, Problem> {
+    installation_pull_set_by(
+        |settings| stack::compose_command_for(address, root, settings),
+        root,
+        release,
+        harness,
+    )
+}
+
+/// [`installation_pull_set`], with the Compose to ask made by `compose` from the image settings:
+/// an engine's, or before there is one, OpenBot's own standalone Compose
+/// (`stack::standalone_compose_command`).
+pub fn installation_pull_set_by(
+    compose: impl FnOnce(&stack::Secrets) -> std::process::Command,
+    root: &Path,
+    release: &Path,
+    harness: Option<&HarnessChoice>,
+) -> Result<Vec<String>, Problem> {
     let picked = crate::harness::picked(harness, release).map_err(Problem::from)?;
     let settings = image_settings(release, picked.as_ref())?;
     let installed = picked
         .as_ref()
         .and_then(|picked| picked.installed_port())
         .is_some();
-    let mut images = stack::installation_images_in(address, root, release, installed, &settings)?;
+    let mut images = stack::installation_images_by(compose(&settings), root, release, installed)?;
     for published in [
         crate::plan::SIGN_IN_IMAGE,
         crate::plan::CHATGPT_SIGN_IN_IMAGE,

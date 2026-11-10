@@ -579,7 +579,8 @@ fn what_downloads_early_depends_on_the_engine_install_will_use() {
             installed_before: false,
             machine_image: if os == "macos" { mac } else { None },
         };
-    // A new Mac with no engine: everything Install will need.
+    // A new Mac with no engine: everything Install will need, OpenBot's images included, named by
+    // the Compose OpenBot downloads, to load once the engine answers.
     assert_eq!(
         plan(&facts("macos", Choice::InstallPodman, None, false, None)),
         Plan {
@@ -588,6 +589,7 @@ fn what_downloads_early_depends_on_the_engine_install_will_use() {
             compose: true,
             deployment: true,
             images: None,
+            offline_images: Some(NamedBy::OwnCompose),
         }
     );
     // Docker Desktop answering: the images go straight into it, and no engine is downloaded.
@@ -616,7 +618,9 @@ fn what_downloads_early_depends_on_the_engine_install_will_use() {
         )),
         Plan {
             machine_image: mac,
+            compose: true,
             deployment: true,
+            offline_images: Some(NamedBy::OwnCompose),
             ..Plan::default()
         }
     );
@@ -638,7 +642,8 @@ fn what_downloads_early_depends_on_the_engine_install_will_use() {
             "{version} {exists}"
         );
     }
-    // A Docker Desktop that is stopped is not opened before Install.
+    // A Docker Desktop that is stopped is not opened before Install: its Compose names the images,
+    // which download to load once it answers.
     assert_eq!(
         plan(&facts(
             "macos",
@@ -649,9 +654,14 @@ fn what_downloads_early_depends_on_the_engine_install_will_use() {
         )),
         Plan {
             deployment: true,
+            offline_images: Some(NamedBy::Docker),
             ..Plan::default()
         }
     );
+    // A new Windows computer is the same as a new Mac, with the WSL image.
+    let windows = plan(&facts("windows", Choice::InstallPodman, None, false, None));
+    assert_eq!(windows.offline_images, Some(NamedBy::OwnCompose));
+    assert!(windows.compose && windows.podman);
     // Linux's Podman comes from its own packages, and it has no machine.
     assert_eq!(
         plan(&facts("linux", Choice::InstallPodman, None, false, None)),
@@ -852,4 +862,47 @@ fn live_the_first_screen_pulls_the_images_install_would() {
     assert!(early.iter().any(|image| image.contains("openbot-server@")));
     eprintln!("{early:#?}");
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/**
+With no engine on the computer, OpenBot's own Compose, downloaded and run on its own, names the same
+images Install pulls for the default Bot. Downloads Compose (about 30 MB) and runs `docker compose`
+for Install's list to compare with.
+*/
+#[test]
+#[ignore = "downloads Compose and runs docker compose"]
+fn live_openbots_own_compose_names_the_images_with_no_engine() {
+    let root = temp_root("early-own-compose");
+    std::fs::create_dir_all(&root).unwrap();
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    std::fs::copy(
+        repository.join("docker-compose.yml"),
+        root.join("docker-compose.yml"),
+    )
+    .unwrap();
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test-fixtures/release-images/container-images-v0.3.3.json"),
+        crate::deployment::images_path(&root),
+    )
+    .unwrap();
+    let cache = temp_root("early-own-compose-cache");
+    let compose = crate::install::runnable_compose(&cache, &()).expect("Compose");
+    let harness = crate::harness::HarnessChoice {
+        id: crate::harness::DEFAULT_HARNESS.into(),
+        agent_url: None,
+    };
+    let nowhere = root.join(".openbot-early-downloads-nowhere");
+    let own = crate::preparation::installation_pull_set_by(
+        |settings| crate::stack::standalone_compose_command(&compose, &nowhere, settings),
+        &nowhere,
+        &root,
+        Some(&harness),
+    )
+    .expect("the images, from OpenBot's own Compose");
+    let docker = default_bot_images(&Address::new(Engine::Docker, None), &root).expect("Docker's");
+    assert_eq!(own, docker);
+    assert_eq!(own.len(), 5, "{own:#?}");
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&cache);
 }

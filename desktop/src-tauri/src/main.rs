@@ -2083,6 +2083,10 @@ async fn prepare_installation_inner(
         // The first screen may have started pulling these already: wait for it, showing its
         // download, and the pulls below find them there.
         early_downloads::wait_for_images(|downloads| report_downloads(&handle, downloads.clone()));
+        // Downloaded before the engine answered: loaded into it now, so the pulls below find them.
+        early_downloads::load_offline_images(&address, |downloads| {
+            report_downloads(&handle, downloads)
+        });
         // Only what this installation runs: see `installation_pull_set`.
         let images = preparation::installation_pull_set(&address, &root, &root, harness.as_ref())?;
         // Several pulls run at once. Stop is checked before each pull starts; running pulls finish.

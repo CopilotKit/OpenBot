@@ -9,6 +9,7 @@ pub mod deployment_release;
 pub mod docker_config;
 pub mod docker_desktop;
 pub mod early_downloads;
+pub mod early_images;
 pub mod engine;
 pub mod env;
 pub mod harness;

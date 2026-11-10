@@ -203,6 +203,28 @@ pub fn fetch_podman_installer(
     )
 }
 
+/// Compose for this computer, ready to run on its own, for `config` before any engine is here: the
+/// verified download, copied where nothing looks for a provider and made executable.
+pub fn runnable_compose(
+    into: &Path,
+    progress: &dyn crate::early_downloads::Progress,
+) -> Result<PathBuf, String> {
+    let staged = fetch_compose(into, progress)?;
+    let folder = into.join("early-compose");
+    std::fs::create_dir_all(&folder)
+        .map_err(|error| format!("could not make {}: {error}", folder.display()))?;
+    let named = folder.join(compose_provider_name());
+    std::fs::copy(&staged, &named)
+        .map_err(|error| format!("could not copy Compose to {}: {error}", named.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&named, std::fs::Permissions::from_mode(0o755))
+            .map_err(|error| format!("chmod 755 {}: {error}", named.display()))?;
+    }
+    Ok(named)
+}
+
 /// Compose for this computer, into `into`, before Install places it.
 pub fn fetch_compose(
     into: &Path,
