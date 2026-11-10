@@ -309,7 +309,13 @@ function Picker({
       >
         <ComboboxInput
           // On the efforts alone there is no model to search for: it stays only to keep the keys.
-          className={effortsOnly ? "sr-only" : "col-start-1 row-start-1"}
+          className={
+            effortsOnly
+              ? // Out of the popup's flow, so it takes no row: as `sr-only` it still held one, a
+                // blank band under the last effort.
+                "pointer-events-none absolute! m-0! h-0! w-0! overflow-hidden border-0! opacity-0"
+              : "col-start-1 row-start-1"
+          }
           placeholder="Search models"
           showTrigger={false}
         />

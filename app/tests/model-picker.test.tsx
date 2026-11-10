@@ -631,6 +631,11 @@ test("picking a model that thinks keeps the popup on its efforts alone, so no ot
       .map((option) => option.textContent),
   ).toEqual(["Default", "Low", "Medium", "High"]);
   expect(within(open).queryByRole("group", { name: "Models" })).toBeNull();
+  // The search it keeps for the keys takes no room: kept in the popup's flow, it left a blank
+  // band under the last effort (50 px on Windows F).
+  const search = open.querySelector('[data-slot="input-group"]');
+  expect(search?.className).toMatch(/(^|\s)absolute!(\s|$)/);
+  expect(search?.className).toMatch(/(^|\s)h-0!(\s|$)/);
 
   // Picking an effort closes it, into the message box.
   await user.click(within(open).getByRole("option", { name: "High" }));
