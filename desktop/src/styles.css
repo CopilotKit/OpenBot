@@ -1565,3 +1565,27 @@ a:hover {
     background: var(--mark-ground);
   }
 }
+
+/* Get troubleshooting logs, under a failure and in the Status window: one line, two buttons. */
+.troubleshooting {
+  margin-top: 16px;
+}
+
+.troubleshooting p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+.troubleshooting .row {
+  margin-top: 8px;
+}
+
+.troubleshooting .caution {
+  margin-top: 8px;
+}
+
+.troubleshooting .caution.failed {
+  color: var(--destructive);
+}

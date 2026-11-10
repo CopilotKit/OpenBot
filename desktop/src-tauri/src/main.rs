@@ -22,7 +22,7 @@ use openbot_desktop_lib::{
     harness, host_access, install, local_eval, local_eval_state, logging, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
-    telemetry, tray, upgrade, windows as win,
+    telemetry, tray, troubleshooting, upgrade, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -5701,6 +5701,85 @@ fn open_log_folder_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(
 }
 
 /**
+Get troubleshooting logs: the version, the system, what failed, what the container engine says about
+itself, and the end of this app's log and the CLI's, redacted, as one block of text. `failure` is
+what the window that asked was showing, when it was showing one. See `troubleshooting`.
+*/
+#[tauri::command]
+async fn troubleshooting_logs<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    failure: Option<String>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || gather_troubleshooting_logs(&app, failure))
+        .await
+        .map_err(|error| format!("the logs could not be gathered: {error}"))
+}
+
+/// The same logs, saved as a file in the log folder and shown in Finder or Explorer.
+#[tauri::command]
+async fn save_troubleshooting_logs<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    failure: Option<String>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || save_troubleshooting_logs_now(&app, failure))
+        .await
+        .map_err(|error| format!("the logs could not be saved: {error}"))?
+}
+
+fn save_troubleshooting_logs_now<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    failure: Option<String>,
+) -> Result<(), String> {
+    use time::macros::format_description;
+    let text = gather_troubleshooting_logs(app, failure);
+    let folder = logging::folder(app).map_err(|error| error.to_string())?;
+    let stamp = time::OffsetDateTime::now_utc()
+        .format(format_description!(
+            "[year]-[month]-[day]T[hour]-[minute]-[second]Z"
+        ))
+        .unwrap_or_default();
+    let saved = troubleshooting::save(&folder, &text, &stamp)
+        .map_err(|error| format!("could not save the logs: {error}"))
+        .inspect_err(|error| log::warn!("[logs] {error}"))?;
+    // The stamp, not the file name: the log's own scrubbing takes a name that long and mixed for a
+    // key.
+    log::info!("[logs] saved troubleshooting logs in the log folder, stamped {stamp}");
+    tauri_plugin_opener::reveal_item_in_dir(&saved)
+        .map_err(|error| error.to_string())
+        .inspect_err(|error| log::warn!("[logs] could not show the saved logs: {error}"))
+}
+
+fn gather_troubleshooting_logs<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    failure: Option<String>,
+) -> String {
+    let home = logging::home_folder();
+    let folder = logging::folder(app).ok();
+    // The engine the back end runs on; before setup has chosen one, whichever is answering.
+    let engine = local_eval::engine_in_use().or_else(|| {
+        let found = engine::detect();
+        found.address.filter(|_| found.responding)
+    });
+    let text = troubleshooting::gather(troubleshooting::Sources {
+        desktop: format!(
+            "OpenBot Desktop {} ({})",
+            desktop_version(app),
+            build_description(
+                env!("OPENBOT_BUILD_COMMIT"),
+                env!("OPENBOT_BUILD_BRANCH"),
+                env!("OPENBOT_BUILD_TIME").parse().unwrap_or_default(),
+            )
+        ),
+        failure,
+        log_folder: folder.as_deref(),
+        home: home.as_deref(),
+        engine,
+    });
+    log::info!("[logs] gathered troubleshooting logs");
+    text
+}
+
+/**
 Restart OpenBot itself: the server and the worker containers, through Compose. The other
 containers, its database among them, keep running, so nothing is lost and the restart takes seconds.
 Only an OpenBot this session started, whose engine it knows.
@@ -7823,6 +7902,12 @@ fn chose(app: &tauri::AppHandle, item: &str) {
         // who wants it stopped does not necessarily want the application gone.
         "stop" => stop_from_menu(app.clone(), AskedFrom::Menu),
         "status" => show_status_window(app),
+        "logs" => {
+            let app = app.clone();
+            std::thread::spawn(move || {
+                let _ = save_troubleshooting_logs_now(&app, None);
+            });
+        }
         app_update::MENU_ID => check_for_updates_from_menu(app.clone()),
         // Exit rather than hide: quitting is a decision to stop, and the exit handler is what stops
         // the processes with it.
@@ -8039,6 +8124,10 @@ fn utc_minute(seconds: u64) -> String {
     )
 }
 
+/// The menu item that saves the troubleshooting logs and shows the file, in the tray and the
+/// window's menu alike.
+const TROUBLESHOOTING_MENU_LABEL: &str = "Get Troubleshooting Logs…";
+
 /**
 The tray menu and the window's menu bar.
 
@@ -8106,6 +8195,13 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
             icon("status"),
             None::<&str>,
         )?));
+        entries.push(MenuEntry::Plain(MenuItem::with_id(
+            app,
+            "logs",
+            TROUBLESHOOTING_MENU_LABEL,
+            true,
+            None::<&str>,
+        )?));
         entries.push(MenuEntry::Native(PredefinedMenuItem::separator(app)?));
         entries.push(MenuEntry::Native(PredefinedMenuItem::about(
             app,
@@ -8153,6 +8249,13 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
             app,
             "status",
             "Status…",
+            true,
+            None::<&str>,
+        )?));
+        entries.push(MenuEntry::Plain(MenuItem::with_id(
+            app,
+            "logs",
+            TROUBLESHOOTING_MENU_LABEL,
             true,
             None::<&str>,
         )?));
@@ -8711,6 +8814,8 @@ fn main() {
             restart_openbot,
             stop_openbot_from_status,
             open_log_folder,
+            troubleshooting_logs,
+            save_troubleshooting_logs,
         ])
         // A packaged application is not a browser tab. Left alone, WebView2 answers a right-click
         // with Back, Refresh, Save as and Print: Back walks the window out of OpenBot with nothing
