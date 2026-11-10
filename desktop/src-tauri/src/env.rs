@@ -507,13 +507,14 @@ mod port_tests {
     #[test]
     fn saved_ports_survive_reopen_and_only_a_new_conflict_moves() {
         // Ports given back and then bound again are the scenario, so it runs where no other test
-        // can be starting a process that holds them for a moment.
+        // can be starting a process that holds them for a moment. The lock is taken first, so this
+        // process's own port tests wait while the child chooses the same default ports.
+        let _ports = crate::test_support::hold_ports();
         if crate::test_support::isolated_process(
             "env::port_tests::saved_ports_survive_reopen_and_only_a_new_conflict_moves",
         ) {
             return;
         }
-        let _ports = crate::test_support::hold_ports();
         let root = crate::test_support::temp_root("saved-local-ports");
         std::fs::create_dir_all(&root).unwrap();
         let chosen = Ports::default()
@@ -568,6 +569,7 @@ mod port_tests {
     #[test]
     fn the_app_and_api_ports_our_server_container_publishes_are_kept() {
         // The one `server` container publishes both, so both are held while it runs.
+        let _ports = crate::test_support::hold_ports();
         let app = TcpListener::bind("127.0.0.1:0").unwrap();
         let server = TcpListener::bind("127.0.0.1:0").unwrap();
         let preferred = Ports {
