@@ -464,7 +464,9 @@ describe("POST /api/admin/enterprise/capabilities/preview", () => {
     ).toEqual(["host/read_file", "host/run_command"]);
     expect(of(nora)?.activity).toMatchObject({ count: 0, recent: [] });
     // Nothing is looked up for somebody who keeps it.
-    expect(of(cy)?.activity).toBeUndefined();
+    const kept = of(cy);
+    expect(kept).toMatchObject({ capability: "localComputer" });
+    expect(kept).not.toHaveProperty("activity");
 
     // Those losing it come before those keeping it.
     const order = preview.people.map((entry) => entry.id);
@@ -495,7 +497,7 @@ describe("POST /api/admin/enterprise/capabilities/preview", () => {
       before: defaultOn,
       after: offForEverybody,
     });
-    expect(cams?.capabilities[0]?.activity).toBeUndefined();
+    expect(cams?.capabilities[0]).not.toHaveProperty("activity");
     expect(preview.warning).toBe('After this, nobody has "Check-ins".');
   });
 });
