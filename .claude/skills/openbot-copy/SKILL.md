@@ -23,10 +23,9 @@ One word for one thing, everywhere a person can see it.
 |---|---|---|
 | **Bot**, **Bots** (capitalised) | What a person creates, talks to and gives work to. | agent, coworker, assistant, AI |
 | **agent** | Only an outside framework's program, in the places that are about connecting one: "an agent you already run", "AG-UI agent". | Bot, when the thing is a Bot |
-| **app** | A service a Bot uses: Gmail, Google Drive, Notion. | connector, integration, plugin (outside Admin) |
-| **Connections** | The apps and accounts a Bot uses as you, and the page that lists them. | connected accounts, linked accounts |
+| **app** | A service a Bot uses: Gmail, Google Drive, Notion. | connector, integration, plugin |
+| **Connections** | The page that lists the apps and accounts every Bot uses as you: the every-Bot page of Apps. On a Bot's page the same thing is the **Apps** row. | connected accounts, linked accounts |
 | **connect / disconnect / reconnect** | What a person does to their own account. | link (except GitHub and Slack identity, where "link" is the vendor's own word) |
-| **Capabilities** | Your skills and your Bots' memory of you, and the page with both. | plugins |
 | **skill** | A named instruction invoked with `/`. | command, prompt |
 | **admin** | The person who runs OpenBot for everybody. | administrator, owner, operator |
 | **OpenBot** | The product the person is using. | this deployment, the server, the instance |
@@ -37,6 +36,31 @@ One word for one thing, everywhere a person can see it.
 | **backend dashboard** | The backend's own pages, where Learning and projects are managed. | the Intelligence dashboard |
 | **database** | Where OpenBot keeps its data. | Postgres (outside Admin) |
 | **the computers Bots work on**, **Bot computer** | Where a Bot browses and works with files. | sandbox, container |
+
+### The eight, Setup and Vault
+
+A person learns one noun, Bot, and eight things a Bot has (`docs/how-openbot-works.md`). Wherever
+they are listed they keep this order, and a list leaves out one with nothing to set there rather
+than showing an empty row. `app/src/lib/primitives.ts` holds the names, the order and the icons.
+
+| Say | For | Not |
+|---|---|---|
+| **Conversations** | Where you give a Bot work and it reports back. Not a settings row. | channels, groups, chats |
+| **Routines** | Work a Bot starts by itself: what, starts, does, until. One list per Bot. A goal is a routine with an outcome to reach; a check-in is a routine that only tells you. | Goals, Check-ins, Responsibilities (as page or menu names) |
+| **Memory** | What a Bot knows about you and your work. | Capabilities |
+| **Skills** | What a Bot knows how to do: skills you wrote, taught, or OpenBot proposed. One page per scope. | Learning (as a page), What it can do, Skills and access, Capabilities |
+| **Apps** | The services a Bot can reach. Connections is its every-Bot page. | Plugins, What it can do |
+| **Computer** | Where a Bot browses, runs commands and keeps files, and the folders on your machine it may use. | Browsers, This computer (as pages) |
+| **Approvals** | When a Bot stops and asks you. | Approval rules (as a page) |
+| **Activity** | The record of what a Bot did. | Audit |
+| **Setup** | A Bot's name and instructions. | |
+| **Vault** | Your saved logins and keys. No Bot sees what is in it. | Saved logins, Passwords, Keys, Credentials (as pages) |
+
+The scopes are **this Bot** (the Bot's page), **every Bot** (Settings, and Connections for Apps)
+and, in the team edition, **everyone** (Admin). The words in the "Not" column may still appear in a
+sentence ("a goal", "a check-in", "your saved logins") and as a label inside a page. They are not
+the title of a page, a menu entry, or a row that opens one.
+`tests/no-retired-page-names.test.ts` reads every such title.
 
 **Never say Intelligence.** To a person, admins included, it is all OpenBot. Name the part of
 OpenBot instead: "The backend is starting.", "Waiting for the backend", "Couldn't reach the
