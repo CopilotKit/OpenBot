@@ -21,12 +21,18 @@ const ASK_EVERY_MS = 500;
 export function CopilotKitSignInWait({
   attempt,
   waiting,
+  before = waiting,
   onCancel,
 }: {
   /** The sign-in being waited on (`signInToCopilotKit`). */
   attempt: string;
   /** What is said while it waits. */
   waiting: string;
+  /**
+   * What is said until the CLI has opened a page. It checks for a sign-in it already has first, and
+   * opens nothing when it finds one.
+   */
+  before?: string;
   onCancel: () => void;
 }) {
   const [page, setPage] = useState<CopilotKitSignInPage | null>(null);
@@ -55,7 +61,7 @@ export function CopilotKitSignInWait({
 
   return (
     <>
-      <StatusLine>{waiting}</StatusLine>
+      <StatusLine>{page ? waiting : before}</StatusLine>
       {page && (
         <>
           <p className="footnote">
