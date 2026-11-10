@@ -38,8 +38,13 @@ const progressListeners = new Set<
 type QuitEvent = { seq: number; steps: ProgressEvent[] };
 const quitListeners = new Set<(event: { payload: QuitEvent }) => void>();
 
+/** What `local_eval_steps` answers for the CLI call running now: the steps it has finished. */
+let localSteps: unknown = null;
+
 mock.module("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => {
+    // Asked every second while a CLI call runs: not a step of the sequence.
+    if (command === "local_eval_steps") return Promise.resolve(localSteps);
     invokeCalls.push({ command, args });
     return invokeHandler(command, args);
   },
@@ -78,6 +83,7 @@ afterEach(() => {
   // Unmounting can still call (a running local step is cancelled), so clear the record after it.
   cleanup();
   invokeCalls = [];
+  localSteps = null;
   progressListeners.clear();
   quitListeners.clear();
 });
@@ -199,6 +205,14 @@ function expectBehind(
   );
   expect(row.querySelector(".step-spinner") !== null).toBe(!waiting);
   expect(row.textContent?.includes("Waiting for you")).toBe(waiting);
+}
+
+/** What the Start screen's journey says is happening now, with its spinner (`StartJourney`). */
+function expectJourney(view: ReturnType<typeof render>, said: string) {
+  const journey = view.getByRole("region", { name: "How far along" });
+  expect(journey.querySelector(".journey-said")?.textContent).toBe(said);
+  expect(journey.querySelector(".step-spinner")).not.toBeNull();
+  expect(journey.querySelector("progress")).not.toBeNull();
 }
 
 /** A status line that is still working: its words, with the setup rows' spinner beside them. */
@@ -1318,14 +1332,27 @@ test("a start that wakes the computer's software and updates OpenBot says it in 
 
   // What each part said instead: the row that waits says how far along, and what it is doing.
   const said = Object.fromEntries(beats.map(({ beat, text }) => [beat, text]));
+  // One journey over the whole Start: what is happening now, the time left, then the rows.
   expect(said["waking the software"]).toContain(
-    `Getting OpenBot readyStep 3 of 4 · 0s elapsedThis can take a few minutes.${NATIVE.starting}`,
+    "Starting the software OpenBot runs onAbout a minute left · 0s so far",
+  );
+  expect(said["waking the software"]).toContain(
+    "Getting OpenBot readyStep 3 of 4",
   );
   expect(said.updating).toContain(
-    "Getting OpenBot readyStep 3 of 4 · 0s elapsedUpdating OpenBot. Your Bots and data stay as they are. This usually takes a few minutes.",
+    "Getting the update readyAbout 2 minutes left",
   );
+  expect(said.updating).toContain(
+    "Getting OpenBot readyStep 3 of 4Updating OpenBot. Your Bots and data stay as they are.",
+  );
+  // The download is the journey's: what is happening, and its measure beside the time left. The row
+  // keeps what this part is, and has no measure of its own.
+  expect(said["downloading the update"]).toMatch(
+    /Downloading the update(About \d+ minutes|About a minute|Less than a minute) left · 300\.0 MB of 900\.0 MB · \d+s so far/,
+  );
+  expect(said["downloading the update"].match(/MB of/g)).toHaveLength(1);
   expect(said["downloading the update"]).toContain(
-    "Downloading the update.300.0 MB of 900.0 MB",
+    "Getting OpenBot readyStep 3 of 4Updating OpenBot. Your Bots and data stay as they are.",
   );
   expect(said["running on the version it had"]).toContain(KEPT_RELEASE);
 });
@@ -2385,7 +2412,7 @@ test("relaunch with Docker Desktop quit opens it, says so, and starts once it an
   await waitFor(() => expect(docker.wakes).toBe(1));
   await view.findByRole("heading", { name: "Starting OpenBot" });
   await emitDockerHandOff();
-  expectWorking(view, DOCKER_HAND_OFF);
+  expectJourney(view, DOCKER_HAND_OFF);
   const row = view.getByRole("listitem", { name: "Getting OpenBot ready" });
   expect(row.textContent).toContain("Step 3 of 4");
   expect(localSequence()).toEqual([]);
@@ -2427,7 +2454,8 @@ test("relaunch with the engine machine stopped says it is starting it, in plain 
     running: true,
     detail: "Starting the software OpenBot runs on.",
   });
-  expectWorking(view, "Starting the software OpenBot runs on.");
+  // Said as the journey's other lines are: a phrase, with no full stop.
+  expectJourney(view, "Starting the software OpenBot runs on");
   await emitProgress({
     step: "start-machine",
     ok: true,
@@ -2669,13 +2697,13 @@ test("relaunch upgrades an older installation to this app's release as part of S
 });
 
 /*
- * Start's rows are the back end's, and one line under them says what the upgrade is doing. The
- * release row carries that sentence, and each upgrade step now says itself on it as it begins
- * (`upgrade::now_said`). The install and the start report rows of their own as well, and those
- * never take the line over. On Windows the line said "Stopping OpenBot." through a whole start,
- * under a list where every step but the last was complete.
+ * Start updating OpenBot itself, in the Start journey: what the update is doing now, said from the
+ * step running now (`upgrade::now_said`), on the one bar that covers every row. The install and the
+ * start report rows of their own as well, and those never take the line over. On Windows the line
+ * said "Stopping OpenBot." through a whole start, under a list where every step but the last was
+ * complete; later a second row under the journey carried a bar of its own and said the same thing.
  */
-test("the line under Start's rows says the upgrade step running now, never one that finished", async () => {
+test("the journey says the update step running now, never one that finished, on its one bar", async () => {
   setupConnectedLocalStack(
     "/tmp/local-eval-upgrade-steps",
     localStatus("ready", "valid"),
@@ -2688,15 +2716,7 @@ test("the line under Start's rows says the upgrade step running now, never one t
       invokeCalls.some((call) => call.command === "upgrade_and_start"),
     ).toBe(true),
   );
-  // The update's one row: its line, with its spinner and time so far.
-  const lines = () =>
-    [
-      ...view.container.querySelectorAll(
-        '[aria-label="Update progress"] .detail',
-      ),
-    ].map((line) => line.textContent);
-  const updatingRow = () =>
-    within(view.getByRole("listitem", { name: "Updating OpenBot" }));
+  const journey = () => view.getByRole("region", { name: "How far along" });
   const release = (detail: string) => ({
     step: "release",
     ok: true,
@@ -2704,19 +2724,20 @@ test("the line under Start's rows says the upgrade step running now, never one t
     detail,
   });
   // What `upgrade_and_start` reports, in order: the release row as each step begins, and the
-  // install's and the start's own rows between them.
-  const upgrade: [ProgressEvent[], string][] = [
+  // install's and the start's own rows between them. Then what the journey says meanwhile, and the
+  // measure under its bar while a download runs.
+  const upgrade: [ProgressEvent[], string, string?][] = [
     [
       [
         release(
           "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
         ),
       ],
-      "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
+      "Getting the update ready",
     ],
-    [[release("Stopping OpenBot.")], "Stopping OpenBot."],
-    [[release("Backing up your data.")], "Backing up your data."],
-    [[release("Downloading the update.")], "Downloading the update."],
+    [[release("Stopping OpenBot.")], "Getting the update ready"],
+    [[release("Backing up your data.")], "Getting the update ready"],
+    [[release("Downloading the update.")], "Downloading the update"],
     [
       [
         release("Installing the update."),
@@ -2737,8 +2758,20 @@ test("the line under Start's rows says the upgrade step running now, never one t
           ok: true,
           running: true,
           detail: "Downloading local software.",
-          downloadBytes: 1_200_000_000,
+          downloads: {
+            done: 2,
+            total: 5,
+            bytes: 600_000_000,
+            size: 1_200_000_000,
+          },
         },
+      ],
+      "Downloading the update",
+      " · 600.0 MB of 1.2 GB",
+    ],
+    [
+      [
+        { step: "images", ok: true, running: false, detail: "Downloaded." },
         {
           step: "installation",
           ok: true,
@@ -2746,7 +2779,7 @@ test("the line under Start's rows says the upgrade step running now, never one t
           detail: "Installed.",
         },
       ],
-      "Installing the update.",
+      "Installing the update",
     ],
     [
       [
@@ -2765,23 +2798,34 @@ test("the line under Start's rows says the upgrade step running now, never one t
           detail: "Waiting for OpenBot to answer.",
         },
       ],
-      "Starting OpenBot.",
+      "Starting the updated OpenBot",
     ],
   ];
-  for (const [events, said] of upgrade) {
+  let fraction = 0;
+  for (const [events, said, bytes] of upgrade) {
     for (const event of events) await emitProgress(event);
     expect(
       view.getByRole("heading", { name: "Starting OpenBot" }),
     ).toBeTruthy();
-    // One line, the step running now, with the spinner and the time so far.
-    expect(lines()).toEqual([said]);
+    expect(journey().querySelector(".journey-said")?.textContent).toBe(said);
+    expect(journey().querySelector(".journey-bytes")?.textContent ?? null).toBe(
+      bytes ?? null,
+    );
+    // One bar on the screen, the journey's, and it only moves forward.
+    const bars = view.getAllByRole("progressbar");
+    expect(bars).toHaveLength(1);
+    const value = Number(bars[0]?.getAttribute("value"));
+    expect(value).toBeGreaterThanOrEqual(fraction);
+    fraction = value;
+    // No row of its own for the update: the start's row says what this part is.
+    expect(view.queryByRole("list", { name: "Update progress" })).toBeNull();
     expect(
-      view
-        .getByRole("listitem", { name: "Updating OpenBot" })
-        .querySelector(".step-spinner"),
-    ).not.toBeNull();
-    expect(updatingRow().getByText(/elapsed/)).toBeTruthy();
+      view.getByRole("listitem", { name: "Opening OpenBot" }).textContent,
+    ).toContain(
+      "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
+    );
   }
+  expect(fraction).toBeGreaterThan(0.5);
   // Nothing an earlier step said is left on the screen.
   for (const finished of [
     "Stopping OpenBot.",

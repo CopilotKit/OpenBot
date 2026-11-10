@@ -158,8 +158,7 @@ test("a download whose size is not known yet says so, and its bar does not guess
   ).toBeTruthy();
 });
 
-const UPDATING =
-  "Updating OpenBot. Your Bots and data stay as they are. This usually takes a few minutes.";
+const UPDATING = "Updating OpenBot. Your Bots and data stay as they are.";
 
 test("a row with bytes and no items says only the bytes", () => {
   const view = render(

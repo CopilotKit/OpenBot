@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useState } from "react";
+import { journey, leftSaid, position, SETUP } from "./journey";
 
 /** What the Install step says while it downloads OpenBot's software. */
 export const INSTALL_BLURB =
@@ -423,6 +424,9 @@ export type BackEndNow = {
   detail: string | null;
   download: Downloads | null;
   since: number | null;
+  /** The CLI's steps its running setup has finished, and when it began (`local_eval_steps`). */
+  trail?: readonly string[];
+  trailSince?: number | null;
 };
 
 /**
@@ -495,18 +499,43 @@ export function installingBehind({
     );
   }
   if (backEnd.stopped) return null;
-  if (backEnd.running && (backEnd.at === "setup" || backEnd.at === "connect"))
+  if (backEnd.running && (backEnd.at === "setup" || backEnd.at === "connect")) {
+    // What the setup is doing now, from the steps it has finished, and the time left by how long
+    // its parts take (`journey.ts`). A download says its own time left from its speed.
+    const following =
+      backEnd.at === "setup" && (backEnd.trail?.length ?? 0) > 0;
+    const where = following
+      ? journey([
+          {
+            plan: SETUP,
+            state: "now",
+            at: position(
+              SETUP,
+              backEnd.trail ?? [],
+              Math.max(
+                0,
+                (Date.now() -
+                  (backEnd.trailSince ?? backEnd.since ?? Date.now())) /
+                  1000,
+              ),
+            ),
+          },
+        ])
+      : null;
     return row(
       3,
       backEnd.download
         ? withTimeLeft("Downloading the rest of OpenBot.", backEnd.download)
-        : backEnd.detail ||
+        : where
+          ? `${where.said}. ${leftSaid(where.left)}.`
+          : backEnd.detail ||
             "Setting up OpenBot on this computer. This takes a few minutes the first time.",
       {
         downloads: backEnd.download ?? undefined,
         startedAt: backEnd.since ?? undefined,
       },
     );
+  }
   if (backEnd.running && backEnd.at === "wait")
     return row(
       4,

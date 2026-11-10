@@ -18,11 +18,16 @@ let invokeHandler: Invoke = async () => {
 let updateStep: unknown = null;
 let updateStepAsked: unknown[] = [];
 
+/** What `local_eval_steps` answers for the CLI call running now: the steps it has finished. */
+let localSteps: unknown = null;
+
 mock.module("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => {
     // The engine already answers here: these tests are about the CLI calls after it. Waking a
     // stopped engine is App.test.tsx's "relaunch with Docker Desktop quit".
     if (command === "wake_engine") return Promise.resolve(null);
+    // Asked every second while a CLI call runs: not a step of the sequence.
+    if (command === "local_eval_steps") return Promise.resolve(localSteps);
     // Asking which step an update is in is not a step of the sequence either.
     if (command === "local_eval_update_step") {
       updateStepAsked.push(args);
@@ -44,6 +49,7 @@ afterEach(() => {
   invokeCalls = [];
   updateStep = null;
   updateStepAsked = [];
+  localSteps = null;
 });
 afterAll(() => GlobalRegistrator.unregister());
 
@@ -182,10 +188,15 @@ function row(screen: ReturnType<typeof view>, name: string) {
   return screen.getByRole("listitem", { name });
 }
 
+/** The Start's one journey: what is happening now, how far along, and any download's measure. */
+function journeyOf(screen: ReturnType<typeof view>) {
+  return screen.getByRole("region", { name: "How far along" });
+}
+
 const SETUP = "Setting up OpenBot";
 const CONNECT = "Connecting OpenBot";
 const WAIT = "Getting OpenBot ready";
-const START = "Starting OpenBot";
+const START = "Opening OpenBot";
 
 test("the whole sequence runs by itself: set up, connect, wait for ready and valid, start", async () => {
   invokeHandler = answers({
@@ -224,10 +235,11 @@ test("the whole sequence runs by itself: set up, connect, wait for ready and val
 /**
  * The Windows fresh-install probe: "Setting up OpenBot · In progress" said nothing while ~690 MB of
  * back-end images came down, and the person waited behind the AI screen with nothing either. A
- * first setup's download now shows on its row, with the bar Install shows, and on the screen in
- * front of it while it runs there.
+ * first setup's download now shows on the screen in front of it while it runs there, with the bar
+ * Install shows, and on Start as the journey's own step: one bar, which the download moves, and
+ * its measure under it. The setup's row has no bar of its own.
  */
-test("a first setup shows its download on its row and on the screen in front of it", async () => {
+test("a first setup shows its download on the journey and on the screen in front of it", async () => {
   const settingUp = deferred<LocalReport>();
   let arrived: { done: number; total: number } | null = null;
   invokeHandler = async (command) => {
@@ -243,14 +255,14 @@ test("a first setup shows its download on its row and on the screen in front of 
   arrived = { done: 245_000_000, total: 690_000_000 };
   await waitFor(
     () =>
-      expect(row(screen, SETUP).textContent).toContain("245.0 MB of 690.0 MB"),
+      expect(journeyOf(screen).textContent).toContain("245.0 MB of 690.0 MB"),
     { timeout: 3_000 },
   );
-  const setting = within(row(screen, SETUP));
-  expect(setting.getByText("Downloading the rest of OpenBot.")).toBeTruthy();
-  const bar = setting.getByRole("progressbar", { name: "Download progress" });
-  expect(bar.getAttribute("value")).toBe("245000000");
-  expect(bar.getAttribute("max")).toBe("690000000");
+  const journey = within(journeyOf(screen));
+  expect(journey.getByText("Downloading the rest of OpenBot")).toBeTruthy();
+  // One bar on Start: the journey's. The row says only which step it is.
+  expect(within(row(screen, SETUP)).queryByRole("progressbar")).toBeNull();
+  expect(row(screen, SETUP).textContent).not.toContain("MB");
   // The screen in front (Install, or Connect your AI) shows the same download while it runs.
   const behind = within(screen.getByRole("list", { name: "OpenBot download" }));
   expect(
@@ -271,11 +283,15 @@ test("a first setup shows its download on its row and on the screen in front of 
   ).toEqual({
     attempt: (setup?.args as { attempt?: string } | undefined)?.attempt,
   });
-  // Downloaded: both bars go, and the setup carries on.
+  // Downloaded: its measure and the front screen's row go, and the setup carries on.
   arrived = null;
-  await waitFor(() => expect(screen.queryByRole("progressbar")).toBeNull(), {
-    timeout: 3_000,
-  });
+  await waitFor(
+    () => expect(journeyOf(screen).textContent).not.toContain("MB"),
+    { timeout: 3_000 },
+  );
+  expect(
+    screen.queryByRole("progressbar", { name: "Download progress" }),
+  ).toBeNull();
   expect(screen.queryByRole("list", { name: "OpenBot download" })).toBeNull();
 });
 
@@ -325,7 +341,7 @@ test("a back end an older app installed is updated to this app's release before 
   // One plain line while it runs, on the back end's own row.
   await waitFor(() =>
     expect(row(screen, WAIT).textContent).toContain(
-      "Updating OpenBot. Your Bots and data stay as they are. This usually takes a few minutes.",
+      "Updating OpenBot. Your Bots and data stay as they are.",
     ),
   );
   expect(started).toEqual([]);
@@ -499,12 +515,13 @@ test("an update that fails says the step it stopped at and that the data is kept
 /**
  * Found on OpenBot Desktop: an update sat on "Updating the back end" for minutes with nothing
  * else on the row, while the CLI waited on its databases and Jobs (up to ten minutes each) and
- * logged nothing until each ended. The row now says which step it is in, and for how long.
+ * logged nothing until each ended. The journey now says which step it is in, from the steps the
+ * CLI has finished, and how long is left; the row keeps what this part is, and a part that failed
+ * is said on it at once, not ten minutes later.
  */
-const UPDATING_SAID =
-  "Updating OpenBot. Your Bots and data stay as they are. This usually takes a few minutes.";
+const UPDATING_SAID = "Updating OpenBot. Your Bots and data stay as they are.";
 
-test("a running update says which step it is waiting on, and for how long", async () => {
+test("a running update says what it is doing on the journey, and a failed part at once on its row", async () => {
   const updating = deferred<LocalReport>();
   invokeHandler = async (command, args) => {
     if (command === "cancel_local_eval") return null;
@@ -521,28 +538,42 @@ test("a running update says which step it is waiting on, and for how long", asyn
   await waitFor(() =>
     expect(row(screen, WAIT).textContent).toContain(UPDATING_SAID),
   );
+  // Waiting on its databases: everything before them finished.
+  localSteps = {
+    ended: [
+      "release-download",
+      "chart-download",
+      "chart-render",
+      "cluster-discovery",
+      "kubeconfig",
+      "runtime-identity-write",
+      "image-download",
+      "system-image-download",
+      "system-image-tag",
+      "secrets-apply",
+      "update-schedules",
+      "update-suspend",
+      "update-quiesce",
+      "update-quiesce-wait",
+      "update-jobs",
+      "update-agent-stop",
+      "update-agent-wait",
+      "dependencies-install",
+    ],
+    quietSeconds: 4,
+  };
   updateStep = { step: "dependencies-wait", seconds: 130 };
   await waitFor(
     () =>
-      expect(row(screen, WAIT).textContent).toContain(
-        `${UPDATING_SAID} Waiting for where OpenBot keeps your data, 2m 10s so far.`,
+      expect(journeyOf(screen).textContent).toContain(
+        "Updating where OpenBot keeps your data",
       ),
     { timeout: 3_000 },
   );
-  // In the chart's Jobs: what they are for (their names are the log's), and a failed one at once,
-  // not ten minutes later.
-  updateStep = {
-    step: "jobs",
-    seconds: 5,
-    job: "cpki-bootstrap-ef56ab78",
-  };
-  await waitFor(
-    () =>
-      expect(row(screen, WAIT).textContent).toContain(
-        `${UPDATING_SAID} Updating your data, 5s so far.`,
-      ),
-    { timeout: 3_000 },
-  );
+  // Said once: the row does not repeat the step or its time.
+  expect(row(screen, WAIT).textContent).not.toContain("so far");
+  expect(row(screen, WAIT).textContent).not.toContain("where OpenBot keeps");
+  // In the chart's Jobs: a failed one at once, not ten minutes later. Its name is the log's.
   updateStep = {
     step: "jobs",
     seconds: 40,
@@ -552,10 +583,11 @@ test("a running update says which step it is waiting on, and for how long", asyn
   await waitFor(
     () =>
       expect(row(screen, WAIT).textContent).toContain(
-        "Updating your data, 40s so far. Part of the update didn't work, so it will stop. OpenBot waits up to 10 minutes for it first. Your data is kept.",
+        `${UPDATING_SAID} Part of the update didn't work, so it will stop. OpenBot waits up to 10 minutes for it first. Your data is kept.`,
       ),
     { timeout: 3_000 },
   );
+  expect(row(screen, WAIT).textContent).not.toContain("cpki");
   // It asked about the update's own call.
   const update = invokeCalls.find(
     (call) => (call.args as { action?: string })?.action === "update",
@@ -563,14 +595,7 @@ test("a running update says which step it is waiting on, and for how long", asyn
   expect(updateStepAsked[0]).toEqual({
     attempt: (update?.args as { attempt?: string } | undefined)?.attempt,
   });
-  // A step this window does not know is not shown.
-  updateStep = { step: "rm -rf", seconds: 1 };
   updating.resolve(onRelease("0.16.0-rc.10", null));
-  await waitFor(() =>
-    expect(row(screen, WAIT).textContent).not.toContain(
-      "Waiting for where OpenBot keeps",
-    ),
-  );
 });
 
 /** `run_local_eval` answers from the CLI this app pins: see `local_eval_ipc_tests.rs`. */
@@ -635,8 +660,8 @@ test("after Quit, the unfinished update starts the stack, and the release it had
 });
 
 /**
- * The next Start's retry of an update that did not finish: its download shows on the back end's
- * row while it runs, and when it stalls OpenBot opens on the release the back end has, with the
+ * The next Start's retry of an update that did not finish: its download shows on the journey while
+ * it runs, and when it stalls OpenBot opens on the release the back end has, with the
  * running screen's "did not finish" line.
  */
 test("a retried update shows its download, and a stall keeps the line that it did not finish", async () => {
@@ -662,7 +687,7 @@ test("a retried update shows its download, and a stall keeps the line that it di
   arrived = { done: 61_400_000, total: 147_000_000 };
   await waitFor(
     () =>
-      expect(row(screen, WAIT).textContent).toContain("61.4 MB of 147.0 MB"),
+      expect(journeyOf(screen).textContent).toContain("61.4 MB of 147.0 MB"),
     { timeout: 3_000 },
   );
   updating.reject("download-stalled");
@@ -708,29 +733,35 @@ test("an update says how much of its download has arrived, so a slow line reads 
   });
   await waitFor(() =>
     expect(row(screen, WAIT).textContent).toContain(
-      "Updating OpenBot. Your Bots and data stay as they are. This usually takes a few minutes.",
+      "Updating OpenBot. Your Bots and data stay as they are.",
     ),
   );
   arrived = { done: 48_200_000, total: 147_000_000 };
   await waitFor(
     () =>
-      expect(row(screen, WAIT).textContent).toContain("48.2 MB of 147.0 MB"),
+      expect(journeyOf(screen).textContent).toContain("48.2 MB of 147.0 MB"),
     { timeout: 3_000 },
   );
-  // The same bar Install shows, driven by the bytes, out of the whole download.
+  // The journey says it is downloading, and its one bar is the only one on the screen: the row
+  // keeps what this part is, with no bar or measure of its own.
+  const journey = within(journeyOf(screen));
+  expect(journey.getByText("Downloading the update")).toBeTruthy();
+  expect(screen.getAllByRole("progressbar")).toEqual([
+    journey.getByRole("progressbar", { name: "How far along" }),
+  ]);
   const waiting = within(row(screen, WAIT));
-  expect(waiting.getByText("Downloading the update.")).toBeTruthy();
-  const bar = waiting.getByRole("progressbar", { name: "Download progress" });
-  expect(bar.getAttribute("value")).toBe("48200000");
-  expect(bar.getAttribute("max")).toBe("147000000");
-  // Downloaded: the CLI's update runs, and the row says so again, with no bar.
+  expect(row(screen, WAIT).textContent).toContain(
+    "Updating OpenBot. Your Bots and data stay as they are.",
+  );
+  expect(row(screen, WAIT).textContent).not.toContain("MB");
+  // Downloaded: the CLI's update runs, the measure goes, and the row says the same.
   arrived = null;
   await waitFor(
-    () =>
-      expect(row(screen, WAIT).textContent).toContain(
-        "Updating OpenBot. Your Bots and data stay as they are. This usually takes a few minutes.",
-      ),
+    () => expect(journeyOf(screen).textContent).not.toContain("MB"),
     { timeout: 3_000 },
+  );
+  expect(row(screen, WAIT).textContent).toContain(
+    "Updating OpenBot. Your Bots and data stay as they are.",
   );
   expect(waiting.queryByRole("progressbar")).toBeNull();
   updating.resolve(onRelease("0.16.0-rc.9", null));

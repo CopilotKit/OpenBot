@@ -298,6 +298,28 @@ export async function localEvalDownload(
     : null;
 }
 
+/** The CLI's steps a running setup, start or update has finished, by name, and for how long since. */
+export type LocalSteps = { ended: string[]; quietSeconds: number };
+
+/** A CLI step name, and nothing that could carry more. */
+function stepName(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z][a-z0-9-]{0,63}$/.test(value);
+}
+
+/**
+ * The steps the running call `attempt` has finished, while it runs (`local_eval_steps`), or null.
+ * Only step names: the window turns them into plain words (`journey.ts`).
+ */
+export async function localEvalSteps(
+  attempt: string,
+): Promise<LocalSteps | null> {
+  const found = await invoke<unknown>("local_eval_steps", { attempt });
+  if (!found || typeof found !== "object") return null;
+  const { ended, quietSeconds } = found as Record<string, unknown>;
+  if (!Array.isArray(ended) || typeof quietSeconds !== "number") return null;
+  return { ended: ended.filter(stepName), quietSeconds };
+}
+
 /**
  * The steps of a back end update that wait long enough to need saying, as the native side names
  * them (`local_update::UpdateStep`), in the CLI's own words for them.

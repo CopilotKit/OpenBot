@@ -3718,6 +3718,8 @@ fn run_attempt(
     limits: Limits,
 ) -> Result<Report, Failure> {
     one_at_a_time(&attempt.0, limits, |remaining| {
+        // Its turn: the CLI's log from here on is this call's (`Trail`).
+        let _trail = Trail::begin(id);
         let cli = installed()?;
         run_with(
             &cli,
@@ -4121,6 +4123,8 @@ pub fn setup_installed(
     let id = attempt;
     let attempt = Attempt::register(attempt);
     one_at_a_time(&attempt.0, Limits::for_setup(), |remaining| {
+        // Its turn: the CLI's log from here on is this setup's (`Trail`).
+        let _trail = Trail::begin(id);
         let cli = installed()?;
         let report = setup_with(
             &cli,
@@ -4393,6 +4397,80 @@ impl Drop for ShowingSignIn {
     fn drop(&mut self) {
         sign_in_pages().retain(|(attempt, _)| attempt != &self.0);
     }
+}
+
+/**
+The steps a running CLI call has finished, as its `cli.log` lines say, while it runs: so the window
+can say what a long setup, start or update is doing now and how far along it is, and never sit on
+one line for minutes.
+
+From the call's turn on (`one_at_a_time`), the log's new `local.step` lines are the call's own:
+OpenBot runs one CLI call at a time. Only the steps' names, which are identifiers, leave this
+module, and the seconds since the last one ended.
+*/
+struct Trail(String);
+
+struct Followed {
+    attempt: String,
+    log: crate::local_update::StepLog,
+    ended: Vec<String>,
+    since: Instant,
+}
+
+static TRAILS: std::sync::Mutex<Vec<Followed>> = std::sync::Mutex::new(Vec::new());
+
+fn trails() -> std::sync::MutexGuard<'static, Vec<Followed>> {
+    TRAILS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+impl Trail {
+    fn begin(attempt: &str) -> Self {
+        if let Some(path) = crate::local_update::cli_log() {
+            let mut held = trails();
+            held.retain(|followed| followed.attempt != attempt);
+            held.push(Followed {
+                attempt: attempt.to_owned(),
+                log: crate::local_update::StepLog::at_end_of(path),
+                ended: Vec::new(),
+                since: Instant::now(),
+            });
+        }
+        Self(attempt.to_owned())
+    }
+}
+
+impl Drop for Trail {
+    fn drop(&mut self) {
+        trails().retain(|followed| followed.attempt != self.0);
+    }
+}
+
+/// What the call `attempt` has done so far, by the CLI's own step names, in the order they ended.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Steps {
+    pub ended: Vec<String>,
+    /// Seconds since the last step ended, or since the call began.
+    pub quiet_seconds: u64,
+}
+
+/// The steps the running call `attempt` has finished, while it runs. None once it has ended.
+pub fn steps(attempt: &str) -> Option<Steps> {
+    let mut held = trails();
+    let followed = held
+        .iter_mut()
+        .find(|followed| followed.attempt == attempt)?;
+    let ended = followed.log.poll();
+    if !ended.is_empty() {
+        followed.since = Instant::now();
+        followed.ended.extend(ended);
+    }
+    Some(Steps {
+        ended: followed.ended.clone(),
+        quiet_seconds: followed.since.elapsed().as_secs(),
+    })
 }
 
 /// How far the back end's image download before the call `attempt` has got, while it runs.

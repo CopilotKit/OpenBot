@@ -29,6 +29,8 @@ type Locator = {
   click(): Promise<void>;
   waitFor(options?: { state?: "hidden" | "visible" }): Promise<void>;
   boundingBox(): Promise<Box>;
+  textContent(): Promise<string | null>;
+  count(): Promise<number>;
 };
 type Route = {
   request(): { url(): string };
@@ -41,7 +43,8 @@ type Route = {
 type Page = {
   route(url: string, handler: (route: Route) => Promise<void>): Promise<void>;
   goto(url: string): Promise<unknown>;
-  getByRole(role: string, options: { name: string; exact?: boolean }): Locator;
+  getByRole(role: string, options?: { name: string; exact?: boolean }): Locator;
+  locator(selector: string, options?: { hasText?: string }): Locator;
   getByText(text: string, options?: { exact?: boolean }): Locator;
   getByLabel(text: string, options: { exact: boolean }): Locator;
   evaluate<T, A = undefined>(run: (arg: A) => T, arg?: A): Promise<T>;
@@ -310,23 +313,25 @@ async function anchors(page: Page) {
 /*
  * Seen on Windows: Start's card re-centred as rows came and went while OpenBot updated, so the
  * heading and the rows jumped up 31px when the update's row appeared, up 20px when its download
- * bar did, and down 20px when the bar went. The card is held from the top now.
+ * bar did, and down 20px when the bar went. The card is held from the top now, and the update is
+ * the Start journey's: its download's measure sits on the journey's time line, so neither the
+ * heading nor the rows move as it comes and goes.
  */
 describe.skipIf(!asked)("the Start screen while OpenBot updates", () => {
   for (const [width, height] of [
     [1000, 800],
     [720, 560],
   ] as const) {
-    test(`at ${width}x${height}, nothing on screen moves as the update's row and its download come and go`, async () => {
+    test(`at ${width}x${height}, nothing on screen moves as the update and its download come and go`, async () => {
       const page = await browser.newPage({ viewport: { width, height } });
       try {
         await open(page, "#start");
-        await page
-          .getByRole("listitem", { name: "Starting OpenBot" })
-          .waitFor();
+        await page.getByRole("listitem", { name: "Opening OpenBot" }).waitFor();
         await page.waitForTimeout(600);
         const before = await anchors(page);
         expect(before.heading).toBeGreaterThan(0);
+        const said = page.locator(".journey-said");
+        const time = page.locator(".journey-time");
 
         const emit = (payload: Record<string, unknown>) =>
           page.evaluate(
@@ -338,7 +343,7 @@ describe.skipIf(!asked)("the Start screen while OpenBot updates", () => {
               ).__fake.emit("setup:progress", sent),
             payload,
           );
-        // The update begins: its row appears under Start's.
+        // The update begins: the journey says so.
         await emit({
           step: "release",
           ok: true,
@@ -346,16 +351,16 @@ describe.skipIf(!asked)("the Start screen while OpenBot updates", () => {
           detail: "Downloading the update.",
         });
         await page
-          .getByRole("listitem", { name: "Updating OpenBot" })
+          .locator(".journey-said", { hasText: "Downloading the update" })
           .waitFor();
         expect(await anchors(page)).toEqual(before);
-        // Its download, with a bar.
+        const lines = await time.boundingBox();
+        // Its download, measured on the journey's time line, and one bar on the screen.
         await emit({
           step: "images",
           ok: true,
           running: true,
           detail: "Downloading local software.",
-          downloadBytes: 100_000_000,
           downloads: {
             done: 1,
             total: 5,
@@ -367,7 +372,9 @@ describe.skipIf(!asked)("the Start screen while OpenBot updates", () => {
           .getByText("100.0 MB of 944.2 MB", { exact: false })
           .waitFor();
         expect(await anchors(page)).toEqual(before);
-        // The download ends, and the bar goes.
+        expect((await time.boundingBox())?.height).toBe(lines?.height);
+        expect(await page.getByRole("progressbar").count()).toBe(1);
+        // The download ends, and its measure goes.
         await emit({
           step: "images",
           ok: true,
@@ -378,6 +385,7 @@ describe.skipIf(!asked)("the Start screen while OpenBot updates", () => {
           .getByText("100.0 MB of 944.2 MB", { exact: false })
           .waitFor({ state: "hidden" });
         expect(await anchors(page)).toEqual(before);
+        expect(await said.textContent()).toBe("Downloading the update");
       } finally {
         await page.close();
       }

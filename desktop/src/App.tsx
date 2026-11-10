@@ -988,8 +988,9 @@ function Setup() {
         )
     : undefined;
   // One row while it updates, with its download's bar once there is one: "Installing OpenBot" sat
-  // unchanged for minutes while the update's software downloaded.
-  const updatingLine = updating && (
+  // unchanged for minutes while the update's software downloaded. Not while the Start journey
+  // shows, whose one bar counts the update too (`StartJourney`).
+  const updatingLine = updating && !(local.running && !local.stopped) && (
     <SetupProgress
       label="Update progress"
       steps={[
@@ -1018,7 +1019,12 @@ function Setup() {
               ? "OpenBot is getting ready and opens by itself. This usually takes a minute or two."
               : "Your installation and saved connections are ready to reopen."}
           </p>
-          <LocalIntelligence sequence={local} offerStart handOff={handOff} />
+          <LocalIntelligence
+            sequence={local}
+            offerStart
+            handOff={handOff}
+            open={steps}
+          />
           {goAhead && <PodmanGoAhead asking={goAhead} />}
           {updatingLine}
           {displayedFailure && <Failure problem={displayedFailure} />}
@@ -1093,7 +1099,12 @@ function Setup() {
             OpenBot is setting up on this computer and starts by itself when
             it’s ready. This can take a few minutes.
           </p>
-          <LocalIntelligence sequence={local} offerStart handOff={handOff} />
+          <LocalIntelligence
+            sequence={local}
+            offerStart
+            handOff={handOff}
+            open={steps}
+          />
           {goAhead && <PodmanGoAhead asking={goAhead} />}
           {updatingLine}
           {/* Leftover data is a choice, offered above, not a failure to report here. */}

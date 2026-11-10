@@ -13,6 +13,7 @@ import {
   type LocalReport,
   type LocalTerms,
   localEvalDownload,
+  localEvalSteps,
   localEvalTerms,
   localEvalUpdateStep,
   onInstalledRelease,
@@ -31,12 +32,12 @@ import {
 } from "./Problem";
 import {
   type Downloads,
-  formatElapsed,
   type Progress,
   SetupProgress,
   StatusLine,
   timeLeft,
 } from "./SetupProgress";
+import { StartJourney } from "./StartJourney";
 
 type Call<T> = { attempt: string; answer: Promise<T> };
 
@@ -84,16 +85,9 @@ const PHASES: [Phase, string][] = [
   ["setup", "Setting up OpenBot"],
   ["connect", "Connecting OpenBot"],
   ["wait", "Getting OpenBot ready"],
-  ["start", "Starting OpenBot"],
+  // Not "Starting OpenBot": that is the screen's own heading.
+  ["start", "Opening OpenBot"],
 ];
-
-/** What a running row says when nothing more particular is happening: roughly how long it takes. */
-const TAKES: Record<Phase, string> = {
-  setup: "This takes a few minutes the first time.",
-  connect: "",
-  wait: "This can take a few minutes.",
-  start: "",
-};
 
 /** The readiness sentence for one CLI answer or failure category. */
 function said(intelligence: LocalReport | LocalFailure): string {
@@ -151,6 +145,18 @@ type State = {
    * release it had is still there and still runs.
    */
   updateFailed: string | null;
+  /** The phase this run began at, and when: the whole journey on screen counts from here. */
+  began: Phase | null;
+  runSince: number | null;
+  /** The CLI's steps the running setup or update has finished (`local_eval_steps`), and which. */
+  trail: string[];
+  trailKind: "setup" | "update" | null;
+  /** When the running setup or update began. */
+  trailSince: number | null;
+  /** This run updated the back end, or is updating it now. */
+  updating: boolean;
+  /** Of the back end's services, how many the last status said were ready. */
+  services: { ready: number; total: number } | null;
 };
 
 const idle: State = {
@@ -163,10 +169,28 @@ const idle: State = {
   detail: null,
   download: null,
   updateFailed: null,
+  began: null,
+  runSince: null,
+  trail: [],
+  trailKind: null,
+  trailSince: null,
+  updating: false,
+  services: null,
 };
 
 /** The row an update that failed is said on, under the back end's. */
 const UPDATING = "Updating OpenBot";
+
+/**
+ * The back end's row while it updates. How long it takes and what it is doing now are the
+ * journey's (`StartJourney`): the row says only what this part is, and that nothing is lost.
+ */
+export const UPDATING_SAID =
+  "Updating OpenBot. Your Bots and data stay as they are.";
+
+/** The start's row while Start updates OpenBot itself (`upgrade::now_said`). */
+export const RELEASE_SAID =
+  "Updating OpenBot. Your Bots, sign-ins and data stay as they are.";
 
 /**
  * An update that failed, and where it stopped once the CLI's record says (`failedStep`), in plain
@@ -282,16 +306,12 @@ export function useLocalSequence({
   }
 
   /**
-   * While `attempt` runs, its row says how much of the back end's download has arrived, so a slow
-   * line can be told from a stuck one. OpenBot downloads the images before the CLI pulls them; the
-   * row says `after` once that is over, and when following stops. Returns what stops it.
+   * While `attempt` runs, how much of the back end's download has arrived, so a slow line can be
+   * told from a stuck one: the Start journey's bar counts it (`StartJourney`), and a screen about
+   * something else says it in its own row (`LocalStatus`). OpenBot downloads the images before the
+   * CLI pulls them. Returns what stops it.
    */
-  function followDownload(
-    attempt: string,
-    token: number,
-    saying: string,
-    after: string | null,
-  ): () => void {
+  function followDownload(attempt: string, token: number): () => void {
     let following = true;
     let shown = false;
     let next: ReturnType<typeof setTimeout> | null = null;
@@ -314,22 +334,18 @@ export function useLocalSequence({
               const at = Date.now();
               first ??= { at, bytes: found.done };
               const seconds = (at - first.at) / 1000;
-              const download: Downloads = {
-                bytes: found.done,
-                size: found.total,
-                ...(seconds >= 3 && found.done > first.bytes
-                  ? { bytesPerSecond: (found.done - first.bytes) / seconds }
-                  : {}),
-              };
-              const left = timeLeft(download);
-              // The row's bar and "48.0 MB of 147.0 MB", as Install shows its own download.
               update({
-                detail: left ? `${saying}. ${left}` : `${saying}.`,
-                download,
+                download: {
+                  bytes: found.done,
+                  size: found.total,
+                  ...(seconds >= 3 && found.done > first.bytes
+                    ? { bytesPerSecond: (found.done - first.bytes) / seconds }
+                    : {}),
+                },
               });
             } else if (shown) {
               shown = false;
-              update({ detail: after, download: null });
+              update({ download: null });
             }
           },
           () => {},
@@ -342,8 +358,41 @@ export function useLocalSequence({
     return () => {
       following = false;
       if (next) clearTimeout(next);
-      if (shown && generation.current === token)
-        update({ detail: after, download: null });
+      if (shown && generation.current === token) update({ download: null });
+    };
+  }
+
+  /**
+   * While `attempt` runs, which of the CLI's steps it has finished, so the screen can say what it
+   * is doing now and how far along it is (`journey.ts`). Returns what stops it.
+   */
+  function followSteps(
+    attempt: string,
+    token: number,
+    kind: "setup" | "update",
+  ): () => void {
+    let following = true;
+    let next: ReturnType<typeof setTimeout> | null = null;
+    const current = () => following && generation.current === token;
+    update({ trail: [], trailKind: kind, trailSince: Date.now() });
+    const ask = () => {
+      if (!current()) return;
+      localEvalSteps(attempt)
+        .then(
+          (found) => {
+            // Every answer, so what is said and the time left move on while a step runs.
+            if (current() && found) update({ trail: found.ended });
+          },
+          () => {},
+        )
+        .finally(() => {
+          if (current()) next = setTimeout(ask, DOWNLOAD_EVERY_MS);
+        });
+    };
+    ask();
+    return () => {
+      following = false;
+      if (next) clearTimeout(next);
     };
   }
 
@@ -372,17 +421,12 @@ export function useLocalSequence({
     token: number,
   ): Promise<boolean> {
     // The releases it updates from and to are in the log (`log_update_due`), not on the screen.
-    const updating =
-      "Updating OpenBot. Your Bots and data stay as they are. This usually takes a few minutes.";
-    update({ detail: updating, download: null });
+    const updating = UPDATING_SAID;
+    update({ detail: updating, download: null, updating: true });
     const started = runLocalEval("update", id);
     attempt.current = started.attempt;
-    const unfollow = followDownload(
-      started.attempt,
-      token,
-      "Downloading the update",
-      updating,
-    );
+    const unfollowTrail = followSteps(started.attempt, token, "update");
+    const unfollow = followDownload(started.attempt, token);
     const unfollowSteps = followUpdateSteps(started.attempt, token, updating);
     let updated = false;
     let stalled = false;
@@ -394,10 +438,14 @@ export function useLocalSequence({
         error instanceof LocalEvalError &&
         error.category === "download-stalled";
     } finally {
+      unfollowTrail();
       unfollowSteps();
       unfollow();
       if (attempt.current === started.attempt) attempt.current = null;
     }
+    // The update is done; its services coming up is the wait's, counted from here.
+    if (generation.current === token)
+      update({ trailKind: null, since: Date.now() });
     if (generation.current !== token) return false;
     update({
       detail: null,
@@ -412,9 +460,9 @@ export function useLocalSequence({
   }
 
   /**
-   * While the update `attempt` runs, its row says which step it is in and for how long, once it is
-   * in one that waits: the CLI says nothing while a step runs, and some wait ten minutes. Not while
-   * a download is shown, which says more. Returns what stops it.
+   * While the update `attempt` runs, a Job of it that failed, said on its row at once rather than
+   * ten minutes later, when the CLI gives up waiting on it. Which step it is in and how far along
+   * it is are the journey's (`StartJourney`). Returns what stops it.
    */
   function followUpdateSteps(
     attempt: string,
@@ -429,13 +477,10 @@ export function useLocalSequence({
       localEvalUpdateStep(attempt)
         .then(
           (found) => {
-            if (!current() || !found || now.current.download) return;
-            // The Job's name is in the log (`watch_jobs`): the row says what the step is for.
-            const failed = found.failedJob
-              ? " Part of the update didn't work, so it will stop. OpenBot waits up to 10 minutes for it first. Your data is kept."
-              : "";
+            if (!current() || !found?.failedJob) return;
+            // The Job's name is in the log (`watch_jobs`).
             update({
-              detail: `${updating} ${found.said}, ${formatElapsed(found.seconds)} so far.${failed}`,
+              detail: `${updating} Part of the update didn't work, so it will stop. OpenBot waits up to 10 minutes for it first. Your data is kept.`,
             });
           },
           () => {},
@@ -480,6 +525,15 @@ export function useLocalSequence({
     for (let tries = 0; ; tries += 1) {
       const found = await report("status");
       if (!found) return null;
+      // How many of its services are up: how far along the back end's start is.
+      const services = found.stack?.observed?.services;
+      if (services?.length)
+        update({
+          services: {
+            ready: services.filter((service) => service.ready).length,
+            total: services.length,
+          },
+        });
       const unfinished = found.stack?.unfinishedUpdate ?? null;
       const kept = onInstalledRelease(found);
       /*
@@ -599,6 +653,17 @@ export function useLocalSequence({
      * engine again itself, so a run that only starts OpenBot skips this.
      */
     const began = Date.now();
+    // A new run counts from here; Start OpenBot after a run that got ready carries on its journey.
+    if (from !== "start" || now.current.began === null)
+      update({
+        began: from,
+        runSince: began,
+        trail: [],
+        trailKind: null,
+        trailSince: null,
+        updating: false,
+        services: null,
+      });
     if (from !== "start") {
       update({ at: from, running: true, since: began });
       try {
@@ -623,17 +688,16 @@ export function useLocalSequence({
       if (phase === "setup") {
         const carried = accepted.current;
         const started = setUpLocalEval(root, carried);
+        const unfollowTrail = followSteps(started.attempt, token, "setup");
         // A setup that resumes a stack downloads the images it still needs first.
-        const unfollow = followDownload(
-          started.attempt,
-          token,
-          "Downloading the rest of OpenBot",
-          null,
-        );
+        const unfollow = followDownload(started.attempt, token);
         const report = await call(
           { attempt: started.attempt, answer: started.report },
           token,
-        ).finally(unfollow);
+        ).finally(() => {
+          unfollow();
+          unfollowTrail();
+        });
         if (!report) return stop();
         update({
           refused:
@@ -756,7 +820,9 @@ export function useLocalSequence({
                 step: label,
                 ok: true,
                 running: true,
-                detail: state.detail ?? TAKES[phase],
+                // What is happening now and how long is left is the journey's (`StartJourney`): the
+                // row says only what is particular to it, such as an update's download.
+                detail: state.detail ?? "",
                 downloads: state.download ?? undefined,
                 startedAt: state.since ?? undefined,
                 position: { at: index + 1, of: PHASES.length },
@@ -792,18 +858,40 @@ export function LocalIntelligence({
   sequence,
   offerStart = false,
   handOff = null,
+  open = [],
 }: {
   sequence: LocalSequence;
   offerStart?: boolean;
   /** What Docker Desktop's window may want while the engine wakes: see `handOffNow`. */
   handOff?: string | null;
+  /** What OpenBot's own start reports (`setup:progress`): the journey's last stretch. */
+  open?: readonly Progress[];
 }) {
   const { at, running, stopped, problem } = sequence;
+  // While it runs, one journey says what is happening and how far along the whole Start is. The
+  // rows then say which part is done and which is left, and nothing twice.
+  const journeying = offerStart && running && !stopped;
+  // Its download's bar is the journey's too: the running row keeps only what is particular to it.
+  const releasing = open.some((row) => row.step === "release" && row.running);
+  const rows = journeying
+    ? sequence.steps.map((row) =>
+        row.running
+          ? {
+              ...row,
+              downloads: undefined,
+              detail: at === "start" && releasing ? RELEASE_SAID : row.detail,
+            }
+          : row,
+      )
+    : sequence.steps;
 
   return (
     <section aria-label="OpenBot on this computer">
-      <SetupProgress steps={sequence.steps} />
-      {handOff && <StatusLine>{handOff}</StatusLine>}
+      {journeying && (
+        <StartJourney sequence={sequence} open={open} now={handOff} />
+      )}
+      <SetupProgress steps={rows} showElapsed={!journeying} />
+      {handOff && !journeying && <StatusLine>{handOff}</StatusLine>}
       <LocalNeeds sequence={sequence} />
       {stopped && problem && <Failure problem={problem} />}
       <div className="row">

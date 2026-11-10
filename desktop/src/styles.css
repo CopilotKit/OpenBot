@@ -1136,6 +1136,68 @@ a:hover {
 }
 
 /*
+ * One Start, start to finish (`StartJourney`): what is happening now, the time left and so far, and
+ * one bar over every row that only moves forward. Drawn as the rows are, above them.
+ */
+.journey {
+  margin: 4px 0 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
+  display: grid;
+  gap: 10px;
+}
+
+.journey-head {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 2px;
+  align-items: center;
+  font-size: var(--text-base);
+  line-height: 22px;
+}
+
+.journey-said {
+  font-weight: 500;
+}
+
+/* The time left and so far, under what is happening: one quiet line, as a row's detail. */
+.journey-head .journey-time {
+  grid-column: 2;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.journey progress {
+  width: 100%;
+  height: 6px;
+  appearance: none;
+  border: 0;
+  border-radius: var(--r-full);
+  overflow: hidden;
+  background: var(--border);
+}
+
+.journey progress::-webkit-progress-bar {
+  background: var(--border);
+}
+
+.journey progress::-webkit-progress-value {
+  background: var(--ring);
+  border-radius: inherit;
+  transition: width 0.8s ease-out;
+}
+
+.journey progress::-moz-progress-bar {
+  background: var(--ring);
+  border-radius: inherit;
+}
+
+/*
  * The background install's row, last in the step (`BehindSlot`). Its height is held for the row's
  * tallest form, a line of three rows or a download bar under two, so the row coming, changing or
  * going never moves anything or grows the window.

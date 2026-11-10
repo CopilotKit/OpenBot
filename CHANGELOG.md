@@ -22,10 +22,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   moves. When setup, a start or an update stops, the card says what happened and what to do in the
   same plain words ("OpenBot has 30 GB of free disk. It needs 40 GB. Free up space on drive C:,
   then Retry."), with the engine's own output under Technical details and in the logs you can
-  copy. Docker Desktop and Podman are named only where you act in them. Updating OpenBot on Start
-  says "Downloading the update", "Installing the update" and "Starting OpenBot" rather than a
-  release name, its download's total no longer shrinks partway, and the setup card is held from
-  the top, so rows coming and going no longer move what is already on screen.
+  copy. Docker Desktop and Podman are named only where you act in them. The Start screen no longer
+  sits on "Waiting for the back end · 13s elapsed" for minutes: one journey over the whole start
+  says what is happening now ("Starting OpenBot's services", "Updating your data", "Downloading
+  the update · 300.0 MB of 900.0 MB"), with one bar that only moves forward and "About 2 minutes
+  left" from how long each part measured on a real machine. A part that runs long slows the bar
+  and says "Taking longer than usual, still working" instead of a wrong time, and a slow download
+  no longer counts against the step it holds up. Updating OpenBot on Start says "Downloading the
+  update" and "Installing the update" rather than a release name, its download's total no longer
+  shrinks partway, and the card is held from the top, so nothing already on screen moves as rows
+  and downloads come and go.
 - **Usage data now says why setup stopped.** A failed `local setup`, every failed install or
   Start (a failed `compose up` among them), a failed `local start`, `local connect` or Learning
   model setup, and an Account step that stops on an engine too small or one local setup does not
@@ -50,9 +56,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   "Local update-quiesce failed (exit 1)". OpenBot now lets an update finish once it has begun
   changing the back end ("Finishing the OpenBot update" on the Shutting down screen), repairs a
   back end an earlier update left half done, rolls back one Helm left mid-upgrade, uncordons a
-  back end node left unschedulable, and tries the update once more. While it runs, the row says
-  what the step it is waiting on is doing and for how long, and a failed part of the update is said
-  as soon as it fails. A failed update says where it stopped, and that your data is kept.
+  back end node left unschedulable, and tries the update once more. While it runs, the Start
+  screen says what it is doing and how long is left, and a failed part of the update is said as
+  soon as it fails. A failed update says where it stopped, and that your data is kept.
 - **The Account step says when it is waiting for Install to set up the engine.** On a new Mac it
   said "Checking your CopilotKit account…" for minutes while Install put Podman in, because the
   license agreement check needs a running engine. It now says "You're signed in. OpenBot is setting

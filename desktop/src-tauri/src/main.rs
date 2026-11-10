@@ -6921,6 +6921,13 @@ fn copilotkit_sign_in_page(attempt: String) -> Option<local_eval::SignInPage> {
     local_eval::shown_sign_in_page(&attempt)
 }
 
+/// The CLI's steps the running setup, start or update `attempt` has finished, by name, so its row
+/// can say what it is doing now and how far along it is. Step names and seconds only.
+#[tauri::command]
+fn local_eval_steps(attempt: String) -> Option<local_eval::Steps> {
+    local_eval::steps(&attempt)
+}
+
 /// How much of the back end's download the setup or update `attempt` has, of how much,
 /// while it downloads, so its row can show a slow line moving. Bytes only.
 #[tauri::command]
@@ -9011,6 +9018,7 @@ fn main() {
             sign_in_to_copilotkit,
             copilotkit_sign_in_page,
             local_eval_download,
+            local_eval_steps,
             local_eval_update_step,
             local_eval_terms,
             connect_copilotkit_apps,
