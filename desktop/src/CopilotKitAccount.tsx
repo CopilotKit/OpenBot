@@ -15,7 +15,7 @@ import {
   signInToCopilotKit,
 } from "./localEvalCli";
 import { engineTooSmallSaid } from "./localReadiness";
-import { PodmanGoAhead } from "./PodmanGoAhead";
+import { PausePodman, PodmanGoAhead } from "./PodmanGoAhead";
 import { InlineFailure, type Problem } from "./Problem";
 import { Sections } from "./Sections";
 import {
@@ -106,6 +106,7 @@ export function CopilotKitAccount({
   handOff = null,
   engine = null,
   goAhead = null,
+  pauseOffer = null,
   behind,
   engineSettled = true,
   engineUpdating = false,
@@ -148,6 +149,11 @@ export function CopilotKitAccount({
    * offers Continue.
    */
   goAhead?: string | null;
+  /**
+   * On a Mac whose own Podman OpenBot can't use, Install behind this step waits for the person's
+   * yes before it pauses theirs: its line, from `pauseOfferNow`, said with the button that says yes.
+   */
+  pauseOffer?: string | null;
   /**
    * What is installing behind this step, as one row: what it is doing, how far along, and for how
    * long (`installingBehind`). Shown under every part of the step, so the person always knows
@@ -443,6 +449,7 @@ export function CopilotKitAccount({
           is at. Nobody is asked to click before a prompt: a closed one has its card, with Try
           again. */}
       {asking && <PodmanGoAhead asking={goAhead} />}
+      {pauseOffer && <PausePodman key={pauseOffer} offer={pauseOffer} />}
       {/* Not while setup's failure is shown: the install that brings the engine up has stopped,
           and a spinner saying it is coming waited forever under it. Its Try again starts it. */}
       {waitingForEngine

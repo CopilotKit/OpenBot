@@ -737,8 +737,8 @@ it are there afterwards. Podman 6 reads the machines Podman 5 made on macOS and 
 machines on Linux had to be made again, and Linux is not updated here).
 
 EVERY MACHINE THAT WAS RUNNING IS RUNNING AFTERWARDS, WITH ITS API ANSWERING: the person's own as
-much as OpenBot's. OpenBot uses whichever machine answers, often the person's `podman-machine-default`,
-and the MSI stops the helpers of a machine it finds running. On a live Windows run the 6.1.1 MSI over
+much as OpenBot's. OpenBot runs on its own machine beside the person's `podman-machine-default` on
+Windows (see `own_machine`), and the MSI stops the helpers of every machine it finds running. On a live Windows run the 6.1.1 MSI over
 5.8.9 left the person's machine up and its `win-sshproxy` gone, and with it the Docker API every
 pull uses (see `acquire`). Only OpenBot's own machine used to be stopped and started.
 

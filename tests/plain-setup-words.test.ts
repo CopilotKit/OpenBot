@@ -80,6 +80,26 @@ const ALLOWED: { file: string; word: RegExp; why: string }[] = [
     why: "the person updates or removes a Podman they installed, which OpenBot can't update for them, or is told the Podman OpenBot updated isn't answering",
   },
   {
+    file: "desktop/src-tauri/src/own_machine.rs",
+    word: /Podman/,
+    why: "the person's own Podman, which OpenBot pauses on a Mac only once they say yes, and starts again on Quit",
+  },
+  {
+    file: "desktop/src/PodmanGoAhead.tsx",
+    word: /Podman/,
+    why: "the person says yes to pausing their own Podman",
+  },
+  {
+    file: "desktop/src/SetupProgress.tsx",
+    word: /Podman/,
+    why: "the rows for pausing the person's own Podman and starting it again",
+  },
+  {
+    file: "desktop/src/ShuttingDown.tsx",
+    word: /Podman/,
+    why: "Quit starts the person's own Podman again",
+  },
+  {
     file: "desktop/src-tauri/src/acquire.rs",
     word: /\bCompose\b/,
     why: "the last resort: the person installs Compose v2 themselves",
