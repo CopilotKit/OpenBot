@@ -1209,8 +1209,8 @@ fn up_now(
      * The picked harness rides in on its profile.
      *
      * `agent-harness` is profile-gated so a deployment that picked nothing does not try to start
-     * it: its image comes from `.env`, and unset that is a request to pull the empty string, which
-     * fails the whole `up` rather than the one service nobody asked for. The flag comes before
+     * it: its image comes from `.env`, and with nothing picked it is a stand-in docker-compose.yml
+     * names so older Compose will read the file at all. The flag comes before
      * `up`, because `--profile` is an option of `compose` itself and not of the subcommand.
      */
     let requested = selected_services(harness);

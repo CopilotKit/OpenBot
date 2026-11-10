@@ -261,8 +261,8 @@ export function diagnostics(
     `  processes: ${parts(status.processes)}`,
     `  containers: ${parts(status.containers)}`,
     status.intelligenceStack
-      ? `Back end: ${status.intelligenceStack}, ${readiness ?? "not checked"}`
-      : "Back end: not on this computer",
+      ? `Backend: ${status.intelligenceStack}, ${readiness ?? "not checked"}`
+      : "Backend: not on this computer",
     ...(status.intelligenceStack
       ? [`  containers: ${parts(status.intelligenceContainers)}`]
       : []),

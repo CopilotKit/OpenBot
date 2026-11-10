@@ -1,6 +1,6 @@
 ---
 name: openbot-copy
-description: The words and the voice for every piece of text a person reads in OpenBot: screen headings and descriptions, buttons, empty states, notices, chat cards, the server's error and refusal messages that reach the browser, and OpenBot Desktop's setup window, Status window and menus. Holds the glossary (Bot, app, admin, OpenBot, and the parts of OpenBot: front end, back end, database) and the style rules. Use when writing or changing any text that is shown to a person, naming a screen, a section, a button or a state, writing an error or refusal message, or reviewing a diff that adds user-facing strings under app/src, server/src, desktop/src or desktop/src-tauri. Don't use for text written for the model (tool descriptions, standing instructions, system prompts), for code comments, or for the docs under docs/.
+description: The words and the voice for every piece of text a person reads in OpenBot: screen headings and descriptions, buttons, empty states, notices, chat cards, the server's error and refusal messages that reach the browser, and OpenBot Desktop's setup window, Status window and menus. Holds the glossary (Bot, app, admin, OpenBot, and the parts of OpenBot: front end, backend, database) and the style rules. Use when writing or changing any text that is shown to a person, naming a screen, a section, a button or a state, writing an error or refusal message, or reviewing a diff that adds user-facing strings under app/src, server/src, desktop/src or desktop/src-tauri. Don't use for text written for the model (tool descriptions, standing instructions, system prompts), for code comments, or for the docs under docs/.
 ---
 
 # OpenBot Copy
@@ -33,18 +33,25 @@ One word for one thing, everywhere a person can see it.
 | **turn on / turn off** | An admin switching an app or a feature. | enable / disable (in sentences; a switch may still read "Enabled") |
 | **conversation** | A thread with one or more Bots. | channel, chat (in sentences) |
 | **front end** | The part of OpenBot a person opens in the browser. | the web app, the UI |
-| **back end** | The part of OpenBot that runs the Bots and keeps conversations, memory, learning and Skills. | Intelligence, CopilotKit Intelligence, the platform, the stack, cpki |
-| **back end dashboard** | The back end's own pages, where Learning and projects are managed. | the Intelligence dashboard |
+| **backend** | The part of OpenBot that runs the Bots and keeps conversations, memory, learning and Skills. One word, "Backend" at the start of a sentence. | back end, Intelligence, CopilotKit Intelligence, the platform, the stack, cpki |
+| **backend dashboard** | The backend's own pages, where Learning and projects are managed. | the Intelligence dashboard |
 | **database** | Where OpenBot keeps its data. | Postgres (outside Admin) |
 | **the computers Bots work on**, **Bot computer** | Where a Bot browses and works with files. | sandbox, container |
 
 **Never say Intelligence.** To a person, admins included, it is all OpenBot. Name the part of
-OpenBot instead: "The back end is starting.", "Waiting for the back end", "Couldn't reach the back
-end. Try again." Name a feature by what it does (Automatic learning, Memory, Skills), and say
+OpenBot instead: "The backend is starting.", "Waiting for the backend", "Couldn't reach the
+backend. Try again." Name a feature by what it does (Automatic learning, Memory, Skills), and say
 "OpenBot proposes skills", not who inside OpenBot does. An env var an admin sets keeps its name
 (`INTELLIGENCE_API_URL`); the word on its own does not appear. Logs, comments, code and the operator
 docs under `docs/` and `charts/` are not shown to a person and may name it.
 `tests/no-intelligence-in-user-copy.test.ts` fails on a shown string that says it.
+
+**One exception: OpenBot Desktop's Account step.** Its lede says "This version of OpenBot
+runs self-contained on this computer. It uses a local version of CopilotKit Intelligence, which
+requires a free license key." That copy is Atai's, word for word.
+That screen asks the person to sign in to another company's account, and the name is what makes
+the license key make sense; the CopilotKit sign-in page it opens says the same. It is listed by
+exact text in `SHOWN_BY_DECISION` in the test. Anywhere else, the back end.
 
 **Admin is allowed exact names.** An admin page may name `COMPOSIO_API_KEY`, OAuth and "deployment",
 because the admin is the one who sets them. A page anybody can open may not.
@@ -90,5 +97,6 @@ because the admin is the one who sets them. A page anybody can open may not.
 | "rather than", an em dash, "which is" in UI text | Rewrite as two short sentences |
 | A description beginning "The apps…", "What…", "Who…", or "Where…" without a main verb | State the action or behavior in a complete sentence; remove redundant explanation |
 | An env var, OAuth, Composio or "grant" outside Admin | Say what the person sees |
-| "Intelligence", "CopilotKit Intelligence" or "the Intelligence stack" anywhere | Name the part: the back end, the front end, the database |
+| "Intelligence", "CopilotKit Intelligence" or "the Intelligence stack" anywhere | Name the part: the backend, the front end, the database |
 | A test asserting long explanatory copy | Assert the short sentence, or the role and the key words |
+| "CopilotKit Intelligence" on OpenBot Desktop's Account step | Allowed there only, in the one lede `SHOWN_BY_DECISION` lists (above) |

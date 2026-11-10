@@ -10,7 +10,7 @@ A Bot asks you before some actions. What asks is decided in this order, in
 2. **Rules.** Yours, the admin's in the team edition, and what you allowed for this conversation.
    The strictest one that matches wins, so a team rule that asks beats anything you allowed.
 3. **Auto-review**, when you or the admin turn it on.
-4. **Always ask before making changes**, your own switch in Settings → Approvals. It is off unless you turn
+4. **Extra vigilant**, your own switch in Settings → Approvals. It is off unless you turn
    it on, in both editions.
 
 A task started from a check-in asks before every change, whatever the above says.
@@ -91,16 +91,16 @@ An app can also say a tool destroys something, whatever it is named: an MCP serv
 OpenBot records that when it lists the app's tools (`destructive` on `mcp_tools`), and such a tool
 asks as deleting does. Composio tags `HUBSPOT_ARCHIVE_CONTACT` this way. An action a broker says
 nothing about (no flag from Arcade, no label from Composio) is not destructive: it is an ordinary
-change, which asks only when Always ask before making changes or a rule says so.
+change, which asks only when Extra vigilant or a rule says so.
 
 ## What doesn't ask
 
-With Always ask before making changes off, a Bot reads and makes ordinary changes without asking: drafting
+With Extra vigilant off, a Bot reads and makes ordinary changes without asking: drafting
 an email, editing your documents, creating a calendar event for yourself, labelling mail, saving a
 page, writing a file on its own computer.
 
 A Bot's own computer is its scratch space. Writing, reading and deleting files there, and the
-commands it runs there, are not account actions and don't ask unless Always ask before making changes,
+commands it runs there, are not account actions and don't ask unless Extra vigilant,
 Auto-review or a rule says so. A folder on your own computer is different: the OpenBot desktop app
 asks before every edit or command in it, and **Commands on your computer** in Settings → Approvals
 can refuse commands there altogether. Settings → Approvals says this above its switches.
@@ -114,4 +114,4 @@ can refuse commands there altogether. Settings → Approvals says this above its
   after it. Editors and filters use that for ordinary changes ("Remove filter", "Remove formatting").
 - **An app tool that names none of the words above and that its app doesn't mark destructive**, such
   as one that trashes mail by changing its labels (`GMAIL_BATCH_MODIFY_MESSAGES` with the `TRASH`
-  label). Turn on Auto-review or Always ask before making changes, or add a rule, to cover it.
+  label). Turn on Auto-review or Extra vigilant, or add a rule, to cover it.

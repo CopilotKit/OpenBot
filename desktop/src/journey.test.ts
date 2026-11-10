@@ -355,7 +355,7 @@ test("over Windows D's update, the bar follows the time each part takes and the 
   expect(said).toContain("Getting the update ready");
   expect(said).toContain("Downloading the update");
   expect(said).toContain("Starting the updated OpenBot");
-  expect(said.join(" ")).not.toMatch(/back end|Podman|engine/i);
+  expect(said.join(" ")).not.toMatch(/back ?end|Podman|engine/i);
 });
 
 /**

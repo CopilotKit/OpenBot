@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { BotOrb } from "@/components/agents/bot-orb";
 import { Skeleton } from "@/components/ui/skeleton";
+import { shownSubtitle } from "@/lib/agents/subtitle";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 /**
@@ -26,7 +27,10 @@ export function ConversationIntro({
 }) {
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
-  const about = [agent.title, agent.roleDescription]
+  const about = [
+    agent.title && shownSubtitle(agent.title),
+    agent.roleDescription,
+  ]
     .filter((part): part is string => Boolean(part?.trim()))
     .join(" · ");
   return (

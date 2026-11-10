@@ -109,19 +109,28 @@ export function earlyDownloadsSaid(
 export function EarlyDownloadsLine({
   firstScreen = false,
 }: {
-  /** The Welcome screen, where the downloads start. */
+  /**
+   * The Welcome screen, where the downloads start. There the line keeps the height of its tallest
+   * state (a line, a bar and the bytes) whatever it says, and when it says nothing: on Windows F
+   * the usage-data text under it moved up about 40px when the download finished.
+   */
   firstScreen?: boolean;
 }) {
   const downloads = useEarlyDownloads();
   const download = earlyDownload(downloads);
   const where = useDownloadWhere(download);
-  if (!downloads) return null;
-  const said = earlyDownloadsSaid(downloads, firstScreen, where);
-  if (!said) return null;
+  const said = downloads
+    ? earlyDownloadsSaid(downloads, firstScreen, where)
+    : null;
+  if (!said && !firstScreen) return null;
   return (
-    <div className="early-downloads">
-      <StatusLine working={download != null}>{said}</StatusLine>
-      {download && where && (
+    <div
+      className={
+        firstScreen ? "early-downloads first-screen" : "early-downloads"
+      }
+    >
+      {said && <StatusLine working={download != null}>{said}</StatusLine>}
+      {said && download && where && (
         <DownloadProgress downloads={download} where={where} />
       )}
     </div>

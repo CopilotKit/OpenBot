@@ -218,7 +218,7 @@ export function setupRows(
   const rows = [
     deployment({
       id: "intelligence",
-      title: "Back end",
+      title: "Backend",
       required: true,
       ...intelligenceRow(facts.intelligence, product, personal),
     }),
@@ -313,7 +313,7 @@ function intelligenceRow(
   return {
     status: "needs_setup" as const,
     readyDetail,
-    gapDetail: `${product} couldn't reach its back end. Check its address and key.`,
+    gapDetail: `${product} couldn't reach its backend. Check its address and key.`,
     fix: {
       kind: "env" as const,
       names: INTELLIGENCE_VARIABLES,
@@ -448,18 +448,18 @@ export function entitlementAdvice(
 ): string {
   switch (warning.code) {
     case "RUNTIME_ENTITLEMENTS_SELF_HOSTED_MISCONFIGURED":
-      return "The back end has no valid licence. Set COPILOTKIT_LICENSE_TOKEN on the back end's own deployment.";
+      return "The backend has no valid licence. Set COPILOTKIT_LICENSE_TOKEN on the backend's own deployment.";
     case "RUNTIME_ENTITLEMENTS_SELF_HOSTED_EXPIRED":
-      return "The back end's licence has expired. Renew it and replace COPILOTKIT_LICENSE_TOKEN on the back end's deployment.";
+      return "The backend's licence has expired. Renew it and replace COPILOTKIT_LICENSE_TOKEN on the backend's deployment.";
     case "RUNTIME_ENTITLEMENTS_MANAGED_UNAVAILABLE":
-      return "The back end couldn't confirm this project's licence. Check again in a few minutes.";
+      return "The backend couldn't confirm this project's licence. Check again in a few minutes.";
   }
   if (warning.status === "inactive")
     // The personal edition has no memory to keep off, so it is told only what the back end said.
     return edition === "personal"
-      ? "The back end says this deployment's licence isn't active."
-      : "The back end says this deployment's licence isn't active. Memory stays off until it is.";
-  return "The back end didn't confirm this deployment's licence. Check again in a few minutes.";
+      ? "The backend says this deployment's licence isn't active."
+      : "The backend says this deployment's licence isn't active. Memory stays off until it is.";
+  return "The backend didn't confirm this deployment's licence. Check again in a few minutes.";
 }
 
 /**

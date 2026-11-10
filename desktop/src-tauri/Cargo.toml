@@ -92,7 +92,7 @@ objc2-speech = { version = "0.3", default-features = false, features = ["std", "
 objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "block2", "AVAudioEngine", "AVAudioNode", "AVAudioIONode", "AVAudioFormat", "AVAudioBuffer", "AVAudioTime", "AVAudioTypes"] }
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "AVCaptureDevice", "AVMediaFormat"] }
 # The shell's own messages in an alert with OpenBot's icon. See `native_alert.rs`.
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAlert", "NSApplication", "NSButton", "NSControl", "NSImage", "NSResponder", "NSView"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAlert", "NSApplication", "NSButton", "NSControl", "NSImage", "NSResponder", "NSView", "NSWindow"] }
 
 # Narration on Windows: the SAPI in-process recognizer. See `speech/sapi.rs`. The version Tauri uses.
 [target.'cfg(windows)'.dependencies]

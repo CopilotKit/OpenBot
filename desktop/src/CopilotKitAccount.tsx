@@ -5,7 +5,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { CopilotKitLogo } from "./CopilotKitLogo";
 import { CopilotKitSignInWait } from "./CopilotKitSignInWait";
 import { ExternalLink } from "./ExternalLink";
 import {
@@ -46,6 +45,22 @@ type Seen =
   | { at: "unsupported-engine"; said: string; switchEngine: boolean };
 
 const COULD_NOT_CHECK = "Couldn’t check your CopilotKit account. Try again.";
+
+/**
+ * The signed-out step's footnote, in Atai's words (2026-11-10). One string so a change of wording
+ * is one line. "Traffic data" is being checked with Atai: setup and usage telemetry go to
+ * CopilotKit by default (desktop_telemetry.rs, server/src/telemetry/product.ts).
+ */
+const WHAT_SIGNING_IN_SENDS =
+  "Your conversations and files stay on this computer. Signing in gets your free local license key and does NOT send traffic data to CopilotKit.";
+/**
+ * The signed-out step's lede, in Atai's words. It names CopilotKit Intelligence on this step alone:
+ * it is what the license key is for. Exported so the setup walk's plain-words check
+ * (`App.test.tsx`) excuses exactly this sentence, as `SHOWN_BY_DECISION` does in
+ * `tests/no-intelligence-in-user-copy.test.ts`.
+ */
+export const SELF_CONTAINED =
+  "This version of OpenBot runs self-contained on this computer. It uses a local version of CopilotKit Intelligence, which requires a free license key.";
 const SIGN_IN_DID_NOT_FINISH = "Sign-in didn’t finish. Try again.";
 const SETTING_UP_ENGINE =
   "You're signed in. OpenBot is setting up the software it runs on. The license agreement comes next.";
@@ -293,10 +308,10 @@ export function CopilotKitAccount({
   const asking = goAhead !== null;
   return (
     <div className="sheet">
-      {/* OpenBot is what is being set up, so its mark heads this step as it heads every other.
-          The account is CopilotKit's, so its logotype leads the step itself. */}
-      <Sections at="Account" />
-      <CopilotKitLogo />
+      {/* OpenBot is what is being set up, so its mark heads this step as it heads every other,
+          and here it says "by CopilotKit" beside the name. CopilotKit's logotype here made the step
+          read as signing up for a CopilotKit product. */}
+      <Sections at="Account" byCopilotKit />
       <h1>
         {agreement
           ? "Accept the license agreement"
@@ -310,7 +325,7 @@ export function CopilotKitAccount({
                   : "Change this computer's setup"
                 : waitingForEngine
                   ? "Setting up this computer"
-                  : "Sign in to CopilotKit"}
+                  : "Self-contained OpenBot"}
       </h1>
       <p className="lede">
         {agreement
@@ -323,7 +338,7 @@ export function CopilotKitAccount({
               ? refused.said
               : waitingForEngine
                 ? SETTING_UP_ENGINE
-                : "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the license agreement."}
+                : SELF_CONTAINED}
       </p>
       {refused?.switchEngine && (
         <ol className="blocker-steps">
@@ -348,10 +363,11 @@ export function CopilotKitAccount({
         !appsFailed &&
         !refused &&
         !waitingForEngine && (
-          <p className="footnote">
-            Your conversations and files are stored on this computer. Signing in
-            does not send them to CopilotKit.
-          </p>
+          // What signing in sends, in Atai's words. Never "only gets the license key": once
+          // signed in, this step also sets up apps. Nothing broader, such as "no data leaves this
+          // computer": setup and usage telemetry, the AI provider and connected apps all reach the
+          // network.
+          <p className="footnote">{WHAT_SIGNING_IN_SENDS}</p>
         )}
 
       {/* The agreement waits on the engine. While it does, this says what Install is doing to bring
@@ -405,7 +421,7 @@ export function CopilotKitAccount({
         <div className="row">
           {seen.at === "signed-out" && (
             <button type="button" onClick={signIn}>
-              Sign in to CopilotKit
+              Sign in for a free local license key
             </button>
           )}
           {agreement && (

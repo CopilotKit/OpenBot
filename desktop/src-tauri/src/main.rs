@@ -7,6 +7,7 @@ use std::sync::Mutex;
 mod desktop_connection;
 mod desktop_host_access;
 mod desktop_page;
+mod desktop_stall;
 mod desktop_status;
 mod desktop_telemetry;
 mod intelligence_bridge;
@@ -19,8 +20,8 @@ mod test_support;
 
 use openbot_desktop_lib::{
     acquire, app_update, deployment, deployment_release, docker_config, early_downloads, engine,
-    env as openbot_env, harness, host_access, install, local_eval, local_eval_state, logging,
-    preparation,
+    engine_versions, env as openbot_env, harness, host_access, install, local_eval,
+    local_eval_state, logging, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
     telemetry, tray, troubleshooting, update_ready, upgrade, windows as win,
@@ -30,7 +31,7 @@ const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
 /// Kept apart from the quit cleanup notice, whose presence alone means OpenBot needs recovery.
 const LOCAL_EVAL_STOP_NOTICE_FILE: &str = ".openbot-local-eval-stop-notice";
 /// How an Intelligence failure starts, so Stop and Quit can tell it from OpenBot's own.
-const INTELLIGENCE_STOP_FAILED: &str = "Back end stop failed: ";
+const INTELLIGENCE_STOP_FAILED: &str = "Backend stop failed: ";
 const QUIT_MENU_ACCELERATOR: &str = "CmdOrCtrl+KeyQ";
 const QUIT_CLEANUP_NOTICE_LIMIT: usize = 16 * 1024;
 use serde::{Deserialize, Serialize};
@@ -364,6 +365,26 @@ fn wake_saved_engine(
     }
 }
 
+/// What Start does to the engine before Compose reads the project, in this order: bring the
+/// installation's engine up (`wake_saved_engine`), then make sure it is new enough to run OpenBot,
+/// updating it for the person when it is not (`engine_new_enough`).
+///
+/// Before Compose, because an old Compose stops at its first look at the project ("Compose config
+/// exited with exit status: 15"). Not while OpenBot's own containers are up: the caller skips this,
+/// so Docker Desktop is never quit from under a running OpenBot. An engine still not answering is
+/// left to the check after this one, which says so.
+async fn engine_before_compose(
+    wake: impl AsyncFnOnce() -> Result<(), Problem>,
+    answering: impl AsyncFnOnce() -> Option<engine::Address>,
+    new_enough: impl AsyncFnOnce(engine::Address) -> Result<(), Problem>,
+) -> Result<(), Problem> {
+    wake().await?;
+    match answering().await {
+        Some(address) => new_enough(address).await,
+        None => Ok(()),
+    }
+}
+
 /// `wake_saved_engine` on this machine, each line said on the setup window's rows. Opening Docker
 /// Desktop says the hand-off and brings OpenBot back once Docker answers: see
 /// `docker_desktop::start`.
@@ -605,6 +626,7 @@ fn report_line<R: tauri::Runtime>(
         log::error!("[step {step}] failed: {entry}");
     }
     forget_running_logged();
+    desktop_stall::row_done(app, step);
     if !ok {
         // The row's step, and a class from the step or, where the step says nothing, its words.
         // Only the two enums are recorded, never the words.
@@ -617,8 +639,8 @@ fn report_line<R: tauri::Runtime>(
             ),
         );
     }
-    let _ = app.emit(
-        "setup:progress",
+    emit_progress(
+        app,
         Progress {
             step: step.into(),
             ok,
@@ -630,6 +652,27 @@ fn report_line<R: tauri::Runtime>(
             asks: false,
         },
     );
+}
+
+/// A row's progress to the setup page, numbered: the page's heartbeat says back the highest number
+/// it has taken, so a page that stops taking them is noticed (`desktop_stall`).
+fn emit_progress<R: tauri::Runtime>(app: &tauri::AppHandle<R>, progress: Progress) {
+    #[derive(Serialize, Clone)]
+    struct Numbered {
+        seq: u64,
+        #[serde(flatten)]
+        progress: Progress,
+    }
+    let seq = desktop_stall::sent(app, &progress.step);
+    let _ = app.emit("setup:progress", Numbered { seq, progress });
+}
+
+/// The setup page's heartbeat, every few seconds while its setup, start or update screens show and
+/// as soon as a row's progress reaches it: the highest progress number it has taken, and whether it
+/// has just loaded. Off the main thread, and it waits on nothing.
+#[tauri::command]
+async fn setup_heartbeat(app: tauri::AppHandle, seen: u64, fresh: bool) {
+    desktop_stall::heartbeat(&app, seen, fresh);
 }
 
 /// The running step last written to the log, so a step that says the same thing on every poll
@@ -725,6 +768,7 @@ fn report_running_line<R: tauri::Runtime>(
         detail: _,
     } = line;
     setup_phase(step);
+    desktop_stall::row_running(app, step, &detail);
     {
         let mut logged = RUNNING_LOGGED
             .lock()
@@ -735,8 +779,8 @@ fn report_running_line<R: tauri::Runtime>(
             *logged = Some(now);
         }
     }
-    let _ = app.emit(
-        "setup:progress",
+    emit_progress(
+        app,
         Progress {
             step: step.into(),
             ok: true,
@@ -771,6 +815,9 @@ fn report_running_line<R: tauri::Runtime>(
 /// machine is prepared" with the browser in front. `set_focus` does nothing to a hidden or
 /// minimised window, hence `show` and `unminimize` first.
 fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
+    if held_back(why) {
+        return;
+    }
     log::info!("[front] {why}");
     #[cfg(target_os = "macos")]
     let _ = app.show();
@@ -809,6 +856,51 @@ fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
     }
     #[cfg(not(windows))]
     let _ = window.set_focus();
+}
+
+/// The browser sign-in is open (`sign_in_to_copilotkit`): the person is in their browser.
+static SIGN_IN_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/**
+Whether `bring_to_front` holds OpenBot back, and says so in the log: while the browser sign-in is
+open, nothing setup does is the person's next step. On Windows F, "[front] the engine machine is
+prepared" brought OpenBot in front of the browser while the person typed their email to sign in.
+When the sign-in ends, OpenBot comes forward once (`while_signing_in`): the license agreement is
+the person's next step then.
+*/
+fn held_back(why: &str) -> bool {
+    let held = SIGN_IN_OPEN.load(std::sync::atomic::Ordering::SeqCst);
+    if held {
+        log::info!("[front] held back: sign-in open in the browser ({why})");
+    }
+    held
+}
+
+/// Marks the browser sign-in open while it lives, and closed when it is dropped, however the
+/// sign-in ends.
+struct SignInOpen;
+
+impl SignInOpen {
+    fn begin() -> Self {
+        SIGN_IN_OPEN.store(true, std::sync::atomic::Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for SignInOpen {
+    fn drop(&mut self) {
+        SIGN_IN_OPEN.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Run the browser sign-in, with OpenBot held back from the front meanwhile, then bring it forward
+/// once, whatever the sign-in's outcome: what comes next is the person's.
+fn while_signing_in<T>(sign_in: impl FnOnce() -> T, come_forward: impl FnOnce()) -> T {
+    let open = SignInOpen::begin();
+    let ended = sign_in();
+    drop(open);
+    come_forward();
+    ended
 }
 
 /// How OpenBot's window came forward on Windows (`bring_to_front`).
@@ -871,8 +963,12 @@ fn report_running_downloads<R: tauri::Runtime>(
         .get(step)
         .cloned()
         .unwrap_or_else(|| engine::StepLine::here(""));
-    let _ = app.emit(
-        "setup:progress",
+    // Bytes moving restart the step's clock, so a long download is not a step that looks stuck.
+    if downloads_moved(step, downloads.bytes) {
+        desktop_stall::moved(app, step);
+    }
+    emit_progress(
+        app,
         Progress {
             step: step.into(),
             ok: true,
@@ -886,12 +982,24 @@ fn report_running_downloads<R: tauri::Runtime>(
     );
 }
 
+/// Whether `step`'s download has more bytes than the last time it said.
+fn downloads_moved(step: &str, bytes: u64) -> bool {
+    static SEEN: Mutex<std::collections::BTreeMap<String, u64>> =
+        Mutex::new(std::collections::BTreeMap::new());
+    let mut seen = SEEN.lock().unwrap_or_else(|held| held.into_inner());
+    let before = seen.insert(step.to_owned(), bytes);
+    before.is_none_or(|before| bytes > before)
+}
+
 fn report_downloads<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     downloads: pull_metrics::Downloads,
 ) {
-    let _ = app.emit(
-        "setup:progress",
+    if downloads_moved("images", downloads.bytes) {
+        desktop_stall::moved(app, "images");
+    }
+    emit_progress(
+        app,
         Progress {
             step: "images".into(),
             ok: true,
@@ -2381,7 +2489,91 @@ async fn prepare_installation_inner(
 /// nothing moving in it reads as a hang.
 /// `saved` is the engine the installation was set up on: only that one is looked at, started or
 /// installed. With none saved, `install::install_engine_with` chooses.
+///
+/// Answering is not enough: the engine is then checked for versions new enough to run OpenBot,
+/// and updated for the person when it is not (`engine_new_enough`).
 async fn engine_ready(
+    app: &tauri::AppHandle,
+    saved: Option<engine::Engine>,
+) -> Result<engine::Address, Problem> {
+    let address = engine_answering(app, saved).await?;
+    engine_new_enough(app, address.clone()).await?;
+    Ok(address)
+}
+
+/**
+The engine at `address` new enough to run OpenBot, updated for the person when it is not.
+
+At setup and at every Start, before Compose reads the project: an older Compose stops there with
+"Compose config exited with exit status: 15", which nobody can act on. Docker Desktop and OpenBot's
+Podman are updated here; only what cannot be updated for them is one plain step on the row. Said on
+the `engine` row, and nothing is said when nothing needed doing. See `engine_versions`.
+*/
+async fn engine_new_enough<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    address: engine::Address,
+) -> Result<(), Problem> {
+    let engine = address.engine;
+    let progress_app = app.clone();
+    let back_app = app.clone();
+    // Stop and Quit move the ticket on: a wait for the person ends with them.
+    let watching = app.clone();
+    let ticket = app
+        .state::<Shell>()
+        .start_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let checked = tauri::async_runtime::spawn_blocking(move || {
+        let back = || {
+            bring_to_front(
+                &back_app,
+                "the engine update no longer needs another window",
+            )
+        };
+        let cancelled = || {
+            watching
+                .state::<Shell>()
+                .start_generation
+                .load(std::sync::atomic::Ordering::SeqCst)
+                != ticket
+        };
+        let mut updates = engine_versions::OnThisMachine {
+            address,
+            cache: stack::default_root(),
+            back: &back,
+            cancelled: &cancelled,
+        };
+        engine_versions::ensure(
+            engine,
+            std::env::consts::OS,
+            win::machine_arch(),
+            &mut updates,
+            &mut |line| report_running_line(&progress_app, "engine", line, None),
+        )
+    })
+    .await
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot could not check the software it runs on. Try again.",
+            format!("the engine version check did not run: {error}"),
+        )
+    })?;
+    match checked {
+        Ok(engine_versions::Checked::NewEnough(readings)) => {
+            log::info!("[engine] versions: {}", readings.said(engine));
+            Ok(())
+        }
+        Ok(engine_versions::Checked::Updated { said, .. }) => {
+            report_plain(app, "engine", true, said);
+            Ok(())
+        }
+        Err(problem) => {
+            report_plain(app, "engine", false, problem.said.clone());
+            Err(problem)
+        }
+    }
+}
+
+async fn engine_answering(
     app: &tauri::AppHandle,
     saved: Option<engine::Engine>,
 ) -> Result<engine::Address, Problem> {
@@ -3370,8 +3562,23 @@ async fn start_stack_inner<R: tauri::Runtime>(
     let saved = preparation::saved_engine(&root);
     let owned = shell.containers.lock().unwrap().is_some();
     if !owned {
-        wake_installation_engine(&app, saved).await?;
-        attempt.require_current()?;
+        engine_before_compose(
+            async || {
+                wake_installation_engine(&app, saved).await?;
+                attempt.require_current()
+            },
+            async || {
+                tauri::async_runtime::spawn_blocking(move || engine::detect_saved(saved))
+                    .await
+                    .ok()
+                    .and_then(|status| status.address.filter(|_| status.responding))
+            },
+            async |address| {
+                engine_new_enough(&app, address).await?;
+                attempt.require_current()
+            },
+        )
+        .await?;
     }
 
     // Minted before Compose, because the server is a container now and Compose is how it gets its
@@ -3994,6 +4201,8 @@ The window only listens. Nothing here waits for it: with no window, or a page th
 the same cleanup runs in the same order and the exit follows.
 */
 fn quit_cleanup_shown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Vec<String> {
+    // A setup window that stopped answering and still has not: said before the flush below.
+    desktop_stall::at_quit(app);
     show_shutting_down(app);
     desktop_telemetry::shutdown(app);
     let shell = app.state::<Shell>();
@@ -4314,7 +4523,7 @@ where
         return Ok(());
     };
     let not_stopped =
-        |why: String| format!("the back end's command-line tool did not stop the back end ({why})");
+        |why: String| format!("the backend's command-line tool did not stop the backend ({why})");
     match stop(&state.stack_id()) {
         Ok(report) => match report.outcome {
             local_eval::Outcome::Completed => Ok(()),
@@ -4324,7 +4533,7 @@ where
             })),
         },
         Err(local_eval::Failure::Unavailable) => {
-            Err("this build has no command-line tool to stop the back end OpenBot created".into())
+            Err("this build has no command-line tool to stop the backend OpenBot created".into())
         }
         Err(failure) => Err(not_stopped(wire_name(failure))),
     }
@@ -4602,7 +4811,7 @@ fn write_quit_cleanup_notice(root: &Path, lines: &[String]) -> Result<(), String
         .and_then(|()| std::fs::write(&path, br#"{"version":1}"#))
         .map_err(|error| {
             format!(
-                "{}: could not write the back end shutdown notice: {error}",
+                "{}: could not write the backend shutdown notice: {error}",
                 path.display()
             )
         })
@@ -4620,7 +4829,7 @@ fn take_local_eval_stop_notice(root: &Path) -> Option<Problem> {
     Some(Problem::with(
         "When OpenBot last quit, some of its services didn't stop. They may still be running. \
          Stopping OpenBot again asks them to stop.",
-        "the back end stack did not stop when OpenBot last quit",
+        "the backend stack did not stop when OpenBot last quit",
     ))
 }
 
@@ -5263,13 +5472,21 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
     #[cfg(target_os = "macos")]
     let builder = builder.traffic_light_position(TRAFFIC_LIGHTS);
     /*
-     * Built visible, as the configured window always was. It was built hidden and shown once it
-     * was in place (to spare a reopened window a moment at the system's default spot), and on
-     * Windows that froze setup: the WebView2 page under a window first created hidden stopped
-     * taking native updates a few seconds after a download line appeared, for minutes, until the
-     * window was activated or clicked. `tauri_plugin_window_state` puts it back at the size and
-     * place it had as it is built, and `fit_main_window_to_screen` brings it onto a screen.
+     * Built visible, as the configured window always was, and built where it was last: the size
+     * and place `tauri_plugin_window_state` saved go to the builder, so the first frame is already
+     * there. Built at the system's default spot and moved after, a reopened window showed blank at
+     * 104,104 for about 230 ms on Windows, then jumped to its saved 400,90. The plugin's own restore
+     * then finds it already in place. Never built hidden to avoid that: on Windows a WebView2 page
+     * under a window first created hidden stopped taking native updates mid-setup, for minutes,
+     * until the window was activated or clicked.
      */
+    let builder = match saved_main_window(app) {
+        Some(place) => builder
+            .position(place.x, place.y)
+            .inner_size(place.width, place.height)
+            .maximized(place.maximized),
+        None => builder,
+    };
     let window = builder
         .on_new_window(move |destination, _features| {
             outside_links::new_window(&destination, |to| {
@@ -5283,6 +5500,128 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
     let _ = window.set_zoom(saved_zoom(app));
     fit_main_window_to_screen(app);
     Ok(())
+}
+
+/// A window's state as `tauri_plugin_window_state` saves it (its `WindowState`): the outer
+/// position and the inner size in physical pixels, and where it was before it was maximized.
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Deserialize)]
+#[serde(default)]
+struct SavedWindow {
+    width: u32,
+    height: u32,
+    x: i32,
+    y: i32,
+    prev_x: i32,
+    prev_y: i32,
+    maximized: bool,
+}
+
+/// A monitor as placing a window needs it: its whole area and work area in physical pixels, and
+/// its scale.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Screen {
+    position: (i32, i32),
+    size: (u32, u32),
+    work: (i32, i32, u32, u32),
+    scale: f64,
+}
+
+/// Where to build a window, in logical pixels, as the builder takes it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Place {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    maximized: bool,
+}
+
+/**
+Where to build the main window from its saved state, on `screens` (the primary first): where it
+was, on the screen it was on, in that screen's logical pixels; or, when no screen it was on is
+there any more, the middle of the primary screen's work area. None when nothing is saved.
+*/
+fn place_saved_window(saved: SavedWindow, screens: &[Screen]) -> Option<Place> {
+    if saved == SavedWindow::default() || saved.width == 0 || saved.height == 0 {
+        return None;
+    }
+    let (x, y) = if saved.maximized {
+        (saved.prev_x, saved.prev_y)
+    } else {
+        (saved.x, saved.y)
+    };
+    // The screen the window's top-left area is on, as the plugin checks it.
+    let on = screens.iter().find(|screen| {
+        let (left, top) = screen.position;
+        let (width, height) = screen.size;
+        let right = left + width as i32;
+        let bottom = top + height as i32;
+        x + saved.width as i32 > left && x < right && y + saved.height as i32 > top && y < bottom
+    });
+    match on {
+        Some(screen) => Some(Place {
+            x: f64::from(x) / screen.scale,
+            y: f64::from(y) / screen.scale,
+            width: f64::from(saved.width) / screen.scale,
+            height: f64::from(saved.height) / screen.scale,
+            maximized: saved.maximized,
+        }),
+        None => {
+            let primary = screens.first()?;
+            let (left, top, width, height) = primary.work;
+            let fit_width = saved.width.min(width);
+            let fit_height = saved.height.min(height);
+            Some(Place {
+                x: f64::from(left + (width - fit_width) as i32 / 2) / primary.scale,
+                y: f64::from(top + (height - fit_height) as i32 / 2) / primary.scale,
+                width: f64::from(fit_width) / primary.scale,
+                height: f64::from(fit_height) / primary.scale,
+                maximized: saved.maximized,
+            })
+        }
+    }
+}
+
+/// The main window's saved place (`place_saved_window`), from the window-state plugin's file.
+fn saved_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<Place> {
+    // Tests build the window on Tauri's mock runtime, which has no monitors, and must not read
+    // the developer's own saved window: `place_saved_window` is tested on its own.
+    if cfg!(test) {
+        return None;
+    }
+    let file = app
+        .path()
+        .app_config_dir()
+        .ok()?
+        .join(tauri_plugin_window_state::DEFAULT_FILENAME);
+    let saved: std::collections::HashMap<String, SavedWindow> =
+        serde_json::from_slice(&std::fs::read(file).ok()?).ok()?;
+    let saved = *saved.get("main")?;
+    let primary = app.primary_monitor().ok().flatten();
+    let mut monitors = app.available_monitors().unwrap_or_default();
+    if let Some(primary) = &primary {
+        monitors.sort_by_key(|monitor| monitor.name() != primary.name());
+    }
+    let screens: Vec<Screen> = monitors
+        .iter()
+        .map(|monitor| {
+            let work = monitor.work_area();
+            Screen {
+                position: (monitor.position().x, monitor.position().y),
+                size: (monitor.size().width, monitor.size().height),
+                work: (
+                    work.position.x,
+                    work.position.y,
+                    work.size.width,
+                    work.size.height,
+                ),
+                scale: monitor.scale_factor(),
+            }
+        })
+        .collect();
+    let place = place_saved_window(saved, &screens);
+    log::info!("[window] built at its saved place: {place:?}");
+    place
 }
 
 fn window_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) -> WindowPage {
@@ -7226,7 +7565,7 @@ fn log_update_due(from: &str, to: &str, stopped_at: Option<&str>) {
 }
 
 fn update_due_entry(from: &str, to: &str, stopped_at: Option<&str>) -> String {
-    let mut entry = format!("[local update] the back end is on {from}, due an update to {to}");
+    let mut entry = format!("[local update] the backend is on {from}, due an update to {to}");
     if let Some(step) = stopped_at {
         entry.push_str(&format!("; the last update stopped at {step}"));
     }
@@ -7393,7 +7732,10 @@ async fn sign_in_to_copilotkit<R: tauri::Runtime>(
         log::info!("[account] browser sign-in started");
         desktop_telemetry::sign_in_started(&started_app);
         let asked = std::time::Instant::now();
-        let signed_in = local_eval::account_sign_in_installed(&attempt);
+        let signed_in = while_signing_in(
+            || local_eval::account_sign_in_installed(&attempt),
+            || bring_to_front(&started_app, "the browser sign-in ended"),
+        );
         let took = asked.elapsed();
         match &signed_in {
             Ok(said) => log::info!(
@@ -7641,7 +7983,7 @@ where
 {
     let unconnected = |said: &str| ConnectError::Unconnected(Problem::plain(said));
     let recorded = local_eval_state::read(root, None)
-        .ok_or_else(|| unconnected("Set up the back end before connecting OpenBot to it."))?;
+        .ok_or_else(|| unconnected("Set up the backend before connecting OpenBot to it."))?;
     let connection = connect(root).map_err(ConnectError::Failure)?;
     if connection.outcome != local_eval::Outcome::Completed || connection.conflicted {
         return Ok(connection);
@@ -7652,7 +7994,7 @@ where
         .filter(|stack| stack.id == recorded.stack)
     else {
         return Err(unconnected(
-            "A different back end was connected. OpenBot did not use it.",
+            "A different backend was connected. OpenBot did not use it.",
         ));
     };
     let env_file = root.join(".env");
@@ -7666,7 +8008,7 @@ where
     )
     .map_err(|error| {
         ConnectError::Unconnected(Problem::with(
-            "OpenBot could not read the connection settings for its back end.",
+            "OpenBot could not read the connection settings for its backend.",
             format!("{}: {}", env_file.display(), error.kind()),
         ))
     })?;
@@ -7693,7 +8035,7 @@ where
             != Some(reported)
     }) {
         return Err(unconnected(
-            "The connection settings do not match the back end that was set up. OpenBot did not use them.",
+            "The connection settings do not match the backend that was set up. OpenBot did not use them.",
         ));
     }
     match written
@@ -7710,7 +8052,7 @@ where
             let purge = [(LOCAL_EVAL_CONNECTED_KEY.to_owned(), String::new())].into();
             openbot_env::write(&env_file, &settings, &purge).map_err(|error| {
                 ConnectError::Unconnected(Problem::with(
-                    "OpenBot kept the back end's key but could not remove it from its settings file.",
+                    "OpenBot kept the backend's key but could not remove it from its settings file.",
                     format!("{}: {}", env_file.display(), error.kind()),
                 ))
             })?;
@@ -7722,7 +8064,7 @@ where
                     .is_some_and(|key| !key.trim().is_empty());
             if !kept {
                 return Err(unconnected(
-                    "The back end connected, but OpenBot has no key for it.",
+                    "The backend connected, but OpenBot has no key for it.",
                 ));
             }
         }
@@ -9556,6 +9898,7 @@ fn main() {
             local_eval_download,
             local_eval_steps,
             local_eval_update_step,
+            setup_heartbeat,
             local_eval_terms,
             connect_copilotkit_apps,
             connect_local_eval,
@@ -9575,6 +9918,11 @@ fn main() {
         // no such setting, and Tauri has no configuration option for it either, so the page is
         // asked to refuse. Every navigation, because the window navigates to OpenBot and back.
         .on_page_load(|window, payload| {
+            // A new page in the main window is not the setup page until it sends a heartbeat.
+            if window.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started
+            {
+                desktop_stall::page_loaded(window);
+            }
             let _ = window
                 .eval("document.addEventListener('contextmenu', e => e.preventDefault(), true)");
             let page = window_page(window.app_handle(), payload.url());
@@ -9682,6 +10030,7 @@ fn main() {
             watch_for_app_updates(app.handle());
             get_updates_ready(app.handle());
             desktop_telemetry::initialize(app.handle());
+            desktop_stall::initialize(app.handle());
             if let Some(root) = app
                 .path()
                 .app_config_dir()
@@ -10291,12 +10640,12 @@ mod tests {
     fn the_log_keeps_the_back_end_releases_and_the_step_an_update_stopped_at() {
         assert_eq!(
             update_due_entry("0.16.0-rc.9", "0.16.0-rc.10", Some("update-quiesce")),
-            "[local update] the back end is on 0.16.0-rc.9, due an update to 0.16.0-rc.10; the last \
+            "[local update] the backend is on 0.16.0-rc.9, due an update to 0.16.0-rc.10; the last \
              update stopped at update-quiesce"
         );
         assert_eq!(
             update_due_entry("0.16.0-rc.9", "0.16.0-rc.10", None),
-            "[local update] the back end is on 0.16.0-rc.9, due an update to 0.16.0-rc.10"
+            "[local update] the backend is on 0.16.0-rc.9, due an update to 0.16.0-rc.10"
         );
     }
 
@@ -12736,6 +13085,66 @@ mod tests {
         assert_eq!(run(Some(Podman), false, false, true), none);
     }
 
+    /// The tester's Start: Docker Desktop 4.27.2 answered, and Compose v2.24.5 stopped at its first
+    /// look at the project. The engine is now woken, then checked and updated, before Compose.
+    #[test]
+    fn start_wakes_the_engine_then_makes_it_new_enough_before_compose() {
+        use std::cell::RefCell;
+        let docker = || engine::Address::new(engine::Engine::Docker, None);
+        let run = |answers: bool, wake: Result<(), Problem>, check: Result<(), Problem>| {
+            let done = RefCell::new(Vec::new());
+            let result = tauri::async_runtime::block_on(engine_before_compose(
+                async || {
+                    done.borrow_mut().push("wake");
+                    wake
+                },
+                async || {
+                    done.borrow_mut().push("look");
+                    answers.then(docker)
+                },
+                async |address| {
+                    assert_eq!(
+                        address,
+                        docker(),
+                        "the engine that answered is the one checked"
+                    );
+                    done.borrow_mut().push("new enough");
+                    check
+                },
+            ));
+            (result, done.into_inner())
+        };
+
+        let (result, done) = run(true, Ok(()), Ok(()));
+        assert!(result.is_ok());
+        assert_eq!(done, ["wake", "look", "new enough"]);
+
+        // An update that could not be made stops Start there, with its own words, before Compose.
+        let (result, done) = run(
+            true,
+            Ok(()),
+            Err(Problem::plain(
+                "Docker on this computer is too old to run OpenBot. Update Docker, then start \
+                 OpenBot again.",
+            )),
+        );
+        assert!(result
+            .unwrap_err()
+            .said
+            .starts_with("Docker on this computer is too old"));
+        assert_eq!(done, ["wake", "look", "new enough"]);
+
+        // A wake that failed is the failure; nothing is checked.
+        let (result, done) = run(true, Err(Problem::plain("machine did not start")), Ok(()));
+        assert_eq!(result.unwrap_err().said, "machine did not start");
+        assert_eq!(done, ["wake"]);
+
+        // Nothing answering: the check after this one says so, and no update is tried.
+        let (result, done) = run(false, Ok(()), Ok(()));
+        assert!(result.is_ok());
+        assert_eq!(done, ["wake", "look"]);
+    }
+
     #[test]
     fn a_machine_that_fails_to_start_stops_start_with_its_own_words() {
         let problem = wake_saved_engine(
@@ -13411,7 +13820,7 @@ mod tests {
             "podman",
             "wsl",
             "engine",
-            "back end",
+            "backend",
             "backend",
             "container",
             "compose",
@@ -13578,6 +13987,153 @@ mod tests {
         for input in ["SendInput", "keybd_event", "VK_MENU"] {
             assert!(!main[..tests].contains(input), "{input}");
         }
+    }
+
+    /// A reopened window showed blank at Windows' default spot (104,104) for about 230 ms, then
+    /// jumped to its saved 400,90. It is built at its saved place now, in that screen's logical
+    /// pixels, and never hidden.
+    #[test]
+    fn the_main_window_is_built_at_its_saved_place_and_never_hidden() {
+        let screen = |x: i32, width: u32, scale: f64| Screen {
+            position: (x, 0),
+            size: (width, 1080),
+            work: (x, 0, width, 1032),
+            scale,
+        };
+        let saved = SavedWindow {
+            width: 1016,
+            height: 839,
+            x: 400,
+            y: 90,
+            ..SavedWindow::default()
+        };
+        // Where it was, on the primary screen.
+        assert_eq!(
+            place_saved_window(saved, &[screen(0, 1920, 1.0)]),
+            Some(Place {
+                x: 400.0,
+                y: 90.0,
+                width: 1016.0,
+                height: 839.0,
+                maximized: false,
+            })
+        );
+        // On a screen at 150%, in its logical pixels.
+        assert_eq!(
+            place_saved_window(saved, &[screen(0, 2880, 1.5)]),
+            Some(Place {
+                x: 400.0 / 1.5,
+                y: 60.0,
+                width: 1016.0 / 1.5,
+                height: 839.0 / 1.5,
+                maximized: false,
+            })
+        );
+        // On a second screen that is still there.
+        let left = SavedWindow { x: -1500, ..saved };
+        assert_eq!(
+            place_saved_window(left, &[screen(0, 1920, 1.0), screen(-1920, 1920, 1.0)])
+                .map(|place| (place.x, place.y)),
+            Some((-1500.0, 90.0))
+        );
+        // That screen unplugged: the middle of the primary one's work area.
+        assert_eq!(
+            place_saved_window(left, &[screen(0, 1920, 1.0)]).map(|place| (place.x, place.y)),
+            Some((452.0, 96.0))
+        );
+        // Maximized: where it was before, and maximized again.
+        let maximized = SavedWindow {
+            x: -8,
+            y: -8,
+            prev_x: 300,
+            prev_y: 80,
+            maximized: true,
+            ..saved
+        };
+        assert_eq!(
+            place_saved_window(maximized, &[screen(0, 1920, 1.0)]).map(|place| (
+                place.x,
+                place.y,
+                place.maximized
+            )),
+            Some((300.0, 80.0, true))
+        );
+        // Nothing saved: the configured window as it is.
+        assert_eq!(
+            place_saved_window(SavedWindow::default(), &[screen(0, 1920, 1.0)]),
+            None
+        );
+        // The plugin's own file reads as saved here.
+        let file: std::collections::HashMap<String, SavedWindow> = serde_json::from_str(
+            r#"{"main":{"width":1016,"height":839,"x":400,"y":90,"prev_x":400,"prev_y":90,"maximized":false,"visible":true,"decorated":true,"fullscreen":false}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            file["main"],
+            SavedWindow {
+                prev_x: 400,
+                prev_y: 90,
+                ..saved
+            }
+        );
+        // The builder takes the saved place, and the window is never built hidden.
+        let main = include_str!("main.rs");
+        let body = &main[main.find("fn build_main_window").unwrap()..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        assert!(body.contains("match saved_main_window(app)"), "{body}");
+        assert!(
+            body.contains(".position(place.x, place.y)")
+                && body.contains(".inner_size(place.width, place.height)"),
+            "{body}"
+        );
+        assert!(!body.contains(".visible(false)"), "{body}");
+        assert!(!body.contains(".show()"), "{body}");
+    }
+
+    /// Windows F: "[front] the engine machine is prepared" brought OpenBot in front of the
+    /// browser while the person typed their email to sign in. While the sign-in is open, setup's
+    /// own moments hold back; when it ends, OpenBot comes forward once.
+    #[test]
+    fn nothing_comes_forward_while_the_browser_sign_in_is_open_and_once_when_it_ends() {
+        if crate::test_support::isolated_process(
+            "tests::nothing_comes_forward_while_the_browser_sign_in_is_open_and_once_when_it_ends",
+        ) {
+            return;
+        }
+        let forward = std::cell::Cell::new(0);
+        let during = while_signing_in(
+            || {
+                // Setup's moments while the person is in the browser.
+                [
+                    "the engine machine is prepared",
+                    "Docker Desktop answers",
+                    "the engine no longer needs another app's window",
+                ]
+                .map(held_back)
+            },
+            || forward.set(forward.get() + 1),
+        );
+        assert_eq!(during, [true, true, true]);
+        assert_eq!(forward.get(), 1);
+        // Signed in: the next moment comes forward as before.
+        assert!(!held_back("the engine machine is prepared"));
+        // However the sign-in ends, the hold ends with it.
+        let failed = std::panic::catch_unwind(|| {
+            while_signing_in(|| panic!("the sign-in failed"), || {});
+        });
+        assert!(failed.is_err());
+        assert!(!held_back("OpenBot is showing"));
+        // `bring_to_front` asks before it does anything, and the sign-in runs inside the hold.
+        let main = include_str!("main.rs");
+        let body = &main[main.find("fn bring_to_front<").unwrap()..];
+        assert!(body.starts_with(
+            "fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {\n    if held_back(why) {\n        return;\n    }"
+        ));
+        let sign_in = &main[main.find("async fn sign_in_to_copilotkit<").unwrap()..];
+        let sign_in = &sign_in[..sign_in.find("\n}\n").unwrap()];
+        assert!(sign_in.contains(
+            "while_signing_in(\n            || local_eval::account_sign_in_installed(&attempt),\n            || bring_to_front(&started_app, \"the browser sign-in ended\"),"
+        ));
     }
 
     /// Windows cascades a window with no position of its own down and right on every launch. On
@@ -13819,13 +14375,13 @@ mod tests {
             stopped,
             Stopped {
                 openbot: vec!["Compose down failed: compose refused".into()],
-                intelligence: Some("Back end stop failed: the CLI timed out".into()),
+                intelligence: Some("Backend stop failed: the CLI timed out".into()),
             }
         );
         assert_eq!(
             stopped.into_result(),
             Err("Compose down failed: compose refused\n\
-                 Back end stop failed: the CLI timed out"
+                 Backend stop failed: the CLI timed out"
                 .into())
         );
         let _ = std::fs::remove_dir_all(active);
@@ -13873,7 +14429,7 @@ mod tests {
             failures,
             Stopped {
                 openbot: vec!["Compose down failed: compose down refused".into()],
-                intelligence: Some("Back end stop failed: the CLI timed out".into()),
+                intelligence: Some("Backend stop failed: the CLI timed out".into()),
             }
         );
         let _ = std::fs::remove_dir_all(active);
@@ -13969,7 +14525,7 @@ mod tests {
             stopped,
             Stopped {
                 openbot: vec!["Compose down failed: compose down refused".into()],
-                intelligence: Some("Back end stop failed: the CLI timed out".into()),
+                intelligence: Some("Backend stop failed: the CLI timed out".into()),
             }
         );
         report_exit_cleanup_failures(stopped.lines(), |lines| {
@@ -14179,7 +14735,7 @@ mod tests {
         assert!(stopped.openbot.is_empty(), "{stopped:?}");
         assert_eq!(
             stopped.into_result(),
-            Err("Back end stop failed: the CLI timed out".into()),
+            Err("Backend stop failed: the CLI timed out".into()),
             "an Intelligence failure is not a silent success"
         );
         assert!(!recovery_required(&shell, &active));
@@ -14197,10 +14753,7 @@ mod tests {
             |_| Ok(()),
             |_| Err("the CLI timed out".to_string()),
         );
-        assert_eq!(
-            failures.lines(),
-            ["Back end stop failed: the CLI timed out"]
-        );
+        assert_eq!(failures.lines(), ["Backend stop failed: the CLI timed out"]);
         assert!(!recovery_required(&shell, &active));
         let _ = std::fs::remove_dir_all(active);
     }
@@ -14268,22 +14821,22 @@ mod tests {
 
         assert_eq!(
             failed(Err(local_eval::Failure::Unavailable)),
-            "this build has no command-line tool to stop the back end OpenBot created"
+            "this build has no command-line tool to stop the backend OpenBot created"
         );
         assert_eq!(
             failed(Err(local_eval::Failure::Timeout)),
-            "the back end's command-line tool did not stop the back end (timeout)"
+            "the backend's command-line tool did not stop the backend (timeout)"
         );
         assert_eq!(
             failed(Ok(local_eval_report(
                 local_eval::Outcome::Blocked,
                 Some(local_eval::Reason::LocalCommandBusy)
             ))),
-            "the back end's command-line tool did not stop the back end (blocked: local-command-busy)"
+            "the backend's command-line tool did not stop the backend (blocked: local-command-busy)"
         );
         assert_eq!(
             failed(Ok(local_eval_report(local_eval::Outcome::Failed, None))),
-            "the back end's command-line tool did not stop the back end (failed)"
+            "the backend's command-line tool did not stop the backend (failed)"
         );
         let _ = std::fs::remove_dir_all(root);
     }
@@ -14309,7 +14862,7 @@ mod tests {
             failures.lines(),
             [
                 "Compose down failed: compose down refused",
-                "Back end stop failed: this build has no command-line tool to stop the back end \
+                "Backend stop failed: this build has no command-line tool to stop the backend \
                  OpenBot created"
             ]
         );
@@ -14317,7 +14870,7 @@ mod tests {
     }
 
     const NO_CLI_LINE: &str =
-        "Back end stop failed: this build has no command-line tool to stop the back end OpenBot created";
+        "Backend stop failed: this build has no command-line tool to stop the backend OpenBot created";
 
     #[test]
     fn an_intelligence_failure_on_quit_is_shown_next_launch_without_recovery() {

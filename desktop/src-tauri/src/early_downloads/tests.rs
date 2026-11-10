@@ -658,6 +658,16 @@ fn what_downloads_early_depends_on_the_engine_install_will_use() {
             "{version} {exists}"
         );
     }
+    // A Podman too old for OpenBot is updated over with OpenBot's installer: it downloads early too.
+    let old = plan(&facts(
+        "macos",
+        Choice::UsePodman,
+        Some("podman version 5.7.0"),
+        true,
+        None,
+    ));
+    assert!(old.podman, "{old:?}");
+    assert_eq!(old.machine_image, None);
     // A Docker Desktop that is stopped is not opened before Install: its Compose names the images,
     // which download to load once it answers.
     assert_eq!(

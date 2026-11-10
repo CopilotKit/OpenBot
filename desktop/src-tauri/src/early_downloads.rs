@@ -779,7 +779,15 @@ pub fn plan(facts: &Facts) -> Plan {
         return Plan::default();
     }
     let desktop = matches!(facts.os, "macos" | "windows");
-    let installs_podman = desktop && facts.choice == Choice::InstallPodman;
+    // A Podman too old for OpenBot is updated with the same installer (`engine_versions::ensure`).
+    let too_old = facts
+        .podman_version
+        .as_deref()
+        .and_then(crate::engine_versions::Version::find)
+        .is_some_and(|version| version < crate::engine_versions::PODMAN);
+    let installs_podman = desktop
+        && (facts.choice == Choice::InstallPodman
+            || (facts.choice == Choice::UsePodman && too_old));
     let creates_machine = desktop
         && match facts.choice {
             Choice::InstallPodman => true,

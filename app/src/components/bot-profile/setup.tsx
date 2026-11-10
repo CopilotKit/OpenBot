@@ -62,6 +62,7 @@ import {
   type AgentProfile,
   agentCapabilitiesQueryOptions,
 } from "@/lib/agents/queries";
+import { shownSubtitle } from "@/lib/agents/subtitle";
 import { isComposing } from "@/lib/composing";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
@@ -116,6 +117,20 @@ export function SetupSections({ agent }: { agent: AgentProfile }) {
       input: profileUpdateInput(agent, patch),
     });
   const open = TEXT_FIELDS.find((entry) => entry.field === editing);
+  /*
+   * The subtitle as a person reads it everywhere else (lib/agents/subtitle.ts). Saved back unchanged,
+   * it stays as stored: the Bot is told the stored subtitle, and a save of the shown wording would
+   * change that.
+   */
+  const shown = (field: TextField) =>
+    field === "title" ? shownSubtitle(agent.title) : agent[field];
+  const saveText = (field: TextField, value: string) =>
+    save({
+      [field]:
+        field === "title" && value === shownSubtitle(agent.title)
+          ? agent.title
+          : value,
+    });
   const fields = TEXT_FIELDS.filter(
     ({ field }) =>
       field !== "instructions" || typeof agent.instructions === "string",
@@ -141,7 +156,7 @@ export function SetupSections({ agent }: { agent: AgentProfile }) {
                 </ItemMedia>
                 <ItemContent>
                   <ItemTitle>{label}</ItemTitle>
-                  <ItemDescription>{agent[field]}</ItemDescription>
+                  <ItemDescription>{shown(field)}</ItemDescription>
                 </ItemContent>
                 {agent.canManage ? (
                   <ItemActions>
@@ -198,9 +213,9 @@ export function SetupSections({ agent }: { agent: AgentProfile }) {
           label={open.label}
           multiline={open.multiline ?? false}
           onClose={() => setEditing(null)}
-          onSave={(value) => save({ [open.field]: value })}
+          onSave={(value) => saveText(open.field, value)}
           schema={TEXT_SCHEMAS[open.field]}
-          value={agent[open.field] ?? ""}
+          value={shown(open.field) ?? ""}
         />
       ) : null}
     </>

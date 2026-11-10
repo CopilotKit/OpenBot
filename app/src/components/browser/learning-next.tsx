@@ -375,7 +375,7 @@ export function LearningNextRow({
       icon = <IconAlertTriangle />;
       heading = "Learning is off";
       sentence =
-        "Learning isn't available in the back end, so no skill is learned from it.";
+        "Learning isn't available in the backend, so no skill is learned from it.";
       break;
     case "unreadable":
       tone = "warn";

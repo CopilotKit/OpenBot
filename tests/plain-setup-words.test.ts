@@ -70,6 +70,11 @@ const ALLOWED: { file: string; word: RegExp; why: string }[] = [
     why: "the person installs Podman Desktop or the podman package, or asks IT to allow it",
   },
   {
+    file: "desktop/src-tauri/src/engine_versions.rs",
+    word: /Podman/,
+    why: "the person updates or removes a Podman they installed, which OpenBot can't update for them",
+  },
+  {
     file: "desktop/src-tauri/src/acquire.rs",
     word: /\bCompose\b/,
     why: "the last resort: the person installs Compose v2 themselves",
@@ -88,9 +93,10 @@ const ALLOWED: { file: string; word: RegExp; why: string }[] = [
 
 /**
  * Not read: the Status window, opened from the tray once OpenBot is running, names each part for
- * whoever is troubleshooting. It is not part of setup, start or update.
+ * whoever is troubleshooting, with the part names only it uses (`partNames.ts`). It is not part of
+ * setup, start or update.
  */
-const NOT_SETUP = ["desktop/src/StatusWindow.tsx"];
+const NOT_SETUP = ["desktop/src/StatusWindow.tsx", "desktop/src/partNames.ts"];
 
 const LOGGING = /^(console\.\w+|log|logger\.\w+|this\.log|options\.log)$/;
 

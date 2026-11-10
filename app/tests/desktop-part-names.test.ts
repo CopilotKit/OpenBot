@@ -31,7 +31,7 @@ const NAMES: [string, "bots" | "back-end", string][] = [
 /** Containers the table doesn't know: each still says which side of OpenBot it's on. */
 const UNKNOWN: [string, "bots" | "back-end", string][] = [
   ["something-new-1", "bots", "OpenBot service"],
-  ["k3d-local-abc123-serverlb", "back-end", "Back-end service"],
+  ["k3d-local-abc123-serverlb", "back-end", "Backend service"],
 ];
 
 test.each([...NAMES, ...UNKNOWN])(
@@ -42,7 +42,7 @@ test.each([...NAMES, ...UNKNOWN])(
   },
 );
 
-test("every container OpenBot and its back end run has its own name", () => {
+test("every container OpenBot and its backend run has its own name", () => {
   const fallbacks = new Set(UNKNOWN.map(([, , label]) => label));
   for (const [name, group] of NAMES) {
     expect(fallbacks.has(partLabel(name, group))).toBe(false);
