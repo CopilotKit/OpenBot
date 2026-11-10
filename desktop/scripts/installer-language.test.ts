@@ -127,7 +127,11 @@ test("installing over a running OpenBot asks to close it in plain words", () => 
 
 test("the file defines every string Tauri's installer reads", () => {
   const lock = readFileSync(join(desktop, "bun.lock"), "utf8");
-  const locked = /"@tauri-apps\/cli": \["@tauri-apps\/cli@([^"]+)"/.exec(lock)?.[1];
+  const locked = /"@tauri-apps\/cli": \["@tauri-apps\/cli@([^"]+)"/.exec(
+    lock,
+  )?.[1];
   expect(locked).toBe(COPIED_FROM_CLI);
-  expect([...englishStrings().keys()].sort()).toEqual([...TAURI_STRINGS].sort());
+  expect([...englishStrings().keys()].sort()).toEqual(
+    [...TAURI_STRINGS].sort(),
+  );
 });
