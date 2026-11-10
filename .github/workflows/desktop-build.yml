@@ -271,6 +271,13 @@ jobs:
         if: matrix.platform == 'linux'
         run: cargo test --locked --lib local_images::live -- --ignored --test-threads=1
         working-directory: desktop/src-tauri
+      # An announced release's images downloaded while the version that runs stays up, against the
+      # same node, registry and proxy, with Docker as OpenBot's engine: the update afterwards
+      # downloads nothing, and a disk short of room downloads nothing at all.
+      - name: Update download ahead regression tests
+        if: matrix.platform == 'linux'
+        run: cargo test --locked --lib update_ready::live -- --ignored --test-threads=1
+        working-directory: desktop/src-tauri
       # The binary run as the Recorder's browsers run it: the native messaging host Chrome starts, and
       # the install that writes its manifests. The host name and extension id come from
       # shared/recorder-extension.json, which the Rust reads at compile time.

@@ -42,6 +42,7 @@ pub mod stack;
 pub mod telemetry;
 pub mod tray;
 pub mod troubleshooting;
+pub mod update_ready;
 pub mod upgrade;
 pub mod usage_data;
 pub mod vault;
