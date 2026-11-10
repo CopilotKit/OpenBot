@@ -1555,6 +1555,44 @@ mod tests {
         receive
     }
 
+    fn diag(what: &str) {
+        let ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+        let _ = std::io::stderr().write_all(format!("diag rust-{what} {ms}\n").as_bytes());
+    }
+
+    #[test]
+    fn credential_lock_diag_bun_timing() {
+        use std::process::Stdio;
+        let root = crate::test_support::temp_root("provider-oauth-diag");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("model-oauth.json");
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../server/tests/fixtures/provider-oauth-lock-owner.ts");
+        for round in 0..6 {
+            let started = Instant::now();
+            diag(&format!("loop{round}-spawn"));
+            let mut child = LockChild(
+                crate::quiet::command("bun")
+                    .args([fixture.as_os_str(), path.as_os_str()])
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::inherit())
+                    .spawn()
+                    .unwrap(),
+            );
+            let ready = lock_child_ready(&mut child);
+            let said = ready.recv_timeout(Duration::from_secs(120));
+            diag(&format!(
+                "loop{round}-said-{said:?}-after-{}ms",
+                started.elapsed().as_millis()
+            ));
+            drop(child.0.stdin.take());
+            let _ = child.0.wait();
+            diag(&format!("loop{round}-exited-after-{}ms", started.elapsed().as_millis()));
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn credential_lock_excludes_bun_in_both_directions_and_recovers_after_kill() {
         use std::process::Stdio;
@@ -1574,16 +1612,19 @@ mod tests {
                 .spawn()
                 .unwrap(),
         );
+        diag("main-spawned");
         let ready = lock_child_ready(&mut child);
         assert!(matches!(
             ready.recv_timeout(Duration::from_millis(150)),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout)
         ));
         drop(native);
+        diag("main-native-dropped");
         assert_eq!(
             ready.recv_timeout(Duration::from_secs(15)).unwrap(),
             "locked"
         );
+        diag("main-bun-locked");
         let other_path = path.clone();
         let (send, receive) = std::sync::mpsc::channel();
         let waiter = std::thread::spawn(move || {

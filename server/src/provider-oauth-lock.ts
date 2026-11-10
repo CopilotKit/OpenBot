@@ -91,6 +91,7 @@ async function unixLock(path: string): Promise<() => Promise<void>> {
 // the Bun parent dies. The path is environment data, never interpolated code.
 const windowsLockScript = `
 $ErrorActionPreference='Stop'
+[Console]::Error.WriteLine("diag ps-start $([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())")
 Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
@@ -113,9 +114,12 @@ public static class OpenBotCredentialLock {
   }
 }
 '@
+[Console]::Error.WriteLine("diag ps-compiled $([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())")
 $deadline=[DateTime]::UtcNow.AddSeconds(5)
 $file=$null
+$tries=0
 while ($null -eq $file) {
+  $tries++
   try { $file=[OpenBotCredentialLock]::Open($env:OPENBOT_CREDENTIAL_LOCK) }
   catch {
     $cause=$_.Exception.GetBaseException()
@@ -123,6 +127,7 @@ while ($null -eq $file) {
     Start-Sleep -Milliseconds 25
   }
 }
+[Console]::Error.WriteLine("diag ps-locked $([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) tries=$tries")
 try { [Console]::Out.WriteLine('locked'); [Console]::Out.Flush(); [Console]::In.ReadLine() | Out-Null }
 finally { $file.Dispose() }
 `;
@@ -145,12 +150,16 @@ async function windowsLock(path: string): Promise<() => Promise<void>> {
       env,
       stdin: "pipe",
       stdout: "pipe",
-      stderr: "ignore",
+      stderr: "inherit",
       windowsHide: true,
     },
   );
+  console.error("diag bun-spawned-ps", Date.now());
   const reader = child.stdout.getReader();
-  const timeout = setTimeout(() => child.kill(), 15_000);
+  const timeout = setTimeout(() => {
+    console.error("diag bun-kills-ps", Date.now());
+    child.kill();
+  }, 15_000);
   try {
     let message = "";
     while (!message.includes("\n")) {
