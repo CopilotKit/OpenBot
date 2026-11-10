@@ -481,6 +481,13 @@ const OWN_TOOLS: Record<string, OwnTool> = {
     done: "Looked for a tool",
     answersTheModel: true,
   },
+  // Claude Code's own search over the tools a Claude Agent SDK Bot holds, the same step as the one
+  // above (`TOOL_SEARCH` in agent-claude-sdk/src/adapter.py).
+  ToolSearch: {
+    running: "Looking for a tool",
+    done: "Looked for a tool",
+    answersTheModel: true,
+  },
 
   // Bringing someone else in.
   ask_person: { running: "Asking you", done: "Asked you" },
