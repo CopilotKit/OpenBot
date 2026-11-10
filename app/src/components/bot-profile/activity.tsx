@@ -4,6 +4,7 @@ import {
   IconCalendarRepeat,
   IconChecks,
   IconChevronRight,
+  IconClock,
   IconClockPlay,
   IconHelpCircle,
   IconHistory,
@@ -324,7 +325,20 @@ export function activitySummary(activity: BotActivity): string {
     : "No tasks, routines or goals yet";
 }
 
-/** In progress, Scheduled and Completed, read from the ledgers the work already lives in. */
+/** What the row to the Bot's Routines says: what is lined up, and what waits to be asked. */
+function lineUpSummary(activity: BotActivity): string {
+  const onDemand = activity.onDemand?.length ?? 0;
+  const parts = [
+    activity.scheduled.length ? `${activity.scheduled.length} scheduled` : null,
+    onDemand ? `${onDemand} on demand` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "Nothing is scheduled.";
+}
+
+/**
+ * In progress and Completed, read from the ledgers the work already lives in, with a row to the
+ * Bot's Routines for what is lined up, and the Bot's actions in the trail.
+ */
 export function BotActivitySections({ agentId }: { agentId: string }) {
   const activity = useQuery(botActivityQueryOptions(agentId));
   if (activity.isPending) return null;
@@ -345,21 +359,29 @@ export function BotActivitySections({ agentId }: { agentId: string }) {
         live
         title="In progress"
       />
-      <ActivitySection
-        agentId={agentId}
-        empty="Nothing is scheduled."
-        items={activity.data.scheduled}
-        title="Scheduled"
-      />
-      {/* Only when there is one: most Bots have no goal waiting to be asked. */}
-      {activity.data.onDemand?.length ? (
-        <ActivitySection
-          agentId={agentId}
-          empty=""
-          items={activity.data.onDemand}
-          title="On demand"
-        />
-      ) : null}
+      {/*
+       * What is lined up is the Bot's routines, and they have one page: its Routines. This row goes
+       * there instead of listing them a second time.
+       */}
+      <PageSection>
+        <PageRows>
+          <Item
+            render={<Link params={{ agentId }} to="/bots/$agentId/routines" />}
+            size="sm"
+          >
+            <ItemMedia variant="icon">
+              <IconClock />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Routines</ItemTitle>
+              <ItemDescription>{lineUpSummary(activity.data)}</ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <IconChevronRight className="size-4 text-muted-foreground" />
+            </ItemActions>
+          </Item>
+        </PageRows>
+      </PageSection>
       <ActivitySection
         agentId={agentId}
         empty="No tasks, routines or goals have finished yet."

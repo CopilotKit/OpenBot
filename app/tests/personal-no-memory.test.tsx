@@ -203,45 +203,20 @@ describe("the Bots page", () => {
 });
 
 describe("a Bot's What it can do page", () => {
-  test("holds no check-ins in the personal edition: they are rows of the Bot's Routines", async () => {
-    servingNothing();
-    const params = spyOn(BotAccessRoute, "useParams").mockImplementation(
-      (() => ({ agentId: "expenses" })) as never,
-    );
+  test("is split by kind, and an old link opens the Bot's Apps", () => {
+    let thrown: unknown;
     try {
-      const view = drawPage(
-        "personal",
-        BotAccessRoute.options.component as ComponentType,
-        "/bots/expenses/access",
-      );
-      expect(
-        await view.findByRole("heading", { name: "What it can do" }),
-      ).toBeTruthy();
-      await settleReactWork();
-      expect(view.queryByRole("heading", { name: "Check-ins" })).toBeNull();
-    } finally {
-      params.mockRestore();
+      (
+        BotAccessRoute.options.beforeLoad as unknown as (input: unknown) => void
+      )({ params: { agentId: "expenses" } });
+    } catch (error) {
+      thrown = error;
     }
-  });
-
-  test("holds no check-ins in the team edition either", async () => {
-    servingNothing();
-    const params = spyOn(BotAccessRoute, "useParams").mockImplementation(
-      (() => ({ agentId: "expenses" })) as never,
-    );
-    try {
-      const view = drawPage(
-        "team",
-        BotAccessRoute.options.component as ComponentType,
-        "/bots/expenses/access",
-      );
-      expect(
-        await view.findByRole("heading", { name: "Skills and access" }),
-      ).toBeTruthy();
-      await settleReactWork();
-      expect(view.queryByRole("heading", { name: "Check-ins" })).toBeNull();
-    } finally {
-      params.mockRestore();
-    }
+    expect(
+      (thrown as { options?: { to?: string; params?: unknown } }).options,
+    ).toMatchObject({
+      to: "/bots/$agentId/apps",
+      params: { agentId: "expenses" },
+    });
   });
 });

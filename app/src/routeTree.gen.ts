@@ -96,12 +96,15 @@ import { Route as AuthedAppBotsAgentIdIndexRouteImport } from './routes/_authed/
 import { Route as AuthedAppBotsAgentIdAccessRouteImport } from './routes/_authed/_app/bots.$agentId.access'
 import { Route as AuthedAppBotsAgentIdActivityRouteImport } from './routes/_authed/_app/bots.$agentId.activity'
 import { Route as AuthedAppBotsAgentIdApprovalsRouteImport } from './routes/_authed/_app/bots.$agentId.approvals'
+import { Route as AuthedAppBotsAgentIdAppsRouteImport } from './routes/_authed/_app/bots.$agentId.apps'
+import { Route as AuthedAppBotsAgentIdComputerRouteImport } from './routes/_authed/_app/bots.$agentId.computer'
 import { Route as AuthedAppBotsAgentIdMemoryRouteImport } from './routes/_authed/_app/bots.$agentId.memory'
 import { Route as AuthedAppBotsAgentIdReachRouteImport } from './routes/_authed/_app/bots.$agentId.reach'
 import { Route as AuthedAppBotsAgentIdResponsibilitiesRouteImport } from './routes/_authed/_app/bots.$agentId.responsibilities'
 import { Route as AuthedAppBotsAgentIdRoutinesRouteImport } from './routes/_authed/_app/bots.$agentId.routines'
 import { Route as AuthedAppBotsAgentIdSetupRouteImport } from './routes/_authed/_app/bots.$agentId.setup'
 import { Route as AuthedAppBotsAgentIdSharingRouteImport } from './routes/_authed/_app/bots.$agentId.sharing'
+import { Route as AuthedAppBotsAgentIdSkillsRouteImport } from './routes/_authed/_app/bots.$agentId.skills'
 import { Route as AuthedAppConnectionsBrowseArcadeRouteImport } from './routes/_authed/_app/connections.browse.arcade'
 import { Route as AuthedAppConnectionsBrowseComposioRouteImport } from './routes/_authed/_app/connections.browse.composio'
 import { Route as AuthedSettingsPersonalPluginsSplatRouteImport } from './routes/_authed/settings/_personal/plugins.$'
@@ -576,6 +579,18 @@ const AuthedAppBotsAgentIdApprovalsRoute =
     path: '/bots/$agentId/approvals',
     getParentRoute: () => AuthedAppRoute,
   } as any)
+const AuthedAppBotsAgentIdAppsRoute =
+  AuthedAppBotsAgentIdAppsRouteImport.update({
+    id: '/bots/$agentId/apps',
+    path: '/bots/$agentId/apps',
+    getParentRoute: () => AuthedAppRoute,
+  } as any)
+const AuthedAppBotsAgentIdComputerRoute =
+  AuthedAppBotsAgentIdComputerRouteImport.update({
+    id: '/bots/$agentId/computer',
+    path: '/bots/$agentId/computer',
+    getParentRoute: () => AuthedAppRoute,
+  } as any)
 const AuthedAppBotsAgentIdMemoryRoute =
   AuthedAppBotsAgentIdMemoryRouteImport.update({
     id: '/bots/$agentId/memory',
@@ -610,6 +625,12 @@ const AuthedAppBotsAgentIdSharingRoute =
   AuthedAppBotsAgentIdSharingRouteImport.update({
     id: '/bots/$agentId/sharing',
     path: '/bots/$agentId/sharing',
+    getParentRoute: () => AuthedAppRoute,
+  } as any)
+const AuthedAppBotsAgentIdSkillsRoute =
+  AuthedAppBotsAgentIdSkillsRouteImport.update({
+    id: '/bots/$agentId/skills',
+    path: '/bots/$agentId/skills',
     getParentRoute: () => AuthedAppRoute,
   } as any)
 const AuthedAppConnectionsBrowseArcadeRoute =
@@ -757,12 +778,15 @@ export interface FileRoutesByFullPath {
   '/bots/$agentId/access': typeof AuthedAppBotsAgentIdAccessRoute
   '/bots/$agentId/activity': typeof AuthedAppBotsAgentIdActivityRoute
   '/bots/$agentId/approvals': typeof AuthedAppBotsAgentIdApprovalsRoute
+  '/bots/$agentId/apps': typeof AuthedAppBotsAgentIdAppsRoute
+  '/bots/$agentId/computer': typeof AuthedAppBotsAgentIdComputerRoute
   '/bots/$agentId/memory': typeof AuthedAppBotsAgentIdMemoryRoute
   '/bots/$agentId/reach': typeof AuthedAppBotsAgentIdReachRoute
   '/bots/$agentId/responsibilities': typeof AuthedAppBotsAgentIdResponsibilitiesRoute
   '/bots/$agentId/routines': typeof AuthedAppBotsAgentIdRoutinesRoute
   '/bots/$agentId/setup': typeof AuthedAppBotsAgentIdSetupRoute
   '/bots/$agentId/sharing': typeof AuthedAppBotsAgentIdSharingRoute
+  '/bots/$agentId/skills': typeof AuthedAppBotsAgentIdSkillsRoute
   '/connections/browse/arcade': typeof AuthedAppConnectionsBrowseArcadeRoute
   '/connections/browse/composio': typeof AuthedAppConnectionsBrowseComposioRoute
   '/settings/plugins/$': typeof AuthedSettingsPersonalPluginsSplatRoute
@@ -857,12 +881,15 @@ export interface FileRoutesByTo {
   '/bots/$agentId/access': typeof AuthedAppBotsAgentIdAccessRoute
   '/bots/$agentId/activity': typeof AuthedAppBotsAgentIdActivityRoute
   '/bots/$agentId/approvals': typeof AuthedAppBotsAgentIdApprovalsRoute
+  '/bots/$agentId/apps': typeof AuthedAppBotsAgentIdAppsRoute
+  '/bots/$agentId/computer': typeof AuthedAppBotsAgentIdComputerRoute
   '/bots/$agentId/memory': typeof AuthedAppBotsAgentIdMemoryRoute
   '/bots/$agentId/reach': typeof AuthedAppBotsAgentIdReachRoute
   '/bots/$agentId/responsibilities': typeof AuthedAppBotsAgentIdResponsibilitiesRoute
   '/bots/$agentId/routines': typeof AuthedAppBotsAgentIdRoutinesRoute
   '/bots/$agentId/setup': typeof AuthedAppBotsAgentIdSetupRoute
   '/bots/$agentId/sharing': typeof AuthedAppBotsAgentIdSharingRoute
+  '/bots/$agentId/skills': typeof AuthedAppBotsAgentIdSkillsRoute
   '/connections/browse/arcade': typeof AuthedAppConnectionsBrowseArcadeRoute
   '/connections/browse/composio': typeof AuthedAppConnectionsBrowseComposioRoute
   '/settings/plugins/$': typeof AuthedSettingsPersonalPluginsSplatRoute
@@ -963,12 +990,15 @@ export interface FileRoutesById {
   '/_authed/_app/bots/$agentId/access': typeof AuthedAppBotsAgentIdAccessRoute
   '/_authed/_app/bots/$agentId/activity': typeof AuthedAppBotsAgentIdActivityRoute
   '/_authed/_app/bots/$agentId/approvals': typeof AuthedAppBotsAgentIdApprovalsRoute
+  '/_authed/_app/bots/$agentId/apps': typeof AuthedAppBotsAgentIdAppsRoute
+  '/_authed/_app/bots/$agentId/computer': typeof AuthedAppBotsAgentIdComputerRoute
   '/_authed/_app/bots/$agentId/memory': typeof AuthedAppBotsAgentIdMemoryRoute
   '/_authed/_app/bots/$agentId/reach': typeof AuthedAppBotsAgentIdReachRoute
   '/_authed/_app/bots/$agentId/responsibilities': typeof AuthedAppBotsAgentIdResponsibilitiesRoute
   '/_authed/_app/bots/$agentId/routines': typeof AuthedAppBotsAgentIdRoutinesRoute
   '/_authed/_app/bots/$agentId/setup': typeof AuthedAppBotsAgentIdSetupRoute
   '/_authed/_app/bots/$agentId/sharing': typeof AuthedAppBotsAgentIdSharingRoute
+  '/_authed/_app/bots/$agentId/skills': typeof AuthedAppBotsAgentIdSkillsRoute
   '/_authed/_app/connections/browse/arcade': typeof AuthedAppConnectionsBrowseArcadeRoute
   '/_authed/_app/connections/browse/composio': typeof AuthedAppConnectionsBrowseComposioRoute
   '/_authed/settings/_personal/plugins/$': typeof AuthedSettingsPersonalPluginsSplatRoute
@@ -1067,12 +1097,15 @@ export interface FileRouteTypes {
     | '/bots/$agentId/access'
     | '/bots/$agentId/activity'
     | '/bots/$agentId/approvals'
+    | '/bots/$agentId/apps'
+    | '/bots/$agentId/computer'
     | '/bots/$agentId/memory'
     | '/bots/$agentId/reach'
     | '/bots/$agentId/responsibilities'
     | '/bots/$agentId/routines'
     | '/bots/$agentId/setup'
     | '/bots/$agentId/sharing'
+    | '/bots/$agentId/skills'
     | '/connections/browse/arcade'
     | '/connections/browse/composio'
     | '/settings/plugins/$'
@@ -1167,12 +1200,15 @@ export interface FileRouteTypes {
     | '/bots/$agentId/access'
     | '/bots/$agentId/activity'
     | '/bots/$agentId/approvals'
+    | '/bots/$agentId/apps'
+    | '/bots/$agentId/computer'
     | '/bots/$agentId/memory'
     | '/bots/$agentId/reach'
     | '/bots/$agentId/responsibilities'
     | '/bots/$agentId/routines'
     | '/bots/$agentId/setup'
     | '/bots/$agentId/sharing'
+    | '/bots/$agentId/skills'
     | '/connections/browse/arcade'
     | '/connections/browse/composio'
     | '/settings/plugins/$'
@@ -1272,12 +1308,15 @@ export interface FileRouteTypes {
     | '/_authed/_app/bots/$agentId/access'
     | '/_authed/_app/bots/$agentId/activity'
     | '/_authed/_app/bots/$agentId/approvals'
+    | '/_authed/_app/bots/$agentId/apps'
+    | '/_authed/_app/bots/$agentId/computer'
     | '/_authed/_app/bots/$agentId/memory'
     | '/_authed/_app/bots/$agentId/reach'
     | '/_authed/_app/bots/$agentId/responsibilities'
     | '/_authed/_app/bots/$agentId/routines'
     | '/_authed/_app/bots/$agentId/setup'
     | '/_authed/_app/bots/$agentId/sharing'
+    | '/_authed/_app/bots/$agentId/skills'
     | '/_authed/_app/connections/browse/arcade'
     | '/_authed/_app/connections/browse/composio'
     | '/_authed/settings/_personal/plugins/$'
@@ -1907,6 +1946,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAppBotsAgentIdApprovalsRouteImport
       parentRoute: typeof AuthedAppRoute
     }
+    '/_authed/_app/bots/$agentId/apps': {
+      id: '/_authed/_app/bots/$agentId/apps'
+      path: '/bots/$agentId/apps'
+      fullPath: '/bots/$agentId/apps'
+      preLoaderRoute: typeof AuthedAppBotsAgentIdAppsRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/bots/$agentId/computer': {
+      id: '/_authed/_app/bots/$agentId/computer'
+      path: '/bots/$agentId/computer'
+      fullPath: '/bots/$agentId/computer'
+      preLoaderRoute: typeof AuthedAppBotsAgentIdComputerRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
     '/_authed/_app/bots/$agentId/memory': {
       id: '/_authed/_app/bots/$agentId/memory'
       path: '/bots/$agentId/memory'
@@ -1947,6 +2000,13 @@ declare module '@tanstack/react-router' {
       path: '/bots/$agentId/sharing'
       fullPath: '/bots/$agentId/sharing'
       preLoaderRoute: typeof AuthedAppBotsAgentIdSharingRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/bots/$agentId/skills': {
+      id: '/_authed/_app/bots/$agentId/skills'
+      path: '/bots/$agentId/skills'
+      fullPath: '/bots/$agentId/skills'
+      preLoaderRoute: typeof AuthedAppBotsAgentIdSkillsRouteImport
       parentRoute: typeof AuthedAppRoute
     }
     '/_authed/_app/connections/browse/arcade': {
@@ -2200,12 +2260,15 @@ interface AuthedAppRouteChildren {
   AuthedAppBotsAgentIdAccessRoute: typeof AuthedAppBotsAgentIdAccessRoute
   AuthedAppBotsAgentIdActivityRoute: typeof AuthedAppBotsAgentIdActivityRoute
   AuthedAppBotsAgentIdApprovalsRoute: typeof AuthedAppBotsAgentIdApprovalsRoute
+  AuthedAppBotsAgentIdAppsRoute: typeof AuthedAppBotsAgentIdAppsRoute
+  AuthedAppBotsAgentIdComputerRoute: typeof AuthedAppBotsAgentIdComputerRoute
   AuthedAppBotsAgentIdMemoryRoute: typeof AuthedAppBotsAgentIdMemoryRoute
   AuthedAppBotsAgentIdReachRoute: typeof AuthedAppBotsAgentIdReachRoute
   AuthedAppBotsAgentIdResponsibilitiesRoute: typeof AuthedAppBotsAgentIdResponsibilitiesRoute
   AuthedAppBotsAgentIdRoutinesRoute: typeof AuthedAppBotsAgentIdRoutinesRoute
   AuthedAppBotsAgentIdSetupRoute: typeof AuthedAppBotsAgentIdSetupRoute
   AuthedAppBotsAgentIdSharingRoute: typeof AuthedAppBotsAgentIdSharingRoute
+  AuthedAppBotsAgentIdSkillsRoute: typeof AuthedAppBotsAgentIdSkillsRoute
   AuthedAppConnectionsBrowseArcadeRoute: typeof AuthedAppConnectionsBrowseArcadeRoute
   AuthedAppConnectionsBrowseComposioRoute: typeof AuthedAppConnectionsBrowseComposioRoute
   AuthedAppBotsAgentIdIndexRoute: typeof AuthedAppBotsAgentIdIndexRoute
@@ -2241,6 +2304,8 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppBotsAgentIdAccessRoute: AuthedAppBotsAgentIdAccessRoute,
   AuthedAppBotsAgentIdActivityRoute: AuthedAppBotsAgentIdActivityRoute,
   AuthedAppBotsAgentIdApprovalsRoute: AuthedAppBotsAgentIdApprovalsRoute,
+  AuthedAppBotsAgentIdAppsRoute: AuthedAppBotsAgentIdAppsRoute,
+  AuthedAppBotsAgentIdComputerRoute: AuthedAppBotsAgentIdComputerRoute,
   AuthedAppBotsAgentIdMemoryRoute: AuthedAppBotsAgentIdMemoryRoute,
   AuthedAppBotsAgentIdReachRoute: AuthedAppBotsAgentIdReachRoute,
   AuthedAppBotsAgentIdResponsibilitiesRoute:
@@ -2248,6 +2313,7 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppBotsAgentIdRoutinesRoute: AuthedAppBotsAgentIdRoutinesRoute,
   AuthedAppBotsAgentIdSetupRoute: AuthedAppBotsAgentIdSetupRoute,
   AuthedAppBotsAgentIdSharingRoute: AuthedAppBotsAgentIdSharingRoute,
+  AuthedAppBotsAgentIdSkillsRoute: AuthedAppBotsAgentIdSkillsRoute,
   AuthedAppConnectionsBrowseArcadeRoute: AuthedAppConnectionsBrowseArcadeRoute,
   AuthedAppConnectionsBrowseComposioRoute:
     AuthedAppConnectionsBrowseComposioRoute,

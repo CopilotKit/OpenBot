@@ -77,7 +77,7 @@ test("the activity row counts what is running and what is lined up", () => {
  * FOUND ON WINDOWS: a goal that only runs when asked sat under Scheduled, and a Bot with one routine
  * and that goal read "2 scheduled".
  */
-test("a goal that runs only when asked is counted and listed as on demand, never as scheduled", async () => {
+test("a goal that runs only when asked is counted as on demand, never as scheduled", async () => {
   const [routine] = items(1, "Check releases");
   const goal = {
     ...(routine as ActivityItem),
@@ -101,17 +101,14 @@ test("a goal that runs only when asked is counted and listed as on demand, never
   expect(page.getByText("Watch OpenBot releases")).toBeTruthy();
   cleanup();
 
+  // The Activity page doesn't list them a second time: one row goes to the Bot's Routines.
   const sections = glance(data, BotActivitySections);
-  const scheduled = await sections.findByRole("heading", { name: "Scheduled" });
-  const onDemand = sections.getByRole("heading", { name: "On demand" });
-  const listedUnder = (heading: HTMLElement) =>
-    [
-      ...(heading
-        .closest("section")
-        ?.querySelectorAll("[data-slot=item-title]") ?? []),
-    ].map((title) => title.textContent);
-  expect(listedUnder(scheduled)).toEqual(["Check releases 1"]);
-  expect(listedUnder(onDemand)).toEqual(["Watch OpenBot releases"]);
+  const routines = (await sections.findByText("Routines")).closest("a");
+  expect(routines?.getAttribute("href")).toBe("/bots/scout/routines");
+  expect(routines?.textContent).toContain("1 scheduled · 1 on demand");
+  expect(sections.queryByRole("heading", { name: "Scheduled" })).toBeNull();
+  expect(sections.queryByRole("heading", { name: "On demand" })).toBeNull();
+  expect(sections.queryByText("Watch OpenBot releases")).toBeNull();
 });
 
 test("the newest three suggestions show, and the rest open in place", async () => {

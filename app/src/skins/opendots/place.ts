@@ -45,10 +45,13 @@ type Parsed = Omit<Place, "label" | "botId" | "watching" | "coworkerHome"> & {
 
 const BOT_TABS: Record<string, string> = {
   setup: "Setup",
-  access: "Access",
+  access: "Apps",
   activity: "Activity",
   approvals: "Approvals",
+  apps: "Apps",
+  computer: "Computer",
   memory: "Memory",
+  skills: "Skills",
   reach: "Reach",
   responsibilities: "Routines",
   routines: "Routines",
