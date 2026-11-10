@@ -170,7 +170,7 @@ fn read_manifest(body: &[u8], architecture: &str) -> Result<Vec<Layer>, Option<S
 
 /// The anonymous token a `WWW-Authenticate: Bearer realm=...,service=...,scope=...` challenge
 /// offers, as the URL to ask for it.
-fn token_url(challenge: &str) -> Option<reqwest::Url> {
+pub(crate) fn token_url(challenge: &str) -> Option<reqwest::Url> {
     let rest = challenge.trim().strip_prefix("Bearer ")?;
     let mut realm = None;
     let mut query = Vec::new();

@@ -1032,7 +1032,7 @@ fn distribution_folder(registry: &str, distribution: &str) -> Option<String> {
 
 /// The bytes free to this account on the volume that holds `folder`.
 #[cfg(target_os = "windows")]
-fn free_space(folder: &str) -> Option<u64> {
+pub(crate) fn free_space(folder: &str) -> Option<u64> {
     use std::os::windows::ffi::OsStrExt;
     let folder = folder.strip_prefix(r"\\?\").unwrap_or(folder);
     let wide: Vec<u16> = std::ffi::OsStr::new(folder)

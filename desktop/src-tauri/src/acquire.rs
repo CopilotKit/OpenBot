@@ -296,14 +296,24 @@ pub fn machine_exists() -> Result<bool, String> {
 /// `local_eval::Failure::RootlessPodman`). After the switch OpenBot stays in the rootless storage
 /// its database is in (see `connection_keeping_openbot`), and Intelligence runs on the rootful
 /// engine of the same machine.
-pub fn create_machine(cpus: u32, memory_mib: u32, disk_gib: u32) -> StepOutcome {
-    create_machine_with(cpus, memory_mib, disk_gib, machine_exists, podman)
+///
+/// `image` is the machine image already downloaded (`early_downloads`), which Podman builds the
+/// machine from instead of pulling its own from quay.io: `--image` takes a local path, and unpacks a
+/// compressed one itself. `None` leaves the pull to Podman, as before.
+pub fn create_machine(
+    cpus: u32,
+    memory_mib: u32,
+    disk_gib: u32,
+    image: Option<&Path>,
+) -> StepOutcome {
+    create_machine_with(cpus, memory_mib, disk_gib, image, machine_exists, podman)
 }
 
 fn create_machine_with(
     cpus: u32,
     memory_mib: u32,
     disk_gib: u32,
+    image: Option<&Path>,
     exists: impl FnOnce() -> Result<bool, String>,
     mut run: impl FnMut(&[&str]) -> Result<String, String>,
 ) -> StepOutcome {
@@ -314,7 +324,10 @@ fn create_machine_with(
         Ok(false) => {}
         Err(error) => return StepOutcome::stopped(Step::CreateMachine, &error),
     }
-    let args = create_machine_args(cpus, memory_mib, disk_gib, cfg!(target_os = "windows"));
+    let mut args = create_machine_args(cpus, memory_mib, disk_gib, cfg!(target_os = "windows"));
+    if let Some(image) = image {
+        args.extend(["--image".to_string(), image.to_string_lossy().into_owned()]);
+    }
     let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
     match run(&refs) {
         Ok(_) => StepOutcome::went(Step::CreateMachine, format!("{MACHINE} created.")),
@@ -793,6 +806,7 @@ mod tests {
             2,
             4096,
             20,
+            None,
             || machine_exists_with(|| Ok(listing.into())),
             |_args| {
                 init_called = true;
@@ -814,6 +828,7 @@ mod tests {
             2,
             4096,
             20,
+            None,
             || {
                 machine_exists_with(|| {
                     Err("podman machine list exited with status 125; stdout: denied".into())
@@ -851,6 +866,7 @@ mod tests {
                 2,
                 4096,
                 20,
+                None,
                 || machine_exists_with(|| Ok(listing.into())),
                 |_args| panic!("machine init must not run after malformed list output"),
             );
@@ -873,6 +889,7 @@ mod tests {
             4,
             8192,
             64,
+            None,
             || Ok(false),
             |args| {
                 captured = args.iter().map(|arg| (*arg).to_string()).collect();
@@ -884,6 +901,31 @@ mod tests {
         assert_eq!(
             captured,
             create_machine_args(4, 8192, 64, cfg!(target_os = "windows"))
+        );
+    }
+
+    /// The machine image the first screen downloaded is what the machine is built from: Podman is
+    /// given the file, and pulls nothing from quay.io (see `early_downloads`).
+    #[test]
+    fn a_downloaded_machine_image_is_what_the_machine_is_built_from() {
+        let image = std::path::Path::new("/cache/podman-machine.aarch64.applehv.raw.zst");
+        let mut captured = Vec::new();
+        let result = create_machine_with(
+            4,
+            6144,
+            60,
+            Some(image),
+            || Ok(false),
+            |args| {
+                captured = args.iter().map(|arg| (*arg).to_string()).collect();
+                Ok(String::new())
+            },
+        );
+        assert!(result.ok, "{result:?}");
+        assert_eq!(&captured[..3], ["machine", "init", "openbot"]);
+        assert_eq!(
+            &captured[captured.len() - 2..],
+            ["--image", "/cache/podman-machine.aarch64.applehv.raw.zst"]
         );
     }
 
@@ -941,6 +983,7 @@ mod tests {
             4,
             6144,
             60,
+            None,
             || machine_exists_with(|| Ok(listing.into())),
             |args| panic!("nothing runs against an existing machine: {args:?}"),
         );

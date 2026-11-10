@@ -42,6 +42,18 @@ backup taken before the upgrade instead. Three things change for an existing dep
   which do not update themselves, download nothing ahead.
 - **downloads.copilotkit.ai serves each release's `desktop-images.json`.** It answered 403, so the
   list of a release's images could only come from GitHub.
+- **The big downloads start on the first screen, before you click Install.** Nothing used to
+  download until Install, and then one thing at a time: on a new Mac, Podman, then the 937 MB
+  engine image with no progress shown, then 1.1 GB of OpenBot's software. Now the engine image,
+  Podman's installer, the deployment and, when Docker or Podman already runs, OpenBot's software
+  start downloading as soon as the first screen shows, side by side, while you sign in and enter
+  your Mac password. The first screen says how far they are ("Downloading OpenBot. About 3 minutes
+  left.", with the bytes under a bar), and the row for what's installing in the background carries
+  on with it. A download stopped by quitting carries on from where it stopped next time,
+  and every file is checked against its pinned digest before it is used. Podman builds its machine
+  from the downloaded image instead of fetching its own. With less free disk than OpenBot needs,
+  the first screen says how much is free and how much is needed, and the downloads start once
+  there is room. Nothing is installed before you are asked.
 - **Setup says what it's doing in plain words, and what's installing behind every step.** The
   setup window said "Preparing the engine machine", "Installing Podman", "Waiting for the back end"
   and "Updating the back end to 0.16.0-rc.10", and a tester waiting on the first step couldn't tell
