@@ -15,6 +15,7 @@ import {
 import { Link, type LinkProps } from "@tanstack/react-router";
 import type * as React from "react";
 import { useEffect, useSyncExternalStore } from "react";
+import { BrandName } from "@/components/edition/brand-name";
 import { BusinessOrb } from "@/components/edition/business-orb";
 import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { buttonVariants } from "@/components/ui/button";
@@ -110,13 +111,13 @@ export function TeamFeaturesDialog() {
             <BusinessOrb />
             <div className="relative flex items-center gap-2 font-medium">
               <OpenBotLogo className="size-7" />
-              OpenBot
+              <BrandName>OpenBot</BrandName>
             </div>
           </div>
           <div className="flex min-h-0 flex-col gap-6 overflow-y-auto p-6 sm:p-8">
             <DialogHeader>
               <DialogTitle className="text-xl">
-                OpenBot for Business
+                <BrandName>OpenBot for Business</BrandName>
               </DialogTitle>
               <DialogDescription>
                 Everything you have here, on prem and for a whole team.

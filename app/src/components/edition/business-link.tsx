@@ -1,6 +1,7 @@
 import { IconX } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { Trademark } from "@/components/edition/brand-name";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { BUSINESS_URL } from "@/lib/openbot-for-business";
@@ -46,7 +47,10 @@ export function BusinessLink() {
         rel="noopener noreferrer"
         target="_blank"
       >
-        Meet OpenBot for Business
+        <span>
+          Meet OpenBot for Business
+          <Trademark />
+        </span>
       </a>
       <Button
         aria-label="Close"

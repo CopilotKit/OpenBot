@@ -996,7 +996,7 @@ test("a sign-in setup stops for leads with OpenBot by CopilotKit, before and whi
     const card = screen.getByText("Sign in to finish setting up OpenBot.")
       .parentElement as HTMLElement;
     expect(card.querySelector(".lockup")?.textContent).toBe(
-      "OpenBotby CopilotKit",
+      "OpenBot™by CopilotKit",
     );
     expect(screen.queryByRole("img", { name: "CopilotKit" })).toBeNull();
   };
