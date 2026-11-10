@@ -8,26 +8,6 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Three migrations run at start, and the database moves to
-`0088_approval_reviewer_guidance`. `0086_channel_title` adds a nullable `title` column to
-`channels`, for a name a person gives a conversation. `0087_approval_conversation_grants` creates a
-new, empty `approval_conversation_grants` table, which records an action allowed for the rest of
-one conversation. It also adds a nullable `kind` column to `approval_rules` and an `action_kinds`
-column to `approval_team_settings` (`{}` on every existing row), and lets
-`approval_requests.decision` hold `allow_conversation` as well as its earlier values. `0088_approval_reviewer_guidance` adds a
-nullable `reviewer_guidance` column to `approval_team_settings`. No existing row is rewritten and
-nothing is dropped. A database that has run this release does not go back to 1.0.0: restore the
-backup taken before the upgrade instead. Three things change for an existing deployment:
-- Sending, deleting, sharing and posting offer **Allow for this conversation** and **Always allow
-  here** beside Allow once and Deny, and paying and account-setting changes ask with the same four
-  answers instead of being handed to you (below). In the team edition an admin can set each kind
-  to ask every time in Admin > Approvals.
-- A Personal Assistant whose instructions nobody changed takes the new ones at the next start
-  (below). One whose instructions were edited keeps them.
-- OpenBot Desktop's bundled CLI moves to `copilotkit@f5c45eb`, and Start writes
-  `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` in `~/OpenBot/.env` as empty (below). The back end stays
-  on CopilotKit Intelligence 0.16.0-rc.10.
-
 ### OpenBot Desktop
 
 - **OpenBot uses its own Podman machine when yours can't run it, and leaves yours as it is.** A
@@ -117,6 +97,128 @@ backup taken before the upgrade instead. Three things change for an existing dep
   distribution. It isn't OpenBot's and isn't needed, so OpenBot now marks it as already seen for
   you before it makes the machine. Installing over a running OpenBot said "OpenBot is running!
   Click OK to kill it". It now says "OpenBot is open. Click OK to close it and continue."
+- **The Account step leads with OpenBot.** Its header reads "OpenBot by CopilotKit" and its
+  heading "Self-contained OpenBot". It says this version of OpenBot runs self-contained on this
+  computer and needs a free license key, and that your conversations and files stay on this
+  computer. The button reads "Sign in for a free local license key", and CopilotKit's logo no
+  longer heads the step.
+- **Setup says OpenBot, not CopilotKit.** Signing in, the license agreement and the usage-data
+  notice named CopilotKit on its own: "Sign in to CopilotKit", "Checking your CopilotKit
+  account…", "accept the CopilotKit license agreement", "OpenBot sends CopilotKit usage data". They
+  now say OpenBot ("Sign in to OpenBot", "your OpenBot account"), and "OpenBot by CopilotKit" where
+  the company is named: the license agreement, what signing in sends, and the copyright in the
+  Windows installer and the Mac About box. The sign-in a stopped setup asks for is headed by
+  OpenBot by CopilotKit instead of CopilotKit's logo, and Settings > General > Share usage data
+  says the same as the first screen.
+- **Usage data also says when setup looks stuck, or its window stops answering.** A hang is not a
+  failure, so `setup_failed` never said it. A step of the back end's setup or update, OpenBot's own
+  start, or OpenBot updating itself that runs three times as long as it usually takes, and two
+  minutes over at least, now sends one `setup_stalled` with the step, its usual time and how long it
+  has run. A setup window that stops taking what OpenBot sends it for over 30 seconds while it is on
+  screen (as one did on Windows until a click or Alt+Tab) sends one `ui_stalled` with how long it
+  lasted, and the Desktop log says `[ui] the window stopped answering for 42s during
+  start_machine`. Minimised, hidden or covered windows never count. Step names and seconds only,
+  and nothing at all when usage data is off.
+- **A CopilotKit back end set up in your home folder no longer takes over OpenBot's.** Someone who
+  once ran `copilotkit local setup` in their home folder, or any folder above `~/OpenBot`, had that
+  back end resumed for OpenBot: the CLI looks for a back end in the folder it runs in and in every
+  folder above it. It then wrote OpenBot's connection settings into that folder's `.env`, and Start
+  stopped with "The connection settings do not match the backend that was set up". OpenBot now
+  tells the CLI to use exactly `~/OpenBot`, so it sets up a back end of its own and connects
+  `~/OpenBot/.env`, and the other folder's back end and `.env` are left alone. OpenBot also counts
+  a back end as its own, to stop with Stop and Quit, only when the CLI records it for `~/OpenBot`;
+  one it was handed for another folder is never stopped.
+- **Connecting the back end a second time no longer stops setup.** Setup Retry, going Back and
+  forward through setup, and reinstalling over an existing install connect `~/OpenBot` to its back
+  end again. After the first connection OpenBot writes the back end's addresses at `127.0.0.1`
+  where the CLI wrote `localhost`, and the CLI then refused every later connection with "App
+  settings changed after connection was planned", so setup could not finish. The CLI now treats
+  `localhost`, `127.0.0.1` and `[::1]` with the same port as the same address, connects again, and
+  leaves OpenBot's addresses as they are. An address changed to another port or host is still
+  refused.
+- **CopilotKit CLI `copilotkit@2e1c519`.** OpenBot Desktop's bundled CLI moves to the production
+  build of Intelligence `2e1c51900`: `6bfaa0f5c`, which added `telemetry link`, with `--app-path`
+  added to its `local` commands and a second `local connect` accepted after OpenBot rewrote its
+  addresses to `127.0.0.1`. It keeps Intelligence 0.16.0-rc.10 and CopilotKit v1.85.0 templates.
+
+### Conversations
+
+- **A Bot draws a chart or a table only from results it has read, and a form stops at the first
+  field that fails.** A model that calls tools in parallel, such as Claude Opus, asked for its
+  searches and the chart and table meant to show them in one step, so they were drawn with figures
+  it hadn't read, and it then said so under them. A chart, table, card or approval asked for in the
+  same step as another tool is no longer shown, not even for a moment, and the Bot draws it again
+  from the results. One on its own, or beside other components, draws as before. A Bot's computer
+  actions in one step run one at a time, in the order asked for, and stop at the first that fails:
+  the rest are reported to the Bot as not run, and it looks at the page again. Every Bot is told to
+  batch only tool calls that don't depend on each other. This follows Anthropic's guidance for
+  parallel tool use and holds whichever model a Bot runs on, in conversations and in routines.
+- **Talk to OpenBot without a transcription provider.** The message box shows a microphone on
+  every OpenBot, not only where `TRANSCRIPTION_PROVIDER` is set. Click it and your words appear in
+  the box as you speak; the microphone turns into Stop. Stop, or Enter, stops listening and keeps
+  the words in the box without sending them, and the next Enter sends. Typing while it listens
+  stops it too. In OpenBot Desktop the words come from your computer's own speech recognition, on
+  the device (Apple's Speech framework on a Mac, the Windows speech recognizer on Windows), and a
+  Mac asks once for the microphone and speech recognition. In a browser they come from the
+  browser's speech recognition, and a browser without one (Firefox) shows no microphone. Chrome's
+  speech recognition sends the audio to Google's speech service. With `TRANSCRIPTION_PROVIDER` set
+  nothing changes: OpenBot records and your server transcribes, as before.
+- **A Claude Agent SDK Bot answers the first question of a conversation however many apps it
+  holds.** Asked one question, a Personal Assistant on the Claude Agent SDK searched the web and
+  Notion and then stopped with "Claude turned down the request because this conversation is too
+  long for the model". The harness's Claude Code did not know the Claude 5.5 models and held them to
+  a 200K window (they have 1M), and it sent every one of the Bot's app tools' definitions with every
+  request, which took a Bot holding a few apps most of the way there before any result came back.
+  The provider's window now decides, the Bot looks its app tools up when it needs them (about a
+  fifth of the size for 128 tools), no tool result is replayed longer than 100,000 characters, and a
+  turn the model still refuses as too long is tried once more with every tool result cut to its
+  start, each saying how to ask for the rest. A built-in Bot on a Claude plan gets the same window
+  and limits. The message still appears for a conversation that really is too long.
+
+### Smaller changes
+
+- "Backend" is one word everywhere OpenBot shows it: OpenBot Desktop's Status window, tray and
+  messages, the app, the server's messages and the Recorder. Desktop's Status window heads its card
+  "Backend" where it said "Back end".
+- The Personal Assistant on a framework picked in setup reads "Everyday life agent. (powered by a
+  LangChain agent; you can bring your own agent from any stack.)" under its name (with its own
+  framework's name), on a new install and on an existing one that kept "Powered by LangChain
+  (LangGraph)" after an upgrade. Any other Bot OpenBot subtitled under LangChain's earlier names
+  reads "Powered by LangChain". Only what a person sees changes: nothing stored changes, a Bot is
+  told its subtitle as before, and words a person wrote stay theirs. A Bot's page shows a long
+  subtitle on up to three lines.
+- The "Always ask before making changes" switch is called "Extra vigilant", on Welcome, in
+  Settings → Approvals and on a Bot's Tools section in the personal edition. Its description,
+  behaviour and default are unchanged.
+- Welcome's permissions section is shorter: "Choose when Bots ask", one sentence saying Bots ask
+  before they delete, send, share, post or pay in your apps or on websites, the Extra vigilant
+  switch, and where to change it later. Allowing an action always, passwords and a Bot's own
+  workspace are still explained in Settings → Approvals.
+
+## 1.0.1
+
+**Before upgrading.** Three migrations run at start, and the database moves to
+`0088_approval_reviewer_guidance`. `0086_channel_title` adds a nullable `title` column to
+`channels`, for a name a person gives a conversation. `0087_approval_conversation_grants` creates a
+new, empty `approval_conversation_grants` table, which records an action allowed for the rest of
+one conversation. It also adds a nullable `kind` column to `approval_rules` and an `action_kinds`
+column to `approval_team_settings` (`{}` on every existing row), and lets
+`approval_requests.decision` hold `allow_conversation` as well as its earlier values. `0088_approval_reviewer_guidance` adds a
+nullable `reviewer_guidance` column to `approval_team_settings`. No existing row is rewritten and
+nothing is dropped. A database that has run this release does not go back to 1.0.0: restore the
+backup taken before the upgrade instead. Three things change for an existing deployment:
+- Sending, deleting, sharing and posting offer **Allow for this conversation** and **Always allow
+  here** beside Allow once and Deny, and paying and account-setting changes ask with the same four
+  answers instead of being handed to you (below). In the team edition an admin can set each kind
+  to ask every time in Admin > Approvals.
+- A Personal Assistant whose instructions nobody changed takes the new ones at the next start
+  (below). One whose instructions were edited keeps them.
+- OpenBot Desktop's bundled CLI moves to `copilotkit@6bfaa0f`, and Start writes
+  `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` in `~/OpenBot/.env` as empty (below). The back end stays
+  on CopilotKit Intelligence 0.16.0-rc.10.
+
+### OpenBot Desktop
+
 - **Setup says what it's doing in plain words, and what's installing behind every step.** The
   setup window said "Preparing the engine machine", "Installing Podman", "Waiting for the back end"
   and "Updating the back end to 0.16.0-rc.10", and a tester waiting on the first step couldn't tell
@@ -146,19 +248,6 @@ backup taken before the upgrade instead. Three things change for an existing dep
   inside its card; a reopened window comes back where it was. The license step links "Read the
   license agreement" without the agreement's id, and no step line shows a release name or the
   engine's own output.
-- **The Account step leads with OpenBot.** Its header reads "OpenBot by CopilotKit" and its
-  heading "Self-contained OpenBot". It says this version of OpenBot runs self-contained on this
-  computer and needs a free license key, and that your conversations and files stay on this
-  computer. The button reads "Sign in for a free local license key", and CopilotKit's logo no
-  longer heads the step.
-- **Setup says OpenBot, not CopilotKit.** Signing in, the license agreement and the usage-data
-  notice named CopilotKit on its own: "Sign in to CopilotKit", "Checking your CopilotKit
-  account…", "accept the CopilotKit license agreement", "OpenBot sends CopilotKit usage data". They
-  now say OpenBot ("Sign in to OpenBot", "your OpenBot account"), and "OpenBot by CopilotKit" where
-  the company is named: the license agreement, what signing in sends, and the copyright in the
-  Windows installer and the Mac About box. The sign-in a stopped setup asks for is headed by
-  OpenBot by CopilotKit instead of CopilotKit's logo, and Settings > General > Share usage data
-  says the same as the first screen.
 - **A first install on a Mac starts the first time, and a reinstall sets its back end up again.**
   Three things a from-zero install of 1.0.0 hit on a Mac with Docker Desktop:
   - The first Start could stop with "Something went wrong" because Docker Desktop refused the
@@ -182,15 +271,6 @@ backup taken before the upgrade instead. Three things change for an existing dep
   Account step's sign-in sends when it starts and whether it completed, failed or was cancelled.
   The app version keeps a release candidate's label (`1.0.0-rc.5`, not `1.0.0`). Only closed values
   and numbers are sent, and nothing at all when usage data is off.
-- **Usage data also says when setup looks stuck, or its window stops answering.** A hang is not a
-  failure, so `setup_failed` never said it. A step of the back end's setup or update, OpenBot's own
-  start, or OpenBot updating itself that runs three times as long as it usually takes, and two
-  minutes over at least, now sends one `setup_stalled` with the step, its usual time and how long it
-  has run. A setup window that stops taking what OpenBot sends it for over 30 seconds while it is on
-  screen (as one did on Windows until a click or Alt+Tab) sends one `ui_stalled` with how long it
-  lasted, and the Desktop log says `[ui] the window stopped answering for 42s during
-  start_machine`. Minimised, hidden or covered windows never count. Step names and seconds only,
-  and nothing at all when usage data is off.
 - **Sign-in comes first, and macOS asks for your password only after OpenBot says why.** On a new
   Mac the Account step waited for Install to put Podman in before any browser sign-in opened, and
   the "osascript wants to make changes" password box came up by itself over it. The CopilotKit
@@ -246,19 +326,9 @@ backup taken before the upgrade instead. Three things change for an existing dep
   and team deployments are unchanged. The server receives the installation ID when OpenBot starts.
   Signing in and Start never wait for the link, and nothing about it can keep OpenBot from
   starting.
-- **A CopilotKit back end set up in your home folder no longer takes over OpenBot's.** Someone who
-  once ran `copilotkit local setup` in their home folder, or any folder above `~/OpenBot`, had that
-  back end resumed for OpenBot: the CLI looks for a back end in the folder it runs in and in every
-  folder above it. It then wrote OpenBot's connection settings into that folder's `.env`, and Start
-  stopped with "The connection settings do not match the backend that was set up". OpenBot now
-  tells the CLI to use exactly `~/OpenBot`, so it sets up a back end of its own and connects
-  `~/OpenBot/.env`, and the other folder's back end and `.env` are left alone. OpenBot also counts
-  a back end as its own, to stop with Stop and Quit, only when the CLI records it for `~/OpenBot`;
-  one it was handed for another folder is never stopped.
-- **CopilotKit CLI `copilotkit@f5c45eb`.** OpenBot Desktop's bundled CLI moves to the production
-  build of Intelligence `f5c45ebc0`: `6bfaa0f5c`, which added `telemetry link`, with `--app-path`
-  added to its `local` commands. It keeps Intelligence 0.16.0-rc.10 and CopilotKit v1.85.0
-  templates.
+- **CopilotKit CLI `copilotkit@6bfaa0f`.** OpenBot Desktop's bundled CLI moves to the production
+  build of Intelligence `6bfaa0f5c`, which adds `telemetry link`. It keeps Intelligence
+  0.16.0-rc.10 and CopilotKit v1.85.0 templates.
 - **A Learning container left in `~/OpenBot/.env` by an earlier setup no longer fails every
   message.** A folder set up against hosted Intelligence kept
   `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID="openbot"`, which the local back end did not have, so every
@@ -331,27 +401,6 @@ backup taken before the upgrade instead. Three things change for an existing dep
 
 ### Conversations
 
-- **A Bot draws a chart or a table only from results it has read, and a form stops at the first
-  field that fails.** A model that calls tools in parallel, such as Claude Opus, asked for its
-  searches and the chart and table meant to show them in one step, so they were drawn with figures
-  it hadn't read, and it then said so under them. A chart, table, card or approval asked for in the
-  same step as another tool is no longer shown, not even for a moment, and the Bot draws it again
-  from the results. One on its own, or beside other components, draws as before. A Bot's computer
-  actions in one step run one at a time, in the order asked for, and stop at the first that fails:
-  the rest are reported to the Bot as not run, and it looks at the page again. Every Bot is told to
-  batch only tool calls that don't depend on each other. This follows Anthropic's guidance for
-  parallel tool use and holds whichever model a Bot runs on, in conversations and in routines.
-
-- **Talk to OpenBot without a transcription provider.** The message box shows a microphone on
-  every OpenBot, not only where `TRANSCRIPTION_PROVIDER` is set. Click it and your words appear in
-  the box as you speak; the microphone turns into Stop. Stop, or Enter, stops listening and keeps
-  the words in the box without sending them, and the next Enter sends. Typing while it listens
-  stops it too. In OpenBot Desktop the words come from your computer's own speech recognition, on
-  the device (Apple's Speech framework on a Mac, the Windows speech recognizer on Windows), and a
-  Mac asks once for the microphone and speech recognition. In a browser they come from the
-  browser's speech recognition, and a browser without one (Firefox) shows no microphone. Chrome's
-  speech recognition sends the audio to Google's speech service. With `TRANSCRIPTION_PROVIDER` set
-  nothing changes: OpenBot records and your server transcribes, as before.
 - **Rename a conversation you started.** Its menu in the sidebar has **Rename conversation…**.
   Everyone in the conversation sees the new name, and an empty name brings back the one OpenBot
   chose. Only the person who started a conversation can rename it.
@@ -393,17 +442,6 @@ backup taken before the upgrade instead. Three things change for an existing dep
   in the description shown under each Bot's name, which a Bot that runs here is never given, so
   one copied in ran on its output format alone. Each now has a one-line
   description and keeps its rules in its instructions.
-- **A Claude Agent SDK Bot answers the first question of a conversation however many apps it
-  holds.** Asked one question, a Personal Assistant on the Claude Agent SDK searched the web and
-  Notion and then stopped with "Claude turned down the request because this conversation is too
-  long for the model". The harness's Claude Code did not know the Claude 5.5 models and held them to
-  a 200K window (they have 1M), and it sent every one of the Bot's app tools' definitions with every
-  request, which took a Bot holding a few apps most of the way there before any result came back.
-  The provider's window now decides, the Bot looks its app tools up when it needs them (about a
-  fifth of the size for 128 tools), no tool result is replayed longer than 100,000 characters, and a
-  turn the model still refuses as too long is tried once more with every tool result cut to its
-  start, each saying how to ask for the rest. A built-in Bot on a Claude plan gets the same window
-  and limits. The message still appears for a conversation that really is too long.
 - **A Claude Agent SDK Bot keeps your request and its tool results through a long task.** A tool
   result over 50,000 characters (a page of email, an app's tool list, a file read from the Bot's
   computer) reached the Bot as a 2 KB preview and the path of a file it could not open, so it showed
@@ -538,23 +576,12 @@ a model key is needed.
 
 ### Smaller changes
 
-- "Backend" is one word everywhere OpenBot shows it: OpenBot Desktop's Status window, tray and
-  messages, the app, the server's messages and the Recorder. Desktop's Status window heads its card
-  "Backend" where it said "Back end".
-
 - A page a Bot's browser couldn't open, or that a boundary refused, is one line in the conversation,
   such as "Blocked: Open x.com", where it was an empty grey box saying "This turn did not open a
   page."
 
 - An interface a Bot draws in a card, such as the "Build a trip budget" starter task, has one frame
   in the conversation. It had a second border around the card, with a gap between the two.
-- The Personal Assistant on a framework picked in setup reads "Everyday life agent. (powered by a
-  LangChain agent; you can bring your own agent from any stack.)" under its name (with its own
-  framework's name), on a new install and on an existing one that kept "Powered by LangChain
-  (LangGraph)" after an upgrade. Any other Bot OpenBot subtitled under LangChain's earlier names
-  reads "Powered by LangChain". Only what a person sees changes: nothing stored changes, a Bot is
-  told its subtitle as before, and words a person wrote stay theirs. A Bot's page shows a long
-  subtitle on up to three lines.
 - Onboarding's OpenBot for Business step says what OpenBot for Business is before it asks for a
   demo: work sign-in, Bots shared in Slack and Microsoft Teams, and the controls and audit trail,
   beside the picture of running OpenBot yourself that the step showed before. Book a demo then
@@ -569,13 +596,6 @@ a model key is needed.
   mark.
 - The OpenBot version sits to the right of your name at the foot of the sidebar, where it was a
   line under it.
-- The "Always ask before making changes" switch is called "Extra vigilant", on Welcome, in
-  Settings → Approvals and on a Bot's Tools section in the personal edition. Its description,
-  behaviour and default are unchanged.
-- Welcome's permissions section is shorter: "Choose when Bots ask", one sentence saying Bots ask
-  before they delete, send, share, post or pay in your apps or on websites, the Extra vigilant
-  switch, and where to change it later. Allowing an action always, passwords and a Bot's own
-  workspace are still explained in Settings → Approvals.
 
 ### Personal edition
 
