@@ -313,6 +313,17 @@ export function createProviderOAuthProxy(
       }
       if (!response.ok) {
         await response.body?.cancel();
+        /*
+         * A listing refused with a token that has just been refreshed says this sign-in may not
+         * list models, not that it has lapsed: chat on the same token is what decides that. Told
+         * to sign in again here, the person was asked to fix a sign-in that worked, and the
+         * catalogue falls back to the models this sign-in can use (`model-catalogue.ts`).
+         */
+        if (response.status === 401 && listing)
+          return refused(
+            401,
+            "The model provider does not list models for this sign-in.",
+          );
         if (response.status === 401)
           throw new SignInRequired("The model provider refused this sign-in.");
         return refused(

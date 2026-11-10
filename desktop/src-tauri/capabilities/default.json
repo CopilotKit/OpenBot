@@ -6,6 +6,7 @@
   "permissions": [
     "core:event:default",
     "openbot-desktop:allow-quit",
+    "openbot-desktop:allow-zoom",
     {
       "identifier": "opener:allow-open-url",
       "allow": [{ "url": "https://*" }, { "url": "http://*" }]

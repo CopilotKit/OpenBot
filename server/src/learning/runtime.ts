@@ -243,6 +243,12 @@ export function createLearningRuntime(options: {
   /** Default 2_000. */
   personalWaitMs?: number;
   now?: () => number;
+  /**
+   * Whether `containerId` was found missing on this Intelligence: the environment's container,
+   * forgotten (`ConfiguredLearningContainer.forgotten` in learning/settings.ts), or the saved
+   * default, set aside (`LearningSettingsStore.isSetAside`).
+   */
+  forgotten?: (containerId: string) => boolean;
 }) {
   const { store, client, people } = options;
   const personalWaitMs = options.personalWaitMs ?? PERSONAL_WAIT_MS;
@@ -544,6 +550,13 @@ export function createLearningRuntime(options: {
         agentId: input.agentId,
         containerId: exists ? null : (target?.containerId ?? null),
       });
+      /*
+       * A thread bound to a container this Intelligence was found not to have was never created:
+       * creating it is what that container made fail. It is still new, so it takes today's target
+       * rather than failing again every time the person sends to it.
+       */
+      if (!exists && containerId && options.forgotten?.(containerId))
+        return target.containerId;
       return containerId ?? undefined;
     },
     async status(agentId: string): Promise<LearningDeliveryStatus> {

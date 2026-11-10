@@ -23,7 +23,8 @@ import {
   takeUntil,
 } from "rxjs";
 import { sanitizeSeededHistory } from "../history-sanitize";
-import { answersOnLastStep, type RunSteps } from "./last-step";
+import { firingChecklist } from "./firing-checklist";
+import { answersOnLastStep, type RunSteps, startRun } from "./last-step";
 import {
   type NativeRunScope,
   nativeApprovalRun,
@@ -83,6 +84,11 @@ export type BuiltInAgentHooks = {
    * message as something the person said. Absent, the history goes up as those two left it.
    */
   attribute?: (messages: Message[]) => Message[];
+  /**
+   * Nobody is watching this run: a routine's firing or a check-in. It gets the step budget of work
+   * that has to finish on its own (`UNATTENDED_STEPS`) rather than chat's. Absent, a person is.
+   */
+  unattended?: boolean;
 };
 
 /**
@@ -232,7 +238,14 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
   ) {
     const scope = nativeRunScope();
     const steps: RunSteps = {};
-    super(toolsWithin(answersOnLastStep(configuration, steps), scope));
+    super(
+      toolsWithin(
+        answersOnLastStep(configuration, steps, {
+          unattended: hooks.unattended === true,
+        }),
+        scope,
+      ),
+    );
     this.configuration = configuration;
     this.hooks = hooks;
     this.scope = scope;
@@ -268,12 +281,14 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
           code: TOOL_LIMIT_EXCEEDED,
         } as BaseEvent,
       );
-    // A new run counts its steps from where it starts, never from where an earlier run stopped.
-    this.steps.before = undefined;
     const answeredByResume = new Set(
       (input.resume ?? []).map((entry) => entry.interruptId),
     );
     const history = sanitizeSeededHistory(input.messages, answeredByResume);
+    // A routine's firing carries the checklist it has to close. See `firingChecklist`.
+    const checklist = firingChecklist(history);
+    // A new run counts its steps from where it starts, never from where an earlier run stopped.
+    startRun(this.steps, checklist.parts);
     const { inline, observe, attribute } = this.hooks;
     /*
      * Last, after both passes that read roles, and only on the way to the model. The approval
@@ -284,7 +299,9 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
       observe(
         super.run({
           ...input,
-          messages: attribute ? attribute(messages) : messages,
+          messages: checklist.toModel(
+            attribute ? attribute(messages) : messages,
+          ),
         }),
       );
     /*

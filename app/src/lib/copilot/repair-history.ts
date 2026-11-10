@@ -1,4 +1,5 @@
 import type { Message } from "@ag-ui/core";
+import { notRun } from "@openbot/shared/approval-outcomes";
 import { newId } from "../new-id";
 import { withoutWaitingPlaceholders } from "./approval-context";
 
@@ -6,14 +7,93 @@ import { withoutWaitingPlaceholders } from "./approval-context";
  * Insert explanatory tool results for unanswered tool calls before sending history to providers.
  */
 
-const UNANSWERED =
-  "This call produced no result: the surface was interrupted before it could answer. Do not assume it succeeded.";
+/**
+ * What a call nothing answered is answered with, in the voice of every "not run" result (see
+ * `notRun`). It used to say only "Do not assume it succeeded", and a Bot told that much did nothing
+ * with the gap: it neither fetched the thing again nor said in its answer that it was missing.
+ */
+export const UNANSWERED = notRun(
+  "no result came back for this call before the conversation moved on.",
+);
 
 /** A tool result message, which AG-UI models as its own role. */
 type ToolResult = { role: "tool"; toolCallId: string };
 
 function isToolResult(message: Message): message is Message & ToolResult {
   return message.role === "tool" && "toolCallId" in message;
+}
+
+/**
+ * The tool calls in these messages that nothing here answers yet. A held step's stand-in is not an
+ * answer (see `withoutWaitingPlaceholders`).
+ */
+export function unansweredToolCalls(
+  messages: ReadonlyArray<Message>,
+): ReadonlySet<string> {
+  const answered = new Set<string>();
+  for (const message of withoutWaitingPlaceholders(messages))
+    if (isToolResult(message)) answered.add(message.toolCallId);
+  const unanswered = new Set<string>();
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    for (const call of message.toolCalls ?? [])
+      if (!answered.has(call.id)) unanswered.add(call.id);
+  }
+  return unanswered;
+}
+
+/**
+ * This browser's copy of a conversation, with each call it holds no answer for answered from the
+ * stored thread when the store has the answer.
+ *
+ * A CALL WITH NO ANSWER HERE IS USUALLY ONE THAT ANSWERED SOMEWHERE ELSE. A Bot's own tools run on
+ * the server, and their answers reach this copy only through the stream it is joined to. Opened, or
+ * opened again, while the Bot was part way through a step, a conversation can be left holding the
+ * step's calls and only the answers that had arrived by then: found live, 20 lookups sent together,
+ * 11 answered on screen and 9 still running when the person came back to it. The server finished
+ * all 20 and stored them; this copy never heard. The next message then went out with
+ * {@link repairUnansweredToolCalls}'s "interrupted" sentence for those 9, and the Bot told the
+ * person that 9 of its lookups had failed for no reason it could name, when every one had answered.
+ *
+ * So the stored answer is put in its place, and only a call the store has no answer for either is
+ * left for the repair to explain. Each answer goes after the answers already following its call,
+ * so the call's message keeps its answers together and in front of anything said after it.
+ *
+ * Returns `local` itself when nothing was added.
+ */
+export function withStoredAnswers(
+  local: Message[],
+  stored: ReadonlyArray<Message>,
+): Message[] {
+  const unanswered = unansweredToolCalls(local);
+  if (unanswered.size === 0) return local;
+  const found = new Map<string, Message>();
+  for (const message of withoutWaitingPlaceholders(stored)) {
+    if (!isToolResult(message)) continue;
+    if (!unanswered.has(message.toolCallId) || found.has(message.toolCallId))
+      continue;
+    found.set(message.toolCallId, message);
+  }
+  if (found.size === 0) return local;
+
+  const merged: Message[] = [];
+  for (let index = 0; index < local.length; index++) {
+    const message = local[index] as Message;
+    merged.push(message);
+    if (message.role !== "assistant") continue;
+    const answers = (message.toolCalls ?? []).flatMap((call) => {
+      const answer = found.get(call.id);
+      return answer ? [answer] : [];
+    });
+    if (answers.length === 0) continue;
+    // After the answers already following this message, which belong to it.
+    while (local[index + 1]?.role === "tool") {
+      index++;
+      merged.push(local[index] as Message);
+    }
+    merged.push(...answers);
+  }
+  return merged;
 }
 
 /**

@@ -97,8 +97,9 @@ at `agent-langgraph` on a laptop.
 
 **`OPENBOT_GENERATIVE_UI`** enables generated interfaces by default: streamed HTML/CSS/JavaScript
 in a sandboxed iframe, and A2UI 1.0 interfaces built from CopilotKit's standard catalog (every
-standard component except Map, Favicon, LinkCard and Citation). Their buttons send their named action
-and the values entered back to the current conversation's Bot.
+standard component except Map, Favicon, LinkCard and Citation), plus OpenBot's own Breakdown:
+editable amounts that add up to a total, each in its own colour, with a bar of how the total splits.
+Their buttons send their named action and the values entered back to the current conversation's Bot.
 Set `OPENBOT_GENERATIVE_UI=false` or `0` to disable both. `true`, `1`, an empty value, or an unset
 value leave the capability on. The server configures both runtime renderers and reports the same
 setting through `/api/capabilities` to the browser.
@@ -798,9 +799,9 @@ them, including a saved off. See [automatic-learning.md](automatic-learning.md).
 
 | Variable                                 | Meaning                                                                                       |
 | ---------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` | Default Learning container for this deployment's Bots. 1 to 64 lowercase letters, digits and single hyphens, or the server refuses to start. |
+| `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` | Default Learning container for this deployment's Bots. 1 to 64 lowercase letters, digits and single hyphens, or the server refuses to start. Checked at start: a container the configured Intelligence does not have is logged (`configured_absent`) and ignored, and automatic assignment runs as though it was unset. |
 | `CPK_INTELLIGENCE_SKILLS_REVISION`       | An exact published skills revision to pin. Read only beside a container id. Unset follows the latest. |
-| `OPENBOT_LEARNING_AUTO_ASSIGN`           | `false` or `0` stops the server assigning the project's `openbot` container automatically. On otherwise, and off whenever `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` is set. |
+| `OPENBOT_LEARNING_AUTO_ASSIGN`           | `false` or `0` stops the server assigning the project's `openbot` container automatically. On otherwise. Stands aside for a `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` the configured Intelligence has. |
 | `INTELLIGENCE_SERVICE_TOKEN`             | An Intelligence service token that creates the `openbot` Learning container (local evaluation installs only; see [Creating the container](automatic-learning.md#creating-the-container)). Requires `INTELLIGENCE_PROJECT_ID`. |
 | `INTELLIGENCE_PROJECT_ID`                | The numeric ID of the runtime key's Intelligence project, where the service token creates the container. Set both or neither, or the server refuses to start. |
 | `OPENBOT_MEMORY_SOURCE_DEFAULTS`         | `false` or `0` stops OpenBot making each app a person connected into a memory source for the Bots they talk to. On otherwise. Existing sources are left as they are. |

@@ -142,6 +142,25 @@ test("a long reason wraps inside Decision instead of setting its width", async (
     expect([...td.classList]).not.toContain("whitespace-nowrap");
 });
 
+/*
+ * What's longest rows never wrap, so without a floor Decision got what What left over: about 150px
+ * at 1280px wide (What about 530px and mostly empty), and "Stopped by: Bots may not visit social
+ * media sites" ran to three lines over a rule clamped to two short ones. With min-w-64, measured in
+ * the real app: Decision 269px and What 410px at 1280, Decision 256px at 1000 with the table still
+ * inside the window, and the name on two lines at both.
+ */
+test("Decision keeps room for a rule's name, as Bot keeps room for its", async () => {
+  const view = await renderAudit();
+  const cells = view.container.querySelectorAll("[data-column=decision]");
+  expect(cells.length).toBe(ROWS.length);
+  for (const td of cells) expect([...td.classList]).toContain("min-w-64");
+  // What is the column that gives way: it has no floor of its own.
+  for (const td of view.container.querySelectorAll("[data-column=what]"))
+    expect([...td.classList].some((name) => name.startsWith("min-w-"))).toBe(
+      false,
+    );
+});
+
 test("the Started by filter still narrows the rows, though it is no longer a column", async () => {
   const view = await renderAudit();
   const user = userEvent.setup({ document });

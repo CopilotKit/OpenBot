@@ -1,0 +1,1048 @@
+{
+  "apps": [
+    {
+      "id": "composio-gmail",
+      "title": "Gmail",
+      "tools": [
+        {
+          "name": "GMAIL_ADD_LABEL_TO_EMAIL",
+          "effect": "write"
+        },
+        {
+          "name": "GMAIL_CREATE_EMAIL_DRAFT",
+          "effect": "write"
+        },
+        {
+          "name": "GMAIL_CREATE_LABEL",
+          "effect": "write"
+        },
+        {
+          "name": "GMAIL_DELETE_DRAFT",
+          "effect": "write"
+        },
+        {
+          "name": "GMAIL_DELETE_MESSAGE",
+          "effect": "write"
+        },
+        {
+          "name": "GMAIL_FETCH_EMAILS",
+          "effect": "read"
+        },
+        {
+          "name": "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID",
+          "effect": "read"
+        },
+        {
+          "name": "GMAIL_FETCH_MESSAGE_BY_THREAD_ID",
+          "effect": "read"
+        },
+        {
+          "name": "GMAIL_GET_ATTACHMENT",
+          "effect": "read"
+        },
+        {
+          "name": "GMAIL_GET_CONTACTS",
+          "effect": "read"
+        },
+        {
+          "name": "GMAIL_GET_PEOPLE",
+          "effect": "read"
+        },
+        {
+          "name": "GMAIL_GET_PROFILE",
+          "effect": "read"
+        },
+        {
+          "name": "GMAIL_LIST_DRAFTS",
+          "effect": "read"
+        },
+        {
+          "name": "GMAIL_LIST_LABELS",
+          "effect": "read"
+        },
+        {
+          "name": "GMAIL_LIST_THREADS",
+          "effect": "read"
+        },
+        {
+          "name": "GMAIL_MODIFY_THREAD_LABELS",
+          "effect": "write"
+        },
+        {
+          "name": "GMAIL_MOVE_TO_TRASH",
+          "effect": "write"
+        },
+        {
+          "name": "GMAIL_PATCH_LABEL",
+          "effect": "write"
+        },
+        {
+          "name": "GMAIL_REMOVE_LABEL",
+          "effect": "write"
+        },
+        {
+          "name": "GMAIL_REPLY_TO_THREAD",
+          "effect": "write"
+        },
+        {
+          "name": "GMAIL_SEARCH_PEOPLE",
+          "effect": "read"
+        },
+        {
+          "name": "GMAIL_SEND_DRAFT",
+          "effect": "write"
+        },
+        {
+          "name": "GMAIL_SEND_EMAIL",
+          "effect": "write"
+        }
+      ]
+    },
+    {
+      "id": "composio-salesforce",
+      "title": "Salesforce",
+      "tools": [
+        {
+          "name": "SALESFORCE_ACCOUNT_CREATION_WITH_CONTENT_TYPE_OPTION",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_ADD_CONTACT_TO_CAMPAIGN",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_ADD_LEAD_TO_CAMPAIGN",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_ADD_OPPORTUNITY_LINE_ITEM",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_APPLY_LEAD_ASSIGNMENT_RULES",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_ASSOCIATE_CONTACT_TO_ACCOUNT",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_CLONE_OPPORTUNITY_WITH_PRODUCTS",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_CLONE_RECORD",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_COMPLETE_TASK",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_CREATE_ACCOUNT",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_CREATE_CAMPAIGN",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_CREATE_CAMPAIGN_RECORD_VIA_POST",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_CREATE_CONTACT",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_CREATE_LEAD",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_CREATE_LEAD_WITH_SPECIFIED_CONTENT_TYPE",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_CREATE_NEW_CONTACT_WITH_JSON_HEADER",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_CREATE_NOTE",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_CREATE_NOTE_RECORD_WITH_CONTENT_TYPE_HEADER",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_CREATE_OPPORTUNITY",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_CREATE_OPPORTUNITY_RECORD",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_CREATE_TASK",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_DELETE_ACCOUNT",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_DELETE_A_LEAD_OBJECT_BY_ITS_ID",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_DELETE_CAMPAIGN",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_DELETE_CONTACT",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_DELETE_LEAD",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_DELETE_NOTE",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_DELETE_OPPORTUNITY",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_EXECUTE_SOQL_QUERY",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_FETCH_ACCOUNT_BY_ID_WITH_QUERY",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_FETCH_MODIFIED_OR_UNMODIFIED_SOBJECTS",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_GET_ACCOUNT",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_GET_CAMPAIGN",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_GET_CONTACT",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_GET_DASHBOARD",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_GET_LEAD",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_GET_NOTE",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_GET_NOTE_BY_ID_WITH_FIELDS",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_GET_OPPORTUNITY",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_GET_REPORT",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_GET_REPORT_INSTANCE",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_GET_USER_INFO",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_LIST_ACCOUNTS",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_LIST_CAMPAIGNS",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_LIST_CONTACTS",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_LIST_DASHBOARDS",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_LIST_EMAIL_TEMPLATES",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_LIST_LEADS",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_LIST_NOTES",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_LIST_OPPORTUNITIES",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_LIST_REPORTS",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_LOG_CALL",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_LOG_EMAIL_ACTIVITY",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_MASS_TRANSFER_OWNERSHIP",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_QUERY_CONTACTS_BY_NAME",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_QUERY_REPORT",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_REMOVE_ACCOUNT_BY_UNIQUE_IDENTIFIER",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_REMOVE_A_SPECIFIC_CONTACT_BY_ID",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_REMOVE_CAMPAIGN_OBJECT_BY_ID",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_REMOVE_FROM_CAMPAIGN",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_REMOVE_NOTE_OBJECT_BY_ID",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_REMOVE_OPPORTUNITY_BY_ID",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_RETRIEVE_ACCOUNT_DATA_AND_ERROR_RESPONSES",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_RETRIEVE_CAMPAIGN_DATA_WITH_ERROR_HANDLING",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_RETRIEVE_CONTACT_INFO_WITH_STANDARD_RESPONSES",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_RETRIEVE_LEAD_BY_ID",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_RETRIEVE_LEAD_DATA_WITH_VARIOUS_RESPONSES",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_RETRIEVE_NOTE_OBJECT_INFORMATION",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_RETRIEVE_OPPORTUNITIES_DATA",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_RETRIEVE_OPPORTUNITY_BY_ID_WITH_OPTIONAL_FIELDS",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_RETRIEVE_SPECIFIC_CAMPAIGN_OBJECT_DETAILS",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_RETRIEVE_SPECIFIC_CONTACT_BY_ID",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_RUN_REPORT",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_RUN_SOQL_QUERY",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_SEARCH_ACCOUNTS",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_SEARCH_CAMPAIGNS",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_SEARCH_CONTACTS",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_SEARCH_LEADS",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_SEARCH_NOTES",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_SEARCH_OPPORTUNITIES",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_SEARCH_TASKS",
+          "effect": "read"
+        },
+        {
+          "name": "SALESFORCE_SEND_EMAIL",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_SEND_EMAIL_FROM_TEMPLATE",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_SEND_MASS_EMAIL",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_UPDATE_ACCOUNT",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_UPDATE_ACCOUNT_OBJECT_BY_ID",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_UPDATE_CAMPAIGN",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_UPDATE_CAMPAIGN_BY_ID_WITH_JSON",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_UPDATE_CONTACT",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_UPDATE_CONTACT_BY_ID",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_UPDATE_LEAD",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_UPDATE_LEAD_BY_ID_WITH_JSON_PAYLOAD",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_UPDATE_NOTE",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_UPDATE_OPPORTUNITY",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_UPDATE_OPPORTUNITY_BY_ID",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_UPDATE_SPECIFIC_NOTE_BY_ID",
+          "effect": "write"
+        },
+        {
+          "name": "SALESFORCE_UPDATE_TASK",
+          "effect": "write"
+        }
+      ]
+    },
+    {
+      "id": "composio-slack",
+      "title": "Slack",
+      "tools": [
+        {
+          "name": "SLACK_ACTIVATE_OR_MODIFY_DO_NOT_DISTURB_DURATION",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_ADD_AN_EMOJI_ALIAS_IN_SLACK",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_ADD_A_CUSTOM_EMOJI_TO_A_SLACK_TEAM",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_ADD_A_REMOTE_FILE_FROM_A_SERVICE",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_ADD_A_STAR_TO_AN_ITEM",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_ADD_CALL_PARTICIPANTS",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_ADD_EMOJI",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_ADD_REACTION_TO_AN_ITEM",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_ARCHIVE_A_PUBLIC_OR_PRIVATE_CHANNEL",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_ARCHIVE_A_SLACK_CONVERSATION",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_CHAT_POST_MESSAGE",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_CLOSE_DM_OR_MULTI_PERSON_DM",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_CREATE_A_REMINDER",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_CREATE_A_SLACK_USER_GROUP",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_CREATE_CHANNEL",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_CREATE_CHANNEL_BASED_CONVERSATION",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_CUSTOMIZE_URL_UNFURL",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_CUSTOMIZE_URL_UNFURLING_IN_MESSAGES",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_DELETES_A_MESSAGE_FROM_A_CHAT",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_DELETE_A_COMMENT_ON_A_FILE",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_DELETE_A_FILE_BY_ID",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_DELETE_A_PUBLIC_OR_PRIVATE_CHANNEL",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_DELETE_A_SCHEDULED_MESSAGE_IN_A_CHAT",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_DELETE_A_SLACK_REMINDER",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_DELETE_USER_PROFILE_PHOTO",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_DISABLE_AN_EXISTING_SLACK_USER_GROUP",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_ENABLE_A_SPECIFIED_USER_GROUP",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_ENABLE_PUBLIC_SHARING_OF_A_FILE",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_END_A_CALL_WITH_DURATION_AND_ID",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_END_SNOOZE",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_END_USER_DO_NOT_DISTURB_SESSION",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_END_USER_SNOOZE_MODE_IMMEDIATELY",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_FETCH_BOT_USER_INFORMATION",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_FETCH_CONVERSATION_HISTORY",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_FETCH_CURRENT_TEAM_INFO_WITH_OPTIONAL_TEAM_SCOPE",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_FETCH_DND_STATUS_FOR_MULTIPLE_TEAM_MEMBERS",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_FETCH_ITEM_REACTIONS",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_FETCH_MESSAGE_THREAD_FROM_A_CONVERSATION",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_FETCH_TEAM_INFO",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_FETCH_WORKSPACE_SETTINGS_INFORMATION",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_FIND_CHANNELS",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_FIND_USERS",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_FIND_USER_BY_EMAIL_ADDRESS",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_GET_CHANNEL_CONVERSATION_PREFERENCES",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_GET_REMINDER_INFORMATION",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_GET_REMOTE_FILE",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_GET_TEAM_DND_STATUS",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_GET_USER_PRESENCE_INFO",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_INITIATES_CHANNEL_BASED_CONVERSATIONS",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_INVITE_USERS_TO_A_SLACK_CHANNEL",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_INVITE_USER_TO_CHANNEL",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_INVITE_USER_TO_WORKSPACE",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_INVITE_USER_TO_WORKSPACE_WITH_OPTIONAL_CHANNEL_INVITES",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_JOIN_AN_EXISTING_CONVERSATION",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_LEAVE_A_CONVERSATION",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_LISTS_PINNED_ITEMS_IN_A_CHANNEL",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_LISTS_USER_S_STARRED_ITEMS_WITH_PAGINATION",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_LIST_ACCESSIBLE_CONVERSATIONS_FOR_A_USER",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_LIST_ALL_CHANNELS",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_LIST_ALL_SLACK_TEAM_CHANNELS_WITH_VARIOUS_FILTERS",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_LIST_ALL_SLACK_TEAM_USERS_WITH_PAGINATION",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_LIST_ALL_USERS",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_LIST_ALL_USERS_IN_A_USER_GROUP",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_LIST_CONVERSATIONS",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_LIST_FILES_WITH_FILTERS_IN_SLACK",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_LIST_REMINDERS",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_LIST_REMOTE_FILES",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_LIST_SCHEDULED_MESSAGES",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_LIST_SCHEDULED_MESSAGES_IN_A_CHANNEL",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_LIST_SLACK_S_REMOTE_FILES_WITH_FILTERS",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_LIST_STARRED_ITEMS",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_LIST_TEAM_CUSTOM_EMOJIS",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_LIST_USER_GROUPS_FOR_TEAM_WITH_OPTIONS",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_LIST_USER_REACTIONS",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_LIST_USER_REMINDERS_WITH_DETAILS",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_LIST_WORKSPACE_USERS",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_MANUALLY_SET_USER_PRESENCE",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_MARK_REMINDER_AS_COMPLETE",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_OPEN_DM",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_OPEN_OR_RESUME_DIRECT_OR_MULTI_PERSON_MESSAGES",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_PINS_AN_ITEM_TO_A_CHANNEL",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_REGISTERS_A_NEW_CALL_WITH_PARTICIPANTS",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_REGISTERS_NEW_CALL_PARTICIPANTS",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_REGISTER_CALL_PARTICIPANTS_REMOVAL",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_REMOVE_A_REMOTE_FILE",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_REMOVE_A_STAR_FROM_AN_ITEM",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_REMOVE_A_USER_FROM_A_CONVERSATION",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_REMOVE_CALL_PARTICIPANTS",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_REMOVE_REACTION_FROM_ITEM",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_RENAME_AN_EMOJI",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_RENAME_A_CONVERSATION",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_RENAME_A_SLACK_CHANNEL",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_RETRIEVE_A_USER_S_IDENTITY_DETAILS",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_RETRIEVE_CALL_INFORMATION",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_RETRIEVE_CONVERSATION_INFORMATION",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_RETRIEVE_CONVERSATION_MEMBERS_LIST",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_RETRIEVE_CURRENT_USER_DND_STATUS",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_RETRIEVE_DETAILED_INFORMATION_ABOUT_A_FILE",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_RETRIEVE_DETAILED_USER_INFORMATION",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_RETRIEVE_MESSAGE_PERMALINK_URL",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_RETRIEVE_REMOTE_FILE_INFO_IN_SLACK",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_RETRIEVE_TEAM_PROFILE_DETAILS",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_RETRIEVE_USER_PROFILE_INFORMATION",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_REVERSE_A_CONVERSATION_S_ARCHIVAL_STATUS",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_REVOKE_PUBLIC_SHARING_ACCESS_FOR_A_FILE",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_SCHEDULES_A_MESSAGE_TO_A_CHANNEL_AT_A_SPECIFIED_TIME",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_SCHEDULE_MESSAGE",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_SEARCH_FOR_MESSAGES_WITH_QUERY",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_SEARCH_MESSAGES",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_SENDS_A_MESSAGE_TO_A_SLACK_CHANNEL",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_SENDS_EPHEMERAL_MESSAGES_TO_CHANNEL_USERS",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_SEND_EPHEMERAL_MESSAGE",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_SEND_MESSAGE",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_SET_A_CONVERSATION_S_PURPOSE",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_SET_DND_DURATION",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_SET_PROFILE_PHOTO",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_SET_READ_CURSOR_IN_A_CONVERSATION",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_SET_SLACK_USER_PROFILE_INFORMATION",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_SET_THE_TOPIC_OF_A_CONVERSATION",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_SET_USER_PROFILE_PHOTO_WITH_CROPPING_OPTIONS",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_SHARE_A_ME_MESSAGE_IN_A_CHANNEL",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_SHARE_REMOTE_FILE_IN_CHANNELS",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_START_CALL",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_START_REAL_TIME_MESSAGING_SESSION",
+          "effect": "read"
+        },
+        {
+          "name": "SLACK_UNARCHIVE_A_PUBLIC_OR_PRIVATE_CHANNEL",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_UNARCHIVE_CHANNEL",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_UNPIN_ITEM_FROM_CHANNEL",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_UPDATES_AN_EXISTING_REMOTE_FILE",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_UPDATES_A_SLACK_MESSAGE",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_UPDATE_AN_EXISTING_SLACK_USER_GROUP",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_UPDATE_SLACK_CALL_INFORMATION",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_UPDATE_USER_GROUP_MEMBERS",
+          "effect": "write"
+        },
+        {
+          "name": "SLACK_UPLOAD_OR_CREATE_A_FILE_IN_SLACK",
+          "effect": "write"
+        }
+      ]
+    }
+  ],
+  "bots": [
+    {
+      "id": "agent_0b6c1d2e-7a44-4a0e-9a59-2f0d5c3e8b11",
+      "name": "Research"
+    },
+    {
+      "id": "agent_5e2f8a90-1c3b-4d6e-8f70-a1b2c3d4e5f6",
+      "name": "Sales Assistant"
+    },
+    {
+      "id": "agent_9d8c7b6a-5f4e-4d3c-b2a1-0f9e8d7c6b5a",
+      "name": "Inbox Helper"
+    }
+  ]
+}

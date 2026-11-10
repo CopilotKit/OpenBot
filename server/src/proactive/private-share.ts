@@ -187,6 +187,7 @@ export function createPrivateShareCheck(deps: {
         record.action.actionDigest === action.actionDigest &&
         record.action.threadId === action.threadId &&
         (record.decision === "allow_once" ||
+          record.decision === "allow_conversation" ||
           record.decision === "allow_always") &&
         record.decidedAt &&
         now().getTime() - record.decidedAt.getTime() < ONCE_WINDOW_MS,

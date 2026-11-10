@@ -10,6 +10,14 @@ use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+/// Opaque fingerprint of the account verified by Ops, never an email or credential.
+pub fn is_account_id(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 pub const STATE_SCHEMA_VERSION: u8 = 1;
 const STATE_FILE: &str = "telemetry-state.json";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
@@ -161,6 +169,87 @@ impl Telemetry {
             .and_then(|guard| guard.as_ref().map(|state| state.install_id.clone()))
     }
 
+    /// The account binding is saved before requesting a permanent PostHog alias.
+    pub fn bound_account(&self) -> Option<String> {
+        self.state
+            .lock()
+            .ok()
+            .and_then(|state| state.as_ref().and_then(|state| state.account_id.clone()))
+    }
+
+    /// Keep the anonymous trail on first sign-in; rotate before a different account is linked.
+    /// Queued events retain their original installation, including queues from older versions.
+    pub fn bind_account(&self, account: &str) -> Result<()> {
+        if !is_account_id(account) {
+            return Err(TelemetryError::InvalidState(
+                "invalid account binding".into(),
+            ));
+        }
+        self.change_account(Some(account))
+    }
+
+    /// Rotate a previously linked installation on sign-out, retaining queued attribution.
+    pub fn clear_account(&self) -> Result<()> {
+        self.change_account(None)
+    }
+
+    /// Settings' Share usage data, turned off: the same as launching with the opt-out. The
+    /// identity, its account binding and every queued event are deleted, and nothing more is
+    /// recorded or sent.
+    pub fn stop_sharing(&self) -> Result<()> {
+        let mut guard = self.state.lock().map_err(|_| TelemetryError::Poisoned)?;
+        *guard = None;
+        match fs::remove_file(&self.state_path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Settings' Share usage data, turned back on: a fresh identity, with nothing from before the
+    /// opt-out. Setup is long finished by the time Settings can be reached, so activation is not
+    /// recorded a second time.
+    pub fn resume_sharing(&self) -> Result<()> {
+        if !self.config.enabled || telemetry_disabled(EnvOverride::Process) {
+            return Ok(());
+        }
+        let mut guard = self.state.lock().map_err(|_| TelemetryError::Poisoned)?;
+        if guard.is_some() {
+            return Ok(());
+        }
+        if let Some(parent) = self.state_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut state = PersistedState::new(new_uuid());
+        state.activated = true;
+        write_state(&self.state_path, &state)?;
+        *guard = Some(state);
+        Ok(())
+    }
+
+    fn change_account(&self, account: Option<&str>) -> Result<()> {
+        let mut guard = self.state.lock().map_err(|_| TelemetryError::Poisoned)?;
+        let Some(current) = guard.as_ref() else {
+            return Ok(());
+        };
+        if current.account_id.as_deref() == account {
+            return Ok(());
+        }
+        let mut next = current.clone();
+        if current.account_id.is_some() {
+            for event in &mut next.queue {
+                if event.installation_id.is_none() {
+                    event.installation_id = Some(current.install_id.clone());
+                }
+            }
+            next.install_id = new_uuid();
+        }
+        next.account_id = account.map(str::to_owned);
+        write_state(&self.state_path, &next)?;
+        *guard = Some(next);
+        Ok(())
+    }
+
     pub fn update_engine(&self, engine: Engine) -> Result<()> {
         let mut context = self.context.lock().map_err(|_| TelemetryError::Poisoned)?;
         context.engine = engine;
@@ -283,7 +372,13 @@ impl Telemetry {
                 let Some(event) = state.queue.first().cloned() else {
                     return Ok(());
                 };
-                (state.install_id.clone(), event)
+                (
+                    event
+                        .installation_id
+                        .clone()
+                        .unwrap_or_else(|| state.install_id.clone()),
+                    event,
+                )
             };
 
             let response = self
@@ -358,7 +453,7 @@ pub struct Context {
     #[serde(rename = "openbot_distribution")]
     pub distribution: Distribution,
     #[serde(rename = "openbot_version")]
-    pub app_version: NumericVersion,
+    pub app_version: AppVersion,
     #[serde(rename = "openbot_platform")]
     pub platform: Platform,
     #[serde(rename = "openbot_arch")]
@@ -442,6 +537,147 @@ impl<'de> Deserialize<'de> for NumericVersion {
     }
 }
 
+/**
+The app's own version as released: a numeric version, and for a release candidate or other
+pre-release its label, as in `1.0.0-rc.5`. Cut at the first `-`, every 1.0 release candidate said
+`1.0.0`.
+
+The label is a closed word (`alpha`, `beta`, `rc`, `dev`, `pre`, `preview`, `canary`) with at most
+one number after a dot. Anything else after the `-` is not sent: only the numeric part is, as before.
+*/
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppVersion {
+    pub numeric: NumericVersion,
+    pub prerelease: Option<(PrereleaseLabel, Option<u32>)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrereleaseLabel {
+    Alpha,
+    Beta,
+    Rc,
+    Dev,
+    Pre,
+    Preview,
+    Canary,
+}
+
+impl PrereleaseLabel {
+    fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "alpha" => Self::Alpha,
+            "beta" => Self::Beta,
+            "rc" => Self::Rc,
+            "dev" => Self::Dev,
+            "pre" => Self::Pre,
+            "preview" => Self::Preview,
+            "canary" => Self::Canary,
+            _ => return None,
+        })
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Alpha => "alpha",
+            Self::Beta => "beta",
+            Self::Rc => "rc",
+            Self::Dev => "dev",
+            Self::Pre => "pre",
+            Self::Preview => "preview",
+            Self::Canary => "canary",
+        }
+    }
+}
+
+impl AppVersion {
+    /// Exactly a numeric version with an optional closed pre-release label; anything else fails.
+    pub fn parse(value: &str) -> Result<Self> {
+        let (numeric, label) = match value.split_once('-') {
+            Some((numeric, label)) => (numeric, Some(label)),
+            None => (value, None),
+        };
+        let numeric = NumericVersion::parse(numeric)?;
+        let prerelease = match label {
+            None => None,
+            Some(label) => {
+                let (word, number) = match label.split_once('.') {
+                    Some((word, number)) => (word, Some(number)),
+                    None => (label, None),
+                };
+                let word = PrereleaseLabel::parse(word).ok_or_else(|| {
+                    TelemetryError::InvalidState("unknown pre-release label".into())
+                })?;
+                let number = number
+                    .map(|number| {
+                        if number.is_empty()
+                            || number.len() > 9
+                            || !number.bytes().all(|byte| byte.is_ascii_digit())
+                        {
+                            return Err(TelemetryError::InvalidState(
+                                "pre-release number is not numeric".into(),
+                            ));
+                        }
+                        number.parse::<u32>().map_err(|_| {
+                            TelemetryError::InvalidState("pre-release number is too large".into())
+                        })
+                    })
+                    .transpose()?;
+                Some((word, number))
+            }
+        };
+        Ok(Self {
+            numeric,
+            prerelease,
+        })
+    }
+
+    /// The version the app was built as, keeping a release candidate's label. A label outside the
+    /// closed set keeps only the numeric part, as every version did before. None when even that
+    /// is not a numeric version.
+    pub fn from_package(value: &str) -> Option<Self> {
+        Self::parse(value).ok().or_else(|| {
+            NumericVersion::parse(value.split(['-', '+']).next()?)
+                .ok()
+                .map(|numeric| Self {
+                    numeric,
+                    prerelease: None,
+                })
+        })
+    }
+}
+
+impl std::fmt::Display for AppVersion {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.numeric)?;
+        if let Some((label, number)) = self.prerelease {
+            write!(formatter, "-{}", label.as_str())?;
+            if let Some(number) = number {
+                write!(formatter, ".{number}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Serialize for AppVersion {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for AppVersion {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(serde::de::Error::custom)
+    }
+}
+
 impl Context {
     fn to_global_properties(&self) -> serde_json::Value {
         let mut properties = serde_json::json!({
@@ -468,6 +704,8 @@ impl Context {
 pub struct PersistedState {
     pub schema_version: u8,
     pub install_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
     pub activated: bool,
     pub last_step: Option<Step>,
     pub queue: Vec<Event>,
@@ -478,13 +716,15 @@ impl PersistedState {
         Self {
             schema_version: STATE_SCHEMA_VERSION,
             install_id,
+            account_id: None,
             activated: false,
             last_step: None,
             queue: Vec::new(),
         }
     }
 
-    fn push_bounded(&mut self, event: Event, max_queue: usize) {
+    fn push_bounded(&mut self, mut event: Event, max_queue: usize) {
+        event.installation_id = Some(self.install_id.clone());
         self.queue.push(event);
         while self.queue.len() > max_queue {
             self.queue.remove(0);
@@ -503,6 +743,15 @@ impl PersistedState {
                 "install_id is not a UUID".to_string(),
             ));
         }
+        if self
+            .account_id
+            .as_deref()
+            .is_some_and(|id| !is_account_id(id))
+        {
+            return Err(TelemetryError::InvalidState(
+                "invalid account binding".into(),
+            ));
+        }
         for event in &self.queue {
             event.validate()?;
         }
@@ -514,6 +763,9 @@ impl PersistedState {
 #[serde(deny_unknown_fields)]
 pub struct Event {
     pub event_id: String,
+    /// Local queue metadata only; never part of the event payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installation_id: Option<String>,
     pub occurred_at_ms: u64,
     pub event_name: String,
     pub context: Context,
@@ -525,6 +777,7 @@ impl Event {
         let event_name = data.event_name().to_string();
         Self {
             event_id: new_uuid(),
+            installation_id: None,
             occurred_at_ms: now_ms(),
             event_name,
             context,
@@ -537,6 +790,15 @@ impl Event {
     }
 
     fn validate(&self) -> Result<()> {
+        if self
+            .installation_id
+            .as_deref()
+            .is_some_and(|id| !is_uuid(id))
+        {
+            return Err(TelemetryError::InvalidState(
+                "invalid queued installation id".into(),
+            ));
+        }
         if !is_uuid(&self.event_id) {
             return Err(TelemetryError::InvalidState(
                 "event_id is not a UUID".to_string(),
@@ -596,13 +858,35 @@ pub enum EventData {
         duration_ms: u64,
         bytes: Option<u64>,
     },
+    /// Setup or a Start stopped. `step` is the last screen the window showed; `failing_step` is
+    /// the part of the work that failed, by the names the setup window's rows use. The CLI's own
+    /// closed reason or failure category, and what an engine too small had against what it needs,
+    /// when known. Never a sentence, a path or anything the CLI printed.
     SetupFailed {
         step: Step,
         error_class: SetupErrorClass,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        failing_step: Option<FailingStep>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cli_reason: Option<CliReason>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cli_failure: Option<CliFailure>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resources: Option<Resources>,
     },
     Activated,
     SetupAbandoned {
         step: Step,
+    },
+    /// The Account step's CopilotKit sign-in: started, and how it ended, with how long the person
+    /// was in their browser. `restored` is an account check that found this computer already
+    /// signed in, once a launch.
+    SignIn {
+        outcome: SignInOutcome,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cli_failure: Option<CliFailure>,
     },
 }
 
@@ -619,6 +903,7 @@ impl EventData {
             Self::SetupFailed { .. } => "oss.desktop.setup_failed",
             Self::Activated => "oss.desktop.activated",
             Self::SetupAbandoned { .. } => "oss.desktop.setup_abandoned",
+            Self::SignIn { .. } => "oss.desktop.sign_in",
         }
     }
 }
@@ -787,17 +1072,256 @@ pub enum SetupErrorClass {
     InvalidConfiguration,
     NetworkUnavailable,
     PermissionDenied,
+    /// The engine has fewer CPUs, or less memory or free disk, than local setup needs.
+    InsufficientResources,
+    /// An engine or platform local setup does not run on, such as OrbStack, or rootless Podman.
+    UnsupportedEngine,
     Unknown,
 }
 
+/// The part of setup that failed, by the step names the setup window's rows use (`report`), and
+/// the back end's own CLI calls.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FailingStep {
+    /// Start, before any of its steps.
+    Start,
+    Engine,
+    InstallEngine,
+    CreateMachine,
+    StartMachine,
+    HealthGate,
+    Deployment,
+    Release,
+    Images,
+    Installation,
+    Env,
+    Ports,
+    Cleanup,
+    Services,
+    CarryOver,
+    Answering,
+    Stopped,
+    Windows,
+    Linux,
+    Open,
+    Quit,
+    /// The Account step's check of the engine and the CLI's preflight, before the agreement.
+    AccountCheck,
+    LocalSetup,
+    LocalStart,
+    LocalUpdate,
+    LocalConnect,
+    LearningModel,
+    /// A step name this build does not list.
+    Other,
+}
+
+impl FailingStep {
+    /// The step a setup row names, such as `install-engine`.
+    pub fn from_row(step: &str) -> Self {
+        match step {
+            "start" => Self::Start,
+            "engine" => Self::Engine,
+            "install-engine" => Self::InstallEngine,
+            "create-machine" => Self::CreateMachine,
+            "start-machine" => Self::StartMachine,
+            "health-gate" => Self::HealthGate,
+            "deployment" => Self::Deployment,
+            "release" => Self::Release,
+            "images" => Self::Images,
+            "installation" => Self::Installation,
+            "env" => Self::Env,
+            "ports" => Self::Ports,
+            "cleanup" => Self::Cleanup,
+            "services" => Self::Services,
+            "carry-over" => Self::CarryOver,
+            "answering" => Self::Answering,
+            "stopped" => Self::Stopped,
+            "windows" => Self::Windows,
+            "linux" => Self::Linux,
+            "open" => Self::Open,
+            "quit" => Self::Quit,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// The CLI's own reason for stopping, from its closed set (`local_eval::Reason`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CliReason {
+    AuthenticationRequired,
+    EulaAcceptanceRequired,
+    EulaUnavailable,
+    EulaDeclined,
+    ReleaseUnavailable,
+    FeatureDisabled,
+    UnsupportedPlatform,
+    UnsupportedEngine,
+    PortUnavailable,
+    DockerUnavailable,
+    UpdateRecoveryRequired,
+    IncompatibleRelease,
+    LocalCommandBusy,
+    LocalCommandFailed,
+    ConfirmationRequired,
+    DashboardUnavailable,
+    BrowserOpenFailed,
+    ResourcesShort,
+    Unrecognized,
+}
+
+/// Why a CLI call produced no report, from the desktop's closed set (`local_eval::Failure`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CliFailure {
+    Unavailable,
+    Unverified,
+    InvalidStack,
+    Spawn,
+    Timeout,
+    Cancelled,
+    OutputLimit,
+    InvalidJson,
+    UnsupportedVersion,
+    UnexpectedCommand,
+    InvalidStatus,
+    MissingStack,
+    UnsafeEndpoint,
+    ContractMismatch,
+    UnexpectedExit,
+    InvalidAcceptance,
+    RootlessPodman,
+    DownloadStalled,
+}
+
+/**
+What the engine had against what local setup needs, for a setup that stopped on it. CPUs in
+thousandths of a CPU, memory and disk in MiB. `*_short` says which resource is below; an
+`available` that was not measured is absent. `disk_nearly_full` is the back end's own disk below
+k3s's lines rather than below the 40 GiB setup needs.
+*/
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Resources {
+    pub cpu_short: bool,
+    pub memory_short: bool,
+    pub disk_short: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disk_nearly_full: bool,
+    pub cpu_needed_millis: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_available_millis: Option<u64>,
+    pub memory_needed_mib: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_available_mib: Option<u64>,
+    pub disk_needed_mib: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_available_mib: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SignInOutcome {
+    Started,
+    Completed,
+    Failed,
+    Cancelled,
+    /// The account check found this computer already signed in.
+    Restored,
+}
+
+/// Every `FailingStep`, as sent.
+const FAILING_STEPS: &[&str] = &[
+    "start",
+    "engine",
+    "install_engine",
+    "create_machine",
+    "start_machine",
+    "health_gate",
+    "deployment",
+    "release",
+    "images",
+    "installation",
+    "env",
+    "ports",
+    "cleanup",
+    "services",
+    "carry_over",
+    "answering",
+    "stopped",
+    "windows",
+    "linux",
+    "open",
+    "quit",
+    "account_check",
+    "local_setup",
+    "local_start",
+    "local_update",
+    "local_connect",
+    "learning_model",
+    "other",
+];
+
+const CLI_REASONS: &[&str] = &[
+    "authentication_required",
+    "eula_acceptance_required",
+    "eula_unavailable",
+    "eula_declined",
+    "release_unavailable",
+    "feature_disabled",
+    "unsupported_platform",
+    "unsupported_engine",
+    "port_unavailable",
+    "docker_unavailable",
+    "update_recovery_required",
+    "incompatible_release",
+    "local_command_busy",
+    "local_command_failed",
+    "confirmation_required",
+    "dashboard_unavailable",
+    "browser_open_failed",
+    "resources_short",
+    "unrecognized",
+];
+
+const CLI_FAILURES: &[&str] = &[
+    "unavailable",
+    "unverified",
+    "invalid_stack",
+    "spawn",
+    "timeout",
+    "cancelled",
+    "output_limit",
+    "invalid_json",
+    "unsupported_version",
+    "unexpected_command",
+    "invalid_status",
+    "missing_stack",
+    "unsafe_endpoint",
+    "contract_mismatch",
+    "unexpected_exit",
+    "invalid_acceptance",
+    "rootless_podman",
+    "download_stalled",
+];
+
+/// A numeric version, and for the app's own version a closed pre-release label (`AppVersion`).
+pub const APP_VERSION_PATTERN: &str =
+    r"^\d+(?:\.\d+){1,3}(?:-(?:alpha|beta|rc|dev|pre|preview|canary)(?:\.\d{1,9})?)?$";
+
 pub fn schema_json() -> serde_json::Value {
+    let steps = [
+        "welcome", "harness", "install", "account", "model", "connect", "ask",
+    ];
     serde_json::json!({
         "schema_version": STATE_SCHEMA_VERSION,
         "event_name_prefix": "oss.desktop.",
         "numeric_version_pattern": r"^\d+(?:\.\d+){1,3}$",
         "context": {
             "openbot_distribution": ["desktop"],
-            "openbot_version": { "pattern": r"^\d+(?:\.\d+){1,3}$" },
+            "openbot_version": { "pattern": APP_VERSION_PATTERN },
             "openbot_platform": ["windows", "macos", "linux", "other"],
             "openbot_arch": ["x86_64", "aarch64", "other"],
             "openbot_os_version": { "optional": true, "pattern": r"^\d+(?:\.\d+){1,3}$" },
@@ -805,16 +1329,33 @@ pub fn schema_json() -> serde_json::Value {
             "runtime_env": ["development", "production", "test"]
         },
         "events": {
-            "step_viewed": { "step": ["welcome", "harness", "install", "model", "connect", "ask"] },
+            "step_viewed": { "step": steps },
             "harness_chosen": { "harness": ["crewai", "llamaindex", "agno", "langgraph", "google_adk", "pydantic_ai", "microsoft_agent_framework", "claude_agent_sdk", "strands", "ag2", "langroid", "mastra", "byo_url"] },
             "model_chosen": { "provider": ["openai", "anthropic", "google", "xai", "compatible", "none"], "credential_path": ["subscription", "api_key", "oauth", "none"], "custom_base_url": "bool" },
             "engine_detected": { "engine": ["docker", "podman", "none"], "responding": "bool" },
             "engine_installed": { "engine": ["docker", "podman", "none"], "outcome": ["success", "failure"] },
             "windows_stage": { "outcome": ["ready", "wsl_absent", "wsl_one", "wsl_no_kernel", "virtual_machine_platform_disabled", "virtualization_disabled", "nested_virtualization_unavailable", "not_administrator", "check_failed"] },
             "image_pull": { "outcome": ["success", "failure"], "duration_ms": "u64", "bytes": "option_u64" },
-            "setup_failed": { "step": ["welcome", "harness", "install", "model", "connect", "ask"], "error_class": ["engine_unavailable", "engine_install_failed", "image_pull_failed", "invalid_configuration", "network_unavailable", "permission_denied", "unknown"] },
+            "setup_failed": {
+                "step": steps,
+                "error_class": ["engine_unavailable", "engine_install_failed", "image_pull_failed", "invalid_configuration", "network_unavailable", "permission_denied", "insufficient_resources", "unsupported_engine", "unknown"],
+                "failing_step": FAILING_STEPS,
+                "cli_reason": CLI_REASONS,
+                "cli_failure": CLI_FAILURES,
+                "resources": {
+                    "cpu_short": "bool", "memory_short": "bool", "disk_short": "bool", "disk_nearly_full": "bool",
+                    "cpu_needed_millis": "u64", "cpu_available_millis": "option_u64",
+                    "memory_needed_mib": "u64", "memory_available_mib": "option_u64",
+                    "disk_needed_mib": "u64", "disk_available_mib": "option_u64"
+                }
+            },
             "activated": {},
-            "setup_abandoned": { "step": ["welcome", "harness", "install", "model", "connect", "ask"] }
+            "setup_abandoned": { "step": steps },
+            "sign_in": {
+                "outcome": ["started", "completed", "failed", "cancelled", "restored"],
+                "duration_ms": "option_u64",
+                "cli_failure": CLI_FAILURES
+            }
         }
     })
 }
@@ -841,6 +1382,12 @@ fn write_state(path: &Path, state: &PersistedState) -> Result<()> {
 
 fn normalized_max_queue(configured: usize) -> usize {
     configured.clamp(1, 256)
+}
+
+/// `COPILOTKIT_TELEMETRY_DISABLED` or `DO_NOT_TRACK` in this app's own environment. Settings
+/// cannot turn sharing back on over it.
+pub fn disabled_by_environment() -> bool {
+    telemetry_disabled(EnvOverride::Process)
 }
 
 fn telemetry_disabled(env_override: EnvOverride) -> bool {
@@ -921,7 +1468,7 @@ mod tests {
     fn context(version: &str, engine: Engine) -> Context {
         Context {
             distribution: Distribution::Desktop,
-            app_version: NumericVersion::parse(version).unwrap(),
+            app_version: AppVersion::parse(version).unwrap(),
             platform: Platform::Macos,
             arch: Architecture::Aarch64,
             os_version: Some(NumericVersion::parse("14.5.0").unwrap()),
@@ -936,6 +1483,181 @@ mod tests {
             endpoint: Some(endpoint),
             max_queue: 256,
         }
+    }
+
+    #[test]
+    fn persisted_queue_accepts_account_binding_and_record_time_identity() {
+        let mut state = serde_json::to_value(PersistedState::new(new_uuid())).unwrap();
+        state["account_id"] = serde_json::json!("a".repeat(64));
+        let mut event = serde_json::to_value(Event::new(
+            EventData::Activated,
+            context("1.2.3", Engine::None),
+        ))
+        .unwrap();
+        event["installation_id"] = serde_json::json!(new_uuid());
+        state["queue"] = serde_json::json!([event]);
+        assert!(serde_json::from_value::<PersistedState>(state).is_ok(), "account binding must survive a restart alongside each queued event's original identity");
+    }
+
+    #[test]
+    fn account_binding_survives_restart_and_same_account_keeps_anonymous_trail() {
+        let dir = temp_dir("account-binding");
+        let first = Telemetry::open_with_env(
+            &dir,
+            context("1.2.3", Engine::None),
+            Config::disabled_for_tests(),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        let id = first.install_id().unwrap();
+        first.record(EventData::Activated).unwrap();
+        first.bind_account(&"a".repeat(64)).unwrap();
+        assert_eq!(first.install_id().as_deref(), Some(id.as_str()));
+        drop(first);
+        let reopened = Telemetry::open_with_env(
+            &dir,
+            context("1.2.3", Engine::None),
+            Config::disabled_for_tests(),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        assert_eq!(reopened.bound_account(), Some("a".repeat(64)));
+        reopened.bind_account(&"a".repeat(64)).unwrap();
+        assert_eq!(reopened.install_id().as_deref(), Some(id.as_str()));
+        assert_eq!(reopened.snapshot().unwrap().queue.len(), 1);
+    }
+
+    #[test]
+    fn switching_accounts_sends_queued_events_under_their_original_identity() {
+        let _ports = crate::test_support::hold_ports();
+        let dir = temp_dir("account-switch");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/ingest", listener.local_addr().unwrap());
+        let telemetry = Telemetry::open_with_env(
+            &dir,
+            context("1.2.3", Engine::None),
+            enabled(endpoint),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        let old_id = telemetry.install_id().unwrap();
+        telemetry.bind_account(&"a".repeat(64)).unwrap();
+        telemetry.record(EventData::Activated).unwrap();
+        // An old on-disk queue did not carry per-event installation IDs.
+        telemetry.state.lock().unwrap().as_mut().unwrap().queue[0].installation_id = None;
+        telemetry.bind_account(&"b".repeat(64)).unwrap();
+        let new_id = telemetry.install_id().unwrap();
+        assert_ne!(old_id, new_id);
+        assert_eq!(
+            telemetry.runtime_env().get("CPK_TELEMETRY_ID"),
+            Some(&new_id)
+        );
+        telemetry
+            .record(EventData::HarnessChosen {
+                harness: Harness::ByoUrl,
+            })
+            .unwrap();
+        let server = thread::spawn(move || {
+            [
+                one_response(listener.try_clone().unwrap()),
+                one_response(listener),
+            ]
+        });
+        telemetry.flush().unwrap();
+        let requests = server.join().unwrap();
+        assert!(requests[0].contains(&old_id));
+        assert!(!requests[0].contains(&new_id));
+        assert!(requests[1].contains(&new_id));
+        for request in requests {
+            assert!(!request.contains("account_id"));
+        }
+        assert!(telemetry.snapshot().unwrap().queue.is_empty());
+    }
+
+    #[test]
+    fn sign_out_sends_later_events_under_a_fresh_anonymous_identity() {
+        let _ports = crate::test_support::hold_ports();
+        let dir = temp_dir("account-sign-out");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/ingest", listener.local_addr().unwrap());
+        let telemetry = Telemetry::open_with_env(
+            &dir,
+            context("1.2.3", Engine::None),
+            enabled(endpoint),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        let old_id = telemetry.install_id().unwrap();
+        telemetry.bind_account(&"a".repeat(64)).unwrap();
+        telemetry.record(EventData::Activated).unwrap();
+        // An old on-disk queue did not carry per-event installation IDs.
+        telemetry.state.lock().unwrap().as_mut().unwrap().queue[0].installation_id = None;
+        telemetry.clear_account().unwrap();
+        assert_eq!(telemetry.bound_account(), None);
+        let signed_out_id = telemetry.install_id();
+        telemetry.clear_account().unwrap();
+        assert_eq!(telemetry.install_id(), signed_out_id);
+        let new_id = telemetry.install_id().unwrap();
+        assert_ne!(old_id, new_id);
+        assert_eq!(
+            telemetry.runtime_env().get("CPK_TELEMETRY_ID"),
+            Some(&new_id)
+        );
+        telemetry
+            .record(EventData::HarnessChosen {
+                harness: Harness::ByoUrl,
+            })
+            .unwrap();
+        let server = thread::spawn(move || {
+            [
+                one_response(listener.try_clone().unwrap()),
+                one_response(listener),
+            ]
+        });
+        telemetry.flush().unwrap();
+        let requests = server.join().unwrap();
+        assert!(requests[0].contains(&old_id));
+        assert!(!requests[0].contains(&new_id));
+        assert!(requests[1].contains(&new_id));
+        for request in requests {
+            assert!(!request.contains("account_id"));
+        }
+        assert!(telemetry.snapshot().unwrap().queue.is_empty());
+    }
+
+    #[test]
+    fn opt_out_does_not_create_an_account_binding() {
+        let dir = temp_dir("account-opt-out");
+        let telemetry = Telemetry::open_with_env(
+            &dir,
+            context("1.2.3", Engine::None),
+            Config::disabled_for_tests(),
+            EnvOverride::Disabled,
+        )
+        .unwrap();
+        telemetry.bind_account(&"a".repeat(64)).unwrap();
+        assert!(telemetry.install_id().is_none());
+        assert!(telemetry.bound_account().is_none());
+        assert!(!state_path(&dir).exists());
+    }
+
+    #[test]
+    fn failed_binding_write_leaves_in_memory_identity_unchanged() {
+        let dir = temp_dir("account-write-failure");
+        let telemetry = Telemetry::open_with_env(
+            &dir,
+            context("1.2.3", Engine::None),
+            Config::disabled_for_tests(),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        telemetry.bind_account(&"a".repeat(64)).unwrap();
+        let id = telemetry.install_id();
+        fs::remove_file(state_path(&dir)).unwrap();
+        fs::create_dir(state_path(&dir)).unwrap();
+        assert!(telemetry.bind_account(&"b".repeat(64)).is_err());
+        assert_eq!(telemetry.install_id(), id);
+        assert_eq!(telemetry.bound_account(), Some("a".repeat(64)));
     }
 
     #[test]
@@ -997,6 +1719,78 @@ mod tests {
             "error_class": "raw user-facing error"
         }))
         .is_err());
+    }
+
+    /// The new parts of `setup_failed` and `sign_in` are closed: enums and numbers, nothing a
+    /// sentence, a path, an email or a key can ride in. A queue saved by an older version, whose
+    /// `setup_failed` has only a step and a class, still reads.
+    #[test]
+    fn setup_failed_and_sign_in_take_only_closed_values() {
+        let failed = serde_json::json!({
+            "kind": "setup_failed",
+            "step": "account",
+            "error_class": "insufficient_resources",
+            "failing_step": "local_setup",
+            "cli_reason": "resources_short",
+            "resources": {
+                "cpu_short": false, "memory_short": false, "disk_short": true,
+                "cpu_needed_millis": 4000, "cpu_available_millis": 9800,
+                "memory_needed_mib": 4096, "memory_available_mib": 19353,
+                "disk_needed_mib": 40960, "disk_available_mib": 0
+            }
+        });
+        let event = serde_json::from_value::<EventData>(failed.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&event).unwrap(), failed);
+        assert_eq!(event.event_name(), "oss.desktop.setup_failed");
+        for (path, value) in [
+            (
+                "detail",
+                serde_json::json!("/Users/someone/OpenBot: no space left on device"),
+            ),
+            ("failing_step", serde_json::json!("compose up -d failed")),
+            ("cli_reason", serde_json::json!("the CLI's own sentence")),
+            (
+                "cli_failure",
+                serde_json::json!("exit 1: someone@example.invalid"),
+            ),
+            ("email", serde_json::json!("someone@example.invalid")),
+        ] {
+            let mut private = failed.clone();
+            private[path] = value;
+            assert!(
+                serde_json::from_value::<EventData>(private).is_err(),
+                "{path}"
+            );
+        }
+        let mut private = failed.clone();
+        private["resources"]["drive"] = serde_json::json!("C:\\Users\\someone");
+        assert!(serde_json::from_value::<EventData>(private).is_err());
+        // An older queue's event.
+        assert!(serde_json::from_value::<EventData>(serde_json::json!({
+            "kind": "setup_failed", "step": "install", "error_class": "unknown"
+        }))
+        .is_ok());
+
+        let sign_in =
+            serde_json::json!({ "kind": "sign_in", "outcome": "cancelled", "duration_ms": 1200 });
+        let event = serde_json::from_value::<EventData>(sign_in.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&event).unwrap(), sign_in);
+        assert_eq!(event.event_name(), "oss.desktop.sign_in");
+        for (path, value) in [
+            (
+                "outcome",
+                serde_json::json!("signed in as someone@example.invalid"),
+            ),
+            ("email", serde_json::json!("someone@example.invalid")),
+            ("account_id", serde_json::json!("a".repeat(64))),
+        ] {
+            let mut private = sign_in.clone();
+            private[path] = value;
+            assert!(
+                serde_json::from_value::<EventData>(private).is_err(),
+                "{path}"
+            );
+        }
     }
 
     #[test]
@@ -1098,9 +1892,37 @@ mod tests {
             EventData::SetupFailed {
                 step: Step::Install,
                 error_class: SetupErrorClass::ImagePullFailed,
+                failing_step: None,
+                cli_reason: None,
+                cli_failure: None,
+                resources: None,
+            },
+            EventData::SetupFailed {
+                step: Step::Account,
+                error_class: SetupErrorClass::InsufficientResources,
+                failing_step: Some(FailingStep::LocalSetup),
+                cli_reason: Some(CliReason::ResourcesShort),
+                cli_failure: Some(CliFailure::DownloadStalled),
+                resources: Some(Resources {
+                    cpu_short: true,
+                    memory_short: false,
+                    disk_short: true,
+                    disk_nearly_full: true,
+                    cpu_needed_millis: 4000,
+                    cpu_available_millis: Some(2000),
+                    memory_needed_mib: 4096,
+                    memory_available_mib: None,
+                    disk_needed_mib: 40960,
+                    disk_available_mib: Some(1024),
+                }),
             },
             EventData::Activated,
             EventData::SetupAbandoned { step: Step::Ask },
+            EventData::SignIn {
+                outcome: SignInOutcome::Cancelled,
+                duration_ms: Some(12),
+                cli_failure: Some(CliFailure::Cancelled),
+            },
         ]
     }
 
@@ -1131,6 +1953,7 @@ mod tests {
         let state = PersistedState {
             schema_version: STATE_SCHEMA_VERSION,
             install_id: "11111111-1111-4111-8111-111111111111".to_string(),
+            account_id: None,
             activated: false,
             last_step: None,
             queue: vec![Event::new(

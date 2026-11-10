@@ -447,7 +447,10 @@ describe("OpenDots frame", () => {
     async (_who, signedIn) => {
       actor = signedIn;
       const { view } = draw("/");
-      const expected = navigationFor(signedIn.role).filter(isNavigationLink);
+      // Routines is OpenDots' own rail button, to its own screen, so the list's entry is left out.
+      const expected = navigationFor(signedIn.role)
+        .filter(isNavigationLink)
+        .filter((item) => item.id !== "routines");
       const rail = await view.findByRole("navigation", {
         name: "Workspace navigation",
       });

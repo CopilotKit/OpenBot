@@ -1176,13 +1176,13 @@ describe("automatic Learning container assignment", () => {
     },
   );
 
-  test("is off when the environment names a container", () => {
+  test("stays on when the environment names a container, which the boot check confirms first", () => {
     const config = loadConfig({
       ...baseEnvironment,
       CPK_INTELLIGENCE_LEARNING_CONTAINER_ID: "support",
     });
     expect(config.learning).toEqual({ containerId: "support" });
-    expect(config.learningAutoAssign).toBe(false);
+    expect(config.learningAutoAssign).toBe(true);
   });
 
   test("a service token and its project create the container; one without the other is refused", () => {

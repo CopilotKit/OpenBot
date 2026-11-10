@@ -464,8 +464,9 @@ describe("tenant YAML validation", () => {
       avatarSeed: "general-assistant",
       type: "built_in",
       configuration: {
-        systemPrompt:
-          "You are a helpful general assistant. Give clear, concise, and accurate answers.",
+        systemPrompt: expect.stringContaining(
+          "You are a general assistant for everyday work",
+        ),
       },
       /*
        * One skill each, and both are gates rather than preferences. `bot-creator` is what makes the
@@ -2061,6 +2062,64 @@ describe("bundled personal starter", () => {
         roleDescription: "Plans my week.",
         instructions: old,
       });
+    },
+  );
+
+  /*
+   * A desktop installed before the starter's instructions were rewritten holds the text that told
+   * it to ask whenever something was ambiguous and to ask the person to sign in and wait. A
+   * starter's instructions are seeded once, so the package's new text reaches that desktop only
+   * through this repair. Text the person changed, by so much as a sentence, stays theirs.
+   */
+  const shippedUntilNow =
+    "You are a personal assistant for one person. Help with their email, calendar, research, planning and everyday errands. Be clear and brief, and ask when something is ambiguous rather than guessing. When you send, buy, delete or post anything, say exactly what you are doing; OpenBot asks the person before it happens, so do not ask them yourself first. Never type a password yourself: ask the person to sign in, and wait for them.";
+  test.each([
+    ["OpenBot", ""],
+    ["Claude Agent SDK", claude],
+  ])(
+    "a starter still on the instructions an earlier OpenBot shipped moves to the current ones: %s",
+    async (_case, endpoint) => {
+      const tenantId = starterTestTenant();
+      const loaded = await loadStarter(tenantId, endpoint);
+      await synchronizeTenantPackage(database, loaded);
+      const current = String(
+        loaded.agents.find(({ id }) => id === "personal-assistant")
+          ?.configuration.systemPrompt,
+      );
+      expect(current).not.toBe(shippedUntilNow);
+      const id = endpoint ? "picked-harness" : "personal-assistant";
+      const key = endpoint ? "standingInstructions" : "systemPrompt";
+      const holdInstructions = async (text: string) => {
+        const [row] = await database
+          .select({ configuration: agents.configuration })
+          .from(agents)
+          .where(eq(agents.id, id));
+        if (!row) throw new Error("Missing starter");
+        await database
+          .update(agents)
+          .set({
+            configuration: {
+              ...(row.configuration as Record<string, unknown>),
+              [key]: text,
+            },
+          })
+          .where(eq(agents.id, id));
+      };
+
+      await holdInstructions(shippedUntilNow);
+      await synchronizeTenantPackage(
+        database,
+        await loadStarter(tenantId, endpoint),
+      );
+      expect((await profiles.get(actor, id))?.instructions).toBe(current);
+
+      const edited = `${shippedUntilNow} I live in Berlin.`;
+      await holdInstructions(edited);
+      await synchronizeTenantPackage(
+        database,
+        await loadStarter(tenantId, endpoint),
+      );
+      expect((await profiles.get(actor, id))?.instructions).toBe(edited);
     },
   );
 

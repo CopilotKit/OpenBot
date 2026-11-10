@@ -90,11 +90,29 @@ export type Shortfall = {
   cpus?: string;
   memoryGb?: string;
   diskGb?: string;
+  /**
+   * OpenBot's own check after a start that failed: the back end's disk is nearly full, and how
+   * large it is beside `diskGb`.
+   */
+  nearlyFull?: boolean;
+  diskSizeGb?: string;
+  /**
+   * The node still reports low disk with the disk above both lines: space was freed, and the
+   * back end recovers by itself within minutes.
+   */
+  recovering?: boolean;
+  /** Podman on Windows, in WSL: `podman machine set` changes nothing there. */
+  wsl?: boolean;
+  /** The drive that holds its machine's disk, `C:`. */
+  drive?: string;
 };
 
 export type LocalReport = {
   outcome: LocalOutcome;
-  /** With the reason `resources-short`: which resources the CLI found short. */
+  /**
+   * With the reason `resources-short`: which resources the CLI found short. With readiness
+   * `degraded`: a disk OpenBot found short, or recovering, behind a back end that does not answer.
+   */
   shortfall?: Shortfall;
   stack: null | {
     id: string;
@@ -109,6 +127,8 @@ export type LocalReport = {
       /** No migration started: the release that answers is `installedRelease`. */
       prepared: boolean;
       stoppedDownloading: boolean;
+      /** The CLI's name for the step that failed, such as `update-quiesce`, when it recorded one. */
+      failedStep?: string;
     };
     observed: null | {
       running: boolean;
@@ -279,6 +299,91 @@ export async function localEvalDownload(
 }
 
 /**
+ * The steps of a back end update that wait long enough to need saying, as the native side names
+ * them (`local_update::UpdateStep`), in the CLI's own words for them.
+ */
+const UPDATE_STEPS = {
+  "update-quiesce": "Stopping the back end's services",
+  "dependencies-install": "Installing databases and storage",
+  "dependencies-wait": "Waiting for databases and storage",
+  jobs: "Running the database jobs",
+  "services-start": "Starting services and waiting for readiness",
+} as const;
+
+export type LocalUpdateStep = {
+  step: keyof typeof UPDATE_STEPS;
+  /** What the step is, said. */
+  said: string;
+  /** How long the update has been in it. */
+  seconds: number;
+  /** In `jobs`: the Job it waits on, by its name in the cluster. */
+  job: string | null;
+  /** A Job this update started that failed, said as soon as it does. */
+  failedJob: string | null;
+};
+
+/** A Kubernetes object name, and nothing that could carry more. */
+function jobName(value: unknown): string | null {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9.-]{0,252}$/.test(value)
+    ? value
+    : null;
+}
+
+/**
+ * The step the back end update `attempt` is in, once it is in one that waits, or null. The CLI
+ * says nothing while a step runs, and some wait ten minutes, so the row says which one it is.
+ */
+export async function localEvalUpdateStep(
+  attempt: string,
+): Promise<LocalUpdateStep | null> {
+  const found = await invoke<unknown>("local_eval_update_step", { attempt });
+  if (!found || typeof found !== "object") return null;
+  const { step, seconds, job, failedJob } = found as Record<string, unknown>;
+  if (
+    typeof step !== "string" ||
+    !Object.keys(UPDATE_STEPS).includes(step) ||
+    typeof seconds !== "number"
+  )
+    return null;
+  const known = step as keyof typeof UPDATE_STEPS;
+  return {
+    step: known,
+    said: UPDATE_STEPS[known],
+    seconds,
+    job: jobName(job),
+    failedJob: jobName(failedJob),
+  };
+}
+
+/**
+ * The CLI's step names (`failedStep`) as the phases its own progress shows them, so the window can
+ * say where an update stopped (`localSetupStepLabel` in the CLI's `local-setup-progress.ts`).
+ */
+export function updateStepSaid(step: string): string {
+  if (/^(docker|engine|resource)-/.test(step))
+    return "Checking Docker and available resources";
+  if (step.startsWith("release-")) return "Selecting the local release";
+  if (step === "chart-download") return "Downloading the installation chart";
+  if (step === "chart-render") return "Preparing the installation";
+  if (/^(cluster-|kubeconfig|ownership-check|running-check)/.test(step))
+    return "Preparing the local cluster";
+  if (step.startsWith("runtime-")) return "Checking the local runtime identity";
+  if (/^(image-download|system-image-download|system-image-tag)$/.test(step))
+    return "Downloading container images";
+  if (step === "secrets-apply") return "Applying private configuration";
+  if (step.startsWith("update-")) return UPDATE_STEPS["update-quiesce"];
+  if (step === "dependencies-install")
+    return UPDATE_STEPS["dependencies-install"];
+  if (step === "dependencies-wait") return UPDATE_STEPS["dependencies-wait"];
+  if (step.startsWith("migration-")) return "Preparing the database schema";
+  if (/^(hook-|bootstrap-)/.test(step))
+    return "Preparing your local organization and project";
+  if (/^(services-|stack-|service-status)/.test(step))
+    return "Starting services and waiting for readiness";
+  return "Preparing the update";
+}
+
+/**
  * Connects this installation's apps with the CopilotKit sign-in the CLI now holds: CopilotKit
  * makes or replays its Composio project, and the native side keeps the key. Resolves once
  * connected, or when a key was already in place. Rejects with a `Problem` the window shows as it
@@ -318,6 +423,17 @@ export type LocalTerms =
   | { status: "not-required" | "unavailable" | "signed-out" }
   /** No container engine answers yet, so the CLI says nothing about the account. */
   | { status: "engine-not-ready" }
+  /**
+   * The CLI's preflight refused this computer for a reason waiting does not change, such as
+   * OrbStack on a Mac. `said` is the CLI's own sentence, when it gave one; `switchEngine` when the
+   * engine itself is refused and Docker Desktop or Podman is the fix.
+   */
+  | {
+      status: "blocked";
+      reason: LocalReason;
+      said?: string;
+      switchEngine?: boolean;
+    }
   /** OpenBot's own check: the engine has fewer CPUs or less memory than local setup needs. */
   | ({ status: "engine-too-small" } & Shortfall);
 

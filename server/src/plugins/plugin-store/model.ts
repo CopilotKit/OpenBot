@@ -293,6 +293,11 @@ export type GrantedPlugins = {
     inputSchema: Record<string, unknown>;
     /** The app marks it destructive (`mcpTools.destructive`): OpenBot always asks before it runs. */
     destructive: boolean;
+    /**
+     * It only reads, by the rule a call to it is gated with (`classifyTool`). Absent reads as a
+     * write, so a store that does not say never has an action offered as a read.
+     */
+    read?: boolean;
   }[];
   skills: {
     slug: string;

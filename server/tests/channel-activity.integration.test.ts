@@ -249,6 +249,8 @@ describe("channel activity", () => {
         createdAt: expect.any(Date),
         pinned: false,
         lastReadAt: null,
+        // The person who started it.
+        canRename: true,
         task: false,
       },
     ]);
