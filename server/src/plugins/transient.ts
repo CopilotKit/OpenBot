@@ -29,9 +29,51 @@ function passingStatus(status: unknown): boolean {
 /** MCP's own "the server did not answer in time" (`ErrorCode.RequestTimeout`). */
 const MCP_REQUEST_TIMEOUT = -32001;
 
-/** A network failure or a timeout, as Node, Bun, undici and the MCP SDK word them. */
+/** A connection that dropped or never opened, by the code Node, Bun and undici give it. */
+const NETWORK_CODES = new Set([
+  "ETIMEDOUT",
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "EAI_AGAIN",
+  "EPIPE",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_SOCKET",
+  "ConnectionRefused",
+  "ConnectionClosed",
+]);
+
+/**
+ * How an app says "not now" in words: a rate limit, an overload, a timeout. Read only on an app's
+ * own error ANSWER, never on a thrown error, whose message can be anything (this deployment's own
+ * database saying "statement timeout" among them).
+ */
 const PASSING_WORDS =
-  /\b(timed? ?out|timeout|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|EPIPE|socket hang up|fetch failed|network error|Too Many Requests|rate[- ]limit(?:ed)?|Service Unavailable|Bad Gateway|Gateway Time-?out|temporarily unavailable)\b/i;
+  /\b(timed? ?out|timeout|Too Many Requests|rate[- ]limit(?:ed)?|Service Unavailable|Bad Gateway|Gateway Time-?out|temporarily unavailable)\b/i;
+
+type ErrorLike = {
+  name?: unknown;
+  transient?: unknown;
+  status?: unknown;
+  statusCode?: unknown;
+  code?: unknown;
+  response?: { status?: unknown };
+  message?: unknown;
+  cause?: unknown;
+};
+
+/**
+ * THIS DEPLOYMENT'S OWN DATABASE IS NEVER A VENDOR THAT MIGHT ANSWER NEXT TIME. A query it refused
+ * is a fault of ours, said elsewhere without its statement (`withoutStatement`), and trying it again
+ * here would only hide that behind three tries.
+ */
+function ourDatabase(value: ErrorLike): boolean {
+  return (
+    value.name === "DrizzleQueryError" ||
+    value.name === "PostgresError" ||
+    (typeof value.message === "string" &&
+      value.message.startsWith("Failed query:"))
+  );
+}
 
 /**
  * Whether a thrown failure is one that passes. Looks at the error and what it was caused by, since a
@@ -41,15 +83,8 @@ export function transientFailure(error: unknown): boolean {
   let current: unknown = error;
   for (let depth = 0; depth < 5 && current; depth++) {
     if (typeof current !== "object") return false;
-    const value = current as {
-      transient?: unknown;
-      status?: unknown;
-      statusCode?: unknown;
-      code?: unknown;
-      response?: { status?: unknown };
-      message?: unknown;
-      cause?: unknown;
-    };
+    const value = current as ErrorLike;
+    if (ourDatabase(value)) return false;
     if (value.transient === true) return true;
     if (
       passingStatus(value.status) ||
@@ -59,9 +94,14 @@ export function transientFailure(error: unknown): boolean {
     )
       return true;
     if (value.code === MCP_REQUEST_TIMEOUT) return true;
-    if (typeof value.code === "string" && PASSING_WORDS.test(value.code))
+    if (typeof value.code === "string" && NETWORK_CODES.has(value.code))
       return true;
-    if (typeof value.message === "string" && PASSING_WORDS.test(value.message))
+    // `fetch` itself, when the app could not be reached at all.
+    if (
+      value.name === "TypeError" &&
+      typeof value.message === "string" &&
+      /fetch failed|Unable to connect/i.test(value.message)
+    )
       return true;
     current = value.cause;
   }
@@ -73,7 +113,10 @@ export function transientFailure(error: unknown): boolean {
  * upstream outage as an `isError` result rather than as an HTTP status. Read only on an error answer,
  * so a document that happens to mention a 503 is never taken for one.
  */
-export function transientAnswer(answer: { text: string; isError: boolean }) {
+export function transientAnswer(answer: {
+  text: string;
+  isError: boolean;
+}): boolean {
   return (
     answer.isError &&
     (PASSING_WORDS.test(answer.text) ||
@@ -81,27 +124,28 @@ export function transientAnswer(answer: { text: string; isError: boolean }) {
   );
 }
 
-/** A read that kept failing for a reason that passes, after every try. Says so, for the Bot. */
-export class ReadRetriedError extends Error {
-  constructor(
-    readonly tries: number,
-    readonly last: unknown,
-  ) {
-    const said = last instanceof Error ? last.message : String(last);
-    super(
-      `${said.trim().replace(/\.?$/, ".")} OpenBot tried it ${tries} times over a few seconds and it failed each time.`,
-      { cause: last },
-    );
-    this.name = "ReadRetriedError";
+/**
+ * The failure given back after every try, saying it was tried, so the Bot does not spend a step
+ * trying it again at once. The error itself is kept, class and cause and all, because what reads it
+ * next (the trail, the refusal and fault checks) decides by what it is.
+ */
+function saysItWasTried(error: unknown, tries: number): unknown {
+  if (error instanceof Error) {
+    try {
+      error.message = `${error.message.trim().replace(/\.?$/, ".")} OpenBot tried it ${tries} times over a few seconds and it failed each time.`;
+    } catch {
+      // A message that cannot be written is given back as it was.
+    }
   }
+  return error;
 }
 
 /**
  * One read, tried again on a failure that passes: {@link READ_RETRY_DELAYS_MS} apart, then given back.
  *
- * A failure that does not pass (a refusal, a 404, a bad argument) is given back at once, as it was.
- * An error ANSWER that passes is tried again too, and the last one given back as it is, since the
- * app's own words are the best account of it.
+ * A failure that does not pass (a refusal, a 404, a bad argument, a fault of ours) is given back at
+ * once, as it was. An error ANSWER that passes is tried again too, and the last one given back as it
+ * is, since the app's own words are the best account of it.
  */
 export async function withReadRetries<
   T extends { text: string; isError: boolean },
@@ -117,7 +161,7 @@ export async function withReadRetries<
       answer = await read();
     } catch (error) {
       if (!transientFailure(error)) throw error;
-      if (attempt >= tries) throw new ReadRetriedError(tries, error);
+      if (attempt >= tries) throw saysItWasTried(error, tries);
       await sleep(READ_RETRY_DELAYS_MS[attempt - 1] ?? 0);
       continue;
     }
