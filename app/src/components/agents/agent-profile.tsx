@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { agentQueryOptions } from "@/lib/agents/queries";
+import { shownSubtitle } from "@/lib/agents/subtitle";
 
 function Tag({ children }: { children: ReactNode }) {
   return (
@@ -86,7 +87,7 @@ export function AgentProfile({
           </h1>
           {profile.title && (
             <p className="w-full text-balance text-sm text-muted-foreground">
-              {profile.title}
+              {shownSubtitle(profile.title)}
             </p>
           )}
         </div>

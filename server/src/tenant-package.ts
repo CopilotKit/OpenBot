@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  EARLIER_HARNESS_NAMES,
   HARNESSES,
   type Harness,
   OPENBOT_HARNESS_NAME,
@@ -853,15 +854,6 @@ const EARLIER_STARTER_INSTRUCTIONS: readonly string[] = [
   "You are a personal assistant for one person. Help with their email, calendar, research, planning and everyday errands. Be clear and brief, and ask when something is ambiguous rather than guessing. When you send, buy, delete or post anything, say exactly what you are doing; OpenBot asks the person before it happens, so do not ask them yourself first. Never type a password yourself: ask the person to sign in, and wait for them.",
   "You are a personal assistant for one person. Help with their email, calendar, research, planning and everyday errands. Be clear and brief, and ask when something is ambiguous rather than guessing. Before you send, buy, delete or post anything, say exactly what you are about to do. Never type a password yourself: ask the person to sign in, and wait for them.",
 ];
-
-/**
- * Names the catalogue gave a framework before its current one. A Bot an earlier version seeded under
- * one of these is still named after its framework, so it follows a change of harness like one under
- * the current name.
- */
-const EARLIER_HARNESS_NAMES: Readonly<Record<string, readonly string[]>> = {
-  langgraph: ["LangGraph", "LangChain (LangGraph)"],
-};
 
 function catalogueNamesOf(harness: Harness): string[] {
   return [harness.name, ...(EARLIER_HARNESS_NAMES[harness.id] ?? [])];
