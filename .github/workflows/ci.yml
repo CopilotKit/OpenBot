@@ -513,9 +513,10 @@ jobs:
 
   python-harness:
     name: python harness regressions
-    # CPU-bound: main and release runs get a 16-core larger runner (org runner group
-    # openbot-larger, billed per minute); pull requests stay on the free standard runner.
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    # CPU-bound: runs on a 16-core larger runner (org runner group openbot-larger, billed per
+    # minute) for main, releases and pull requests from this repository. Pull requests from forks
+    # stay on the free standard runner.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -667,13 +668,14 @@ jobs:
   # them typecheck, lint and test perfectly.
   image:
     name: image
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     # The only slow job: it builds the container and boots it, ~14 minutes. The four checks above are
     # seconds and stay on every push, because they catch most things cheaply. This one is the cost, so
     # on a pull request it runs only when an admin adds the `full-ci` label — the point at which the PR
     # is actually a merge candidate. On main and through the release workflow_call it always runs, so
     # nothing reaches a release without it. `verify` treats a skipped job as passing, so an unlabelled
-    # PR is green on the cheap checks alone.
+    # PR is green on the cheap checks alone. It runs on the 16-core larger runner everywhere except
+    # pull requests from forks, which stay on the free standard runner.
     if: >-
       github.event_name != 'pull_request' ||
       contains(github.event.pull_request.labels.*.name, 'full-ci')
