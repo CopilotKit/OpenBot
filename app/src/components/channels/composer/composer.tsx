@@ -1687,7 +1687,17 @@ export function Composer({
     >
       <RejectedFiles onDismiss={dismissRejections} rejected={rejected} />
       {tooManyStagedNotice}
-      <LiveDictationNotice dictation={dictation} />
+      {/*
+       * A SLOT OF NO HEIGHT, AND THE NOTICE GROWS UP OUT OF IT. This composer is the one Home centres
+       * in the page, so anything above it in the flow pushed the box down by half its height while it
+       * showed (16px for one line). Here it takes no room: it sits over the space above the box,
+       * the way the thread's composer, pinned to the bottom, lets it grow upward.
+       */}
+      <div className="relative h-0" data-slot="composer-dictate-notice-slot">
+        <div className="absolute inset-x-0 bottom-0">
+          <LiveDictationNotice dictation={dictation} />
+        </div>
+      </div>
       <form
         aria-busy={isBusy}
         className="overflow-hidden rounded-2xl border border-border bg-card"
