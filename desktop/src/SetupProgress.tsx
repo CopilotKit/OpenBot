@@ -193,7 +193,12 @@ const PREPARING = new Set([
 
 /**
  * An installation's native rows as two plain ones, for local mode: "Preparing this computer" and
- * "Installing OpenBot". A failure is shown in full under the rows.
+ * "Downloading OpenBot". A failure is shown in full under the rows.
+ *
+ * The rest of OpenBot (`restOfOpenBot`, the back end's download) comes down alongside OpenBot's
+ * own once the software OpenBot runs on answers. It is the third step, said once nothing before it
+ * is still going: "Step 2 of 4" and "Step 3 of 4" in progress together read as two steps at once
+ * on a live Windows run. Shown then, its download is as far along as it got meanwhile.
  *
  * Keep actionable directions for the current step. Image pulls show their download instead.
  * "Preparing this computer" says, for instance, "Docker Desktop is starting in its own window."
@@ -206,6 +211,8 @@ export function plainInstallSteps(
   installing: boolean,
   /** When this install began: its running row's time so far counts from here. */
   since?: number | null,
+  /** The rest of OpenBot's download while it runs, or null. */
+  restOfOpenBot?: Downloads | null,
 ): Progress[] {
   const preparing = steps.filter((step) => PREPARING.has(step.step));
   const rest = steps.filter((step) => !PREPARING.has(step.step));
@@ -253,6 +260,16 @@ export function plainInstallSteps(
       startedAt: since ?? undefined,
     });
   }
+  if (restOfOpenBot && !rows.some((row) => row.running || !row.ok))
+    rows.push({
+      step: "Downloading the rest of OpenBot",
+      ok: true,
+      running: true,
+      // The row says the time left from the download's own speed.
+      detail: "",
+      downloads: restOfOpenBot,
+      position: { at: 3, of: INSTALL_PARTS },
+    });
   return rows;
 }
 

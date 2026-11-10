@@ -855,11 +855,19 @@ function Setup() {
               ? "OpenBot’s local software is ready. Next, connect your AI."
               : INSTALL_BLURB}
           </p>
-          <SetupProgress steps={plainInstallSteps(steps, busy, installSince)} />
+          {/* Intelligence sets itself up alongside, once the install has Docker answering. Its
+              download is the list's third step, once the second is done. */}
+          <SetupProgress
+            steps={plainInstallSteps(
+              steps,
+              busy,
+              installSince,
+              !local.stopped && local.running ? local.download : null,
+            )}
+          />
           {/* The person closed macOS's password prompt: said, with Try again. */}
           {goAhead && <PodmanGoAhead asking={goAhead} />}
-          {/* Intelligence sets itself up alongside, once the install has Docker answering. */}
-          <LocalStatus sequence={local} />
+          <LocalStatus sequence={local} download={false} />
           {displayedFailure && <Failure problem={displayedFailure} />}
           {!busy && (
             <div className="row">
