@@ -113,20 +113,14 @@ export const EARLIER_HARNESS_NAMES: Readonly<
 };
 
 /**
- * "powered by a LangChain agent": a framework named as what runs the Bot, with the article its name
- * reads with ("an AWS Strands agent").
- */
-export function poweredByAgent(name: string): string {
-  return `powered by ${/^[AEIOU]/.test(name) ? "an" : "a"} ${name} agent`;
-}
-
-/**
- * The Personal Assistant's subtitle when it runs on a framework the installer picked: what it is,
- * what runs it, and that any other agent can be brought along. Atai's wording and punctuation,
- * November 10.
+ * The Personal Assistant's subtitle as a person reads it, when it runs on a framework the installer
+ * picked: what it is, what runs it, and that any other agent can be brought along, with the article
+ * the name reads with ("an AWS Strands agent"). Atai's wording and punctuation, November 10. Shown
+ * only: the starter is still stored, and told to the Bot, as "Everyday life. Powered by <name>.".
  */
 export function starterSubtitle(name: string): string {
-  return `Everyday life agent. (${poweredByAgent(name)}; you can bring your own agent from any stack.)`;
+  const article = /^[AEIOU]/.test(name) ? "an" : "a";
+  return `Everyday life agent. (powered by ${article} ${name} agent; you can bring your own agent from any stack.)`;
 }
 
 /** Every name a harness the installer can run has had, with the harness it belongs to now. */
@@ -139,10 +133,11 @@ function namesWithHarness(): Array<[string, Harness]> {
 }
 
 /**
- * A subtitle OpenBot wrote, read the way it writes it now.
+ * A subtitle OpenBot wrote, as a person reads it now. For the profile a person sees, never for what
+ * a Bot is told.
  *
- * - The Personal Assistant's earlier seed, "Everyday life. Powered by <framework>.", exactly as
- *   seeded, reads as {@link starterSubtitle} for that framework's current name.
+ * - The Personal Assistant's seed, "Everyday life. Powered by <framework>.", exactly as seeded under
+ *   any of the framework's names, reads as {@link starterSubtitle} for its current name.
  * - Any other "Powered by <earlier name>" reads with the framework's current name.
  *
  * Only what OpenBot wrote changes. A subtitle the person rewrote no longer matches the seed, and the

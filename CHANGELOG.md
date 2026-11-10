@@ -426,12 +426,13 @@ a model key is needed.
 
 ### Smaller changes
 
-- The Personal Assistant on a framework picked in setup is subtitled "Everyday life agent. (powered
-  by a LangChain agent; you can bring your own agent from any stack.)" (with its own framework's
-  name). An existing install shows that too, where it kept "Powered by LangChain (LangGraph)" after
-  an upgrade, and any other Bot OpenBot subtitled under LangChain's earlier names reads "Powered by
-  LangChain". Nothing stored changes, and words a person wrote stay theirs. A Bot's page shows a
-  long subtitle on up to three lines.
+- The Personal Assistant on a framework picked in setup reads "Everyday life agent. (powered by a
+  LangChain agent; you can bring your own agent from any stack.)" under its name (with its own
+  framework's name), on a new install and on an existing one that kept "Powered by LangChain
+  (LangGraph)" after an upgrade. Any other Bot OpenBot subtitled under LangChain's earlier names
+  reads "Powered by LangChain". Only what a person sees changes: nothing stored changes, a Bot is
+  told its subtitle as before, and words a person wrote stay theirs. A Bot's page shows a long
+  subtitle on up to three lines.
 
 ## 1.0.0
 

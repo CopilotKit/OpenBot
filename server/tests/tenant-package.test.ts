@@ -1755,6 +1755,14 @@ describe("bundled personal starter", () => {
         roleDescription: declared?.roleDescription,
         instructions: declared?.configuration.systemPrompt,
       });
+      // Stored, and so told to the Bot, as it always was: only what a person sees reads the new wording.
+      const [stored] = await database
+        .select({ title: agentProfiles.title })
+        .from(agentProfiles)
+        .where(eq(agentProfiles.agentId, "picked-harness"));
+      expect(stored?.title).toBe(
+        `Everyday life. Powered by ${endpoint === claude ? "Claude Agent SDK" : "LangChain"}.`,
+      );
       expect(await attachedSkills("picked-harness")).toEqual([
         "bot-creator",
         "skill-creator",

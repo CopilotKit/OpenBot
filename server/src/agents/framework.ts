@@ -1,7 +1,7 @@
 /**
  * Which agent framework a Bot runs on, by what runs it rather than by what its subtitle says.
  *
- * The subtitle ("Everyday life agent. (powered by a LangChain agent; …)") is the person's to write, and a
+ * The subtitle ("Everyday life. Powered by LangChain.") is the person's to write, and a
  * Bot told only that could name its framework only while the subtitle happened to. So the answer is
  * read from the Bot itself:
  *
