@@ -60,12 +60,14 @@ export function BotOrb({
     );
   }
 
+  // No outline, unlike the still orb: the live disc idles at 94% of this box, so a ring here floats
+  // off its edge, and on the dark page it read as a light ring around the orb. The disc has its rim.
   return (
     <span
       role="img"
       aria-label={name}
       data-variant="live"
-      className="bot-orb-live inline-flex shrink-0 rounded-full ring-1 ring-foreground/10"
+      className="bot-orb-live inline-flex shrink-0 rounded-full"
       style={{ height: size, width: size }}
     >
       {/* Hidden so the Bot is announced once, by name. A waiting Bot idles: the next move is the

@@ -29,7 +29,8 @@ One word for one thing, everywhere a person can see it.
 | **Capabilities** | Your skills and your Bots' memory of you, and the page with both. | plugins |
 | **skill** | A named instruction invoked with `/`. | command, prompt |
 | **admin** | The person who runs OpenBot for everybody. | administrator, owner, operator |
-| **OpenBot** | The product the person is using. | this deployment, the server, the instance |
+| **OpenBot** | The product the person is using, and their account with it: "Sign in to OpenBot", "your OpenBot account". | this deployment, the server, the instance, CopilotKit |
+| **OpenBot by CopilotKit** | The company, only where it has to be named: the license agreement's name, a legal or privacy line, the one place setup says who makes OpenBot. | CopilotKit alone |
 | **turn on / turn off** | An admin switching an app or a feature. | enable / disable (in sentences; a switch may still read "Enabled") |
 | **conversation** | A thread with one or more Bots. | channel, chat (in sentences) |
 | **front end** | The part of OpenBot a person opens in the browser. | the web app, the UI |
@@ -52,6 +53,11 @@ requires a free license key." That copy is Atai's, word for word.
 That screen asks the person to sign in to another company's account, and the name is what makes
 the license key make sense; the CopilotKit sign-in page it opens says the same. It is listed by
 exact text in `SHOWN_BY_DECISION` in the test. Anywhere else, the back end.
+
+**Never "CopilotKit" alone.** Product copy says OpenBot, or "OpenBot by CopilotKit" where the
+company has to be named. Addresses (`dashboard.copilotkit.ai`, `github.com/CopilotKit/OpenBot`),
+code identifiers, env names, log lines and Copy diagnostics keep their spelling.
+tests/no-intelligence-in-user-copy.test.ts and tests/plain-setup-words.test.ts hold every screen to it.
 
 **Admin is allowed exact names.** An admin page may name `COMPOSIO_API_KEY`, OAuth and "deployment",
 because the admin is the one who sets them. A page anybody can open may not.
@@ -93,6 +99,7 @@ because the admin is the one who sets them. A page anybody can open may not.
 | "agent" or "coworker" for a Bot | Bot |
 | "administrator" | admin |
 | "this deployment" on a page anybody can open | OpenBot, or say what is missing |
+| "CopilotKit" alone: "Sign in to CopilotKit", "your CopilotKit account" | OpenBot, or "OpenBot by CopilotKit" where the company must be named |
 | A sentence over ~25 words | Split it, or cut the clause that justifies the screen |
 | "rather than", an em dash, "which is" in UI text | Rewrite as two short sentences |
 | A description beginning "The apps…", "What…", "Who…", or "Where…" without a main verb | State the action or behavior in a complete sentence; remove redundant explanation |

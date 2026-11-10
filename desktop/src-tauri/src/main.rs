@@ -8656,7 +8656,7 @@ fn publish_connection_failure<R: tauri::Runtime>(
     }
     let said = match connection {
         openbot_desktop_lib::problem::Connection::Model => "Your AI connection was refused. Refresh it to continue using your existing OpenBot.",
-        openbot_desktop_lib::problem::Connection::Intelligence => "Your CopilotKit connection was refused. Refresh it to continue using your existing OpenBot.",
+        openbot_desktop_lib::problem::Connection::Intelligence => "Your OpenBot account connection was refused. Refresh it to continue using your existing OpenBot.",
         openbot_desktop_lib::problem::Connection::Installation => "Part of OpenBot has to be installed again. OpenBot does that, then you can continue using your existing OpenBot.",
     };
     mark_recovery_required(&shell, root, generation);

@@ -1,6 +1,6 @@
 # Desktop telemetry
 
-Telemetry is enabled by default, and the first setup screen says so before anything is installed or signed in to: "OpenBot sends CopilotKit usage data, linked to your CopilotKit account. It never sends your conversations, files or keys. You can turn this off in Settings." It links this document.
+Telemetry is enabled by default, and the first setup screen says so before anything is installed or signed in to: "OpenBot sends usage data, linked to your OpenBot account. It never sends your conversations, files or keys. You can turn this off in Settings." It links this document.
 
 **Settings > General > Privacy > Share usage data** turns it off. Off is the same opt-out as `COPILOTKIT_TELEMETRY_DISABLED=1`, kept in `usage-data.json` in the app's configuration folder for every later launch. It takes effect at once for the desktop emitter (its identity, account binding and queue are deleted) and the bundled CLI (every call gets `COPILOTKIT_TELEMETRY_DISABLED=1`, and no `telemetry link` runs). The server reads it the next time OpenBot starts, through the suppression override below; the row says changes apply then. Turning it back on starts a fresh identity with nothing from before the opt-out.
 

@@ -70,8 +70,8 @@ first screen and keeps its finished install.
 
 ## Usage data and account attribution
 
-The first setup screen says that OpenBot sends CopilotKit usage data linked to the person's
-CopilotKit account, that it never sends conversations, files or keys, and links
+The first setup screen says that OpenBot sends usage data linked to the person's OpenBot account
+(their CopilotKit sign-in), that it never sends conversations, files or keys, and links
 [Desktop telemetry](../desktop/TELEMETRY.md). **Settings > General > Privacy > Share usage data**
 turns it off. Off is the same opt-out as launching with `COPILOTKIT_TELEMETRY_DISABLED=1`: it is
 kept for the next launch, the desktop's own events and identity are deleted at once, every CLI call

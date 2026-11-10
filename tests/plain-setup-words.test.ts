@@ -256,6 +256,27 @@ test("what OpenBot Desktop says while it sets up, starts or updates, when that s
   expect(sentences().flatMap(technical)).toEqual([]);
 });
 
+/**
+ * The company alone. Product copy says OpenBot, and OpenBot by CopilotKit where the company has to
+ * be named (see .claude/skills/openbot-copy). An address is not read: `github.com/CopilotKit/...`.
+ */
+const COMPANY_ALONE = /(?<!OpenBot\s+by\s+)(?<![\w/.-])CopilotKit(?![\w/-])/;
+
+/** "by CopilotKit" in the lockup, where it follows OpenBot's name on screen (`Lockup`). */
+const BESIDE_THE_NAME = (said: Said) =>
+  said.file === "desktop/src/Sections.tsx" && said.text === "by CopilotKit";
+
+test("OpenBot Desktop and This computer say OpenBot, or OpenBot by CopilotKit, never CopilotKit alone", () => {
+  const all = sentences();
+  expect(
+    all
+      .filter((said) => COMPANY_ALONE.test(said.text) && !BESIDE_THE_NAME(said))
+      .map((said) => `${said.file}:${said.line}  ${said.text}`),
+  ).toEqual([]);
+  // The lockup is read, so the exception above still has something to excuse.
+  expect(all.some(BESIDE_THE_NAME)).toBe(true);
+});
+
 test("every word kept for the person to act in is still needed", () => {
   const all = sentences();
   for (const allowed of ALLOWED)

@@ -44,23 +44,19 @@ type Seen =
   /** The CLI refused the container engine. Trying again by itself would not change it. */
   | { at: "unsupported-engine"; said: string; switchEngine: boolean };
 
-const COULD_NOT_CHECK = "Couldn’t check your CopilotKit account. Try again.";
+const COULD_NOT_CHECK = "Couldn’t check your OpenBot account. Try again.";
 
 /**
  * The signed-out step's footnote, in Atai's words (2026-11-10). One string so a change of wording
  * is one line. "Traffic data" is being checked with Atai: setup and usage telemetry go to
- * CopilotKit by default (desktop_telemetry.rs, server/src/telemetry/product.ts).
+ * CopilotKit by default (desktop_telemetry.rs, server/src/telemetry/product.ts). A privacy line
+ * names the company as OpenBot by CopilotKit, never CopilotKit alone.
  */
 const WHAT_SIGNING_IN_SENDS =
-  "Your conversations and files stay on this computer. Signing in gets your free local license key and does NOT send traffic data to CopilotKit.";
-/**
- * The signed-out step's lede, in Atai's words. It names CopilotKit Intelligence on this step alone:
- * it is what the license key is for. Exported so the setup walk's plain-words check
- * (`App.test.tsx`) excuses exactly this sentence, as `SHOWN_BY_DECISION` does in
- * `tests/no-intelligence-in-user-copy.test.ts`.
- */
-export const SELF_CONTAINED =
-  "This version of OpenBot runs self-contained on this computer. It uses a local version of CopilotKit Intelligence, which requires a free license key.";
+  "Your conversations and files stay on this computer. Signing in gets your free local license key and does NOT send traffic data to OpenBot by CopilotKit.";
+/** The signed-out step's lede, in Atai's words, less the name of what the license key is for. */
+const SELF_CONTAINED =
+  "This version of OpenBot runs self-contained on this computer. It requires a free license key.";
 const SIGN_IN_DID_NOT_FINISH = "Sign-in didn’t finish. Try again.";
 const SETTING_UP_ENGINE =
   "You're signed in. OpenBot is setting up the software it runs on. The license agreement comes next.";
@@ -333,7 +329,7 @@ export function CopilotKitAccount({
 
   const agreement = seen.at === "agreement" ? seen.terms : null;
   // Signed in and agreed already: what is left to say is about the apps. Said while they connect
-  // too, a few seconds after Accept, which flashed "Sign in to CopilotKit" and its sign-in lede.
+  // too, a few seconds after Accept, which flashed the sign-in heading and its sign-in lede.
   const connecting = seen.at === "apps";
   const appsFailed = seen.at === "apps-failed";
   const refused = seen.at === "unsupported-engine" ? seen : null;
@@ -366,9 +362,9 @@ export function CopilotKitAccount({
         {agreement
           ? // The organization and the agreement's version are the log's: on Windows F the
             // lede ended "for CopilotKit🪁." and the link read "(developer-edition-2026-10-01-web)".
-            "To run OpenBot on this computer, accept the CopilotKit license agreement."
+            "To run OpenBot on this computer, accept the OpenBot by CopilotKit license agreement."
           : connecting || appsFailed
-            ? "OpenBot uses your CopilotKit account to set up apps like Gmail and Slack."
+            ? "OpenBot uses your account to set up apps like Gmail and Slack."
             : refused
               ? refused.said
               : waitingForEngine
@@ -422,13 +418,13 @@ export function CopilotKitAccount({
           )
         : handOff && !behind && <StatusLine>{handOff}</StatusLine>}
       {seen.at === "checking" && !handOff && !asking && (
-        <StatusLine>Checking your CopilotKit account…</StatusLine>
+        <StatusLine>Checking your OpenBot account…</StatusLine>
       )}
       {seen.at === "signing-in" && (
         <CopilotKitSignInWait
           attempt={seen.attempt}
-          before="Checking your CopilotKit account…"
-          waiting="Finish signing in to CopilotKit in your browser…"
+          before="Checking your OpenBot account…"
+          waiting="Finish signing in to OpenBot in your browser…"
           onCancel={cancelSignIn}
         />
       )}

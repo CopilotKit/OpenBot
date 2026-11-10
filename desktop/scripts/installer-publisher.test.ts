@@ -1,16 +1,19 @@
 /**
- * Windows names OpenBot's publisher as CopilotKit, as the rest of the bundle does.
+ * Windows names OpenBot's publisher as CopilotKit, and the copyright reads OpenBot by CopilotKit.
  *
  * v0.3.3's installer listed the publisher as "copilotkit" in Settings > Apps and in Programs and
  * Features. tauri.conf.json set no `bundle.publisher`, so Tauri fell back to the identifier's second
  * segment, both for the NSIS installer's `Publisher` uninstall value (its `MANUFACTURER`) and for
  * the app's `CompanyName` version resource (tauri-build).
  *
- * CopilotKit is the name the bundle already gives as its copyright: the installer's branding text,
- * the `LegalCopyright` version resource and the Mac app's copyright. The installer also keeps the
- * install folder under `Software\<publisher>\OpenBot` and reads it back on every update. Windows
- * registry keys ignore case, so CopilotKit is the same key v0.3.3 wrote under "copilotkit", and a
- * different name would lose the folder an update installs into.
+ * The publisher stays CopilotKit: the installer keeps the install folder under
+ * `Software\<publisher>\OpenBot` and reads it back on every update. Windows registry keys ignore
+ * case, so CopilotKit is the same key v0.3.3 wrote under "copilotkit", and a different name would
+ * lose the folder an update installs into.
+ *
+ * The copyright is what a person reads: the installer's and the uninstaller's branding text, the
+ * `LegalCopyright` version resource and the Mac app's About box. It names the company as product
+ * copy does, OpenBot by CopilotKit, never CopilotKit alone (.claude/skills/openbot-copy).
  *
  * Plain file reads only, so it runs on any runner.
  */
@@ -67,8 +70,8 @@ for (const [build, config] of Object.entries(builds)) {
     expect(publisherOf(config)).toBe("CopilotKit");
   });
 
-  test(`the ${build} build's publisher matches its copyright`, () => {
-    expect(publisherOf(config)).toBe(config.bundle.copyright as string);
+  test(`the ${build} build's copyright reads OpenBot by CopilotKit`, () => {
+    expect(config.bundle.copyright).toBe("OpenBot by CopilotKit");
   });
 
   test(`the ${build} build keeps the identifier and the registry key an update reads`, () => {

@@ -605,10 +605,11 @@ fn what_downloads_early_depends_on_the_engine_install_will_use() {
             compose: true,
             deployment: true,
             images: None,
-            offline_images: Some(NamedBy::OwnCompose),
+            offline_images: true,
         }
     );
-    // Docker Desktop answering: the images go straight into it, and no engine is downloaded.
+    // Docker Desktop answering: the images go straight into it, and no engine is downloaded. Their
+    // list comes from OpenBot's own Compose, which an old Docker Desktop's may not read.
     assert_eq!(
         plan(&facts(
             "macos",
@@ -618,11 +619,24 @@ fn what_downloads_early_depends_on_the_engine_install_will_use() {
             Some(&docker)
         )),
         Plan {
+            compose: true,
             deployment: true,
             images: Some(docker.clone()),
             ..Plan::default()
         }
     );
+    // Windows D: a person's Podman answering with no Compose installed. OpenBot's own Compose
+    // downloads too, to name the images, since `podman compose` has no provider to run.
+    let podman = Address::new(Engine::Podman, Some("podman-machine-default".into()));
+    let answering = plan(&facts(
+        "windows",
+        Choice::UsePodman,
+        Some("podman version 6.1.1"),
+        false,
+        Some(&podman),
+    ));
+    assert!(answering.compose, "{answering:?}");
+    assert_eq!(answering.images, Some(podman));
     // Podman 6.1 is here without OpenBot's machine: the machine image only.
     assert_eq!(
         plan(&facts(
@@ -636,7 +650,7 @@ fn what_downloads_early_depends_on_the_engine_install_will_use() {
             machine_image: mac,
             compose: true,
             deployment: true,
-            offline_images: Some(NamedBy::OwnCompose),
+            offline_images: true,
             ..Plan::default()
         }
     );
@@ -668,8 +682,8 @@ fn what_downloads_early_depends_on_the_engine_install_will_use() {
     ));
     assert!(old.podman, "{old:?}");
     assert_eq!(old.machine_image, None);
-    // A Docker Desktop that is stopped is not opened before Install: its Compose names the images,
-    // which download to load once it answers.
+    // A Docker Desktop that is stopped is not opened before Install: OpenBot's own Compose names
+    // the images, which download to load once it answers.
     assert_eq!(
         plan(&facts(
             "macos",
@@ -679,14 +693,15 @@ fn what_downloads_early_depends_on_the_engine_install_will_use() {
             None
         )),
         Plan {
+            compose: true,
             deployment: true,
-            offline_images: Some(NamedBy::Docker),
+            offline_images: true,
             ..Plan::default()
         }
     );
     // A new Windows computer is the same as a new Mac, with the WSL image.
     let windows = plan(&facts("windows", Choice::InstallPodman, None, false, None));
-    assert_eq!(windows.offline_images, Some(NamedBy::OwnCompose));
+    assert!(windows.offline_images);
     assert!(windows.compose && windows.podman);
     // Linux's Podman comes from its own packages, and it has no machine.
     assert_eq!(
@@ -930,5 +945,99 @@ fn live_openbots_own_compose_names_the_images_with_no_engine() {
     assert_eq!(own, docker);
     assert_eq!(own.len(), 5, "{own:#?}");
     let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&cache);
+}
+
+/**
+Windows D: Podman answered with no Compose installed, and the first screen said "Some downloads
+didn't finish" because the image list asked `podman compose`, which had no provider to run. The list
+waits for OpenBot's own Compose (here a stand-in that arrives a moment later, as a download still
+running does) and asks it, and nothing else.
+*/
+#[cfg(unix)]
+#[test]
+fn the_image_list_waits_for_openbots_own_compose_and_asks_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let release = temp_root("early-named-images");
+    std::fs::create_dir_all(&release).unwrap();
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    std::fs::copy(
+        repository.join("docker-compose.yml"),
+        release.join("docker-compose.yml"),
+    )
+    .unwrap();
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test-fixtures/release-images/container-images-v0.3.3.json"),
+        crate::deployment::images_path(&release),
+    )
+    .unwrap();
+    let compose = release.join("docker-compose-own");
+    let asked = release.join("asked");
+    let started = Instant::now();
+    let images = named_images(&release, || {
+        // Still downloading for a moment, then in place.
+        std::thread::sleep(Duration::from_millis(300));
+        std::fs::write(
+            &compose,
+            format!(
+                "#!/bin/sh\necho \"$@\" > '{}'\necho pgvector/pgvector:pg17\necho ghcr.io/copilotkit/openbot-server@sha256:fce3ffc51b12c075642a8b37d00d6137d85f418cd8d43d28456757b173d7eef9\n",
+                asked.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&compose, std::fs::Permissions::from_mode(0o755)).unwrap();
+        Ok(compose.clone())
+    })
+    .expect("the images, named by OpenBot's own Compose");
+    assert!(started.elapsed() >= Duration::from_millis(300));
+    let said = std::fs::read_to_string(&asked).unwrap();
+    assert!(said.contains("config --images"), "{said}");
+    assert!(
+        images.contains(&"pgvector/pgvector:pg17".to_string()),
+        "{images:?}"
+    );
+    // The two sign-in images, from the release's image list.
+    assert!(
+        images
+            .iter()
+            .any(|image| image.contains("openbot-agent-langgraph-agui@")),
+        "{images:?}"
+    );
+    let _ = std::fs::remove_dir_all(&release);
+}
+
+/**
+Live: a Podman whose `compose` has no provider to run, as on Windows D. Asking it for the image list
+fails, as the first screen did; OpenBot's own Compose, downloaded (about 30 MB), names the five
+images Install pulls.
+*/
+#[test]
+#[ignore = "runs podman compose with no provider, and downloads Compose"]
+fn live_podman_with_no_compose_still_has_its_images_named() {
+    let release = temp_root("early-no-compose");
+    std::fs::create_dir_all(&release).unwrap();
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    std::fs::copy(
+        repository.join("docker-compose.yml"),
+        release.join("docker-compose.yml"),
+    )
+    .unwrap();
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test-fixtures/release-images/container-images-v0.3.3.json"),
+        crate::deployment::images_path(&release),
+    )
+    .unwrap();
+    // Podman with no Compose provider: what `podman compose` runs is not there.
+    std::env::set_var("PODMAN_COMPOSE_PROVIDER", "/nonexistent/docker-compose");
+    let podman = Address::new(Engine::Podman, None);
+    let through_podman = default_bot_images(&podman, &release);
+    assert!(through_podman.is_err(), "{through_podman:?}");
+    eprintln!("podman compose: {}", through_podman.unwrap_err());
+    let cache = temp_root("early-no-compose-cache");
+    let images = named_images(&release, own_compose(&cache)).expect("named by OpenBot's own");
+    assert_eq!(images.len(), 5, "{images:#?}");
+    let _ = std::fs::remove_dir_all(&release);
     let _ = std::fs::remove_dir_all(&cache);
 }

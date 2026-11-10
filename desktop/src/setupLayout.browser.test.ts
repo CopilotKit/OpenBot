@@ -647,7 +647,7 @@ describe.skipIf(!asked)("the first screen while its downloads run", () => {
           Math.round(
             (
               await page
-                .getByText("OpenBot sends CopilotKit usage data", {
+                .getByText("OpenBot sends usage data", {
                   exact: false,
                 })
                 .boundingBox()
