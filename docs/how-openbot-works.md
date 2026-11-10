@@ -39,7 +39,7 @@ the same four parts.
 | Part | Choices |
 | --- | --- |
 | **What** | The instruction, in your words. |
-| **Starts** | At a time, or when something happens (a new email, a pull request). A routine can have more than one start. |
+| **Starts** | At a time, when something happens (a new email, a pull request), or now, once. A routine can have more than one start. |
 | **Does** | Acts, within your approvals. Or only tells you what it found. |
 | **Until** | You stop it. Or it is done, when you gave it an outcome to reach. |
 
@@ -54,7 +54,7 @@ A Bot's routines are one list, and each reads as a sentence:
 - Every day. Watches the launch brief and tells you.
 
 A routine reports into the conversation you asked in. You make, change and stop routines by asking.
-A goal or a check-in can also be made from the Routines page.
+You can also make one on the Routines page, by answering the same four parts.
 
 ### 3. It checks its memory
 

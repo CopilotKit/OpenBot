@@ -31,16 +31,26 @@ Old addresses redirect here: `/routines` and `/responsibilities` to Settings →
 
 ## Creating one
 
-Two ways, and they write through the same store call.
+Two ways, and either way a routine or a goal is written by the same store calls.
 
-- **New on the Routines page.** Settings → Routines and a Bot's Routines page both have **New**, a
-  menu of **Routine**, **Goal** and **Check-in** (Check-in is left out for a Bot that already has
-  one). **Routine** opens a form: the Bot, what it should do, when (every day, every weekday, one
-  day a week, one day a month, or every hour, at a time on your clock), and the conversation it posts
-  in, or a new one named after it. A Bot's own Routines page and the clock beside a conversation's
-  message box open the same form with that Bot, and that conversation, already chosen. **Goal** and
-  **Check-in** open their own dialogs. The form
-  sends `POST /api/routines`, which calls `routineStore.create` exactly as `create_routine` does.
+- **New routine.** Settings → Routines and a Bot's Routines page both have **New routine**, which
+  opens one screen (`/routines/new`). It asks, in order: **Bot**, **What to do**, **It should** (Act
+  for you or Only tell you), **Starts** (On a schedule, When something happens, or Now, once), **Done
+  when** (optional), **Posts in**, and **Name**. It does not ask whether you want a routine, a goal
+  or a check-in; the answers decide: `planRoutine` (`app/src/lib/routines/plan.ts`) turns them into a
+  plan, and `createFromPlanMutationOptions` writes it:
+  - Act on a schedule with nothing in Done when is a routine (`POST /api/routines`, which calls
+    `routineStore.create` exactly as `create_routine` does).
+  - Act on a schedule with an outcome is a goal that ends when met, plus a routine that runs it.
+  - Act when something happens is a goal with that subscription.
+  - Now, once is a goal, run at once.
+  - Only tell you is a check-in, with **How often** in place of Starts and Done when. It is offered
+    only while an admin allows check-ins.
+
+  A Bot's own Routines page and the clock beside a conversation's message box open the same screen
+  with that Bot already chosen, and from the clock that conversation too
+  (`RoutineComposerButton`). If a goal is saved but its schedule is refused, the goal is paused, and
+  the screen says why its schedule was refused.
 - **Ask a Bot**, in a conversation: "every weekday at 9, post the standup notes here." Anything the
   form's schedules do not cover ("every other Tuesday") goes this way. The same Bot can list what is
   standing, change one, or delete one, all by being asked. There is no edit form.
@@ -63,14 +73,26 @@ its own: it runs when asked, or when an event wakes it. A goal's own run is not 
 because it already holds the goal's own tools. See `server/src/responsibilities/chat-tools.ts`.
 
 A goal that repeats is never completed by one of its runs. It repeats when it was made `recurring`,
-when an enabled routine of its Bot runs it, or when an event wakes it. Its run is told so, records
-its result with `report_goal_progress`, and is refused `complete_goal`; only the person ends it.
-Asked to run a completed or paused goal, `run_goal` says so instead of running nothing. See
-`GoalRepeats` in `server/src/responsibilities/types.ts`.
+or, unless it was made `endsWhenMet`, when an enabled routine of its Bot runs it or an event wakes
+it. Its run is told so, records its result with `report_goal_progress`, and is refused
+`complete_goal`; only the person ends it. Asked to run a completed or paused goal, `run_goal` says
+so instead of running nothing. See `GoalRepeats` in `server/src/responsibilities/types.ts`.
 
-A routine records the goal it runs (`routines.goal_id`): the `goalId` a Bot passes to
-`create_routine` or `update_routine`, else the goal whose id its instruction names, else the goal
-its firing first runs with `run_goal`. Never a goal its instruction only mentions. A routine made
+A goal that a routine or an event starts can still be completed by a run that meets its outcome, when
+it is made `endsWhenMet`; without it, a goal a routine or an event starts repeats and a run never
+completes it (`repeatsOf` in `server/src/responsibilities/store.ts`). It never combines with `recurring`: the
+store and `parseResponsibilityInput` refuse both together. Completing a goal by any path, a run or
+the person, switches off the routines that run it (`routineRunsGoal`): those whose `goal_id` is that
+goal, and an older routine that names it by id or whole quoted title. An older routine that also
+names another goal of its Bot that is not completed stays on, so that goal still repeats; it is
+switched off when the last goal it runs completes (`switchOffRoutinesOf`). A goal made on the New routine
+screen may have no success criteria, and its run is then told the outcome is that the instruction has
+been carried out (`NO_OUTCOME` in `shared/responsibility-turn.ts`); a Bot's `create_goal` still
+requires them.
+
+A routine records the goal it runs (`routines.goal_id`): the `goalId` passed to `create_routine`, `update_routine` or
+`POST /api/routines` (as the New routine screen does), else the goal whose id its instruction names,
+else the goal its firing first runs with `run_goal`. Never a goal its instruction only mentions. A routine made
 before 0.3.3 (`goal_by_title`) is read from its instruction, by the goal's id or its whole title in
 quotes. See `routineRunsGoal`.
 

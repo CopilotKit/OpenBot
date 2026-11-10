@@ -8,14 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Three migrations run at start, and the database moves to
-`0088_approval_reviewer_guidance`. `0086_channel_title` adds a nullable `title` column to
+**Before upgrading.** Four migrations run at start, and the database moves to
+`0089_goal_ends_when_met`. `0086_channel_title` adds a nullable `title` column to
 `channels`, for a name a person gives a conversation. `0087_approval_conversation_grants` creates a
 new, empty `approval_conversation_grants` table, which records an action allowed for the rest of
 one conversation. It also adds a nullable `kind` column to `approval_rules` and an `action_kinds`
 column to `approval_team_settings` (`{}` on every existing row), and lets
 `approval_requests.decision` hold `allow_conversation` as well as its earlier values. `0088_approval_reviewer_guidance` adds a
-nullable `reviewer_guidance` column to `approval_team_settings`. No existing row is rewritten and
+nullable `reviewer_guidance` column to `approval_team_settings`. `0089_goal_ends_when_met` adds an
+`ends_when_met` column to `responsibilities`, false on every existing goal, so existing goals behave
+as before. No existing row is rewritten and
 nothing is dropped. A database that has run this release does not go back to 1.0.0: restore the
 backup taken before the upgrade instead. Three things change for an existing deployment:
 - Sending, deleting, sharing and posting offer **Allow for this conversation** and **Always allow
@@ -402,6 +404,16 @@ backup taken before the upgrade instead. Three things change for an existing dep
   (every day, weekday, week, month or hour, at a time on your clock), where it posts, and a name.
   The clock beside + in a conversation's message box opens it for that Bot and that conversation.
   A schedule the form doesn't cover, such as every other Tuesday, can still be asked of a Bot.
+- **One New routine screen for routines, goals and check-ins.** New routine no longer opens a menu
+  of Routine, Goal and Check-in. One screen asks what to do, whether the Bot should act for you or
+  only tell you, what starts it (a schedule, an event such as a GitHub issue opening, or now, once)
+  and, optionally, when it is done. From those answers it makes a routine, a goal, or a check-in:
+  a schedule with nothing in Done when makes a routine; a schedule or an event with Done when makes
+  a goal that ends once that is met, shown as one Goal row with its schedule under Starts; Only
+  tell you makes a check-in. A goal can now be saved with no outcome.
+- **A goal can end when its outcome is met.** A goal made with an outcome, on a schedule or an
+  event, is completed by the run that meets it, and completing a goal switches off the routines
+  that run it. A goal that repeats with no outcome is still ended only by you.
 - **Routines and check-ins finish what they start.** A routine or check-in had chat's 8 steps. It
   now has 24, plus 4 for each part of a routine written as a list, up to 48. A routine written as a
   list shows the Bot its parts numbered, and the run carries on until each is closed as Done,
