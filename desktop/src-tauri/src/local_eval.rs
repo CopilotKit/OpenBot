@@ -4302,23 +4302,21 @@ fn lost_stack(
             PrivateFiles::Missing if !shared => Some(Lost::Forgettable(stack)),
             PrivateFiles::Missing => Some(Lost::Said(crate::problem::Problem::with(
                 format!(
-                    "OpenBot's saved settings are missing, and another app on this computer \
-                     uses them too. Restore {} from a backup, then try again.",
+                    "OpenBot's services on this computer are missing their saved settings, and \
+                     another app on this computer uses them too. Restore {} from a backup, then try \
+                     again.",
                     private.display()
                 ),
                 format!("{} lost setup.json or secrets.json", stack.as_str()),
             ))),
             PrivateFiles::Damaged => Some(Lost::Said(crate::problem::Problem::with(
                 format!(
-                    "OpenBot's saved settings can't be read. Restore {} from a backup, or \
-                     delete that folder so OpenBot sets itself up again from the start. Then try \
-                     again.",
+                    "The saved settings of OpenBot's services on this computer can't be read. \
+                     Restore {} from a backup, or delete that folder to set them up again from the \
+                     start. Then try again.",
                     private.display()
                 ),
-                format!(
-                    "{}: setup.json or secrets.json is unreadable",
-                    stack.as_str()
-                ),
+                format!("{}: setup.json or secrets.json is unreadable", stack.as_str()),
             ))),
         });
     }

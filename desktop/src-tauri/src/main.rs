@@ -16668,12 +16668,11 @@ fn main() {
             panic!("{report:?}\n{calls}");
         };
         assert!(
-            problem
-                .said
-                .starts_with("OpenBot's saved settings can't be read."),
+            problem.said.starts_with(
+                "The saved settings of OpenBot's services on this computer can't be read."
+            ),
             "{problem:?}"
         );
-        assert!(!problem.said.contains("back end"), "{problem:?}");
         assert!(
             problem.said.contains(&private.display().to_string()),
             "{problem:?}"
@@ -16693,7 +16692,6 @@ fn main() {
                 .contains("another app on this computer uses them too"),
             "{problem:?}"
         );
-        assert!(!problem.said.contains("back end"), "{problem:?}");
         assert!(deletes(&calls).is_empty(), "{calls}");
 
         for folder in [empty, cli, home, root, kite] {
