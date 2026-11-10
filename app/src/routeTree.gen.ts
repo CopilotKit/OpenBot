@@ -20,7 +20,6 @@ import { Route as AuthedAppIndexRouteImport } from './routes/_authed/_app/index'
 import { Route as AuthedAppApprovalsRouteImport } from './routes/_authed/_app/approvals'
 import { Route as AuthedAppBotRouteImport } from './routes/_authed/_app/bot'
 import { Route as AuthedAppBrowserRouteImport } from './routes/_authed/_app/browser'
-import { Route as AuthedAppCapabilitiesRouteImport } from './routes/_authed/_app/capabilities'
 import { Route as AuthedAppMemoryRouteImport } from './routes/_authed/_app/memory'
 import { Route as AuthedAppReachabilityRouteImport } from './routes/_authed/_app/reachability'
 import { Route as AuthedAppResponsibilitiesRouteImport } from './routes/_authed/_app/responsibilities'
@@ -54,6 +53,7 @@ import { Route as AuthedSettingsNotificationsRouteImport } from './routes/_authe
 import { Route as AuthedSettingsPasswordsRouteImport } from './routes/_authed/settings/passwords'
 import { Route as AuthedSettingsRoutinesRouteImport } from './routes/_authed/settings/routines'
 import { Route as AuthedSettingsSetupRouteImport } from './routes/_authed/settings/setup'
+import { Route as AuthedSettingsSkillsRouteImport } from './routes/_authed/settings/skills'
 import { Route as AuthedSettingsThisComputerRouteImport } from './routes/_authed/settings/this-computer'
 import { Route as AuthedSettingsVaultRouteImport } from './routes/_authed/settings/vault'
 import { Route as AuthedSignInRequestIdRouteImport } from './routes/_authed/sign-in/$requestId'
@@ -87,7 +87,6 @@ import { Route as AuthedAdminSkillsSlugRouteImport } from './routes/_authed/admi
 import { Route as AuthedAdminSkillsNewRouteImport } from './routes/_authed/admin/skills_.new'
 import { Route as AuthedSettingsPersonalActivityRouteImport } from './routes/_authed/settings/_personal/activity'
 import { Route as AuthedSettingsPersonalComputerRouteImport } from './routes/_authed/settings/_personal/computer'
-import { Route as AuthedSettingsPersonalSkillsRouteImport } from './routes/_authed/settings/_personal/skills'
 import { Route as AuthedSettingsComponentsGalleryIndexRouteImport } from './routes/_authed/settings/components-gallery/index'
 import { Route as AuthedSettingsComponentsGalleryNameRouteImport } from './routes/_authed/settings/components-gallery/$name'
 import { Route as AuthedSettingsConnectedAccountsIndexRouteImport } from './routes/_authed/settings/connected-accounts/index'
@@ -165,11 +164,6 @@ const AuthedAppBotRoute = AuthedAppBotRouteImport.update({
 const AuthedAppBrowserRoute = AuthedAppBrowserRouteImport.update({
   id: '/browser',
   path: '/browser',
-  getParentRoute: () => AuthedAppRoute,
-} as any)
-const AuthedAppCapabilitiesRoute = AuthedAppCapabilitiesRouteImport.update({
-  id: '/capabilities',
-  path: '/capabilities',
   getParentRoute: () => AuthedAppRoute,
 } as any)
 const AuthedAppMemoryRoute = AuthedAppMemoryRouteImport.update({
@@ -340,6 +334,11 @@ const AuthedSettingsSetupRoute = AuthedSettingsSetupRouteImport.update({
   path: '/setup',
   getParentRoute: () => AuthedSettingsRouteRoute,
 } as any)
+const AuthedSettingsSkillsRoute = AuthedSettingsSkillsRouteImport.update({
+  id: '/skills',
+  path: '/skills',
+  getParentRoute: () => AuthedSettingsRouteRoute,
+} as any)
 const AuthedSettingsThisComputerRoute =
   AuthedSettingsThisComputerRouteImport.update({
     id: '/this-computer',
@@ -368,21 +367,21 @@ const AuthedAppBotsIndexRoute = AuthedAppBotsIndexRouteImport.update({
 } as any)
 const AuthedAppCapabilitiesIndexRoute =
   AuthedAppCapabilitiesIndexRouteImport.update({
-    id: '/',
-    path: '/',
-    getParentRoute: () => AuthedAppCapabilitiesRoute,
+    id: '/capabilities/',
+    path: '/capabilities/',
+    getParentRoute: () => AuthedAppRoute,
   } as any)
 const AuthedAppCapabilitiesMemoryRoute =
   AuthedAppCapabilitiesMemoryRouteImport.update({
-    id: '/memory',
-    path: '/memory',
-    getParentRoute: () => AuthedAppCapabilitiesRoute,
+    id: '/capabilities/memory',
+    path: '/capabilities/memory',
+    getParentRoute: () => AuthedAppRoute,
   } as any)
 const AuthedAppCapabilitiesSkillsRoute =
   AuthedAppCapabilitiesSkillsRouteImport.update({
-    id: '/skills',
-    path: '/skills',
-    getParentRoute: () => AuthedAppCapabilitiesRoute,
+    id: '/capabilities/skills',
+    path: '/capabilities/skills',
+    getParentRoute: () => AuthedAppRoute,
   } as any)
 const AuthedAppChannelChannelIdRoute =
   AuthedAppChannelChannelIdRouteImport.update({
@@ -521,12 +520,6 @@ const AuthedSettingsPersonalComputerRoute =
   AuthedSettingsPersonalComputerRouteImport.update({
     id: '/computer',
     path: '/computer',
-    getParentRoute: () => AuthedSettingsPersonalRoute,
-  } as any)
-const AuthedSettingsPersonalSkillsRoute =
-  AuthedSettingsPersonalSkillsRouteImport.update({
-    id: '/skills',
-    path: '/skills',
     getParentRoute: () => AuthedSettingsPersonalRoute,
   } as any)
 const AuthedSettingsComponentsGalleryIndexRoute =
@@ -690,7 +683,6 @@ export interface FileRoutesByFullPath {
   '/approvals': typeof AuthedAppApprovalsRoute
   '/bot': typeof AuthedAppBotRoute
   '/browser': typeof AuthedAppBrowserRoute
-  '/capabilities': typeof AuthedAppCapabilitiesRouteWithChildren
   '/memory': typeof AuthedAppMemoryRoute
   '/reachability': typeof AuthedAppReachabilityRoute
   '/responsibilities': typeof AuthedAppResponsibilitiesRoute
@@ -721,6 +713,7 @@ export interface FileRoutesByFullPath {
   '/settings/passwords': typeof AuthedSettingsPasswordsRoute
   '/settings/routines': typeof AuthedSettingsRoutinesRoute
   '/settings/setup': typeof AuthedSettingsSetupRoute
+  '/settings/skills': typeof AuthedSettingsSkillsRoute
   '/settings/this-computer': typeof AuthedSettingsThisComputerRoute
   '/settings/vault': typeof AuthedSettingsVaultRoute
   '/sign-in/$requestId': typeof AuthedSignInRequestIdRoute
@@ -750,7 +743,6 @@ export interface FileRoutesByFullPath {
   '/admin/skills/new': typeof AuthedAdminSkillsNewRoute
   '/settings/activity': typeof AuthedSettingsPersonalActivityRoute
   '/settings/computer': typeof AuthedSettingsPersonalComputerRoute
-  '/settings/skills': typeof AuthedSettingsPersonalSkillsRoute
   '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
   '/settings/credentials/new': typeof AuthedSettingsCredentialsNewRoute
@@ -822,6 +814,7 @@ export interface FileRoutesByTo {
   '/settings/passwords': typeof AuthedSettingsPasswordsRoute
   '/settings/routines': typeof AuthedSettingsRoutinesRoute
   '/settings/setup': typeof AuthedSettingsSetupRoute
+  '/settings/skills': typeof AuthedSettingsSkillsRoute
   '/settings/this-computer': typeof AuthedSettingsThisComputerRoute
   '/settings/vault': typeof AuthedSettingsVaultRoute
   '/sign-in/$requestId': typeof AuthedSignInRequestIdRoute
@@ -850,7 +843,6 @@ export interface FileRoutesByTo {
   '/admin/skills/new': typeof AuthedAdminSkillsNewRoute
   '/settings/activity': typeof AuthedSettingsPersonalActivityRoute
   '/settings/computer': typeof AuthedSettingsPersonalComputerRoute
-  '/settings/skills': typeof AuthedSettingsPersonalSkillsRoute
   '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
   '/settings/credentials/new': typeof AuthedSettingsCredentialsNewRoute
@@ -895,7 +887,6 @@ export interface FileRoutesById {
   '/_authed/_app/approvals': typeof AuthedAppApprovalsRoute
   '/_authed/_app/bot': typeof AuthedAppBotRoute
   '/_authed/_app/browser': typeof AuthedAppBrowserRoute
-  '/_authed/_app/capabilities': typeof AuthedAppCapabilitiesRouteWithChildren
   '/_authed/_app/memory': typeof AuthedAppMemoryRoute
   '/_authed/_app/reachability': typeof AuthedAppReachabilityRoute
   '/_authed/_app/responsibilities': typeof AuthedAppResponsibilitiesRoute
@@ -927,6 +918,7 @@ export interface FileRoutesById {
   '/_authed/settings/passwords': typeof AuthedSettingsPasswordsRoute
   '/_authed/settings/routines': typeof AuthedSettingsRoutinesRoute
   '/_authed/settings/setup': typeof AuthedSettingsSetupRoute
+  '/_authed/settings/skills': typeof AuthedSettingsSkillsRoute
   '/_authed/settings/this-computer': typeof AuthedSettingsThisComputerRoute
   '/_authed/settings/vault': typeof AuthedSettingsVaultRoute
   '/_authed/sign-in/$requestId': typeof AuthedSignInRequestIdRoute
@@ -957,7 +949,6 @@ export interface FileRoutesById {
   '/_authed/admin/skills_/new': typeof AuthedAdminSkillsNewRoute
   '/_authed/settings/_personal/activity': typeof AuthedSettingsPersonalActivityRoute
   '/_authed/settings/_personal/computer': typeof AuthedSettingsPersonalComputerRoute
-  '/_authed/settings/_personal/skills': typeof AuthedSettingsPersonalSkillsRoute
   '/_authed/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/_authed/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
   '/_authed/settings/credentials_/new': typeof AuthedSettingsCredentialsNewRoute
@@ -1002,7 +993,6 @@ export interface FileRouteTypes {
     | '/approvals'
     | '/bot'
     | '/browser'
-    | '/capabilities'
     | '/memory'
     | '/reachability'
     | '/responsibilities'
@@ -1033,6 +1023,7 @@ export interface FileRouteTypes {
     | '/settings/passwords'
     | '/settings/routines'
     | '/settings/setup'
+    | '/settings/skills'
     | '/settings/this-computer'
     | '/settings/vault'
     | '/sign-in/$requestId'
@@ -1062,7 +1053,6 @@ export interface FileRouteTypes {
     | '/admin/skills/new'
     | '/settings/activity'
     | '/settings/computer'
-    | '/settings/skills'
     | '/settings/components-gallery/$name'
     | '/settings/connected-accounts/$key'
     | '/settings/credentials/new'
@@ -1134,6 +1124,7 @@ export interface FileRouteTypes {
     | '/settings/passwords'
     | '/settings/routines'
     | '/settings/setup'
+    | '/settings/skills'
     | '/settings/this-computer'
     | '/settings/vault'
     | '/sign-in/$requestId'
@@ -1162,7 +1153,6 @@ export interface FileRouteTypes {
     | '/admin/skills/new'
     | '/settings/activity'
     | '/settings/computer'
-    | '/settings/skills'
     | '/settings/components-gallery/$name'
     | '/settings/connected-accounts/$key'
     | '/settings/credentials/new'
@@ -1206,7 +1196,6 @@ export interface FileRouteTypes {
     | '/_authed/_app/approvals'
     | '/_authed/_app/bot'
     | '/_authed/_app/browser'
-    | '/_authed/_app/capabilities'
     | '/_authed/_app/memory'
     | '/_authed/_app/reachability'
     | '/_authed/_app/responsibilities'
@@ -1238,6 +1227,7 @@ export interface FileRouteTypes {
     | '/_authed/settings/passwords'
     | '/_authed/settings/routines'
     | '/_authed/settings/setup'
+    | '/_authed/settings/skills'
     | '/_authed/settings/this-computer'
     | '/_authed/settings/vault'
     | '/_authed/sign-in/$requestId'
@@ -1268,7 +1258,6 @@ export interface FileRouteTypes {
     | '/_authed/admin/skills_/new'
     | '/_authed/settings/_personal/activity'
     | '/_authed/settings/_personal/computer'
-    | '/_authed/settings/_personal/skills'
     | '/_authed/settings/components-gallery/$name'
     | '/_authed/settings/connected-accounts/$key'
     | '/_authed/settings/credentials_/new'
@@ -1384,13 +1373,6 @@ declare module '@tanstack/react-router' {
       path: '/browser'
       fullPath: '/browser'
       preLoaderRoute: typeof AuthedAppBrowserRouteImport
-      parentRoute: typeof AuthedAppRoute
-    }
-    '/_authed/_app/capabilities': {
-      id: '/_authed/_app/capabilities'
-      path: '/capabilities'
-      fullPath: '/capabilities'
-      preLoaderRoute: typeof AuthedAppCapabilitiesRouteImport
       parentRoute: typeof AuthedAppRoute
     }
     '/_authed/_app/memory': {
@@ -1624,6 +1606,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSettingsSetupRouteImport
       parentRoute: typeof AuthedSettingsRouteRoute
     }
+    '/_authed/settings/skills': {
+      id: '/_authed/settings/skills'
+      path: '/skills'
+      fullPath: '/settings/skills'
+      preLoaderRoute: typeof AuthedSettingsSkillsRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
+    }
     '/_authed/settings/this-computer': {
       id: '/_authed/settings/this-computer'
       path: '/this-computer'
@@ -1661,24 +1650,24 @@ declare module '@tanstack/react-router' {
     }
     '/_authed/_app/capabilities/': {
       id: '/_authed/_app/capabilities/'
-      path: '/'
+      path: '/capabilities'
       fullPath: '/capabilities/'
       preLoaderRoute: typeof AuthedAppCapabilitiesIndexRouteImport
-      parentRoute: typeof AuthedAppCapabilitiesRoute
+      parentRoute: typeof AuthedAppRoute
     }
     '/_authed/_app/capabilities/memory': {
       id: '/_authed/_app/capabilities/memory'
-      path: '/memory'
+      path: '/capabilities/memory'
       fullPath: '/capabilities/memory'
       preLoaderRoute: typeof AuthedAppCapabilitiesMemoryRouteImport
-      parentRoute: typeof AuthedAppCapabilitiesRoute
+      parentRoute: typeof AuthedAppRoute
     }
     '/_authed/_app/capabilities/skills': {
       id: '/_authed/_app/capabilities/skills'
-      path: '/skills'
+      path: '/capabilities/skills'
       fullPath: '/capabilities/skills'
       preLoaderRoute: typeof AuthedAppCapabilitiesSkillsRouteImport
-      parentRoute: typeof AuthedAppCapabilitiesRoute
+      parentRoute: typeof AuthedAppRoute
     }
     '/_authed/_app/channel/$channelId': {
       id: '/_authed/_app/channel/$channelId'
@@ -1853,13 +1842,6 @@ declare module '@tanstack/react-router' {
       path: '/computer'
       fullPath: '/settings/computer'
       preLoaderRoute: typeof AuthedSettingsPersonalComputerRouteImport
-      parentRoute: typeof AuthedSettingsPersonalRoute
-    }
-    '/_authed/settings/_personal/skills': {
-      id: '/_authed/settings/_personal/skills'
-      path: '/skills'
-      fullPath: '/settings/skills'
-      preLoaderRoute: typeof AuthedSettingsPersonalSkillsRouteImport
       parentRoute: typeof AuthedSettingsPersonalRoute
     }
     '/_authed/settings/components-gallery/': {
@@ -2116,7 +2098,6 @@ const AuthedAdminRouteRouteWithChildren =
 interface AuthedSettingsPersonalRouteChildren {
   AuthedSettingsPersonalActivityRoute: typeof AuthedSettingsPersonalActivityRoute
   AuthedSettingsPersonalComputerRoute: typeof AuthedSettingsPersonalComputerRoute
-  AuthedSettingsPersonalSkillsRoute: typeof AuthedSettingsPersonalSkillsRoute
   AuthedSettingsPersonalPluginsSplatRoute: typeof AuthedSettingsPersonalPluginsSplatRoute
   AuthedSettingsPersonalSkillsSlugRoute: typeof AuthedSettingsPersonalSkillsSlugRoute
   AuthedSettingsPersonalSkillsNewRoute: typeof AuthedSettingsPersonalSkillsNewRoute
@@ -2127,7 +2108,6 @@ const AuthedSettingsPersonalRouteChildren: AuthedSettingsPersonalRouteChildren =
   {
     AuthedSettingsPersonalActivityRoute: AuthedSettingsPersonalActivityRoute,
     AuthedSettingsPersonalComputerRoute: AuthedSettingsPersonalComputerRoute,
-    AuthedSettingsPersonalSkillsRoute: AuthedSettingsPersonalSkillsRoute,
     AuthedSettingsPersonalPluginsSplatRoute:
       AuthedSettingsPersonalPluginsSplatRoute,
     AuthedSettingsPersonalSkillsSlugRoute:
@@ -2152,6 +2132,7 @@ interface AuthedSettingsRouteRouteChildren {
   AuthedSettingsPasswordsRoute: typeof AuthedSettingsPasswordsRoute
   AuthedSettingsRoutinesRoute: typeof AuthedSettingsRoutinesRoute
   AuthedSettingsSetupRoute: typeof AuthedSettingsSetupRoute
+  AuthedSettingsSkillsRoute: typeof AuthedSettingsSkillsRoute
   AuthedSettingsThisComputerRoute: typeof AuthedSettingsThisComputerRoute
   AuthedSettingsVaultRoute: typeof AuthedSettingsVaultRoute
   AuthedSettingsIndexRoute: typeof AuthedSettingsIndexRoute
@@ -2173,6 +2154,7 @@ const AuthedSettingsRouteRouteChildren: AuthedSettingsRouteRouteChildren = {
   AuthedSettingsPasswordsRoute: AuthedSettingsPasswordsRoute,
   AuthedSettingsRoutinesRoute: AuthedSettingsRoutinesRoute,
   AuthedSettingsSetupRoute: AuthedSettingsSetupRoute,
+  AuthedSettingsSkillsRoute: AuthedSettingsSkillsRoute,
   AuthedSettingsThisComputerRoute: AuthedSettingsThisComputerRoute,
   AuthedSettingsVaultRoute: AuthedSettingsVaultRoute,
   AuthedSettingsIndexRoute: AuthedSettingsIndexRoute,
@@ -2190,28 +2172,10 @@ const AuthedSettingsRouteRouteChildren: AuthedSettingsRouteRouteChildren = {
 const AuthedSettingsRouteRouteWithChildren =
   AuthedSettingsRouteRoute._addFileChildren(AuthedSettingsRouteRouteChildren)
 
-interface AuthedAppCapabilitiesRouteChildren {
-  AuthedAppCapabilitiesMemoryRoute: typeof AuthedAppCapabilitiesMemoryRoute
-  AuthedAppCapabilitiesSkillsRoute: typeof AuthedAppCapabilitiesSkillsRoute
-  AuthedAppCapabilitiesIndexRoute: typeof AuthedAppCapabilitiesIndexRoute
-}
-
-const AuthedAppCapabilitiesRouteChildren: AuthedAppCapabilitiesRouteChildren = {
-  AuthedAppCapabilitiesMemoryRoute: AuthedAppCapabilitiesMemoryRoute,
-  AuthedAppCapabilitiesSkillsRoute: AuthedAppCapabilitiesSkillsRoute,
-  AuthedAppCapabilitiesIndexRoute: AuthedAppCapabilitiesIndexRoute,
-}
-
-const AuthedAppCapabilitiesRouteWithChildren =
-  AuthedAppCapabilitiesRoute._addFileChildren(
-    AuthedAppCapabilitiesRouteChildren,
-  )
-
 interface AuthedAppRouteChildren {
   AuthedAppApprovalsRoute: typeof AuthedAppApprovalsRoute
   AuthedAppBotRoute: typeof AuthedAppBotRoute
   AuthedAppBrowserRoute: typeof AuthedAppBrowserRoute
-  AuthedAppCapabilitiesRoute: typeof AuthedAppCapabilitiesRouteWithChildren
   AuthedAppMemoryRoute: typeof AuthedAppMemoryRoute
   AuthedAppReachabilityRoute: typeof AuthedAppReachabilityRoute
   AuthedAppResponsibilitiesRoute: typeof AuthedAppResponsibilitiesRoute
@@ -2219,6 +2183,8 @@ interface AuthedAppRouteChildren {
   AuthedAppSkillsRoute: typeof AuthedAppSkillsRoute
   AuthedAppTeamBotsRoute: typeof AuthedAppTeamBotsRoute
   AuthedAppIndexRoute: typeof AuthedAppIndexRoute
+  AuthedAppCapabilitiesMemoryRoute: typeof AuthedAppCapabilitiesMemoryRoute
+  AuthedAppCapabilitiesSkillsRoute: typeof AuthedAppCapabilitiesSkillsRoute
   AuthedAppChannelChannelIdRoute: typeof AuthedAppChannelChannelIdRoute
   AuthedAppChannelNewRoute: typeof AuthedAppChannelNewRoute
   AuthedAppConnectionsKeyRoute: typeof AuthedAppConnectionsKeyRoute
@@ -2229,6 +2195,7 @@ interface AuthedAppRouteChildren {
   AuthedAppStartStartIdRoute: typeof AuthedAppStartStartIdRoute
   AuthedAppAgentsIndexRoute: typeof AuthedAppAgentsIndexRoute
   AuthedAppBotsIndexRoute: typeof AuthedAppBotsIndexRoute
+  AuthedAppCapabilitiesIndexRoute: typeof AuthedAppCapabilitiesIndexRoute
   AuthedAppConnectionsIndexRoute: typeof AuthedAppConnectionsIndexRoute
   AuthedAppBotsAgentIdAccessRoute: typeof AuthedAppBotsAgentIdAccessRoute
   AuthedAppBotsAgentIdActivityRoute: typeof AuthedAppBotsAgentIdActivityRoute
@@ -2250,7 +2217,6 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppApprovalsRoute: AuthedAppApprovalsRoute,
   AuthedAppBotRoute: AuthedAppBotRoute,
   AuthedAppBrowserRoute: AuthedAppBrowserRoute,
-  AuthedAppCapabilitiesRoute: AuthedAppCapabilitiesRouteWithChildren,
   AuthedAppMemoryRoute: AuthedAppMemoryRoute,
   AuthedAppReachabilityRoute: AuthedAppReachabilityRoute,
   AuthedAppResponsibilitiesRoute: AuthedAppResponsibilitiesRoute,
@@ -2258,6 +2224,8 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppSkillsRoute: AuthedAppSkillsRoute,
   AuthedAppTeamBotsRoute: AuthedAppTeamBotsRoute,
   AuthedAppIndexRoute: AuthedAppIndexRoute,
+  AuthedAppCapabilitiesMemoryRoute: AuthedAppCapabilitiesMemoryRoute,
+  AuthedAppCapabilitiesSkillsRoute: AuthedAppCapabilitiesSkillsRoute,
   AuthedAppChannelChannelIdRoute: AuthedAppChannelChannelIdRoute,
   AuthedAppChannelNewRoute: AuthedAppChannelNewRoute,
   AuthedAppConnectionsKeyRoute: AuthedAppConnectionsKeyRoute,
@@ -2268,6 +2236,7 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppStartStartIdRoute: AuthedAppStartStartIdRoute,
   AuthedAppAgentsIndexRoute: AuthedAppAgentsIndexRoute,
   AuthedAppBotsIndexRoute: AuthedAppBotsIndexRoute,
+  AuthedAppCapabilitiesIndexRoute: AuthedAppCapabilitiesIndexRoute,
   AuthedAppConnectionsIndexRoute: AuthedAppConnectionsIndexRoute,
   AuthedAppBotsAgentIdAccessRoute: AuthedAppBotsAgentIdAccessRoute,
   AuthedAppBotsAgentIdActivityRoute: AuthedAppBotsAgentIdActivityRoute,

@@ -10,7 +10,7 @@ import {
   IconLayoutGrid,
   IconListCheck,
   IconLock,
-  IconSchool,
+  IconBrain,
   IconSettings,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -28,7 +28,10 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import {
+  deploymentCapabilitiesQueryOptions,
+  offersMemory,
+} from "@/lib/deployment/queries";
 import { desktopShell } from "@/lib/desktop/shell";
 import { managePaths } from "@/lib/manage-paths";
 import { mayOpenSetup, setupChecklistQueryOptions } from "@/lib/setup/queries";
@@ -45,6 +48,8 @@ type SettingsSidebarItem = {
   exact?: boolean;
   /** Shown only inside OpenBot Desktop, which is what the page reads from. */
   desktopOnly?: boolean;
+  /** Shown only where OpenBot offers memory (see `offersMemory`). */
+  memoryOnly?: boolean;
   icon: React.ComponentType<{ className?: string }>;
   linkOptions: LinkOptions;
   title: string;
@@ -72,6 +77,19 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
     linkOptions: { to: "/settings/routines" },
   },
   {
+    /* What your Bots remember about you. Only where OpenBot offers memory. */
+    title: "Memory",
+    icon: IconBrain,
+    memoryOnly: true,
+    linkOptions: { to: "/settings/memory" },
+  },
+  {
+    /* The skills that are yours, written, taught or learned, and what waits for your review. */
+    title: "Skills",
+    icon: IconBook,
+    linkOptions: { to: "/settings/skills" },
+  },
+  {
     /* Whether Bots ask first, and rules for every Bot. Team settings are an administrator's. */
     title: "Approvals",
     icon: IconChecks,
@@ -82,12 +100,6 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
     title: "Browsers",
     icon: IconBrowser,
     linkOptions: { to: "/settings/browsers" },
-  },
-  {
-    /* Who else's Bots use the Skills learned from your recordings: none, all, or the ones you open. */
-    title: "Learning",
-    icon: IconSchool,
-    linkOptions: { to: "/settings/learning" },
   },
   {
     /* What the deployment has and still needs: onboarding's checklist, to come back to. */
@@ -123,11 +135,6 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
  * connecting it are the same step, on Connections, which also links to the Vault.
  */
 const PERSONAL_SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
-  {
-    title: "Skills",
-    icon: IconBook,
-    linkOptions: { to: "/settings/skills" },
-  },
   {
     title: "Computer",
     icon: IconDeviceDesktop,
@@ -198,7 +205,8 @@ export function SettingsSidebar({
               .filter(
                 (option) =>
                   (!option.setup || canSetUp) &&
-                  (!option.desktopOnly || desktopShell() !== null),
+                  (!option.desktopOnly || desktopShell() !== null) &&
+                  (!option.memoryOnly || offersMemory(capabilities)),
               )
               .map((option) => (
                 <SidebarMenuItem key={option.title}>

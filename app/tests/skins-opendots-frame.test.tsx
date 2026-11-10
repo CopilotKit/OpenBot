@@ -385,7 +385,6 @@ describe("OpenDots frame", () => {
       "/bots/cass",
       "/s/routines", // routines
       "/s/memories", // memory
-      "/capabilities", // skills and memory
       "/connections",
       "/settings", // the skin picker, approvals and reachability
     ]) {
@@ -420,7 +419,6 @@ describe("OpenDots frame", () => {
         "/bots",
         "/s/routines",
         "/s/memories",
-        "/capabilities",
         "/connections",
         "/settings",
       ]) {

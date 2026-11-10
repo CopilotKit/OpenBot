@@ -109,9 +109,9 @@ describe("an address that opened memory", () => {
         page("/bots/$agentId/access", "What it can do"),
         page("/bots/$agentId/routines", "Routines"),
         page("/bots/$agentId/memory", "Bot memory", BotMemoryRoute),
-        page("/capabilities/memory", "Memory", CapabilitiesMemoryRoute),
-        page("/memory", "Old memory", LegacyMemoryRoute),
-        page("/settings/memory", "Old settings memory", SettingsMemoryRoute),
+        page("/capabilities/memory", "Old memory", CapabilitiesMemoryRoute),
+        page("/memory", "Older memory", LegacyMemoryRoute),
+        page("/settings/memory", "Memory", SettingsMemoryRoute),
       ]),
     });
     const view = render(
@@ -138,10 +138,10 @@ describe("an address that opened memory", () => {
     expect(await view.findByText("Routines")).toBeTruthy();
   });
 
-  test("still opens memory in the team edition", async () => {
+  test("still opens memory in the team edition, in Settings", async () => {
     for (const at of ["/capabilities/memory", "/memory", "/settings/memory"]) {
       const { view, path } = await land("team", at);
-      await waitFor(() => expect(path()).toBe("/capabilities/memory"));
+      await waitFor(() => expect(path()).toBe("/settings/memory"));
       expect(await view.findByText("Memory")).toBeTruthy();
       cleanup();
     }
@@ -176,7 +176,7 @@ function drawPage(edition: Edition, Page: ComponentType, at: string) {
 }
 
 describe("the Bots page", () => {
-  test("has Skills and no Memory under What your Bots know in the personal edition", async () => {
+  test("has Skills and no Memory under What your Bots learn in the personal edition", async () => {
     servingNothing();
     // The page reads its search and navigates through its own route, mounted here at `$`.
     const search = spyOn(BotsRoute, "useSearch").mockImplementation(
@@ -188,13 +188,13 @@ describe("the Bots page", () => {
         BotsRoute.options.component as ComponentType,
         "/bots",
       );
-      expect(await view.findByText("What your Bots know")).toBeTruthy();
+      expect(await view.findByText("What your Bots learn")).toBeTruthy();
       expect(view.getByText("Skills").closest("a")?.getAttribute("href")).toBe(
-        "/capabilities/skills",
+        "/settings/skills",
       );
       expect(view.queryByText("Memory")).toBeNull();
       expect(
-        view.container.querySelector('a[href="/capabilities/memory"]'),
+        view.container.querySelector('a[href="/settings/memory"]'),
       ).toBeNull();
     } finally {
       search.mockRestore();

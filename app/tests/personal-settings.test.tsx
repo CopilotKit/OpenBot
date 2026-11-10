@@ -61,7 +61,6 @@ function clientFor(edition: "team" | "personal" | undefined) {
 }
 
 const PERSONAL_ENTRIES = [
-  ["Skills", "/settings/skills"],
   ["Computer", "/settings/computer"],
   ["Activity", "/settings/activity"],
 ] as const;
@@ -101,13 +100,21 @@ describe("the Settings sidebar", () => {
     }
   });
 
-  test("Learning shows in the personal edition's settings", () => {
+  test("Skills is in both editions' settings, and Learning opens it", () => {
     for (const edition of ["personal", "team"] as const) {
-      expect(settingsSidebarItems(edition).map((item) => item.title)).toContain(
-        "Learning",
-      );
+      const titles = settingsSidebarItems(edition).map((item) => item.title);
+      expect(titles).toContain("Skills");
+      expect(titles).not.toContain("Learning");
     }
-    expect(LearningRoute.options.beforeLoad).toBeUndefined();
+    let thrown: unknown;
+    try {
+      (LearningRoute.options.beforeLoad as unknown as () => void)();
+    } catch (error) {
+      thrown = error;
+    }
+    expect((thrown as { options?: { to?: string } }).options?.to).toBe(
+      "/settings/skills",
+    );
   });
 
   test("lists none of it in the team edition", () => {

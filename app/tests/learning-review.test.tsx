@@ -19,12 +19,25 @@ import {
 } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { LearningReview } from "@/components/settings/learning-review";
+import { LearningSharing } from "@/components/settings/learning-sharing";
 import {
   personalLearningQueryOptions,
   personalReviewQueryOptions,
 } from "@/lib/learning/queries";
 import { queryClient } from "@/query-client";
-import { LearningSettingsPage } from "@/routes/_authed/settings/learning";
+
+/**
+ * What Settings → Learning drew: the review and the learned skills. Both are sections of Settings →
+ * Skills now, and these tests read them together as they did there.
+ */
+function LearningSettingsPage() {
+  return (
+    <>
+      <LearningReview />
+      <LearningSharing />
+    </>
+  );
+}
 
 let wasServer = true;
 beforeAll(() => {

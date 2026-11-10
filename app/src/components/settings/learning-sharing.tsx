@@ -108,13 +108,35 @@ const SKILLS_DESCRIPTION: Record<LearningSharingMode, string> = {
   choose: "Open a skill to let every Bot on OpenBot use it.",
 };
 
+/** How a skill was made, beside its title on the Skills page's one list. */
+export function SkillMark({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="font-normal text-muted-foreground text-xs">
+      {children}
+    </span>
+  );
+}
+
 /**
- * Settings, Learning: every recording a person makes goes into their own Learning space, and the Skills learned there
- * reach every Bot they use. Here they choose who else's Bots may draw on them: none (the default), all, or the Skills
- * they open one by one. Each change takes effect when it is made; there is no save. Sharing waits for an administrator
- * (Admin, Automatic learning, Skill sharing): until then nothing can be opened, and what was opened can still be closed.
+ * Settings -> Skills, Your skills: the skills that are the person's, in one list. The page hands in
+ * the rows for the skills they wrote (`written`, each marked Written); this draws them first, then
+ * the Skills learned from their recordings and conversations, each marked Learned.
+ *
+ * Every recording a person makes goes into their own Learning space, and the Skills learned there
+ * reach every Bot they use. In the team edition they also choose, below the list, who else's Bots may
+ * draw on them: none (the default), all, or the Skills they open one by one. Each change takes effect
+ * when it is made; there is no save. Sharing waits for an administrator (Admin, Automatic learning,
+ * Skill sharing): until then nothing can be opened, and what was opened can still be closed.
  */
-export function LearningSharing() {
+export function LearningSharing({
+  written = [],
+  action,
+}: {
+  /** Rows for the skills the person wrote, drawn above the learned ones in the same list. */
+  written?: React.ReactNode[];
+  /** The section's one verb: New skill. */
+  action?: React.ReactNode;
+} = {}) {
   const sharing = useQuery(personalLearningQueryOptions());
   const setMode = useMutation(
     setLearningSharingModeMutationOptions(queryClient),
@@ -147,20 +169,37 @@ export function LearningSharing() {
 
   if (personal) {
     // One person, one computer: nobody to share with, so every row simply opens its Skill.
-    const none = data.skills === null || data.skills.length === 0;
+    const learned = data.skills ?? [];
+    const none = learned.length === 0 && written.length === 0;
     return (
       <PageSection
+        action={action}
         title="Your skills"
         // Said only over skills to open: above the empty state it would point at nothing.
-        description={none ? undefined : "Open a skill to read what it does."}
+        description={
+          none
+            ? undefined
+            : "Type / and a skill's name to give a Bot that instruction. Open one to read or change it."
+        }
       >
-        {data.skills === null || data.skills.length === 0 ? (
-          <PageEmpty>{emptySentence(data, mode, true)}</PageEmpty>
+        {none ? (
+          <PageEmpty>
+            {data.skills === null
+              ? emptySentence(data, mode, true)
+              : "No skills yet. Write one with New skill, or teach a Bot a task."}
+          </PageEmpty>
         ) : (
           <PageRows>
-            {data.skills.map((skill, index) => (
-              <React.Fragment key={skill.name}>
+            {written.map((row, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: the page builds these rows in a fixed order.
+              <React.Fragment key={index}>
                 {index > 0 ? <Separator /> : null}
+                {row}
+              </React.Fragment>
+            ))}
+            {learned.map((skill, index) => (
+              <React.Fragment key={skill.name}>
+                {index > 0 || written.length > 0 ? <Separator /> : null}
                 <Item
                   size="sm"
                   render={
@@ -176,6 +215,7 @@ export function LearningSharing() {
                   <ItemContent>
                     <ItemTitle>
                       {skillTitle(skill.name, skill.description)}
+                      <SkillMark>Learned</SkillMark>
                     </ItemTitle>
                     <ItemDescription>{skill.description}</ItemDescription>
                   </ItemContent>
@@ -197,64 +237,86 @@ export function LearningSharing() {
     );
   }
 
+  // Below the list: it is a choice about the learned skills in it.
+  const choiceSection = (
+    <PageSection
+      title="Who else's Bots use your skills"
+      description={choiceSentence(data)}
+    >
+      <PageRows>
+        {/* One pressed button of three, as Admin, Boundaries draws its enforcement choice. */}
+        {SHARING_CHOICES.map((choice, index) => (
+          <React.Fragment key={choice.mode}>
+            {index > 0 ? <Separator /> : null}
+            <Item
+              size="sm"
+              render={
+                <button
+                  aria-pressed={mode === choice.mode}
+                  disabled={
+                    setMode.isPending ||
+                    (!data.sharingAllowed && choice.mode !== "closed")
+                  }
+                  onClick={() => {
+                    if (mode !== choice.mode) setMode.mutate(choice.mode);
+                  }}
+                  type="button"
+                />
+              }
+            >
+              <ItemMedia variant="icon">
+                <choice.icon />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>{choice.title}</ItemTitle>
+                <ItemDescription className="line-clamp-none">
+                  {choice.description}
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                {mode === choice.mode ? (
+                  <IconCheck
+                    aria-hidden="true"
+                    className="size-4 text-foreground"
+                  />
+                ) : null}
+              </ItemActions>
+            </Item>
+          </React.Fragment>
+        ))}
+      </PageRows>
+    </PageSection>
+  );
+  const learned = data.skills ?? [];
   return (
     <>
       <PageSection
-        title="Who else's Bots use your skills"
-        description={choiceSentence(data)}
-      >
-        <PageRows>
-          {/* One pressed button of three, as Admin, Boundaries draws its enforcement choice. */}
-          {SHARING_CHOICES.map((choice, index) => (
-            <React.Fragment key={choice.mode}>
-              {index > 0 ? <Separator /> : null}
-              <Item
-                size="sm"
-                render={
-                  <button
-                    aria-pressed={mode === choice.mode}
-                    disabled={
-                      setMode.isPending ||
-                      (!data.sharingAllowed && choice.mode !== "closed")
-                    }
-                    onClick={() => {
-                      if (mode !== choice.mode) setMode.mutate(choice.mode);
-                    }}
-                    type="button"
-                  />
-                }
-              >
-                <ItemMedia variant="icon">
-                  <choice.icon />
-                </ItemMedia>
-                <ItemContent>
-                  <ItemTitle>{choice.title}</ItemTitle>
-                  <ItemDescription className="line-clamp-none">
-                    {choice.description}
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  {mode === choice.mode ? (
-                    <IconCheck
-                      aria-hidden="true"
-                      className="size-4 text-foreground"
-                    />
-                  ) : null}
-                </ItemActions>
-              </Item>
-            </React.Fragment>
-          ))}
-        </PageRows>
-      </PageSection>
-      <PageSection
+        action={action}
         title="Your skills"
-        description={SKILLS_DESCRIPTION[data.sharingAllowed ? mode : "closed"]}
+        description={
+          learned.length > 0
+            ? SKILLS_DESCRIPTION[data.sharingAllowed ? mode : "closed"]
+            : written.length > 0
+              ? "Type / and a skill's name to give a Bot that instruction. Only you see yours."
+              : undefined
+        }
       >
-        {data.skills === null || data.skills.length === 0 ? (
-          <PageEmpty>{emptySentence(data, mode, false)}</PageEmpty>
+        {learned.length === 0 && written.length === 0 ? (
+          <PageEmpty>
+            {data.skills === null || data.unavailable === "off"
+              ? emptySentence(data, mode, false)
+              : "No skills yet. Write one with New skill, or teach a Bot a task."}
+          </PageEmpty>
         ) : (
           <PageRows>
-            {data.skills.map((skill, index) => {
+            {written.map((row, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: the page builds these rows in a fixed order.
+              <React.Fragment key={index}>
+                {index > 0 ? <Separator /> : null}
+                {row}
+              </React.Fragment>
+            ))}
+            {learned.map((skill, index) => {
               const open =
                 (setOpen.isPending && setOpen.variables?.name === skill.name
                   ? setOpen.variables.open
@@ -266,7 +328,7 @@ export function LearningSharing() {
                 skill.sharing !== "approved";
               return (
                 <React.Fragment key={skill.name}>
-                  {index > 0 ? <Separator /> : null}
+                  {index > 0 || written.length > 0 ? <Separator /> : null}
                   {mode === "choose" || needsAdmin ? (
                     // The row opens the Skill; the Switch sits beside that button, not inside it.
                     <Item size="sm">
@@ -281,6 +343,7 @@ export function LearningSharing() {
                         <ItemContent>
                           <ItemTitle>
                             {skillTitle(skill.name, skill.description)}
+                            <SkillMark>Learned</SkillMark>
                           </ItemTitle>
                           <ItemDescription>
                             {[
@@ -372,6 +435,7 @@ export function LearningSharing() {
                       <ItemContent>
                         <ItemTitle>
                           {skillTitle(skill.name, skill.description)}
+                          <SkillMark>Learned</SkillMark>
                         </ItemTitle>
                         <ItemDescription>{skill.description}</ItemDescription>
                       </ItemContent>
@@ -392,6 +456,7 @@ export function LearningSharing() {
           source={{ kind: "personal" }}
         />
       </PageSection>
+      {choiceSection}
       {failure ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           {failure.message}

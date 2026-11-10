@@ -10,11 +10,18 @@ describe("settings sidebar", () => {
     expect(titles.indexOf("Browsers")).toBe(titles.indexOf("Approvals") + 1);
   });
 
-  test("Learning links to /settings/learning, right after Browsers", () => {
+  test("Routines, Memory and Skills follow one another, and Learning is part of Skills", () => {
     const titles = SETTINGS_SIDEBAR_ITEMS.map((item) => item.title);
-    const learning = SETTINGS_SIDEBAR_ITEMS[titles.indexOf("Learning")];
+    const at = (title: string) => titles.indexOf(title);
 
-    expect(learning?.linkOptions).toEqual({ to: "/settings/learning" });
-    expect(titles.indexOf("Learning")).toBe(titles.indexOf("Browsers") + 1);
+    expect(at("Memory")).toBe(at("Routines") + 1);
+    expect(at("Skills")).toBe(at("Memory") + 1);
+    expect(SETTINGS_SIDEBAR_ITEMS[at("Memory")]?.linkOptions).toEqual({
+      to: "/settings/memory",
+    });
+    expect(SETTINGS_SIDEBAR_ITEMS[at("Skills")]?.linkOptions).toEqual({
+      to: "/settings/skills",
+    });
+    expect(titles).not.toContain("Learning");
   });
 });

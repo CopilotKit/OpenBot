@@ -270,7 +270,7 @@ function YourSkills({ agentId }: { agentId: string }) {
         <PageEmpty
           action={
             <Button
-              render={(props) => <Link {...props} to="/capabilities/skills" />}
+              render={(props) => <Link {...props} to="/settings/skills" />}
               size="sm"
               variant="outline"
             >

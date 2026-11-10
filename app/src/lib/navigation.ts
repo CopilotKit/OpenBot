@@ -1,7 +1,6 @@
 import {
   type Icon,
   IconBolt,
-  IconBox,
   IconPlug,
   IconSettings,
   IconShieldLock,
@@ -21,18 +20,17 @@ import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
  * `section` says where OpenBot's sidebar puts each entry: `primary` destinations sit in its footer,
  * `account` ones in the menu under the person's name. A skin may group them its own way.
  *
- * Bots, Capabilities and Connections are each somebody's own, which is why they sit beside each
- * other and not inside Admin. Capabilities are your skills and what your Bots remember about you;
- * Connections are the apps a Bot reaches as you, the every-Bot page of Apps. Every Bot's routines
- * are in Settings, with the rest of what is set for every Bot (`docs/how-openbot-works.md`).
- * Capabilities links to `/capabilities` rather than a tab, so it stays lit on both of its tabs.
+ * Bots and Connections are each somebody's own, which is why they sit beside each other and not
+ * inside Admin. Connections is the every-Bot page of Apps: the apps a Bot reaches as you. The rest of
+ * what is set for every Bot (routines, memory, skills, the computer, approvals, activity) is in
+ * Settings, and a Bot's own is on its page (`docs/how-openbot-works.md`).
  */
 export type NavigationItem =
   | {
       kind?: undefined;
-      id: "bots" | "capabilities" | "connections" | "admin" | "settings";
+      id: "bots" | "connections" | "admin" | "settings";
       label: string;
-      to: "/bots" | "/capabilities" | "/connections" | "/admin" | "/settings";
+      to: "/bots" | "/connections" | "/admin" | "/settings";
       icon: Icon;
       section: "primary" | "account";
       /** Admin routes are guarded on the server; the entry is hidden from people who cannot open them. */
@@ -51,7 +49,7 @@ export type NavigationItem =
       section: "account";
     };
 
-/** An entry that is a page. Bots, Capabilities, Connections and Settings always are. */
+/** An entry that is a page. Bots, Connections and Settings always are. */
 export type NavigationLink = Extract<NavigationItem, { to: string }>;
 
 export function isNavigationLink(item: NavigationItem): item is NavigationLink {
@@ -72,13 +70,6 @@ export const NAVIGATION: readonly NavigationItem[] = [
     label: "Bots",
     to: "/bots",
     icon: IconBolt,
-    section: "primary",
-  },
-  {
-    id: "capabilities",
-    label: "Capabilities",
-    to: "/capabilities",
-    icon: IconBox,
     section: "primary",
   },
   {
@@ -107,17 +98,15 @@ export const NAVIGATION: readonly NavigationItem[] = [
 
 /**
  * The destinations this person may open, in order. The personal edition has no Admin: the team
- * features entry takes its place, for everybody, since nobody there administers anybody else. It has
- * no Capabilities either: a person's skills and what their Bots remember are on the Bots page, so
- * there is one place fewer to go.
+ * features entry takes its place, for everybody, since nobody there administers anybody else.
  */
 export function navigationFor(
   role: string | undefined,
   edition: "team" | "personal" = "team",
 ): readonly NavigationItem[] {
   if (edition === "personal") {
-    return NAVIGATION.filter((item) => item.id !== "capabilities").map(
-      (item) => (item.id === "admin" ? TEAM_FEATURES_ITEM : item),
+    return NAVIGATION.map((item) =>
+      item.id === "admin" ? TEAM_FEATURES_ITEM : item,
     );
   }
   return NAVIGATION.filter(

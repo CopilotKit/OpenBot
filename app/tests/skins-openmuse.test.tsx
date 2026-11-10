@@ -768,7 +768,6 @@ describe("every OpenBot surface stays reachable", () => {
     [/^Home$/, "/"],
     // OpenBot's own destinations, from the shared navigation list its sidebar draws.
     [/^Bots$/, "/bots"],
-    [/^Capabilities$/, "/capabilities"],
     [/^Connections$/, "/connections"],
     [/^Admin$/, "/admin"],
     [/^Settings$/, "/settings"],

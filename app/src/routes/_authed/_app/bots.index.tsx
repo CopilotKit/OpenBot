@@ -1,4 +1,9 @@
-import { IconBook, IconChevronRight, IconPlus } from "@tabler/icons-react";
+import {
+  IconBook,
+  IconBrain,
+  IconChevronRight,
+  IconPlus,
+} from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
@@ -18,7 +23,11 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { Separator } from "@/components/ui/separator";
+import {
+  deploymentCapabilitiesQueryOptions,
+  useOffersMemory,
+} from "@/lib/deployment/queries";
 
 /** Just longer than the sheet's 200ms exit, so it has finished sliding away before the page changes. */
 const SHEET_CLOSE_MS = 240;
@@ -56,7 +65,7 @@ function BotsPage() {
       title="Bots"
     >
       <BotRoster />
-      {personal ? <WhatYourBotsKnow /> : null}
+      <WhatYourBotsLearn />
       <NewBotSheet
         onClose={() => void navigate({ search: {} })}
         onCreated={(agentId) => {
@@ -83,22 +92,42 @@ function BotsPage() {
 }
 
 /**
- * Capabilities, in the personal edition, where it is not a page of its own: what a person's Bots
- * know how to do, beneath the Bots themselves. No Memory row: the personal edition has no memory
- * (see `offersMemory`).
+ * Learns, the pair of Memory and Skills, beneath the Bots themselves: what every Bot knows about you
+ * and how to do things. Both are set for every Bot in Settings. No Memory row where OpenBot doesn't
+ * offer memory (see `offersMemory`).
  */
-function WhatYourBotsKnow() {
+function WhatYourBotsLearn() {
+  const memory = useOffersMemory();
   return (
-    <PageSection title="What your Bots know">
+    <PageSection title="What your Bots learn">
       <PageRows>
-        <Item render={<Link to="/capabilities/skills" />} size="sm">
+        {memory ? (
+          <>
+            <Item render={<Link to="/settings/memory" />} size="sm">
+              <ItemMedia variant="icon">
+                <IconBrain />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>Memory</ItemTitle>
+                <ItemDescription>
+                  What your Bots remember about you and your work.
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+              </ItemActions>
+            </Item>
+            <Separator />
+          </>
+        ) : null}
+        <Item render={<Link to="/settings/skills" />} size="sm">
           <ItemMedia variant="icon">
             <IconBook />
           </ItemMedia>
           <ItemContent>
             <ItemTitle>Skills</ItemTitle>
             <ItemDescription>
-              Step-by-step instructions you wrote or your Bots learned.
+              Step-by-step instructions you wrote, taught or your Bots learned.
             </ItemDescription>
           </ItemContent>
           <ItemActions>

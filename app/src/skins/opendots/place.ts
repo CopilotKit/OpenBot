@@ -10,7 +10,7 @@ export type Section =
   | "routines"
   | "memories"
   | "bots"
-  | "capabilities"
+  | "skills"
   | "connections"
   | "other";
 
@@ -106,14 +106,18 @@ export function parsePlace(
   if (path === "/bots" || path === "/agents") {
     return { section: "bots", label: "All Bots", ownsWatch: false };
   }
-  if (path === "/s/routines" || path === "/routines") {
+  if (
+    path === "/s/routines" ||
+    path === "/routines" ||
+    path === "/settings/routines"
+  ) {
     return { section: "routines", label: "Routines", ownsWatch: false };
   }
-  if (path === "/s/memories" || path === "/capabilities/memory") {
+  if (path === "/s/memories" || path === "/settings/memory") {
     return { section: "memories", label: "Memories", ownsWatch: false };
   }
-  if (path.startsWith("/capabilities")) {
-    return { section: "capabilities", label: "Capabilities", ownsWatch: false };
+  if (path.startsWith("/settings/skills")) {
+    return { section: "skills", label: "Skills", ownsWatch: false };
   }
   if (path.startsWith("/connections")) {
     return { section: "connections", label: "Connections", ownsWatch: false };

@@ -30,9 +30,7 @@ function AccessPage() {
       {(agent) => (
         <>
           <AccessSections agent={agent} />
-          {personal ? (
-            <BotApprovalRules agentId={agent.id} />
-          ) : null}
+          {personal ? <BotApprovalRules agentId={agent.id} /> : null}
         </>
       )}
     </BotSubpage>
