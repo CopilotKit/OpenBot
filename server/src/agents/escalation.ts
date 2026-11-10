@@ -159,10 +159,17 @@ export function escalationTool(options: {
   return {
     name: ESCALATE_TOOL,
     ref: `bot/${ESCALATE_TOOL}`,
+    /*
+     * The closed test the prompt's asking section gives, in the same words. This used to say
+     * "Prefer this to guessing" and was offered on every run, which pulled a routine with nobody
+     * watching toward questions instead of a delivered answer with its assumptions said.
+     */
     description:
-      "Put a question to a person when the work needs judgement you do not have: a decision only " +
-      "they can make, a fact only they know, permission you do not hold. Prefer this to guessing, " +
-      "and prefer it to asking another Bot when no other Bot could settle it either. Say what you " +
+      "Put a question to a person only when you cannot go on without them: a wrong guess would " +
+      "send, delete, pay or do something else hard to undo; the possible readings would lead to " +
+      "materially different work; or only they know the answer. Otherwise make the call, say what " +
+      "you assumed, and keep going. Do everything that does not depend on the answer before you " +
+      "ask. Prefer it to asking another Bot when no other Bot could settle it either. Say what you " +
       "need and why, then stop and wait for their answer. Put each decision in `parts`, one " +
       "entry each: one decision is a single entry, and several are separate entries rather than " +
       "numbered inside one sentence. `options` is optional: give it when you can name the likely " +

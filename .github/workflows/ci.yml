@@ -149,7 +149,7 @@ jobs:
       - run: >-
           bun test tests/sign-in.test.ts tests/session-cookies.test.ts tests/follows-popup.test.ts
           tests/webrtc-proxy.test.ts tests/web-bot-auth-browser.test.ts
-          tests/handoff-page-restore.test.ts tests/handback-fresh-look.test.ts tests/enter-text.test.ts tests/person-browser.test.ts tests/person-browser-computer.test.ts
+          tests/handoff-page-restore.test.ts tests/handback-fresh-look.test.ts tests/enter-text.test.ts tests/parallel-actions-computer.test.ts tests/person-browser.test.ts tests/person-browser-computer.test.ts
           tests/bot-browser.test.ts tests/bot-browser-computer.test.ts tests/recorder-capture-pass.test.ts
           tests/screencast-keys-browser.test.ts tests/screencast-pacing-browser.test.ts tests/browser-memory.test.ts
         working-directory: agent-computer
@@ -158,15 +158,14 @@ jobs:
           COMPUTER_BROWSER_MODE: headless
       # The app's real-browser tests, here because this job has the browser: a running step's words
       # under reduced motion, where onboarding's Back lands beside the Mac window's buttons, the name
-      # step's orb drawn whole under the step dashes, and the New Bot sheet's first four frameworks
-      # clearing its footer in an 800px window, and a conversation's rail of turns clear of the Bot's
-      # text, which only a browser's layout resolves. The root playwright-core is the same version as
-      # agent-computer's playwright, so it finds the Chromium installed above. The onboarding frame
-      # reads the generated app config, which `bun test` alone doesn't write (the test script's
-      # pretest does).
+      # step's orb drawn whole under the step dashes, a conversation's rail of turns clear of the
+      # Bot's text, and one frame around an interface drawn in a Card, which only a browser's layout
+      # and cascade resolve. The root playwright-core is the same version as agent-computer's
+      # playwright, so it finds the Chromium installed above. The onboarding frame reads the
+      # generated app config, which `bun test` alone doesn't write (the test script's pretest does).
       - run: |
           bun run generate:app-config
-          bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/new-bot-sheet-fit.test.tsx app/tests/transcript-rail-clearance.test.tsx
+          bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx
         env:
           OPENBOT_APP_BROWSER: '1'
       # Headed is the default for hosted computers, so it is tested as one: the computer starting its
@@ -514,9 +513,10 @@ jobs:
 
   python-harness:
     name: python harness regressions
-    # CPU-bound: main and release runs get a 16-core larger runner (org runner group
-    # openbot-larger, billed per minute); pull requests stay on the free standard runner.
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    # CPU-bound: runs on a 16-core larger runner (org runner group openbot-larger, billed per
+    # minute) for main, releases and pull requests from this repository. Pull requests from forks
+    # stay on the free standard runner.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -668,13 +668,14 @@ jobs:
   # them typecheck, lint and test perfectly.
   image:
     name: image
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     # The only slow job: it builds the container and boots it, ~14 minutes. The four checks above are
     # seconds and stay on every push, because they catch most things cheaply. This one is the cost, so
     # on a pull request it runs only when an admin adds the `full-ci` label — the point at which the PR
     # is actually a merge candidate. On main and through the release workflow_call it always runs, so
     # nothing reaches a release without it. `verify` treats a skipped job as passing, so an unlabelled
-    # PR is green on the cheap checks alone.
+    # PR is green on the cheap checks alone. It runs on the 16-core larger runner everywhere except
+    # pull requests from forks, which stay on the free standard runner.
     if: >-
       github.event_name != 'pull_request' ||
       contains(github.event.pull_request.labels.*.name, 'full-ci')

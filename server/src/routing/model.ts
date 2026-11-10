@@ -16,9 +16,56 @@ import type { RuntimeModel } from "../copilot";
  * chooser offered every tool, the router sent every message to the default Bot, and Auto-review
  * asked the person about everything it was meant to let through.
  */
+/**
+ * There is no key to call the model with, and no plan to call it through.
+ *
+ * Its own class so a caller that has to say so to a person (an admin describing a boundary in
+ * English) can tell "nobody set a model up" from "the model did not answer", which call for different
+ * next steps. The message is the one the other callers have always logged.
+ */
+export class ModelNotConfiguredError extends Error {
+  constructor() {
+    super("no model key");
+    this.name = "ModelNotConfiguredError";
+  }
+}
+
+/** The JSON Schema a call's answer must match, by name, for a provider that can hold it to one. */
+export type ModelAnswerSchema = {
+  name: string;
+  schema: Record<string, unknown>;
+};
+
+export type ModelCallOptions = {
+  /**
+   * Asks the provider for structured output: `response_format` `json_schema` (strict) on Chat
+   * Completions, `output_config.format` on Anthropic's Messages. Without it the call asks for a JSON
+   * object on Chat Completions and nothing on Anthropic, which is what every older caller relies on.
+   *
+   * A model or gateway that refuses the schema answers 400; the call is then made once more without
+   * it, and the prompt's own description of the object has to carry the shape. On a plan there is no
+   * request body to put it in, so the prompt carries it there too.
+   */
+  schema?: ModelAnswerSchema;
+};
+
+export type ModelCompleter = (
+  prompt: string,
+  signal?: AbortSignal,
+  options?: ModelCallOptions,
+) => Promise<string>;
+
 export function createModelCompleter(deps: {
   model: RuntimeModel;
   resolveApiKey: () => Promise<string | null>;
+  /**
+   * How long one call may take. Ten seconds unless a caller says otherwise: the router and the
+   * reviewer sit in front of a person mid-conversation and land softly on a timeout. A caller that
+   * writes something longer for an admin who asked for it, a boundary rule, gives itself more.
+   */
+  timeoutMs?: number;
+  /** Anthropic's output cap. 1024 covers a router's or reviewer's one object. */
+  maxTokens?: number;
   /**
    * A smaller model to ask first, for a call that sits in front of a person waiting. See
    * `routingModelFor`. When it answers with an HTTP error (a key without access to it, a name the
@@ -29,8 +76,9 @@ export function createModelCompleter(deps: {
    * model allowlist) applies to the next call and not the next restart.
    */
   fastModel?: string | (() => string | undefined);
-}): (prompt: string, signal?: AbortSignal) => Promise<string> {
-  return async (prompt: string, signal?: AbortSignal) => {
+}): ModelCompleter {
+  const timeoutMs = deps.timeoutMs ?? 10_000;
+  return async (prompt, signal, options) => {
     if (deps.model.plan) return askPlan(deps.model.plan, prompt, signal);
     const fast =
       typeof deps.fastModel === "function" ? deps.fastModel() : deps.fastModel;
@@ -41,11 +89,15 @@ export function createModelCompleter(deps: {
     signal?.throwIfAborted();
     const key = await deps.resolveApiKey();
     signal?.throwIfAborted();
-    if (!key) throw new Error("no model key");
+    if (!key) throw new ModelNotConfiguredError();
     const anthropic = deps.model.provider === "anthropic";
     let response: Response | undefined;
     for (const model of models) {
-      response = await ask(model, key);
+      response = await ask(model, key, options?.schema);
+      // A model or gateway that cannot hold the answer to a schema says so with a 400. Asked once
+      // more without it, the prompt still describes the object, so the answer is still checked.
+      if (response.status === 400 && options?.schema)
+        response = await ask(model, key);
       if (response.ok) break;
     }
     if (!response?.ok)
@@ -66,7 +118,11 @@ export function createModelCompleter(deps: {
       throw new Error("router model returned no text");
     return content;
 
-    function ask(model: string, key: string): Promise<Response> {
+    function ask(
+      model: string,
+      key: string,
+      schema?: ModelAnswerSchema,
+    ): Promise<Response> {
       return fetch(
         anthropic
           ? anthropicMessagesUrl(process.env)
@@ -96,13 +152,36 @@ export function createModelCompleter(deps: {
              * and the confidence floor still sends an unsure match to the default.
              */
             ...(anthropic
-              ? { max_tokens: 1024 }
-              : { response_format: { type: "json_object" } }),
+              ? {
+                  max_tokens: deps.maxTokens ?? 1024,
+                  ...(schema
+                    ? {
+                        output_config: {
+                          format: {
+                            type: "json_schema",
+                            schema: schema.schema,
+                          },
+                        },
+                      }
+                    : {}),
+                }
+              : {
+                  response_format: schema
+                    ? {
+                        type: "json_schema",
+                        json_schema: {
+                          name: schema.name,
+                          schema: schema.schema,
+                          strict: true,
+                        },
+                      }
+                    : { type: "json_object" },
+                }),
             messages: [{ role: "user", content: prompt }],
           }),
           signal: signal
-            ? AbortSignal.any([signal, AbortSignal.timeout(10_000)])
-            : AbortSignal.timeout(10_000),
+            ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+            : AbortSignal.timeout(timeoutMs),
         },
       );
     }

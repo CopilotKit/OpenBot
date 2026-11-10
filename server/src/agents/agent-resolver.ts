@@ -93,8 +93,14 @@ export type ActorAgentResolverDependencies = {
   markAttachmentsSentForActor?: (actorId: string) => MarkAttachmentsSent;
   acquireLearnedSkills?: AcquireLearnedSkills;
   loadPersonalMemoryForActor?: (actorId: string) => LoadPersonalMemory;
-  /** The model a person picked for the conversation a run answers in. Absent, the deployment's. */
-  pickedModelForActor?: (actorId: string) => PickedModel;
+  /**
+   * The model a person picked for the conversation a run answers in. Absent, the deployment's. Given
+   * what started the run, so a run nobody is watching can think harder (`runModeOf`).
+   */
+  pickedModelForActor?: (
+    actorId: string,
+    initiator?: AuditInitiator,
+  ) => PickedModel;
   /** Writes the row for a run refused for sending more tools than its model accepts. */
   recordToolLimitRefusalForActor?: (
     actorId: string,
@@ -167,7 +173,7 @@ export function createActorAgentResolver(
       deps.loadPersonalMemoryForActor?.(actor.id),
       deps.recordToolLimitRefusalForActor?.(actor.id, context?.initiator),
       context?.holdsTools,
-      deps.pickedModelForActor?.(actor.id),
+      deps.pickedModelForActor?.(actor.id, context?.initiator),
       deps.loadAppsForActor?.(actor.id),
     ).then((agents) => {
       const loadName = deps.loadNameForActor;

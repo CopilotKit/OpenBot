@@ -14,16 +14,24 @@ import {
   type LocalTerms,
   localEvalDownload,
   localEvalTerms,
+  localEvalUpdateStep,
   onInstalledRelease,
   runLocalEval,
   setUpLocalEval,
   signInToCopilotKit,
+  updateStepSaid,
   wakeEngine,
 } from "./localEvalCli";
 import { localReadiness, onInstalledReleaseSaid } from "./localReadiness";
-import { asProblem, Failure, type Problem } from "./Problem";
+import {
+  asProblem,
+  Failure,
+  type Problem,
+  TroubleshootingLogs,
+} from "./Problem";
 import {
   type Downloads,
+  formatElapsed,
   type Progress,
   SetupProgress,
   StatusLine,
@@ -146,6 +154,18 @@ const idle: State = {
 
 /** The row an update that failed is said on, under the back end's. */
 const UPDATING = "Updating the back end";
+
+/**
+ * An update that failed, and where it stopped once the CLI's record says (`failedStep`). Its data
+ * is kept either way: `local update` never deletes it, and the next Start repairs what a stopped
+ * update left and tries again.
+ */
+function updateFailedSaid(to: string, step: string | null): string {
+  const where = step
+    ? ` It stopped at "${updateStepSaid(step)}" (${step}).`
+    : "";
+  return `The back end could not be updated to ${to}.${where} Your data is kept, and OpenBot tries again the next time it starts.`;
+}
 
 export type LocalSequence = State & {
   /** Set up, connected and reported ready and valid, and waiting for the go-ahead to start. */
@@ -338,6 +358,7 @@ export function useLocalSequence({
       "Downloading the back end update",
       updating,
     );
+    const unfollowSteps = followUpdateSteps(started.attempt, token, updating);
     let updated = false;
     let stalled = false;
     try {
@@ -348,6 +369,7 @@ export function useLocalSequence({
         error instanceof LocalEvalError &&
         error.category === "download-stalled";
     } finally {
+      unfollowSteps();
       unfollow();
       if (attempt.current === started.attempt) attempt.current = null;
     }
@@ -359,9 +381,49 @@ export function useLocalSequence({
         ? null
         : stalled
           ? `The back end update stopped downloading, so the back end stays on ${from}. OpenBot continues the download where it left off the next time it starts.`
-          : `The back end could not be updated to ${to}, so it stays on ${from}. OpenBot tries again the next time it starts.`,
+          : updateFailedSaid(to, null),
     });
     return true;
+  }
+
+  /**
+   * While the update `attempt` runs, its row says which step it is in and for how long, once it is
+   * in one that waits: the CLI says nothing while a step runs, and some wait ten minutes. Not while
+   * a download is shown, which says more. Returns what stops it.
+   */
+  function followUpdateSteps(
+    attempt: string,
+    token: number,
+    updating: string,
+  ): () => void {
+    let following = true;
+    let next: ReturnType<typeof setTimeout> | null = null;
+    const current = () => following && generation.current === token;
+    const ask = () => {
+      if (!current()) return;
+      localEvalUpdateStep(attempt)
+        .then(
+          (found) => {
+            if (!current() || !found || now.current.download) return;
+            const job = found.job ? ` (${found.job})` : "";
+            const failed = found.failedJob
+              ? ` The back end's job ${found.failedJob} failed, so this update will stop. The back end's tool waits up to 10 minutes for it first. Your data is kept.`
+              : "";
+            update({
+              detail: `${updating} ${found.said}${job}, ${formatElapsed(found.seconds)}.${failed}`,
+            });
+          },
+          () => {},
+        )
+        .finally(() => {
+          if (current()) next = setTimeout(ask, DOWNLOAD_EVERY_MS);
+        });
+    };
+    ask();
+    return () => {
+      following = false;
+      if (next) clearTimeout(next);
+    };
   }
 
   /**
@@ -388,6 +450,8 @@ export function useLocalSequence({
     // The update ran on a stack found stopped. It starts the cluster itself, so the release the
     // stack had comes back up after a failed one, and is waited on like a stack that is starting.
     let woken = false;
+    // The release an update that just failed was moving to, until the next answer says where.
+    let failedTo: string | null = null;
     for (let tries = 0; ; tries += 1) {
       const found = await report("status");
       if (!found) return null;
@@ -424,8 +488,19 @@ export function useLocalSequence({
           token,
         );
         if (!going) return null;
+        if (
+          now.current.updateFailed === updateFailedSaid(found.updateTo, null)
+        ) {
+          failedTo = found.updateTo;
+        }
         continue;
       }
+      // Where the update that just failed stopped, from the record the CLI kept of it.
+      const failedStep = unfinished?.failedStep;
+      if (failedTo && failedStep) {
+        update({ updateFailed: updateFailedSaid(failedTo, failedStep) });
+      }
+      failedTo = null;
       if (isReady(found)) {
         if (!found.stack) {
           update({ blocked: { said: said("missing-stack"), reason: null } });
@@ -790,6 +865,12 @@ export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
               Retry
             </button>
           </div>
+          <TroubleshootingLogs
+            problem={
+              sequence.problem ??
+              (sequence.blocked ? { said: sequence.blocked.said } : null)
+            }
+          />
         </>
       )}
     </section>

@@ -1,0 +1,4285 @@
+{
+  "note": "Captured read-only on 2026-11-09: every Slack action Composio lists, from GET /api/v3/tools?toolkit_slug=slack&toolkit_versions=latest followed to the last page, in the order Composio sent them. slug, name, description, tags and version are verbatim; input_parameters keeps each argument name and its type and drops the rest of the schema (descriptions, examples, nesting), because the full catalogue is 1.3 MB and nothing reading this fixture looks past an argument name. Vendor catalogue only, no account data. Regenerate rather than hand-edit.",
+  "slack": [
+    {
+      "slug": "SLACK_ADD_CALL_PARTICIPANTS",
+      "name": "Add call participants",
+      "description": "Registers new participants added to a Slack call.",
+      "tags": ["calls", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "users": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "users"]
+      }
+    },
+    {
+      "slug": "SLACK_ADD_EMOJI",
+      "name": "Add emoji",
+      "description": "Adds a custom emoji to a Slack workspace given a unique name and an image URL; subject to workspace emoji limits.",
+      "tags": ["admin", "admin.emoji", "openWorldHint", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": ["name", "url"]
+      }
+    },
+    {
+      "slug": "SLACK_ADD_EMOJI_ALIAS",
+      "name": "Add an emoji alias",
+      "description": "Adds an alias for an existing custom emoji in a Slack Enterprise Grid organization.",
+      "tags": ["admin", "admin.emoji", "openWorldHint", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "alias_for": {
+            "type": "string"
+          }
+        },
+        "required": ["alias_for", "name"]
+      }
+    },
+    {
+      "slug": "SLACK_ADD_ENTERPRISE_USER_TO_WORKSPACE",
+      "name": "Add Enterprise user to workspace",
+      "description": "Adds an Enterprise user to a workspace. Use when you need to assign an existing Enterprise Grid user to a specific workspace with optional guest restrictions.",
+      "tags": ["openWorldHint", "admin.users", "updateHint", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "channel_ids": {
+            "type": "string"
+          },
+          "is_restricted": {
+            "type": "boolean"
+          },
+          "is_ultra_restricted": {
+            "type": "boolean"
+          }
+        },
+        "required": ["team_id", "user_id"]
+      }
+    },
+    {
+      "slug": "SLACK_ADD_REACTION_TO_AN_ITEM",
+      "name": "Add reaction to message",
+      "description": "Adds a specified emoji reaction to a Slack message identified by channel and timestamp. An already-existing reaction is reported as success.",
+      "tags": ["important", "openWorldHint", "reactions", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": ["channel", "name", "timestamp"]
+      }
+    },
+    {
+      "slug": "SLACK_ADD_REMOTE_FILE",
+      "name": "Add a remote file",
+      "description": "Adds a reference to an external file (e.g., Google Drive, Dropbox) to Slack for discovery and sharing, requiring a unique `external_id` and an `external_url` accessible by Slack.",
+      "tags": ["files", "files.remote", "openWorldHint", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "filetype": {
+            "type": "string"
+          },
+          "external_id": {
+            "type": "string"
+          },
+          "external_url": {
+            "type": "string"
+          },
+          "preview_image": {
+            "type": "string"
+          },
+          "indexable_file_contents": {
+            "type": "string"
+          }
+        },
+        "required": ["title", "external_id", "external_url"]
+      }
+    },
+    {
+      "slug": "SLACK_ADD_STAR",
+      "name": "Add a star to an item",
+      "description": "Adds a star to a Slack channel, file, file comment, or message for the authenticated user. Stars added through this method can no longer be viewed or interacted with by end users.",
+      "tags": ["updateHint", "openWorldHint", "stars"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          },
+          "file_comment": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_ADMIN_CONVERSATIONS_SEARCH",
+      "name": "Search for channels in Enterprise organization",
+      "description": "Tool to search for public or private channels in an Enterprise organization. Use when you need to find channels by name, type, or other criteria within an Enterprise Grid workspace.",
+      "tags": ["important", "openWorldHint", "readOnlyHint", "search"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "sort": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "query": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "sort_dir": {
+            "type": "string"
+          },
+          "team_ids": {
+            "type": "string"
+          },
+          "total_count_only": {
+            "type": "boolean"
+          },
+          "connected_team_ids": {
+            "type": "string"
+          },
+          "search_channel_types": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_API_TEST",
+      "name": "Test Slack API connection",
+      "description": "Tool to check API calling code by testing connectivity and authentication to the Slack API. Use when you need to verify that API credentials are valid and the connection is working properly.",
+      "tags": ["openWorldHint", "readOnlyHint", "idempotentHint", "test"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "foo": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_ARCHIVE_CONVERSATION",
+      "name": "Archive a Slack conversation",
+      "description": "Archives a Slack conversation by its ID, rendering it read-only and hidden while retaining history, ideal for cleaning up inactive channels; be aware that some channels (like #general or certain DMs) cannot be archived and this may impact connected integrations.",
+      "tags": [
+        "conversations",
+        "idempotentHint",
+        "openWorldHint",
+        "updateHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_ASSISTANT_SEARCH_CONTEXT",
+      "name": "Real-time search",
+      "description": "Search Slack messages, files, channels, and users via the Real-time Search API, with content-type and conversation filters and pagination.",
+      "tags": [
+        "important",
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint",
+        "search"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "sort": {
+            "type": "string"
+          },
+          "after": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "query": {
+            "type": "string"
+          },
+          "before": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "sort_dir": {
+            "type": "string"
+          },
+          "highlight": {
+            "type": "boolean"
+          },
+          "modifiers": {
+            "type": "string"
+          },
+          "action_token": {
+            "type": "string"
+          },
+          "include_bots": {
+            "type": "boolean"
+          },
+          "term_clauses": {
+            "type": "array"
+          },
+          "channel_types": {
+            "type": "string"
+          },
+          "content_types": {
+            "type": "string"
+          },
+          "context_channel_id": {
+            "type": "string"
+          },
+          "include_deleted_users": {
+            "type": "boolean"
+          },
+          "include_message_blocks": {
+            "type": "boolean"
+          },
+          "disable_semantic_search": {
+            "type": "boolean"
+          },
+          "include_context_messages": {
+            "type": "boolean"
+          },
+          "include_archived_channels": {
+            "type": "boolean"
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "slug": "SLACK_ASSISTANT_SEARCH_INFO",
+      "name": "Check search capabilities",
+      "description": "Check if semantic (AI-powered) search is available on the Slack workspace. Returns whether natural language queries will trigger semantic search in assistant.search.context calls.",
+      "tags": ["readOnlyHint", "idempotentHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_CHAT_POST_MESSAGE",
+      "name": "Send message",
+      "description": "Posts a message to a Slack channel, DM or private group using text, Markdown, blocks or attachments; this action is deprecated. Long converted Markdown may be split into threaded continuation messages, and a continuation failure can leave the initial message posted without all content.",
+      "tags": ["chat", "important", "openWorldHint", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "parse": {
+            "type": "string"
+          },
+          "blocks": {
+            "type": "string"
+          },
+          "mrkdwn": {
+            "type": "boolean"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "thread_ts": {
+            "type": "string"
+          },
+          "link_names": {
+            "type": "boolean"
+          },
+          "attachments": {
+            "type": "string"
+          },
+          "unfurl_links": {
+            "type": "boolean"
+          },
+          "unfurl_media": {
+            "type": "boolean"
+          },
+          "markdown_text": {
+            "type": "string"
+          },
+          "reply_broadcast": {
+            "type": "boolean"
+          }
+        },
+        "required": ["channel"]
+      }
+    },
+    {
+      "slug": "SLACK_CLOSE_DM",
+      "name": "Close conversation channel",
+      "description": "Closes a Slack direct message (DM) or multi-person direct message (MPDM) channel, removing it from the user's sidebar without deleting history; this action affects only the calling user's view.",
+      "tags": ["conversations", "updateHint", "openWorldHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string"
+          }
+        },
+        "required": ["channel"]
+      }
+    },
+    {
+      "slug": "SLACK_COMPLETE_EXTERNAL_FILE_UPLOAD",
+      "name": "Complete external file upload",
+      "description": "Finalize uploaded file IDs once and optionally share the files.",
+      "tags": ["files", "openWorldHint", "updateHint", "destructiveHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array"
+          },
+          "blocks": {
+            "type": "array"
+          },
+          "channels": {
+            "type": "string"
+          },
+          "thread_ts": {
+            "type": "string"
+          },
+          "channel_id": {
+            "type": "string"
+          },
+          "initial_comment": {
+            "type": "string"
+          }
+        },
+        "required": ["files"]
+      }
+    },
+    {
+      "slug": "SLACK_CONVERT_CHANNEL_TO_PRIVATE",
+      "name": "Convert public channel to private",
+      "description": "Convert a public Slack channel to private using the Admin API. This is an Enterprise Grid only feature and requires an org-installed user token with admin.conversations:write scope.",
+      "tags": [
+        "updateHint",
+        "destructiveHint",
+        "idempotentHint",
+        "openWorldHint",
+        "admin.conversations"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "channel_id": {
+            "type": "string"
+          }
+        },
+        "required": ["channel_id"]
+      }
+    },
+    {
+      "slug": "SLACK_CREATE_A_REMINDER",
+      "name": "Create a reminder",
+      "description": "Creates a Slack reminder with specified text and time; time accepts Unix timestamps, seconds from now, or natural language (e.g., 'in 15 minutes', 'every Thursday at 2pm').",
+      "tags": ["important", "openWorldHint", "reminders", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string"
+          },
+          "user": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": ["text", "time"]
+      }
+    },
+    {
+      "slug": "SLACK_CREATE_CANVAS",
+      "name": "Create Slack Canvas",
+      "description": "Creates a new Slack Canvas with the specified title and optional content.",
+      "tags": ["important", "openWorldHint", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "channel_id": {
+            "type": "string"
+          },
+          "document_content": {
+            "type": "object"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_CREATE_CHANNEL",
+      "name": "Create channel",
+      "description": "Initiates a public or private channel-based conversation in a Slack workspace. Immediately creates the channel; invoke only after explicit user confirmation.",
+      "tags": ["conversations", "openWorldHint", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "is_private": {
+            "type": "boolean"
+          }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "slug": "SLACK_CREATE_CHANNEL_BASED_CONVERSATION",
+      "name": "Create a channel-based conversation",
+      "description": "Creates a new public or private Slack channel with a unique name; the channel can be org-wide, or team-specific if `team_id` is given (required if `org_wide` is false or not provided).",
+      "tags": ["admin", "admin.conversations", "openWorldHint", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "org_wide": {
+            "type": "boolean"
+          },
+          "is_private": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": ["is_private", "name"]
+      }
+    },
+    {
+      "slug": "SLACK_CREATE_ENTERPRISE_TEAM",
+      "name": "Create Enterprise team",
+      "description": "Tool to create an Enterprise team in Slack. Use when you need to create a new team (workspace) within an Enterprise Grid organization. Requires admin.teams:write scope.",
+      "tags": ["openWorldHint", "admin.teams", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_name": {
+            "type": "string"
+          },
+          "team_domain": {
+            "type": "string"
+          },
+          "team_description": {
+            "type": "string"
+          },
+          "team_discoverability": {
+            "type": "string"
+          }
+        },
+        "required": ["team_domain", "team_name"]
+      }
+    },
+    {
+      "slug": "SLACK_CREATE_SLACK_LIST",
+      "name": "Create Slack List",
+      "description": "Creates a new Slack List via `slackLists.create`. Provide a `name` and, optionally, a `description_blocks` description and a `schema` of typed columns. You can instead copy an existing List's structure with `copy_from_list_id` (and its rows via `include_copied_list_records`), or enable task-tracking columns with `todo_mode`. Returns the new List's `list_id`. Requires a user token with the `lists:write` scope.",
+      "tags": ["important", "openWorldHint", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "schema": {
+            "type": "array"
+          },
+          "todo_mode": {
+            "type": "boolean"
+          },
+          "copy_from_list_id": {
+            "type": "string"
+          },
+          "description_blocks": {
+            "type": "string"
+          },
+          "include_copied_list_records": {
+            "type": "boolean"
+          }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "slug": "SLACK_CREATE_SLACK_LIST_ITEM",
+      "name": "Create Slack List item",
+      "description": "Creates a new item (row) in a Slack List via `slackLists.items.create`. Set initial cell values with `initial_fields`; text columns require Block Kit `rich_text` (a plain string is wrapped automatically). Optionally duplicate an existing row with `duplicated_item_id` or create a subtask with `parent_item_id`. Requires a user token with the `lists:write` scope.",
+      "tags": ["important", "openWorldHint", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "list_id": {
+            "type": "string"
+          },
+          "initial_fields": {
+            "type": "array"
+          },
+          "parent_item_id": {
+            "type": "string"
+          },
+          "duplicated_item_id": {
+            "type": "string"
+          }
+        },
+        "required": ["list_id"]
+      }
+    },
+    {
+      "slug": "SLACK_CREATE_USER_GROUP",
+      "name": "Create a Slack user group",
+      "description": "Creates a new User Group (often referred to as a subteam) in a Slack workspace.",
+      "tags": ["openWorldHint", "usergroups", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "handle": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "channels": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "include_count": {
+            "type": "boolean"
+          },
+          "enable_section": {
+            "type": "boolean"
+          },
+          "additional_channels": {
+            "type": "string"
+          }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "slug": "SLACK_CUSTOMIZE_URL_UNFURL",
+      "name": "Customize URL unfurl",
+      "description": "Customizes URL unfurls in a posted Slack message or message composer using custom preview content or Work Object metadata. It can also provide authentication prompts for unfurling.",
+      "tags": ["chat", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "ts": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "unfurls": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "string"
+          },
+          "unfurl_id": {
+            "type": "string"
+          },
+          "user_auth_url": {
+            "type": "string"
+          },
+          "user_auth_blocks": {
+            "type": "string"
+          },
+          "user_auth_message": {
+            "type": "string"
+          },
+          "user_auth_required": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_DELETE_CANVAS",
+      "name": "Delete Slack Canvas",
+      "description": "Deletes a Slack Canvas permanently and irreversibly; always confirm with the user before calling. For skill canvases, Slack may return success without deleting the canvas and indicate that the Skills API is required.",
+      "tags": ["important", "openWorldHint", "deleteHint", "destructiveHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "canvas_id": {
+            "type": "string"
+          }
+        },
+        "required": ["canvas_id"]
+      }
+    },
+    {
+      "slug": "SLACK_DELETE_CHANNEL",
+      "name": "Delete a public or private channel",
+      "description": "Permanently and irreversibly deletes a specified public or private channel, including all its messages and files, within a Slack Enterprise Grid organization.",
+      "tags": [
+        "admin",
+        "admin.conversations",
+        "destructiveHint",
+        "openWorldHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "channel_id": {
+            "type": "string"
+          }
+        },
+        "required": ["channel_id"]
+      }
+    },
+    {
+      "slug": "SLACK_DELETE_FILE",
+      "name": "Delete a file by ID",
+      "description": "Permanently deletes an existing file from a Slack workspace using its unique file ID; this action is irreversible and also removes any associated comments or shares.",
+      "tags": ["destructiveHint", "files", "idempotentHint", "openWorldHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          }
+        },
+        "required": ["file"]
+      }
+    },
+    {
+      "slug": "SLACK_DELETE_FILE_COMMENT",
+      "name": "Delete file comment",
+      "description": "Deletes a specific comment from a file in Slack; this action is irreversible.",
+      "tags": ["destructiveHint", "files", "files.comments", "openWorldHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          }
+        },
+        "required": ["file", "id"]
+      }
+    },
+    {
+      "slug": "SLACK_DELETE_MULTIPLE_SLACK_LIST_ITEMS",
+      "name": "Delete multiple Slack List items",
+      "description": "Deletes several items (rows) from a Slack List in one call via `slackLists.items.deleteMultiple`. This operation is ALL-OR-NOTHING: Slack returns a single `{\"ok\": true}` on success or `{\"ok\": false, \"error\": ...}` on failure, with NO per-item result array, so partial state cannot be reported. On failure, treat the whole batch as not deleted and retry the entire batch. Requires a user token with the `lists:write` scope.",
+      "tags": ["important", "openWorldHint", "deleteHint", "destructiveHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array"
+          },
+          "list_id": {
+            "type": "string"
+          }
+        },
+        "required": ["list_id", "ids"]
+      }
+    },
+    {
+      "slug": "SLACK_DELETE_REMINDER",
+      "name": "Delete a Slack reminder",
+      "description": "Deletes an existing Slack reminder, typically when it is no longer relevant or a task is completed; this operation is irreversible.",
+      "tags": ["destructiveHint", "openWorldHint", "reminders"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "reminder": {
+            "type": "string"
+          }
+        },
+        "required": ["reminder"]
+      }
+    },
+    {
+      "slug": "SLACK_DELETES_A_MESSAGE_FROM_A_CHAT",
+      "name": "Delete a message from a chat",
+      "description": "Deletes a message, identified by its channel ID and timestamp, from a Slack channel, private group, or direct message conversation; the authenticated user or bot must be the original poster.",
+      "tags": ["chat", "destructiveHint", "idempotentHint", "openWorldHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "ts": {
+            "type": "string"
+          },
+          "as_user": {
+            "type": "boolean"
+          },
+          "channel": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_DELETE_SCHEDULED_MESSAGE",
+      "name": "Delete scheduled chat message",
+      "description": "Deletes a pending, unsent scheduled message from the specified Slack channel, identified by its `scheduled_message_id`.",
+      "tags": ["chat", "destructiveHint", "idempotentHint", "openWorldHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "as_user": {
+            "type": "boolean"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "scheduled_message_id": {
+            "type": "string"
+          }
+        },
+        "required": ["channel", "scheduled_message_id"]
+      }
+    },
+    {
+      "slug": "SLACK_DELETE_SLACK_LIST_ACCESS",
+      "name": "Delete Slack List access",
+      "description": "Revokes sharing access on a Slack List via `slackLists.access.delete`. Provide the `list_id` and EXACTLY ONE of `channel_ids` or `user_ids` (they are mutually exclusive) to remove access for those channels or users. Requires a user token with the `lists:write` scope.",
+      "tags": ["important", "openWorldHint", "destructiveHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "list_id": {
+            "type": "string"
+          },
+          "user_ids": {
+            "type": "array"
+          },
+          "channel_ids": {
+            "type": "array"
+          }
+        },
+        "required": ["list_id"]
+      }
+    },
+    {
+      "slug": "SLACK_DELETE_SLACK_LIST_ITEM",
+      "name": "Delete Slack List item",
+      "description": "Deletes an item (row) from a Slack List via `slackLists.items.delete`. Identify the List with `list_id` and the row to remove with `id`. Deletion is permanent and cannot be undone. Requires a user token with the `lists:write` scope.",
+      "tags": ["important", "openWorldHint", "deleteHint", "destructiveHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "list_id": {
+            "type": "string"
+          }
+        },
+        "required": ["list_id", "id"]
+      }
+    },
+    {
+      "slug": "SLACK_DELETE_USER_PROFILE_PHOTO",
+      "name": "Delete user profile photo",
+      "description": "Deletes the Slack profile photo for the user identified by the token, reverting them to the default avatar; this action is irreversible and succeeds even if no custom photo was set.",
+      "tags": ["destructiveHint", "openWorldHint", "users", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_DISABLE_USER_GROUP",
+      "name": "Disable a Slack user group",
+      "description": "Disables a specified, currently enabled Slack User Group by its unique ID, effectively archiving it by setting its 'date_delete' timestamp; the group is not permanently deleted and can be re-enabled.",
+      "tags": ["openWorldHint", "usergroups", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "usergroup": {
+            "type": "string"
+          },
+          "include_count": {
+            "type": "boolean"
+          }
+        },
+        "required": ["usergroup"]
+      }
+    },
+    {
+      "slug": "SLACK_DOWNLOAD_SLACK_FILE",
+      "name": "Download Slack file",
+      "description": "Tool to download Slack file content and convert it to a publicly accessible URL. Use when you need to retrieve and download files that have been shared in Slack channels or conversations.",
+      "tags": ["important", "openWorldHint", "readOnlyHint", "files"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          }
+        },
+        "required": ["file"]
+      }
+    },
+    {
+      "slug": "SLACK_EDIT_CANVAS",
+      "name": "Edit Slack Canvas",
+      "description": "Edits a Slack Canvas with granular control over content placement. Supports replace, insert (before/after/start/end) operations for flexible content management.",
+      "tags": ["important", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "canvas_id": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "section_id": {
+            "type": "string"
+          },
+          "title_content": {
+            "type": "object"
+          },
+          "document_content": {
+            "type": "object"
+          }
+        },
+        "required": ["canvas_id"]
+      }
+    },
+    {
+      "slug": "SLACK_ENABLE_PUBLIC_SHARING_OF_A_FILE",
+      "name": "Share file public url",
+      "description": "Enables public sharing for an existing Slack file by generating a publicly accessible URL; this action does not create new files. Once enabled, the file is accessible to anyone with the URL — verify intent before sharing sensitive or confidential files.",
+      "tags": ["files", "idempotentHint", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          }
+        },
+        "required": ["file"]
+      }
+    },
+    {
+      "slug": "SLACK_ENABLE_USER_GROUP",
+      "name": "Enable a user group",
+      "description": "Enables a disabled User Group in Slack using its ID, reactivating it for mentions and permissions; this action only changes the enabled status and cannot create new groups or modify other properties.",
+      "tags": ["idempotentHint", "openWorldHint", "usergroups", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "usergroup": {
+            "type": "string"
+          },
+          "include_count": {
+            "type": "boolean"
+          }
+        },
+        "required": ["usergroup"]
+      }
+    },
+    {
+      "slug": "SLACK_END_CALL",
+      "name": "End a call",
+      "description": "Ends an ongoing Slack call, identified by its ID (obtained from `calls.add`), optionally specifying the call's duration.",
+      "tags": ["calls", "destructiveHint", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "duration": {
+            "type": "integer"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "slug": "SLACK_END_DND",
+      "name": "End DND session",
+      "description": "Ends the authenticated user's current Do Not Disturb (DND) session in Slack, affecting only DND status and making them available; if DND is not active, Slack acknowledges the request without changing status.",
+      "tags": ["dnd", "idempotentHint", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_END_SNOOZE",
+      "name": "End snooze",
+      "description": "Ends the current user's snooze mode immediately.",
+      "tags": ["dnd", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_FETCH_CONVERSATION_HISTORY",
+      "name": "Fetch conversation history",
+      "description": "Fetches a chronological list of messages and events from a specified Slack conversation, accessible by the authenticated user/bot, with options for pagination and time range filtering. IMPORTANT LIMITATION: This action only returns messages from the main channel timeline. Threaded replies are NOT returned by this endpoint. To retrieve threaded replies, use the SLACK_FETCH_MESSAGE_THREAD_FROM_A_CONVERSATION action (conversations.replies API) instead. The oldest/latest timestamp filters work reliably for filtering the main channel timeline, but cannot be used to retrieve individual threaded replies - even if you know the exact reply timestamp, setting oldest=latest to that timestamp will return an empty messages array. To get threaded replies: 1. Use this action to get parent messages (which include thread_ts, reply_count, latest_reply fields) 2. Use SLACK_FETCH_MESSAGE_THREAD_FROM_A_CONVERSATION with the parent's thread_ts to fetch all replies in that thread",
+      "tags": [
+        "conversations",
+        "important",
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "latest": {
+            "type": "string"
+          },
+          "oldest": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "inclusive": {
+            "type": "boolean"
+          },
+          "include_all_metadata": {
+            "type": "boolean"
+          }
+        },
+        "required": ["channel"]
+      }
+    },
+    {
+      "slug": "SLACK_FETCH_ITEM_REACTIONS",
+      "name": "Fetch item reactions",
+      "description": "Fetches reactions for a Slack message, file, or file comment. Exactly one identifier path must be provided: `channel`+`timestamp`, `file`, or `file_comment`. Mixing identifiers (e.g., providing both `channel`+`timestamp` and `file`) causes errors. If the response omits the `reactions` field, the item has zero reactions.",
+      "tags": ["openWorldHint", "reactions", "readOnlyHint", "idempotentHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "full": {
+            "type": "boolean"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          },
+          "file_comment": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_FETCH_MESSAGE_THREAD_FROM_A_CONVERSATION",
+      "name": "Retrieve conversation replies",
+      "description": "Retrieves replies to a specific parent message in a Slack conversation, using the channel ID and the parent message's timestamp (`ts`). Note: The parent message in the response contains metadata (reply_count, reply_users, latest_reply) that indicates expected thread activity. If the returned messages array contains fewer replies than reply_count indicates, check: (1) has_more=true means pagination is needed, (2) recently posted replies may have timing delays, (3) some replies may be filtered by permissions or deleted. The composio_execution_message field will warn about any detected mismatches.",
+      "tags": [
+        "conversations",
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "ts": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "latest": {
+            "type": "string"
+          },
+          "oldest": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "inclusive": {
+            "type": "boolean"
+          },
+          "include_all_metadata": {
+            "type": "boolean"
+          }
+        },
+        "required": ["channel", "ts"]
+      }
+    },
+    {
+      "slug": "SLACK_FETCH_TEAM_INFO",
+      "name": "Fetch team info",
+      "description": "Fetches comprehensive metadata about the current Slack team, or a specified team if the provided ID is accessible.",
+      "tags": ["openWorldHint", "readOnlyHint", "idempotentHint", "team"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_FIND_CHANNELS",
+      "name": "Find channels",
+      "description": "Finds Slack channels and conversations visible to the authenticated user by name, topic or purpose, with partial or exact matching. Searches one page at a time; results depend on conversation type, membership, archive settings and access, with a cursor to continue.",
+      "tags": [
+        "conversations",
+        "search",
+        "important",
+        "readOnlyHint",
+        "idempotentHint",
+        "openWorldHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "query": {
+            "type": "string"
+          },
+          "types": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "exact_match": {
+            "type": "boolean"
+          },
+          "member_only": {
+            "type": "boolean"
+          },
+          "exclude_archived": {
+            "type": "boolean"
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "slug": "SLACK_FIND_USER_BY_EMAIL_ADDRESS",
+      "name": "Lookup users by email",
+      "description": "Retrieves the Slack user object for an active user by their registered email address; requires the users:read.email OAuth scope. Fails with 'users_not_found' if the email is unregistered, the user is inactive, the account is a guest, or the email is hidden by workspace privacy settings.",
+      "tags": ["openWorldHint", "readOnlyHint", "users"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          }
+        },
+        "required": ["email"]
+      }
+    },
+    {
+      "slug": "SLACK_FIND_USERS",
+      "name": "Find users",
+      "description": "Find Slack users by ID, email, name, display name, or other text. General searches filter one page per call and return a cursor; direct ID and exact-email lookup failures may return empty results with a diagnostic message.",
+      "tags": [
+        "users",
+        "search",
+        "important",
+        "readOnlyHint",
+        "idempotentHint",
+        "openWorldHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "exact_match": {
+            "type": "boolean"
+          },
+          "include_bots": {
+            "type": "boolean"
+          },
+          "search_query": {
+            "type": "string"
+          },
+          "include_locale": {
+            "type": "boolean"
+          },
+          "include_deleted": {
+            "type": "boolean"
+          },
+          "include_restricted": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_GET_APP_PERMISSION_SCOPES",
+      "name": "Get app permission scopes",
+      "description": "DEPRECATED: Use SLACK_TEST_AUTH instead. Preflight a Slack token by calling auth.test and returning the token's currently granted OAuth scopes (from response headers) to detect missing permissions before attempting admin actions. Use when you need to verify token capabilities or check for specific scopes before making API calls that require elevated permissions.",
+      "tags": [
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint",
+        "auth",
+        "deprecated"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "required_scopes": {
+            "type": "array"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_GET_AUDIT_ACTION_TYPES",
+      "name": "Get Audit Action Types",
+      "description": "Tool to retrieve information about action types available in the Slack Audit Logs API. Use when you need to know which action types can be used to filter audit logs or understand the categories of auditable actions in Slack.",
+      "tags": ["openWorldHint", "readOnlyHint", "idempotentHint", "audit"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_GET_AUDIT_SCHEMAS",
+      "name": "Get Audit Schemas",
+      "description": "Tool to retrieve object schema information from the Slack Audit Logs API. Use when you need to understand the types of objects returned by audit log endpoints. Returns a list of all object types with descriptions.",
+      "tags": ["openWorldHint", "readOnlyHint", "idempotentHint", "audit"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_GET_BOT_USER",
+      "name": "Fetch bot user information",
+      "description": "Fetches information for a specified, existing Slack bot user; will not work for regular user accounts or other integration types.",
+      "tags": ["bots", "openWorldHint", "readOnlyHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "bot": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_GET_CALL_INFO",
+      "name": "Retrieve call information",
+      "description": "Retrieves a point-in-time snapshot of a specific Slack call's information.",
+      "tags": ["calls", "openWorldHint", "readOnlyHint", "idempotentHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "slug": "SLACK_GET_CANVAS",
+      "name": "Get Slack Canvas (Deprecated)",
+      "description": "Retrieves file metadata for a Slack Canvas by its ID. This action is deprecated and does not retrieve canvas document content.",
+      "tags": ["important", "openWorldHint", "readOnlyHint", "deprecated"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "canvas_id": {
+            "type": "string"
+          }
+        },
+        "required": ["canvas_id"]
+      }
+    },
+    {
+      "slug": "SLACK_GET_CHANNEL_CONVERSATION_PREFERENCES",
+      "name": "Get channel conversation preferences",
+      "description": "Retrieves conversation preferences (e.g., who can post, who can thread) for a specified channel, primarily for use within Slack Enterprise Grid environments.",
+      "tags": ["admin", "admin.conversations", "openWorldHint", "readOnlyHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "channel_id": {
+            "type": "string"
+          }
+        },
+        "required": ["channel_id"]
+      }
+    },
+    {
+      "slug": "SLACK_GET_REMINDER",
+      "name": "Get reminder information",
+      "description": "Retrieves detailed information for an existing Slack reminder specified by its ID; this is a read-only operation.",
+      "tags": ["openWorldHint", "readOnlyHint", "reminders"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "reminder": {
+            "type": "string"
+          }
+        },
+        "required": ["reminder"]
+      }
+    },
+    {
+      "slug": "SLACK_GET_REMOTE_FILE",
+      "name": "Get remote file",
+      "description": "Retrieve information about a remote file added to Slack via the files.remote API. Does not work for standard Slack-hosted file uploads.",
+      "tags": [
+        "files",
+        "files.remote",
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "external_id": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_GET_SLACK_LIST_ITEM",
+      "name": "Get Slack List item",
+      "description": "Fetches a single item (row) from a Slack List via `slackLists.items.info`. Returns the row's `column_id`-keyed typed values along with metadata about the parent List. Set `include_is_subscribed` to also report whether the calling user is subscribed to the row. Requires a user token with the `lists:read` scope.",
+      "tags": ["important", "openWorldHint", "readOnlyHint", "idempotentHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "list_id": {
+            "type": "string"
+          },
+          "include_is_subscribed": {
+            "type": "boolean"
+          }
+        },
+        "required": ["list_id", "id"]
+      }
+    },
+    {
+      "slug": "SLACK_GET_TEAM_PROFILE",
+      "name": "Retrieve team profile details",
+      "description": "Retrieves all profile field definitions for a Slack team, optionally filtered by visibility, to understand the team's profile structure.",
+      "tags": [
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint",
+        "team",
+        "team.profile"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "visibility": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_GET_UNREAD_MESSAGES_FROM_USER",
+      "name": "Get unread messages from user",
+      "description": "Retrieves unread direct messages from a specified user in the authenticated user's DM conversation, checking message history after the last-read timestamp. Opens or resumes the DM and returns matching messages oldest first, with a limit of 25 by default and up to 999.",
+      "tags": [
+        "important",
+        "readOnlyHint",
+        "idempotentHint",
+        "openWorldHint",
+        "messages"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": ["user_id"]
+      }
+    },
+    {
+      "slug": "SLACK_GET_USER_DND_STATUS",
+      "name": "Get team DND status",
+      "description": "Retrieves current Do Not Disturb status for specified Slack users, up to 50 per request.",
+      "tags": ["dnd", "openWorldHint", "readOnlyHint", "idempotentHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "users": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": ["users"]
+      }
+    },
+    {
+      "slug": "SLACK_GET_USER_PRESENCE",
+      "name": "Retrieve user presence",
+      "description": "Retrieves a Slack user's current real-time presence (e.g., 'active', 'away') to determine their availability, noting this action does not provide historical data or status reasons.",
+      "tags": ["openWorldHint", "readOnlyHint", "users"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_GET_WORKSPACE_CONNECTIONS_FOR_CHANNEL",
+      "name": "Get workspace connections for channel",
+      "description": "Tool to get all workspaces a channel is connected to within an Enterprise org. Use when you need to determine which workspaces have access to a specific public or private channel in an Enterprise Grid organization.",
+      "tags": [
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint",
+        "admin.conversations"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "channel_id": {
+            "type": "string"
+          }
+        },
+        "required": ["channel_id"]
+      }
+    },
+    {
+      "slug": "SLACK_GET_WORKSPACE_SETTINGS",
+      "name": "Fetch workspace settings information",
+      "description": "Retrieves detailed settings for a specific Slack workspace, primarily for administrators in an Enterprise Grid organization to view or audit workspace configurations.",
+      "tags": [
+        "admin",
+        "admin.teams.settings",
+        "openWorldHint",
+        "readOnlyHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": ["team_id"]
+      }
+    },
+    {
+      "slug": "SLACK_INVITE_USERS_TO_A_SLACK_CHANNEL",
+      "name": "Invite users to a Slack channel",
+      "description": "Invites users to an existing Slack channel using their Slack user IDs. Slack API failures raise an error, which may include per-user invitation failures.",
+      "tags": ["conversations", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "force": {
+            "type": "boolean"
+          },
+          "users": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_INVITE_USER_TO_CHANNEL",
+      "name": "Invite users to channel",
+      "description": "Invites users to a specified Slack channel; this action is restricted to Enterprise Grid workspaces and requires the authenticated user to be a member of the target channel.",
+      "tags": ["admin", "admin.conversations", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "user_ids": {
+            "type": "string"
+          },
+          "channel_id": {
+            "type": "string"
+          }
+        },
+        "required": ["channel_id", "user_ids"]
+      }
+    },
+    {
+      "slug": "SLACK_INVITE_USER_TO_WORKSPACE",
+      "name": "Invite user to workspace",
+      "description": "Invites a user to a Slack workspace and specified channels by email; use `resend=True` to re-process an existing invitation for a user not yet signed up.",
+      "tags": ["admin", "admin.users", "openWorldHint", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "resend": {
+            "type": "boolean"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "real_name": {
+            "type": "string"
+          },
+          "channel_ids": {
+            "type": "string"
+          },
+          "is_restricted": {
+            "type": "boolean"
+          },
+          "custom_message": {
+            "type": "string"
+          },
+          "guest_expiration_ts": {
+            "type": "string"
+          },
+          "is_ultra_restricted": {
+            "type": "boolean"
+          },
+          "email_password_policy_enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": ["channel_ids", "email", "team_id"]
+      }
+    },
+    {
+      "slug": "SLACK_JOIN_AN_EXISTING_CONVERSATION",
+      "name": "Join conversation by channel id",
+      "description": "Joins an existing Slack conversation (public channel, private channel, or multi-person direct message) by its ID, if the authenticated user has permission. Joining an already-joined channel returns a non-fatal no-op response. Private or restricted channel joins may fail with a permission error.",
+      "tags": ["conversations", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string"
+          }
+        },
+        "required": ["channel"]
+      }
+    },
+    {
+      "slug": "SLACK_LEAVE_A_CONVERSATION",
+      "name": "Leave conversation channel",
+      "description": "(DEPRECATED: use `SLACK_LEAVE_CONVERSATION`) Leaves a Slack conversation given its channel ID; fails if leaving as the last member of a private channel or if used on a Slack Connect channel.",
+      "tags": [
+        "conversations",
+        "idempotentHint",
+        "openWorldHint",
+        "updateHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string"
+          }
+        },
+        "required": ["channel"]
+      }
+    },
+    {
+      "slug": "SLACK_LEAVE_CONVERSATION",
+      "name": "Leave conversation channel",
+      "description": "Leaves a Slack conversation given its channel ID; fails if leaving as the last member of a private channel or if used on a Slack Connect channel.",
+      "tags": [
+        "conversations",
+        "idempotentHint",
+        "openWorldHint",
+        "updateHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string"
+          }
+        },
+        "required": ["channel"]
+      }
+    },
+    {
+      "slug": "SLACK_LIST_ADMIN_APPS_APPROVED",
+      "name": "List approved apps",
+      "description": "Tool to list approved apps for an Enterprise Grid organization or workspace. Use when you need to retrieve the list of apps that have been approved for installation by workspace admins. Requires admin.apps:read scope and a user token from an org owner/admin context.",
+      "tags": ["openWorldHint", "readOnlyHint", "idempotentHint", "admin.apps"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "certified": {
+            "type": "boolean"
+          },
+          "enterprise_id": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_ADMIN_APPS_REQUESTS",
+      "name": "List app requests",
+      "description": "Tool to list pending app installation requests for a team/workspace. Use when you need to see which apps users have requested to install that haven't yet been approved or denied. Requires Enterprise Grid or Business+ plan with admin.apps:read scope.",
+      "tags": ["openWorldHint", "readOnlyHint", "idempotentHint", "admin.apps"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "certified": {
+            "type": "boolean"
+          },
+          "enterprise_id": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_ADMIN_EMOJI",
+      "name": "List admin emoji",
+      "description": "List custom emoji across an Enterprise Grid organization. Use when you need to retrieve all custom emoji for an entire Enterprise Grid org (not just a single workspace). Requires admin.teams:read scope and an admin token. For single workspace emoji, use the regular emoji.list method instead.",
+      "tags": ["openWorldHint", "readOnlyHint", "admin.emoji"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_ALL_CHANNELS",
+      "name": "List all channels",
+      "description": "Lists conversations available to the authenticated user, with filters for conversation type and archived status. Results are paginated; the created field is a Unix timestamp.",
+      "tags": [
+        "conversations",
+        "important",
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "types": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "exclude_archived": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_ALL_USERS",
+      "name": "List all users",
+      "description": "Retrieves a paginated list of all users with profile details, status, and team memberships in a Slack workspace; data may not be real-time. Filter response fields `is_bot`, `is_app_user`, and `deleted` to build human-only rosters. Profile fields like `email` and `phone` may be absent depending on OAuth scopes and workspace privacy settings. Guest/restricted accounts may be omitted based on scopes—do not treat results as a complete directory. High-frequency calls risk HTTP 429; honor the `Retry-After` header and throttle to ~1–2 requests/second. Use stable user IDs rather than display names for mapping. Prefer SLACK_FIND_USERS for targeted lookups; cache results to avoid full-workspace fetches.",
+      "tags": [
+        "important",
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint",
+        "users"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "include_locale": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_APPROVED_WORKSPACE_INVITE_REQUESTS",
+      "name": "List approved workspace invite requests",
+      "description": "List all approved workspace invite requests with pagination support. Use to review which invite requests have been approved and the details of each approval. Requires admin.invites:read scope and Enterprise Grid organization.",
+      "tags": ["openWorldHint", "readOnlyHint", "admin.inviteRequests"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_AUTH_TEAMS",
+      "name": "List authorized teams",
+      "description": "Obtains a paginated list of workspaces your org-wide app has been approved for. Use when you need to discover all workspaces within an organization where the app is installed.",
+      "tags": ["openWorldHint", "readOnlyHint", "idempotentHint", "auth"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "include_icon": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_AVAILABLE_WORKSPACES",
+      "name": "List available workspaces",
+      "description": "Lists a page of Slack workspaces authorized for the connection that also appear in the target user's visible Enterprise Grid memberships. Returns workspace IDs and names with a cursor for further pages; missing membership data yields an empty result.",
+      "tags": [
+        "important",
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint",
+        "auth"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "string"
+          }
+        },
+        "required": ["user"]
+      }
+    },
+    {
+      "slug": "SLACK_LIST_CANVASES",
+      "name": "List Slack Canvases (Deprecated)",
+      "description": "Lists accessible Slack Canvases using page-based pagination and optional channel, user and timestamp filters. This deprecated action's user filter may include canvases accessible to the user, and timestamp filters may not be reliable for canvases.",
+      "tags": ["important", "openWorldHint", "readOnlyHint", "deprecated"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer"
+          },
+          "user": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "ts_to": {
+            "type": "integer"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "ts_from": {
+            "type": "integer"
+          },
+          "show_files_hidden_by_limit": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_CONVERSATIONS",
+      "name": "List conversations",
+      "description": "Lists a page of Slack conversations for a specified user or the authenticated user, with filters for conversation type and archived status. Results contain conversation objects with IDs and may include channel names; access and selected types affect which conversations appear.",
+      "tags": ["openWorldHint", "readOnlyHint", "idempotentHint", "users"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "types": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "exclude_archived": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_CUSTOM_EMOJIS",
+      "name": "List team custom emojis",
+      "description": "Retrieves all custom emojis for the Slack workspace (image URLs or aliases), not standard Unicode emojis; does not include usage statistics or creation dates.",
+      "tags": ["emoji", "openWorldHint", "readOnlyHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "include_categories": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_DENIED_WORKSPACE_INVITE_REQUESTS",
+      "name": "List denied workspace invite requests",
+      "description": "Lists a page of denied workspace invitation requests for review or audit, including available details about who denied them. Use the returned cursor to retrieve further pages.",
+      "tags": [
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint",
+        "admin.inviteRequests"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_ENTERPRISE_TEAMS",
+      "name": "List Enterprise teams",
+      "description": "List all teams (workspaces) in a Slack Enterprise Grid organization with pagination support. Use when you need to retrieve team IDs, names, domains, and metadata for all workspaces in an Enterprise. Requires admin.teams:read scope and Enterprise Grid organization.",
+      "tags": [
+        "important",
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint",
+        "admin.teams"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_FILES_WITH_FILTERS_IN_SLACK",
+      "name": "List Slack files",
+      "description": "Lists files and their metadata within a Slack workspace, filterable by user, channel, timestamp, or type; returns metadata only, not file content. Results are limited to files visible to the authenticated user — files in private channels or restricted to certain members require appropriate membership and permissions. For large workspaces, check `paging.pages` in the response to determine total pages when paginating.",
+      "tags": ["files", "openWorldHint", "readOnlyHint", "idempotentHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "string"
+          },
+          "user": {
+            "type": "string"
+          },
+          "count": {
+            "type": "string"
+          },
+          "ts_to": {
+            "type": "integer"
+          },
+          "types": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "ts_from": {
+            "type": "integer"
+          },
+          "show_files_hidden_by_limit": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_IDP_GROUPS_LINKED_TO_CHANNEL",
+      "name": "List IDP groups linked to channel",
+      "description": "Lists IDP groups that have restricted access to a private Slack channel. Use when you need to see which identity provider groups can access a specific channel.",
+      "tags": ["openWorldHint", "readOnlyHint", "admin.conversations"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "channel_id": {
+            "type": "string"
+          }
+        },
+        "required": ["channel_id"]
+      }
+    },
+    {
+      "slug": "SLACK_LIST_PENDING_WORKSPACE_INVITE_REQUESTS",
+      "name": "List pending workspace invite requests",
+      "description": "Lists pending Slack workspace invite requests, optionally filtered by workspace and paginated. Requires the admin.invites:read scope.",
+      "tags": [
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint",
+        "admin.inviteRequests"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_PINNED_ITEMS",
+      "name": "List pinned items in a channel",
+      "description": "Retrieves all messages and files pinned to a specified channel; the caller must have access to this channel.",
+      "tags": ["openWorldHint", "pins", "readOnlyHint", "idempotentHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string"
+          }
+        },
+        "required": ["channel"]
+      }
+    },
+    {
+      "slug": "SLACK_LIST_REMINDERS",
+      "name": "List reminders",
+      "description": "Lists all reminders with their details for the authenticated Slack user; returns an empty array if no reminders exist (valid state, not an error). Reminder text is not unique—perform client-side matching on returned objects before extracting a reminder ID for use with SLACK_DELETE_A_SLACK_REMINDER.",
+      "tags": ["openWorldHint", "readOnlyHint", "idempotentHint", "reminders"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_REMOTE_FILES",
+      "name": "List remote files",
+      "description": "Retrieve information about a team's remote files.",
+      "tags": [
+        "files",
+        "files.remote",
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "ts_to": {
+            "type": "number"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "ts_from": {
+            "type": "number"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_RESTRICTED_APPS",
+      "name": "List Restricted Apps",
+      "description": "Tool to list restricted apps for an org or workspace. Use when you need to view apps that have been restricted from installation. Requires admin.apps:read scope and appropriate admin permissions.",
+      "tags": ["important", "openWorldHint", "readOnlyHint", "admin.apps"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "certified": {
+            "type": "boolean"
+          },
+          "enterprise_id": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_SCHEDULED_MESSAGES",
+      "name": "List scheduled messages",
+      "description": "Retrieves a list of pending (not yet delivered) messages scheduled in a specific Slack channel, or across all accessible channels if no channel ID is provided, optionally filtered by time and paginated.",
+      "tags": [
+        "chat",
+        "chat.scheduledMessages",
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "latest": {
+            "type": "string"
+          },
+          "oldest": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_SLACK_LIST_ITEMS",
+      "name": "List Slack List items",
+      "description": "Lists the rows (items) in a Slack List via `slackLists.items.list`. Each row exposes `column_id`-keyed typed values (e.g. `rich_text`, `select`, `user`, `date`, `number`); the legacy `key`/`value` fields are deprecated. Results are cursor-paginated—you must paginate using `response_metadata.next_cursor` until it is empty, or rows are silently truncated to the first page. Set `archived=true` to return archived rows instead of active ones. Requires a user token with the `lists:read` scope.",
+      "tags": ["important", "openWorldHint", "readOnlyHint", "idempotentHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "list_id": {
+            "type": "string"
+          },
+          "archived": {
+            "type": "boolean"
+          }
+        },
+        "required": ["list_id"]
+      }
+    },
+    {
+      "slug": "SLACK_LIST_STARRED_ITEMS",
+      "name": "List starred items",
+      "description": "Lists items starred by a user. Returns classic starred items only — does not reflect Slack's 'saved for later' feature. Use SLACK_SEARCH_MESSAGES or SLACK_SEARCH_ALL for broader saved-content queries.",
+      "tags": ["stars", "openWorldHint", "readOnlyHint", "idempotentHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_UNREAD_CHANNEL_MESSAGES",
+      "name": "List unread channel messages",
+      "description": "Lists a page of unread main-timeline messages in a Slack channel for the authenticated user, using the last read position or zero if unavailable. Use the returned cursor to request another page; threaded replies are not included.",
+      "tags": [
+        "important",
+        "readOnlyHint",
+        "idempotentHint",
+        "openWorldHint",
+        "conversations"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "include_all_metadata": {
+            "type": "boolean"
+          }
+        },
+        "required": ["channel"]
+      }
+    },
+    {
+      "slug": "SLACK_LIST_USER_GROUP_MEMBERS",
+      "name": "List all users in a user group",
+      "description": "Retrieves a list of all user IDs within a specified Slack user group, with an option to include users from disabled groups.",
+      "tags": [
+        "openWorldHint",
+        "readOnlyHint",
+        "usergroups",
+        "usergroups.users"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "usergroup": {
+            "type": "string"
+          },
+          "include_disabled": {
+            "type": "boolean"
+          }
+        },
+        "required": ["usergroup"]
+      }
+    },
+    {
+      "slug": "SLACK_LIST_USER_GROUPS",
+      "name": "List user groups",
+      "description": "Lists user groups in a Slack workspace, including user-created and default groups, with options to include disabled groups, user IDs, and member counts.",
+      "tags": ["openWorldHint", "readOnlyHint", "usergroups"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "include_count": {
+            "type": "boolean"
+          },
+          "include_users": {
+            "type": "boolean"
+          },
+          "include_disabled": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_USER_REACTIONS",
+      "name": "List user reactions",
+      "description": "Lists all reactions added by a specific user to messages, files, or file comments in Slack, useful for engagement analysis when the item content itself is not required. Results are paginated; check `response_metadata.next_cursor` and iterate with the `cursor` parameter to retrieve complete reaction history.",
+      "tags": ["openWorldHint", "reactions", "readOnlyHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "full": {
+            "type": "boolean"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "user": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LIST_WORKSPACE_ADMINS",
+      "name": "List workspace admins",
+      "description": "Tool to list all admins on a given Slack workspace. Use when you need to identify workspace administrators. Requires Enterprise Grid organization and admin.teams:read scope.",
+      "tags": ["openWorldHint", "readOnlyHint", "idempotentHint", "admin"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": ["team_id"]
+      }
+    },
+    {
+      "slug": "SLACK_LIST_WORKSPACE_OWNERS",
+      "name": "List workspace owners",
+      "description": "Tool to list all owners on a given Slack workspace. Use when you need to identify workspace ownership or admin structure. Requires admin.teams:read scope.",
+      "tags": ["openWorldHint", "readOnlyHint", "idempotentHint", "team"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": ["team_id"]
+      }
+    },
+    {
+      "slug": "SLACK_LIST_WORKSPACE_USERS",
+      "name": "List admin users",
+      "description": "Retrieves a paginated list of users in an Enterprise Slack organization, optionally filtered to a workspace, activity status or guests.",
+      "tags": ["admin", "admin.users", "openWorldHint", "readOnlyHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "only_guests": {
+            "type": "boolean"
+          },
+          "include_deactivated_user_workspaces": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_LOOKUP_CANVAS_SECTIONS",
+      "name": "Lookup Canvas Sections",
+      "description": "Looks up section IDs in a Slack Canvas for use with targeted edit operations. Section IDs are needed for insert_after, insert_before, delete, and section-specific replace operations.",
+      "tags": ["important", "openWorldHint", "readOnlyHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "criteria": {
+            "type": "object"
+          },
+          "canvas_id": {
+            "type": "string"
+          }
+        },
+        "required": ["canvas_id", "criteria"]
+      }
+    },
+    {
+      "slug": "SLACK_MANUALLY_SET_USER_PRESENCE",
+      "name": "Set user presence",
+      "description": "(DEPRECATED: use `SLACK_SET_USER_PRESENCE`) Manually sets a user's Slack presence, overriding automatic detection; this setting persists across connections but can be overridden by user actions or Slack's auto-away (e.g., after 10 mins of inactivity).",
+      "tags": ["updateHint", "openWorldHint", "users"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "presence": {
+            "type": "string"
+          }
+        },
+        "required": ["presence"]
+      }
+    },
+    {
+      "slug": "SLACK_OPEN_DM",
+      "name": "Open DM",
+      "description": "Opens or resumes a Slack direct message or multi-person direct message using user IDs or an existing conversation ID. Returns the conversation ID and may indicate that the conversation is already open.",
+      "tags": ["conversations", "openWorldHint", "updateHint", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "users": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "return_im": {
+            "type": "boolean"
+          },
+          "prevent_creation": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_PIN_ITEM",
+      "name": "Pin an item to a channel",
+      "description": "Pins a message to a specified Slack channel; the message must not already be pinned.",
+      "tags": ["updateHint", "openWorldHint", "pins"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": ["channel", "timestamp"]
+      }
+    },
+    {
+      "slug": "SLACK_READ_AUDIT_LOGS",
+      "name": "Read Audit Logs",
+      "description": "Reads Slack Enterprise audit logs with filters and pagination. Requires an organization-installed token with auditlogs:read; returned entity details may be incomplete.",
+      "tags": ["important", "openWorldHint", "readOnlyHint", "audit"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "action": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "entity": {
+            "type": "string"
+          },
+          "latest": {
+            "type": "integer"
+          },
+          "oldest": {
+            "type": "integer"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_REMOVE_CALL_PARTICIPANTS",
+      "name": "Remove call participants",
+      "description": "Registers participants removed from a Slack call.",
+      "tags": ["calls", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "users": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "users"]
+      }
+    },
+    {
+      "slug": "SLACK_REMOVE_EMOJI",
+      "name": "Remove emoji",
+      "description": "Tool to remove a custom emoji across an Enterprise Grid organization. Use when you need to delete a custom emoji from the entire organization.",
+      "tags": [
+        "openWorldHint",
+        "destructiveHint",
+        "idempotentHint",
+        "admin.emoji"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "slug": "SLACK_REMOVE_REACTION_FROM_ITEM",
+      "name": "Remove reaction from item",
+      "description": "Removes an emoji reaction from a message, file, or file comment in Slack. Provide exactly one targeting method: channel+timestamp together, file, or file_comment. Mixing methods or omitting all returns invalid_arguments.",
+      "tags": [
+        "destructiveHint",
+        "idempotentHint",
+        "important",
+        "openWorldHint",
+        "reactions",
+        "updateHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          },
+          "file_comment": {
+            "type": "string"
+          }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "slug": "SLACK_REMOVE_REMOTE_FILE",
+      "name": "Remove remote file",
+      "description": "Removes the Slack reference to an external file (which must have been previously added via the remote files API), specified by either its `external_id` or `file` ID (one of which is required), without deleting the actual external file.",
+      "tags": [
+        "destructiveHint",
+        "files",
+        "files.remote",
+        "idempotentHint",
+        "openWorldHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "external_id": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_REMOVE_STAR",
+      "name": "Remove a star from an item",
+      "description": "Removes a star from a previously starred Slack item (message, file, file comment, channel, group, or DM), requiring identification via `file`, `file_comment`, `channel` (for channel/group/DM), or both `channel` and `timestamp` (for a message).",
+      "tags": [
+        "destructiveHint",
+        "idempotentHint",
+        "openWorldHint",
+        "stars",
+        "updateHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          },
+          "file_comment": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_REMOVE_USER_FROM_CONVERSATION",
+      "name": "Remove user from conversation",
+      "description": "Removes a specified user from a Slack conversation (channel); the caller must have permissions to remove users and cannot remove themselves using this action.",
+      "tags": [
+        "conversations",
+        "destructiveHint",
+        "idempotentHint",
+        "openWorldHint",
+        "updateHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_REMOVE_USER_FROM_WORKSPACE",
+      "name": "Remove user from workspace",
+      "description": "Tool to remove a user from a Slack workspace. Use when you need to revoke a user's access to a workspace.",
+      "tags": ["openWorldHint", "destructiveHint", "admin.users"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": ["team_id", "user_id"]
+      }
+    },
+    {
+      "slug": "SLACK_RENAME_CONVERSATION",
+      "name": "Rename a conversation",
+      "description": "Renames a Slack channel, automatically adjusting the new name to meet naming conventions (e.g., converting to lowercase), which may affect integrations using the old name.",
+      "tags": ["conversations", "updateHint", "openWorldHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_RENAME_EMOJI",
+      "name": "Rename an emoji",
+      "description": "Renames an existing custom emoji in a Slack workspace, updating all its instances.",
+      "tags": ["admin", "admin.emoji", "updateHint", "openWorldHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "new_name": {
+            "type": "string"
+          }
+        },
+        "required": ["name", "new_name"]
+      }
+    },
+    {
+      "slug": "SLACK_RESERVE_FILE_UPLOAD",
+      "name": "Reserve Slack file upload",
+      "description": "Reserve a temporary Slack upload URL without uploading bytes. Upload the exact bytes to the returned URL, then call Slack's files.completeUploadExternal method; Slack aborts reservations that are not completed.",
+      "tags": ["files", "openWorldHint", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "length": {
+            "type": "integer"
+          },
+          "alt_txt": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "snippet_type": {
+            "type": "string"
+          }
+        },
+        "required": ["filename", "length"]
+      }
+    },
+    {
+      "slug": "SLACK_RESET_USER_SESSIONS",
+      "name": "Reset user sessions",
+      "description": "Resets a user's Slack sessions to force re-authentication, with optional filters to expire only mobile or only web sessions.",
+      "tags": [
+        "openWorldHint",
+        "destructiveHint",
+        "admin.users.session",
+        "updateHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "string"
+          },
+          "web_only": {
+            "type": "boolean"
+          },
+          "mobile_only": {
+            "type": "boolean"
+          }
+        },
+        "required": ["user_id"]
+      }
+    },
+    {
+      "slug": "SLACK_RESTRICT_APP_INSTALLATION",
+      "name": "Restrict app installation",
+      "description": "Restrict an app for installation on a workspace. Use when you need to prevent an app from being installed on a specific workspace or enterprise organization.",
+      "tags": ["openWorldHint", "updateHint", "admin.apps"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "app_id": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "enterprise_id": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_RETRIEVE_A_USER_S_IDENTITY_DETAILS",
+      "name": "Retrieve a user's identity details",
+      "description": "Retrieves the authenticated user's and their team's identity, with details varying based on OAuth scopes (e.g., `identity.basic`, `identity.email`, `identity.avatar`).",
+      "tags": ["openWorldHint", "readOnlyHint", "idempotentHint", "users"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_RETRIEVE_CONVERSATION_INFORMATION",
+      "name": "Retrieve conversation information",
+      "description": "Retrieves metadata for a Slack conversation by ID, including name, purpose and creation date, with options for member count and locale. Returned fields vary by conversation type and access.",
+      "tags": [
+        "conversations",
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string"
+          },
+          "include_locale": {
+            "type": "boolean"
+          },
+          "include_num_members": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_RETRIEVE_CONVERSATION_MEMBERS_LIST",
+      "name": "Get conversation members",
+      "description": "Retrieves a paginated list of active member IDs (not names, emails, or presence) for a specified Slack public channel, private channel, DM, or MPIM. Returns only user IDs; use a user-lookup tool to enrich member data.",
+      "tags": [
+        "conversations",
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_RETRIEVE_CURRENT_USER_DND_STATUS",
+      "name": "Retrieve user DND status",
+      "description": "Retrieves a Slack user's current Do Not Disturb (DND) status to determine their availability before interaction; any specified user ID must be a valid Slack user ID.",
+      "tags": ["dnd", "openWorldHint", "readOnlyHint", "idempotentHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_RETRIEVE_DETAILED_INFORMATION_ABOUT_A_FILE",
+      "name": "Retrieve detailed file information",
+      "description": "Retrieves detailed metadata and paginated comments for a specific Slack file ID; does not download file content.",
+      "tags": ["files", "openWorldHint", "readOnlyHint", "idempotentHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          }
+        },
+        "required": ["file"]
+      }
+    },
+    {
+      "slug": "SLACK_RETRIEVE_DETAILED_USER_INFORMATION",
+      "name": "Retrieve detailed user information",
+      "description": "Retrieves comprehensive information for a valid Slack user ID, excluding message history and channel memberships. Sensitive fields like `email` and `phone` require the `users:read.email` scope and may be silently omitted based on workspace privacy policies.",
+      "tags": ["openWorldHint", "readOnlyHint", "idempotentHint", "users"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": "string"
+          },
+          "include_locale": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_RETRIEVE_MESSAGE_PERMALINK_URL",
+      "name": "Retrieve message permalink",
+      "description": "Retrieves a permalink URL for a specific message in a Slack channel or conversation; the permalink respects Slack's privacy settings.",
+      "tags": ["chat", "openWorldHint", "readOnlyHint", "idempotentHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string"
+          },
+          "message_ts": {
+            "type": "string"
+          }
+        },
+        "required": ["channel", "message_ts"]
+      }
+    },
+    {
+      "slug": "SLACK_RETRIEVE_USER_PROFILE_INFORMATION",
+      "name": "Retrieve user profile information",
+      "description": "Retrieves profile information for a specified Slack user (defaults to the authenticated user if `user` ID is omitted); a provided `user` ID must be valid. Sensitive fields like email and phone may be silently omitted if required scopes (e.g., `users:read.email`) are not granted or workspace privacy policies restrict access.",
+      "tags": [
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint",
+        "users",
+        "users.profile"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": "string"
+          },
+          "include_labels": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_REVOKE_FILE_PUBLIC_SHARING",
+      "name": "Revoke a file's public url",
+      "description": "Revokes public or external sharing access for a Slack file by its file ID.",
+      "tags": [
+        "destructiveHint",
+        "files",
+        "idempotentHint",
+        "openWorldHint",
+        "updateHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          }
+        },
+        "required": ["file"]
+      }
+    },
+    {
+      "slug": "SLACK_RTM_CONNECT",
+      "name": "Start RTM session",
+      "description": "Starts a Real Time Messaging session and returns a WebSocket URL. Use when you need to establish a persistent RTM connection to receive real-time events from Slack.",
+      "tags": ["openWorldHint", "rtm", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "presence_sub": {
+            "type": "boolean"
+          },
+          "batch_presence_aware": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_RTM_START",
+      "name": "Start RTM session",
+      "description": "Starts a legacy Slack Real Time Messaging session via rtm.start and returns connection information. The method is deprecated, returns the rtm.connect response for existing apps, and is unavailable to newly created apps.",
+      "tags": ["openWorldHint", "rtm", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "no_latest": {
+            "type": "boolean"
+          },
+          "mpim_aware": {
+            "type": "boolean"
+          },
+          "no_unreads": {
+            "type": "boolean"
+          },
+          "presence_sub": {
+            "type": "boolean"
+          },
+          "simple_latest": {
+            "type": "boolean"
+          },
+          "include_locale": {
+            "type": "boolean"
+          },
+          "batch_presence_aware": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_SCHEDULE_MESSAGE",
+      "name": "Schedule message",
+      "description": "Schedules a message to a Slack channel, DM, or private group for a future time, up to 120 days in advance. Content can be supplied as Markdown, text, blocks, or attachments; Markdown is converted to blocks.",
+      "tags": ["chat", "createHint", "important", "openWorldHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "parse": {
+            "type": "string"
+          },
+          "blocks": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "post_at": {
+            "type": "string"
+          },
+          "thread_ts": {
+            "type": "string"
+          },
+          "link_names": {
+            "type": "boolean"
+          },
+          "attachments": {
+            "type": "string"
+          },
+          "unfurl_links": {
+            "type": "boolean"
+          },
+          "unfurl_media": {
+            "type": "boolean"
+          },
+          "markdown_text": {
+            "type": "string"
+          },
+          "reply_broadcast": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_SCIM_GET_CONFIG",
+      "name": "Get SCIM service provider configuration",
+      "description": "Tool to retrieve SCIM service provider configuration from Slack. Use when you need to discover Slack's SCIM API capabilities including supported authentication schemes, bulk operations, filtering, and other service provider features.",
+      "tags": ["openWorldHint", "readOnlyHint", "idempotentHint", "scim"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_SEARCH_ALL",
+      "name": "Search all content",
+      "description": "Tool to search all messages and files. Use when you need unified content search across channels and files in one call. Results are scoped to content visible to the authenticated token; missing hits in private or restricted channels reflect permission/membership gaps. Response separates messages and files into distinct sections — explicitly read the files section for document results. Results are index-based and may lag several minutes behind real-time; use SLACK_FETCH_CONVERSATION_HISTORY for near-real-time per-channel coverage. Paginated searches exceeding ~1 req/sec may return HTTP 429 too_many_requests; honor the Retry-After header and resume from the last page.",
+      "tags": ["important", "search", "readOnlyHint", "idempotentHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer"
+          },
+          "sort": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "query": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "sort_dir": {
+            "type": "string"
+          },
+          "highlight": {
+            "type": "boolean"
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "slug": "SLACK_SEARCH_FILES",
+      "name": "Search Slack files",
+      "description": "Search files visible to the connected Slack user by text and modifiers.",
+      "tags": [
+        "files",
+        "search",
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer"
+          },
+          "sort": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "query": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "sort_dir": {
+            "type": "string"
+          },
+          "highlight": {
+            "type": "boolean"
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "slug": "SLACK_SEARCH_MESSAGES",
+      "name": "Search messages",
+      "description": "Workspace‑wide Slack message search with date ranges and filters. Use `query` modifiers (e.g., in:#channel, from:@user, before/after:YYYY-MM-DD), sorting (score/timestamp), and pagination.",
+      "tags": [
+        "important",
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint",
+        "search"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer"
+          },
+          "sort": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "query": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "sort_dir": {
+            "type": "string"
+          },
+          "highlight": {
+            "type": "boolean"
+          },
+          "auto_paginate": {
+            "type": "boolean"
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "slug": "SLACK_SEND_EPHEMERAL_MESSAGE",
+      "name": "Send ephemeral message",
+      "description": "Sends an ephemeral message visible only to the specified `user` in a channel; other channel members cannot see it. Both the bot and the target user must be members of the specified channel.",
+      "tags": ["chat", "openWorldHint", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "user": {
+            "type": "string"
+          },
+          "parse": {
+            "type": "string"
+          },
+          "blocks": {
+            "type": "string"
+          },
+          "as_user": {
+            "type": "boolean"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "icon_url": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "thread_ts": {
+            "type": "string"
+          },
+          "icon_emoji": {
+            "type": "string"
+          },
+          "link_names": {
+            "type": "boolean"
+          },
+          "attachments": {
+            "type": "string"
+          },
+          "markdown_text": {
+            "type": "string"
+          }
+        },
+        "required": ["channel", "user"]
+      }
+    },
+    {
+      "slug": "SLACK_SEND_ME_MESSAGE",
+      "name": "Share a me message in a channel",
+      "description": "Sends a 'me message' (e.g., '/me is typing') to a Slack channel, where it's displayed as a third-person user action; messages are plain text and the channel must exist and be accessible.",
+      "tags": ["chat", "openWorldHint", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_SEND_MESSAGE",
+      "name": "Send message",
+      "description": "Posts a message to a Slack channel, DM, or private group. Provide exactly one visible content mode: `markdown_text` for normal Markdown content, or `blocks` for raw Slack Block Kit layouts. Use `fallback_text` only with `blocks`; it maps to Slack's top-level `text` fallback. Fails with `not_in_channel`, `channel_not_found`, or `channel_is_archived` if the bot lacks access. Rate-limited at ~1 req/sec (HTTP 429, honor `Retry-After`). Not idempotent — duplicate calls post duplicate messages.",
+      "tags": ["chat", "important", "openWorldHint", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "blocks": {
+            "type": "array"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "thread_ts": {
+            "type": "string"
+          },
+          "unfurl_links": {
+            "type": "boolean"
+          },
+          "unfurl_media": {
+            "type": "boolean"
+          },
+          "fallback_text": {
+            "type": "string"
+          },
+          "markdown_text": {
+            "type": "string"
+          },
+          "reply_broadcast": {
+            "type": "boolean"
+          }
+        },
+        "required": ["channel"]
+      }
+    },
+    {
+      "slug": "SLACK_SET_ADMIN_USER",
+      "name": "Set admin user",
+      "description": "Sets an existing regular user or owner as an admin in a Slack workspace.",
+      "tags": ["openWorldHint", "updateHint", "admin.users"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": ["team_id", "user_id"]
+      }
+    },
+    {
+      "slug": "SLACK_SET_CONVERSATION_PREFS",
+      "name": "Set conversation preferences",
+      "description": "Sets the posting permissions for a public or private channel in Slack. Use this to control who can post messages, start threads, use @channel/@here mentions, and initiate huddles in a specific channel.",
+      "tags": ["openWorldHint", "updateHint", "admin.conversations"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "prefs": {
+            "type": "string"
+          },
+          "channel_id": {
+            "type": "string"
+          }
+        },
+        "required": ["channel_id", "prefs"]
+      }
+    },
+    {
+      "slug": "SLACK_SET_CONVERSATION_PURPOSE",
+      "name": "Set a conversation's purpose",
+      "description": "Sets the purpose (a short description of its topic/goal, displayed in the header) for a Slack conversation; the calling user must be a member.",
+      "tags": ["conversations", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_SET_DEFAULT_CHANNELS",
+      "name": "Set default channels",
+      "description": "Tool to set the default channels of a workspace. Use when you need to configure which channels new members automatically join.",
+      "tags": ["openWorldHint", "updateHint", "admin.teams.settings"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "channel_ids": {
+            "type": "string"
+          }
+        },
+        "required": ["team_id", "channel_ids"]
+      }
+    },
+    {
+      "slug": "SLACK_SET_DND_DURATION",
+      "name": "Set DND duration",
+      "description": "Turns on Do Not Disturb mode for the current user, or changes its duration.",
+      "tags": ["dnd", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "num_minutes": {
+            "type": "string"
+          }
+        },
+        "required": ["num_minutes"]
+      }
+    },
+    {
+      "slug": "SLACK_SET_PROFILE_PHOTO",
+      "name": "Set profile photo",
+      "description": "This method allows the user to set their profile image.",
+      "tags": ["users", "users.profile", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "image": {
+            "type": "object"
+          },
+          "crop_w": {
+            "type": "integer"
+          },
+          "crop_x": {
+            "type": "integer"
+          },
+          "crop_y": {
+            "type": "integer"
+          }
+        },
+        "required": ["image"]
+      }
+    },
+    {
+      "slug": "SLACK_SET_READ_CURSOR_IN_A_CONVERSATION",
+      "name": "Set conversation read cursor",
+      "description": "Marks a message, specified by its timestamp (`ts`), as the most recently read for the authenticated user in the given `channel`, provided the user is a member of the channel and the message exists within it.",
+      "tags": ["conversations", "updateHint", "openWorldHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "ts": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_SET_SLACK_LIST_ACCESS",
+      "name": "Set Slack List access",
+      "description": "Grants or sets sharing access on a Slack List via `slackLists.access.set`. Grant `read`, `write`, or `owner` access to either channels (`channel_ids`) or users (`user_ids`) — exactly one of the two is required. The `owner` level is user-only and subject to additional server-side rules. Requires a user token with the `lists:write` scope.",
+      "tags": ["important", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "list_id": {
+            "type": "string"
+          },
+          "user_ids": {
+            "type": "array"
+          },
+          "channel_ids": {
+            "type": "array"
+          },
+          "access_level": {
+            "type": "string"
+          }
+        },
+        "required": ["list_id", "access_level"]
+      }
+    },
+    {
+      "slug": "SLACK_SET_STATUS",
+      "name": "Set Slack user profile information",
+      "description": "(DEPRECATED: use `SLACK_SET_USER_PROFILE`) Updates a Slack user's profile, setting either individual fields or multiple fields via a JSON object.",
+      "tags": ["openWorldHint", "updateHint", "users", "users.profile"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "user": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_SET_THE_TOPIC_OF_A_CONVERSATION",
+      "name": "Set conversation topic",
+      "description": "Sets or updates the topic for a specified Slack conversation.",
+      "tags": ["conversations", "updateHint", "openWorldHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_SET_USER_ACTIVE",
+      "name": "Mark user as active",
+      "description": "Tool to mark a user as active in Slack. Note: This endpoint is deprecated and non-functional - it exists for backwards compatibility but does not perform any action.",
+      "tags": ["openWorldHint", "users", "readOnlyHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_SET_USER_PRESENCE",
+      "name": "Set user presence",
+      "description": "Manually sets a user's Slack presence, overriding automatic detection; this setting persists across connections but can be overridden by user actions or Slack's auto-away (e.g., after 10 mins of inactivity).",
+      "tags": ["updateHint", "openWorldHint", "users"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "presence": {
+            "type": "string"
+          }
+        },
+        "required": ["presence"]
+      }
+    },
+    {
+      "slug": "SLACK_SET_USER_PROFILE",
+      "name": "Set Slack user profile information",
+      "description": "Updates a Slack user's profile, setting either individual fields or multiple fields via a JSON object.",
+      "tags": ["openWorldHint", "updateHint", "users", "users.profile"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "user": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_SET_WORKSPACE_DESCRIPTION",
+      "name": "Set workspace description",
+      "description": "Set the description of a given workspace. Use when you need to update or change the description text displayed for a Slack workspace.",
+      "tags": ["openWorldHint", "updateHint", "admin.teams.settings"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": ["team_id", "description"]
+      }
+    },
+    {
+      "slug": "SLACK_SET_WORKSPACE_ICON",
+      "name": "Set workspace icon",
+      "description": "Sets the icon of a workspace. Use when you need to update or change the workspace icon image. The image must be publicly accessible and in a supported format (GIF, PNG, JPG, JPEG, HEIC, or HEIF).",
+      "tags": ["openWorldHint", "updateHint", "admin.teams.settings"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "image_url": {
+            "type": "string"
+          }
+        },
+        "required": ["team_id", "image_url"]
+      }
+    },
+    {
+      "slug": "SLACK_SET_WORKSPACE_NAME",
+      "name": "Set workspace name",
+      "description": "Set the name of a given Slack workspace. Use when you need to update the display name for a workspace in an Enterprise Grid organization.",
+      "tags": ["openWorldHint", "updateHint", "admin.teams.settings"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        },
+        "required": ["team_id", "name"]
+      }
+    },
+    {
+      "slug": "SLACK_SET_WORKSPACE_OWNER",
+      "name": "Set workspace owner",
+      "description": "Set an existing guest, regular user, or admin user to be a workspace owner. Use when you need to promote a workspace member to owner status. Requires an Enterprise Grid workspace.",
+      "tags": ["openWorldHint", "updateHint", "admin.users"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": ["team_id", "user_id"]
+      }
+    },
+    {
+      "slug": "SLACK_SET_WORKSPACES_FOR_CHANNEL",
+      "name": "Set workspaces for channel",
+      "description": "Set the workspaces in an Enterprise grid org that connect to a channel. Use when you need to share a public or private channel with specific workspaces in an Enterprise Grid organization.",
+      "tags": ["openWorldHint", "updateHint", "admin.conversations"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "channel_id": {
+            "type": "string"
+          },
+          "org_channel": {
+            "type": "boolean"
+          },
+          "target_team_ids": {
+            "type": "string"
+          }
+        },
+        "required": ["channel_id"]
+      }
+    },
+    {
+      "slug": "SLACK_SHARE_REMOTE_FILE",
+      "name": "Share a remote file in channels",
+      "description": "Shares a remote file, which must already be registered with Slack, into specified Slack channels or direct message conversations.",
+      "tags": ["files", "files.remote", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "channels": {
+            "type": "string"
+          },
+          "external_id": {
+            "type": "string"
+          }
+        },
+        "required": ["channels"]
+      }
+    },
+    {
+      "slug": "SLACK_START_CALL",
+      "name": "Start call",
+      "description": "Registers a new call in Slack using `calls.add` for third-party call integration; `created_by` is required if not using a user-specific token.",
+      "tags": ["calls", "openWorldHint", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "users": {
+            "type": "string"
+          },
+          "join_url": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "date_start": {
+            "type": "integer"
+          },
+          "external_unique_id": {
+            "type": "string"
+          },
+          "external_display_id": {
+            "type": "string"
+          },
+          "desktop_app_join_url": {
+            "type": "string"
+          }
+        },
+        "required": ["external_unique_id", "join_url"]
+      }
+    },
+    {
+      "slug": "SLACK_TEST_AUTH",
+      "name": "Test authentication",
+      "description": "Checks authentication and tells you who you are. Use to verify Slack API authentication is functional and to retrieve identity information about the authenticated user or bot.",
+      "tags": [
+        "important",
+        "openWorldHint",
+        "readOnlyHint",
+        "idempotentHint",
+        "auth"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_UNARCHIVE_CHANNEL",
+      "name": "Unarchive channel",
+      "description": "Reverses conversation archival.",
+      "tags": ["conversations", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string"
+          }
+        },
+        "required": ["channel"]
+      }
+    },
+    {
+      "slug": "SLACK_UNPIN_ITEM",
+      "name": "Unpin message from channel",
+      "description": "Unpins a message, identified by its timestamp, from a specified channel if the message is currently pinned there; this operation is destructive.",
+      "tags": [
+        "destructiveHint",
+        "idempotentHint",
+        "openWorldHint",
+        "pins",
+        "updateHint"
+      ],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": ["channel", "timestamp"]
+      }
+    },
+    {
+      "slug": "SLACK_UPDATE_CALL_INFO",
+      "name": "Update call information",
+      "description": "Updates the title, join URL, or desktop app join URL for an existing Slack call identified by its ID.",
+      "tags": ["calls", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "join_url": {
+            "type": "string"
+          },
+          "desktop_app_join_url": {
+            "type": "string"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "slug": "SLACK_UPDATE_REMOTE_FILE",
+      "name": "Update an existing remote file",
+      "description": "Updates metadata or content details for an existing remote file in Slack; this action cannot upload new files or change the fundamental file type.",
+      "tags": ["files", "files.remote", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "filetype": {
+            "type": "string"
+          },
+          "external_id": {
+            "type": "string"
+          },
+          "external_url": {
+            "type": "string"
+          },
+          "preview_image": {
+            "type": "string"
+          },
+          "indexable_file_contents": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_UPDATES_A_SLACK_MESSAGE",
+      "name": "Update a Slack message",
+      "description": "Updates a Slack message by timestamp. Provide exactly one visible content mode: `markdown_text` for normal Markdown content, or `blocks` for raw Slack Block Kit layouts. Use `fallback_text` only with `blocks`; it maps to Slack's top-level `text` fallback.",
+      "tags": ["chat", "updateHint", "important", "openWorldHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "ts": {
+            "type": "string"
+          },
+          "blocks": {
+            "type": "array"
+          },
+          "as_user": {
+            "type": "boolean"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "file_ids": {
+            "type": "array"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "fallback_text": {
+            "type": "string"
+          },
+          "markdown_text": {
+            "type": "string"
+          },
+          "reply_broadcast": {
+            "type": "boolean"
+          }
+        },
+        "required": ["channel", "ts"]
+      }
+    },
+    {
+      "slug": "SLACK_UPDATE_SLACK_LIST",
+      "name": "Update Slack List",
+      "description": "Updates a Slack List's metadata via `slackLists.update`. Only the List's `name`, `description_blocks`, and `todo_mode` are editable here. The List to update is identified by its `id` (not `list_id`). Descriptions are rich text — a plain string is wrapped into a `rich_text` block automatically. Requires a user token with the `lists:write` scope.",
+      "tags": ["important", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "todo_mode": {
+            "type": "boolean"
+          },
+          "description_blocks": {
+            "type": "string"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "slug": "SLACK_UPDATE_SLACK_LIST_ITEM",
+      "name": "Update Slack List item",
+      "description": "Updates one or more cells in an EXISTING Slack List row via `slackLists.items.update`. Each cell is identified by `row_id` (an existing row ID matching `^Rec[A-Z0-9]{8,}$`) and `column_id` and carries a typed value; text columns require Block Kit `rich_text` (a plain string is wrapped automatically), and `select` takes the column's choice values (e.g. `[\"todo\"]`). Use it to UPDATE existing rows; the live API rejects `row_id_to_create` inside a cell (despite Slack's inline example), so to ADD a row use `create_slack_list_item`. Requires a user token with the `lists:write` scope.",
+      "tags": ["important", "openWorldHint", "updateHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "cells": {
+            "type": "array"
+          },
+          "list_id": {
+            "type": "string"
+          }
+        },
+        "required": ["list_id", "cells"]
+      }
+    },
+    {
+      "slug": "SLACK_UPDATE_USER_GROUP",
+      "name": "Update Slack user group",
+      "description": "Updates an existing Slack User Group, which must be specified by an existing `usergroup` ID, with new optional details such as its name, description, handle, or default channels.",
+      "tags": ["openWorldHint", "updateHint", "usergroups"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "handle": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "channels": {
+            "type": "string"
+          },
+          "usergroup": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "include_count": {
+            "type": "boolean"
+          },
+          "enable_section": {
+            "type": "boolean"
+          },
+          "additional_channels": {
+            "type": "string"
+          }
+        },
+        "required": ["usergroup"]
+      }
+    },
+    {
+      "slug": "SLACK_UPDATE_USER_GROUP_MEMBERS",
+      "name": "Update user group members",
+      "description": "Replaces the members of an existing Slack User Group with a complete list of user IDs. The list cannot be empty; guests and bot users cannot be added.",
+      "tags": ["updateHint", "openWorldHint", "usergroups", "usergroups.users"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "users": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "usergroup": {
+            "type": "string"
+          },
+          "include_count": {
+            "type": "boolean"
+          }
+        },
+        "required": ["usergroup", "users"]
+      }
+    },
+    {
+      "slug": "SLACK_UPLOAD_OR_CREATE_A_FILE_IN_SLACK",
+      "name": "Upload or create a file in Slack",
+      "description": "Upload files, images, screenshots, documents, or any media to Slack channels or threads. Supports all file types including images (PNG, JPG, JPEG, GIF), documents (PDF, DOCX, TXT), code files, and more. Can share files publicly in channels or as thread replies with optional comments. Large files may fail with `upload_too_large`; use SLACK_ADD_A_REMOTE_FILE_FROM_A_SERVICE for large uploads. If the API returns `ok=false` with `method_deprecated`, fall back to SLACK_ADD_A_REMOTE_FILE_FROM_A_SERVICE or SLACK_SEND_MESSAGE with a URL.",
+      "tags": ["files", "openWorldHint", "createHint"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "blocks": {
+            "type": "array"
+          },
+          "content": {
+            "type": "string"
+          },
+          "channels": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "filetype": {
+            "type": "string"
+          },
+          "thread_ts": {
+            "type": "string"
+          },
+          "initial_comment": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "slug": "SLACK_WHO_AM_I",
+      "name": "Who Am I",
+      "description": "Return the identity (user + workspace) of the connected Slack account. Slack user ids are workspace-scoped, so the workspace is part of the label.",
+      "tags": ["important", "readOnlyHint", "idempotentHint", "auth"],
+      "version": "20261101_00",
+      "input_parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    }
+  ]
+}

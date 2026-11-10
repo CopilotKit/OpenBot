@@ -933,6 +933,19 @@ pub fn compose(
     for key in ["CPK_INTELLIGENCE_API_KEY", "INTELLIGENCE_API_KEY"] {
         env.insert(key.into(), intelligence.api_key.trim().to_string());
     }
+    /*
+     * No Learning container named: the server assigns this Intelligence's own (auto-assign, in
+     * server/src/learning/auto-assign.ts), after checking it is there.
+     *
+     * Written empty rather than left out, so it is ours and `write` takes out a line somebody else
+     * left. A CLI set up against hosted Intelligence writes `"openbot"` into this same file; against
+     * the local Intelligence Start points at, that container does not exist, every new thread was
+     * refused ("Failed to initialize thread"), and naming one also turned auto-assign off.
+     */
+    env.insert(
+        "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID".into(),
+        String::new(),
+    );
 
     /*
      * MINTED ONCE PER DEPLOYMENT, NOT ONCE PER START.
@@ -1572,6 +1585,8 @@ pub fn write(
             continue;
         }
         let key = line.split('=').next().unwrap_or("").trim();
+        // `export NAME=value` sets NAME for Compose and the server alike, so it is NAME's line.
+        let key = key.strip_prefix("export ").map_or(key, str::trim);
         let ours = owned.contains_key(key) || purge.contains_key(key);
         if key.is_empty() || line.trim_start().starts_with('#') || !ours {
             out.push_str(line);
@@ -1857,6 +1872,40 @@ HTTPS_PROXY=http://proxy:8080
         assert!(!saved.contains("INTELLIGENCE_API_KEY="));
         assert!(saved.contains("CUSTOM=keep-me"));
         assert!(saved.contains("INTELLIGENCE_API_URL=https://selected.example"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A hosted CLI setup left `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID="openbot"` in the folder
+    /// Desktop now runs from. Kept, it named a container the local Intelligence does not have, every
+    /// message failed with "Failed to initialize thread", and auto-assign was off. After a Start the
+    /// only value in the file is Desktop's empty one, which the server reads as "assign one".
+    #[test]
+    fn a_learning_container_an_earlier_setup_named_gives_way_to_auto_assign() {
+        let dir = temp_root("env-stale-learning-container");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        std::fs::write(
+            &path,
+            "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID=\"openbot\"\nexport CPK_INTELLIGENCE_LEARNING_CONTAINER_ID=openbot\nCUSTOM=keep-me\n",
+        )
+        .unwrap();
+        let (settings, secrets) = crate::vault::split(compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        ));
+        write(&path, &settings, &secrets).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        let named: Vec<&str> = saved
+            .lines()
+            .filter(|line| line.contains("CPK_INTELLIGENCE_LEARNING_CONTAINER_ID"))
+            .collect();
+        assert_eq!(named, ["CPK_INTELLIGENCE_LEARNING_CONTAINER_ID="]);
+        assert!(saved.contains("CUSTOM=keep-me"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

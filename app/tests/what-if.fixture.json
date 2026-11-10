@@ -1,0 +1,288 @@
+{
+  "about": "Answers the server gave for tests/support/what-if-deployment.ts in server/, captured 2026-11-09 through the functions its routes call (readWhatIfVocabulary, checkAction, factsFromAuditRow). event is a real mcp.call_rejected row the plugin store wrote.",
+  "vocabulary": {
+    "bots": [
+      {
+        "id": "whatif-research",
+        "name": "Research",
+        "owner": "whatif-casey"
+      },
+      {
+        "id": "whatif-sales",
+        "name": "Sales",
+        "owner": "whatif-sam"
+      }
+    ],
+    "people": [
+      {
+        "id": "whatif-admin",
+        "name": "Avery Admin",
+        "email": "admin@whatif.test"
+      },
+      {
+        "id": "whatif-casey",
+        "name": "Casey Moore",
+        "email": "casey@whatif.test"
+      },
+      {
+        "id": "whatif-sam",
+        "name": "Sam Lee",
+        "email": "sam@whatif.test"
+      }
+    ],
+    "groups": ["whatif-contractors", "whatif-sales"],
+    "apps": [
+      {
+        "id": "whatif-crm",
+        "name": "CRM",
+        "tools": [
+          {
+            "name": "get_record",
+            "effect": "read",
+            "destructive": false
+          },
+          {
+            "name": "update_record",
+            "effect": "write",
+            "destructive": false
+          }
+        ]
+      },
+      {
+        "id": "whatif-gmail",
+        "name": "Gmail",
+        "tools": [
+          {
+            "name": "delete_email",
+            "effect": "write",
+            "destructive": true
+          },
+          {
+            "name": "list_emails",
+            "effect": "read",
+            "destructive": false
+          },
+          {
+            "name": "send_email",
+            "effect": "write",
+            "destructive": false
+          }
+        ]
+      }
+    ]
+  },
+  "checked": {
+    "action": {
+      "bot": "whatif-sales",
+      "person": "whatif-sam",
+      "group": "",
+      "initiator": "routine",
+      "surface": "app",
+      "app": "whatif-gmail",
+      "tool": "send_email",
+      "intent": "",
+      "host": "",
+      "label": "",
+      "command": "",
+      "file": ""
+    },
+    "labels": {
+      "bot": "Sales",
+      "person": "Sam Lee",
+      "app": "Gmail"
+    },
+    "result": {
+      "outcome": "refused",
+      "decidedBy": "boundaries",
+      "headline": "Refused. Boundaries decide it.",
+      "layers": [
+        {
+          "id": "grant",
+          "title": "App grants",
+          "verdict": "allows",
+          "summary": "The Sales Bot has been given \"Send email\" on Gmail.",
+          "page": "/admin/plugins",
+          "decides": false,
+          "unreached": false
+        },
+        {
+          "id": "app_allowlist",
+          "title": "App allowlist",
+          "verdict": "allows",
+          "summary": "Gmail is on the approved list.",
+          "page": "/admin/plugins",
+          "decides": false,
+          "unreached": false
+        },
+        {
+          "id": "capabilities",
+          "title": "Permissions",
+          "verdict": "allows",
+          "summary": "\"Use Bots\" is on for Sam Lee, OpenBot's default.",
+          "page": "/admin/permissions",
+          "decides": false,
+          "unreached": false
+        },
+        {
+          "id": "boundaries",
+          "title": "Boundaries",
+          "verdict": "refuses",
+          "summary": "The rule \"No email when nobody is watching\" refuses it.",
+          "page": "/admin/boundaries",
+          "basis": "No email when nobody is watching",
+          "rule": "initiator.kind == \"routine\" && mcp.server == \"whatif-gmail\" && mcp.effect == \"write\"",
+          "decides": true,
+          "unreached": false
+        },
+        {
+          "id": "safety",
+          "title": "Safety requirements",
+          "verdict": "asks",
+          "summary": "Built in: sending something to other people always asks the person first.",
+          "decides": false,
+          "unreached": true
+        },
+        {
+          "id": "approvals",
+          "title": "Approvals",
+          "verdict": "allows",
+          "summary": "No rule asks about this.",
+          "page": "/admin/approvals",
+          "decides": false,
+          "unreached": true
+        }
+      ],
+      "notApplicable": ["Network allowlist"],
+      "notChecked": [
+        "Whether what it sends holds a password or a key. A call that does is refused.",
+        "Who it sends to. Sending private information to somebody new asks the owner first.",
+        "Who can reach the Bot, for an app with one shared account.",
+        "What the person already answered in that conversation."
+      ],
+      "effect": "write"
+    }
+  },
+  "event": {
+    "id": "ddfa2309-d627-411e-8233-d19a263e3d7e",
+    "actorUserId": null,
+    "initiatorKind": "routine",
+    "initiatorId": "nightly",
+    "eventType": "mcp.call_rejected",
+    "targetType": "mcp_tool",
+    "targetId": "whatif-gmail/send_email",
+    "payload": {
+      "bot": "whatif-sales",
+      "tool": "send_email",
+      "actor": "whatif-sam",
+      "effect": "write",
+      "server": "whatif-gmail",
+      "attempt": "77b1dd53-1309-49d4-a155-e3d257326601",
+      "decision": {
+        "mode": "enforce",
+        "rule": "initiator.kind == \"routine\" && mcp.server == \"whatif-gmail\" && mcp.effect == \"write\"",
+        "source": "deny",
+        "allowed": false,
+        "ruleName": "No email when nobody is watching",
+        "carriedOut": false
+      },
+      "reachedAs": "deployment"
+    },
+    "createdAt": "2026-11-10T00:54:57.430Z"
+  },
+  "explained": {
+    "action": {
+      "bot": "whatif-sales",
+      "person": "whatif-sam",
+      "group": "",
+      "initiator": "routine",
+      "surface": "app",
+      "app": "whatif-gmail",
+      "tool": "send_email",
+      "intent": "",
+      "host": "",
+      "label": "",
+      "command": "",
+      "file": ""
+    },
+    "labels": {
+      "bot": "Sales",
+      "person": "Sam Lee",
+      "app": "Gmail"
+    },
+    "result": {
+      "outcome": "refused",
+      "decidedBy": "boundaries",
+      "headline": "Refused. Boundaries decide it.",
+      "layers": [
+        {
+          "id": "grant",
+          "title": "App grants",
+          "verdict": "allows",
+          "summary": "The Sales Bot has been given \"Send email\" on Gmail.",
+          "page": "/admin/plugins",
+          "decides": false,
+          "unreached": false
+        },
+        {
+          "id": "app_allowlist",
+          "title": "App allowlist",
+          "verdict": "allows",
+          "summary": "Gmail is on the approved list.",
+          "page": "/admin/plugins",
+          "decides": false,
+          "unreached": false
+        },
+        {
+          "id": "capabilities",
+          "title": "Permissions",
+          "verdict": "allows",
+          "summary": "\"Use Bots\" is on for Sam Lee, OpenBot's default.",
+          "page": "/admin/permissions",
+          "decides": false,
+          "unreached": false
+        },
+        {
+          "id": "boundaries",
+          "title": "Boundaries",
+          "verdict": "refuses",
+          "summary": "The rule \"No email when nobody is watching\" refuses it.",
+          "page": "/admin/boundaries",
+          "basis": "No email when nobody is watching",
+          "rule": "initiator.kind == \"routine\" && mcp.server == \"whatif-gmail\" && mcp.effect == \"write\"",
+          "decides": true,
+          "unreached": false
+        },
+        {
+          "id": "safety",
+          "title": "Safety requirements",
+          "verdict": "asks",
+          "summary": "Built in: sending something to other people always asks the person first.",
+          "decides": false,
+          "unreached": true
+        },
+        {
+          "id": "approvals",
+          "title": "Approvals",
+          "verdict": "allows",
+          "summary": "No rule asks about this.",
+          "page": "/admin/approvals",
+          "decides": false,
+          "unreached": true
+        }
+      ],
+      "notApplicable": ["Network allowlist"],
+      "notChecked": [
+        "Whether what it sends holds a password or a key. A call that does is refused.",
+        "Who it sends to. Sending private information to somebody new asks the owner first.",
+        "Who can reach the Bot, for an app with one shared account.",
+        "What the person already answered in that conversation."
+      ],
+      "effect": "write"
+    },
+    "recorded": {
+      "outcome": "refused",
+      "layer": "boundaries",
+      "summary": "Refused by the boundary \"No email when nobody is watching\"."
+    }
+  }
+}

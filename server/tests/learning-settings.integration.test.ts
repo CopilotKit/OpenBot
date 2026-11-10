@@ -255,6 +255,44 @@ describe("durable Learning settings", () => {
         .where(eq(learningThreadBindings.threadId, threadId)),
     ).toHaveLength(2);
   });
+
+  test("a saved default set aside on this Intelligence reads as its stand-in and stays saved through a save of what was read", async () => {
+    const store = createLearningSettingsStore(database);
+    await store.write({
+      enabled: true,
+      defaultTarget: { containerId: "hosted-learning" },
+      agents: {},
+    });
+    store.setAside("hosted-learning", { containerId: "openbot" });
+    expect((await store.read()).defaultTarget).toEqual({
+      containerId: "openbot",
+    });
+    expect(store.isSetAside("hosted-learning")).toBe(true);
+
+    await store.write({ ...(await store.read()), personalReview: "people" });
+    const [row] = await database
+      .select({ settings: learningSettings.settings })
+      .from(learningSettings)
+      .where(eq(learningSettings.id, "current"));
+    expect(row?.settings).toMatchObject({
+      defaultTarget: { containerId: "hosted-learning" },
+      personalReview: "people",
+    });
+    // Another replica, or this server pointed back at the Intelligence it was chosen on, reads it.
+    expect(
+      (await createLearningSettingsStore(database).read()).defaultTarget,
+    ).toEqual({ containerId: "hosted-learning" });
+
+    // Choosing another container is a new choice, and replaces it.
+    await store.write({
+      ...(await store.read()),
+      defaultTarget: { containerId: "support" },
+    });
+    expect(await store.savedDefault()).toEqual({ containerId: "support" });
+    expect((await store.read()).defaultTarget).toEqual({
+      containerId: "support",
+    });
+  });
 });
 
 describe("automatic approval is saved on its own", () => {

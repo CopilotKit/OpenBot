@@ -101,6 +101,7 @@ export function AuditTable({
   moreToLoad = false,
   nameFor,
   query,
+  rowAction,
   storedNames = false,
   toolbar,
 }: {
@@ -115,6 +116,8 @@ export function AuditTable({
   query: string;
   /** Whether a row's What shows the trail's stored name on hover: Admin's, not a person's. */
   storedNames?: boolean;
+  /** Drawn under a row's Decision: Admin's "Why?" on the rows a control decided. */
+  rowAction?: (event: AuditEvent) => React.ReactNode;
   /**
    * Drawn above the table, given how many rows it shows ("3 events", "1 of 3 events", "Newest 50
    * events" while older ones are still to load) and the filter buttons to place beside the search.
@@ -128,8 +131,8 @@ export function AuditTable({
   const [sorting, setSorting] = useState<SortingState>(INITIAL_SORT);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const columns = useMemo(
-    () => auditColumns(nameFor, storedNames, deploymentName),
-    [nameFor, storedNames, deploymentName],
+    () => auditColumns(nameFor, storedNames, deploymentName, rowAction),
+    [nameFor, storedNames, deploymentName, rowAction],
   );
   const table = useTable({
     features,
@@ -214,6 +217,11 @@ export function AuditTable({
                         // Room for a Bot's name and "Started by a person" on a line each; a longer
                         // name wraps. Without it the column gave way to Decision's longer lines.
                         cell.column.id === "bot" && "min-w-40",
+                        // Room for a reason line such as "Stopped by: Bots may not visit social
+                        // media sites" on a line or two. Without it the column got what What, whose
+                        // longest rows never wrap, left over: about 150px at 1280, and the rule's
+                        // name ran to three lines.
+                        cell.column.id === "decision" && "min-w-64",
                       )}
                       data-column={cell.column.id}
                       key={cell.id}
@@ -357,6 +365,7 @@ function auditColumns(
   nameFor: NameFor,
   storedNames: boolean,
   deployment: string,
+  rowAction?: (event: AuditEvent) => React.ReactNode,
 ): ColumnDef<typeof features, AuditEvent>[] {
   return [
     {
@@ -436,7 +445,10 @@ function auditColumns(
       id: "decision",
       header: "Decision",
       cell: ({ row }) => (
-        <DecisionCell event={row.original} storedNames={storedNames} />
+        <>
+          <DecisionCell event={row.original} storedNames={storedNames} />
+          {rowAction?.(row.original)}
+        </>
       ),
       enableSorting: false,
     },

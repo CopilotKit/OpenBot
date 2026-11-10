@@ -17,6 +17,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { RULE_TEMPLATES } from "@/lib/boundaries/rules";
 import type { ActionPolicy } from "@/lib/computers/queries";
 import { Route as BoundariesRoute } from "@/routes/_authed/admin/boundaries";
@@ -66,9 +67,24 @@ const template = RULE_TEMPLATES[1]!;
 
 let stored: ActionPolicy;
 const saved: ActionPolicy[] = [];
+/** Every candidate the screens asked the server to replay. */
+const replayed: ActionPolicy[] = [];
+const NOTHING_REPLAYED = Response.json({
+  report: {
+    scanned: 0,
+    wouldRefuse: 0,
+    wouldAllow: 0,
+    unchanged: 0,
+    changes: [],
+  },
+});
+let replay: (candidate: ActionPolicy) => Response = () =>
+  NOTHING_REPLAYED.clone();
 function serving(policy: ActionPolicy) {
   stored = policy;
   saved.length = 0;
+  replayed.length = 0;
+  replay = () => NOTHING_REPLAYED.clone();
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path.endsWith("/api/computers/policy") && init?.method === "PUT") {
@@ -78,15 +94,16 @@ function serving(policy: ActionPolicy) {
     }
     if (path.endsWith("/api/computers/policy"))
       return Response.json({ policy: stored });
-    if (path.endsWith("/api/computers/policy-dry-run"))
+    if (path.endsWith("/api/computers/policy-dry-run")) {
+      const { policy: candidate } = JSON.parse(String(init?.body)) as {
+        policy: ActionPolicy;
+      };
+      replayed.push(candidate);
+      return replay(candidate);
+    }
+    if (path.includes("/api/agents"))
       return Response.json({
-        report: {
-          scanned: 0,
-          wouldRefuse: 0,
-          wouldAllow: 0,
-          unchanged: 0,
-          changes: [],
-        },
+        agents: [{ id: "general-assistant", name: "General Assistant" }],
       });
     return Response.json({ error: "unexpected" }, { status: 404 });
   }) as typeof fetch;
@@ -196,4 +213,140 @@ test("removing a rule is confirmed, and takes its name with it", async () => {
   await waitFor(() => expect(saved).toHaveLength(1));
   expect(saved[0]?.deny).toEqual([template.rule]);
   expect(saved[0]?.labels).toEqual({});
+});
+
+const salesforceWrites = 'mcp.server == "salesforce" && mcp.effect == "write"';
+
+/** One recorded action as the dry-run reports it. */
+function changed(overrides: Record<string, unknown>) {
+  return {
+    createdAt: "2026-11-09T10:45:00.000Z",
+    bot: "general-assistant",
+    page: "",
+    element: null,
+    command: null,
+    file: null,
+    initiator: { kind: "person", id: "" },
+    was: "allowed",
+    would: "refused",
+    rule: salesforceWrites,
+    reason: "Blocked.",
+    ...overrides,
+  };
+}
+
+test("a rule about an app is tested as it is written, and lists the app calls it would stop beside computer actions", async () => {
+  // A rule already in force, which this one's answer must not borrow from.
+  serving({ mode: "enforce", deny: [custom], allow: ["true"] });
+  replay = () =>
+    Response.json({
+      report: {
+        scanned: 9,
+        wouldRefuse: 2,
+        wouldAllow: 0,
+        unchanged: 7,
+        changes: [
+          changed({
+            id: "a",
+            kind: "app",
+            action: "salesforce/update_record",
+            initiator: { kind: "routine", id: "weekly-review" },
+          }),
+          changed({
+            id: "c",
+            kind: "computer",
+            action: "computer_run_command",
+            command: "sf data update record",
+          }),
+        ],
+      },
+    });
+  const { view } = open("/admin/boundaries/new");
+
+  fireEvent.click(await view.findByText("Write your own"));
+  // Typed a key at a time: replayed once it rests, not once a keystroke.
+  await userEvent
+    .setup({ document })
+    .type(view.getByLabelText("Rule"), salesforceWrites);
+
+  // Nobody presses anything: the answer arrives under the rule.
+  expect(view.queryByRole("button", { name: /test/i })).toBeNull();
+  expect(
+    await view.findByText(
+      "Of the last 9 recorded actions, this rule would have stopped 2.",
+    ),
+  ).toBeTruthy();
+  // Once, when the rule rested, and the rule on its own: the rule in force stops what it stops
+  // whether or not this one is added, so what it would have stopped is no part of this answer.
+  expect(replayed).toEqual([
+    { mode: "enforce", deny: [salesforceWrites], allow: ["true"] },
+  ]);
+
+  // The app call reads as Audit reads it: the action in words, the app's tool, who started it.
+  expect(view.getByText("Update record")).toBeTruthy();
+  expect(view.getByText("salesforce/update_record")).toBeTruthy();
+  expect(view.getByText("Started by a routine")).toBeTruthy();
+  expect(view.getByRole("img", { name: "App call" })).toBeTruthy();
+  // Beside the computer action it would also stop.
+  expect(view.getByText("sf data update record")).toBeTruthy();
+  expect(view.getByRole("img", { name: "Computer action" })).toBeTruthy();
+  expect(view.getAllByText("Would stop")).toHaveLength(2);
+});
+
+test("a rule that doesn't compile says why under it, and isn't replayed as one that stops everything", async () => {
+  serving({ mode: "enforce", deny: [], allow: ["true"] });
+  const why =
+    'A rule can\'t check "elemnt". It can check tool, intent, bot, actor, initiator, page, element, key, file, command and mcp.';
+  replay = (candidate) =>
+    Response.json({ error: why, rule: candidate.deny.at(-1) }, { status: 400 });
+  const { view } = open("/admin/boundaries/new");
+
+  fireEvent.click(await view.findByText("Write your own"));
+  await userEvent
+    .setup({ document })
+    .type(view.getByLabelText("Rule"), 'elemnt.name == "Submit"');
+
+  expect((await view.findByRole("alert")).textContent).toBe(why);
+  expect(view.queryByText(/recorded actions/)).toBeNull();
+});
+
+test("a rule's page lists the app calls it stopped", async () => {
+  serving({
+    mode: "enforce",
+    deny: [salesforceWrites],
+    allow: ["true"],
+    labels: {
+      [salesforceWrites]: { name: "Never change Salesforce", description: "" },
+    },
+  });
+  replay = () =>
+    Response.json({
+      report: {
+        scanned: 4,
+        wouldRefuse: 0,
+        wouldAllow: 1,
+        unchanged: 3,
+        changes: [
+          changed({
+            id: "s",
+            kind: "app",
+            action: "salesforce/delete_record",
+            was: "refused",
+            would: "allowed",
+          }),
+        ],
+      },
+    });
+  const { view } = open("/admin/boundaries/0");
+
+  expect(
+    await view.findByText("It stopped 1 of the last 4 recorded actions."),
+  ).toBeTruthy();
+  expect(view.getByText("Delete record")).toBeTruthy();
+  expect(view.getByText("salesforce/delete_record")).toBeTruthy();
+  expect(view.getByText("Stopped")).toBeTruthy();
+  // Replayed without the rule: what it stopped is what would have gone through.
+  expect(replayed).toEqual([
+    { mode: "enforce", deny: [], allow: ["true"], labels: {} },
+  ]);
 });

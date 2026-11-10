@@ -32,8 +32,11 @@ export type ChannelActivityEvent = {
    * OpenBot is out of sight. `lastMessage` runs every line into one. Only on a Bot's message.
    */
   firstLine?: string;
-  /** Newly written summary, on its own event: the sweep runs seconds after the activity it follows. */
-  summary?: string;
+  /**
+   * What the conversation is called now, on its own event: the sweep's summary, written seconds after
+   * the activity it follows, or a rename. Null when a cleared name leaves it with no summary yet.
+   */
+  summary?: string | null;
   /** A person's first words, newly written, on its own event: the row's name until `summary`. */
   opening?: string;
   /** The channel is hidden from every member's roster. Absent on an ordinary activity event. */

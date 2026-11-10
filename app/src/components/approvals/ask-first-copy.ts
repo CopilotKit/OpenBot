@@ -3,10 +3,10 @@
  * onboarding's Welcome and Settings → Approvals so the two never say different things.
  *
  * Each sentence is what server/src/approvals/policy.ts does:
- * - Deleting, sending, sharing and posting in an app or on a website are safety asks, decided before
- *   any rule or the switch is read, so they ask with the switch off.
- * - Payments and credential or security-setting changes are hand-offs, not asks: the person does
- *   them, the Bot never does.
+ * - Deleting, sending, sharing, posting and paying in an app or on a website ask with the switch
+ *   off. Open by default: the person can allow each once, for a conversation, or always, unless the
+ *   admin set that kind to ask every time.
+ * - A password or other sign-in detail changed on a website is a hand-off: only the person has it.
  * - The switch asks before every change that isn't a read, a Bot's own workspace included, unless a
  *   rule allows it.
  * - A Bot's own workspace (`computer_write_file`, `computer_run_command`) is left out of the safety
@@ -14,10 +14,10 @@
  */
 
 export const ALWAYS_ASKS =
-  "Bots always ask for your approval before deleting, sending, sharing, or posting content in your apps or on websites.";
+  "Bots ask for your approval before deleting, sending, sharing, posting, or paying in your apps or on websites. You can allow each one once, for a conversation, or always.";
 
 export const HANDED_TO_YOU =
-  "Bots leave payments and account security changes for you to do yourself.";
+  "Bots leave changing a password on a website for you to do yourself.";
 
 export const ASK_FIRST_TITLE = "Always ask before making changes";
 

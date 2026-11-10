@@ -158,6 +158,27 @@ export function connectedAccountsUrlFor(
   return `${base}?connected=failed`;
 }
 
+/**
+ * Where an app's sign-in started from OpenBot Desktop comes back to: the app's page that confirms the
+ * account and hands the person back to the Desktop window (`/desktop-return` in the app).
+ *
+ * THE SIGN-IN RUNS IN THE PERSON'S OWN BROWSER. The Desktop window sends every site outside OpenBot
+ * there, so the vendor's redirect lands in that browser too. Sent to the account's page, as a
+ * browser's sign-in is, the person was left on OpenBot in a browser tab while the window they started
+ * from sat behind it, still showing the app as not connected.
+ *
+ * On the app's origin, as {@link connectedAccountsUrlFor} is, and naming the app by its key only:
+ * where to go back to in the window is not the browser's to say, so the page brings the window
+ * forward wherever it is.
+ */
+export function desktopReturnUrlFor(
+  appUrl: string | undefined,
+  serverId: string,
+): string {
+  const origin = appUrl?.replace(/\/+$/, "") ?? "";
+  return `${origin}/desktop-return?app=${encodeURIComponent(serverId)}`;
+}
+
 /** A fresh PKCE verifier: unreserved characters only, comfortably over the 43-character floor. */
 export function createVerifier(): string {
   return randomBytes(48).toString("base64url");

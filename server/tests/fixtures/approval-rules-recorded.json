@@ -1,0 +1,51 @@
+{
+  "about": "Real answers from OpenAI Chat Completions to the prompts in server/src/approvals/rule-translate.ts, with response_format json_schema, over the vocabulary in approval-rules-vocabulary.json (Composio's own Gmail, Salesforce and Slack listings). Each string is the assistant message content exactly as the model returned it, recorded 2026-11-09. gpt-5.6-terra is the deployment default; gpt-4o-mini is where the check earns its keep: given a description in the old form's mcp/<app>/* spelling it copies it, and the check sends it back. bothAttemptsUnchecked was recorded against the writer prompt one guidance line earlier (before the line about a site's host); every other case against the prompt as it stands.",
+  "checksFirstTime": {
+    "model": "gpt-5.6-terra",
+    "text": "Ask before any Bot sends email from Gmail",
+    "writer": [
+      "{\"notes\":\"Requires approval before any Bot sends an email using Gmail.\",\"rules\":[{\"toolRef\":\"composio-gmail/GMAIL_SEND_*\",\"effect\":\"write\",\"scope\":\"composio-gmail\",\"botId\":\"*\",\"behaviour\":\"ask\"}]}"
+    ],
+    "reader": "{\"summary\":\"Every Bot asks before sending Gmail drafts or emails.\",\"explanation\":\"Every Bot asks before using Gmail's GMAIL_SEND_DRAFT or GMAIL_SEND_EMAIL tools. The rule covers only those two tools, not other Gmail tools; built-in safety also requires asking before sending anything to other people.\"}"
+  },
+  "siteRule": {
+    "model": "gpt-5.6-terra",
+    "text": "Ask before any Bot opens a page on linkedin.com",
+    "writer": [
+      "{\"notes\":\"Requires approval before any Bot opens a page whose host is linkedin.com.\",\"rules\":[{\"toolRef\":\"computer_navigate\",\"effect\":\"read\",\"scope\":\"linkedin.com\",\"botId\":\"*\",\"behaviour\":\"ask\"}]}"
+    ],
+    "reader": "{\"summary\":\"Every Bot asks before navigating LinkedIn.com with the computer.\",\"explanation\":\"Every Bot asks before using the computer_navigate tool to read linkedin.com. This covers only that exact tool and site, not other computer tools or other LinkedIn addresses; built-in requirements still require the person for actions such as sending, publishing, deleting, changing credentials or settings, or moving money.\"}"
+  },
+  "fixedOnRetry": {
+    "model": "gpt-4o-mini",
+    "text": "Ask before Bots use mcp/gmail/* tools",
+    "writer": [
+      "{\"notes\":\"This rule specifies that any action taken by Bots using the mcp/gmail tools requires prior approval from the user, which aligns with the behavior of asking before taking that action. There are no other constraints not expressed by this rule.\",\"rules\":[{\"toolRef\":\"mcp/gmail/*\",\"effect\":\"*\",\"scope\":\"mcp/gmail\",\"botId\":\"*\",\"behaviour\":\"ask\"}]}",
+      "{\"notes\":\"The rule appropriately asks for approval for any action taken by Bots using the tools from the composio-gmail app. No actions from other apps or tools are described in this context.\",\"rules\":[{\"toolRef\":\"composio-gmail/*\",\"effect\":\"*\",\"scope\":\"composio-gmail\",\"botId\":\"*\",\"behaviour\":\"ask\"}]}"
+    ],
+    "reader": "{\"summary\":\"Every Bot asks before any action in Gmail tools.\",\"explanation\":\"All Bots (Research, Sales Assistant, and Inbox Helper) are required to ask for permission before performing any action on the Gmail tools. The rule encompasses a wide range of tools for email handling, such as sending drafts, deleting emails, or fetching contacts. However, it does not cover tools outside of the specified Gmail tools list, and built-in safety requirements for critical actions like changing passwords or sharing sensitive information will always take precedence.\"}"
+  },
+  "neverChecks": {
+    "model": "gpt-4o-mini",
+    "text": "Ask before Bots use mcp/hubspot/* tools",
+    "writer": [
+      "{\"notes\":\"The rule specifies that any action taken by Bots using tools from the mcp/hubspot app must be prefaced by a request for approval, ensuring supervision over those actions. No other apps or Bot rules are specified in the description.\",\"rules\":[{\"toolRef\":\"mcp/hubspot/*\",\"effect\":\"*\",\"scope\":\"mcp/hubspot\",\"botId\":\"*\",\"behaviour\":\"ask\"}]}",
+      "{\"notes\":\"The description states to ask before any bot uses tools from a non-existent app 'mcp/hubspot', so no rules can be established for this description as the specified app is not listed.\",\"rules\":[]}"
+    ]
+  },
+  "bothAttemptsUnchecked": {
+    "model": "gpt-4o-mini",
+    "text": "Ask before Bots use mcp/hubspot/* tools",
+    "writer": [
+      "{\"notes\":\"The rule asks for prior approval before any Bot uses any tools from the mcp/hubspot app. This means that all actions requiring any use of these tools will need to be confirmed by the user first.\",\"rules\":[{\"toolRef\":\"mcp/hubspot/*\",\"effect\":\"*\",\"scope\":\"mcp/hubspot\",\"botId\":\"*\",\"behaviour\":\"ask\"}]}",
+      "{\"notes\":\"The description specifies that there should be an approval gate for all action types (read, write, delegate, share_private) on any tools within the 'hubspot' app. The rules encompass all action types under the defined tool scope, using 'ask' for every bot action in this context.\",\"rules\":[{\"toolRef\":\"composio-hubspot/*\",\"effect\":\"*\",\"scope\":\"composio-hubspot\",\"botId\":\"*\",\"behaviour\":\"ask\"}]}"
+    ]
+  },
+  "noRuleWritten": {
+    "model": "gpt-4o-mini",
+    "text": "Hand off anything the Bots do in HubSpot",
+    "writer": [
+      "{\"notes\":\"The rule specifies that any action performed by any Bot in HubSpot should be handed off to the user, meaning the user must perform the action themselves. Since HubSpot isn't listed as an available app, no rules can be defined for it.\",\"rules\":[]}"
+    ]
+  }
+}

@@ -321,10 +321,19 @@ test("with a broker set up, the last tile browses its directory of more apps", a
 });
 
 describe("an app under Connections in the personal edition", () => {
-  test("Routines is always on, with no switch to turn it off", async () => {
+  test("Routines is every Bot's, with no switch, and leads to the Routines page", async () => {
     servers = [server("notion"), server("routines")];
     const { view } = draw("personal", "/connections/routines");
-    expect(await view.findByText("Always on")).toBeTruthy();
+    expect(
+      await view.findByText(
+        "Routines are work your Bots do on a schedule. Every Bot can set one up for you.",
+      ),
+    ).toBeTruthy();
+    expect(
+      (await view.findByRole("link", { name: /Your routines/ })).getAttribute(
+        "href",
+      ),
+    ).toBe("/routines");
     expect(view.queryByRole("switch")).toBeNull();
     expect(view.queryByText("Turned on")).toBeNull();
   });
