@@ -46,6 +46,13 @@ end. Try again." Name a feature by what it does (Automatic learning, Memory, Ski
 docs under `docs/` and `charts/` are not shown to a person and may name it.
 `tests/no-intelligence-in-user-copy.test.ts` fails on a shown string that says it.
 
+**One exception: OpenBot Desktop's Account step.** Its lede says "This version of OpenBot
+runs self-contained on this computer. It uses a local version of CopilotKit Intelligence, which
+requires a free license key." That copy is Atai's, word for word.
+That screen asks the person to sign in to another company's account, and the name is what makes
+the license key make sense; the CopilotKit sign-in page it opens says the same. It is listed by
+exact text in `SHOWN_BY_DECISION` in the test. Anywhere else, the back end.
+
 **Admin is allowed exact names.** An admin page may name `COMPOSIO_API_KEY`, OAuth and "deployment",
 because the admin is the one who sets them. A page anybody can open may not.
 
@@ -92,3 +99,4 @@ because the admin is the one who sets them. A page anybody can open may not.
 | An env var, OAuth, Composio or "grant" outside Admin | Say what the person sees |
 | "Intelligence", "CopilotKit Intelligence" or "the Intelligence stack" anywhere | Name the part: the back end, the front end, the database |
 | A test asserting long explanatory copy | Assert the short sentence, or the role and the key words |
+| "CopilotKit Intelligence" on OpenBot Desktop's Account step | Allowed there only, in the one lede `SHOWN_BY_DECISION` lists (above) |

@@ -342,7 +342,9 @@ test("Cancel stops the CLI's sign-in and goes back to the start of the step", as
     { command: "cancel_local_eval", args: { attempt: signInAttempt() } },
   ]);
   expect(
-    await screen.findByRole("button", { name: "Sign in to CopilotKit" }),
+    await screen.findByRole("button", {
+      name: "Sign in for a free local license key",
+    }),
   ).toBeTruthy();
   expect(screen.queryByText(PAGE.userCode)).toBeNull();
   // The stopped sign-in is not reported as a failure.
@@ -353,35 +355,33 @@ test("Cancel stops the CLI's sign-in and goes back to the start of the step", as
   ).toBeNull();
 });
 
-/** CopilotKit's logotype, light, with the reversed wordmark for a dark window. */
-function expectCopilotKitLogo(screen: ReturnType<typeof render>) {
-  const logo = screen.getByRole("img", { name: "CopilotKit" });
-  expect(logo.getAttribute("src")).toBe("/copilotkit-logo.svg");
-  expect(
-    logo
-      .closest("picture")
-      ?.querySelector('source[media="(prefers-color-scheme: dark)"]')
-      ?.getAttribute("srcset"),
-  ).toBe("/copilotkit-logo-dark.svg");
-}
-
 /*
- * The step signs in to a CopilotKit account, so it shows CopilotKit's logotype, signed out and
- * while the sign-in waits. It showed OpenBot's mark alone.
+ * The step is OpenBot's, so it leads with OpenBot by CopilotKit, not CopilotKit's logotype, while
+ * the sign-in waits and once it is stopped, and says what the free local license key is for.
  */
-test("the CopilotKit sign-in shows CopilotKit's logotype, while it waits and once stopped", async () => {
+test("the sign-in leads with OpenBot, while it waits and once stopped", async () => {
   waitingSignIn();
   const screen = await startSigningIn();
   await screen.findByText(PAGE.userCode);
-  expectCopilotKitLogo(screen);
+  expect(
+    screen.getByRole("heading", { name: "Self-contained OpenBot" }),
+  ).toBeTruthy();
+  expect(screen.getByText(/requires a free license key/)).toBeTruthy();
+  expect(
+    screen.getByText(/does NOT send traffic data to CopilotKit/),
+  ).toBeTruthy();
+  expect(screen.getByText("by CopilotKit")).toBeTruthy();
+  expect(screen.queryByRole("img", { name: "CopilotKit" })).toBeNull();
 
   await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-  await screen.findByRole("button", { name: "Sign in to CopilotKit" });
-  expectCopilotKitLogo(screen);
+  await screen.findByRole("button", {
+    name: "Sign in for a free local license key",
+  });
+  expect(screen.queryByRole("img", { name: "CopilotKit" })).toBeNull();
 });
 
 test("after Accept, the step says it is setting up your apps, not to sign in", async () => {
-  // Seen on Windows: Accept was followed for two seconds by "Sign in to CopilotKit" and its
+  // Seen on Windows: Accept was followed for two seconds by the sign-in heading and its
   // sign-in lede, over "Connecting your apps…", for a person already signed in and agreed.
   let connected!: () => void;
   invokeHandler = alreadySignedIn(async ({ command }) => {
@@ -415,9 +415,9 @@ test("after Accept, the step says it is setting up your apps, not to sign in", a
   ).toBeTruthy();
   expect(screen.getByText("Connecting your apps…")).toBeTruthy();
   expect(
-    screen.queryByRole("heading", { name: "Sign in to CopilotKit" }),
+    screen.queryByRole("heading", { name: "Self-contained OpenBot" }),
   ).toBeNull();
-  expect(screen.queryByText(/Sign in, then accept/)).toBeNull();
+  expect(screen.queryByText(/requires a free license key/)).toBeNull();
   connected();
   await waitFor(() => expect(done).toBe("developer-edition-2026-10-01-web"));
 });

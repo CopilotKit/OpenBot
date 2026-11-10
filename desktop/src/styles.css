@@ -1460,6 +1460,13 @@ a:hover {
   letter-spacing: -0.01em;
 }
 
+/* "by CopilotKit" beside the name: the same size, quieter, so OpenBot still leads. */
+.setup-header .lockup span.lockup-by {
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin-left: -2px;
+}
+
 /* The developer half of a failure: present, and never the headline. */
 .detail-of {
   border: 0;

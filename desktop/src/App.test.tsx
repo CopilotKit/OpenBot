@@ -82,6 +82,7 @@ mock.module("./Mark", () => ({
 }));
 
 const { App } = await import("./App");
+const { SELF_CONTAINED } = await import("./CopilotKitAccount");
 const { ShuttingDownWindow, isShuttingDownPage } = await import(
   "./ShuttingDown"
 );
@@ -716,12 +717,10 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   await installLocal(view);
   // The first step. OpenBot needs no account, so it installs behind it, exactly once; nothing
   // of Intelligence's runs before the agreement. The browser sign-in starts without a click.
-  await view.findByRole("heading", { name: "Sign in to CopilotKit" });
+  await view.findByRole("heading", { name: "Self-contained OpenBot" });
   await view.findByText("Finish signing in to CopilotKit in your browser…");
   expect(
-    view.getByText(
-      "Your conversations and files are stored on this computer. Signing in does not send them to CopilotKit.",
-    ),
+    view.getByText(/Your conversations and files stay on this computer/),
   ).toBeTruthy();
   expect(stepLabel(view)).toBe("Account");
   await waitFor(() =>
@@ -932,7 +931,7 @@ test("the account step waits for a container engine Install is still setting up,
   await installLocal(view);
   await view.findByRole(
     "button",
-    { name: "Sign in to CopilotKit" },
+    { name: "Sign in for a free local license key" },
     { timeout: 6000 },
   );
   expect(asked).toBe(2);
@@ -1018,7 +1017,7 @@ test("the install behind the account step is said on every part of it, signing i
   engineAnswers = true;
   await view.findByRole(
     "button",
-    { name: "Sign in to CopilotKit" },
+    { name: "Sign in for a free local license key" },
     { timeout: 5000 },
   );
   expectBehind(view, 1, "Installing the software OpenBot runs on.");
@@ -1089,11 +1088,15 @@ function behindNow(view: ReturnType<typeof render>): string | null {
 }
 
 function technicalOn(beats: Beat[]) {
-  return beats.flatMap(({ beat, text }) =>
-    TECHNICAL.filter((word) => word.test(text)).map(
-      (word) => `${beat}: ${text.match(word)?.[0]}`,
-    ),
-  );
+  return beats.flatMap(({ beat, text }) => {
+    // The Account step's lede names CopilotKit Intelligence by product decision, as the one
+    // entry in `SHOWN_BY_DECISION` (tests/no-intelligence-in-user-copy.test.ts) records. Only
+    // that exact sentence is excused; the word anywhere else on any screen still fails.
+    const plain = text.replaceAll(SELF_CONTAINED, "");
+    return TECHNICAL.filter((word) => word.test(plain)).map(
+      (word) => `${beat}: ${plain.match(word)?.[0]}`,
+    );
+  });
 }
 
 /** What each part of a first run said, from the first screen to OpenBot opening. */

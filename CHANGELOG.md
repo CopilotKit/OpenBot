@@ -71,6 +71,11 @@ backup taken before the upgrade instead. Three things change for an existing dep
   inside its card; a reopened window comes back where it was. The license step links "Read the
   license agreement" without the agreement's id, and no step line shows a release name or the
   engine's own output.
+- **The Account step leads with OpenBot.** Its header reads "OpenBot by CopilotKit" and its
+  heading "Self-contained OpenBot". It says this version of OpenBot runs on this computer with a
+  local version of CopilotKit Intelligence, which needs a free license key, and that your
+  conversations and files stay on this computer. The button reads "Sign in for a free local license
+  key", and CopilotKit's logo no longer heads the step.
 - **A first install on a Mac starts the first time, and a reinstall sets its back end up again.**
   Three things a from-zero install of 1.0.0 hit on a Mac with Docker Desktop:
   - The first Start could stop with "Something went wrong" because Docker Desktop refused the
