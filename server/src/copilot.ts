@@ -28,6 +28,7 @@ import {
 } from "@openbot/shared/model-providers";
 import { MODEL_TOOL_LIMIT } from "@openbot/shared/model-tool-limit";
 import { runTimeZone } from "@openbot/shared/person-time-zone";
+import { SUBAGENT_TOOL } from "@openbot/shared/subagent";
 import {
   BuiltInAgentWithSaneHistory,
   CloningRemoteAgent,
@@ -38,7 +39,7 @@ import {
 } from "@openbot/toolkit/copilotkit/agents";
 import { UNATTENDED_STEPS } from "@openbot/toolkit/copilotkit/last-step";
 import { createIntelligenceThreadLock } from "@openbot/toolkit/copilotkit/thread-lock";
-import type { GrantedTool } from "@openbot/toolkit/granted-tool";
+import type { GrantedTool, ToolExecution } from "@openbot/toolkit/granted-tool";
 import { parametersFor } from "@openbot/toolkit/granted-tool";
 import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
 import { sanitizeSeededHistory } from "@openbot/toolkit/history-sanitize";
@@ -64,11 +65,11 @@ import {
   planModelForEnvironment,
 } from "./agents/plan-model";
 import type { AgentActor } from "./agents/profile-types";
-import { isUnattended, runModeOf } from "./agents/run-mode";
 import {
   type RefusingProvider,
   sayingProviderRefusals,
 } from "./agents/provider-refusal";
+import { isUnattended, runModeOf } from "./agents/run-mode";
 import {
   OPENBOT_TOOL_LIMIT,
   toolLimitFor,
@@ -123,6 +124,7 @@ import { providerName } from "./model-billing";
 import { modelSourceFor, type RunChoice } from "./model-catalogue";
 import { pickedSkillGuidance } from "./plugins/picked-skill";
 import { refFromToolName } from "./plugins/plugin-store/model";
+import { appCallsOfRun, withAppCallsOf } from "./plugins/run-calls";
 import type { SelectableSkill, Selection } from "./plugins/selection";
 import {
   latestUserText,
@@ -1341,7 +1343,12 @@ async function buildAgent(
 
   // Whether anybody is watching this run: a routine or a check-in is told it runs unattended.
   const mode = runModeOf(initiator);
-  const granted = await loadTools(agent.id);
+  /*
+   * This run's app calls, a few at a time. A subagent is this Bot built again inside the run's
+   * `run_subagent` call, and takes the run's calls rather than a set of its own (`appCallsOfRun`).
+   */
+  const appCalls = appCallsOfRun();
+  const granted = await withAppCallsOf(appCalls, () => loadTools(agent.id));
   // Nobody is watching, so the run has to finish on its own: the same reading the prompt is given.
   const unattended = isUnattended(mode);
   /*
@@ -1766,7 +1773,15 @@ async function buildAgent(
        * deployment's own statement rather than anything the model can edit. A request is earlier
        * than a run and knows neither.
        */
-      const passing = (await handoff?.(agent.id, input)) ?? [];
+      const passing = ((await handoff?.(agent.id, input)) ?? []).map((tool) =>
+        tool.name === SUBAGENT_TOOL
+          ? {
+              ...tool,
+              execute: (args: unknown, execution?: ToolExecution) =>
+                withAppCallsOf(appCalls, () => tool.execute(args, execution)),
+            }
+          : tool,
+      );
       signal.throwIfAborted();
       const tools = passing.length > 0 ? [...offered, ...passing] : offered;
       // Nothing added and nothing narrowed means nothing to rebuild, and reusing the agent already

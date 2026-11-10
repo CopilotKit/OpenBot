@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import PQueue from "p-queue";
 
 /**
@@ -82,4 +83,25 @@ export function runCalls(limit: number = MAX_APP_CALLS_AT_ONCE): RunCalls {
       }
     },
   };
+}
+
+/**
+ * The app calls of the run a Bot is being built inside, when it is built inside one.
+ *
+ * A SUBAGENT IS PART OF ITS RUN, NOT A RUN OF ITS OWN. It is the same Bot built afresh from inside
+ * the run's `run_subagent` call (`agents/subagent.ts`), so without this each subagent got its own
+ * {@link MAX_APP_CALLS_AT_ONCE}, and a Bot that split a cycle plan in two had nine lookups out at
+ * once against the same two apps (found live). Built inside {@link withAppCallsOf}, a Bot takes the
+ * run's calls instead: one queue, and a read one subagent made is answered again for the other.
+ */
+const enclosing = new AsyncLocalStorage<RunCalls>();
+
+/** This run's app calls: the enclosing run's when there is one, otherwise a new set. */
+export function appCallsOfRun(): RunCalls {
+  return enclosing.getStore() ?? runCalls();
+}
+
+/** Run `work` (a Bot's build, or a tool call that builds one) as part of the run holding `calls`. */
+export function withAppCallsOf<T>(calls: RunCalls, work: () => T): T {
+  return enclosing.run(calls, work);
 }

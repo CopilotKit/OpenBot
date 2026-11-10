@@ -3,7 +3,10 @@ import { randomUUID } from "node:crypto";
 import type { BaseEvent, RunAgentInput } from "@ag-ui/client";
 import { LLMock } from "@copilotkit/aimock";
 import { MCPMock } from "@copilotkit/aimock/mcp";
+import { SUBAGENT_TOOL } from "@openbot/shared/subagent";
+import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import { buildAgents, type RuntimeModel } from "../src/copilot";
@@ -167,6 +170,7 @@ afterAll(async () => {
 });
 
 type Call = { name: string; args: Record<string, unknown> };
+type AbstractAgentLike = Pick<import("@ag-ui/client").AbstractAgent, "run">;
 let named: (name: string) => string = (name) => name;
 
 /** One run of a built-in Bot holding the tracker, on a model that asks for `steps` in turn. */
@@ -304,4 +308,114 @@ test("a read the app answers 503 to is tried again before the Bot hears of it, a
   const wrote = await write.execute({ issue: "EGG-2", text: "flaky write" });
   expect(wrote).toContain("That tool could not be called");
   expect(commented).toEqual([]);
+}, 30_000);
+
+test("a subagent's lookups share the run's few-at-a-time, so two of them never double it", async () => {
+  searched.length = 0;
+  peak = 0;
+  const llm = new LLMock({ host: "127.0.0.1", port: 0 });
+  const userText = (request: {
+    messages: { role: string; content?: unknown }[];
+  }) =>
+    String(
+      request.messages.find((message) => message.role === "user")?.content ??
+        "",
+    );
+  const answered = (request: { messages: { role: string }[] }) =>
+    request.messages.some((message) => message.role === "tool");
+  llm.on({ predicate: () => true }, (request) => {
+    if (answered(request)) return { content: "Done." };
+    const part = /^part (\w+)$/.exec(userText(request))?.[1];
+    // Each part, as a subagent, sends ten lookups at once.
+    if (part)
+      return {
+        toolCalls: Array.from({ length: 10 }, (_, index) => ({
+          name: named("search_issues"),
+          arguments: JSON.stringify({ query: `${part} ${index}` }),
+        })),
+      };
+    // The run itself splits the work in two, at the same time, as a Bot does with run_subagent.
+    return {
+      toolCalls: ["one", "two"].map((part) => ({
+        name: SUBAGENT_TOOL,
+        arguments: JSON.stringify({ part }),
+      })),
+    };
+  });
+  const original = process.env.OPENAI_BASE_URL;
+  process.env.OPENAI_BASE_URL = `${await llm.start()}/v1`;
+  const offered = (await grantedTools({ store, botId, actorId: ACTOR })).map(
+    (tool) => tool.name,
+  );
+  named = (name) => offered.find((tool) => tool.endsWith(`__${name}`)) ?? name;
+  const loadTools = async () => grantedTools({ store, botId, actorId: ACTOR });
+  const bot = {
+    id: botId,
+    name: "Planner",
+    type: "built_in" as const,
+    systemPrompt: "Plan.",
+  };
+  const runOnce = async (agent: AbstractAgentLike, text: string) =>
+    new Promise<void>((resolve, reject) =>
+      agent
+        .run({
+          threadId: `thread-${randomUUID()}`,
+          runId: `run-${randomUUID()}`,
+          messages: [{ id: "user", role: "user", content: text }],
+          tools: [],
+          context: [],
+          state: {},
+          forwardedProps: {},
+        })
+        .subscribe({ next: () => {}, error: reject, complete: resolve }),
+    );
+  /*
+   * A subagent: the same Bot built afresh and run on its part, from inside the run's own tool call,
+   * which is how `agents/subagent.ts` starts one.
+   */
+  const splitWork: GrantedTool = {
+    name: SUBAGENT_TOOL,
+    ref: `bot/${SUBAGENT_TOOL}`,
+    description: "Hand one part to a subagent.",
+    parameters: z.object({ part: z.string() }),
+    concurrent: true,
+    execute: async (args) => {
+      const built = await buildAgents(
+        [bot],
+        model,
+        "synthetic-fixture-key",
+        undefined,
+        loadTools,
+      );
+      const child = built[botId]?.clone();
+      if (!child) throw new Error("The subagent was not built.");
+      await runOnce(child, `part ${(args as { part: string }).part}`);
+      return "Part done.";
+    },
+  };
+  try {
+    const built = await buildAgents(
+      [bot],
+      model,
+      "synthetic-fixture-key",
+      undefined,
+      loadTools,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async () => [splitWork],
+    );
+    const agent = built[botId]?.clone();
+    if (!agent) throw new Error("The planner was not built.");
+    await runOnce(agent, "Plan the cycle.");
+  } finally {
+    if (original === undefined) delete process.env.OPENAI_BASE_URL;
+    else process.env.OPENAI_BASE_URL = original;
+    await llm.stop();
+  }
+
+  expect(searched).toHaveLength(20);
+  expect(peak).toBeLessThanOrEqual(MAX_APP_CALLS_AT_ONCE);
 }, 30_000);

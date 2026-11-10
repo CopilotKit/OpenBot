@@ -18,7 +18,7 @@ import {
   catalogueEntry,
   researchRoleFor,
 } from "./catalogue";
-import { runCalls, sameArguments } from "./run-calls";
+import { appCallsOfRun, sameArguments } from "./run-calls";
 import type { SelectableSkill } from "./selection";
 import {
   isDeploymentFault,
@@ -550,9 +550,10 @@ export async function grantedTools(options: {
   /*
    * This run's app calls, a few at a time, and a read asked twice answered once. One per call of this
    * function, which is one per run: a run builds its tools afresh (`loadTools` in copilot.ts), so
-   * nothing is cached past the run it was read in. See `./run-calls`.
+   * nothing is cached past the run it was read in. A subagent's tools are built inside its run's
+   * and take that run's calls (`appCallsOfRun`). See `./run-calls`.
    */
-  const calls = runCalls();
+  const calls = appCallsOfRun();
 
   return granted.tools.map((tool) => ({
     name: tool.toolName,
