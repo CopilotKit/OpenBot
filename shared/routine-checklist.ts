@@ -38,12 +38,35 @@ export function routineParts(instruction: string): string[] {
       text: (match[2] ?? "").replace(/\s+/g, " ").trim(),
     });
   }
-  if (items.length === 0) return [];
+  if (items.length === 0) return inlineSteps(instruction);
   const outer = Math.min(...items.map((item) => item.indent));
   const parts = items
     .filter((item) => item.indent === outer && item.text.length > 0)
     .map((item) => shorten(item.text));
   return parts.length >= 2 && parts.length <= MOST_PARTS ? parts : [];
+}
+
+/** A step number in running text: "1)" or "1." after a space, before the step's words. */
+const INLINE_STEP = /(?:^|\s)(\d{1,2})[.)]\s+/g;
+
+/**
+ * The parts of an instruction whose steps are numbered in one paragraph ("Steps: 1) read the cycle
+ * 2) read the page 3) rank"), which is how a Bot writes a routine down when it is asked for one in
+ * a conversation (found live). Only a run counted 1, 2, 3 in order is steps: a version number has no
+ * space after its dot, and numbers out of order are references, not steps. Words after the last
+ * step stay with it.
+ */
+function inlineSteps(instruction: string): string[] {
+  const text = instruction.replace(/\s+/g, " ");
+  const steps: { at: number; from: number }[] = [];
+  for (const mark of text.matchAll(INLINE_STEP)) {
+    if (Number(mark[1]) !== steps.length + 1) continue;
+    steps.push({ at: mark.index, from: mark.index + mark[0].length });
+  }
+  if (steps.length < 2 || steps.length > MOST_PARTS) return [];
+  return steps.map((step, index) =>
+    shorten(text.slice(step.from, steps[index + 1]?.at ?? text.length).trim()),
+  );
 }
 
 const STATUS = /\b(?:done|blocked|skipped)\b/i;

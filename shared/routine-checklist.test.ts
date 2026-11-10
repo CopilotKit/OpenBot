@@ -33,8 +33,34 @@ describe("the parts of a routine", () => {
     ).toEqual(["Check my calendar", "Summarise unread email", "Post it here"]);
   });
 
+  test("are numbered steps written on one line, as a Bot saves a routine it was asked for", () => {
+    // Saved word for word by a Bot on Claude through create_routine, found live.
+    expect(
+      routineParts(
+        'Plan the next cycle for the CPK engineering team. Steps: 1) In Linear, read the current cycle and its issues, plus all issues with no cycle that were updated in the last 30 days. 2) In Notion, read the "Cycle 65 candidates" page and all of its sub-pages. 3) Match every candidate line on those pages to its Linear issue, and record each issue\'s status, owner and estimate. 4) Rank the triage list (highest priority first) with a one-line reason per item. Only read from Linear and Notion; do not change anything in them.',
+      ),
+    ).toEqual([
+      "In Linear, read the current cycle and its issues, plus all issues with no cycle…",
+      'In Notion, read the "Cycle 65 candidates" page and all of its sub-pages.',
+      "Match every candidate line on those pages to its Linear issue, and record each …",
+      "Rank the triage list (highest priority first) with a one-line reason per item. …",
+    ]);
+    expect(
+      routineParts(
+        "Every Monday: 1. read the current cycle in Linear, 2. read the candidates page in Notion, 3. rank the triage list.",
+      ),
+    ).toEqual([
+      "read the current cycle in Linear,",
+      "read the candidates page in Notion,",
+      "rank the triage list.",
+    ]);
+  });
+
   test.each([
-    ["one sentence", "Post the standup summary."],
+    ["a version number", "Upgrade to 2.5 and check 3.1 still builds."],
+    ["numbers out of order", "Look at 3) first and then 1) after it."],
+    ["one numbered step", "Do this: 1) post the standup summary."],
+
     ["one item", "Do this:\n- Post the standup summary"],
     [
       "a list of things to work through rather than parts",
