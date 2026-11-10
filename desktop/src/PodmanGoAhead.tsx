@@ -2,9 +2,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 import { StatusLine } from "./SetupProgress";
 
-/** What happens next and why, said before macOS asks for the person's password. */
+/**
+ * What happens next and why, said before macOS asks for the person's password. In plain words: the
+ * person doesn't know what Podman is, and needn't. The log names it.
+ */
 export const PODMAN_EXPLAINED =
-  "OpenBot installs Podman, which runs OpenBot's back end on this computer. macOS asks for your password once to install it.";
+  "OpenBot needs one more piece of software to run on this computer. macOS asks for your password once to install it.";
+
+/** The heading over that explanation. */
+export const PODMAN_HEADING = "Install the software OpenBot needs";
 
 /**
  * Continue, under the explanation: Install raises macOS's password prompt (`install::GoAhead`).
@@ -56,8 +62,8 @@ export function PodmanGoAhead({
   quiet?: boolean;
 }) {
   return (
-    <section className="local-alert needs" aria-label="Install Podman">
-      <h2>Install Podman</h2>
+    <section className="local-alert needs" aria-label={PODMAN_HEADING}>
+      <h2>{PODMAN_HEADING}</h2>
       <p>{PODMAN_EXPLAINED}</p>
       {!quiet && <StatusLine working={false}>{asking}</StatusLine>}
       <ContinueToPodman key={asking} />
