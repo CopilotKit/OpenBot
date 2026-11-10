@@ -23,7 +23,12 @@ import {
   wakeEngine,
 } from "./localEvalCli";
 import { localReadiness, onInstalledReleaseSaid } from "./localReadiness";
-import { asProblem, Failure, type Problem } from "./Problem";
+import {
+  asProblem,
+  Failure,
+  type Problem,
+  TroubleshootingLogs,
+} from "./Problem";
 import {
   type Downloads,
   formatElapsed,
@@ -860,6 +865,12 @@ export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
               Retry
             </button>
           </div>
+          <TroubleshootingLogs
+            problem={
+              sequence.problem ??
+              (sequence.blocked ? { said: sequence.blocked.said } : null)
+            }
+          />
         </>
       )}
     </section>

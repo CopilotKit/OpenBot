@@ -186,7 +186,7 @@ pub fn line(
 }
 
 /// The person's home folder, written as `~` in the log: it names them.
-fn home_folder() -> Option<String> {
+pub fn home_folder() -> Option<String> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
     let home = home
         .to_string_lossy()
@@ -203,6 +203,72 @@ pub fn scrub<'a>(text: &'a str, home: Option<&str>) -> Cow<'a, str> {
         Some(home) if redacted.contains(home) => Cow::Owned(redacted.replace(home, "~")),
         _ => redacted,
     }
+}
+
+/**
+Every name the home folder goes by: itself, and on Windows its 8.3 short form and long form. Windows writes temporary paths with the short one (`C:\Users\RUNNER~1\AppData\Local\Temp`,
+for `C:\Users\runneradmin`), and that names the person as much as the long one does.
+*/
+pub fn home_forms(home: &str) -> Vec<String> {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut forms = vec![home.to_owned()];
+    #[cfg(windows)]
+    for other in [windows_path(home, true), windows_path(home, false)]
+        .into_iter()
+        .flatten()
+    {
+        let other = other.trim_end_matches(['/', '\\']).to_owned();
+        if other.len() > 3 && !forms.contains(&other) {
+            forms.push(other);
+        }
+    }
+    forms
+}
+
+/// `redact`, then each of `homes` as `~`, longest first so one never leaves part of another.
+pub fn scrub_homes<'a>(text: &'a str, homes: &[String]) -> Cow<'a, str> {
+    let mut text = redact(text);
+    let mut homes: Vec<&String> = homes.iter().filter(|home| home.len() > 3).collect();
+    homes.sort_by_key(|home| std::cmp::Reverse(home.len()));
+    for home in homes {
+        if text.contains(home.as_str()) {
+            text = Cow::Owned(text.replace(home.as_str(), "~"));
+        }
+    }
+    text
+}
+
+/// `path` in its 8.3 short form (`short`) or its long form, as Windows resolves it. None when the
+/// volume keeps no short names or the path does not exist.
+#[cfg(windows)]
+fn windows_path(path: &str, short: bool) -> Option<String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Storage::FileSystem::{GetLongPathNameW, GetShortPathNameW};
+    let wide: Vec<u16> = std::ffi::OsStr::new(path)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let resolve = |buffer: Option<&mut [u16]>| {
+        let at = windows::core::PCWSTR(wide.as_ptr());
+        // SAFETY: `wide` is a NUL-terminated path that outlives the call, and the buffer, when
+        // given, is one the call may fill up to its length.
+        unsafe {
+            if short {
+                GetShortPathNameW(at, buffer)
+            } else {
+                GetLongPathNameW(at, buffer)
+            }
+        }
+    };
+    // Asked with no buffer, each answers the length it needs, NUL included.
+    let needed = resolve(None) as usize;
+    if needed == 0 {
+        return None;
+    }
+    let mut buffer = vec![0u16; needed];
+    // Filled, it answers the length it wrote, NUL not included.
+    let written = resolve(Some(&mut buffer)) as usize;
+    (written > 0 && written < buffer.len()).then(|| String::from_utf16_lossy(&buffer[..written]))
 }
 
 /// One way a key or a token shows itself, and what is kept of the match.
@@ -237,6 +303,9 @@ fn opaque(candidate: &str) -> bool {
         && candidate.chars().any(|c| c.is_ascii_digit())
 }
 
+/// The name of anything that holds a credential: `OPENAI_API_KEY`, `refresh_token`, `x-api-key`.
+const CREDENTIAL_NAME: &str = r"[A-Za-z0-9_.\-]*(?:api[_\-]?key|apikey|[_\-]key\b|secret|token|password|passwd|pwd|cookie|authorization|credential|private[_\-]?key|access[_\-]?key|session[_\-]?id)[A-Za-z0-9_.\-]*";
+
 /// In order: a rule after another sees what the earlier one left.
 static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
     let rule = |pattern: &str, keep: &'static str| Rule {
@@ -258,12 +327,20 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
         // `Authorization: Bearer <token>`, `Basic <base64>`.
         rule(r"(?i)\b(?P<scheme>bearer)\s+[^\s\x22',;]+", "${scheme} [redacted]"),
         rule(r"\b(?P<scheme>Basic)\s+[A-Za-z0-9+/]{12,}={0,2}", "${scheme} [redacted]"),
+        // A credential's quoted value in an `.env` file, spaces and all:
+        // `BETTER_AUTH_SECRET="correct horse battery staple"`. The rule after stops at a space.
+        rule(
+            &format!(
+                r#"(?i)(?P<name>{CREDENTIAL_NAME})(?P<sep>\s*=\s*)(?:"[^"\r\n]*"|'[^'\r\n]*')"#
+            ),
+            "${name}${sep}[redacted]",
+        ),
         // Anything named as a credential, with its value: `OPENAI_API_KEY=…`, `"refresh_token": "…"`,
         // `x-api-key: …`, `password=…`. The name stays, so the line still says what was there.
         Rule {
-            pattern: Regex::new(
-                r#"(?i)(?P<name>[A-Za-z0-9_.\-]*(?:api[_\-]?key|apikey|[_\-]key\b|secret|token|password|passwd|pwd|cookie|authorization|credential|private[_\-]?key|access[_\-]?key|session[_\-]?id)[A-Za-z0-9_.\-]*)(?P<sep>["']?\s*[:=]\s*["']?)[^\s"'&,;}\]\[][^\s"'&,;}\]]*"#,
-            )
+            pattern: Regex::new(&format!(
+                r#"(?i)(?P<name>{CREDENTIAL_NAME})(?P<sep>["']?\s*[:=]\s*["']?)[^\s"'&,;}}\]\[][^\s"'&,;}}\]]*"#
+            ))
             .expect("a redaction pattern compiles"),
             keep: "${name}${sep}[redacted]",
             secret: named_value,

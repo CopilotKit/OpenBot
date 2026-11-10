@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type LocalReadiness, runLocalEval } from "./localEvalCli";
 import { type PartGroup, partLabel } from "./partNames";
+import { TroubleshootingLogs } from "./Problem";
 import { StatusLine } from "./SetupProgress";
 
 /** The Status window is the setup page at this hash, in a window of its own. */
@@ -394,6 +395,7 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
                 </button>
               )}
             </div>
+            <TroubleshootingLogs />
           </>
         )}
       </div>
