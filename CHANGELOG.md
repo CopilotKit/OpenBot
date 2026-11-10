@@ -396,10 +396,13 @@ a model key is needed.
 
 ### Smaller changes
 
-- Welcome's permissions section is a few lines: "Choose when Bots ask", one sentence saying Bots
-  always ask before they delete, send, share or post in your apps or on websites and that the
-  switch adds every change, the switch, and where to change it later. Payments and a Bot's own
-  workspace are still explained in Settings → Approvals. The switch and its default are unchanged.
+- The "Always ask before making changes" switch is called "Extra vigilant", on Welcome, in
+  Settings → Approvals and on a Bot's Tools section in the personal edition. Its description,
+  behaviour and default are unchanged.
+- Welcome's permissions section is shorter: "Choose when Bots ask", one sentence saying Bots ask
+  before they delete, send, share, post or pay in your apps or on websites, the Extra vigilant
+  switch, and where to change it later. Allowing an action always, passwords and a Bot's own
+  workspace are still explained in Settings → Approvals.
 
 ## 1.0.0
 

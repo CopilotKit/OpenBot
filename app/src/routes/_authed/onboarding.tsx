@@ -99,9 +99,9 @@ export const Route = createFileRoute("/_authed/onboarding")({
  * What always asks is said above the switch, so nobody reads turning it off as turning those off
  * too. The switch only adds routine changes on top (reported on 0.3.3).
  *
- * A few lines a new person takes in at a glance: what always asks, the one choice, and where to
- * change it later. The detail (payments left to you, a Bot's own workspace) lives in Settings →
- * Approvals, said in full there.
+ * A few lines a new person takes in at a glance: what asks, the one choice, and where to change it
+ * later. The detail (allowing an action always, passwords, a Bot's own workspace) lives in
+ * Settings → Approvals, said in full there.
  *
  * The animation is a picture and the switch is real, so they never share a pane: the switch sits
  * with the words, and the picture stays a picture.
@@ -125,10 +125,10 @@ function welcomeStep(computer: boolean): OnboardingStep {
                 Choose when Bots ask
               </h2>
               <p className="text-pretty text-muted-foreground">
-                {ALWAYS_ASKS_SHORT} Turn this on to approve every change too.
+                {ALWAYS_ASKS_SHORT}
               </p>
             </div>
-            <AskFirstSwitch described={false} />
+            <AskFirstSwitch />
             <p className="text-sm text-pretty text-muted-foreground">
               You can change this anytime in Settings.
             </p>

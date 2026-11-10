@@ -20,19 +20,14 @@ import {
 import { queryClient } from "@/query-client";
 
 /**
- * The approval step's one setting, offered on the step rather than described: Always ask before
- * making changes, the same switch and the same preference as Settings → Approvals, in the same
- * words (ask-first-copy.ts). It takes effect when switched, and a change that fails is said under it.
+ * The approval step's one setting, offered on the step rather than described: Extra vigilant, the
+ * same switch and the same preference as Settings → Approvals, in the same words
+ * (ask-first-copy.ts). It takes effect when switched, and a change that fails is said under it.
  *
  * The step is still a picture of what a Bot asks; the switch sits with the words, outside the
  * picture's frame, because it is the one real control here.
  */
-export function AskFirstSwitch({
-  described = true,
-}: {
-  /** The switch's description under its title. Settings says it in full; a shorter screen may not. */
-  described?: boolean;
-} = {}) {
+export function AskFirstSwitch() {
   // Read once: the inbox's own polling is for the approvals page, not for a single switch.
   const inbox = useQuery({ ...approvalInboxOptions(), refetchInterval: false });
   const preferences = useMutation(
@@ -50,11 +45,9 @@ export function AskFirstSwitch({
         </ItemMedia>
         <ItemContent>
           <ItemTitle>{ASK_FIRST_TITLE}</ItemTitle>
-          {described ? (
-            <ItemDescription className="line-clamp-none">
-              {ASK_FIRST_DESCRIPTION}
-            </ItemDescription>
-          ) : null}
+          <ItemDescription className="line-clamp-none">
+            {ASK_FIRST_DESCRIPTION}
+          </ItemDescription>
         </ItemContent>
         <ItemActions>
           <Switch

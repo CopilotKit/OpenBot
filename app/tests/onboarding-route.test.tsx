@@ -415,7 +415,7 @@ test("on every step, its name in the list of steps is its heading", async () => 
   ]);
 });
 
-test("Welcome asks when Bots should ask, with Always ask before making changes beside the words, not in the picture", async () => {
+test("Welcome asks when Bots should ask, with Extra vigilant beside the words, not in the picture", async () => {
   const view = open("/onboarding?step=welcome");
   await heading(view, "Welcome to OpenBot");
 
@@ -424,7 +424,7 @@ test("Welcome asks when Bots should ask, with Always ask before making changes b
   });
   expect(permissions.tagName).toBe("H2");
   const ask = await view.findByRole("switch", {
-    name: "Always ask before making changes",
+    name: "Extra vigilant",
   });
   // A real control: with the words, and nowhere inside the inert illustration.
   expect(ask.closest("[data-onboarding-intro]")).not.toBeNull();
@@ -441,24 +441,27 @@ test("Welcome asks when Bots should ask, with Always ask before making changes b
  * switch where it was missed. What always asks is said first, above the switch, and the switch says
  * it adds routine changes on top (server/src/approvals/policy.ts: safety before the default).
  */
-test("Welcome says what always asks before the switch, and what the switch adds, in a few lines", async () => {
+test("Welcome says what always asks before the switch, and the switch says what it adds, in a few lines", async () => {
   const view = open("/onboarding?step=welcome");
   await heading(view, "Welcome to OpenBot");
 
   const ask = await view.findByRole("switch", {
-    name: "Always ask before making changes",
+    name: "Extra vigilant",
   });
   const always = view.getByText(
-    "Bots always ask before they delete, send, share, or post in your apps or on websites. Turn this on to approve every change too.",
+    "Bots ask before they delete, send, share, post, or pay in your apps or on websites.",
   );
   // Above the switch in the reading order, not under it.
   expect(
     always.compareDocumentPosition(ask) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
 
-  // The switch is its title alone here; Settings → Approvals says the rest.
+  // The switch says what it adds, in the words Settings → Approvals uses.
   const row = ask.closest("[data-slot='item']");
-  expect(row?.textContent).toBe("Always ask before making changes");
+  expect(row?.textContent).toContain("Extra vigilant");
+  expect(row?.textContent).toContain(
+    "Require your approval for every change to your apps, websites, and files, including routine edits and updates.",
+  );
 
   const later = view.getByText("You can change this anytime in Settings.");
   expect(
@@ -470,12 +473,12 @@ test("Welcome says what always asks before the switch, and what the switch adds,
   expect(view.queryByText(/always wait for you/)).toBeNull();
 });
 
-test("switching Always ask before making changes on Welcome saves it, and moves nothing on", async () => {
+test("switching Extra vigilant on Welcome saves it, and moves nothing on", async () => {
   const view = open("/onboarding?step=welcome");
   await heading(view, "Welcome to OpenBot");
 
   const ask = await view.findByRole("switch", {
-    name: "Always ask before making changes",
+    name: "Extra vigilant",
   });
   await waitFor(() => expect(ask.hasAttribute("data-disabled")).toBe(false));
   expect(ask.getAttribute("aria-checked")).toBe("false");
@@ -486,7 +489,7 @@ test("switching Always ask before making changes on Welcome saves it, and moves 
   await waitFor(() =>
     expect(
       view
-        .getByRole("switch", { name: "Always ask before making changes" })
+        .getByRole("switch", { name: "Extra vigilant" })
         .getAttribute("aria-checked"),
     ).toBe("true"),
   );
