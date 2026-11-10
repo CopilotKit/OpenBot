@@ -261,7 +261,13 @@
 /*
  * The same pattern as a halo behind a Bot's orb at the top of a conversation, from the same tokens,
  * so swapping or turning off the empty-state pattern does the same here. It fades out from the
- * center instead of a corner.
+ * center instead of a corner, and is gone by the edge of its own box (`closest-side`), so the box's
+ * square never shows. The intro leaves it room to reach that edge (`HALO_ROOM` in
+ * conversation-intro.tsx).
+ *
+ * The dark theme's light pattern on a near-black ground stood out about 1.6 times as strongly as the
+ * light theme's, and read as a block of pixels around the orb rather than a halo; it is drawn at 0.6
+ * of the token's strength there so the two themes match. A skin's 0 is still 0.
  */
 .orb-pattern {
   position: absolute;
@@ -272,12 +278,20 @@
   opacity: var(--empty-pattern-opacity);
   mask-image:
     var(--empty-pattern),
-    radial-gradient(circle, #000 30%, rgb(0 0 0 / 0.35) 55%, transparent 72%);
+    radial-gradient(
+      circle closest-side,
+      #000 42%,
+      rgb(0 0 0 / 0.35) 78%,
+      transparent 100%
+    );
   mask-repeat: repeat, no-repeat;
   mask-size:
     auto,
     100% 100%;
   mask-composite: intersect;
+}
+.dark .orb-pattern {
+  opacity: calc(var(--empty-pattern-opacity) * 0.6);
 }
 
 /*
@@ -292,8 +306,16 @@
   opacity: 0.25;
   backdrop-filter: blur(calc(var(--blur-amount) * 1.5)) contrast(1.25);
 }
-.dark .bot-orb-live .agent-orb::before {
-  filter: blur(var(--blur-amount)) contrast(1) saturate(0.95) brightness(1.18);
+/*
+ * The disc's ground. The mesh is transparent in places, and the orb's ground (`--bg`, the page's
+ * `--background`) fills the halftone and the inner edge. On the dark page that made a dark hole in
+ * the bottom of the sphere, with the halo's pattern showing through it. The disc is drawn on
+ * `--orb-ground`, the light page's color, in both themes, so it reads the same on either page and
+ * its own colors carry it, as the still orb's do.
+ */
+.bot-orb-live .agent-orb {
+  --background: var(--orb-ground);
+  background: var(--orb-ground);
 }
 
 /*
