@@ -42,6 +42,7 @@ import { Route as AuthedAdminPlaygroundRouteImport } from './routes/_authed/admi
 import { Route as AuthedAdminProactiveRouteImport } from './routes/_authed/admin/proactive'
 import { Route as AuthedAdminProvidersRouteImport } from './routes/_authed/admin/providers'
 import { Route as AuthedAdminSkillsRouteImport } from './routes/_authed/admin/skills'
+import { Route as AuthedAdminWhatIfRouteImport } from './routes/_authed/admin/what-if'
 import { Route as AuthedSettingsIndexRouteImport } from './routes/_authed/settings/index'
 import { Route as AuthedSettingsPersonalRouteImport } from './routes/_authed/settings/_personal'
 import { Route as AuthedSettingsApprovalsRouteImport } from './routes/_authed/settings/approvals'
@@ -273,6 +274,11 @@ const AuthedAdminProvidersRoute = AuthedAdminProvidersRouteImport.update({
 const AuthedAdminSkillsRoute = AuthedAdminSkillsRouteImport.update({
   id: '/skills',
   path: '/skills',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
+const AuthedAdminWhatIfRoute = AuthedAdminWhatIfRouteImport.update({
+  id: '/what-if',
+  path: '/what-if',
   getParentRoute: () => AuthedAdminRouteRoute,
 } as any)
 const AuthedSettingsIndexRoute = AuthedSettingsIndexRouteImport.update({
@@ -686,6 +692,7 @@ export interface FileRoutesByFullPath {
   '/admin/proactive': typeof AuthedAdminProactiveRoute
   '/admin/providers': typeof AuthedAdminProvidersRoute
   '/admin/skills': typeof AuthedAdminSkillsRoute
+  '/admin/what-if': typeof AuthedAdminWhatIfRoute
   '/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/settings/browsers': typeof AuthedSettingsBrowsersRoute
   '/settings/learning': typeof AuthedSettingsLearningRoute
@@ -782,6 +789,7 @@ export interface FileRoutesByTo {
   '/admin/proactive': typeof AuthedAdminProactiveRoute
   '/admin/providers': typeof AuthedAdminProvidersRoute
   '/admin/skills': typeof AuthedAdminSkillsRoute
+  '/admin/what-if': typeof AuthedAdminWhatIfRoute
   '/settings': typeof AuthedSettingsIndexRoute
   '/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/settings/browsers': typeof AuthedSettingsBrowsersRoute
@@ -883,6 +891,7 @@ export interface FileRoutesById {
   '/_authed/admin/proactive': typeof AuthedAdminProactiveRoute
   '/_authed/admin/providers': typeof AuthedAdminProvidersRoute
   '/_authed/admin/skills': typeof AuthedAdminSkillsRoute
+  '/_authed/admin/what-if': typeof AuthedAdminWhatIfRoute
   '/_authed/settings/_personal': typeof AuthedSettingsPersonalRouteWithChildren
   '/_authed/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/_authed/settings/browsers': typeof AuthedSettingsBrowsersRoute
@@ -986,6 +995,7 @@ export interface FileRouteTypes {
     | '/admin/proactive'
     | '/admin/providers'
     | '/admin/skills'
+    | '/admin/what-if'
     | '/settings/approvals'
     | '/settings/browsers'
     | '/settings/learning'
@@ -1082,6 +1092,7 @@ export interface FileRouteTypes {
     | '/admin/proactive'
     | '/admin/providers'
     | '/admin/skills'
+    | '/admin/what-if'
     | '/settings'
     | '/settings/approvals'
     | '/settings/browsers'
@@ -1182,6 +1193,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/proactive'
     | '/_authed/admin/providers'
     | '/_authed/admin/skills'
+    | '/_authed/admin/what-if'
     | '/_authed/settings/_personal'
     | '/_authed/settings/approvals'
     | '/_authed/settings/browsers'
@@ -1489,6 +1501,13 @@ declare module '@tanstack/react-router' {
       path: '/skills'
       fullPath: '/admin/skills'
       preLoaderRoute: typeof AuthedAdminSkillsRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
+    '/_authed/admin/what-if': {
+      id: '/_authed/admin/what-if'
+      path: '/what-if'
+      fullPath: '/admin/what-if'
+      preLoaderRoute: typeof AuthedAdminWhatIfRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
     '/_authed/settings/': {
@@ -1978,6 +1997,7 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminProactiveRoute: typeof AuthedAdminProactiveRoute
   AuthedAdminProvidersRoute: typeof AuthedAdminProvidersRoute
   AuthedAdminSkillsRoute: typeof AuthedAdminSkillsRoute
+  AuthedAdminWhatIfRoute: typeof AuthedAdminWhatIfRoute
   AuthedAdminIndexRoute: typeof AuthedAdminIndexRoute
   AuthedAdminApprovalsDescribeRoute: typeof AuthedAdminApprovalsDescribeRoute
   AuthedAdminApprovalsGuidanceRoute: typeof AuthedAdminApprovalsGuidanceRoute
@@ -2012,6 +2032,7 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminProactiveRoute: AuthedAdminProactiveRoute,
   AuthedAdminProvidersRoute: AuthedAdminProvidersRoute,
   AuthedAdminSkillsRoute: AuthedAdminSkillsRoute,
+  AuthedAdminWhatIfRoute: AuthedAdminWhatIfRoute,
   AuthedAdminIndexRoute: AuthedAdminIndexRoute,
   AuthedAdminApprovalsDescribeRoute: AuthedAdminApprovalsDescribeRoute,
   AuthedAdminApprovalsGuidanceRoute: AuthedAdminApprovalsGuidanceRoute,

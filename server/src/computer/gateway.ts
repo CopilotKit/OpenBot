@@ -855,16 +855,12 @@ export function createComputerGateway(
         actorId: actor.id,
         botId: seat.botId,
         toolRef: toolName,
-        effect: ["activate", "type", "write_file", "run_command"].includes(
-          intent ?? "",
-        )
-          ? "write"
-          : "read",
-        scope: filePath
-          ? filePath.split("/").slice(0, -1).join("/") || "workspace"
-          : subject.command
-            ? "workspace"
-            : hostOf(pageUrl) || "browser",
+        effect: approvalEffectOf(intent),
+        scope: approvalScopeOf({
+          filePath,
+          command: subject.command,
+          pageUrl,
+        }),
         args: continuation?.args ?? { ...subject, signal: undefined },
         target: {
           pageUrl,
@@ -1790,6 +1786,36 @@ export function intentOf(
     default:
       return undefined;
   }
+}
+
+/**
+ * Whether the approval gate is asked about a computer action as a change or a read: pressing, typing,
+ * saving a file and running a command change something; everything else reads.
+ */
+export function approvalEffectOf(
+  intent: PolicyContext["intent"],
+): "read" | "write" {
+  return ["activate", "type", "write_file", "run_command"].includes(
+    intent ?? "",
+  )
+    ? "write"
+    : "read";
+}
+
+/**
+ * Where an approval rule finds a computer action: the folder a file is in, the workspace for a
+ * command, or the page's host.
+ */
+export function approvalScopeOf(subject: {
+  filePath?: string | undefined;
+  command?: string | undefined;
+  pageUrl: string;
+}): string {
+  return subject.filePath
+    ? subject.filePath.split("/").slice(0, -1).join("/") || "workspace"
+    : subject.command
+      ? "workspace"
+      : hostOf(subject.pageUrl) || "browser";
 }
 
 type ActionRow = {

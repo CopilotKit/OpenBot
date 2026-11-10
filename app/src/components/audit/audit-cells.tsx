@@ -335,7 +335,7 @@ export function subjectText(event: AuditEvent, storedNames = true): string {
       ? `${payload.offered} of ${payload.granted} tools`
       : "";
   // What an admin asked the trail, in their words.
-  if (event.eventType === "audit.asked")
+  if (event.eventType === "audit.asked" || event.eventType === "what_if.asked")
     return typeof payload.question === "string" ? payload.question : "";
   // Which permission, for whom: one sentence can save several switches, each a row of its own.
   if (event.eventType === "capability.changed")
@@ -1166,6 +1166,8 @@ const DECISIONS: Record<string, string> = {
   "computer.policy_translated": "Drafted, not saved",
   // A question read into filters. Not "Allowed": nothing was decided, and nothing left the trail.
   "audit.asked": "Asked, nothing changed",
+  "what_if.asked": "Asked, nothing changed",
+  "what_if.checked": "Checked, nothing changed",
   "computer.isolation_loaded": "Isolation at start-up",
   "computer.control_taken": "A person took control",
   "computer.control_released": "Control went back to the Bot",
