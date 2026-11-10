@@ -31,7 +31,7 @@
  * which one settles it. The ones a real action would never reach are marked so.
  */
 
-import type { AuditInitiator } from "@openbot/toolkit/initiator";
+import { appToolName, connectorName } from "@openbot/shared/tool-name";
 import type {
   WhatIfLayer,
   WhatIfLayerId,
@@ -39,7 +39,7 @@ import type {
   WhatIfResult,
   WhatIfVerdict,
 } from "@openbot/shared/what-if";
-import { appToolName, connectorName } from "@openbot/shared/tool-name";
+import type { AuditInitiator } from "@openbot/toolkit/initiator";
 import {
   CAPABILITY_LABELS,
   type Capability,
@@ -347,23 +347,24 @@ function enterpriseLayers(
 }
 
 /** The boundary's own rules on the action. A rule by its name where the Boundaries page gives one. */
-function boundaryLayer(decision: PolicyDecision): Layer {
+export function boundaryLayer(decision: PolicyDecision): Layer {
+  // A whole subject, so an unnamed rule reads "A rule with no name allows it", never "The rule a rule".
   const named = decision.ruleName
-    ? `"${decision.ruleName}"`
+    ? `The rule "${decision.ruleName}"`
     : decision.matched
-      ? "a rule with no name"
-      : null;
+      ? "A rule with no name"
+      : "A rule";
   const extra = {
     page: "/admin/boundaries" as const,
     ...(decision.ruleName ? { basis: decision.ruleName } : {}),
     ...(decision.matched ? { rule: decision.matched } : {}),
   };
   if (decision.allowed)
-    return layer("boundaries", "allows", `The rule ${named} allows it.`, extra);
+    return layer("boundaries", "allows", `${named} allows it.`, extra);
   const trial = decision.forward;
   const why =
     decision.source === "deny"
-      ? `The rule ${named} refuses it.`
+      ? `${named} refuses it.`
       : "No rule allows it, and an action no rule allows is refused.";
   return layer(
     "boundaries",
