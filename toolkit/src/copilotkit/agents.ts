@@ -25,6 +25,7 @@ import {
 import { sanitizeSeededHistory } from "../history-sanitize";
 import { firingChecklist } from "./firing-checklist";
 import { answersOnLastStep, type RunSteps, startRun } from "./last-step";
+import { oneMessagePerStep } from "./step-messages";
 import {
   type NativeRunScope,
   nativeApprovalRun,
@@ -240,9 +241,12 @@ export class BuiltInAgentWithSaneHistory extends BuiltInAgent {
     const steps: RunSteps = {};
     super(
       toolsWithin(
-        answersOnLastStep(configuration, steps, {
-          unattended: hooks.unattended === true,
-        }),
+        // Outside the last step's wrapper, so a step it asks twice is still one message.
+        oneMessagePerStep(
+          answersOnLastStep(configuration, steps, {
+            unattended: hooks.unattended === true,
+          }),
+        ),
         scope,
       ),
     );
