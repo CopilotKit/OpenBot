@@ -507,6 +507,11 @@ function sendsHarnessTokenAway(
   );
 }
 
+/** Where an effort sits in {@link EFFORT_ORDER}; -1 for none or one nothing says, the weakest. */
+function effortRank(effort: string | undefined): number {
+  return effort ? (EFFORT_ORDER as readonly string[]).indexOf(effort) : -1;
+}
+
 /** Efforts in the order every provider documents them, duplicates and blanks dropped. */
 export function orderEfforts(values: readonly unknown[]): string[] {
   const seen = new Set<string>();
@@ -1054,6 +1059,12 @@ export function createModelCatalogue(options: {
    */
   async function choose(
     saved: { model?: string | null; effort?: string | null } | null | undefined,
+    /**
+     * The effort to use when the person picked none: sent only when the model takes it and thinks
+     * less than that on its own default. A routine runs at `high`, because nobody is watching it
+     * and models stop early more often at `low` and `medium`.
+     */
+    atLeast?: (typeof EFFORT_ORDER)[number],
   ): Promise<RunChoice> {
     const catalogue = await read();
     const listed = snapshot !== undefined;
@@ -1066,7 +1077,11 @@ export function createModelCatalogue(options: {
     const effort =
       saved?.effort && model?.efforts?.includes(saved.effort)
         ? saved.effort
-        : undefined;
+        : atLeast &&
+            model?.efforts?.includes(atLeast) &&
+            effortRank(model.defaultEffort) < effortRank(atLeast)
+          ? atLeast
+          : undefined;
     return {
       model: id,
       label: model?.label ?? modelLabel(id),

@@ -32,6 +32,21 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   update" and "Installing the update" rather than a release name, its download's total no longer
   shrinks partway, and the card is held from the top, so nothing already on screen moves as rows
   and downloads come and go.
+- **A first install on a Mac starts the first time, and a reinstall sets its back end up again.**
+  Three things a from-zero install of 1.0.0 hit on a Mac with Docker Desktop:
+  - The first Start could stop with "Something went wrong" because Docker Desktop refused the
+    sign-in folder OpenBot had made a moment before (`invalid mount config for type "bind" ...
+    operation not permitted`). Retry worked seconds later. Install now makes that folder, and
+    Start waits and tries again for up to 15 seconds on exactly that refusal. Every other error
+    still stops Start at once.
+  - After the earlier installation's folder and back end were deleted, the AI step said "Back end
+    setup stopped" every time: the CopilotKit CLI still recorded a back end for `~/OpenBot` whose
+    private files were gone. OpenBot now has the CLI forget that back end and sets one up from the
+    start. A back end whose files are damaged, or that another app also uses, is kept, and OpenBot
+    says which folder to restore or delete.
+  - An app copied into Applications without Finder (with `ditto` or `cp`) runs from a temporary
+    copy, and the Recorder said "Move OpenBot Desktop to Applications" though it was there. The
+    Recorder now uses the app's real place in Applications.
 - **Usage data now says why setup stopped.** A failed `local setup`, every failed install or
   Start (a failed `compose up` among them), a failed `local start`, `local connect` or Learning
   model setup, and an Account step that stops on an engine too small or one local setup does not
@@ -175,6 +190,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   off. Every such call is still on the audit trail. Admins can set each kind to ask every time, or
   to be done by members themselves, in Admin → Approvals. A password changed on a website is still
   yours to do. This reverses #998's "always asks" rule.
+- **A Bot's lookups come back, even in a big batch.** A Bot that asks an app for many things at
+  once now has at most 5 of them out at a time, and the rest wait their turn, so the app is not hit
+  with a burst it answers with timeouts and rate limits. A lookup the Bot already made in the same
+  run, with the same details, is answered from the first result, which says it was already
+  fetched, instead of going to the app again. A lookup that times out or that the app turns away
+  for the moment (too many requests, or its own server error) is tried twice more over a few
+  seconds before the Bot hears of it. Anything that changes something in an app is never retried
+  on its own, because it may already have happened. A step that did not run now always tells the
+  Bot the same thing: what happened, and to run it again if it still needs it or say in its answer
+  that it could not get it.
 - **Coming back to a conversation while a Bot is part way through its lookups no longer loses
   them.** A Bot that sent 20 lookups at once, opened again while 9 were still running, showed only
   the 11 that had answered, and the next message told the Bot the other 9 had been "interrupted
@@ -183,6 +208,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   reply as they come, and holds anything you type until the turn is over. A message sent from a
   conversation that still missed some answers takes them from the stored conversation first;
   only a lookup that truly never answered is said to have no result.
+- **The Bots OpenBot ships do the work instead of asking about it.** The Personal Assistant was
+  told to ask whenever something was ambiguous and to ask you to sign in and wait, so it stopped to
+  ask about choices it could make and sent a sentence where it should have handed you the browser.
+  It, General Assistant and Knowledge now take the step in the same reply, use what they already
+  have before asking, ask only when a wrong guess would be hard to undo or only you know the
+  answer, try a failed call once more, and end with what they could not confirm. A Personal
+  Assistant whose instructions you never changed moves to the new ones on the next start; one you
+  edited keeps yours. The ten Bots in `examples/fintech/catalog` now run on their rules: those lived
+  in the description shown under each Bot's name, which a Bot that runs here is never given, so
+  one copied in ran on its output format alone. Each now has a one-line
+  description and keeps its rules in its instructions.
 - **A Claude Agent SDK Bot keeps your request and its tool results through a long task.** A tool
   result over 50,000 characters (a page of email, an app's tool list, a file read from the Bot's
   computer) reached the Bot as a 2 KB preview and the path of a file it could not open, so it showed
