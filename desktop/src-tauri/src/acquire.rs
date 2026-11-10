@@ -830,7 +830,48 @@ pub fn machine_api_answers(name: &str) -> Result<(), String> {
 /// The engine at `address` answers, and so does the Docker API Compose will use through it, or why
 /// not. Only a Podman machine has an API of its own to ask; anything else is asked as before.
 pub fn engine_answers(address: &Address) -> Result<(), String> {
-    if !address.responds() {
+    engine_answers_with(
+        address,
+        Address::responds,
+        Address::pin,
+        |machine| podman(&["machine", "inspect", machine]),
+        ping_api,
+    )
+}
+
+/**
+The Podman machine `address` reaches, by name.
+
+Through its own connection, or else through the default one, named as `Address::pin` names it.
+Detection asks Podman's default connection first and keeps no name for it, so a person's own
+`podman-machine-default`, found that way, came with none, and its API was never asked: on a live
+Windows run a relaunch with that machine's pipe gone checked nothing and failed at the back end.
+*/
+pub fn machine_reached(address: &Address) -> Option<String> {
+    connection_reached(address, Address::pin).map(|connection| machine_of(&connection).to_string())
+}
+
+fn connection_reached(
+    address: &Address,
+    pin: impl FnOnce(&Address) -> Result<Address, String>,
+) -> Option<String> {
+    if address.engine != Engine::Podman {
+        return None;
+    }
+    address
+        .connection
+        .clone()
+        .or_else(|| pin(address).ok().and_then(|pinned| pinned.connection))
+}
+
+fn engine_answers_with(
+    address: &Address,
+    responds: impl FnOnce(&Address) -> bool,
+    pin: impl FnOnce(&Address) -> Result<Address, String>,
+    inspect: impl FnOnce(&str) -> Result<String, String>,
+    ping: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    if !responds(address) {
         return Err(format!(
             "{} does not answer on {}",
             address.engine.binary(),
@@ -840,16 +881,13 @@ pub fn engine_answers(address: &Address) -> Result<(), String> {
                 .unwrap_or("its default connection")
         ));
     }
-    let Some(connection) = address
-        .connection
-        .as_deref()
-        .filter(|_| address.engine == Engine::Podman)
-    else {
+    // Docker, or a Podman reached through a URL, has no machine of its own to ask.
+    let Some(connection) = connection_reached(address, pin) else {
         return Ok(());
     };
-    let machine = machine_of(connection);
-    match podman(&["machine", "inspect", machine]) {
-        Ok(listing) => api_answers_in(&listing, machine, ping_api),
+    let machine = machine_of(&connection);
+    match inspect(machine) {
+        Ok(listing) => api_answers_in(&listing, machine, ping),
         // Not a machine's connection (a remote host somebody added): there is no API of its own.
         Err(_) => Ok(()),
     }
@@ -860,6 +898,16 @@ fn api_answers_in(
     machine: &str,
     ping: impl FnOnce(&str) -> Result<(), String>,
 ) -> Result<(), String> {
+    let machines: Vec<Value> = serde_json::from_str(listing)
+        .map_err(|error| format!("could not read podman machine inspect JSON: {error}"))?;
+    // A machine inspect does not list is not one OpenBot knows to be broken: nothing is restarted
+    // on a guess.
+    if !machines
+        .iter()
+        .any(|entry| entry.get("Name").and_then(Value::as_str) == Some(machine))
+    {
+        return Ok(());
+    }
     if let Some(state) = machine_state(listing, machine)? {
         if !state.eq_ignore_ascii_case("running") {
             return Err(format!("{machine} is {state}"));
@@ -1827,6 +1875,95 @@ mod tests {
         assert!(
             api_answers_in(&inspected("running"), "openbot-s1", |_| Err("gone".into())).is_err()
         );
+        // Not listed: nothing is known to be broken, and nothing is asked.
+        assert!(api_answers_in("[]", "openbot-s1", |_| panic!("not asked")).is_ok());
+    }
+
+    /// `podman machine inspect podman-machine-default` on Windows: running, rootless, its API on
+    /// its own pipe, as the live Windows run's machine was.
+    fn windows_default_machine() -> String {
+        serde_json::json!([{
+            "Name": "podman-machine-default",
+            "State": "running",
+            "Rootful": false,
+            "ConnectionInfo": {
+                "PodmanSocket": {
+                    "Path": "C:\\Users\\Administrator\\.local\\share\\containers\\podman\\machine\\podman.sock"
+                },
+                "PodmanPipe": { "Path": "\\\\.\\pipe\\podman-machine-default" }
+            },
+            "UserModeNetworking": false
+        }])
+        .to_string()
+    }
+
+    fn pinned_to_default(_: &Address) -> Result<Address, String> {
+        Ok(Address::new(
+            Engine::Podman,
+            Some("podman-machine-default".into()),
+        ))
+    }
+
+    /// Detection finds the person's default machine through Podman's default connection and keeps
+    /// no name for it. Its API is asked all the same, through the name `pin` gives the default.
+    #[test]
+    fn a_machine_found_through_the_default_connection_has_its_api_asked() {
+        let found = Address::new(Engine::Podman, None);
+        let mut inspected = None;
+        let mut pinged = None;
+        let answered = engine_answers_with(
+            &found,
+            |_| true,
+            pinned_to_default,
+            |machine| {
+                inspected = Some(machine.to_string());
+                Ok(windows_default_machine())
+            },
+            |api| {
+                pinged = Some(api.to_string());
+                Err(format!(
+                    "{api}: The system cannot find the file specified. (os error 2)"
+                ))
+            },
+        );
+        assert_eq!(inspected.as_deref(), Some("podman-machine-default"));
+        assert_eq!(
+            pinged.as_deref(),
+            Some("npipe:////./pipe/podman-machine-default")
+        );
+        assert!(answered.unwrap_err().contains("(os error 2)"));
+        assert_eq!(
+            connection_reached(&found, pinned_to_default).as_deref(),
+            Some("podman-machine-default")
+        );
+
+        // The same machine with its pipe there answers.
+        assert!(engine_answers_with(
+            &found,
+            |_| true,
+            pinned_to_default,
+            |_| Ok(windows_default_machine()),
+            |_| Ok(()),
+        )
+        .is_ok());
+        // Docker has no machine to ask, and a `podman` that does not answer is said as that.
+        assert!(engine_answers_with(
+            &Address::new(Engine::Docker, None),
+            |_| true,
+            |_| panic!("Docker is not pinned to a machine"),
+            |_| panic!("Docker has no machine"),
+            |_| panic!("Docker has no machine API"),
+        )
+        .is_ok());
+        assert!(engine_answers_with(
+            &found,
+            |_| false,
+            |_| panic!("not asked"),
+            |_| panic!("not asked"),
+            |_| panic!("not asked"),
+        )
+        .unwrap_err()
+        .contains("does not answer on its default connection"));
     }
 
     /// The ping, against a real socket: an API that answers 200, one that has gone, and one that

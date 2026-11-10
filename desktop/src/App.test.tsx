@@ -1059,6 +1059,95 @@ test("an install that failed behind the account step offers Try again, which run
   );
 }, 15000);
 
+/**
+ * What `local_eval_terms` answered on a Windows tester's Docker Desktop 4.31.1, whose engine
+ * (26.1.4) reports its OperatingSystem as "Docker Desktop (containerized)": the CLI's sentence, in
+ * the shape `local_eval.rs` gives the window (as `local-eval-terms-orbstack.json`).
+ */
+const OLD_DOCKER_DESKTOP_REFUSED = {
+  status: "blocked",
+  reason: "unsupported-engine",
+  said: "Docker Desktop or rootful Podman is required on Windows. This machine runs Docker Desktop (containerized).",
+  switchEngine: true,
+};
+const DOCKER_UPDATING =
+  "The Docker Desktop on this computer is too old for OpenBot, so OpenBot is updating it. About 9 minutes left.";
+
+/*
+ * The same tester: the account's licence check ran while Install was updating that Docker Desktop,
+ * and the step said "Switch to Docker Desktop or Podman" on a computer running Docker Desktop.
+ * Under it the update's failure card had a second Try again. Until Install has the engine new
+ * enough, a refusal of it waits for Install, and the step says what Install is doing.
+ */
+test("an old engine refused while Install updates it shows the update, and one Try again", async () => {
+  setupRootConfiguration("/tmp/account-old-docker", async () =>
+    emptyConfiguration(),
+  );
+  let preparation = deferred<void>();
+  let updated = false;
+  withLocalCli({
+    prepare_installation: () => preparation.promise,
+    local_eval_terms: () =>
+      updated ? ACCEPTED_TERMS : OLD_DOCKER_DESKTOP_REFUSED,
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await emitProgress({
+    step: "engine",
+    ok: true,
+    running: true,
+    detail: DOCKER_UPDATING,
+  });
+  await view.findByRole("heading", { name: "Setting up this computer" });
+  expectBehind(view, 1, DOCKER_UPDATING);
+  expect(
+    view.queryByRole("heading", { name: "Switch to Docker Desktop or Podman" }),
+  ).toBeNull();
+  expect(view.queryByText("docker context use desktop-linux")).toBeNull();
+  // Asked again while it waits, and still not said.
+  await act(async () => new Promise((settle) => setTimeout(settle, 2500)));
+  expect(
+    invokeCalls.filter((call) => call.command === "local_eval_terms").length,
+  ).toBeGreaterThan(1);
+  expect(
+    view.queryByRole("heading", { name: "Switch to Docker Desktop or Podman" }),
+  ).toBeNull();
+
+  // The update stops: one card, one Try again, which runs the install and the check again.
+  await act(async () =>
+    preparation.reject({
+      said: "The Docker update OpenBot downloaded could not be checked, so it has not been run. Try again.",
+    }),
+  );
+  await view.findByRole("alert");
+  expect(view.getAllByRole("button", { name: "Try again" })).toHaveLength(1);
+  expect(
+    view.queryByRole("heading", { name: "Switch to Docker Desktop or Podman" }),
+  ).toBeNull();
+  preparation = deferred<void>();
+  await userEvent.click(view.getByRole("button", { name: "Try again" }));
+  expect(
+    installationCalls().filter(
+      (call) => call.command === "prepare_installation",
+    ),
+  ).toHaveLength(2);
+
+  // Updated this time: Docker Desktop 4.98 is not "containerized", and the account goes on.
+  updated = true;
+  await emitProgress({
+    step: "engine",
+    ok: true,
+    running: false,
+    detail: "OpenBot updated Docker.",
+  });
+  await act(async () => preparation.resolve());
+  await view.findByRole(
+    "heading",
+    { name: "Connect your AI" },
+    { timeout: 6000 },
+  );
+}, 20000);
+
 // What the native side says as it opens Docker Desktop: `docker_desktop::HAND_OFF`.
 const DOCKER_HAND_OFF =
   "Docker Desktop is starting in its own window. If it asks you to accept its terms or sign in, do that there. OpenBot comes back when Docker is ready.";
@@ -1651,9 +1740,19 @@ test("every failure screen says what happened and what to do, in plain words", a
     });
     const view = await renderApp();
     await installLocal(view);
-    await view.findByRole("heading", {
-      name: "Switch to Docker Desktop or Podman",
+    // OrbStack's Docker answers and is new enough: Install has settled the engine, so a refusal
+    // of it is the person's to act on (until then the step waits for Install).
+    await emitProgress({
+      step: "engine",
+      ok: true,
+      running: false,
+      detail: "Docker is answering.",
     });
+    await view.findByRole(
+      "heading",
+      { name: "Switch to Docker Desktop or Podman" },
+      { timeout: 6000 },
+    );
     seen("account, refused", readable(view));
     cleanup();
     invokeCalls = [];

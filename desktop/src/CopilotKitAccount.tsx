@@ -111,9 +111,24 @@ export function CopilotKitAccount({
   engine = null,
   goAhead = null,
   behind,
+  engineSettled = true,
+  retried = 0,
 }: {
   /** The installation folder the apps are connected for. */
   root: string;
+  /**
+   * Install has the software OpenBot runs on answering and new enough, or is done. Until then a
+   * refusal of the engine is not this step's to say: Install may be updating it. Docker Desktop
+   * 4.31 calls itself "Docker Desktop (containerized)", which the CLI refuses, and a Windows tester
+   * was told to switch to Docker Desktop while OpenBot was updating it. The step waits instead, and
+   * says what Install is doing.
+   */
+  engineSettled?: boolean;
+  /**
+   * Setup's own Try again, in its failure card, was chosen: whatever this step stopped at is asked
+   * again with it. With that card up the step offers no Try again of its own, so there is one.
+   */
+  retried?: number;
   /**
    * What another app's window wants while Install, behind this step, waits on it: Docker Desktop
    * starting, or a password prompt. See `handOffNow`.
@@ -150,6 +165,8 @@ export function CopilotKitAccount({
   done.current = onDone;
   const installation = useRef(root);
   installation.current = root;
+  const settled = useRef(engineSettled);
+  settled.current = engineSettled;
 
   const finish = useCallback((version: string | null) => {
     if (finished.current) return;
@@ -191,9 +208,17 @@ export function CopilotKitAccount({
       (terms) => {
         if (attempt.current !== started.attempt) return;
         attempt.current = null;
-        if (terms.status === "engine-not-ready") {
+        // Refused while Install may still update the engine: not the person's to act on yet.
+        const refusedBeforeUpdate =
+          !settled.current &&
+          terms.status === "blocked" &&
+          terms.reason === "unsupported-engine";
+        if (terms.status === "engine-not-ready" || refusedBeforeUpdate) {
           // Install is still bringing the engine up: keep checking rather than fail, and say so.
           // On a new Mac that is minutes of Podman installing, under "Checking your account".
+          // While Install has not settled the engine, the wait has no limit: an update can take
+          // longer, and an install that stops says so in its own card.
+          if (!settled.current) waitingSince.current = null;
           const since = waitingSince.current ?? Date.now();
           waitingSince.current = since;
           if (Date.now() - since < ENGINE_WAIT_LIMIT_MS) {
@@ -287,6 +312,16 @@ export function CopilotKitAccount({
       attempt.current = null;
     };
   }, []);
+
+  // Setup's Try again: whatever this step stopped at is asked again with the install.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on each Try again, not each render.
+  useEffect(() => {
+    if (retried === 0) return;
+    if (seen.at === "failed") {
+      if (seen.retry === "sign-in") void signIn();
+      else check();
+    } else if (seen.at === "unsupported-engine") check();
+  }, [retried]);
 
   /** Stop the CLI's sign-in and go back to the start of this step. */
   function cancelSignIn() {
@@ -449,7 +484,8 @@ export function CopilotKitAccount({
               </button>
             </>
           )}
-          {seen.at === "failed" && (
+          {/* One Try again: setup's failure card has its own, which asks this again too. */}
+          {seen.at === "failed" && !failure && (
             <button
               type="button"
               onClick={() => (seen.retry === "sign-in" ? signIn() : check())}
@@ -457,7 +493,7 @@ export function CopilotKitAccount({
               Try again
             </button>
           )}
-          {refused && (
+          {refused && !failure && (
             <button type="button" onClick={check}>
               Try again
             </button>

@@ -547,20 +547,15 @@ impl Updates for OnThisMachine<'_> {
     }
 
     fn restart(&mut self) -> Result<(), String> {
-        let Some(connection) = self
-            .address
-            .connection
-            .as_deref()
-            .filter(|_| self.address.engine == Engine::Podman)
-        else {
+        // By the name it is reached by, the default connection's included (`machine_reached`).
+        let Some(machine) = crate::acquire::machine_reached(&self.address) else {
             return Err("no Podman machine to restart".into());
         };
-        let machine = crate::acquire::machine_of(connection);
-        let containers = crate::acquire::running_containers(machine);
-        if let Err(error) = crate::acquire::stop_machine_named(machine) {
+        let containers = crate::acquire::running_containers(&machine);
+        if let Err(error) = crate::acquire::stop_machine_named(&machine) {
             log::info!("[engine] podman machine stop {machine}: {error}");
         }
-        crate::acquire::start_machine_named(machine, &containers)
+        crate::acquire::start_machine_named(&machine, &containers)
     }
 }
 
