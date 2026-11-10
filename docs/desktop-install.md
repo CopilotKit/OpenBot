@@ -157,6 +157,19 @@ fill a gap. Three rules hold that boundary:
   which it opens; otherwise Podman, which it installs and runs as a rootful machine, because k3d
   needs a rootful engine. The choice is saved with the installation, and later runs use only that
   engine (`src-tauri/src/install.rs`, `acquire.rs`).
+- **The person's own Podman machine is left as it is.** A machine made with `podman machine init`
+  is rootless, which local Intelligence can't run on, and on Windows any machine but OpenBot's lacks
+  the networking OpenBot's containers need to reach Intelligence (user-mode networking and the
+  host-gateway setting). So OpenBot passes such a machine over and makes and uses its own rootful
+  machine, `openbot`, as on a computer with none (`engine::passed_over_machine`). On Windows it runs
+  beside the person's, which keeps running untouched. While `openbot` starts, the app holds the name
+  of Docker's default pipe, `\\.\pipe\docker_engine`, which Podman otherwise gives to the first
+  machine that starts, so `openbot` gets only its own pipe (`acquire::DOCKER_PIPE`). On a Mac, where Podman runs one machine at a
+  time, a rootless machine of the person's is the only kind passed over: the window says OpenBot
+  needs its own and offers to pause theirs while OpenBot runs, and nothing is paused until they
+  choose **Pause my Podman**. Quit then stops `openbot` and starts theirs again with the containers
+  that were running in it (`src-tauri/src/own_machine.rs`). A rootful machine on a Mac, and Docker,
+  are used as before. The person's default Podman connection is never changed.
 - **An engine too old to run OpenBot is updated for the person.** At setup and at every Start,
   before Compose reads the project, the app reads the engine's version and its Compose version and
   compares them with the minimums in `src-tauri/src/engine_versions.rs`: Compose 2.27.2 (the first
@@ -174,12 +187,15 @@ fill a gap. Three rules hold that boundary:
   (`engine_versions::ensure`, `acquire::engine_answers`). The machine is the one OpenBot reaches,
   through Podman's default connection when detection found it there (`acquire::machine_reached`). A
   relaunch does the same before the back end is asked (`wake_engine`), whose own check says only
-  that Docker is unavailable, and Stop and Quit do it before `compose down`. The install's `engine`
-  row is said done only after this check, so the account's licence check and the back end's setup,
-  which start on it, never run against an engine about to be updated. A Docker
+  that Docker is unavailable, and Stop and Quit do it once before both their stops (`compose
+  down` and the back end's `local stop`). The install's `engine` row is said done only after this
+  check, so the back end's setup, which starts on it, never runs against an engine about to be
+  updated. While a row says the engine is updating, the account's licence check is not asked; one
+  refused before that waits for the engine instead of asking again. A Docker
   Desktop that is too old (4.31 and earlier) is updated to Docker's newest release with Docker's
   own installer command line, after its checksum and Docker's signature are checked
-  (`src-tauri/src/docker_desktop_update.rs`). Docker's terms are never accepted for the person. Only
+  (`src-tauri/src/docker_desktop_update.rs`). The containers running before Docker Desktop is quit
+  are started again once it answers. Docker's terms are never accepted for the person. Only
   what cannot be updated (a Docker that is not Docker Desktop, an old Podman on an Intel Mac, a
   macOS or Windows too old for the newest Docker Desktop) is one plain step. Linux is left as it is.
   `cargo run --example engine_update_check` shows what the app would do on a machine without

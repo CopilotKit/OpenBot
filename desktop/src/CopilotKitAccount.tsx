@@ -15,7 +15,7 @@ import {
   signInToCopilotKit,
 } from "./localEvalCli";
 import { engineTooSmallSaid } from "./localReadiness";
-import { PodmanGoAhead } from "./PodmanGoAhead";
+import { PausePodman, PodmanGoAhead } from "./PodmanGoAhead";
 import { InlineFailure, type Problem } from "./Problem";
 import { Sections } from "./Sections";
 import {
@@ -106,8 +106,10 @@ export function CopilotKitAccount({
   handOff = null,
   engine = null,
   goAhead = null,
+  pauseOffer = null,
   behind,
   engineSettled = true,
+  engineUpdating = false,
   retried = 0,
 }: {
   /** The installation folder the apps are connected for. */
@@ -120,6 +122,11 @@ export function CopilotKitAccount({
    * says what Install is doing.
    */
   engineSettled?: boolean;
+  /**
+   * Install is updating the engine now. The check is not asked at all meanwhile: the engine being
+   * updated refuses it. It is asked once Install has settled the engine.
+   */
+  engineUpdating?: boolean;
   /**
    * Setup's own Try again, in its failure card, was chosen: whatever this step stopped at is asked
    * again with it. With that card up the step offers no Try again of its own, so there is one.
@@ -143,6 +150,11 @@ export function CopilotKitAccount({
    */
   goAhead?: string | null;
   /**
+   * On a Mac whose own Podman OpenBot can't use, Install behind this step waits for the person's
+   * yes before it pauses theirs: its line, from `pauseOfferNow`, said with the button that says yes.
+   */
+  pauseOffer?: string | null;
+  /**
    * What is installing behind this step, as one row: what it is doing, how far along, and for how
    * long (`installingBehind`). Shown under every part of the step, so the person always knows
    * OpenBot is still installing. It carries the engine's line and any hand-off, so those are not
@@ -163,6 +175,10 @@ export function CopilotKitAccount({
   installation.current = root;
   const settled = useRef(engineSettled);
   settled.current = engineSettled;
+  const updating = useRef(engineUpdating);
+  updating.current = engineUpdating;
+  /** The check waited for Install to settle the engine, and is asked once it has. */
+  const checkWhenSettled = useRef(false);
 
   const finish = useCallback((version: string | null) => {
     if (finished.current) return;
@@ -196,6 +212,17 @@ export function CopilotKitAccount({
   const waitingSince = useRef<number | null>(null);
   const askAgain = useRef<ReturnType<typeof setTimeout> | null>(null);
   const check = useCallback(() => {
+    /*
+     * Not asked at all until Install has the engine answering and new enough. The check reaches the
+     * engine, and one being updated is refused: on a Windows tester's old Docker Desktop it answered
+     * "blocked (UnsupportedEngine) ... (containerized)" fourteen times in forty seconds while
+     * OpenBot updated it. The step waits, saying what Install is doing, and asks once it has.
+     */
+    if (updating.current) {
+      checkWhenSettled.current = true;
+      setSeen({ at: "waiting-for-engine" });
+      return;
+    }
     // While it waits for the engine, each check asked again keeps saying what it waits on.
     if (waitingSince.current === null) setSeen({ at: "checking" });
     const started = localEvalTerms();
@@ -209,7 +236,14 @@ export function CopilotKitAccount({
           !settled.current &&
           terms.status === "blocked" &&
           terms.reason === "unsupported-engine";
-        if (terms.status === "engine-not-ready" || refusedBeforeUpdate) {
+        // Refused before Install has settled the engine: asked once more when it has, not every two
+        // seconds meanwhile.
+        if (refusedBeforeUpdate) {
+          checkWhenSettled.current = true;
+          setSeen({ at: "waiting-for-engine" });
+          return;
+        }
+        if (terms.status === "engine-not-ready") {
           // Install is still bringing the engine up: keep checking rather than fail, and say so.
           // On a new Mac that is minutes of Podman installing, under "Checking your account".
           // While Install has not settled the engine, the wait has no limit: an update can take
@@ -274,6 +308,14 @@ export function CopilotKitAccount({
   }, [connectApps]);
   const checkAgain = useRef(check);
   checkAgain.current = check;
+
+  // Install settled the engine: the check that waited for it is asked now.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: when the engine settles, not each render.
+  useEffect(() => {
+    if (!engineSettled || !checkWhenSettled.current) return;
+    checkWhenSettled.current = false;
+    check();
+  }, [engineSettled]);
 
   /**
    * The CLI's `login`: done at once when it already has a sign-in, otherwise it opens the browser
@@ -407,6 +449,7 @@ export function CopilotKitAccount({
           is at. Nobody is asked to click before a prompt: a closed one has its card, with Try
           again. */}
       {asking && <PodmanGoAhead asking={goAhead} />}
+      {pauseOffer && <PausePodman key={pauseOffer} offer={pauseOffer} />}
       {/* Not while setup's failure is shown: the install that brings the engine up has stopped,
           and a spinner saying it is coming waited forever under it. Its Try again starts it. */}
       {waitingForEngine

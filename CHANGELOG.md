@@ -30,6 +30,30 @@ backup taken before the upgrade instead. Three things change for an existing dep
 
 ### OpenBot Desktop
 
+- **OpenBot uses its own Podman machine when yours can't run it, and leaves yours as it is.** A
+  Podman machine made with `podman machine init` is rootless, and OpenBot used it and stopped at
+  "Change this computer's setup" because local Intelligence needs rootful Podman. On Windows even a
+  rootful machine of yours left chat unable to reach OpenBot's back end. OpenBot now makes and uses
+  its own rootful machine, `openbot`, as on a computer with none. On Windows it runs beside yours,
+  which keeps running untouched, and never takes Docker's default pipe (`docker_engine`), so your
+  Docker tools and Docker Desktop keep reaching what they did. On a Mac, where Podman runs one machine at a time, OpenBot asks
+  before it pauses your rootless machine while it runs (**Pause my Podman**), and Quit starts yours
+  again with its containers. Docker, and a rootful machine of yours on a Mac, are used as before.
+  Your default Podman connection is never changed. An installation that ran in your own machine
+  starts fresh in `openbot`; its old data stays in your machine.
+- **Start says in the log what it is waiting on, and why it gave up.** A Start that waited five
+  minutes for OpenBot's services and then said "OpenBot didn't get ready in time" left nothing in
+  the log in between. Each wait now writes what it asked (the address or the back end's status),
+  each new answer and the same one again once a minute, and why it ended, with how long it took and
+  the last answer.
+- **Updating Docker Desktop keeps your containers running, and its lines can be read whole.**
+  Containers that were running before OpenBot updated Docker Desktop are started again once it is
+  back. The background row now shows the update's lines and Docker Desktop's own messages in full,
+  and the account step no longer asks the old Docker Desktop for your licence while it is being
+  updated.
+- **Quit with Podman's connection gone still stops cleanly.** When the Podman machine OpenBot uses
+  had lost its Docker API, Quit could not stop the back end and the next launch said some services
+  didn't stop. Stop and Quit now restart that machine once before they stop anything.
 - **Updating an old Docker Desktop on Windows no longer stops at "could not be checked".** OpenBot
   downloaded Docker's installer and then could not check its signature, because the installer's
   folder name has spaces in it, so every update stopped there. The check, and the all-users install
@@ -314,6 +338,17 @@ backup taken before the upgrade instead. Three things change for an existing dep
   window can't read says "Dropped file: couldn't be attached. Attach it with + instead."
 
 ### Conversations
+
+- **A Bot draws a chart or a table only from results it has read, and a form stops at the first
+  field that fails.** A model that calls tools in parallel, such as Claude Opus, asked for its
+  searches and the chart and table meant to show them in one step, so they were drawn with figures
+  it hadn't read, and it then said so under them. A chart, table, card or approval asked for in the
+  same step as another tool is no longer shown, not even for a moment, and the Bot draws it again
+  from the results. One on its own, or beside other components, draws as before. A Bot's computer
+  actions in one step run one at a time, in the order asked for, and stop at the first that fails:
+  the rest are reported to the Bot as not run, and it looks at the page again. Every Bot is told to
+  batch only tool calls that don't depend on each other. This follows Anthropic's guidance for
+  parallel tool use and holds whichever model a Bot runs on, in conversations and in routines.
 
 - **Talk to OpenBot without a transcription provider.** The message box shows a microphone on
   every OpenBot, not only where `TRANSCRIPTION_PROVIDER` is set. Click it and your words appear in

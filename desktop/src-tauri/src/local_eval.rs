@@ -412,6 +412,91 @@ pub struct Service {
     pub ready: bool,
 }
 
+/// One `local status` answer as the log says it while Start waits for the back end: its readiness
+/// and licence, whether the CLI's checks of the addresses below passed, and which services are not
+/// ready yet. Service names and loopback addresses only; nothing secret is in a report.
+pub fn status_said(report: &Report) -> String {
+    let name = |value: serde_json::Value| value.as_str().unwrap_or("unknown").to_string();
+    let mut said = format!(
+        "readiness {}, licence {}, checks {}",
+        name(serde_json::json!(report.readiness)),
+        name(serde_json::json!(report.licence)),
+        if report.checks_passed {
+            "passed"
+        } else {
+            "not passed"
+        }
+    );
+    if let Some(reason) = report.reason {
+        said.push_str(&format!(", reason {}", name(serde_json::json!(reason))));
+    }
+    let Some(stack) = &report.stack else {
+        said.push_str(", no stack");
+        return said;
+    };
+    if let Some(observed) = &stack.observed {
+        let waiting: Vec<String> = observed
+            .services
+            .iter()
+            .filter(|service| !service.ready)
+            .map(|service| format!("{} {}", service.name, service.phase))
+            .collect();
+        said.push_str(&format!(
+            ", services {} of {} ready",
+            observed.services.len() - waiting.len(),
+            observed.services.len()
+        ));
+        if !waiting.is_empty() {
+            said.push_str(&format!(" (not ready: {})", waiting.join(", ")));
+        }
+    }
+    said.push_str(&format!(
+        "; API {}, gateway {}, dashboard {}",
+        stack.urls.api, stack.urls.gateway, stack.urls.dashboard
+    ));
+    said
+}
+
+/// A wait for the back end nobody ended (Stop, Quit, a window reloaded) is over after this long
+/// without a status, so the next one starts its own.
+pub const WAIT_FORGOTTEN: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// The lines one `local status` answer adds to Start's wait for the back end
+/// (`logging::WaitLog`): what it answered, when that is new or a minute has passed, and that the
+/// wait ended once the back end is ready with a valid licence. The window ends a wait that gives up
+/// (`back_end_wait_ended`).
+pub fn status_waited(
+    wait: &mut Option<crate::logging::WaitLog>,
+    now: std::time::Instant,
+    answer: &Result<Report, Failure>,
+) -> Vec<String> {
+    if wait
+        .as_ref()
+        .is_some_and(|wait| wait.quiet_for(now) >= WAIT_FORGOTTEN)
+    {
+        *wait = None;
+    }
+    let waiting = wait.get_or_insert_with(|| {
+        crate::logging::WaitLog::new(
+            "the backend, `local status` until it is ready with a valid licence",
+            now,
+        )
+    });
+    let said = match answer {
+        Ok(report) => status_said(report),
+        Err(failure) => format!("the status call failed: {failure:?}"),
+    };
+    let mut lines: Vec<String> = waiting.answered(now, &said).into_iter().collect();
+    let ready = answer.as_ref().is_ok_and(|report| {
+        report.readiness == Readiness::Ready && report.licence == Licence::Valid
+    });
+    if ready {
+        lines.push(waiting.ended(now, "ready"));
+        *wait = None;
+    }
+    lines
+}
+
 /// The fixed argument list for one call. Built only from validated types.
 pub fn arguments(action: Action, stack: &StackId) -> [&str; 5] {
     [
@@ -5230,6 +5315,69 @@ mod tests {
         input
     }
 
+    /// Start's wait for the back end, from the CLI's own status answers: each new answer said with
+    /// what is not ready and the addresses the CLI checks, a repeat not said again, a failed call
+    /// said as one, and the wait ended once the back end is ready with a valid licence.
+    #[test]
+    fn the_back_end_wait_says_each_status_and_ends_when_ready() {
+        let start = std::time::Instant::now();
+        let at = |seconds: u64| start + std::time::Duration::from_secs(seconds);
+        let mut starting = canonical("starting", "valid", json!(null));
+        starting["stack"]["observed"]["services"] = json!([
+            { "name": "cpki-app-api", "phase": "Running", "ready": true },
+            { "name": "cpki-gateway", "phase": "Pending", "ready": false }
+        ]);
+        let starting = status(&starting).unwrap();
+        let mut wait = None;
+
+        let first = status_waited(&mut wait, at(0), &Ok(starting.clone()));
+        assert_eq!(first.len(), 1, "{first:#?}");
+        assert!(first[0].starts_with(
+            "[wait] the backend, `local status` until it is ready with a valid licence: readiness starting, licence valid"
+        ), "{first:#?}");
+        assert!(
+            first[0].contains("services 1 of 2 ready (not ready: cpki-gateway Pending)"),
+            "{first:#?}"
+        );
+        assert!(
+            first[0].contains(
+                "API http://localhost:8082, gateway ws://[::1]:4401, dashboard http://intelligence.localhost:8080"
+            ),
+            "{first:#?}"
+        );
+        assert!(!first[0].contains(SECRET), "{first:#?}");
+        assert!(status_waited(&mut wait, at(15), &Ok(starting.clone())).is_empty());
+        let failed = status_waited(&mut wait, at(30), &Err(Failure::Timeout));
+        assert!(
+            failed[0].contains("the status call failed: Timeout"),
+            "{failed:#?}"
+        );
+
+        // What the window gives up with, and the last answer it had.
+        let gave_up = wait.as_ref().unwrap().ended(
+            at(40),
+            "gave up: OpenBot didn't get ready in time. Retry to check again.",
+        );
+        assert!(gave_up.contains("after 40.0s and 3 checks"), "{gave_up}");
+        assert!(gave_up.ends_with("last answer: the status call failed: Timeout"));
+
+        let ready = status(&canonical("ready", "valid", json!(null))).unwrap();
+        let ended = status_waited(&mut wait, at(45), &Ok(ready));
+        assert!(
+            ended
+                .last()
+                .unwrap()
+                .contains(": ready after 45.0s and 4 checks"),
+            "{ended:#?}"
+        );
+        assert!(wait.is_none());
+
+        // A wait nobody ended is not carried on by the next one.
+        status_waited(&mut wait, at(400), &Ok(starting.clone()));
+        let next = status_waited(&mut wait, at(400 + 121), &Ok(starting));
+        assert!(next[0].contains("(0.0s in, check 1)"), "{next:#?}");
+    }
+
     #[test]
     fn each_readiness_state_is_read() {
         for (wire, expected) in [
@@ -7381,6 +7529,34 @@ printf '%s' '{completed}'
             engine_variables(Some(&engine)).get("CONTAINER_CONNECTION"),
             Some(Some(_))
         ));
+    }
+
+    /// With the person's own machine passed over (`engine::passed_over_machine`), OpenBot runs on
+    /// its own, and the CLI is told that machine's API and connection. The machine behind Podman's
+    /// default connection, which is the person's, is never the one asked about.
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn the_cli_is_told_openbots_own_machine_and_never_the_default_one() {
+        use crate::acquire::MachineFacts;
+        use crate::engine::{Address, Engine};
+        let pipe = "npipe:////./pipe/podman-openbot";
+        let address = Address::new(Engine::Podman, Some("openbot-root".into()));
+        let mut asked = Vec::new();
+        let engine = CliEngine::of_with(&address, |connection| {
+            asked.push(connection.to_string());
+            Ok(MachineFacts {
+                rootful: Some(true),
+                api: Some(pipe.into()),
+            })
+        });
+        assert_eq!(asked, ["openbot-root"]);
+        assert!(!engine.rootless);
+        let variables = engine_variables(Some(&engine));
+        assert_eq!(variables.get("DOCKER_HOST"), Some(&Some(pipe.to_string())));
+        assert_eq!(
+            variables.get("CONTAINER_CONNECTION"),
+            Some(&Some("openbot-root".to_string()))
+        );
     }
 
     #[test]

@@ -57,6 +57,9 @@ pub struct StepLine {
     pub said: String,
     pub elsewhere: bool,
     pub asks: bool,
+    /// The engine itself is being updated (`engine_versions`): the window asks nothing of it until
+    /// the update is done. An engine being updated refuses what is asked of it.
+    pub updating: bool,
     pub detail: Option<String>,
 }
 
@@ -67,6 +70,7 @@ impl StepLine {
             said: said.into(),
             elsewhere: false,
             asks: false,
+            updating: false,
             detail: None,
         }
     }
@@ -77,6 +81,7 @@ impl StepLine {
             said: said.into(),
             elsewhere: true,
             asks: false,
+            updating: false,
             detail: None,
         }
     }
@@ -87,8 +92,15 @@ impl StepLine {
             said: said.into(),
             elsewhere: false,
             asks: true,
+            updating: false,
             detail: None,
         }
+    }
+
+    /// A line said while the engine itself is being updated: see `updating`.
+    pub fn updating(mut self) -> Self {
+        self.updating = true;
+        self
     }
 
     /// The technical words for the log, beside the plain line the window shows.
@@ -391,7 +403,8 @@ pub struct EngineStatus {
 ///
 /// Somebody who already has a machine up is handed it rather than made to wait while a duplicate
 /// boots beside it. Ours is preferred among running machines only so that repeat launches settle on
-/// the same one.
+/// the same one. A machine of the person's own that OpenBot cannot run on is passed over: see
+/// `passed_over`.
 ///
 /// Answers with the connection for the machine's own mode (see `acquire::connection_for`): a rootful
 /// machine is reached through `<name>-root`, where its rootful engine is.
@@ -404,11 +417,85 @@ fn running_machine(preferred: &str) -> Option<String> {
         return None;
     }
     let machines: Vec<MachineListing> = serde_json::from_slice(&output.stdout).ok()?;
+    usable_running_machine(&machines, preferred, |name| {
+        passed_over(name, std::env::consts::OS, crate::acquire::machine_behind).is_some()
+    })
+    .map(|name| crate::acquire::connection_of_machine(&name))
+}
+
+/// The running machine to use, by name: `preferred` when it runs, else the first running one that
+/// is not `passed_over`.
+fn usable_running_machine(
+    machines: &[MachineListing],
+    preferred: &str,
+    passed_over: impl Fn(&str) -> bool,
+) -> Option<String> {
     let running = || machines.iter().filter(|machine| machine.running);
+    if let Some(ours) = running().find(|machine| machine.name == preferred) {
+        return Some(ours.name.clone());
+    }
     running()
-        .find(|machine| machine.name == preferred)
-        .or_else(|| running().next())
-        .map(|machine| crate::acquire::connection_of_machine(&machine.name))
+        .find(|machine| !passed_over(&machine.name))
+        .map(|machine| machine.name.clone())
+}
+
+/**
+The person's own Podman machine behind `address`, by name, when OpenBot does not run on it and uses
+its own machine (`acquire::MACHINE`) instead.
+
+- **Rootless, anywhere.** Local Intelligence needs rootful Podman, and its CLI refuses a rootless
+  machine ("Rootless Podman is not supported"). `podman machine init` makes a rootless machine by
+  default, so a person who already uses Podman usually has one, and OpenBot used to settle on it and
+  stop at that refusal. OpenBot never switches somebody's machine (see `acquire::create_machine`).
+- **Any machine of theirs, on Windows.** OpenBot's own machine there has what OpenBot's containers
+  need to reach this computer: user-mode networking, and `host.containers.internal` set to its
+  gateway (`acquire::configure_host_gateway_after_start`). A person's machine has neither. Found on
+  a live Windows run with the person's machine switched to rootful by hand: `host.docker.internal`
+  answered with the WSL VM's bridge gateway, where nothing listens, so the server could not reach
+  Intelligence and every chat said "OpenBot couldn't reach its backend". A Mac machine has no such
+  setting: every applehv machine reaches this computer through gvproxy's gateway, and OpenBot makes
+  its own with nothing but `--rootful`, so a person's rootful machine there is used as before.
+
+OpenBot's own machine is never the person's, even one an early release created rootless: OpenBot's
+database is in it. A connection that is not a machine's (a remote host somebody added) is not one
+either, and is used as before.
+
+On Windows OpenBot's machine runs beside theirs, and on a Mac in its place while OpenBot runs (see
+`own_machine`).
+*/
+pub fn passed_over_machine(address: &Address) -> Option<String> {
+    if address.engine != Engine::Podman || !matches!(std::env::consts::OS, "macos" | "windows") {
+        return None;
+    }
+    let connection = match &address.connection {
+        Some(connection) => connection.clone(),
+        None => address.pin().ok()?.connection?,
+    };
+    passed_over(
+        &connection,
+        std::env::consts::OS,
+        crate::acquire::machine_behind,
+    )
+}
+
+/// `passed_over_machine` for the connection `connection` on `os`, with the machine behind it read
+/// by `machine_behind`.
+pub(crate) fn passed_over(
+    connection: &str,
+    os: &str,
+    machine_behind: impl FnOnce(&str) -> Result<crate::acquire::MachineFacts, String>,
+) -> Option<String> {
+    let machine = crate::acquire::machine_of(connection);
+    if machine == crate::acquire::MACHINE {
+        return None;
+    }
+    let facts = machine_behind(connection).ok()?;
+    let usable = match os {
+        "windows" => false,
+        "macos" => facts.rootful != Some(false),
+        _ => true,
+    };
+    (!usable).then(|| machine.to_string())
 }
 
 #[derive(Deserialize)]
@@ -696,9 +783,35 @@ pub fn detect_saved(saved: Option<Engine>) -> EngineStatus {
 }
 
 fn detect_among(engines: &[Engine]) -> EngineStatus {
+    detect_among_with(
+        engines,
+        Address::responds,
+        passed_over_machine,
+        || running_machine(crate::acquire::MACHINE),
+        |engine| program(engine).is_some(),
+    )
+}
+
+/// `detect_among`, with how each engine answers passed in, so the choice can be tested on any
+/// computer: whether an address answers, the person's machine behind one that OpenBot passes over
+/// (see `passed_over_machine`), the connection of a running machine OpenBot can use, and whether an
+/// engine is installed.
+fn detect_among_with(
+    engines: &[Engine],
+    responds: impl Fn(&Address) -> bool,
+    passed_over_machine: impl Fn(&Address) -> Option<String>,
+    running_machine: impl FnOnce() -> Option<String>,
+    installed: impl Fn(Engine) -> bool,
+) -> EngineStatus {
+    // The person's machine answered first, and OpenBot uses its own machine instead.
+    let mut passed_over = None;
     for &engine in engines {
         let address = Address::new(engine, None);
-        if address.responds() {
+        if responds(&address) {
+            if let Some(theirs) = passed_over_machine(&address) {
+                passed_over = Some(theirs);
+                continue;
+            }
             return answering(address);
         }
     }
@@ -706,16 +819,32 @@ fn detect_among(engines: &[Engine]) -> EngineStatus {
     // Podman's default connection can name a machine that is not running while another one is. That
     // is not "no engine", and creating a second machine in answer to it is the wrong repair.
     if engines.contains(&Engine::Podman) {
-        if let Some(machine) = running_machine(crate::acquire::MACHINE) {
+        if let Some(machine) = running_machine() {
             let address = Address::new(Engine::Podman, Some(machine));
-            if address.responds() {
+            if responds(&address) {
                 return answering(address);
             }
         }
     }
 
+    // Not answering, for OpenBot: its own machine is made or started next, as on a computer with
+    // no machine (see `own_machine`).
+    if let Some(theirs) = passed_over {
+        return EngineStatus {
+            engine: Some(Engine::Podman),
+            address: None,
+            responding: false,
+            engine_socket: None,
+            detail: format!(
+                "podman answers on {theirs}, a machine of the person's own that OpenBot does not \
+                 run on; OpenBot uses its own machine, {}, instead.",
+                crate::acquire::MACHINE
+            ),
+        };
+    }
+
     for &engine in engines {
-        if program(engine).is_some() {
+        if installed(engine) {
             return EngineStatus {
                 engine: Some(engine),
                 address: None,
@@ -1049,6 +1178,153 @@ fn main() {
     fn the_tools_live_under_the_downloads_they_came_from() {
         let downloads = Path::new("/tmp/openbot-engine");
         assert_eq!(tools_dir_under(downloads), downloads.join("bin"));
+    }
+
+    /// What `podman machine inspect` says of a machine, as Podman 6.1.1 reports it.
+    fn facts(rootful: bool) -> Result<crate::acquire::MachineFacts, String> {
+        Ok(crate::acquire::MachineFacts {
+            rootful: Some(rootful),
+            api: None,
+        })
+    }
+
+    const THEIRS: &str = "podman-machine-default";
+
+    /// The live Windows run: the person's `podman-machine-default`, made the default way and so
+    /// rootless, answered first. OpenBot settled on it, and the CLI refused it ("Rootless Podman is
+    /// not supported"). Switched to rootful by hand, it answered and chat still could not reach the
+    /// back end: it has none of the networking OpenBot's own machine is given. So on Windows every
+    /// machine of the person's is passed over, and on a Mac a rootless one.
+    #[test]
+    fn the_persons_machine_is_passed_over_rootless_anywhere_and_any_on_windows() {
+        let missing = |_: &str| Err("Error: not a machine".to_string());
+        for (os, rootful, passed) in [
+            ("windows", false, true),
+            ("windows", true, true),
+            ("macos", false, true),
+            ("macos", true, false),
+        ] {
+            assert_eq!(
+                passed_over(THEIRS, os, |_| facts(rootful)),
+                passed.then(|| THEIRS.to_string()),
+                "{os}, rootful {rootful}"
+            );
+            // Reached through its root connection, it is the same machine.
+            assert_eq!(
+                passed_over(&format!("{THEIRS}-root"), os, |_| facts(rootful)),
+                passed.then(|| THEIRS.to_string()),
+                "{os}, rootful {rootful}, root connection"
+            );
+            // OpenBot's own machine is used as it is, whatever its mode: its database is in it.
+            assert_eq!(passed_over("openbot-root", os, |_| facts(rootful)), None);
+            assert_eq!(passed_over("openbot", os, |_| facts(rootful)), None);
+            // A connection that is not a machine's is used as before.
+            assert_eq!(passed_over("remote-host", os, missing), None);
+        }
+    }
+
+    fn podman_default() -> Address {
+        Address::new(Engine::Podman, None)
+    }
+
+    /// The person's machine answers on Podman's default connection and OpenBot's is not up yet: no
+    /// engine for OpenBot, so setup makes and starts its own (`own_machine`), and the person's is
+    /// left out of it. Once OpenBot's machine runs, it is the one used, through its root connection.
+    #[test]
+    fn a_passed_over_machine_leaves_openbot_waiting_for_its_own_then_using_it() {
+        let theirs = |address: &Address| {
+            (address.engine == Engine::Podman && address.connection.is_none())
+                .then(|| THEIRS.to_string())
+        };
+        let answers = |address: &Address| address.engine == Engine::Podman;
+
+        let waiting = detect_among_with(
+            &[Engine::Docker, Engine::Podman],
+            answers,
+            theirs,
+            || None,
+            |_| true,
+        );
+        assert!(!waiting.responding);
+        assert_eq!(waiting.engine, Some(Engine::Podman));
+        assert_eq!(waiting.address, None);
+        assert!(waiting.detail.contains(THEIRS), "{}", waiting.detail);
+        assert!(waiting.detail.contains("openbot"), "{}", waiting.detail);
+
+        let ours = detect_among_with(
+            &[Engine::Docker, Engine::Podman],
+            answers,
+            theirs,
+            || Some("openbot-root".into()),
+            |_| true,
+        );
+        assert!(ours.responding);
+        assert_eq!(
+            ours.address.and_then(|address| address.connection),
+            Some("openbot-root".into())
+        );
+    }
+
+    /// Docker, and a machine of the person's that OpenBot runs on (rootful, on a Mac), keep today's
+    /// behaviour: whatever answers is used.
+    #[test]
+    fn docker_or_a_usable_machine_that_answers_is_used_as_before() {
+        let never_passed = |_: &Address| None;
+        let docker = detect_among_with(
+            &[Engine::Docker, Engine::Podman],
+            |address| address.engine == Engine::Docker,
+            never_passed,
+            || panic!("Docker answered"),
+            |_| true,
+        );
+        assert!(docker.responding);
+        assert_eq!(docker.engine, Some(Engine::Docker));
+
+        let podman = detect_among_with(
+            &[Engine::Docker, Engine::Podman],
+            |address| address.engine == Engine::Podman,
+            never_passed,
+            || panic!("the default connection answered"),
+            |_| true,
+        );
+        assert!(podman.responding);
+        assert_eq!(podman.address, Some(podman_default()));
+    }
+
+    /// A machine of the person's that OpenBot passes over is never picked from the running
+    /// machines either. Ours is, and so is one OpenBot can use.
+    #[test]
+    fn a_running_passed_over_machine_is_never_the_one_used() {
+        let listing = |machines: &[(&str, bool)]| -> Vec<MachineListing> {
+            machines
+                .iter()
+                .map(|(name, running)| MachineListing {
+                    name: name.to_string(),
+                    running: *running,
+                })
+                .collect()
+        };
+        let theirs_passed = |name: &str| name == THEIRS;
+        assert_eq!(
+            usable_running_machine(&listing(&[(THEIRS, true)]), "openbot", theirs_passed),
+            None
+        );
+        assert_eq!(
+            usable_running_machine(
+                &listing(&[(THEIRS, true), ("openbot", true)]),
+                "openbot",
+                theirs_passed
+            ),
+            Some("openbot".into())
+        );
+        assert_eq!(
+            usable_running_machine(
+                &listing(&[(THEIRS, true), ("rootful-one", true)]),
+                "openbot",
+                theirs_passed
+            ),
+            Some("rootful-one".into())
+        );
     }
 
     #[test]

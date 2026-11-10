@@ -21,6 +21,7 @@ type ProgressEvent = {
   running?: boolean;
   elsewhere?: boolean;
   asks?: boolean;
+  updating?: boolean;
   downloadBytes?: number;
   downloads?: {
     done: number;
@@ -972,6 +973,72 @@ test("macOS's password prompt is explained and comes without a click, and a clos
   expectBehind(view, 1, PODMAN_PROMPTING);
 });
 
+// What Install says on a Mac whose own Podman OpenBot can't use (`own_machine::PAUSE_OFFER`).
+const PAUSE_OFFER =
+  "Your Podman is set up in a way OpenBot can't use. OpenBot will use its own, and pause yours while OpenBot is running. Yours starts again when you quit OpenBot.";
+
+/**
+ * David's decision for 1.0.2: on a Mac, where Podman runs one machine at a time, OpenBot says it
+ * needs its own and offers to pause the person's while it runs. Pausing theirs is their choice:
+ * the card says so with one button, and nothing is paused until it is pressed. The password card is
+ * not shown for it, and the background row says what it waits for.
+ */
+test("a Mac whose own Podman OpenBot can't use is offered a pause, and nothing is paused until the person says yes", async () => {
+  setupRootConfiguration("/tmp/local-eval-pause-podman", async () =>
+    emptyConfiguration(),
+  );
+  const browser = deferred<{ signedIn: boolean }>();
+  withLocalCli({
+    prepare_installation: () => new Promise(() => {}),
+    local_eval_terms: () => ({ status: "engine-not-ready" }),
+    sign_in_to_copilotkit: () => browser.promise,
+    copilotkit_sign_in_page: () => null,
+    allow_pause_podman: () => true,
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByText("Checking your OpenBot account…");
+  await emitProgress({
+    step: "pause-podman",
+    ok: true,
+    running: true,
+    asks: true,
+    detail: PAUSE_OFFER,
+  });
+  // Said before and after signing in, on whichever part of the step the person is on.
+  const offered = () =>
+    view.findByRole("region", { name: "OpenBot needs its own Podman" });
+  expect((await offered()).textContent).toContain(PAUSE_OFFER);
+  expectBehind(view, 1, "Waiting for you to pause your Podman.", {
+    waiting: true,
+  });
+  await act(async () => browser.resolve({ signedIn: true }));
+  await view.findByRole("heading", { name: "Setting up this computer" });
+  const card = await offered();
+  expect(card.textContent).toContain(PAUSE_OFFER);
+  expect(
+    view.queryByRole("region", { name: "Your password is needed" }),
+  ).toBeNull();
+  expect(view.queryByRole("alert")).toBeNull();
+  const paused = () =>
+    invokeCalls.filter((call) => call.command === "allow_pause_podman");
+  expect(paused()).toHaveLength(0);
+
+  await userEvent.click(view.getByRole("button", { name: "Pause my Podman" }));
+  expect(paused()).toHaveLength(1);
+
+  // Paused: the card goes, and the row says so.
+  await emitProgress({
+    step: "pause-podman",
+    ok: true,
+    running: false,
+    detail: "Your Podman is paused while OpenBot runs.",
+  });
+  expect(
+    view.queryByRole("region", { name: "OpenBot needs its own Podman" }),
+  ).toBeNull();
+});
+
 test("the account step waits for a container engine Install is still setting up, rather than failing", async () => {
   // A new Windows computer installs Podman while the person signs in, and until an engine answers
   // the CLI says nothing about the account ("engine-not-ready"). That was shown as "Couldn't check
@@ -1095,19 +1162,25 @@ test("an old engine refused while Install updates it shows the update, and one T
     step: "engine",
     ok: true,
     running: true,
+    updating: true,
     detail: DOCKER_UPDATING,
   });
   await view.findByRole("heading", { name: "Setting up this computer" });
+  const askedBeforeTheUpdate = invokeCalls.filter(
+    (call) => call.command === "local_eval_terms",
+  ).length;
   expectBehind(view, 1, DOCKER_UPDATING);
   expect(
     view.queryByRole("heading", { name: "Switch to Docker Desktop or Podman" }),
   ).toBeNull();
   expect(view.queryByText("docker context use desktop-linux")).toBeNull();
-  // Asked again while it waits, and still not said.
+  // Not asked at all while the update runs: the old engine would only refuse it. On the tester's
+  // computer it answered "(containerized)" fourteen times in forty seconds.
   await act(async () => new Promise((settle) => setTimeout(settle, 2500)));
+  expect(askedBeforeTheUpdate).toBeLessThanOrEqual(1);
   expect(
-    invokeCalls.filter((call) => call.command === "local_eval_terms").length,
-  ).toBeGreaterThan(1);
+    invokeCalls.filter((call) => call.command === "local_eval_terms"),
+  ).toHaveLength(askedBeforeTheUpdate);
   expect(
     view.queryByRole("heading", { name: "Switch to Docker Desktop or Podman" }),
   ).toBeNull();

@@ -50,6 +50,11 @@ export type Progress = {
    */
   asks?: boolean;
   /**
+   * The engine itself is being updated (`engine::StepLine::updating`). Nothing is asked of it
+   * until the update is done: an engine being updated refuses what is asked.
+   */
+  updating?: boolean;
+  /**
    * Where this step is among the parts of what it belongs to, said while it runs: "Step 2 of 4".
    * A row list shows the parts done and the one running; this says how many are left.
    */
@@ -99,6 +104,12 @@ export function engineNow(steps: Progress[]): string | null {
 }
 
 /**
+ * The row OpenBot asks on before it pauses the person's own Podman on a Mac
+ * (`own_machine::PAUSE_STEP`).
+ */
+export const PAUSE_PODMAN_STEP = "pause-podman";
+
+/**
  * The line of a step that waits on the person after they closed macOS's password prompt ("OpenBot
  * needs your password to install what it needs to run…"), or null. The screens say it in a card
  * with Try again (`PodmanGoAhead`). Nothing waits on the person before a prompt.
@@ -106,8 +117,31 @@ export function engineNow(steps: Progress[]): string | null {
 export function goAheadNow(steps: Progress[]): string | null {
   const asking = [...steps]
     .reverse()
-    .find((step) => step.running && step.asks && step.detail);
+    .find(
+      (step) =>
+        step.running &&
+        step.asks &&
+        step.detail &&
+        step.step !== PAUSE_PODMAN_STEP,
+    );
   return asking?.detail ?? null;
+}
+
+/**
+ * The offer to pause the person's own Podman while OpenBot runs, while OpenBot waits for their yes
+ * ("Your Podman is set up in a way OpenBot can't use…"), or null. A Mac runs one Podman machine at
+ * a time, so OpenBot's own can start only once theirs is paused, and only the person says it may
+ * be. The screens say it in a card with the button that says yes (`PausePodman`).
+ */
+export function pauseOfferNow(steps: Progress[]): string | null {
+  const offering = steps.find(
+    (step) =>
+      step.step === PAUSE_PODMAN_STEP &&
+      step.running &&
+      step.asks &&
+      step.detail,
+  );
+  return offering?.detail ?? null;
 }
 
 /** Where OpenBot's own icon is, as this computer names it: macOS has a menu bar, Windows a tray. */
@@ -187,6 +221,7 @@ const PREPARING = new Set([
   "engine",
   "install-engine",
   "create-machine",
+  PAUSE_PODMAN_STEP,
   "start-machine",
   "health-gate",
 ]);
@@ -583,14 +618,20 @@ export function installingBehind({
       now?.downloads && showsDownload(now.downloads) ? now.downloads : null;
     const meanwhile = early && showsDownload(early) ? early : null;
     if (preparing) {
-      // A closed password prompt has its own card, with Try again: the row says only what it
-      // waits for.
+      // A closed password prompt has its own card, with Try again, and so does the offer to
+      // pause the person's Podman: the row says only what it waits for.
       const waiting = now?.asks === true;
       if (waiting)
-        return row(1, "Waiting for your password.", {
-          waiting,
-          startedAt: since ?? undefined,
-        });
+        return row(
+          1,
+          now?.step === PAUSE_PODMAN_STEP
+            ? "Waiting for you to pause your Podman."
+            : "Waiting for your password.",
+          {
+            waiting,
+            startedAt: since ?? undefined,
+          },
+        );
       // The first screen's downloads while they run, the machine it runs on among them, so one bar
       // carries them all and only moves forward; then a download of Install's own. A prompt in
       // another window keeps its words.
@@ -721,6 +762,8 @@ function label(step: string): string {
       return "Software OpenBot runs on";
     case "create-machine":
       return "Preparing this computer";
+    case PAUSE_PODMAN_STEP:
+      return "Your Podman";
     case "start-machine":
       return "Starting the software OpenBot runs on";
     case "health-gate":
@@ -753,6 +796,8 @@ function label(step: string): string {
       return "Stopping OpenBot";
     case "stop-intelligence":
       return "Stopping OpenBot's services";
+    case "start-your-podman":
+      return "Starting your Podman again";
     default:
       return step;
   }

@@ -21,7 +21,7 @@ mod test_support;
 use openbot_desktop_lib::{
     acquire, app_update, deployment, deployment_release, docker_config, early_downloads, engine,
     engine_versions, env as openbot_env, harness, host_access, install, local_eval,
-    local_eval_state, logging, preparation,
+    local_eval_state, logging, own_machine, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
     telemetry, tray, troubleshooting, update_ready, upgrade, windows as win,
@@ -257,6 +257,9 @@ struct Progress {
     /// The step waits for the person's go-ahead in this window: see `install::GoAhead`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     asks: bool,
+    /// The engine itself is being updated: see `engine::StepLine::updating`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    updating: bool,
 }
 
 #[derive(Serialize)]
@@ -393,6 +396,10 @@ async fn wake_installation_engine<R: tauri::Runtime>(
     saved: Option<engine::Engine>,
 ) -> Result<(), Problem> {
     let progress_app = app.clone();
+    let ticket = app
+        .state::<Shell>()
+        .start_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
     tauri::async_runtime::spawn_blocking(move || {
         wake_saved_engine(
             saved,
@@ -425,13 +432,15 @@ async fn wake_installation_engine<R: tauri::Runtime>(
             },
             || acquire::machine_exists().unwrap_or(false),
             || {
-                report_running_line(
-                    &progress_app,
-                    "start-machine",
-                    engine::starting_machine_line(),
-                    None,
-                );
-                let started = acquire::start_machine();
+                // On a Mac where the person's own Podman machine is running again, only once they
+                // said yes to pausing it. Stop or Quit while that waits ends it, said on its row.
+                let started = start_own_machine(&progress_app, &|| {
+                    progress_app
+                        .state::<Shell>()
+                        .start_generation
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                        != ticket
+                })?;
                 report(
                     &progress_app,
                     "start-machine",
@@ -720,6 +729,7 @@ fn report_line<R: tauri::Runtime>(
             downloads: None,
             elsewhere: false,
             asks: false,
+            updating: false,
         },
     );
 }
@@ -835,6 +845,7 @@ fn report_running_line<R: tauri::Runtime>(
         said: detail,
         elsewhere,
         asks,
+        updating,
         detail: _,
     } = line;
     setup_phase(step);
@@ -860,6 +871,7 @@ fn report_running_line<R: tauri::Runtime>(
             downloads: None,
             elsewhere,
             asks,
+            updating,
         },
     );
 }
@@ -1002,6 +1014,92 @@ fn bring_setup_to_front(app: tauri::AppHandle, why: String) {
     bring_to_front(&app, &why);
 }
 
+/// The person said yes to pausing their Podman while OpenBot runs. See `own_machine`. False when
+/// nothing was waiting for it.
+#[tauri::command]
+fn allow_pause_podman() -> bool {
+    let waiting = own_machine::allow_pause();
+    log::info!(
+        "[engine] the go-ahead to pause the person's Podman{}",
+        if waiting {
+            ""
+        } else {
+            ", with nothing waiting for it"
+        }
+    );
+    waiting
+}
+
+/**
+OpenBot's own machine started, as setup and a relaunch start it, each line said on the window's rows.
+
+On a Mac, where Podman runs one machine at a time, a machine of the person's that is running keeps
+it from starting. The window then says why on its `own_machine::PAUSE_STEP` row and waits for the
+person's yes, and only then is theirs paused. Quit starts it again (`give_back_paused_podman`).
+`cancelled` (Stop or Quit) ends that wait with nothing paused. Elsewhere it simply starts.
+*/
+fn start_own_machine<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<acquire::StepOutcome, Problem> {
+    let paused = std::cell::Cell::new(false);
+    let started = own_machine::start_own_with(
+        &mut own_machine::ThisComputer,
+        &own_machine::record_path(),
+        own_machine::one_machine_at_a_time(std::env::consts::OS),
+        acquire::MACHINE,
+        &mut |theirs| {
+            let offer = own_machine::pause_offer(theirs);
+            let given = own_machine::PAUSE_GATE.wait(
+                || {
+                    report_running_line(app, own_machine::PAUSE_STEP, offer, None);
+                    bring_to_front(app, "OpenBot asks to pause the person's Podman");
+                },
+                cancelled,
+            );
+            if let Err(problem) = &given {
+                report_plain(app, own_machine::PAUSE_STEP, false, problem.said.clone());
+            }
+            given
+        },
+        &mut |line| {
+            paused.set(true);
+            report_running_line(app, own_machine::PAUSE_STEP, line, None)
+        },
+        &mut || {
+            report_running_line(app, "start-machine", engine::starting_machine_line(), None);
+            acquire::start_machine()
+        },
+    );
+    match &started {
+        Ok(_) if paused.get() => {
+            report_plain(app, own_machine::PAUSE_STEP, true, own_machine::PAUSED)
+        }
+        Err(problem) if paused.get() => {
+            report_plain(app, own_machine::PAUSE_STEP, false, problem.said.clone())
+        }
+        _ => {}
+    }
+    started
+}
+
+/// Quit's last part on a Mac whose Podman OpenBot paused: OpenBot's machine stopped, and the
+/// person's started again with its containers. See `own_machine::give_back_with`. Nothing at all
+/// when OpenBot paused nothing.
+fn give_back_paused_podman(progress: &mut dyn FnMut(QuitStep, QuitStepState)) {
+    let record = own_machine::record_path();
+    if !own_machine::has_paused(&record) {
+        return;
+    }
+    progress(QuitStep::GiveBackPodman, QuitStepState::Running);
+    let given =
+        own_machine::give_back_with(&mut own_machine::ThisComputer, &record, acquire::MACHINE);
+    if let Err(error) = &given {
+        log::warn!("[quit] could not start the person's Podman again: {error}");
+    }
+    progress(QuitStep::GiveBackPodman, QuitStepState::of(&given));
+}
+
 /// The person chose Try again after closing the password prompt, so Install asks again now rather
 /// than after its short wait. See `install::GoAhead`. False when nothing was waiting for it.
 #[tauri::command]
@@ -1048,6 +1146,7 @@ fn report_running_downloads<R: tauri::Runtime>(
             downloads: Some(downloads),
             elsewhere: line.elsewhere,
             asks: line.asks,
+            updating: line.updating,
         },
     );
 }
@@ -1079,6 +1178,7 @@ fn report_downloads<R: tauri::Runtime>(
             downloads: Some(downloads),
             elsewhere: false,
             asks: false,
+            updating: false,
         },
     );
 }
@@ -2852,8 +2952,30 @@ async fn engine_answering(
         return Err(created.problem());
     }
 
-    report_running_line(app, "start-machine", engine::starting_machine_line(), None);
-    let started = acquire::start_machine();
+    // On a Mac where the person's own Podman machine is running, only once they said yes to
+    // pausing it. A wait ended by Stop or Quit, or a pause that failed, is said on its own row.
+    let watching = app.clone();
+    let ticket = app
+        .state::<Shell>()
+        .start_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let starting = app.clone();
+    let started = tauri::async_runtime::spawn_blocking(move || {
+        start_own_machine(&starting, &|| {
+            watching
+                .state::<Shell>()
+                .start_generation
+                .load(std::sync::atomic::Ordering::SeqCst)
+                != ticket
+        })
+    })
+    .await
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot couldn't start the software it runs on. Try again.",
+            format!("the machine start did not run: {error}"),
+        )
+    })??;
     report(app, "start-machine", started.ok, started.said.clone());
     if !started.ok {
         return Err(started.problem());
@@ -4255,30 +4377,51 @@ fn stop_for_update<R: tauri::Runtime>(
 /// Stop as the button and the menu bar run it.
 fn stop_everything_for(shell: &Shell, fallback_root: &Path) -> Stopped {
     let root = root_for_stop(shell, fallback_root);
+    let (down, intelligence) = healed_once_before(
+        |root: &Path| {
+            if let Some(address) = engine_for_stop(shell, root) {
+                answering_before_stop(&address);
+            }
+        },
+        |root: &Path| down_owned_containers(shell, root),
+        intelligence_step(Shutdown::Stop),
+    );
     stop_everything_then(
         shell,
         &root,
         stack::stop_processes_under,
-        |root| down_owned_containers(shell, root),
-        intelligence_step(Shutdown::Stop),
+        down,
+        intelligence,
     )
 }
 
 /// Quit's cleanup as the exit handler runs it, telling `progress` as each part starts and ends.
-fn quit_cleanup<P>(shell: &Shell, progress: P) -> Stopped
+fn quit_cleanup<P>(shell: &Shell, mut progress: P) -> Stopped
 where
     P: FnMut(QuitStep, QuitStepState),
 {
     // A ChatGPT sign-in left waiting would keep its container, and the callback port, after Quit.
     openbot_desktop_lib::plan::release_chatgpt_callback_port();
-    exit_cleanup_reporting(
+    let (down, intelligence) = healed_once_before(
+        |root: &Path| {
+            if let Some(address) = engine_for_stop(shell, root) {
+                answering_before_stop(&address);
+            }
+        },
+        |root: &Path| down_containers_on_quit(shell, root),
+        intelligence_step(Shutdown::Quit),
+    );
+    let stopped = exit_cleanup_reporting(
         shell,
         &stack::default_root(),
         stack::stop_processes_under,
-        |root| down_containers_on_quit(shell, root),
-        intelligence_step(Shutdown::Quit),
-        progress,
-    )
+        down,
+        intelligence,
+        &mut progress,
+    );
+    // Last, once nothing of OpenBot's runs in its machine: the person's Podman OpenBot paused.
+    give_back_paused_podman(&mut progress);
+    stopped
 }
 
 /**
@@ -4322,6 +4465,9 @@ enum QuitStep {
     OpenBot,
     /// The local Intelligence stack OpenBot created.
     Intelligence,
+    /// On a Mac, the person's Podman that OpenBot paused while it ran, started again. See
+    /// `own_machine`.
+    GiveBackPodman,
 }
 
 impl QuitStep {
@@ -4330,6 +4476,7 @@ impl QuitStep {
             QuitStep::FinishUpdate => "finish-update",
             QuitStep::OpenBot => "stop-openbot",
             QuitStep::Intelligence => "stop-intelligence",
+            QuitStep::GiveBackPodman => "start-your-podman",
         }
     }
 
@@ -4337,7 +4484,10 @@ impl QuitStep {
     /// says why ("Finishing the update so nothing is left half done").
     fn running_detail(self) -> &'static str {
         match self {
-            QuitStep::FinishUpdate | QuitStep::OpenBot | QuitStep::Intelligence => "",
+            QuitStep::FinishUpdate
+            | QuitStep::OpenBot
+            | QuitStep::Intelligence
+            | QuitStep::GiveBackPodman => "",
         }
     }
 }
@@ -4390,6 +4540,7 @@ impl QuitStatus {
             downloads: None,
             elsewhere: false,
             asks: false,
+            updating: false,
         };
         match self.steps.iter_mut().find(|known| known.step == row.step) {
             Some(known) => *known = row,
@@ -4660,10 +4811,7 @@ where
 fn down_owned_containers(shell: &Shell, root: &Path) -> Result<(), String> {
     let containers = shell.containers.lock().unwrap();
     match containers.as_ref() {
-        Some(owned) => {
-            answering_before_down(&owned.address);
-            stack::down(&owned.address, root)
-        }
+        Some(owned) => stack::down(&owned.address, root),
         None if shell.stopped_container_root.lock().unwrap().as_deref() == Some(root) => Ok(()),
         None if root.join("docker-compose.yml").exists() => Err(
             "OpenBot has no runtime ownership for this installation. Stop its containers using the original engine and context before starting OpenBot again.".into(),
@@ -4677,16 +4825,17 @@ fn down_owned_containers(shell: &Shell, root: &Path) -> Result<(), String> {
 /// retire those runs, but an old Compose file alone is not a failed shutdown by this session.
 /// Explicit Stop keeps the unknown-runtime error so it cannot claim an unverified cleanup.
 /**
-A Podman machine whose Docker API has gone, stopped and started once before `compose down`, which
-reaches the engine through that API (`engine_versions::answering_now`). The containers that were
-running in it, OpenBot's among them, are started with it, and Compose then stops OpenBot's as it
-always does.
+A Podman machine whose Docker API has gone, stopped and started once before Stop or Quit stops
+anything (`engine_versions::answering_now`). Both stops reach the engine through that API:
+OpenBot's `compose down`, and the back end's `local stop`, which the CLI refuses as
+"docker_unavailable" without it. The containers that were running in the machine, OpenBot's and the
+back end's among them, are started with it, and the two stops then stop them as they always do.
 
-On a live Windows run, with the machine's `win-sshproxy` gone, Quit's `compose down` failed on the
-missing pipe, the back end's stop was refused as "docker_unavailable", and the next launch opened on
-"OpenBot had trouble shutting down last time." What still fails after this is reported as before.
+On a live Windows run, with the machine's `win-sshproxy` gone, Quit failed both, and the next launch
+opened on "When OpenBot last quit, some of its services didn't stop". What still fails after this
+is reported as before.
 */
-fn answering_before_down(address: &engine::Address) {
+fn answering_before_stop(address: &engine::Address) {
     // Only a machine that answers `podman` while its API has gone. One that does not answer at all
     // may have been stopped by the person, and Quit never starts it.
     if address.engine != engine::Engine::Podman || !address.responds() {
@@ -4713,6 +4862,68 @@ fn answering_before_down(address: &engine::Address) {
             problem.detail.as_deref().unwrap_or(&problem.said)
         ),
     }
+}
+
+/// The engine Stop and Quit stop things on: OpenBot's own containers' while they run, otherwise
+/// the one the installation at `root` was set up on, when it answers.
+fn engine_for_stop(shell: &Shell, root: &Path) -> Option<engine::Address> {
+    // Only a Podman machine on a Mac or a PC has an API of its own to lose.
+    if !cfg!(any(target_os = "macos", target_os = "windows")) {
+        return None;
+    }
+    let owned = shell
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|owned| owned.address.clone());
+    // Without OpenBot's own containers, only an installation on Podman is asked about: nothing else
+    // has a machine to restart, and a Stop with nothing to stop runs no engine command.
+    owned.or_else(|| {
+        if preparation::saved_engine(root) != Some(engine::Engine::Podman) {
+            return None;
+        }
+        let found = engine::detect_saved(Some(engine::Engine::Podman));
+        found.address.filter(|_| found.responding)
+    })
+}
+
+/// `down` and `intelligence`, the two stops, each after one `heal` shared between them: whichever
+/// runs first heals, and the other finds it done. Both stops need the engine's API, and a machine
+/// is restarted at most once for the two.
+/// One of Stop's stops, as `stop_everything_then` and `exit_cleanup_reporting` take it.
+type StopStep<'a> = Box<dyn FnOnce(&Path) -> Result<(), String> + 'a>;
+
+fn healed_once_before<'a, H, D, I>(
+    heal: H,
+    down: D,
+    intelligence: I,
+) -> (StopStep<'a>, StopStep<'a>)
+where
+    H: FnOnce(&Path) + 'a,
+    D: FnOnce(&Path) -> Result<(), String> + 'a,
+    I: FnOnce(&Path) -> Result<(), String> + 'a,
+{
+    let heal = std::rc::Rc::new(std::cell::RefCell::new(Some(heal)));
+    let once = {
+        let heal = heal.clone();
+        move |root: &Path| {
+            if let Some(heal) = heal.borrow_mut().take() {
+                heal(root);
+            }
+        }
+    };
+    let again = once.clone();
+    (
+        Box::new(move |root: &Path| {
+            once(root);
+            down(root)
+        }),
+        Box::new(move |root: &Path| {
+            again(root);
+            intelligence(root)
+        }),
+    )
 }
 
 fn down_containers_on_quit(shell: &Shell, root: &Path) -> Result<(), String> {
@@ -7672,9 +7883,41 @@ async fn run_local_eval<R: tauri::Runtime>(
     {
         desktop_telemetry::setup_failed(&app, failure);
     }
+    if action == local_eval::Action::Status {
+        for line in
+            local_eval::status_waited(&mut back_end_wait(), std::time::Instant::now(), &report)
+        {
+            log::info!("{line}");
+        }
+    }
     let report = report?;
     learn_dashboards(&app, report.stack.iter());
     Ok(report)
+}
+
+/// The window's wait for the back end to report ready, as the log says it (`logging::WaitLog`):
+/// every `local status` answer as it changes, and why the wait ended. A Start on Windows waited
+/// five minutes and gave up with nothing in the log between.
+static BACK_END_WAIT: Mutex<Option<openbot_desktop_lib::logging::WaitLog>> = Mutex::new(None);
+
+fn back_end_wait() -> std::sync::MutexGuard<'static, Option<openbot_desktop_lib::logging::WaitLog>>
+{
+    BACK_END_WAIT
+        .lock()
+        .unwrap_or_else(|held| held.into_inner())
+}
+
+/// The window stopped waiting for the back end, and why: the sentence it shows (`waitForReady`),
+/// such as "OpenBot didn't get ready in time. Retry to check again." Written with how long it
+/// waited and the last status, so the log says why Start gave up.
+#[tauri::command]
+fn back_end_wait_ended(why: String) {
+    let mut wait = back_end_wait();
+    let now = std::time::Instant::now();
+    match wait.take() {
+        Some(waited) => log::warn!("{}", waited.ended(now, &format!("gave up: {why}"))),
+        None => log::warn!("[wait] the backend: gave up before any status answered: {why}"),
+    }
 }
 
 /// The back end update last written to the log, so a status polled every few seconds says it once.
@@ -7748,6 +7991,49 @@ fn know_cli_engine(root: &Path) {
     if let Some(address) = found.address.filter(|_| found.responding) {
         local_eval::use_engine(&address);
     }
+}
+
+/**
+Whether the person's own Podman machine answers while OpenBot's is still on its way, so the CLI must
+not be asked yet.
+
+The CLI, told no engine, takes the Podman machine that answers, and that is the person's. On a live
+Windows run it refused theirs ("Rootless Podman is not supported. Switch to rootful Podman ...") and
+the account step showed that as a change the person had to make. OpenBot passes theirs over and
+makes its own (`engine::passed_over_machine`), so until that answers, the account step waits as it
+waits for any engine coming up. Asked only while no engine is known, after `know_cli_engine`.
+*/
+fn own_machine_on_its_way(root: &Path) -> bool {
+    own_machine_on_its_way_with(
+        local_eval::engine_known(),
+        preparation::saved_engine(root),
+        || engine::passed_over_machine(&engine::Address::new(engine::Engine::Podman, None)),
+    )
+}
+
+/// `own_machine_on_its_way`, with what it reads passed in: whether an engine is known, the engine
+/// the installation saved, and the person's machine behind Podman's default connection that OpenBot
+/// passes over, if any.
+fn own_machine_on_its_way_with(
+    engine_known: bool,
+    saved: Option<engine::Engine>,
+    passed_over: impl FnOnce() -> Option<String>,
+) -> bool {
+    !engine_known && saved != Some(engine::Engine::Docker) && passed_over().is_some()
+}
+
+/// The account step's check: the CLI's own answer, or, while OpenBot's machine is on its way, that
+/// the engine is not ready yet, without asking the CLI.
+fn account_terms(
+    on_its_way: bool,
+    ask_the_cli: impl FnOnce() -> Result<local_eval::Terms, local_eval::Failure>,
+) -> Result<local_eval::Terms, local_eval::Failure> {
+    if on_its_way {
+        return Ok(local_eval::Terms::EngineNotReady {
+            cause: "own_machine",
+        });
+    }
+    ask_the_cli()
 }
 
 /// Keep the dashboard address of every stack a CLI report described, for `Dashboards`.
@@ -7929,10 +8215,14 @@ async fn local_eval_terms(
         // The CLI checks its engine before it answers. See `know_cli_engine`.
         know_cli_engine(&root);
         // An engine too small for local setup is said here, before Start fails on it.
-        let terms = match local_eval::engine_size_terms() {
-            Some(too_small) => Ok(too_small),
-            None => local_eval::terms_installed(&attempt),
-        };
+        let terms =
+            account_terms(
+                own_machine_on_its_way(&root),
+                || match local_eval::engine_size_terms() {
+                    Some(too_small) => Ok(too_small),
+                    None => local_eval::terms_installed(&attempt),
+                },
+            );
         // What the step waits on, said in the log when it changes. See `AccountWait`.
         let step = RUNNING_LOGGED
             .lock()
@@ -9988,11 +10278,13 @@ fn main() {
         .plugin(outside_links_guard())
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
+            back_end_wait_ended,
             start_early_downloads,
             early_downloads_now,
             record_setup_event,
             bring_setup_to_front,
             allow_podman_install,
+            allow_pause_podman,
             wake_engine,
             detect_engine,
             windows_blocker,
@@ -14466,6 +14758,42 @@ mod tests {
         }
     }
 
+    /// The live Windows run: the person's own `podman-machine-default` answered, the CLI was told no
+    /// engine and took it, and the account step showed its refusal ("Rootless Podman is not
+    /// supported. Switch to rootful Podman ...") as a change the person had to make, with Try again
+    /// repeating it. While OpenBot's own machine is on its way the step waits instead, as it waits
+    /// for any engine coming up, and the CLI is not asked. Once an engine is known, or on an
+    /// installation that is on Docker, the CLI is asked as before.
+    #[test]
+    fn the_account_step_waits_for_openbots_own_machine_without_asking_the_cli() {
+        let theirs = || Some("podman-machine-default".to_string());
+        assert!(own_machine_on_its_way_with(false, None, theirs));
+        assert!(own_machine_on_its_way_with(
+            false,
+            Some(engine::Engine::Podman),
+            theirs
+        ));
+        assert!(!own_machine_on_its_way_with(true, None, theirs));
+        assert!(!own_machine_on_its_way_with(
+            false,
+            Some(engine::Engine::Docker),
+            theirs
+        ));
+        assert!(!own_machine_on_its_way_with(false, None, || None));
+
+        let waiting = account_terms(true, || panic!("the CLI is not asked yet"));
+        assert!(matches!(
+            waiting,
+            Ok(local_eval::Terms::EngineNotReady {
+                cause: "own_machine"
+            })
+        ));
+        assert!(matches!(
+            account_terms(false, || Ok(local_eval::Terms::SignedOut)),
+            Ok(local_eval::Terms::SignedOut)
+        ));
+    }
+
     #[test]
     fn nothing_is_ever_written_in_the_menu_bar() {
         // The status title widened the tray item behind the camera notch, and on macOS
@@ -14629,6 +14957,58 @@ mod tests {
             assert_eq!(phases.into_inner(), expected, "{ownership:?}");
             let _ = std::fs::remove_dir_all(root);
         }
+    }
+
+    /// D's Quit: the machine's API pipe had gone, so OpenBot's compose down and the back end's
+    /// local stop both failed ("docker_unavailable") and the next launch said some services didn't
+    /// stop. Now one heal comes first, shared by both stops: the machine is restarted once, both
+    /// stops succeed, and there is no failure to record.
+    #[test]
+    fn quit_with_the_api_gone_heals_once_then_both_stops_succeed() {
+        let root = local_eval_root(
+            "openbot-quit-heals-first",
+            Some(local_eval_state::Ownership::Created),
+        );
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(root.clone());
+        let api = std::cell::Cell::new(false);
+        let restarts = std::cell::Cell::new(0);
+        let needs_api = |which: &str| {
+            if api.get() {
+                Ok(())
+            } else {
+                Err(format!("{which}: blocked, docker_unavailable"))
+            }
+        };
+        let (down, intelligence) = healed_once_before(
+            |_: &Path| {
+                restarts.set(restarts.get() + 1);
+                api.set(true);
+            },
+            |_: &Path| needs_api("compose down"),
+            |_: &Path| needs_api("local stop"),
+        );
+        let stopped =
+            exit_cleanup_reporting(&shell, &root, |_| Ok(0), down, intelligence, |_, _| {});
+        assert_eq!(restarts.get(), 1);
+        assert_eq!(stopped.lines(), Vec::<String>::new());
+
+        // OpenBot already stopped, as on D: the back end's stop still comes after the heal.
+        api.set(false);
+        restarts.set(0);
+        let (down, intelligence) = healed_once_before(
+            |_: &Path| {
+                restarts.set(restarts.get() + 1);
+                api.set(true);
+            },
+            |_: &Path| Ok(()),
+            |_: &Path| needs_api("local stop"),
+        );
+        let stopped =
+            exit_cleanup_reporting(&shell, &root, |_| Ok(0), down, intelligence, |_, _| {});
+        assert_eq!(restarts.get(), 1);
+        assert_eq!(stopped.lines(), Vec::<String>::new());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /** The heading over a password prompt the person closed. */
 export const PASSWORD_AGAIN = "Your password is needed";
@@ -55,6 +55,70 @@ export function PodmanGoAhead({
       <h2>{PASSWORD_AGAIN}</h2>
       <p>{asking}</p>
       <TryPasswordAgain key={asking} />
+    </section>
+  );
+}
+
+/** The heading over the offer to pause the person's own Podman. */
+export const OWN_PODMAN = "OpenBot needs its own Podman";
+
+/**
+ * On a Mac whose own Podman machine OpenBot can't use: what OpenBot will do, and the button that
+ * says yes. A Mac runs one Podman machine at a time, so OpenBot's own starts only once the
+ * person's is paused, and pausing it is their choice. Nothing is paused until they choose it, and
+ * Quit starts theirs again (`own_machine`).
+ *
+ * Give it `key={offer}`, as `TryPasswordAgain`: offered again later, the button works again.
+ */
+export function PausePodman({
+  offer,
+}: {
+  /** OpenBot's line while it waits for the go-ahead (`pauseOfferNow`). */
+  offer: string;
+}) {
+  const [sent, setSent] = useState(false);
+  // Nothing goes on until the person answers, so the offer and its button are brought into view
+  // in a step that scrolls. At the window's smallest size the button sat under the step's pinned
+  // foot (`StepFooter`). Only the step's own card scrolls: `scrollIntoView` also moved the window's
+  // page, which does not scroll, and cut off the card's top.
+  const offered = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const card = offered.current;
+    const sheet = card?.closest(".sheet");
+    if (!card || !sheet) return;
+    const foot = sheet.querySelector(".step-footer");
+    const limit = foot
+      ? foot.getBoundingClientRect().top
+      : sheet.getBoundingClientRect().bottom;
+    const over = card.getBoundingClientRect().bottom - limit;
+    if (over > 0) sheet.scrollTop += over;
+  }, []);
+  return (
+    <section
+      ref={offered}
+      className="local-alert needs"
+      aria-label={OWN_PODMAN}
+    >
+      <h2>{OWN_PODMAN}</h2>
+      <p>{offer}</p>
+      <div className="row">
+        <button
+          type="button"
+          disabled={sent}
+          onClick={() => {
+            setSent(true);
+            // False when OpenBot was not waiting after all: offer it again rather than hang.
+            invoke<boolean>("allow_pause_podman").then(
+              (waiting) => {
+                if (!waiting) setSent(false);
+              },
+              () => setSent(false),
+            );
+          }}
+        >
+          Pause my Podman
+        </button>
+      </div>
     </section>
   );
 }

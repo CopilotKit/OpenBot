@@ -1273,14 +1273,16 @@ a:hover {
 }
 
 /*
- * A plain line, with no download under it, may take a second line: the row is 68 px of the 132
- * held, so it still never moves anything. Cut at one line, "The Podman on this computer is too old
- * for OpenBot, so OpenBot is updating it." read "...so OpenBot is u…" and lost its point.
+ * A plain line, with no download under it, may take up to three lines: the row is then 108 px of
+ * the 132 held, so it still never moves anything. Cut at one line, "The Podman on this computer is
+ * too old for OpenBot, so OpenBot is updating it." read "...so OpenBot is u…"; cut at two, Docker
+ * Desktop's hand-off read "...OpenBot comes back when Docker is…". The longest line that reaches
+ * this row is three lines at 1016x839 and at 720x560 (`setupLayout.browser.test.ts`).
  */
 .behind-slot .step:not(:has(> .downloads)) .detail {
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   white-space: normal;
 }
 

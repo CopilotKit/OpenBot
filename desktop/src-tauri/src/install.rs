@@ -737,8 +737,8 @@ it are there afterwards. Podman 6 reads the machines Podman 5 made on macOS and 
 machines on Linux had to be made again, and Linux is not updated here).
 
 EVERY MACHINE THAT WAS RUNNING IS RUNNING AFTERWARDS, WITH ITS API ANSWERING: the person's own as
-much as OpenBot's. OpenBot uses whichever machine answers, often the person's `podman-machine-default`,
-and the MSI stops the helpers of a machine it finds running. On a live Windows run the 6.1.1 MSI over
+much as OpenBot's. OpenBot runs on its own machine beside the person's `podman-machine-default` on
+Windows (see `own_machine`), and the MSI stops the helpers of every machine it finds running. On a live Windows run the 6.1.1 MSI over
 5.8.9 left the person's machine up and its `win-sshproxy` gone, and with it the Docker API every
 pull uses (see `acquire`). Only OpenBot's own machine used to be stopped and started.
 
@@ -778,6 +778,7 @@ pub fn update_podman(
 /// The row's line while Podman updates: why it is updating, since it is the person's own Podman.
 pub fn podman_updating() -> StepLine {
     StepLine::here("The Podman on this computer is too old for OpenBot, so OpenBot is updating it.")
+        .updating()
 }
 
 /// A line the installer says, as the update says it. Work OpenBot does by itself says why it is
@@ -788,8 +789,15 @@ fn while_updating(line: StepLine) -> StepLine {
         return line;
     }
     let why = podman_updating().said;
+    // The installer's prompt, said short after why: "...so OpenBot is updating it. Your Mac will
+    // ask for your password." The whole of both did not fit the background row.
     let said = if line.elsewhere {
-        format!("{why} {}", line.said)
+        format!(
+            "{why} {}",
+            line.said
+                .split_once(" so OpenBot")
+                .map_or(line.said.clone(), |(prompt, _)| format!("{prompt}."))
+        )
     } else {
         why
     };
@@ -797,6 +805,7 @@ fn while_updating(line: StepLine) -> StepLine {
     StepLine {
         said,
         detail: Some(detail),
+        updating: true,
         ..line
     }
 }
@@ -2301,6 +2310,26 @@ esac
         assert!(said
             .iter()
             .any(|line| line.detail.as_deref() == Some("Installing Podman.")));
+    }
+
+    /// During an update the Mac's password prompt is said after why, short enough for the row:
+    /// "...so OpenBot is updating it. Your Mac will ask for your password." The installer's own
+    /// words go to the log, and the line stays one about the engine being updated.
+    #[test]
+    fn the_password_prompt_during_an_update_says_why_first_and_fits() {
+        let line = while_updating(podman_install_said("macos"));
+        assert_eq!(
+            line.said,
+            "The Podman on this computer is too old for OpenBot, so OpenBot is updating it. Your \
+             Mac will ask for your password."
+        );
+        assert!(line.elsewhere && line.updating);
+        assert_eq!(
+            line.detail.as_deref(),
+            Some("Installing Podman's package; macOS asks for the password.")
+        );
+        // A go-ahead the person gives in OpenBot's own window is said as it is.
+        assert_eq!(while_updating(podman_declined()), podman_declined());
     }
 
     /// A machine the installer took the API from is stopped and started even when it was not
