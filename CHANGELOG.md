@@ -24,7 +24,7 @@ backup taken before the upgrade instead. Three things change for an existing dep
   to ask every time in Admin > Approvals.
 - A Personal Assistant whose instructions nobody changed takes the new ones at the next start
   (below). One whose instructions were edited keeps them.
-- OpenBot Desktop's bundled CLI moves to `copilotkit@6bfaa0f`, and Start writes
+- OpenBot Desktop's bundled CLI moves to `copilotkit@f5c45eb`, and Start writes
   `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` in `~/OpenBot/.env` as empty (below). The back end stays
   on CopilotKit Intelligence 0.16.0-rc.10.
 
@@ -235,9 +235,19 @@ backup taken before the upgrade instead. Three things change for an existing dep
   and team deployments are unchanged. The server receives the installation ID when OpenBot starts.
   Signing in and Start never wait for the link, and nothing about it can keep OpenBot from
   starting.
-- **CopilotKit CLI `copilotkit@6bfaa0f`.** OpenBot Desktop's bundled CLI moves to the production
-  build of Intelligence `6bfaa0f5c`, which adds `telemetry link`. It keeps Intelligence
-  0.16.0-rc.10 and CopilotKit v1.85.0 templates.
+- **A CopilotKit back end set up in your home folder no longer takes over OpenBot's.** Someone who
+  once ran `copilotkit local setup` in their home folder, or any folder above `~/OpenBot`, had that
+  back end resumed for OpenBot: the CLI looks for a back end in the folder it runs in and in every
+  folder above it. It then wrote OpenBot's connection settings into that folder's `.env`, and Start
+  stopped with "The connection settings do not match the backend that was set up". OpenBot now
+  tells the CLI to use exactly `~/OpenBot`, so it sets up a back end of its own and connects
+  `~/OpenBot/.env`, and the other folder's back end and `.env` are left alone. OpenBot also counts
+  a back end as its own, to stop with Stop and Quit, only when the CLI records it for `~/OpenBot`;
+  one it was handed for another folder is never stopped.
+- **CopilotKit CLI `copilotkit@f5c45eb`.** OpenBot Desktop's bundled CLI moves to the production
+  build of Intelligence `f5c45ebc0`: `6bfaa0f5c`, which added `telemetry link`, with `--app-path`
+  added to its `local` commands. It keeps Intelligence 0.16.0-rc.10 and CopilotKit v1.85.0
+  templates.
 - **A Learning container left in `~/OpenBot/.env` by an earlier setup no longer fails every
   message.** A folder set up against hosted Intelligence kept
   `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID="openbot"`, which the local back end did not have, so every

@@ -8126,8 +8126,10 @@ fn apps_unavailable() -> Problem {
 /**
 Run `setup` in `root` and record what it made.
 
-A stack set up here was made for OpenBot, so it starts and stops with it. The one exception is a
-record that already calls the same stack shared: setting up again resumes that stack, it does not
+A stack set up here was made for OpenBot, so it starts and stops with it. It is OpenBot's only when
+the CLI records it for `root` itself (`appPaths`): a stack recorded for another folder is another
+app's, whatever setup reported, and is kept as shared, so Stop and Quit never stop it. A record that
+already calls the same stack shared stays shared: setting up again resumes that stack, it does not
 make OpenBot its owner.
 */
 fn set_up_local_eval_at<S>(root: &Path, setup: S) -> Result<local_eval::Report, SetupError>
@@ -8142,11 +8144,19 @@ where
     else {
         return Ok(report);
     };
+    let ours = stack.lists_folder(root);
     let stack = local_eval::StackId::parse(&stack.id).map_err(SetupError::Failure)?;
     let ownership = match local_eval_state::read(root, None) {
+        _ if !ours => local_eval_state::Ownership::Shared,
         Some(state) if state.stack_id() == stack => state.ownership,
         _ => local_eval_state::Ownership::Created,
     };
+    if !ours {
+        log::warn!(
+            "[local setup] {} is recorded for another folder; OpenBot keeps it as shared and never stops it",
+            stack.as_str()
+        );
+    }
     local_eval_state::begin(root, &stack, ownership, &cli_sha256)
         .map_err(SetupError::Unrecorded)?;
     Ok(report)
@@ -13910,6 +13920,7 @@ mod tests {
             update_in_progress: false,
             unfinished_update: None,
             observed: None,
+            app_paths: Vec::new(),
         }
     }
 
@@ -15442,12 +15453,22 @@ mod tests {
     }
 
     fn local_eval_completed(stack: &str) -> local_eval::Report {
+        local_eval_completed_for(stack, &[])
+    }
+
+    /// `local_eval_completed`, for a stack the CLI records for `folders` (`appPaths`).
+    fn local_eval_completed_for(stack: &str, folders: &[&Path]) -> local_eval::Report {
+        let app_paths: Vec<_> = folders
+            .iter()
+            .map(|folder| serde_json::json!({ "path": folder, "missing": false }))
+            .collect();
         let listing = serde_json::json!({
             "version": 1,
             "command": "local list",
             "status": "completed",
             "stacks": [{
                 "id": stack,
+                "appPaths": app_paths,
                 "installedRelease": "0.13.14",
                 "step": "ready",
                 "urls": {
@@ -15470,7 +15491,7 @@ mod tests {
         let report = set_up_local_eval_at(&root, |folder| {
             assert_eq!(folder, root.as_path(), "setup runs in the installation");
             Ok((
-                local_eval_completed("local-67db320bed3f3e893a4f8122"),
+                local_eval_completed_for("local-67db320bed3f3e893a4f8122", &[&root]),
                 LOCAL_EVAL_PIN.to_owned(),
             ))
         })
@@ -15513,7 +15534,7 @@ mod tests {
         );
         set_up_local_eval_at(&root, |_| {
             Ok((
-                local_eval_completed("local-abc123"),
+                local_eval_completed_for("local-abc123", &[&root]),
                 LOCAL_EVAL_PIN.to_owned(),
             ))
         })
@@ -15522,6 +15543,65 @@ mod tests {
             .unwrap()
             .tied_to_openbot());
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /**
+    A stack `local setup` reported that the CLI records for another folder is never OpenBot's.
+
+    Found with a CLI that resumed the stack someone set up in their home folder for `~/OpenBot`:
+    Desktop recorded it as one it created, so Stop and Quit would have stopped another app's
+    stack. It is kept as shared, even over an earlier record that called it OpenBot's, and a stack
+    recorded for OpenBot's folder alongside others is still OpenBot's.
+    */
+    #[test]
+    fn a_stack_recorded_for_another_folder_is_never_recorded_as_openbots() {
+        let home = temp_root("openbot-local-eval-setup-foreign");
+        let root = home.join("OpenBot");
+        std::fs::create_dir_all(&root).unwrap();
+        let foreign = local_eval_completed_for("local-abc123", &[&home]);
+        set_up_local_eval_at(&root, |_| Ok((foreign.clone(), LOCAL_EVAL_PIN.to_owned()))).unwrap();
+        let state = local_eval_state::read(&root, None).unwrap();
+        assert_eq!(state.stack, "local-abc123");
+        assert!(!state.tied_to_openbot());
+
+        // An earlier OpenBot recorded it as its own: setting up again takes that back.
+        local_eval_state::begin(
+            &root,
+            &local_eval::StackId::parse("local-abc123").unwrap(),
+            local_eval_state::Ownership::Created,
+            LOCAL_EVAL_PIN,
+        )
+        .unwrap();
+        set_up_local_eval_at(&root, |_| Ok((foreign, LOCAL_EVAL_PIN.to_owned()))).unwrap();
+        assert!(!local_eval_state::read(&root, None)
+            .unwrap()
+            .tied_to_openbot());
+
+        // A report that names no folder is not OpenBot's either.
+        set_up_local_eval_at(&root, |_| {
+            Ok((
+                local_eval_completed("local-abc123"),
+                LOCAL_EVAL_PIN.to_owned(),
+            ))
+        })
+        .unwrap();
+        assert!(!local_eval_state::read(&root, None)
+            .unwrap()
+            .tied_to_openbot());
+
+        // OpenBot's own folder among the stack's folders: OpenBot's.
+        local_eval_state::clear(&root).unwrap();
+        set_up_local_eval_at(&root, |_| {
+            Ok((
+                local_eval_completed_for("local-def456", &[&home, &root]),
+                LOCAL_EVAL_PIN.to_owned(),
+            ))
+        })
+        .unwrap();
+        let state = local_eval_state::read(&root, None).unwrap();
+        assert_eq!(state.stack, "local-def456");
+        assert!(state.tied_to_openbot());
+        let _ = std::fs::remove_dir_all(home);
     }
 
     #[test]
@@ -17823,6 +17903,285 @@ fn main() {
         app.state::<desktop_telemetry::DesktopTelemetry>().deliver();
         assert!(sink.next(std::time::Duration::from_secs(2)).is_none());
         let _ = std::fs::remove_dir_all(&cli.dir);
+    }
+
+    /// A CLI that finds a folder's stack as the CopilotKit CLI does: `.copilotkit/local.json` in the
+    /// folder it runs in, then in every folder above it, or with `--app-path <folder>` only in that
+    /// folder. `local setup` resumes the stack it finds, else the stack recorded for the folder, else
+    /// makes one for the folder; `local connect` writes the `.env` of the folder whose reference it
+    /// found. Its JSON is the CLI's, as it printed `local setup`, `local connect` and `local list` for
+    /// these stacks. Stacks are kept in `stacks` beside it, one per line: id, app folder, API port;
+    /// the gateway and dashboard ports follow the API's. Every call goes to `calls`.
+    #[cfg(unix)]
+    const FOLDER_CLI: &str = r##"
+use std::path::{Path, PathBuf};
+
+const MADE: &str = "local-eeeeeeeeeeeeeeeeeeeeeeee";
+
+fn main() {
+    let dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--warm") {
+        return;
+    }
+    let mut calls = std::fs::read_to_string(dir.join("calls")).unwrap_or_default();
+    calls.push_str(&args.join(" "));
+    calls.push('\n');
+    std::fs::write(dir.join("calls"), calls).unwrap();
+    let named = args
+        .iter()
+        .position(|arg| arg == "--app-path")
+        .map(|at| PathBuf::from(&args[at + 1]));
+    let folder = named
+        .clone()
+        .unwrap_or_else(|| std::env::current_dir().unwrap())
+        .canonicalize()
+        .unwrap();
+    let reference = folder
+        .ancestors()
+        .take(if named.is_some() { 1 } else { usize::MAX })
+        .find_map(|at| {
+            let text = std::fs::read_to_string(at.join(".copilotkit/local.json")).ok()?;
+            Some((at.to_path_buf(), field(&text, "stackId")))
+        });
+    let mut stacks: Vec<(String, PathBuf, u16)> = std::fs::read_to_string(dir.join("stacks"))
+        .unwrap_or_default()
+        .lines()
+        .map(|line| {
+            let parts: Vec<&str> = line.split('\t').collect();
+            (parts[0].to_owned(), PathBuf::from(parts[1]), parts[2].parse().unwrap())
+        })
+        .collect();
+    let described = |stacks: &[(String, PathBuf, u16)], id: &str| {
+        let (_, app, api) = stacks.iter().find(|stack| stack.0 == id).unwrap();
+        format!(
+            r#"{{"id":"{id}","appPaths":[{{"path":"{}","missing":false}}],"installedRelease":"0.16.0-rc.10","step":"ready","engine":"docker-desktop","urls":{{"api":"http://localhost:{api}","dashboard":"http://localhost:{}","gateway":"ws://localhost:{}"}},"failedStep":null,"update":null}}"#,
+            escaped(app),
+            api + 2,
+            api + 1
+        )
+    };
+    match args.get(1).map(String::as_str) {
+        Some("list") => {
+            let listed: Vec<String> = stacks.iter().map(|stack| described(&stacks, &stack.0)).collect();
+            println!(
+                r#"{{"version":1,"command":"local list","status":"completed","stacks":[{}],"nextAction":null,"error":null,"diagnostics":[]}}"#,
+                listed.join(",")
+            );
+        }
+        Some("setup") => {
+            let id = match reference {
+                Some((_, id)) => id,
+                None => {
+                    let id = match stacks.iter().find(|stack| stack.1 == folder) {
+                        Some(stack) => stack.0.clone(),
+                        None => {
+                            stacks.push((MADE.to_owned(), folder.clone(), 51796));
+                            let kept: Vec<String> = stacks
+                                .iter()
+                                .map(|(id, app, api)| format!("{id}\t{}\t{api}", app.display()))
+                                .collect();
+                            std::fs::write(dir.join("stacks"), kept.join("\n")).unwrap();
+                            MADE.to_owned()
+                        }
+                    };
+                    std::fs::create_dir_all(folder.join(".copilotkit")).unwrap();
+                    std::fs::write(
+                        folder.join(".copilotkit/local.json"),
+                        format!(r#"{{"stackId":"{id}","appPath":"{}"}}"#, escaped(&folder)),
+                    )
+                    .unwrap();
+                    id
+                }
+            };
+            println!(
+                r#"{{"version":1,"command":"local setup","status":"completed","stack":{},"learning":{{"configuration":"incomplete","verified":false}},"samples":null,"samplesError":null,"nextAction":{{"reason":"confirmation_required","summary":"The stack is ready. Review and approve this app connection separately.","instructions":["Run local connect to review the app settings that will change. Prior settings are saved privately before replacement.","Run npx --prefer-offline --yes https://pkg.pr.new/CopilotKit/Intelligence/copilotkit@f5c45eb local login --stack {id} to open the dashboard signed in."],"resumeCommand":"copilotkit local connect --approve-connection","url":null,"linkLabel":null,"linkFile":null,"caveats":[],"requiredEnvVars":[],"artifacts":[]}},"error":null,"diagnostics":[]}}"#,
+                described(&stacks, &id)
+            );
+        }
+        Some("connect") => {
+            let Some((at, id)) = reference else {
+                println!(r#"{{"version":1,"command":"local connect","status":"failed","error":{{"code":"LOCAL_COMMAND_FAILED","message":"No recorded local stack was found. Run `copilotkit local list` or start local setup."}},"nextAction":{{"reason":"local_command_failed","summary":"The local command did not finish. Check local status for the recorded failed step, then resume the command. No automatic rollback was requested.","instructions":[],"resumeCommand":"copilotkit local connect --json","url":null,"linkLabel":null,"linkFile":null,"caveats":[],"requiredEnvVars":[],"artifacts":[]}},"diagnostics":[]}}"#);
+                std::process::exit(1);
+            };
+            let api = stacks.iter().find(|stack| stack.0 == id).unwrap().2;
+            let written = [
+                format!("INTELLIGENCE_API_URL=http://localhost:{api}"),
+                format!("INTELLIGENCE_GATEWAY_WS_URL=ws://localhost:{}", api + 1),
+                format!("CPK_INTELLIGENCE_API_KEY=cpk-42_1111111111111111_{}", "e".repeat(64)),
+                "SL_ENABLED=true".to_owned(),
+            ];
+            let mut env: Vec<String> = std::fs::read_to_string(at.join(".env"))
+                .unwrap_or_default()
+                .lines()
+                .filter(|line| !written.iter().any(|set| set.split('=').next() == line.split('=').next()))
+                .map(str::to_owned)
+                .collect();
+            env.extend(written);
+            std::fs::write(at.join(".env"), env.join("\n") + "\n").unwrap();
+            println!(
+                r#"{{"version":1,"command":"local connect","status":"completed","stack":{},"conflicts":[],"nextAction":null,"error":null,"diagnostics":[]}}"#,
+                described(&stacks, &id)
+            );
+        }
+        _ => std::process::exit(3),
+    }
+}
+
+fn field(json: &str, name: &str) -> String {
+    let start = json.find(&format!("\"{name}\":\"")).unwrap() + name.len() + 4;
+    json[start..start + json[start..].find('"').unwrap()].to_owned()
+}
+
+fn escaped(path: &Path) -> String {
+    path.display().to_string().replace('\\', "\\\\").replace('"', "\\\"")
+}
+"##;
+
+    /**
+    Someone who once ran `copilotkit local setup` in their home folder, then started OpenBot
+    Desktop, which keeps its installation in `~/OpenBot`.
+
+    The CLI found `~/.copilotkit/local.json` above `~/OpenBot` and resumed the home folder's stack
+    for it; `local connect` then wrote the home folder's `.env`, and Start stopped with "The
+    connection settings do not match the backend that was set up". Desktop also recorded the home
+    folder's stack as one it created, so Stop and Quit would have stopped it.
+
+    Through the window's own `set_up_local_eval` and `connect_local_eval`, against a CLI that finds
+    stacks as the real one does: OpenBot passes `--app-path`, gets a stack of its own, recorded as
+    its own, `~/OpenBot/.env` names it, and Start takes its key. The home folder's stack, reference
+    and `.env` are left alone.
+    */
+    #[cfg(unix)]
+    #[test]
+    fn a_backend_set_up_in_a_folder_above_openbots_never_becomes_openbots() {
+        if crate::test_support::isolated_process(
+            "tests::a_backend_set_up_in_a_folder_above_openbots_never_becomes_openbots",
+        ) {
+            return;
+        }
+        const HOME_STACK: &str = "local-dddddddddddddddddddddddd";
+        const OPENBOT_STACK: &str = "local-eeeeeeeeeeeeeeeeeeeeeeee";
+        let empty = temp_root("openbot-parent-stack-path");
+        std::fs::create_dir_all(&empty).unwrap();
+        std::env::set_var("PATH", &empty);
+        let cli = temp_root("openbot-parent-stack-cli");
+        std::fs::create_dir_all(&cli).unwrap();
+        std::fs::write(cli.join("cli.rs"), FOLDER_CLI).unwrap();
+        let program = cli.join("cli");
+        crate::test_support::compile_fixture(&cli.join("cli.rs"), &program);
+        assert!(std::process::Command::new(&program)
+            .arg("--warm")
+            .status()
+            .unwrap()
+            .success());
+        use sha2::Digest;
+        let digest: String = sha2::Sha256::digest(std::fs::read(&program).unwrap())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_PROGRAM", &program);
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_PROGRAM_SHA256", digest);
+        std::env::remove_var("OPENBOT_DEV_LOCAL_EVAL_ENTRY");
+
+        // The home folder, where `copilotkit local setup` once ran, and OpenBot's folder in it.
+        let home = temp_root("openbot-parent-stack-home");
+        std::fs::create_dir_all(home.join(".copilotkit")).unwrap();
+        let home = home.canonicalize().unwrap();
+        std::env::set_var("HOME", &home);
+        std::env::remove_var("XDG_CONFIG_HOME");
+        let reference = format!(
+            r#"{{"stackId":"{HOME_STACK}","appPath":"{}"}}"#,
+            home.display()
+        );
+        std::fs::write(home.join(".copilotkit/local.json"), &reference).unwrap();
+        std::fs::write(
+            cli.join("stacks"),
+            format!("{HOME_STACK}\t{}\t52796", home.display()),
+        )
+        .unwrap();
+        let root = home.join("OpenBot");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(".env"),
+            "INTELLIGENCE_API_URL=https://hosted.example\nSERVER_PORT=3001\n",
+        )
+        .unwrap();
+
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .manage(desktop_telemetry::DesktopTelemetry::for_tests(
+                temp_root("openbot-parent-stack-telemetry"),
+                false,
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let calls = || std::fs::read_to_string(cli.join("calls")).unwrap_or_default();
+
+        let report = tauri::async_runtime::block_on(set_up_local_eval(
+            app.handle().clone(),
+            "openbot-parent-stack-setup".into(),
+            root.display().to_string(),
+            None,
+        ))
+        .unwrap_or_else(|error| panic!("{error:?}\n{}", calls()));
+        let stack = report.stack.as_ref().expect("setup reported its stack");
+        assert_eq!(stack.id, OPENBOT_STACK, "{}", calls());
+        assert!(stack.lists_folder(&root));
+        let state = local_eval_state::read(&root, None).unwrap();
+        assert_eq!(state.stack, OPENBOT_STACK);
+        assert!(state.tied_to_openbot());
+
+        let connection = tauri::async_runtime::block_on(connect_local_eval(
+            app.handle().clone(),
+            "openbot-parent-stack-connect".into(),
+            root.display().to_string(),
+        ))
+        .unwrap_or_else(|error| panic!("{error:?}\n{}", calls()));
+        assert_eq!(connection.outcome, local_eval::Outcome::Completed);
+        let env = std::fs::read_to_string(root.join(".env")).unwrap();
+        for line in [
+            "INTELLIGENCE_API_URL=http://127.0.0.1:51796",
+            "INTELLIGENCE_GATEWAY_WS_URL=ws://127.0.0.1:51797",
+            "SERVER_PORT=3001",
+        ] {
+            assert!(env.lines().any(|found| found == line), "{line}\n{env}");
+        }
+        assert!(!env.contains("CPK_INTELLIGENCE_API_KEY"), "{env}");
+        assert!(local_eval_state::read(&root, None).unwrap().connected);
+
+        // Start takes the key `local connect` gave OpenBot's own stack.
+        let key = intelligence_key_for_start(&root, |root, name| {
+            Ok(openbot_desktop_lib::vault::recall(root, name)?.unwrap_or_default())
+        })
+        .unwrap();
+        assert_eq!(key, format!("cpk-42_1111111111111111_{}", "e".repeat(64)));
+
+        // The home folder's stack is as it was.
+        assert!(!home.join(".env").exists());
+        assert_eq!(
+            std::fs::read_to_string(home.join(".copilotkit/local.json")).unwrap(),
+            reference
+        );
+        // Both calls name OpenBot's folder exactly.
+        assert!(
+            calls().contains(&format!(
+                "local setup --defer-model --json --app-path {}",
+                root.display()
+            )),
+            "{}",
+            calls()
+        );
+        assert!(
+            calls().contains(&format!(
+                "local connect --approve-connection --json --app-path {}",
+                root.display()
+            )),
+            "{}",
+            calls()
+        );
+        let _ = std::fs::remove_dir_all(&cli);
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     /// A CLI that answers each `local` command it is asked with what the pinned CLI (6bfaa0f)
