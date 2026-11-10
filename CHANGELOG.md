@@ -320,6 +320,17 @@ backup taken before the upgrade instead. Three things change for an existing dep
 
 ### Conversations
 
+- **A Bot draws a chart or a table only from results it has read, and a form stops at the first
+  field that fails.** A model that calls tools in parallel, such as Claude Opus, asked for its
+  searches and the chart and table meant to show them in one step, so they were drawn with figures
+  it hadn't read, and it then said so under them. A chart, table, card or approval asked for in the
+  same step as another tool is no longer shown, not even for a moment, and the Bot draws it again
+  from the results. One on its own, or beside other components, draws as before. A Bot's computer
+  actions in one step run one at a time, in the order asked for, and stop at the first that fails:
+  the rest are reported to the Bot as not run, and it looks at the page again. Every Bot is told to
+  batch only tool calls that don't depend on each other. This follows Anthropic's guidance for
+  parallel tool use and holds whichever model a Bot runs on, in conversations and in routines.
+
 - **Talk to OpenBot without a transcription provider.** The message box shows a microphone on
   every OpenBot, not only where `TRANSCRIPTION_PROVIDER` is set. Click it and your words appear in
   the box as you speak; the microphone turns into Stop. Stop, or Enter, stops listening and keeps
