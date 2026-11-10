@@ -128,6 +128,10 @@ fn main() {
                 || value
                     .starts_with("compose --profile harness up -d --no-build --pull never ") =>
         {
+            if SCENARIO == "up-fails" {
+                eprintln!("permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock");
+                std::process::exit(1);
+            }
             // Whether Compose was handed the desktop's host token, by its length only: the
             // token itself is never written anywhere.
             if let Some(token) = std::env::var_os("OPENBOT_DESKTOP_HOST_TOKEN") {

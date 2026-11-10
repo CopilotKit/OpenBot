@@ -41,13 +41,18 @@ All desktop event names begin with `oss.desktop.`. The Rust `EventData` enum and
 | `engine_installed` | Engine and installer-outcome enums |
 | `windows_stage` | Windows prerequisite outcome enum |
 | `image_pull` | Outcome enum, milliseconds, optional observed download bytes |
-| `setup_failed` | Setup step and error-class enums |
+| `setup_failed` | Setup step and error-class enums; optional failing-step, CLI-reason and CLI-failure enums; optional resources (booleans and numbers) |
 | `activated` | No properties; OpenBot started successfully |
 | `setup_abandoned` | Last setup step enum |
+| `sign_in` | Sign-in outcome enum; optional milliseconds; optional CLI-failure enum |
 
 For `model_chosen`, providers are `openai`, `anthropic`, `google`, `xai`, `compatible`, or `none`; credential paths are `subscription`, `api_key`, `oauth`, or `none`. OpenAI and Anthropic plan sign-ins use `subscription`. Google and xAI native sign-ins use their named provider with `oauth`; their API-key routes use `compatible`, matching the picker’s endpoint choice. A compatible endpoint uses `api_key` only when a nonblank key is supplied or its saved key is explicitly selected; keyless endpoints use `none`. Skipping model setup uses provider and credential path `none`. `custom_base_url` records only whether a nonblank base URL was selected, never its value.
 
-Every event carries desktop distribution, numeric app version, platform, architecture, numeric OS version when available, and engine. The runtime receives the same desktop metadata through its existing `telemetryProperties` hook. No prompt, answer, credential, file name, path, hostname, email, model name, YAML value, or custom URL is accepted by the desktop schema.
+`setup_failed` is sent by the desktop itself, never by the window, from every failed install or Start (once: a step that already said it failed is not counted again, and a Start cancelled by Stop is not a failure), and from every failed `local setup`, `local start`, `local update`, `local connect`, the Learning model's setup after Start, and an Account-step check that stops setup (an engine too small, or one local setup does not run on). `step` is the last screen shown; `failing_step` names the part that failed by the setup rows' step names (`install_engine`, `services`, `local_setup`, `account_check`, ...). `error_class` comes from the step, or where the step says nothing, from the failure's words, of which only the class is kept. `cli_reason` and `cli_failure` are the CLI's closed reason and the desktop's closed failure category. `resources`, for an engine too small, has `cpu_short`, `memory_short` and `disk_short`, and what setup needs against what was measured: CPUs in thousandths, memory and disk in MiB; anything not measured is absent.
+
+`sign_in` is the Account step's CopilotKit sign-in: `started`, then `completed`, `failed` or `cancelled` with how long it took, and `restored` once a launch when the account check finds this computer already signed in without a sign-in.
+
+Every event carries desktop distribution, app version (numeric, with a release candidate's closed label such as `1.0.0-rc.5`), platform, architecture, numeric OS version when available, and engine. The runtime receives the same desktop metadata through its existing `telemetryProperties` hook, where the app version accepts only the same closed pre-release labels. No prompt, answer, credential, file name, path, hostname, email, model name, YAML value, or custom URL is accepted by the desktop schema.
 
 Image timing covers an explicit missing-only Compose pull, excluding startup and migrations. Byte counts are the download counters observed from Compose, deduplicated per layer; they are not an exact network total. Missing counters remain null. Older Compose providers without `pull --policy missing` retain their existing implicit pull behavior and emit no pull measurement.
 
