@@ -20,7 +20,7 @@ Desktop installation:
 - At setup and at every Start, a Docker Desktop or Podman too old to run OpenBot is updated
   (below). Docker Desktop quits while it updates, which stops its containers; the ones that were
   running are started again afterwards.
-- OpenBot Desktop's bundled CLI moves to `copilotkit@f5c45eb` (below). The back end stays on
+- OpenBot Desktop's bundled CLI moves to `copilotkit@2e1c519` (below). The back end stays on
   CopilotKit Intelligence 0.16.0-rc.10.
 
 ### OpenBot Desktop
@@ -150,10 +150,18 @@ Desktop installation:
   `~/OpenBot/.env`, and the other folder's back end and `.env` are left alone. OpenBot also counts
   a back end as its own, to stop with Stop and Quit, only when the CLI records it for `~/OpenBot`;
   one it was handed for another folder is never stopped.
-- **CopilotKit CLI `copilotkit@f5c45eb`.** OpenBot Desktop's bundled CLI moves to the production
-  build of Intelligence `f5c45ebc0`: `6bfaa0f5c`, which added `telemetry link`, with `--app-path`
-  added to its `local` commands. It keeps Intelligence 0.16.0-rc.10 and CopilotKit v1.85.0
-  templates.
+- **Connecting the back end a second time no longer stops setup.** Setup Retry, going Back and
+  forward through setup, and reinstalling over an existing install connect `~/OpenBot` to its back
+  end again. After the first connection OpenBot writes the back end's addresses at `127.0.0.1`
+  where the CLI wrote `localhost`, and the CLI then refused every later connection with "App
+  settings changed after connection was planned", so setup could not finish. The CLI now treats
+  `localhost`, `127.0.0.1` and `[::1]` with the same port as the same address, connects again, and
+  leaves OpenBot's addresses as they are. An address changed to another port or host is still
+  refused.
+- **CopilotKit CLI `copilotkit@2e1c519`.** OpenBot Desktop's bundled CLI moves to the production
+  build of Intelligence `2e1c51900`: `6bfaa0f5c`, which added `telemetry link`, with `--app-path`
+  added to its `local` commands and a second `local connect` accepted after OpenBot rewrote its
+  addresses to `127.0.0.1`. It keeps Intelligence 0.16.0-rc.10 and CopilotKit v1.85.0 templates.
 
 ### Conversations
 
