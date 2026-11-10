@@ -319,7 +319,7 @@ test("a Stop failure is split into OpenBot's part and Intelligence's part", () =
   // Anything that is not the native line format is OpenBot's own failure.
   expect(splitStopFailure({ said: "x" }).openBot).not.toBeNull();
   expect(intelligenceStopProblem(intelligence)).toEqual({
-    said: "OpenBot stopped, but could not stop its back end.",
+    said: "OpenBot stopped, but some of its services didn't. They may still be running.",
     detail: intelligence,
   });
 });

@@ -642,7 +642,6 @@ export function ProviderPicker({
         Choose the AI your Bots use. Sign in with a plan you already have, or
         use an API key.
       </p>
-      {status}
 
       <fieldset className="picker providers">
         <legend className="sr-only">Model provider</legend>
@@ -1090,6 +1089,9 @@ export function ProviderPicker({
           Continue
         </button>
       </div>
+      {/* Under the form, never above it: what runs behind this step comes and goes while the
+          person types here, and nothing above the fields may move. See `BehindSlot`. */}
+      {status}
     </div>
   );
 }
