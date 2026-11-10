@@ -184,7 +184,7 @@ pub fn mark_connected(root: &Path, stack: &StackId) -> Result<State, Problem> {
             Problem::with(
                 "OpenBot has no record of its services on this computer. Start OpenBot to set \
                  them up again.",
-                "OpenBot has no record of that back end",
+                "OpenBot has no record of that backend",
             )
         })?;
     record.connected = true;

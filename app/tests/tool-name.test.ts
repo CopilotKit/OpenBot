@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { approvalWords, readToolName } from "@openbot/shared/tool-name";
+import {
+  answersTheModel,
+  approvalWords,
+  readToolName,
+} from "@openbot/shared/tool-name";
 
 /**
  * What the person watching is told a Bot just did.
@@ -8,6 +12,14 @@ import { approvalWords, readToolName } from "@openbot/shared/tool-name";
  * that exists to keep two vendors' `search` apart. A reader should never see either.
  */
 describe("naming a tool call", () => {
+  test("a Claude Agent SDK Bot looking for a tool says so, as any Bot's tool search does", () => {
+    for (const name of ["search_tools", "ToolSearch"]) {
+      expect(readToolName(name)).toEqual({ label: "Looked for a tool" });
+      expect(readToolName(name, true)).toEqual({ label: "Looking for a tool" });
+      expect(answersTheModel(name)).toBe(true);
+    }
+  });
+
   test("a research call says what it did and not which provider did it", () => {
     for (const name of [
       "mcp__exa__web_search_exa",

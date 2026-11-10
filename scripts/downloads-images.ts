@@ -6,8 +6,9 @@
  * Run by .github/workflows/downloads-sync.yml after scripts/downloads-sync.sh, for the same
  * release, and by hand. The release's `desktop-images.json` says which images: the Desktop app's
  * own code writes it when the release is published (desktop/src-tauri/src/release_images.rs), so
- * it names exactly what the app pulls. Images on ghcr.io and Docker Hub are copied; any other registry is
- * left as it is.
+ * it names exactly what the app pulls. Images on ghcr.io, Docker Hub and quay.io are copied; any other
+ * registry is left as it is. quay.io holds the engine machine images Podman builds its machine from,
+ * which the app downloads before Install (desktop/src-tauri/src/early_downloads.rs).
  *
  * What it writes, in the bucket behind the CloudFront distribution: a read-only copy of the
  * registry's own paths (the OCI Distribution API, GET only), so the address works as a registry:
@@ -21,8 +22,9 @@
  *   v2/<repo>/referrers/sha256:<hex>     an empty image index for each of those manifests, so the
  *                                        referrers API Docker 29 asks with every pull answers 200;
  *                                        cached for five minutes
- * <repo> is the path on ghcr.io unchanged, such as copilotkit/openbot-server, or for Docker Hub
- * docker.io/ and its path, official images under library/ (docker.io/library/busybox). The whole
+ * <repo> is the path on ghcr.io unchanged, such as copilotkit/openbot-server, for Docker Hub
+ * docker.io/ and its path, official images under library/ (docker.io/library/busybox), and for
+ * quay.io quay.io/ and its path (quay.io/podman/machine-os). The whole
  * index is copied because Docker 29 fetches every manifest it names, attestations included, and a
  * 403 for one fails the pull. An image named by digest whose referrers are there already is whole,
  * and is not read again.
@@ -117,7 +119,8 @@ export function imageRef(
   const hosted =
     first.includes(".") || first.includes(":") || first === "localhost";
   const host = hosted ? first : "docker.io";
-  if (host !== "ghcr.io" && !DOCKER_HUB.has(host)) return undefined;
+  if (host !== "ghcr.io" && host !== "quay.io" && !DOCKER_HUB.has(host))
+    return undefined;
   let rest = hosted ? reference.slice(slash + 1) : reference;
   let digest: string | undefined;
   const at = rest.indexOf("@");
@@ -142,14 +145,20 @@ export function imageRef(
   const where =
     host === "ghcr.io"
       ? { name: `ghcr.io/${rest}`, path: rest, read: `${source}/${rest}` }
-      : (() => {
-          const repo = rest.includes("/") ? rest : `library/${rest}`;
-          return {
-            name: `docker.io/${repo}`,
-            path: `docker.io/${repo}`,
-            read: `docker.io/${repo}`,
-          };
-        })();
+      : host === "quay.io"
+        ? {
+            name: `quay.io/${rest}`,
+            path: `quay.io/${rest}`,
+            read: `quay.io/${rest}`,
+          }
+        : (() => {
+            const repo = rest.includes("/") ? rest : `library/${rest}`;
+            return {
+              name: `docker.io/${repo}`,
+              path: `docker.io/${repo}`,
+              read: `docker.io/${repo}`,
+            };
+          })();
   // A digest names the image exactly; a tag beside it is only a label, as it is to a client.
   return digest ? { ...where, digest } : { ...where, tag };
 }
@@ -702,7 +711,7 @@ async function copy(options: Copy): Promise<number> {
   }
   for (const image of elsewhere)
     console.log(
-      `${image} is not on ghcr.io or Docker Hub; it is left to its own registry.`,
+      `${image} is not on ghcr.io, Docker Hub or quay.io; it is left to its own registry.`,
     );
 
   // What S3 holds for a key: its SHA-256 as S3 computed it on an upload sent with one, its

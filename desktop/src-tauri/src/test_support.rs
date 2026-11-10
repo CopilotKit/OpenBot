@@ -6,6 +6,11 @@ static NEXT_TEMP_ROOT: AtomicU64 = AtomicU64::new(0);
 /// Held by every test that binds or probes loopback ports, in every module. Tests run in
 /// parallel, so one test's port could be taken by another between choosing it and using it.
 /// A test that panics while holding it does not fail the others that wait for it.
+///
+/// It does not cover the other way a port given back stays taken: a process any test is starting
+/// holds a copy of every open socket until it execs, so a listener just dropped can still be
+/// bound, and even answer, for that moment. A test that needs a port again keeps its listener, or
+/// runs alone (`isolated_process`).
 #[allow(dead_code)] // The library's port tests use it; the binary shares this file.
 static PORT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 

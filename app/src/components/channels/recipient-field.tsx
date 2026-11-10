@@ -14,6 +14,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { shownSubtitle } from "@/lib/agents/subtitle";
 
 /**
  * Who a conversation that does not exist yet is with.
@@ -90,7 +91,9 @@ export function RecipientField({
               >
                 <ChannelAvatar participantIds={[profile.id]} size={18} />
                 <span>{profile.name}</span>
-                <span className="text-muted-foreground">{profile.title}</span>
+                <span className="text-muted-foreground">
+                  {shownSubtitle(profile.title)}
+                </span>
               </button>
             </li>
           ))}

@@ -45,7 +45,7 @@ export class MemoryRefusedError extends Error {
 export class MemoryUnavailableError extends Error {
   constructor() {
     super(
-      "This memory is kept in OpenBot's back end, which cannot be reached right now. Try again.",
+      "This memory is kept in OpenBot's backend, which cannot be reached right now. Try again.",
     );
     this.name = "MemoryUnavailableError";
   }

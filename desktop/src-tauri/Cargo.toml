@@ -38,6 +38,14 @@ sha2 = "0.10"
 tar = "0.4"
 # Comparing the app's release with its deployment's. See `follow.rs`.
 semver = "1"
+# OpenBot's images downloaded before any engine answers: the registry's manifests, read as the OCI
+# Distribution spec says, for this computer's platform. The ORAS project's client. See
+# `early_images.rs`. Its blobs come through `early_downloads::fetch`, which resumes and checks them.
+# No TLS provider of its own: rustls's ring, which reqwest 0.12 already builds, is the one used.
+oci-client = { version = "0.18", default-features = false, features = ["rustls-tls-no-provider"] }
+# The TLS provider the client above needs installed, as tauri-plugin-updater installs it: ring,
+# which this build already has. The version reqwest and the updater already use.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # Read Bun's release ZIP in-process; no unzip or PowerShell installation is required.
 zip = { version = "2.4.2", default-features = false, features = ["deflate-flate2", "flate2"] }
 # With `deep-link`, a second launch's `openbot://` link reaches the running OpenBot. See `notice.rs`.
@@ -84,11 +92,13 @@ objc2-speech = { version = "0.3", default-features = false, features = ["std", "
 objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "block2", "AVAudioEngine", "AVAudioNode", "AVAudioIONode", "AVAudioFormat", "AVAudioBuffer", "AVAudioTime", "AVAudioTypes"] }
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "AVCaptureDevice", "AVMediaFormat"] }
 # The shell's own messages in an alert with OpenBot's icon. See `native_alert.rs`.
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAlert", "NSApplication", "NSButton", "NSControl", "NSImage", "NSResponder", "NSView"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAlert", "NSApplication", "NSButton", "NSControl", "NSImage", "NSResponder", "NSView", "NSWindow"] }
 
 # Narration on Windows: the SAPI in-process recognizer. See `speech/sapi.rs`. The version Tauri uses.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Media_Speech", "Win32_System_Com", "Data_Xml_Dom", "UI_Notifications", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_Storage_FileSystem"] }
+# `Win32_System_Pipes` and `Win32_Security`: holding Docker's default pipe name while OpenBot's
+# Podman machine starts. See `acquire::start_machine`.
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Media_Speech", "Win32_System_Com", "Data_Xml_Dom", "UI_Notifications", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_Pipes"] }
 # Where WSL keeps a Podman machine's disk, so its drive's free space is checked before Start. See
 # `windows::podman_machine_drive`. The version reqwest already uses.
 windows-registry = "0.6"

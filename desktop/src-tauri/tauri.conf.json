@@ -34,6 +34,10 @@
     "windows": {
       "nsis": {
         "installerHooks": "./windows/hooks.nsh",
+        "languages": ["English"],
+        "customLanguageFiles": {
+          "English": "./windows/installer-english.nsh"
+        },
         "installerIcon": "./icons/icon.ico",
         "uninstallerIcon": "./icons/icon.ico",
         "headerImage": "./windows/installer-header.bmp",
@@ -64,7 +68,7 @@
       "icons/icon.ico"
     ],
     "publisher": "CopilotKit",
-    "copyright": "CopilotKit",
+    "copyright": "OpenBot by CopilotKit",
     "category": "DeveloperTool",
     "shortDescription": "Run OpenBot on your own machine",
     "longDescription": "OpenBot Desktop installs the container engine, raises the stack, and keeps it running."

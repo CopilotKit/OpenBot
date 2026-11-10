@@ -50,6 +50,11 @@ export type Progress = {
    */
   asks?: boolean;
   /**
+   * The engine itself is being updated (`engine::StepLine::updating`). Nothing is asked of it
+   * until the update is done: an engine being updated refuses what is asked.
+   */
+  updating?: boolean;
+  /**
    * Where this step is among the parts of what it belongs to, said while it runs: "Step 2 of 4".
    * A row list shows the parts done and the one running; this says how many are left.
    */
@@ -99,6 +104,12 @@ export function engineNow(steps: Progress[]): string | null {
 }
 
 /**
+ * The row OpenBot asks on before it pauses the person's own Podman on a Mac
+ * (`own_machine::PAUSE_STEP`).
+ */
+export const PAUSE_PODMAN_STEP = "pause-podman";
+
+/**
  * The line of a step that waits on the person after they closed macOS's password prompt ("OpenBot
  * needs your password to install what it needs to run…"), or null. The screens say it in a card
  * with Try again (`PodmanGoAhead`). Nothing waits on the person before a prompt.
@@ -106,8 +117,31 @@ export function engineNow(steps: Progress[]): string | null {
 export function goAheadNow(steps: Progress[]): string | null {
   const asking = [...steps]
     .reverse()
-    .find((step) => step.running && step.asks && step.detail);
+    .find(
+      (step) =>
+        step.running &&
+        step.asks &&
+        step.detail &&
+        step.step !== PAUSE_PODMAN_STEP,
+    );
   return asking?.detail ?? null;
+}
+
+/**
+ * The offer to pause the person's own Podman while OpenBot runs, while OpenBot waits for their yes
+ * ("Your Podman is set up in a way OpenBot can't use…"), or null. A Mac runs one Podman machine at
+ * a time, so OpenBot's own can start only once theirs is paused, and only the person says it may
+ * be. The screens say it in a card with the button that says yes (`PausePodman`).
+ */
+export function pauseOfferNow(steps: Progress[]): string | null {
+  const offering = steps.find(
+    (step) =>
+      step.step === PAUSE_PODMAN_STEP &&
+      step.running &&
+      step.asks &&
+      step.detail,
+  );
+  return offering?.detail ?? null;
 }
 
 /** Where OpenBot's own icon is, as this computer names it: macOS has a menu bar, Windows a tray. */
@@ -187,13 +221,19 @@ const PREPARING = new Set([
   "engine",
   "install-engine",
   "create-machine",
+  PAUSE_PODMAN_STEP,
   "start-machine",
   "health-gate",
 ]);
 
 /**
  * An installation's native rows as two plain ones, for local mode: "Preparing this computer" and
- * "Installing OpenBot". A failure is shown in full under the rows.
+ * "Downloading OpenBot". A failure is shown in full under the rows.
+ *
+ * The rest of OpenBot (`restOfOpenBot`, the back end's download) comes down alongside OpenBot's
+ * own once the software OpenBot runs on answers. It is the third step, said once nothing before it
+ * is still going: "Step 2 of 4" and "Step 3 of 4" in progress together read as two steps at once
+ * on a live Windows run. Shown then, its download is as far along as it got meanwhile.
  *
  * Keep actionable directions for the current step. Image pulls show their download instead.
  * "Preparing this computer" says, for instance, "Docker Desktop is starting in its own window."
@@ -206,6 +246,8 @@ export function plainInstallSteps(
   installing: boolean,
   /** When this install began: its running row's time so far counts from here. */
   since?: number | null,
+  /** The rest of OpenBot's download while it runs, or null. */
+  restOfOpenBot?: Downloads | null,
 ): Progress[] {
   const preparing = steps.filter((step) => PREPARING.has(step.step));
   const rest = steps.filter((step) => !PREPARING.has(step.step));
@@ -253,6 +295,16 @@ export function plainInstallSteps(
       startedAt: since ?? undefined,
     });
   }
+  if (restOfOpenBot && !rows.some((row) => row.running || !row.ok))
+    rows.push({
+      step: "Downloading the rest of OpenBot",
+      ok: true,
+      running: true,
+      // The row says the time left from the download's own speed.
+      detail: "",
+      downloads: restOfOpenBot,
+      position: { at: 3, of: INSTALL_PARTS },
+    });
   return rows;
 }
 
@@ -328,7 +380,7 @@ function SetupProgressRow({
  * Install shows its download from the start, items and all. The back end's update shows one only
  * once it has something to say: an update with nothing to download is not a download.
  */
-function showsDownload({ bytes, size, total }: Downloads): boolean {
+export function showsDownload({ bytes, size, total }: Downloads): boolean {
   return (total ?? 0) > 0 || bytes > 0 || (size ?? 0) > 0;
 }
 
@@ -338,7 +390,9 @@ function showsDownload({ bytes, size, total }: Downloads): boolean {
  * byte came in, so the part unpacking now moves the bar and the time left, and the parts that
  * finished say how long one takes here.
  */
-function useDownloadWhere(downloads: Downloads | null): DownloadWhere | null {
+export function useDownloadWhere(
+  downloads: Downloads | null,
+): DownloadWhere | null {
   const [, tick] = useState(0);
   const seen = useRef<PartsSeen | null>(null);
   const now = Date.now();
@@ -388,7 +442,7 @@ function downloadSaid(step: Progress, where: DownloadWhere): string {
  * do on 1.0.0-rc.1, and on Windows F, with its last bytes uncounted, "1.1 GB of 1.1 GB · 2 of 5
  * parts left" sat under a full bar with no time left, and looked stuck.
  */
-function DownloadProgress({
+export function DownloadProgress({
   downloads,
   where,
 }: {
@@ -519,6 +573,10 @@ export type BackEndNow = {
  * `installing` and `installed` are OpenBot's own install (`prepare_installation`), whose rows are
  * `steps`; the back end's setup follows it (`backEnd`). `waitingFor` is what the rest waits on when
  * it waits on the person; `done` is what the row says once everything is installed.
+ *
+ * `early` is the download the first screen started before Install was clicked (`EarlyDownloads`),
+ * while it runs. The row shows it whenever the step Install is on shows no download of its own, so
+ * the bytes arriving behind a step that waits on the person are never hidden.
  */
 export function installingBehind({
   steps,
@@ -528,6 +586,7 @@ export function installingBehind({
   backEnd,
   waitingFor,
   done,
+  early,
 }: {
   steps: Progress[];
   installing: boolean;
@@ -536,6 +595,7 @@ export function installingBehind({
   backEnd: BackEndNow;
   waitingFor?: string;
   done?: string;
+  early?: Downloads | null;
 }): Progress | null {
   const row = (
     at: number,
@@ -554,20 +614,38 @@ export function installingBehind({
     const preparing = now
       ? PREPARING.has(now.step)
       : !steps.some((step) => !PREPARING.has(step.step));
-    if (preparing) {
-      // A closed password prompt has its own card, with Try again: the row says only what it
-      // waits for.
-      const waiting = now?.asks === true;
-      return row(
-        1,
-        waiting
-          ? "Waiting for your password."
-          : now?.detail || "Preparing this computer to run OpenBot.",
-        { waiting, startedAt: since ?? undefined },
-      );
-    }
-    const downloads =
+    const own =
       now?.downloads && showsDownload(now.downloads) ? now.downloads : null;
+    const meanwhile = early && showsDownload(early) ? early : null;
+    if (preparing) {
+      // A closed password prompt has its own card, with Try again, and so does the offer to
+      // pause the person's Podman: the row says only what it waits for.
+      const waiting = now?.asks === true;
+      if (waiting)
+        return row(
+          1,
+          now?.step === PAUSE_PODMAN_STEP
+            ? "Waiting for you to pause your Podman."
+            : "Waiting for your password.",
+          {
+            waiting,
+            startedAt: since ?? undefined,
+          },
+        );
+      // The first screen's downloads while they run, the machine it runs on among them, so one bar
+      // carries them all and only moves forward; then a download of Install's own. A prompt in
+      // another window keeps its words.
+      const downloading = now?.elsewhere ? null : (meanwhile ?? own);
+      if (downloading)
+        return row(1, "Downloading OpenBot.", {
+          downloads: downloading,
+          startedAt: since ?? undefined,
+        });
+      return row(1, now?.detail || "Preparing this computer to run OpenBot.", {
+        startedAt: since ?? undefined,
+      });
+    }
+    const downloads = meanwhile ?? own;
     return row(
       2,
       downloads
@@ -684,6 +762,8 @@ function label(step: string): string {
       return "Software OpenBot runs on";
     case "create-machine":
       return "Preparing this computer";
+    case PAUSE_PODMAN_STEP:
+      return "Your Podman";
     case "start-machine":
       return "Starting the software OpenBot runs on";
     case "health-gate":
@@ -716,6 +796,8 @@ function label(step: string): string {
       return "Stopping OpenBot";
     case "stop-intelligence":
       return "Stopping OpenBot's services";
+    case "start-your-podman":
+      return "Starting your Podman again";
     default:
       return step;
   }

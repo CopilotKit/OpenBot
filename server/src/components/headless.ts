@@ -493,6 +493,8 @@ export async function createHeadlessComponentTools(options: {
         parameters: z.toJSONSchema(spec.parameters) as Record<string, unknown>,
       },
       ...(description === undefined ? { hidden: true } : {}),
+      // Not recorded when asked for beside another kind of call; see `shared/tool-steps.ts`.
+      component: true,
       async execute(args) {
         const parsed = spec.parameters.safeParse(args);
         if (!parsed.success)

@@ -2,6 +2,10 @@ import {
   OpenGenerativeUIActivityRenderer,
   useFrontendTool,
 } from "@copilotkit/react-core/v2";
+import {
+  answeredTooEarly,
+  drawnTooEarlyAnswer,
+} from "@openbot/shared/tool-steps";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import * as z from "zod";
@@ -18,6 +22,7 @@ import {
   useDeclaredBotId,
 } from "@/lib/copilot/active-bot";
 import { heldComponent, useOfferedTo } from "@/lib/copilot/bot-offer";
+import { drawnTooEarlyIn } from "@/lib/copilot/tool-steps";
 import {
   type PublishedSandboxed,
   publishedSandboxedQueryOptions,
@@ -97,9 +102,12 @@ function SandboxedTool({
     // refused was drawn instead of the card saying it was not allowed.
     (props: {
       args?: Record<string, unknown>;
+      result?: string;
       status?: string;
       toolCallId?: string;
     }) => {
+      // Asked for too early, so never drawn. See `shared/tool-steps.ts`.
+      if (answeredTooEarly(props.result)) return null;
       const refusal = props.toolCallId
         ? refusals.get(props.toolCallId)
         : undefined;
@@ -150,6 +158,9 @@ function SandboxedTool({
       `A component authored in this deployment: ${component.name}.`,
     parameters: parametersFor(component.argumentSchema),
     handler: async (_args: unknown, context: ToolCallContext = {}) => {
+      // Asked for in the same step as another kind of call: not drawn. See `shared/tool-steps.ts`.
+      if (drawnTooEarlyIn(context?.agent?.messages, context?.toolCall?.id))
+        return drawnTooEarlyAnswer(component.name);
       // The Bot that drew it, not the one on screen; see `botOfCall`.
       const decision = await decideComponent(
         component.name,

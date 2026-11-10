@@ -392,6 +392,51 @@ beforeAll(() => {
   runComposeConfig({});
 }, 60_000);
 
+/**
+ * Older Compose (v2.24.5, for one) validates every service before it applies profiles, so one
+ * service whose image comes out blank fails the whole project, profile or not. The desktop app
+ * runs `compose config` before it starts anything, so on those versions Start stopped with
+ * "Compose config exited with exit status: 15" whenever no harness was picked.
+ *
+ * Current Compose applies the same check to every service a profile turns on, so turning them all
+ * on with nothing set is how this suite sees what older Compose sees. CI also runs v2.24.5 itself.
+ */
+test("gives every service a real image when nothing is set, so older Compose reads the file", () => {
+  const output = execFileSync(
+    "docker",
+    [
+      "compose",
+      "-f",
+      "docker-compose.yml",
+      "-f",
+      "desktop/src-tauri/telemetry.compose.yml",
+      "-f",
+      "desktop/src-tauri/telemetry-disabled.compose.yml",
+      "--env-file",
+      "/dev/null",
+      "--profile",
+      "*",
+      "config",
+      "--format",
+      "json",
+    ],
+    {
+      cwd: join(import.meta.dir, ".."),
+      env: { PATH: process.env.PATH ?? "" },
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  const services = (
+    JSON.parse(output) as { services: Record<string, { image?: string }> }
+  ).services;
+  expect(Object.keys(services)).toContain("agent-harness");
+  const blank = Object.entries(services)
+    .filter(([, service]) => !service.image?.trim())
+    .map(([name]) => name);
+  expect(blank).toEqual([]);
+});
+
 test("provides PostgreSQL with pgvector for local development", () => {
   const compose = composeFile();
 

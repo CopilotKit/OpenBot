@@ -46,7 +46,11 @@ import {
   FILE_PICKER_ACCEPT,
   stagedRowId,
 } from "./attachments";
-import { DictationButton, DictationSurface } from "./dictation-controls";
+import {
+  DictationButton,
+  DictationSurface,
+  LiveDictationNotice,
+} from "./dictation-controls";
 import { appendDictation } from "./dictation-draft";
 import {
   applyCommandChips,
@@ -386,11 +390,24 @@ export function Composer({
   /** A send has completed and the caret is owed back, as soon as the editor will take it. */
   const wantsFocus = useRef(false);
   const sendDictatedDraft = useRef(false);
+  /** The box as it is now, for live dictation to add its words to. */
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  /** The box as it was when live dictation began: each transcript replaces what came after it. */
+  const liveBase = useRef<Segment[]>([]);
   const dictation = useDictation(
-    (transcript, intent) => {
-      setValue((current) => appendDictation(current, transcript));
-      sendDictatedDraft.current = intent === "send";
-      wantsFocus.current = true;
+    {
+      onTranscript: (transcript, intent) => {
+        setValue((current) => appendDictation(current, transcript));
+        sendDictatedDraft.current = intent === "send";
+        wantsFocus.current = true;
+      },
+      onLiveStart: () => {
+        liveBase.current = valueRef.current;
+      },
+      onLiveText: (transcript) => {
+        setValue(appendDictation(liveBase.current, transcript));
+      },
     },
     disabled || voiceCall?.active === true,
   );
@@ -1130,6 +1147,9 @@ export function Composer({
 
   const handleChange = useCallback(
     (next: Segment[]) => {
+      // Typing while live dictation listens stops it at once and keeps the box as it is: the
+      // recognizer's later words would otherwise write over what was just typed.
+      dictation.live.session.release();
       const { segments, actions } = applyCommandChips(
         enforceSingleAgent(next),
         commands,
@@ -1141,7 +1161,7 @@ export function Composer({
         action();
       }
     },
-    [commands],
+    [commands, dictation.live.session],
   );
 
   /**
@@ -1152,6 +1172,13 @@ export function Composer({
    */
   const submitDraft = useCallback(
     async (segments: Segment[]) => {
+      // Enter while live dictation listens stops it and keeps the words in the box. It never
+      // sends: the person reads what was heard first, and the next Enter sends it. Asked before
+      // anything else, so an empty box still stops listening.
+      if (dictation.live.session.active) {
+        dictation.live.session.stop();
+        return;
+      }
       // `canSendDraft` rather than `isEmpty`: a screenshot with no words is a message, and an
       // upload still in flight is not one yet, whatever is typed alongside it.
       //
@@ -1299,6 +1326,7 @@ export function Composer({
     [
       disabled,
       dictation.session,
+      dictation.live.session,
       dismissRejections,
       isBusy,
       onQueue,
@@ -1370,7 +1398,18 @@ export function Composer({
   /** Something to send, mid-turn, with a queue to put it in. */
   const parking = canQueue && sendable;
   const canSend =
-    !disabled && !dictation.busy && sendable && (!isBusy || canQueue);
+    !disabled &&
+    !dictation.busy &&
+    !dictation.live.active &&
+    sendable &&
+    (!isBusy || canQueue);
+  /** Live dictation began from the microphone: the caret goes to the end of the box, where Enter stops it. */
+  const focusForDictation = useCallback(() => {
+    promptAreaRef.current?.focus();
+    promptAreaRef.current?.setCursorToEnd();
+  }, []);
+  const placeholder =
+    dictation.live.state.phase === "listening" ? "Listening…" : "Ask anything";
   const canSendRecording =
     !disabled &&
     !tooManyStaged &&
@@ -1543,6 +1582,7 @@ export function Composer({
       <div className="flex flex-col" ref={containerRef} {...dropZone}>
         <RejectedFiles onDismiss={dismissRejections} rejected={rejected} />
         {tooManyStagedNotice}
+        <LiveDictationNotice dictation={dictation} />
         <form
           aria-busy={isBusy}
           data-slot="composer"
@@ -1585,7 +1625,7 @@ export function Composer({
                 onChange={handleChange}
                 onImagePaste={canAttach ? stagePastedImage : undefined}
                 onSubmit={submitDraft}
-                placeholder="Ask anything"
+                placeholder={placeholder}
                 ref={promptAreaRef}
                 triggers={triggers}
                 value={value}
@@ -1626,6 +1666,7 @@ export function Composer({
                 <DictationButton
                   dictation={dictation}
                   disabled={disabled || voiceCall?.active === true}
+                  onStarted={focusForDictation}
                 />
                 {primaryAction}
               </div>
@@ -1646,6 +1687,15 @@ export function Composer({
     >
       <RejectedFiles onDismiss={dismissRejections} rejected={rejected} />
       {tooManyStagedNotice}
+      {/*
+       * THE NOTICE TAKES ITS OWN ROOM, AND THE BOX STAYS WHERE IT IS. This composer is the one Home
+       * centres in the page. Above the box in the flow alone, the notice pushed the box down by half
+       * its height (16px for one line); drawn over the space above it instead, it sat on the starter
+       * tasks. So it is in the flow above the box, and an invisible copy of it, the same height, is
+       * in the flow below: the centred block grows by the same amount on both sides of the box, the
+       * greeting and the tasks move up to make room, and the box holds still.
+       */}
+      <LiveDictationNotice dictation={dictation} />
       <form
         aria-busy={isBusy}
         className="overflow-hidden rounded-2xl border border-border bg-card"
@@ -1678,7 +1728,7 @@ export function Composer({
                 onChange={handleChange}
                 onImagePaste={canAttach ? stagePastedImage : undefined}
                 onSubmit={submitDraft}
-                placeholder="Ask anything"
+                placeholder={placeholder}
                 ref={promptAreaRef}
                 triggers={triggers}
                 value={value}
@@ -1708,12 +1758,22 @@ export function Composer({
               <DictationButton
                 dictation={dictation}
                 disabled={disabled || voiceCall?.active === true}
+                onStarted={focusForDictation}
               />
               {primaryAction}
             </div>
           </div>
         </DictationSurface>
       </form>
+      {/* The notice's invisible copy, below the box: see above. Hidden from everyone and inert. */}
+      <div
+        aria-hidden="true"
+        className="invisible"
+        data-slot="composer-dictate-notice-balance"
+        inert
+      >
+        <LiveDictationNotice dictation={dictation} />
+      </div>
     </div>
   );
 }

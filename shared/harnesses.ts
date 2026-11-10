@@ -101,6 +101,68 @@ export function summaryFor(harness: Harness): string {
 }
 
 /**
+ * Names the catalogue gave a framework before its current one, by harness id.
+ *
+ * A Bot an earlier version seeded under one of these is still named after its framework: the
+ * installer moves it like one under the current name, and its subtitle reads the current name.
+ */
+export const EARLIER_HARNESS_NAMES: Readonly<
+  Record<string, readonly string[]>
+> = {
+  langgraph: ["LangGraph", "LangChain (LangGraph)"],
+};
+
+/**
+ * The Personal Assistant's subtitle as a person reads it, when it runs on a framework the installer
+ * picked: what it is, what runs it, and that any other agent can be brought along, with the article
+ * the name reads with ("an AWS Strands agent"). Atai's wording and punctuation, November 10. Shown
+ * only: the starter is still stored, and told to the Bot, as "Everyday life. Powered by <name>.".
+ */
+export function starterSubtitle(name: string): string {
+  const article = /^[AEIOU]/.test(name) ? "an" : "a";
+  return `Everyday life agent. (powered by ${article} ${name} agent; you can bring your own agent from any stack.)`;
+}
+
+/** Every name a harness the installer can run has had, with the harness it belongs to now. */
+function namesWithHarness(): Array<[string, Harness]> {
+  return HARNESSES.filter(({ image }) => image !== null).flatMap((harness) =>
+    [harness.name, ...(EARLIER_HARNESS_NAMES[harness.id] ?? [])].map(
+      (name): [string, Harness] => [name, harness],
+    ),
+  );
+}
+
+/**
+ * A subtitle OpenBot wrote, as a person reads it now. For the profile a person sees, never for what
+ * a Bot is told.
+ *
+ * - The Personal Assistant's seed, "Everyday life. Powered by <framework>.", exactly as seeded under
+ *   any of the framework's names, reads as {@link starterSubtitle} for its current name.
+ * - Any other "Powered by <earlier name>" reads with the framework's current name.
+ *
+ * Only what OpenBot wrote changes. A subtitle the person rewrote no longer matches the seed, and the
+ * person's own words around a "Powered by" stay as they wrote them.
+ */
+export function withCurrentFrameworkNames(title: string): string {
+  for (const [name, harness] of namesWithHarness()) {
+    if (title === `Everyday life. Powered by ${name}.`) {
+      return starterSubtitle(harness.name);
+    }
+  }
+  let current = title;
+  for (const harness of HARNESSES) {
+    for (const earlier of EARLIER_HARNESS_NAMES[harness.id] ?? []) {
+      const escaped = earlier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      current = current.replace(
+        new RegExp(`Powered by ${escaped}(?![\\w(])`, "g"),
+        `Powered by ${harness.name}`,
+      );
+    }
+  }
+  return current;
+}
+
+/**
  * What a Bot that runs inside OpenBot is powered by: its subtitle's "Powered by OpenBot", and the
  * framework it is told it runs on.
  */

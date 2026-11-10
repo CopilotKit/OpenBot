@@ -473,7 +473,7 @@ pub fn uncordon_if_cordoned(
     if ran.stdout.trim() != "true" {
         return Ok(false);
     }
-    log::warn!("[local update] the back end's node {node} is cordoned, so nothing new can start on it; uncordoning it");
+    log::warn!("[local update] the backend's node {node} is cordoned, so nothing new can start on it; uncordoning it");
     let mut uncordon = engine();
     uncordon.args(["exec", &node, "kubectl", "uncordon", &node]);
     let ran = bounded(uncordon, Duration::from_secs(15))?;

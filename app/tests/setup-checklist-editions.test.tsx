@@ -175,7 +175,7 @@ test("the personal edition's gaps speak of no memory and no admin either", async
 
   expect(
     row("intelligence").getByText(
-      "The back end says this deployment's licence isn't active.",
+      "The backend says this deployment's licence isn't active.",
     ),
   ).toBeTruthy();
   expect(
@@ -210,7 +210,7 @@ test("a team deployment's gaps still say what an inactive licence keeps off", as
 
   expect(
     row("intelligence").getByText(
-      "The back end says this deployment's licence isn't active. Memory stays off until it is.",
+      "The backend says this deployment's licence isn't active. Memory stays off until it is.",
     ),
   ).toBeTruthy();
   expect(

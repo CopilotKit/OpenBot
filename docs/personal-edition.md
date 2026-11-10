@@ -48,7 +48,9 @@ The server's container is given the supervisor by name in `docker-compose.yml` u
 A new installation starts with one Bot, the Personal Assistant. When a Bot was picked during setup,
 the Personal Assistant runs on what was picked: it takes the `picked-harness` row's id and
 connection, and the Personal Assistant's instructions, skills and conversation, and its subtitle
-says what runs it ("Everyday life. Powered by LangChain."). With nothing picked, as
+says what runs it ("Everyday life. Powered by LangChain.", which its profile shows as "Everyday life
+agent. (powered by a LangChain agent; you can bring your own agent from any stack.)"). With nothing
+picked, as
 `start.sh` leaves it, `PICKED_HARNESS_URL` is empty, the `picked-harness` row in
 [`examples/personal/agents.yaml`](../examples/personal/agents.yaml) is dropped, and the Personal
 Assistant runs inside the server ("Everyday life. Powered by OpenBot."). Either way it is an
@@ -119,7 +121,7 @@ Learning: a Bot those settings left out is taken back in at the next start, or i
 | --- | --- |
 | Use Bots, cloud browser, network and computer, local computer access (folders, in OpenBot Desktop), custom rules, password manager, apps a Bot uses as you, check-ins | On |
 | Slack and Teams, Team Bots, Isolated Bots | Off |
-| Always ask before making changes | Off for anybody who has not chosen otherwise. Paying, and deleting, sending, sharing or posting in your apps and on websites, ask anyway, as does every edit or command in a folder on this computer. A Bot's own computer is its scratch space. See [Approvals](approvals.md) |
+| Extra vigilant | Off for anybody who has not chosen otherwise. Paying, and deleting, sending, sharing or posting in your apps and on websites, ask anyway, as does every edit or command in a folder on this computer. A Bot's own computer is its scratch space. See [Approvals](approvals.md) |
 | Stop idle computers | Never: there is one |
 | Check-ins per Bot per day | 24, as in the team edition |
 | SSO, action recording, model and MCP allowlists, skill sharing | Off |

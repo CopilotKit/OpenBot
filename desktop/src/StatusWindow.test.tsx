@@ -75,12 +75,12 @@ test("memory reads as people read it, and a total ignores what could not be meas
   expect(totalMemory([{ name: "b", memoryBytes: null }])).toBeNull();
 });
 
-test("each part shows its state and memory, and the back end its CLI readiness", async () => {
+test("each part shows its state and memory, and the backend its CLI readiness", async () => {
   invokeHandler = answers();
   const view = render(<StatusWindow readEveryMs={60_000} />);
   const bots = await view.findByRole("region", { name: "App" });
   expect(bots.textContent).toContain("Running · 400 MB");
-  const intelligence = view.getByRole("region", { name: "Back end" });
+  const intelligence = view.getByRole("region", { name: "OpenBot's services" });
   await waitFor(() =>
     expect(intelligence.textContent).toContain("Ready · 2.4 GB"),
   );
@@ -89,11 +89,7 @@ test("each part shows its state and memory, and the back end its CLI readiness",
     [...part.querySelectorAll(".status-list li")].map(
       (row) => row.firstElementChild?.textContent,
     );
-  expect(rows(bots)).toEqual([
-    "Front end and Bots",
-    "Background jobs",
-    "Database",
-  ]);
+  expect(rows(bots)).toEqual(["App and Bots", "Background jobs", "Database"]);
   expect(rows(intelligence)).toEqual(["Conversations and learning"]);
   expect(view.container.textContent).not.toMatch(/openbot-desktop-|k3d-/);
   expect(
@@ -105,7 +101,7 @@ test("Restart OpenBot restarts its processes; Stop Intelligence stops only the s
   invokeHandler = answers();
   const view = render(<StatusWindow readEveryMs={60_000} />);
   const intelligence = await view.findByRole("region", {
-    name: "Back end",
+    name: "OpenBot's services",
   });
   await userEvent.click(
     within(intelligence).getByRole("button", { name: "Stop" }),
@@ -181,7 +177,7 @@ test("a desktop app without a log offers no Open log folder", async () => {
   expect(view.queryByRole("button", { name: "Open log folder" })).toBeNull();
 });
 
-test("the back end is named in words on screen, and its stack id goes only to Copy diagnostics", async () => {
+test("the back end's stack id goes only to Copy diagnostics", async () => {
   invokeHandler = answers({
     desktop_status: { ...running, intelligenceStack: "local-08ff56ec9469e95e" },
   });
@@ -195,14 +191,11 @@ test("the back end is named in words on screen, and its stack id goes only to Co
     },
   });
   const view = render(<StatusWindow readEveryMs={60_000} />);
-  await view.findByRole("region", { name: "Back end" });
-  expect(
-    view.container.querySelector(".status-details")?.textContent,
-  ).toContain("Back endOn this computer");
+  await view.findByRole("region", { name: "OpenBot's services" });
   expect(view.container.textContent).not.toContain("local-08ff56ec9469e95e");
   await userEvent.click(view.getByRole("button", { name: "Copy diagnostics" }));
   await waitFor(() =>
-    expect(copied).toContain("Back end: local-08ff56ec9469e95e"),
+    expect(copied).toContain("Backend: local-08ff56ec9469e95e"),
   );
 });
 
@@ -212,8 +205,125 @@ test("diagnostics carry versions, places and memory, and nothing secret", () => 
   expect(text).toContain(
     "Installed in /Users/someone/OpenBot, app on port 3010",
   );
-  expect(text).toContain("Back end: local-abc, ready");
+  expect(text).toContain("Backend: local-abc, ready");
   expect(text).toContain("k3d-local-abc-server-0 2.4 GB");
   expect(text).toContain("openbot-desktop-postgres-1 150 MB");
   expect(text).not.toMatch(/key|token|secret/i);
+});
+
+/**
+ * Words a person reading the Status window doesn't know, and values only support needs: the
+ * engine's name, the back end, Docker's container names, the build's commit and time, ports.
+ * Docker Desktop is named where the person opens it; Docker alone, as the engine's name, is not.
+ * On a live Windows run the window said "Back end", "Container engine" and "Podman".
+ */
+const TECHNICAL = [
+  /Podman/i,
+  /\bDocker\b(?! Desktop)/,
+  /\bengines?\b/i,
+  /back[ -]?end/i,
+  /front[ -]?end/i,
+  /\bcontainers?\b/i,
+  /\bk3[sd]\b/i,
+  /Intelligence/,
+  /\bCLI\b/,
+  /\bCompose\b/,
+  /\bstack\b/i,
+  /\bports?\b/i,
+  /\bUTC\b/,
+  /\bBuilt\b/,
+  /\b[0-9a-f]{7,40}\b/,
+  /openbot-desktop-|local-[0-9a-f]/,
+  /\u2014/,
+];
+
+/** Everything a person reads on the window: its text and the names a screen reader says. */
+function readOn(view: ReturnType<typeof render>): string[] {
+  const named = [...view.container.querySelectorAll("[aria-label]")].map(
+    (element) => element.getAttribute("aria-label") ?? "",
+  );
+  return [view.container.textContent ?? "", ...named];
+}
+
+test("every label and value on the Status window is in plain words, and the technical detail is in Copy diagnostics", async () => {
+  const onAMac = {
+    ...running,
+    engine: "podman" as const,
+    containers: [
+      ...running.containers,
+      { name: "openbot-desktop-agent-computer-1", memoryBytes: null },
+      { name: "openbot-desktop-sidecar-1", memoryBytes: 20_000_000 },
+    ],
+    intelligenceStack: "local-e0cf90debea88453ad454b93",
+    intelligenceContainers: [
+      {
+        name: "k3d-local-e0cf90debea88453ad454b93-server-0",
+        memoryBytes: 2_400_000_000,
+      },
+      { name: "k3d-local-e0cf90debea88453ad454b93-tools", memoryBytes: 9e6 },
+      {
+        name: "k3d-local-e0cf90debea88453ad454b93-serverlb",
+        memoryBytes: 2e7,
+      },
+    ],
+    build: "Built 2026-11-09 18:30 UTC from 795f619 on main",
+    logFolder: "/Users/someone/Library/Logs/ai.copilotkit.openbot.desktop",
+  };
+  const allStopped = {
+    ...onAMac,
+    openbotRunning: false,
+    openbotHeld: false,
+    containers: [],
+    intelligenceContainers: [],
+    engine: null,
+    appPort: null,
+  };
+  let copied = "";
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: {
+      writeText: async (text: string) => {
+        copied = text;
+      },
+    },
+  });
+  for (const [state, status] of [
+    ["running", onAMac],
+    ["stopped", allStopped],
+  ] as const) {
+    invokeHandler = answers({ desktop_status: status });
+    const view = render(<StatusWindow readEveryMs={60_000} />);
+    await view.findByRole("region", { name: "App" });
+    if (state === "running")
+      await waitFor(() =>
+        expect(view.container.textContent).toContain("Ready"),
+      );
+    const technical = readOn(view).flatMap((said) =>
+      TECHNICAL.filter((word) => word.test(said)).map(
+        (word) => said.match(word)?.[0],
+      ),
+    );
+    expect({ state, technical }).toEqual({ state, technical: [] });
+    // Each part has its place and says what it is, in the words setup uses.
+    expect(
+      view.getByRole("region", { name: "Software OpenBot runs on" })
+        .textContent,
+    ).toContain(state === "running" ? "Running" : "Not running");
+    expect(
+      view.queryByRole("region", { name: "OpenBot's services" }),
+    ).not.toBeNull();
+    expect(
+      view.container.querySelector(".status-details")?.textContent,
+    ).toContain(`Version${running.version}Logs`);
+    // What support needs is one click away.
+    await userEvent.click(
+      view.getByRole("button", { name: "Copy diagnostics" }),
+    );
+    await waitFor(() => expect(copied).toContain(status.build));
+    expect(copied).toContain(
+      `Container engine: ${status.engine ?? "not answering"}`,
+    );
+    expect(copied).toContain("local-e0cf90debea88453ad454b93");
+    cleanup();
+  }
 });

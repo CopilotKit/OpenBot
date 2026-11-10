@@ -91,6 +91,11 @@ pub type Secrets = std::collections::BTreeMap<String, String>;
 /// below only `-p`, so every caller's arguments stay exactly as they were. A project that could not
 /// be decided, because the engine could not be asked, is `DESKTOP_PROJECT`: never the folder's
 /// name, which would be adopting whatever else runs under it.
+/// The engine's Compose for the installation in `root`, with `secrets` in its environment.
+pub fn compose_command_for(engine: &Address, root: &Path, secrets: &Secrets) -> Command {
+    compose_command(engine, root, secrets)
+}
+
 fn compose_command(engine: &Address, root: &Path, secrets: &Secrets) -> Command {
     let project = project(engine, root).unwrap_or_else(|_| DESKTOP_PROJECT.to_owned());
     let mut command = engine.command();
@@ -1011,9 +1016,33 @@ pub fn installation_images_in(
     harness: bool,
     settings: &Secrets,
 ) -> Result<Vec<String>, Problem> {
+    installation_images_by(
+        compose_command(engine, root, settings),
+        root,
+        release,
+        harness,
+    )
+}
+
+/// A Compose of OpenBot's own that runs without any engine, for `config`: the standalone binary
+/// `install.rs` downloads (`docker-compose`), with the same settings as `compose_command`. Before
+/// Podman is on a computer, this is the only Compose there is.
+pub fn standalone_compose_command(compose: &Path, root: &Path, secrets: &Secrets) -> Command {
+    let mut command = crate::quiet::command(compose);
+    command.current_dir(root).envs(secrets);
+    command.env("COMPOSE_PROJECT_NAME", DESKTOP_PROJECT);
+    command
+}
+
+/// [`installation_images_in`], with the Compose `command` to ask given.
+pub fn installation_images_by(
+    mut command: Command,
+    root: &Path,
+    release: &Path,
+    harness: bool,
+) -> Result<Vec<String>, Problem> {
     let mut requested = selected_services(harness);
     requested.push("migrate");
-    let mut command = compose_command(engine, root, settings);
     if release != root {
         // Compose reads the release's file from where it runs, and `.env` from there too, so the
         // installation's own settings are named explicitly.
@@ -1180,8 +1209,8 @@ fn up_now(
      * The picked harness rides in on its profile.
      *
      * `agent-harness` is profile-gated so a deployment that picked nothing does not try to start
-     * it: its image comes from `.env`, and unset that is a request to pull the empty string, which
-     * fails the whole `up` rather than the one service nobody asked for. The flag comes before
+     * it: its image comes from `.env`, and with nothing picked it is a stand-in docker-compose.yml
+     * names so older Compose will read the file at all. The flag comes before
      * `up`, because `--profile` is an option of `compose` itself and not of the subcommand.
      */
     let requested = selected_services(harness);
@@ -3632,26 +3661,110 @@ pub fn wait_until_healthy(
     patience: std::time::Duration,
     keep_going: impl Fn() -> bool,
 ) -> Result<(), String> {
-    let deadline = std::time::Instant::now() + patience;
+    wait_until_healthy_saying(ready, patience, keep_going, &mut |line| {
+        log::info!("{line}")
+    })
+}
+
+/// [`wait_until_healthy`], with what it waited on and why it stopped said to `say`: each poll's
+/// answer as it changes (the URL, and its status or the error), and the reason it ended. A wait
+/// that gave up after minutes had left no line at all (see `logging::WaitLog`).
+pub fn wait_until_healthy_saying(
+    ready: &Ready,
+    patience: std::time::Duration,
+    keep_going: impl Fn() -> bool,
+    say: &mut dyn FnMut(String),
+) -> Result<(), String> {
+    let started = std::time::Instant::now();
+    let deadline = started + patience;
+    let mut waited = crate::logging::WaitLog::new(
+        format!(
+            "OpenBot's services, GET /health on port {} (API) and port {} (app)",
+            ready.api, ready.app
+        ),
+        started,
+    );
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .map_err(|error| format!("could not ask OpenBot's services: {error}"))?;
     let mut api_up = false;
 
     while std::time::Instant::now() < deadline && keep_going() {
         // An earlier API success is no longer sufficient when the app becomes ready later.
-        api_up = answering_at(ready.api, "/health").is_some();
-        if api_up && answering_at(ready.app, "/health").is_some() {
+        let api = health_answer(&client, ready.api, "/health");
+        api_up = api.is_ok();
+        let app = api_up.then(|| health_answer(&client, ready.app, "/health"));
+        let answer = format!(
+            "API {}; app {}",
+            answer_said(&api),
+            app.as_ref()
+                .map_or("not asked until the API answers".to_string(), answer_said)
+        );
+        if let Some(line) = waited.answered(std::time::Instant::now(), &answer) {
+            say(line);
+        }
+        if app.is_some_and(|app| app.is_ok()) {
+            say(waited.ended(std::time::Instant::now(), "both answered"));
             return Ok(());
         }
 
         std::thread::sleep(std::time::Duration::from_millis(750));
     }
 
-    if api_up {
-        return Err(format!(
+    let failed = if api_up {
+        format!(
             "the API is answering, but the app is not answering on port {}.",
             ready.app
-        ));
+        )
+    } else {
+        format!("the API is not answering on port {}.", ready.api)
+    };
+    let why = if keep_going() {
+        format!("gave up: {failed}")
+    } else {
+        "stopped by Stop or Quit".to_string()
+    };
+    say(waited.ended(std::time::Instant::now(), &why));
+    Err(failed)
+}
+
+/// What `port` answered at `path` on either loopback: the address that answered, or what each
+/// one said instead (its HTTP status, or the error that kept it from answering).
+fn health_answer(
+    client: &reqwest::blocking::Client,
+    port: u16,
+    path: &str,
+) -> Result<String, String> {
+    let mut said = Vec::new();
+    for host in LOOPBACKS {
+        let url = format!("http://{host}:{port}{path}");
+        match client.get(&url).send() {
+            Ok(response) if response.status().is_success() => {
+                return Ok(format!("http://{host}:{port}"))
+            }
+            Ok(response) => said.push(format!("{url} answered {}", response.status())),
+            Err(error) => said.push(format!("{url}: {}", deepest_cause(&error))),
+        }
     }
-    Err(format!("the API is not answering on port {}.", ready.api))
+    Err(said.join(", "))
+}
+
+fn answer_said(answer: &Result<String, String>) -> String {
+    match answer {
+        Ok(base) => format!("answering on {base}"),
+        Err(said) => format!("not answering ({said})"),
+    }
+}
+
+/// The innermost reason: reqwest's own message is "error sending request for url", and what
+/// support needs is underneath it ("Connection refused", "operation timed out").
+fn deepest_cause(error: &dyn std::error::Error) -> String {
+    let mut cause = error;
+    while let Some(source) = cause.source() {
+        cause = source;
+    }
+    cause.to_string()
 }
 
 /// Keep a short startup headline and useful local diagnostics, with credentials removed.
@@ -9362,13 +9475,81 @@ fn main() {
         }
     }
 
+    /// A readiness wait that runs out writes what it asked, what each answer was, and why it gave
+    /// up: here a real server that answers its health check with 503, as one still migrating does.
+    #[test]
+    fn a_readiness_timeout_writes_its_waits_and_its_reason_to_the_log() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut request = [0u8; 1024];
+                let _ = stream.read(&mut request);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+            }
+        });
+        let ready = Ready {
+            api: port,
+            app: port,
+        };
+        let mut lines = Vec::new();
+        let result = wait_until_healthy_saying(
+            &ready,
+            std::time::Duration::from_secs(2),
+            || true,
+            &mut |line| lines.push(line),
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            format!("the API is not answering on port {port}.")
+        );
+        let what = format!("[wait] OpenBot's services, GET /health on port {port} (API)");
+        let first = &lines[0];
+        assert!(first.starts_with(&what), "{lines:#?}");
+        assert!(
+            first.contains(&format!(
+                "http://127.0.0.1:{port}/health answered 503 Service Unavailable"
+            )),
+            "{lines:#?}"
+        );
+        assert!(first.contains("check 1)"), "{lines:#?}");
+        let last = lines.last().unwrap();
+        assert!(
+            last.contains(&format!(
+                "gave up: the API is not answering on port {port}. after "
+            )),
+            "{lines:#?}"
+        );
+        assert!(last.contains("checks; last answer: API not answering (http://127.0.0.1"));
+        assert!(last.contains("503 Service Unavailable"), "{lines:#?}");
+        // The same answer each poll is said once, not once a poll.
+        assert_eq!(lines.len(), 2, "{lines:#?}");
+    }
+
     #[test]
     fn readiness_ends_at_once_when_the_start_is_stopped() {
         // Port 1 needs privilege to bind, so nothing here will ever answer it.
         let ready = Ready { api: 1, app: 1 };
         let started = std::time::Instant::now();
-        let result = wait_until_healthy(&ready, std::time::Duration::from_secs(30), || false);
+        let mut lines = Vec::new();
+        let result = wait_until_healthy_saying(
+            &ready,
+            std::time::Duration::from_secs(30),
+            || false,
+            &mut |line| lines.push(line),
+        );
         assert!(result.is_err());
+        assert!(
+            lines
+                .last()
+                .unwrap()
+                .contains("stopped by Stop or Quit after"),
+            "{lines:#?}"
+        );
         assert!(
             started.elapsed() < std::time::Duration::from_secs(5),
             "a stopped Start sat out the readiness wait"
