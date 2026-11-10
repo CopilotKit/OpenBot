@@ -554,8 +554,8 @@ pub fn verify_mac(dmg: &Path) -> Result<Mounted, Problem> {
     Ok(mounted)
 }
 
-/// Check the Windows installer's Authenticode signature: valid, and Docker Inc's.
-pub fn verify_windows(installer: &Path) -> Result<(), Problem> {
+/// The answer to `AUTHENTICODE_QUERY` about the file at `path`, or what PowerShell said instead.
+pub fn authenticode(path: &Path) -> Result<String, String> {
     let output = crate::quiet::command("powershell")
         .args([
             "-NoProfile",
@@ -563,15 +563,29 @@ pub fn verify_windows(installer: &Path) -> Result<(), Problem> {
             "-Command",
             AUTHENTICODE_QUERY,
         ])
-        .arg(installer)
+        .arg(path)
         .output()
-        .map_err(|error| not_verified(format!("Get-AuthenticodeSignature: {error}")))?;
-    let answer = String::from_utf8_lossy(&output.stdout);
-    if !output.status.success() || !signed_by_docker_on_windows(&answer) {
+        .map_err(|error| format!("Get-AuthenticodeSignature: {error}"))?;
+    let answer = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !output.status.success() {
+        return Err(format!(
+            "Get-AuthenticodeSignature exited with {}: {}{}",
+            output.status,
+            answer,
+            crate::quiet::said(&output.stderr)
+        ));
+    }
+    Ok(answer)
+}
+
+/// Check the Windows installer's Authenticode signature: valid, and Docker Inc's.
+pub fn verify_windows(installer: &Path) -> Result<(), Problem> {
+    let answer = authenticode(installer)
+        .map_err(|error| not_verified(format!("{}: {error}", installer.display())))?;
+    if !signed_by_docker_on_windows(&answer) {
         return Err(not_verified(format!(
-            "{} is not validly signed by Docker Inc: {}",
-            installer.display(),
-            answer.trim()
+            "{} is not validly signed by Docker Inc: {answer}",
+            installer.display()
         )));
     }
     Ok(())
@@ -1197,5 +1211,36 @@ Internal requirements count=1 size=180
             Some("https://desktop.docker.com/win/main/amd64/appcast.xml")
         );
         assert_eq!(appcast_url("linux", "x86_64"), None);
+    }
+
+    /*
+     * The real call, on Windows. Docker's installer is downloaded to
+     * "...\docker-desktop\245422\Docker Desktop Installer.exe", and on a live Windows run the check
+     * stopped every update there: the path passed after `-Command` became part of the command text, a
+     * parse error, and the answer was empty. A signed Windows file stands in for the installer, in
+     * a folder whose name has spaces and a quote.
+     */
+    #[test]
+    #[cfg(windows)]
+    fn the_signature_check_reads_a_path_with_spaces_and_quotes() {
+        let folder = std::env::temp_dir().join(format!(
+            "openbot sig check {} it's here",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&folder).unwrap();
+        let signed = folder.join("Signed Installer.exe");
+        let system = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+        std::fs::copy(&system, &signed).unwrap();
+        let answer = authenticode(&signed);
+        let _ = std::fs::remove_dir_all(&folder);
+        let answer = answer.unwrap();
+        let (status, subject) = answer
+            .split_once('|')
+            .unwrap_or_else(|| panic!("not <status>|<subject>: {answer}"));
+        assert_eq!(status, "Valid", "{answer}");
+        assert!(subject.contains("O=Microsoft Corporation"), "{answer}");
+        // A Microsoft signature is not Docker's.
+        assert!(!signed_by_docker_on_windows(&answer));
     }
 }
