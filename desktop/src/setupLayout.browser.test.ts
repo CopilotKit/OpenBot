@@ -49,6 +49,7 @@ type Page = {
   getByLabel(text: string, options: { exact: boolean }): Locator;
   evaluate<T, A = undefined>(run: (arg: A) => T, arg?: A): Promise<T>;
   waitForTimeout(ms: number): Promise<void>;
+  screenshot(options: { path: string }): Promise<unknown>;
   close(): Promise<void>;
 };
 type Browser = {
@@ -73,6 +74,7 @@ fake.emit = emit;
 const relaunch = location.hash === "#start";
 const signingIn = location.hash === "#signin";
 const installing = location.hash === "#licence-installing";
+const pausing = location.hash === "#pause-podman";
 const licence = location.hash === "#licence" || installing;
 let finishInstall;
 const installed = new Promise((resolve) => (finishInstall = resolve));
@@ -124,6 +126,11 @@ export async function invoke(command) {
         { id: "openai-compatible", name: "Any OpenAI-compatible endpoint", summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.", logins: ["endpoint"], mark: null, caution: null },
       ];
     case "prepare_installation":
+      if (pausing) {
+        // A Mac whose own Podman OpenBot can't use: Install waits for the person's yes.
+        emit("setup:progress", { step: "pause-podman", ok: true, running: true, asks: true, detail: "Your Podman is set up in a way OpenBot can't use. OpenBot will use its own, and pause yours while OpenBot is running. Yours starts again when you quit OpenBot." });
+        return new Promise(() => {});
+      }
       emit("setup:progress", { step: "engine", ok: true, running: false, detail: "The software OpenBot runs on is ready." });
       return installing ? installed : new Promise((resolve) => setTimeout(() => resolve(null), 50));
     case "sign_in_to_copilotkit":
@@ -132,7 +139,10 @@ export async function invoke(command) {
       return signingIn
         ? { url: "https://dashboard.copilotkit.ai/cli-auth/device?user_code=WXYZ-2345", userCode: "WXYZ-2345" }
         : null;
+    case "allow_pause_podman":
+      return true;
     case "local_eval_terms":
+      if (pausing) return { status: "engine-not-ready" };
       return { status: "required", accepted: !licence, version: "developer-edition-2026-10-01-web", url: "https://copilotkit.ai/legal/developer-edition", organizationName: "Acme" };
     case "set_up_local_eval":
       return setUp;
@@ -901,6 +911,75 @@ describe.skipIf(!asked)("the Start screen while OpenBot updates", () => {
         expect(await anchors(page)).toEqual(before);
         // Its download done, the update is on to installing what it downloaded.
         expect(await said.textContent()).toBe("Installing the update");
+      } finally {
+        await page.close();
+      }
+    }, 30_000);
+  }
+});
+
+/*
+ * David's decision for 1.0.2: on a Mac whose own Podman OpenBot can't use, the account step says
+ * OpenBot needs its own and offers to pause theirs, with one button. The card, its button and the
+ * background row are all in the window at the setup window's sizes, without the page growing.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each size for a look.
+ */
+describe.skipIf(!asked)("the offer to pause the person's Podman", () => {
+  for (const [width, height] of [
+    [1016, 839],
+    [720, 560],
+  ] as const) {
+    test(`at ${width}x${height}, the offer and its button are in the window`, async () => {
+      const page = await browser.newPage({ viewport: { width, height } });
+      try {
+        await open(page, "#pause-podman");
+        await page
+          .getByRole("button", { name: "Install", exact: true })
+          .click();
+        await page
+          .getByRole("heading", { name: "Setting up this computer" })
+          .waitFor();
+        const card = page.getByRole("region", {
+          name: "OpenBot needs its own Podman",
+        });
+        await card.waitFor();
+        await page.waitForTimeout(400);
+        const button = page.getByRole("button", { name: "Pause my Podman" });
+        const box = await button.boundingBox();
+        const behind = page.getByRole("listitem", {
+          name: "Installing OpenBot in the background",
+        });
+        const foot = await page.locator(".step-footer").boundingBox();
+        expect(box).not.toBeNull();
+        expect(foot).not.toBeNull();
+        if (box && foot) {
+          // In the window, and not under the step's pinned foot: seen at 720x560, cut in half.
+          expect(box.y).toBeGreaterThanOrEqual(0);
+          expect(box.y + box.height).toBeLessThanOrEqual(foot.y);
+          expect(box.x + box.width).toBeLessThanOrEqual(width);
+        }
+        expect(await behind.textContent()).toContain(
+          "Waiting for you to pause your Podman.",
+        );
+        expect(
+          await page.evaluate(() => ({
+            page: document.documentElement.scrollHeight,
+            window: window.innerHeight,
+          })),
+        ).toEqual({ page: height, window: height });
+        const shots = process.env.OPENBOT_APP_SHOTS;
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/pause-podman-${width}x${height}.png`,
+          });
+        await button.click();
+        expect(
+          await page.evaluate(() =>
+            (
+              globalThis as unknown as { __fake: { calls: string[] } }
+            ).__fake.calls.filter((call) => call === "allow_pause_podman"),
+          ),
+        ).toEqual(["allow_pause_podman"]);
       } finally {
         await page.close();
       }

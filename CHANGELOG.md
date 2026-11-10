@@ -24,12 +24,23 @@ backup taken before the upgrade instead. Three things change for an existing dep
   to ask every time in Admin > Approvals.
 - A Personal Assistant whose instructions nobody changed takes the new ones at the next start
   (below). One whose instructions were edited keeps them.
-- OpenBot Desktop's bundled CLI moves to `copilotkit@f5c45eb`, and Start writes
+- OpenBot Desktop's bundled CLI moves to `copilotkit@2e1c519`, and Start writes
   `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` in `~/OpenBot/.env` as empty (below). The back end stays
   on CopilotKit Intelligence 0.16.0-rc.10.
 
 ### OpenBot Desktop
 
+- **OpenBot uses its own Podman machine when yours can't run it, and leaves yours as it is.** A
+  Podman machine made with `podman machine init` is rootless, and OpenBot used it and stopped at
+  "Change this computer's setup" because local Intelligence needs rootful Podman. On Windows even a
+  rootful machine of yours left chat unable to reach OpenBot's back end. OpenBot now makes and uses
+  its own rootful machine, `openbot`, as on a computer with none. On Windows it runs beside yours,
+  which keeps running untouched, and never takes Docker's default pipe (`docker_engine`), so your
+  Docker tools and Docker Desktop keep reaching what they did. On a Mac, where Podman runs one machine at a time, OpenBot asks
+  before it pauses your rootless machine while it runs (**Pause my Podman**), and Quit starts yours
+  again with its containers. Docker, and a rootful machine of yours on a Mac, are used as before.
+  Your default Podman connection is never changed. An installation that ran in your own machine
+  starts fresh in `openbot`; its old data stays in your machine.
 - **Start says in the log what it is waiting on, and why it gave up.** A Start that waited five
   minutes for OpenBot's services and then said "OpenBot didn't get ready in time" left nothing in
   the log in between. Each wait now writes what it asked (the address or the back end's status),
@@ -244,10 +255,18 @@ backup taken before the upgrade instead. Three things change for an existing dep
   `~/OpenBot/.env`, and the other folder's back end and `.env` are left alone. OpenBot also counts
   a back end as its own, to stop with Stop and Quit, only when the CLI records it for `~/OpenBot`;
   one it was handed for another folder is never stopped.
-- **CopilotKit CLI `copilotkit@f5c45eb`.** OpenBot Desktop's bundled CLI moves to the production
-  build of Intelligence `f5c45ebc0`: `6bfaa0f5c`, which added `telemetry link`, with `--app-path`
-  added to its `local` commands. It keeps Intelligence 0.16.0-rc.10 and CopilotKit v1.85.0
-  templates.
+- **Connecting the back end a second time no longer stops setup.** Setup Retry, going Back and
+  forward through setup, and reinstalling over an existing install connect `~/OpenBot` to its back
+  end again. After the first connection OpenBot writes the back end's addresses at `127.0.0.1`
+  where the CLI wrote `localhost`, and the CLI then refused every later connection with "App
+  settings changed after connection was planned", so setup could not finish. The CLI now treats
+  `localhost`, `127.0.0.1` and `[::1]` with the same port as the same address, connects again, and
+  leaves OpenBot's addresses as they are. An address changed to another port or host is still
+  refused.
+- **CopilotKit CLI `copilotkit@2e1c519`.** OpenBot Desktop's bundled CLI moves to the production
+  build of Intelligence `2e1c51900`: `6bfaa0f5c`, which added `telemetry link`, with `--app-path`
+  added to its `local` commands and a second `local connect` accepted after OpenBot rewrote its
+  addresses to `127.0.0.1`. It keeps Intelligence 0.16.0-rc.10 and CopilotKit v1.85.0 templates.
 - **A Learning container left in `~/OpenBot/.env` by an earlier setup no longer fails every
   message.** A folder set up against hosted Intelligence kept
   `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID="openbot"`, which the local back end did not have, so every
