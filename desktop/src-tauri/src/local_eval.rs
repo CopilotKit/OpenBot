@@ -343,6 +343,25 @@ pub struct Stack {
     /// The update the CLI keeps on record because it did not finish, when its record names it.
     pub unfinished_update: Option<UnfinishedUpdate>,
     pub observed: Option<Observed>,
+    /// The app folders the CLI records the stack for (`appPaths`), as it reported them. Kept only
+    /// to tell OpenBot's own stack from another app's (`lists_folder`); never sent to the window.
+    #[serde(skip)]
+    pub app_paths: Vec<String>,
+}
+
+impl Stack {
+    /// Whether the CLI records this stack for `folder`, compared as real paths, as the CLI keeps
+    /// them. A folder that is not there lists nothing.
+    pub fn lists_folder(&self, folder: &std::path::Path) -> bool {
+        let Ok(folder) = folder.canonicalize() else {
+            return false;
+        };
+        self.app_paths.iter().any(|path| {
+            std::path::Path::new(path)
+                .canonicalize()
+                .is_ok_and(|path| path == folder)
+        })
+    }
 }
 
 /**
@@ -1965,7 +1984,25 @@ fn stack(value: &Value) -> Result<Stack, Failure> {
         update_in_progress,
         unfinished_update,
         observed: observation(saved.get("observed"))?,
+        app_paths: app_paths(saved.get("appPaths")),
     })
+}
+
+/// More app folders than anyone shares one stack with is not a listing.
+const MAX_APP_PATHS: usize = 256;
+
+/// `appPaths` as `local list`, `status`, `setup` and `connect` report it: `[{path, missing}]`. Only
+/// the paths are kept. Anything else lists no folder, so a stack it describes is never OpenBot's.
+fn app_paths(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(MAX_APP_PATHS)
+        .filter_map(|path| path.get("path").and_then(Value::as_str))
+        .filter(|path| !path.is_empty() && path.len() <= 4096)
+        .map(str::to_owned)
+        .collect()
 }
 
 fn observation(value: Option<&Value>) -> Result<Option<Observed>, Failure> {
@@ -2598,8 +2635,27 @@ fn command_inheriting(
         command.current_dir(folder);
     }
     command.args(arguments);
+    if let (Some(folder), ["local", ..]) = (folder, arguments) {
+        // Absolute, as `current_dir` reads it: the CLI resolves a relative one inside the folder.
+        let folder = std::path::absolute(folder).unwrap_or_else(|_| folder.to_path_buf());
+        command.arg(APP_PATH).arg(folder);
+    }
     command
 }
+
+/**
+`--app-path <folder>`, added to every `local` call that runs in OpenBot's folder (`local setup` and
+`local connect`): the CLI acts for exactly that folder.
+
+Without it the CLI finds a folder's stack through `.copilotkit/local.json` in the folder or in any
+folder above it. Someone who once ran `copilotkit local setup` in their home folder had that stack
+resumed for `~/OpenBot`, and `local connect` wrote the home folder's `.env`, so Start found
+`~/OpenBot/.env` naming no stack it set up. With it, setup creates or resumes the stack the CLI
+records for OpenBot's folder, and connect writes OpenBot's `.env` (Intelligence
+`apps/cli/src/commands/local.ts`, in the CLI pinned since `desktop/intelligence-cli.json` named
+f5c45eb).
+*/
+pub const APP_PATH: &str = "--app-path";
 
 /// The container engine the CLI runs on, with the environment the CLI itself gets: for
 /// `local_images`, which pulls into the same k3d node the CLI pulls into.
@@ -5498,9 +5554,13 @@ mod tests {
         .unwrap();
         assert_eq!(report.outcome, Outcome::Blocked);
         assert_eq!(report.reason, Some(Reason::EulaAcceptanceRequired));
+        // `--app-path`: the installation folder exactly, never a folder above it with its own stack.
         assert_eq!(
             fixture.argv().unwrap(),
-            "local\nsetup\n--defer-model\n--json"
+            format!(
+                "local\nsetup\n--defer-model\n--json\n--app-path\n{}",
+                installation.display()
+            )
         );
         assert_eq!(fixture.cwd(), installation.canonicalize().unwrap());
     }
@@ -5636,7 +5696,11 @@ mod tests {
         assert_eq!(report.outcome, Outcome::Completed);
         assert_eq!(
             fixture.argv().unwrap(),
-            format!("local\nsetup\n--model-config\n{}\n--json", file.display())
+            format!(
+                "local\nsetup\n--model-config\n{}\n--json\n--app-path\n{}",
+                file.display(),
+                installation.display()
+            )
         );
         assert_eq!(fixture.cwd(), installation.canonicalize().unwrap());
 
@@ -5650,7 +5714,10 @@ mod tests {
         .unwrap();
         assert_eq!(
             fixture.argv().unwrap(),
-            "local\nsetup\n--defer-model\n--json"
+            format!(
+                "local\nsetup\n--defer-model\n--json\n--app-path\n{}",
+                installation.display()
+            )
         );
 
         for refused in [Path::new("model.json"), Path::new("-x/model.json")] {
@@ -5709,7 +5776,10 @@ mod tests {
         assert_eq!(connection.stack.unwrap().id, "local-abc123");
         assert_eq!(
             fixture.argv().unwrap(),
-            "local\nconnect\n--approve-connection\n--json"
+            format!(
+                "local\nconnect\n--approve-connection\n--json\n--app-path\n{}",
+                installation.display()
+            )
         );
         assert_eq!(fixture.cwd(), installation.canonicalize().unwrap());
     }
