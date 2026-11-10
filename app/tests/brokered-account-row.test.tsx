@@ -718,7 +718,10 @@ afterEach(() => {
  * shell, neither of which this file is about. The index route is registered only so
  * the Back link has something to build an href from.
  */
-function renderAccountScreen(client: QueryClient) {
+function renderAccountScreen(
+  client: QueryClient,
+  at = `/connections/${APP_KEY}`,
+) {
   const rootRoute = createRootRoute({ component: Outlet });
   const authedRoute = createRoute({
     id: "/_authed",
@@ -757,7 +760,7 @@ function renderAccountScreen(client: QueryClient) {
   const router = createRouter({
     routeTree: tree,
     history: createMemoryHistory({
-      initialEntries: [`/connections/${APP_KEY}`],
+      initialEntries: [at],
     }),
   });
   return render(
@@ -2872,4 +2875,46 @@ test("one account is named in the row, which keeps its Disconnect and offers ano
   expect(
     view.getByRole("button", { name: /Connect another account/ }),
   ).toBeTruthy();
+});
+
+/**
+ * ADDED IS NOT CONNECTED, ON THE APP'S PAGE TOO. A person who added an app and never signed in read
+ * a row with a Connect button and a sentence, and nothing that said plainly it wasn't connected.
+ */
+test("an added app nobody signed in to says Not connected beside Connect, on both pages", async () => {
+  installDeployment({
+    composioConfigured: true,
+    recorded: false,
+    confirms: false,
+  });
+
+  const person = renderAccountScreen(queryClient());
+  expect(await person.findByRole("button", { name: "Connect" })).toBeTruthy();
+  expect(person.getByText("Not connected")).toBeTruthy();
+  cleanup();
+
+  const admin = renderAdminScreen(queryClient());
+  expect(await admin.findByRole("button", { name: "Connect" })).toBeTruthy();
+  expect(admin.getByText("Not connected")).toBeTruthy();
+});
+
+/**
+ * BROWSE APPS SENDS A KEY APP HERE STRAIGHT AFTER ADDING IT (`?connect=true`), and the key form is
+ * what opens: there is no sign-in page to send anybody to.
+ */
+test("arriving to connect a key app opens its key form without a second press", async () => {
+  installDeployment({
+    authScheme: "API_KEY",
+    composioConfigured: true,
+    confirms: false,
+    fields: [PERPLEXITY_KEY],
+    recorded: false,
+  });
+
+  const view = renderAccountScreen(
+    queryClient(),
+    `/connections/${APP_KEY}?connect=true`,
+  );
+
+  expect(await view.findByLabelText("API Key")).toBeTruthy();
 });
