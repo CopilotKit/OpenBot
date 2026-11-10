@@ -309,7 +309,7 @@ pub fn get_ready(
             Some(bytes) => bytes,
             None => {
                 return Outcome::NotYet(
-                    "the back end is not running, or its new images could not be read".into(),
+                    "the backend is not running, or its new images could not be read".into(),
                 )
             }
         },
@@ -362,14 +362,14 @@ pub fn get_ready(
         match downloaded {
             Ok(local_images::Done::Downloaded | local_images::Done::NothingToDo) => {}
             Ok(local_images::Done::Unavailable) => {
-                return Outcome::NotYet("the back end's node could not be reached".into())
+                return Outcome::NotYet("the backend's node could not be reached".into())
             }
             Err(local_images::Stop::Cancelled) => return Outcome::Stopped,
             Err(local_images::Stop::Stalled) => {
-                return Outcome::NotYet("the back end's images stopped arriving".into())
+                return Outcome::NotYet("the backend's images stopped arriving".into())
             }
             Err(local_images::Stop::TooLong) => {
-                return Outcome::NotYet("the back end's images took too long".into())
+                return Outcome::NotYet("the backend's images took too long".into())
             }
         }
     }
@@ -379,7 +379,7 @@ pub fn get_ready(
     }
     if let Some((node, images)) = &back_end {
         if local_images::missing_bytes(node, images, ahead.limits) != Some(0) {
-            return Outcome::NotYet("some of the back end's images are still missing".into());
+            return Outcome::NotYet("some of the backend's images are still missing".into());
         }
     }
     Outcome::Ready
