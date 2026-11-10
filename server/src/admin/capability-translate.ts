@@ -18,8 +18,9 @@
  * the recent use of what anybody loses, and only the admin's own Save writes the switches, in one
  * transaction, each on the trail with the sentence.
  */
-import { Hono, type MiddlewareHandler } from "hono";
+
 import { sql } from "drizzle-orm";
+import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { type AuditReader, recordAuditEvent } from "../audit";
 import { type AppVariables, requireAdmin } from "../auth/guards";
@@ -40,6 +41,7 @@ import {
   CAPABILITY_LABELS,
   type CapabilityRow,
   DEFAULT_CAPABILITIES,
+  isCapability,
 } from "./capabilities";
 import {
   applyCapabilityChanges,
@@ -682,6 +684,9 @@ export function createCapabilityChangeRoutes(options: {
         actorUserId: actor.id,
         payload: {
           ...change,
+          title: isCapability(change.capability)
+            ? CAPABILITY_LABELS[change.capability].title
+            : change.capability,
           by: actor.email,
           before:
             before.find(

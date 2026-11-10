@@ -572,6 +572,7 @@ describe("POST /api/admin/enterprise/capabilities/batch", () => {
       scopeKind: "organization",
       scopeId: "",
       capability: LOCAL,
+      title: "Local computer access",
       allowed: false,
       by: ada.email,
       before: null,

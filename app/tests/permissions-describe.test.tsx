@@ -19,6 +19,7 @@ import {
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { previewHeadline } from "@/components/admin/controls/describe-capabilities";
+import { decisionText, subjectText } from "@/components/audit/audit-cells";
 import { Route as DescribeRoute } from "@/routes/_authed/admin/permissions_.describe";
 import {
   CAPABILITIES,
@@ -326,6 +327,41 @@ test("removing a change is called out and shows who the rest would change", asyn
   expect(
     sent.filter((call) => call.path.endsWith("/preview")).at(-1)?.body.changes,
   ).toHaveLength(3);
+});
+
+test("each saved switch reads on Audit as which permission, for whom, and what it was set to", () => {
+  const row = (payload: Record<string, unknown>) => ({
+    id: "1",
+    actorUserId: "admin-1",
+    initiatorKind: "person",
+    initiatorId: "admin-1",
+    eventType: "capability.changed",
+    targetType: "capability",
+    targetId: "localComputer",
+    createdAt: "2026-11-09T17:26:34.000Z",
+    payload: { capability: "localComputer", ...payload },
+  });
+  // One sentence saved three of these, and each read "Change a permission · Allowed".
+  const everybody = row({
+    title: "Local computer access",
+    scopeKind: "organization",
+    scopeId: "",
+    allowed: false,
+  });
+  const sales = row({
+    title: "Local computer access",
+    scopeKind: "group",
+    scopeId: "Sales",
+    allowed: true,
+  });
+  expect(subjectText(everybody)).toBe("Local computer access · Everybody");
+  expect(decisionText(everybody)).toBe("Turned off");
+  expect(subjectText(sales)).toBe("Local computer access · Group: Sales");
+  expect(decisionText(sales)).toBe("Granted");
+  // A row from before the title was kept names the permission by its key.
+  expect(
+    subjectText(row({ scopeKind: "role", scopeId: "admin", allowed: true })),
+  ).toBe("localComputer · Admins");
 });
 
 test("the headline names only what changes", () => {
