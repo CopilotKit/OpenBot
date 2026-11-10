@@ -159,13 +159,15 @@ jobs:
       # The app's real-browser tests, here because this job has the browser: a running step's words
       # under reduced motion, where onboarding's Back lands beside the Mac window's buttons, the name
       # step's orb drawn whole under the step dashes, a conversation's rail of turns clear of the
-      # Bot's text, one frame around an interface drawn in a Card, and Home's message box holding
-      # still while the microphone's notice shows, which only a browser's layout and cascade resolve. The root playwright-core is the same version as agent-computer's
+      # Bot's text, one frame around an interface drawn in a Card, the page under the update banner
+      # holding still as an update gets ready, and Home's message box holding still while the
+      # microphone's notice shows, which only a browser's layout and cascade resolve. The root
+      # playwright-core is the same version as agent-computer's
       # playwright, so it finds the Chromium installed above. The onboarding frame reads the
       # generated app config, which `bun test` alone doesn't write (the test script's pretest does).
       - run: |
           bun run generate:app-config
-          bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/composer-dictation-notice-layout.test.tsx
+          bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx
         env:
           OPENBOT_APP_BROWSER: '1'
       # The desktop setup window's, for the same reason: the AI step's form holding still while the
@@ -624,6 +626,25 @@ jobs:
       - run: docker compose --env-file /dev/null --profile harness config --format json >/dev/null
         env:
           PICKED_HARNESS_IMAGE: openbot-agent-langgraph-agui:test
+      # Docker Desktop shipped Compose v2.24.5 in early 2024, and that version refuses the whole
+      # project when any service's image is blank, profile or not. The desktop app runs
+      # `compose config` before it starts, so this is the oldest Compose it has to get past.
+      - name: Compose v2.24.5 reads the file with no harness picked
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            x86_64) arch=x86_64; sum=94355be1d1d395040bbda1490f98d5c7627c30798a7955e1f2a78fda33a4b3e1 ;;
+            aarch64) arch=aarch64; sum=535e90ff9a7f24384f8a38f9f9ad49125485af7ae5ffda7226d091e5b8126948 ;;
+            *) echo "no pinned Compose v2.24.5 for $(uname -m)" >&2; exit 1 ;;
+          esac
+          compose="$RUNNER_TEMP/docker-compose-2.24.5"
+          curl -fsSL --retry 3 -o "$compose" "https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-linux-$arch"
+          echo "$sum  $compose" | sha256sum -c -
+          chmod +x "$compose"
+          "$compose" version
+          unset PICKED_HARNESS_IMAGE
+          "$compose" -f docker-compose.yml -f desktop/src-tauri/telemetry.compose.yml --env-file /dev/null config --format json >/dev/null
+          PICKED_HARNESS_IMAGE=openbot-agent-langgraph-agui:test "$compose" --env-file /dev/null --profile harness config --format json >/dev/null
 
   build:
     name: build

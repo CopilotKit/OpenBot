@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>OpenBot asks Docker Desktop to quit while it updates it, then opens it again.</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>OpenBot uses your microphone for dictation and voice conversations.</string>
   <key>NSSpeechRecognitionUsageDescription</key>

@@ -390,7 +390,7 @@ pub fn allow_podman_install() -> bool {
 /// How the password prompt and the installer behind it ended.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Debug)]
-enum Prompted {
+pub(crate) enum Prompted {
     Installed,
     /// The person closed the prompt. A decision, not a failure: the step asks again.
     Declined,
@@ -461,7 +461,7 @@ fn podman_install_script(package: &Path) -> String {
 
 /// Text as an AppleScript string literal.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn applescript_string(text: &str) -> String {
+pub(crate) fn applescript_string(text: &str) -> String {
     format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
@@ -627,14 +627,32 @@ fn install_engine_with(
 
 /// Place the Compose provider where the engine will find it, unless something already provides one.
 ///
-/// Nothing is placed when Compose already answers. Docker Desktop ships a provider, and a Linux
-/// machine may have `docker-compose-v2` from its own packages; putting a second one in front of
-/// either is a version somebody did not choose.
+/// Nothing is placed when a Compose new enough for OpenBot already answers. Docker Desktop ships a
+/// provider, and a Linux machine may have `docker-compose-v2` from its own packages; putting a
+/// second one in front of either is a version somebody did not choose. One too old to run OpenBot
+/// (an old Docker Desktop's, found on PATH by Podman) is put behind ours: see `engine_versions`.
 fn place_compose(into: &Path) -> Result<String, Problem> {
-    if crate::acquire::address().composes() {
+    let address = crate::acquire::address();
+    if address.composes() && !compose_too_old(&address) {
         return Ok("Compose is already here.".into());
     }
+    place_newer_compose(into)
+}
 
+/// Whether the Compose that answers through `address` is older than OpenBot needs. Not on Linux,
+/// whose Compose comes from the distribution (see `engine_versions`).
+fn compose_too_old(address: &engine::Address) -> bool {
+    cfg!(any(target_os = "macos", target_os = "windows"))
+        && crate::engine_versions::read(address)
+            .compose
+            .is_some_and(|version| version < crate::engine_versions::COMPOSE)
+}
+
+/// Place OpenBot's own Compose provider, in front of whatever provider is already there.
+///
+/// It goes in OpenBot's tools directory, which every engine command OpenBot runs has first on its
+/// PATH (`engine::command_at`). Nothing anybody else installed is changed or removed.
+pub fn place_newer_compose(into: &Path) -> Result<String, Problem> {
     let download = compose_download()?;
     let staged = fetch_verified(&download, into)?;
 
@@ -660,6 +678,57 @@ fn place_compose(into: &Path) -> Result<String, Problem> {
     }
 
     Ok(format!("Compose {COMPOSE} installed."))
+}
+
+/**
+Update a Podman that is too old to run OpenBot, by running OpenBot's own pinned installer over it.
+
+The same installer, the same digest check and the same prompt as a first install (`install_podman`):
+the package on a Mac, the MSI on Windows. Both upgrade in place. Neither touches Podman's machines,
+which live in the person's own folders, so OpenBot's machine and every container, image and volume
+in it are there afterwards. Podman 6 reads the machines Podman 5 made on macOS and Windows (only
+machines on Linux had to be made again, and Linux is not updated here).
+
+On Windows OpenBot's own machine is stopped first: its helpers (`gvproxy`, `win-sshproxy`) run from
+Podman's folder, and an installer that finds them running asks for a restart. It is started again
+once the new Podman is in place, because Start runs Compose on it next. Nobody else's machine is
+stopped.
+*/
+pub fn update_podman(
+    cache: &Path,
+    progress: &mut dyn FnMut(StepLine),
+    back: &dyn Fn(),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<(), Problem> {
+    progress(
+        StepLine::here("Updating the software OpenBot runs on.").logged(format!(
+            "Podman is older than {}; installing Podman {PODMAN} over it.",
+            crate::engine_versions::PODMAN
+        )),
+    );
+    let into = crate::acquire::download_dir(cache);
+    let stopped = cfg!(target_os = "windows")
+        && crate::acquire::machine_exists().unwrap_or(false)
+        && engine::tool(Engine::Podman)
+            .args(["machine", "stop", crate::acquire::MACHINE])
+            .output()
+            .is_ok_and(|output| output.status.success());
+    install_podman(&into, progress, back, cancelled)?;
+    if engine::program(Engine::Podman).is_none() {
+        return Err(Problem::with(
+            "OpenBot updated the software it runs on, but can't find it afterwards. Start \
+             OpenBot again.",
+            format!("the Podman {PODMAN} installer reported success; podman is not found"),
+        ));
+    }
+    if stopped {
+        progress(engine::starting_machine_line());
+        let started = crate::acquire::start_machine();
+        if !started.ok {
+            return Err(started.problem());
+        }
+    }
+    Ok(())
 }
 
 /// The filename Podman looks a provider up by.
@@ -790,7 +859,7 @@ fn install_podman(
 /// macOS asks for administrator rights: the person sees the standard authorization dialog, and no
 /// password passes through this process.
 #[cfg(target_os = "macos")]
-fn run_administrator_script(script: &str) -> Prompted {
+pub(crate) fn run_administrator_script(script: &str) -> Prompted {
     let output = match crate::quiet::command("osascript")
         .args(["-e", script])
         .output()
@@ -822,7 +891,7 @@ fn run_administrator_script(script: &str) -> Prompted {
 /// Two layers, applied in this order: single-quote it for the shell, then escape what AppleScript
 /// treats as special in the double-quoted string that carries it.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn applescript_shell_arg(path: &Path) -> String {
+pub(crate) fn applescript_shell_arg(path: &Path) -> String {
     let quoted = format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"));
     quoted.replace('\\', "\\\\").replace('"', "\\\"")
 }
