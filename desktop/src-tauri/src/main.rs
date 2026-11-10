@@ -16417,9 +16417,10 @@ fn main() {
         assert!(
             problem
                 .said
-                .starts_with("The back end's saved settings can't be read."),
+                .starts_with("OpenBot's saved settings can't be read."),
             "{problem:?}"
         );
+        assert!(!problem.said.contains("back end"), "{problem:?}");
         assert!(
             problem.said.contains(&private.display().to_string()),
             "{problem:?}"
@@ -16436,9 +16437,10 @@ fn main() {
         assert!(
             problem
                 .said
-                .contains("another app on this computer uses it too"),
+                .contains("another app on this computer uses them too"),
             "{problem:?}"
         );
+        assert!(!problem.said.contains("back end"), "{problem:?}");
         assert!(deletes(&calls).is_empty(), "{calls}");
 
         for folder in [empty, cli, home, root, kite] {

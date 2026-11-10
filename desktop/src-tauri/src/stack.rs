@@ -1112,7 +1112,7 @@ pub fn make_sign_in_folder(root: &Path) -> Result<PathBuf, crate::problem::Probl
     let folder = root.join(".openbot");
     std::fs::create_dir_all(&folder).map_err(|error| {
         crate::problem::Problem::with(
-            "OpenBot could not prepare its sign-in folder.",
+            "OpenBot couldn't prepare its sign-in folder. Try again.",
             format!("{}: {error}", folder.display()),
         )
     })?;
