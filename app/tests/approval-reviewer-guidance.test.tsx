@@ -238,6 +238,14 @@ test("guidance is checked, tested on recent decisions after saying how many mode
   expect(
     await view.findByText("Agreed with your people on 2 of 5."),
   ).toBeTruthy();
+  // The results sit outside the field: inside it, the rows' horizontal separators balanced the field's
+  // descriptions into half-width lines.
+  const described = view.getByText(/^Replays the reviewer with this guidance/);
+  expect(
+    described
+      .closest("[data-slot=field]")
+      ?.querySelector("[data-orientation=horizontal]"),
+  ).toBeNull();
   expect(
     view.getByText(
       "Would have let through 1 your people denied, and asked about 2 they allowed.",

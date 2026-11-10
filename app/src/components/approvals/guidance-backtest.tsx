@@ -117,49 +117,55 @@ export function GuidanceBacktestField({
   if (!preview) return null;
   const current = run.data && run.variables === text ? run.data : null;
   const stale = run.data && run.variables !== text;
+  /*
+   * The results sit beside the field, not in it: a field holding a horizontal row (the replay rows
+   * have them) balances its descriptions, which squeezed the lines above the results to half width.
+   */
   return (
-    <Field aria-labelledby="guidance-backtest" aria-live="polite">
-      <FieldLabel id="guidance-backtest">On recent decisions</FieldLabel>
-      {preview.calls === 0 ? (
-        <FieldDescription>
-          No requests your people decided yet. You can test guidance once
-          they've answered some.
-        </FieldDescription>
-      ) : (
-        <>
+    <div aria-live="polite" className="flex flex-col gap-3">
+      <Field aria-labelledby="guidance-backtest">
+        <FieldLabel id="guidance-backtest">On recent decisions</FieldLabel>
+        {preview.calls === 0 ? (
           <FieldDescription>
-            Replays the reviewer with this guidance over the last{" "}
-            {plural(preview.calls, "request")} your people decided. That's{" "}
-            {plural(preview.calls, "model call")}, one for each.
+            No requests your people decided yet. You can test guidance once
+            they've answered some.
           </FieldDescription>
-          <div>
-            <Button
-              disabled={run.isPending}
-              onClick={() => run.mutate(text)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              {run.isPending
-                ? "Testing…"
-                : `Test on ${plural(preview.calls, "request")}`}
-            </Button>
-          </div>
-        </>
-      )}
-      {run.error && run.variables === text ? (
-        <p className="text-destructive text-sm" role="alert">
-          {run.error.message}
-        </p>
-      ) : null}
-      {stale && !run.isPending ? (
-        <p className="text-amber-600 text-sm dark:text-amber-500">
-          You've changed the guidance since it was tested. Test it again to see
-          what your edit changes.
-        </p>
-      ) : null}
+        ) : (
+          <>
+            <FieldDescription>
+              Replays the reviewer with this guidance over the last{" "}
+              {plural(preview.calls, "request")} your people decided. That's{" "}
+              {plural(preview.calls, "model call")}, one for each.
+            </FieldDescription>
+            <div>
+              <Button
+                disabled={run.isPending}
+                onClick={() => run.mutate(text)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {run.isPending
+                  ? "Testing…"
+                  : `Test on ${plural(preview.calls, "request")}`}
+              </Button>
+            </div>
+          </>
+        )}
+        {run.error && run.variables === text ? (
+          <p className="text-destructive text-sm" role="alert">
+            {run.error.message}
+          </p>
+        ) : null}
+        {stale && !run.isPending ? (
+          <p className="text-amber-600 text-sm dark:text-amber-500">
+            You've changed the guidance since it was tested. Test it again to
+            see what your edit changes.
+          </p>
+        ) : null}
+      </Field>
       {current ? (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3" data-guidance-results>
           <div>
             <p className="font-medium text-sm">{agreementHeadline(current)}</p>
             <p className="mt-0.5 text-sm">{disagreementLine(current)}</p>
@@ -175,6 +181,6 @@ export function GuidanceBacktestField({
           ) : null}
         </div>
       ) : null}
-    </Field>
+    </div>
   );
 }
