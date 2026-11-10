@@ -103,12 +103,13 @@ function serve(
     isolationAvailable?: boolean;
     visibility?: AgentProfile["visibility"];
     instructions?: string;
+    title?: string;
   } = {},
 ) {
   let profile: AgentProfile = {
     id: "expenses",
     name: "Expenses",
-    title: "Finance Operations",
+    title: options.title ?? "Finance Operations",
     roleDescription: "Review receipts.",
     avatarSeed: "expenses",
     ownerUserId,
@@ -477,4 +478,34 @@ test("an isolated Bot whose owner lost the switch says the admin turned it off, 
   await user.click(toggle);
   await waitFor(() => expect(updates).toHaveLength(1));
   expect(updates[0]).toMatchObject({ isolated: false });
+});
+
+/*
+ * The starter's subtitle reads the new wording wherever it is drawn, and stays stored as seeded:
+ * the Bot is told the stored subtitle. Every in-place edit sends the whole profile back, so the
+ * shown wording must never be what goes back unless the person rewrote it.
+ */
+test("the starter's subtitle shows the new wording, and an edit sends back the stored one", async () => {
+  const stored = "Everyday life. Powered by LangChain (LangGraph).";
+  const shown =
+    "Everyday life agent. (powered by a LangChain agent; you can bring your own agent from any stack.)";
+  serve(PICKED, actor.id, { title: stored });
+  const view = draw("personal");
+  const user = userEvent.setup({ document: view.baseElement.ownerDocument });
+
+  const titled = await view.findByRole("button", { name: /^Title/ });
+  expect(titled.textContent).toContain(shown);
+  expect(titled.textContent).not.toContain("LangGraph");
+
+  // Another field's edit carries the subtitle as stored.
+  await rename(view, "Assistant");
+  await waitFor(() => expect(updates).toHaveLength(1));
+  expect(updates[0]).toMatchObject({ name: "Assistant", title: stored });
+
+  // The subtitle's own dialog shows the new wording; saved unchanged, it stays as stored.
+  await user.click(view.getByRole("button", { name: /^Title/ }));
+  await view.findByDisplayValue(shown);
+  await user.click(view.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(updates).toHaveLength(2));
+  expect(updates[1]).toMatchObject({ title: stored });
 });

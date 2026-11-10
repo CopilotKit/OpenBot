@@ -479,9 +479,7 @@ test("personal approvals keep the person's controls without team-only explanatio
   await view.findByText("Rules for every Bot");
   expect(view.queryByText(/Team rules are locked/)).toBeNull();
   expect(view.queryByText("Shared Bots")).toBeNull();
-  expect(
-    view.getByRole("switch", { name: "Always ask before making changes" }),
-  ).toBeTruthy();
+  expect(view.getByRole("switch", { name: "Extra vigilant" })).toBeTruthy();
   expect(view.getByRole("switch", { name: "Auto-review" })).toBeTruthy();
 });
 test("team approvals still show the shared Bot account controls", async () => {

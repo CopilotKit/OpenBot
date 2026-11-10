@@ -75,6 +75,11 @@ const ALLOWED: { file: string; word: RegExp; why: string }[] = [
     why: "the person installs Podman Desktop or the podman package, or asks IT to allow it",
   },
   {
+    file: "desktop/src-tauri/src/engine_versions.rs",
+    word: /Podman/,
+    why: "the person updates or removes a Podman they installed, which OpenBot can't update for them",
+  },
+  {
     file: "desktop/src-tauri/src/acquire.rs",
     word: /\bCompose\b/,
     why: "the last resort: the person installs Compose v2 themselves",

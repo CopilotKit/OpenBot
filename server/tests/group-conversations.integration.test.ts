@@ -152,6 +152,27 @@ async function drain(conversations: { sweep(): Promise<boolean> }) {
   for (let i = 0; i < 10 && (await conversations.sweep()); i++) {}
 }
 
+/**
+ * A Bot's partial text is written in the background while its turn runs, so it reaches the
+ * transcript one commit after the Bot says it, and on a busy CI database that commit has taken longer
+ * than any fixed sleep. Read again until it shows, as the app's own poll does, and hand back what was
+ * last read, so an assertion on it still fails when the text never arrives. The deadline is well
+ * inside the test's own five seconds, so that failure names the text rather than a timeout.
+ */
+async function readUntil(
+  read: () => Promise<string>,
+  done: (seen: string) => boolean,
+  timeoutMs = 2_000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let seen = await read();
+  while (!done(seen) && Date.now() < deadline) {
+    await Bun.sleep(10);
+    seen = await read();
+  }
+  return seen;
+}
+
 describe("group conversations in PostgreSQL", () => {
   test("two Bots answer one person, see each other, and answer each other within the depth cap", async () => {
     const owner = await person();
@@ -472,10 +493,12 @@ describe("group conversations in PostgreSQL", () => {
       replies: {
         [ada]: async (input) => {
           input.onText?.("Hal");
-          await new Promise((resolve) => setTimeout(resolve, 30));
-          seenMidRun =
-            (await conversations.list(owner.id, channelId)).messages.at(-1)
-              ?.text ?? "";
+          seenMidRun = await readUntil(
+            async () =>
+              (await conversations.list(owner.id, channelId)).messages.at(-1)
+                ?.text ?? "",
+            (text) => text === "Hal",
+          );
           return "Hallo";
         },
         [grace]: () => {
@@ -701,12 +724,15 @@ describe("group conversations in PostgreSQL", () => {
       replies: {
         [ada]: async (input) => {
           input.onText?.("From your notes: the launch slipped.");
-          await new Promise((resolve) => setTimeout(resolve, 30));
+          // The owner's read first, until the row holds the partial text, so the teammate's read
+          // after it is of a row that does.
+          ownerMidRun = await readUntil(
+            async () =>
+              JSON.stringify(await conversations.list(owner.id, channelId)),
+            (seen) => seen.includes("launch slipped"),
+          );
           teammateMidRun = JSON.stringify(
             await conversations.list(teammate.id, channelId),
-          );
-          ownerMidRun = JSON.stringify(
-            await conversations.list(owner.id, channelId),
           );
           return "From your notes: the launch slipped.";
         },
@@ -753,11 +779,17 @@ describe("group conversations in PostgreSQL", () => {
     });
     let channelId = "";
     let graceSaw = "";
+    let ownerMidRun = "";
     const { conversations } = service({
       replies: {
         [ada]: async (input) => {
           input.onText?.("From your notes: the launch slipped.");
-          await new Promise((resolve) => setTimeout(resolve, 30));
+          // Until the row holds the partial text, so what Grace is handed is read from a row that does.
+          ownerMidRun = await readUntil(
+            async () =>
+              JSON.stringify(await conversations.list(owner.id, channelId)),
+            (seen) => seen.includes("launch slipped"),
+          );
           // Meanwhile the teammate asks Grace, and another replica runs that turn.
           await conversations.send(teammate.id, channelId, {
             id: `${prefix}-handed-teammate`,
@@ -789,6 +821,7 @@ describe("group conversations in PostgreSQL", () => {
       agentId: ada,
     });
     await drain(conversations);
+    expect(ownerMidRun).toContain("launch slipped");
     expect(graceSaw).toContain("what is the status?");
     expect(graceSaw).not.toContain("launch slipped");
   });

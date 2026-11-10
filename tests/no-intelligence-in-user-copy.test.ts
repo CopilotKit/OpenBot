@@ -66,6 +66,20 @@ const NOT_SHOWN: { file: string; text: string; why: string }[] = [
   },
 ];
 
+/**
+ * Shown text that names CopilotKit Intelligence on purpose. One entry, by exact text: OpenBot
+ * Desktop's Account step, where the name says what the free license key is for and matches the
+ * CopilotKit sign-in page that opens next. Everywhere else it is still the back end (see
+ * .claude/skills/openbot-copy). A new entry is a product decision, not a way past this test.
+ */
+const SHOWN_BY_DECISION: { file: string; text: string; why: string }[] = [
+  {
+    file: "desktop/src/CopilotKitAccount.tsx",
+    text: "This version of OpenBot runs self-contained on this computer. It uses a local version of CopilotKit Intelligence, which requires a free license key.",
+    why: "the Account step names what the sign-in gets a license key for",
+  },
+];
+
 /** Calls whose arguments are written to a log, never shown. */
 const LOGGING =
   /^(console\.\w+|log|logger\.\w+|this\.log|options\.log|note|once|sayUnavailable)$/;
@@ -183,7 +197,7 @@ function shown(): string[] {
 }
 
 const isNotShown = (hit: string) =>
-  NOT_SHOWN.some(
+  [...NOT_SHOWN, ...SHOWN_BY_DECISION].some(
     (entry) => hit.startsWith(`${entry.file}:`) && hit.includes(entry.text),
   );
 
@@ -193,7 +207,7 @@ test("no text a person reads in the desktop app, the app, the server or the Reco
 
 test("every exception for text that is never shown still matches", () => {
   const found = shown();
-  const stale = NOT_SHOWN.filter(
+  const stale = [...NOT_SHOWN, ...SHOWN_BY_DECISION].filter(
     (entry) =>
       !found.some(
         (hit) => hit.startsWith(`${entry.file}:`) && hit.includes(entry.text),
