@@ -1742,6 +1742,14 @@ main > .sheet > .step-footer > .row:first-child:empty {
   padding-top: 0;
 }
 
+/*
+ * With its own actions above the foot, as Cancel is while the account step signs in, the foot's
+ * empty row still holds the card's one gap above the background row. It sat flush against Cancel.
+ */
+main > .sheet > .step-footer > .row:first-child:empty:has(+ .behind-slot) {
+  padding-top: 24px;
+}
+
 @media (max-width: 580px) {
   main > .sheet > .step-footer {
     bottom: -24px;
