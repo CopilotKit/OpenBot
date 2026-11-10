@@ -34,13 +34,18 @@
 //!   already runs.
 //! - **macOS.** The package writes to `/opt/podman` and needs administrator rights, so the person
 //!   sees one standard macOS authorization prompt. There is no way around that prompt and no reason
-//!   to want one: it is the same dialog every other installer raises.
+//!   to want one: it is the same dialog every other installer raises. It is never raised unexplained:
+//!   the package downloads while the person signs in, then the step waits (`GoAhead`) while OpenBot's
+//!   window says what comes next and why, and raises the prompt only once they choose Continue. The
+//!   prompt itself names OpenBot and Podman (`PODMAN_PASSWORD_PROMPT`).
 //! - **Linux.** Podman there is not a binary but a set of them (`conmon`, `crun`, `netavark`,
 //!   `slirp4netns`), wired to the distribution's own paths, so downloading one file would produce
 //!   something that runs nothing. The distribution's package manager installs it, through
 //!   `pkexec`, which raises that desktop's own authorization prompt.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Condvar, Mutex};
+use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
@@ -218,7 +223,8 @@ fn digest_of(bytes: &[u8]) -> String {
 /// somebody presses Start. Answers with the sentence for the step row, or a failure in both
 /// registers. `saved` is the engine the installation was set up on, if it saved one.
 pub fn install_engine(cache: &Path, saved: Option<Engine>) -> Result<String, Problem> {
-    install_engine_observed(cache, saved, |_, _| {}, &mut |_| {}, &|| {}).map(|chosen| chosen.said)
+    install_engine_observed(cache, saved, |_, _| {}, &mut |_| {}, &|| {}, &|| false)
+        .map(|chosen| chosen.said)
 }
 
 /// The engine the install step settled on, and the sentence for its step row.
@@ -233,12 +239,15 @@ pub struct EngineChosen {
 ///
 /// `back` brings OpenBot's window to the front again after another app's window took it: Docker
 /// Desktop once it answers, or the system's password prompt once Podman's installer is done.
+///
+/// `cancelled` ends a wait for the person's go-ahead (`GoAhead`): Stop or Quit while it waits.
 pub fn install_engine_observed(
     cache: &Path,
     saved: Option<Engine>,
     installed: impl FnMut(Engine, bool),
     progress: &mut dyn FnMut(StepLine),
     back: &dyn Fn(),
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<EngineChosen, Problem> {
     // Only one of the two runs, so they share the step row's lines one at a time.
     let progress = std::cell::RefCell::new(progress);
@@ -248,18 +257,170 @@ pub fn install_engine_observed(
         saved,
         installed,
         || crate::docker_desktop::start(&mut **progress.borrow_mut(), back),
-        |into| {
-            let line = podman_install_said(std::env::consts::OS);
-            let prompted = line.elsewhere;
-            (progress.borrow_mut())(line);
-            let result = install_podman(into);
-            if prompted {
-                back();
-            }
-            result
-        },
+        |into| install_podman(into, &mut **progress.borrow_mut(), back, cancelled),
         place_compose,
     )
+}
+
+/// The step row's line while Podman's package downloads, before anything needs the person.
+pub const PODMAN_DOWNLOADING: &str = "Downloading Podman.";
+
+/// The step row's line while it waits for the person's go-ahead to install Podman. The window
+/// shows its own explanation and Continue beside it.
+pub const PODMAN_GO_AHEAD: &str = "Podman is downloaded and ready to install.";
+
+/// The same wait, after the person closed macOS's password prompt without a password.
+pub const PODMAN_DECLINED: &str = "macOS didn't get your password, so Podman isn't installed yet.";
+
+/// What macOS's password prompt says, under the name of the process that raised it.
+pub const PODMAN_PASSWORD_PROMPT: &str =
+    "OpenBot needs your password to install Podman, which runs OpenBot's back end.";
+
+/**
+The person's go-ahead for a step that raises the system's password prompt.
+
+The prompt came up by itself in the middle of the Account step, over a screen about something else,
+before the person knew what Podman was or why it needed their password. Apple's guidance for a screen
+before a system prompt is to explain it there, with one button that opens the prompt. So the step
+says it is asking (`StepLine::asks`), the window explains, and the prompt waits for Continue.
+
+Only a go-ahead given while a step asks counts: a click left over from an earlier ask never lets a
+later prompt through unexplained. Each go-ahead is used once.
+*/
+pub struct GoAhead {
+    state: Mutex<Asked>,
+    changed: Condvar,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Asked {
+    Nothing,
+    Waiting,
+    Given,
+}
+
+impl Default for GoAhead {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GoAhead {
+    pub const fn new() -> Self {
+        Self {
+            state: Mutex::new(Asked::Nothing),
+            changed: Condvar::new(),
+        }
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, Asked> {
+        self.state.lock().unwrap_or_else(|held| held.into_inner())
+    }
+
+    /// The person chose Continue. True when a step was asking for it.
+    pub fn give(&self) -> bool {
+        let mut state = self.state();
+        if *state != Asked::Waiting {
+            return false;
+        }
+        *state = Asked::Given;
+        self.changed.notify_all();
+        true
+    }
+
+    /// Ask, then wait for the go-ahead. `ask` says so to the window. `cancelled` ends the wait.
+    pub fn wait(&self, ask: impl FnOnce(), cancelled: &dyn Fn() -> bool) -> Result<(), Problem> {
+        *self.state() = Asked::Waiting;
+        ask();
+        let mut state = self.state();
+        loop {
+            if *state == Asked::Given {
+                *state = Asked::Nothing;
+                return Ok(());
+            }
+            if cancelled() {
+                *state = Asked::Nothing;
+                return Err(Problem::plain(
+                    "OpenBot stopped before installing Podman. Start again when you're ready.",
+                ));
+            }
+            state = self
+                .changed
+                .wait_timeout(state, Duration::from_millis(200))
+                .unwrap_or_else(|held| held.into_inner())
+                .0;
+        }
+    }
+}
+
+/// The go-ahead Install waits on before macOS asks for the password to install Podman.
+pub static PODMAN_GO_AHEAD_GATE: GoAhead = GoAhead::new();
+
+/// The window's Continue under the explanation. True when Install was waiting for it.
+pub fn allow_podman_install() -> bool {
+    PODMAN_GO_AHEAD_GATE.give()
+}
+
+/// How the password prompt and the installer behind it ended.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[derive(Debug)]
+enum Prompted {
+    Installed,
+    /// The person closed the prompt. A decision, not a failure: the step asks again.
+    Declined,
+    Failed(Problem),
+}
+
+/**
+Download Podman's package, wait for the person's go-ahead, then raise the password prompt.
+
+The download needs nobody, so it runs while the person signs in. Only the prompt waits for them. A
+prompt closed without a password asks again, with the explanation, rather than failing Install
+behind a screen that has no way to start it again.
+*/
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn install_after_go_ahead(
+    fetch: impl FnOnce() -> Result<PathBuf, Problem>,
+    progress: &mut dyn FnMut(StepLine),
+    gate: &GoAhead,
+    cancelled: &dyn Fn() -> bool,
+    mut prompt: impl FnMut(&str) -> Prompted,
+    back: &dyn Fn(),
+) -> Result<(), Problem> {
+    progress(StepLine::here(PODMAN_DOWNLOADING));
+    let package = fetch()?;
+    let script = podman_install_script(&package);
+    let mut asking = PODMAN_GO_AHEAD;
+    loop {
+        gate.wait(|| progress(StepLine::asks(asking)), cancelled)?;
+        progress(podman_install_said("macos"));
+        let prompted = prompt(&script);
+        // The prompt was in front of OpenBot's window, however it ended.
+        back();
+        match prompted {
+            Prompted::Installed => return Ok(()),
+            Prompted::Declined => asking = PODMAN_DECLINED,
+            Prompted::Failed(problem) => return Err(problem),
+        }
+    }
+}
+
+/// The AppleScript that installs Podman's package as an administrator, with OpenBot's own words in
+/// the password prompt. `with prompt` is `do shell script`'s text for that dialog (StandardAdditions).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn podman_install_script(package: &Path) -> String {
+    format!(
+        "do shell script \"/usr/sbin/installer -pkg {} -target /\" with administrator privileges \
+         with prompt {}",
+        applescript_shell_arg(package),
+        applescript_string(PODMAN_PASSWORD_PROMPT)
+    )
+}
+
+/// Text as an AppleScript string literal.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn applescript_string(text: &str) -> String {
+    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 /// The step row's line while Podman installs, naming the prompt the platform raises for it.
@@ -465,7 +626,14 @@ pub fn compose_provider_name() -> &'static str {
 }
 
 #[cfg(target_os = "windows")]
-fn install_podman(into: &Path) -> Result<(), Problem> {
+fn install_podman(
+    into: &Path,
+    progress: &mut dyn FnMut(StepLine),
+    _back: &dyn Fn(),
+    _cancelled: &dyn Fn() -> bool,
+) -> Result<(), Problem> {
+    // The MSI installs for this account alone and asks for nothing.
+    progress(podman_install_said("windows"));
     let download = podman_download()?;
     let msi = fetch_verified(&download, into)?;
     let log = into.join("podman-install.log");
@@ -554,39 +722,48 @@ fn installer_stopped(verb: &str, msi: &Path, failure: MsiexecFailure, log: &Path
 }
 
 #[cfg(target_os = "macos")]
-fn install_podman(into: &Path) -> Result<(), Problem> {
-    let download = podman_download()?;
-    let pkg = fetch_verified(&download, into)?;
+fn install_podman(
+    into: &Path,
+    progress: &mut dyn FnMut(StepLine),
+    back: &dyn Fn(),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<(), Problem> {
+    install_after_go_ahead(
+        || fetch_verified(&podman_download()?, into),
+        progress,
+        &PODMAN_GO_AHEAD_GATE,
+        cancelled,
+        run_administrator_script,
+        back,
+    )
+}
 
-    // The package writes to `/opt/podman`, which needs administrator rights. `do shell script ...
-    // with administrator privileges` is how macOS asks for them: the person sees the standard
-    // authorization dialog, and no password passes through this process.
-    let script = format!(
-        "do shell script \"/usr/sbin/installer -pkg {} -target /\" with administrator privileges",
-        applescript_shell_arg(&pkg)
-    );
-    let output = crate::quiet::command("osascript")
-        .args(["-e", &script])
+/// Run `script` through `osascript`. `do shell script ... with administrator privileges` is how
+/// macOS asks for administrator rights: the person sees the standard authorization dialog, and no
+/// password passes through this process.
+#[cfg(target_os = "macos")]
+fn run_administrator_script(script: &str) -> Prompted {
+    let output = match crate::quiet::command("osascript")
+        .args(["-e", script])
         .output()
-        .map_err(|error| {
-            Problem::with(
+    {
+        Ok(output) => output,
+        Err(error) => {
+            return Prompted::Failed(Problem::with(
                 "OpenBot could not start the installer for the software it needs.",
                 format!("osascript: {error}"),
-            )
-        })?;
-
+            ))
+        }
+    };
     if output.status.success() {
-        return Ok(());
+        return Prompted::Installed;
     }
     let said = crate::quiet::said(&output.stderr);
     // -128 is AppleScript's "user cancelled", which is a decision rather than a failure.
     if said.contains("-128") {
-        return Err(Problem::plain(
-            "The install was cancelled, so OpenBot does not have the software it needs yet. Press \
-             Start to try again.",
-        ));
+        return Prompted::Declined;
     }
-    Err(Problem::with(
+    Prompted::Failed(Problem::with(
         "Installing the software OpenBot needs did not finish. Try again.",
         said,
     ))
@@ -596,14 +773,28 @@ fn install_podman(into: &Path) -> Result<(), Problem> {
 ///
 /// Two layers, applied in this order: single-quote it for the shell, then escape what AppleScript
 /// treats as special in the double-quoted string that carries it.
-#[cfg(target_os = "macos")]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn applescript_shell_arg(path: &Path) -> String {
     let quoted = format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"));
     quoted.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 #[cfg(target_os = "linux")]
-fn install_podman(_into: &Path) -> Result<(), Problem> {
+fn install_podman(
+    _into: &Path,
+    progress: &mut dyn FnMut(StepLine),
+    back: &dyn Fn(),
+    _cancelled: &dyn Fn() -> bool,
+) -> Result<(), Problem> {
+    progress(podman_install_said("linux"));
+    let result = install_podman_with_pkexec();
+    // pkexec's prompt was in front of OpenBot's window.
+    back();
+    result
+}
+
+#[cfg(target_os = "linux")]
+fn install_podman_with_pkexec() -> Result<(), Problem> {
     let (manager, args) = linux_package_manager().ok_or_else(|| {
         Problem::with(
             "OpenBot cannot install the software it needs on this system. Install the `podman` \
@@ -1292,5 +1483,201 @@ esac
             podman_install_said("windows"),
             StepLine::here("Installing Podman.")
         );
+    }
+
+    /// Where Podman's package lands: the app's cache, which has a space in its path on macOS.
+    const PACKAGE: &str = "/Users/a b/Library/Caches/OpenBot/podman-installer-macos-arm64.pkg";
+
+    /// What happened, in order: the step's lines, the download, the prompt and OpenBot coming back.
+    #[derive(Clone, Default)]
+    struct Seen(std::sync::Arc<Mutex<Vec<String>>>);
+
+    impl Seen {
+        fn add(&self, what: impl Into<String>) {
+            self.0.lock().unwrap().push(what.into());
+        }
+
+        fn line(&self, line: StepLine) {
+            let kind = if line.asks {
+                "asks"
+            } else if line.elsewhere {
+                "elsewhere"
+            } else {
+                "here"
+            };
+            self.add(format!("{kind}: {}", line.said));
+        }
+
+        fn all(&self) -> Vec<String> {
+            self.0.lock().unwrap().clone()
+        }
+
+        /// The window: waits until the step asks for the `nth` time, then until the person reads
+        /// it, then chooses Continue. Nothing may have been prompted by then.
+        fn continue_when_asked(&self, gate: &std::sync::Arc<GoAhead>, nth: usize) {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while self
+                .all()
+                .iter()
+                .filter(|seen| seen.starts_with("asks: "))
+                .count()
+                < nth
+            {
+                assert!(std::time::Instant::now() < deadline, "{:?}", self.all());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            std::thread::sleep(Duration::from_millis(300));
+            let prompts = self.all().iter().filter(|seen| *seen == "prompt").count();
+            assert_eq!(
+                prompts,
+                nth - 1,
+                "the prompt came up before Continue: {:?}",
+                self.all()
+            );
+            assert!(gate.give());
+        }
+    }
+
+    /// The person met macOS's password prompt over the Account step, mid-sign-in, with nothing on
+    /// screen saying what it was for. The package downloads first, then the step asks and waits;
+    /// the prompt comes up only after Continue, and says in OpenBot's words why it is there.
+    #[test]
+    fn the_password_prompt_waits_for_continue_and_says_why() {
+        let gate = std::sync::Arc::new(GoAhead::new());
+        let seen = Seen::default();
+        let window = {
+            let (gate, seen) = (gate.clone(), seen.clone());
+            std::thread::spawn(move || seen.continue_when_asked(&gate, 1))
+        };
+        let mut scripts = Vec::new();
+        let installed = install_after_go_ahead(
+            || {
+                seen.add("downloaded");
+                Ok(PathBuf::from(PACKAGE))
+            },
+            &mut |line| seen.line(line),
+            &gate,
+            &|| false,
+            |script| {
+                seen.add("prompt");
+                scripts.push(script.to_owned());
+                Prompted::Installed
+            },
+            &|| seen.add("back"),
+        );
+        window.join().unwrap();
+        assert!(installed.is_ok(), "{installed:?}");
+        assert_eq!(
+            seen.all(),
+            [
+                "here: Downloading Podman.",
+                "downloaded",
+                "asks: Podman is downloaded and ready to install.",
+                "elsewhere: Installing Podman. Enter your Mac password when macOS asks for it.",
+                "prompt",
+                "back",
+            ]
+        );
+        assert_eq!(
+            scripts,
+            [concat!(
+                r#"do shell script "/usr/sbin/installer -pkg '/Users/a b/Library/Caches/OpenBot/"#,
+                r#"podman-installer-macos-arm64.pkg' -target /" with administrator privileges "#,
+                r#"with prompt "OpenBot needs your password to install Podman, which runs "#,
+                r#"OpenBot's back end.""#
+            )]
+        );
+    }
+
+    /// Closing the prompt without a password is a decision. Install did fail on it, behind an
+    /// Account step with no way to start it again; now the step asks again, and says why.
+    #[test]
+    fn a_closed_password_prompt_asks_again() {
+        let gate = std::sync::Arc::new(GoAhead::new());
+        let seen = Seen::default();
+        let window = {
+            let (gate, seen) = (gate.clone(), seen.clone());
+            std::thread::spawn(move || {
+                seen.continue_when_asked(&gate, 1);
+                seen.continue_when_asked(&gate, 2);
+            })
+        };
+        let mut answers = [Prompted::Declined, Prompted::Installed].into_iter();
+        let installed = install_after_go_ahead(
+            || Ok(PathBuf::from(PACKAGE)),
+            &mut |line| seen.line(line),
+            &gate,
+            &|| false,
+            |_| {
+                seen.add("prompt");
+                answers.next().unwrap()
+            },
+            &|| seen.add("back"),
+        );
+        window.join().unwrap();
+        assert!(installed.is_ok(), "{installed:?}");
+        assert_eq!(
+            seen.all(),
+            [
+                "here: Downloading Podman.",
+                "asks: Podman is downloaded and ready to install.",
+                "elsewhere: Installing Podman. Enter your Mac password when macOS asks for it.",
+                "prompt",
+                "back",
+                "asks: macOS didn't get your password, so Podman isn't installed yet.",
+                "elsewhere: Installing Podman. Enter your Mac password when macOS asks for it.",
+                "prompt",
+                "back",
+            ]
+        );
+    }
+
+    /// Stop or Quit while the step waits ends the wait, and no prompt comes up after it.
+    #[test]
+    fn stopping_while_it_asks_raises_no_prompt() {
+        let gate = GoAhead::new();
+        let seen = Seen::default();
+        let stopped = std::sync::atomic::AtomicBool::new(false);
+        let failed = install_after_go_ahead(
+            || Ok(PathBuf::from(PACKAGE)),
+            &mut |line| {
+                seen.line(line);
+                stopped.store(true, std::sync::atomic::Ordering::SeqCst);
+            },
+            &gate,
+            &|| stopped.load(std::sync::atomic::Ordering::SeqCst),
+            |_| {
+                seen.add("prompt");
+                Prompted::Installed
+            },
+            &|| seen.add("back"),
+        )
+        .unwrap_err();
+        assert_eq!(
+            failed.said,
+            "OpenBot stopped before installing Podman. Start again when you're ready."
+        );
+        assert!(
+            !seen.all().contains(&"prompt".to_owned()),
+            "{:?}",
+            seen.all()
+        );
+    }
+
+    /// A Continue left over from an earlier ask, or sent twice, never lets a later prompt through.
+    #[test]
+    fn a_continue_with_nothing_asking_counts_for_nothing() {
+        let gate = GoAhead::new();
+        assert!(!gate.give());
+        let asked_once = std::sync::atomic::AtomicUsize::new(0);
+        // The earlier click is not taken: the wait still needs one given while it asks.
+        let waited = gate.wait(
+            || {
+                asked_once.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            },
+            &|| asked_once.load(std::sync::atomic::Ordering::SeqCst) == 1,
+        );
+        assert!(waited.is_err());
+        assert!(!gate.give());
     }
 }

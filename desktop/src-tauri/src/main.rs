@@ -252,6 +252,9 @@ struct Progress {
     /// The detail sends the person to another app's window: see `engine::StepLine`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     elsewhere: bool,
+    /// The step waits for the person's go-ahead in this window: see `install::GoAhead`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    asks: bool,
 }
 
 #[derive(Serialize)]
@@ -527,6 +530,7 @@ fn report<R: tauri::Runtime>(
             download_bytes: None,
             downloads: None,
             elsewhere: false,
+            asks: false,
         },
     );
 }
@@ -560,6 +564,7 @@ fn report_running_line<R: tauri::Runtime>(
     let engine::StepLine {
         said: detail,
         elsewhere,
+        asks,
     } = line;
     {
         let mut logged = RUNNING_LOGGED
@@ -581,6 +586,7 @@ fn report_running_line<R: tauri::Runtime>(
             download_bytes,
             downloads: None,
             elsewhere,
+            asks,
         },
     );
 }
@@ -619,6 +625,22 @@ fn bring_setup_to_front(app: tauri::AppHandle, why: String) {
     bring_to_front(&app, &why);
 }
 
+/// The person chose Continue under the setup window's explanation of the password prompt, so
+/// Install may raise it now. See `install::GoAhead`. False when nothing was waiting for it.
+#[tauri::command]
+fn allow_podman_install() -> bool {
+    let waiting = install::allow_podman_install();
+    log::info!(
+        "[install] Continue to install Podman{}",
+        if waiting {
+            ""
+        } else {
+            ", with nothing waiting for it"
+        }
+    );
+    waiting
+}
+
 /// Install's running image downloads: the step's sentence, the overall bytes as `downloadBytes`
 /// for anything that reads only that, and the per-image detail.
 fn report_downloads<R: tauri::Runtime>(
@@ -635,6 +657,7 @@ fn report_downloads<R: tauri::Runtime>(
             download_bytes: (downloads.bytes > 0).then_some(downloads.bytes),
             downloads: Some(downloads),
             elsewhere: false,
+            asks: false,
         },
     );
 }
@@ -2069,6 +2092,12 @@ async fn engine_ready(
     let telemetry_app = app.clone();
     let progress_app = app.clone();
     let back_app = app.clone();
+    // Stop and Quit move the ticket on: a wait for the person's go-ahead ends with them.
+    let watching = app.clone();
+    let ticket = app
+        .state::<Shell>()
+        .start_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
     let installed = tauri::async_runtime::spawn_blocking(move || {
         install::install_engine_observed(
             &stack::default_root(),
@@ -2093,6 +2122,13 @@ async fn engine_ready(
             &mut |line| report_running_line(&progress_app, "install-engine", line, None),
             // Docker Desktop's window, or the password prompt, came to the front over OpenBot's.
             &|| bring_to_front(&back_app, "the engine no longer needs another app's window"),
+            &|| {
+                watching
+                    .state::<Shell>()
+                    .start_generation
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    != ticket
+            },
         )
     })
     .await
@@ -3622,6 +3658,7 @@ impl QuitStatus {
             download_bytes: None,
             downloads: None,
             elsewhere: false,
+            asks: false,
         };
         match self.steps.iter_mut().find(|known| known.step == row.step) {
             Some(known) => *known = row,
@@ -8883,6 +8920,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             record_setup_event,
             bring_setup_to_front,
+            allow_podman_install,
             wake_engine,
             fit_setup_window,
             detect_engine,

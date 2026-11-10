@@ -44,10 +44,14 @@ use serde::{Deserialize, Serialize};
 /// the system's password prompt for Podman's installer. Those windows come to the front over
 /// OpenBot's. The setup window then says the line on whichever screen the person is on, and OpenBot
 /// comes back to the front once that window is done with.
+///
+/// `asks` when the step waits for the person's go-ahead in OpenBot's own window before it raises
+/// such a prompt (`install::GoAhead`). The window explains what comes next, with one button.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StepLine {
     pub said: String,
     pub elsewhere: bool,
+    pub asks: bool,
 }
 
 impl StepLine {
@@ -56,6 +60,7 @@ impl StepLine {
         Self {
             said: said.into(),
             elsewhere: false,
+            asks: false,
         }
     }
 
@@ -64,6 +69,16 @@ impl StepLine {
         Self {
             said: said.into(),
             elsewhere: true,
+            asks: false,
+        }
+    }
+
+    /// A line about a step that waits for the person's go-ahead in OpenBot's window.
+    pub fn asks(said: impl Into<String>) -> Self {
+        Self {
+            said: said.into(),
+            elsewhere: false,
+            asks: true,
         }
     }
 }
