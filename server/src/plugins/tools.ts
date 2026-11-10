@@ -230,7 +230,7 @@ export function grantedToolGuidance(
       : []),
     ...(callable.length > 0
       ? [
-          "Use them for anything about those systems. Do NOT browse to one of their websites instead: your",
+          "Use them for anything about those systems. Do not browse to one of their websites instead: your",
           "browser is signed in as nobody, so it sees less than these tools do and will meet a sign-in wall",
           "that connecting an account has already solved.",
           ...(laterBySystem.size > 0
@@ -278,7 +278,7 @@ export function grantedToolGuidance(
                 "If a question needs one of them, say plainly that you have not been granted it and that an",
                 "administrator can grant it on that connector.",
               ]),
-          "Do NOT browse to its website: that is not the same thing, your browser is signed in as nobody,",
+          "Do not browse to its website: that is not the same thing, your browser is signed in as nobody,",
           "and it will meet a sign-in wall that the connector exists to avoid. Do not ask the person to",
           "sign in there either.",
         ]
@@ -561,7 +561,7 @@ export async function grantedTools(options: {
     ...(tool.read ? { reads: true as const } : {}),
     initiator,
     // OpenBot always asks before a tool its app marks destructive, and the Bot is told so here, on
-    // the tool, since its name needn't say it (APPROVAL_GUIDANCE names these words).
+    // the tool, since its name needn't say it (ASKING_GUIDANCE names these words).
     description: tool.destructive
       ? [tool.description.trim(), DESTRUCTIVE_TOOL_NOTE]
           .filter(Boolean)
