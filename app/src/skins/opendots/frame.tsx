@@ -40,8 +40,8 @@ import {
 import { useIsMobile } from "@/hooks/use-mobile";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
-import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { setBotPausedMutationOptions } from "@/lib/bot-lifecycle/mutations";
 import { botLifecycleQueryOptions } from "@/lib/bot-lifecycle/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
@@ -165,7 +165,10 @@ function Rail({
   /** Whether the rail carries the Bots badge: at desktop width, where the rail is on screen. */
   showBadge: boolean;
 }) {
-  const navigation = useNavigationItems();
+  // OpenDots draws Routines itself, as its own screen just above, so not a second time from the list.
+  const navigation = useNavigationItems().filter(
+    (item) => item.id !== "routines",
+  );
   return (
     <nav
       aria-label="Workspace navigation"
