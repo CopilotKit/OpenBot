@@ -18,11 +18,7 @@ import { RETIRED_PAGE_NAMES } from "../app/src/lib/primitives";
  *
  * Only whole titles are compared, case aside. "Automatic learning" passes where "Learning" fails,
  * and sentences are never read: "goal" and "check-in" remain ordinary words.
- *
- * ENFORCED is off until the last phase of docs/superpowers/specs/2026-11-10-eight-primitives-design.md
- * ships. Until then the test lists what is left and passes.
  */
-const ENFORCED = false;
 
 const REPO = join(import.meta.dir, "..");
 const APP = join(REPO, "app/src");
@@ -41,6 +37,7 @@ const DESTINATION_LISTS = new Set([
   "lib/primitives.ts",
   "components/settings/settings-sidebar.tsx",
   "components/admin/admin-sidebar.tsx",
+  "components/admin/admin-sections.ts",
   "components/bot-profile/settings-rows.tsx",
 ]);
 
@@ -150,13 +147,6 @@ test("no page, menu entry or settings row is titled with a retired name", () => 
     // The list of retired names is not a title.
     (hit) => !hit.startsWith("app/src/lib/primitives.ts:"),
   );
-  if (!ENFORCED) {
-    if (found.length > 0)
-      console.warn(
-        `${found.length} retired page names still shown:\n${found.join("\n")}`,
-      );
-    return;
-  }
   expect(found).toEqual([]);
 });
 

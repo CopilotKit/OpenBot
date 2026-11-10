@@ -166,7 +166,9 @@ Where `OPENBOT_BROWSER_URL` is set, as `scripts/start.sh` sets it, your browser 
 
 ## What the app shows
 
-The menu is **Bots**, **Connections** and **Settings**. There is no Admin and no Capabilities page.
+The menu is **Bots**, **Connections** and **Settings**. There is no Admin. Each of the eight things
+a Bot has is set in two places, for one Bot on its page and for every Bot in Settings (or on
+Connections, for apps). See [How OpenBot works](how-openbot-works.md).
 
 **Connections** is every way a Bot signs in to something, because adding an app and connecting your
 account are the same decision when one person makes both:
@@ -183,8 +185,8 @@ account are the same decision when one person makes both:
   [Approvals](approvals.md). An app can't be taken from one Bot; turning it off takes it from all of
   them. See `server/src/plugins/personal-defaults.ts`.
 - A connected tile opens `/connections/<app>`: its tools, your account, and turning it off.
-- **Sign-ins and keys**, below the grid, links to saved website logins and API keys, which live under
-  Settings.
+- **Vault**, below the grid, opens Settings → Vault, where your saved website logins and API keys
+  are.
 - **Routines is always on**, here as in the team edition: every Bot has all of its tools, and it
   can't be turned off. See [Routines](routines.md).
 - **Parallel Search is on from the start**, and can be turned off. See
@@ -197,25 +199,32 @@ isn't known until it is on, shows **Turn on**, and one that takes a key shows **
 opens its page under Connections. The Bot is told which button the card shows, so it names that one
 (`server/src/plugins/app-access-tool.ts`).
 
-**Bots** lists your Bots and, under **What your Bots know**, Skills and Memory. A Bot's own page has
-four settings: Routines, Memory, **What it can do** (the apps and skills it has, what it asks before
-doing, and its goals) and Setup.
+**Bots** lists your Bots and, under **What your Bots learn**, a link to Skills. A Bot's own page
+shows what it is working on and what waits for you, with its Activity beside them, then its settings
+in this order: **Routines** (its routines, goals and check-ins in one list), **Skills**, **Apps**,
+**Computer** (its folders and its browser), **Approvals** and **Setup** (its name, instructions and
+who it hands work to). There is no Memory row, because the personal edition does not offer memory
+yet.
 
-**Settings** holds Saved logins, Keys, Skills for every Bot, Learning, Computer and Activity (the audit trail).
-Where Admin was, **OpenBot for Business** opens a list of what the team edition adds. An old
-`/admin/...` or `/settings/plugins/...` address opens the same page where it is now. There is no Sharing, Visibility, Isolated, or Reaching you, which are
+**Settings** is in three groups: **You** (General, Notifications and Vault), **Every Bot** (Routines,
+Skills, Computer, Approvals and Activity) and **OpenBot** (Setup and the Components gallery).
+Settings → Computer is the computer your Bots share with its Reset, the folders on this computer
+they may read, what OpenBot runs here (inside OpenBot Desktop), and the browsers signed in to the
+Recorder. Activity is the trail of everything your Bots did. Where Admin was, **OpenBot for Business** opens a list of what the team edition adds. An old
+`/admin/...`, `/settings/plugins/...`, `/capabilities/...` or `/settings/learning` address opens the
+same page where it is now. There is no Sharing, Visibility, Isolated, or Reaching you, which are
 all about other people, other computers or Slack and Teams.
 
-**Settings → Learning** is where the skills OpenBot learns from your recordings and conversations
-wait for your review. You approve or reject them yourself, under **Waiting for your review**, and
-**Learn now** starts a run on demand. **Your skills** lists the skills learned from your recordings and conversations,
-and a row opens one to read. A skill from your recordings reaches every Bot. A skill from
+**Settings → Skills** lists **Your skills**: the skills you wrote and the skills learned from your
+recordings and conversations, each marked with where it came from, and a row opens one. The skills
+OpenBot learns wait for your review under **Waiting for your review**, where you approve or reject
+them yourself, and **Learn now** starts a run on demand. A skill from your recordings reaches every Bot. A skill from
 conversations reaches the Bots that share its Learning container, which is every Bot unless one
 has a container of its own. There is no one to share with, so **Ask to share** is not offered here.
 
 **Approve new skills automatically** is on from the start, so you don't have to review each one. It
-approves what OpenBot proposes from your recordings and conversations. It runs when Learning opens,
-every 15 minutes, and when you switch it on. Turn it off in Settings → Learning to review each skill
+approves what OpenBot proposes from your recordings and conversations. It runs when Settings → Skills opens,
+every 15 minutes, and when you switch it on. Turn it off in Settings → Skills to review each skill
 yourself. **Your recordings** on Teach a Bot lists what you have recorded, which needs Intelligence
 0.16 with recordings switched on. Recordings can't be deleted from OpenBot.
 

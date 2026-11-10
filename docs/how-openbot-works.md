@@ -1,9 +1,5 @@
 # How OpenBot works
 
-> **Status: target.** This page describes the product as we want a person to understand it. Where
-> OpenBot today uses another name or puts something in another place, this page is the one to move
-> toward. Open decisions are listed at the end.
-
 OpenBot gives you Bots. A Bot is an AI teammate with a job, a memory and a computer. You talk to it,
 it does the work, and it asks you before anything you would want to be asked about.
 
@@ -127,7 +123,8 @@ Each primitive can be set in two places, and nowhere else:
 OpenBot for a team adds one scope above these:
 
 - **Everyone**: what an admin sets for the whole team. The same eight primitives, with the admin
-  deciding what people and their Bots may use.
+  deciding what people and their Bots may use. Admin groups its pages by them, in the same order,
+  then Vault, then the team itself.
 
 There is nothing in the team edition that is a ninth primitive. People, sign-in and policy are how an
 admin sets the eight for everyone.
@@ -179,5 +176,5 @@ Credentials as separate places.
   what a person sees. Whether the storage merges is a separate decision.
 - **One editor for skills.** A skill you wrote, a skill you taught and a skill OpenBot proposed each
   open in their own editor today. They are one list; whether they become one editor is not decided.
-- **The vault in the team edition.** Whether an admin's shared credentials are the "everyone" scope
-  of the vault, or stay in Admin.
+- **The vault in the team edition.** An admin's shared credentials are Admin → Vault, apart from
+  your own. Whether they become the "everyone" scope of one vault is not decided.

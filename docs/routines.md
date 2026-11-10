@@ -5,15 +5,41 @@ be asked. "Every weekday at nine, summarize what changed in this channel overnig
 a message — it fires on its own, for as long as it stays switched on, and its reply lands in a channel
 the same way any other message from that Bot does.
 
+## One list
+
+Routines, goals and check-ins are one list, on each Bot's Routines page (`/bots/<id>/routines`) and,
+for every Bot at once, in Settings → Routines (`/settings/routines`). A goal is a routine with an
+outcome to reach. A check-in is a routine that only tells you. They stay three stores on the server
+(routines, goals in `responsibilities`, check-ins in `proactive` settings), and the page reads all
+three and draws them together (`app/src/lib/routines/merged.ts`).
+
+Every row is the same sentence in four parts:
+
+- **What** it is: the routine's instruction, the goal's title, or the Bot's check-in.
+- **Starts**: a routine's schedule; for a goal, the routines that run it and the events that wake
+  it, or when you ask; for a check-in, at most once an hour.
+- **Does**: whether it acts, or only tells you.
+- **Until**: until you stop it, or, for a goal, the outcome that completes it.
+
+A routine that runs a goal is not a row of its own: it is one of that goal's starts, so the goal's
+row carries it. Rows that are working (on, active, not paused) come first. Settings → Routines also
+holds the switch for check-ins from all your Bots. In the team edition an admin turns check-ins on
+or off for everybody, and limits them, in Admin → Routines.
+
+Old addresses redirect here: `/routines` and `/responsibilities` to Settings → Routines, and
+`/bots/<id>/responsibilities` to the Bot's Routines page.
+
 ## Creating one
 
 Two ways, and they write through the same store call.
 
-- **Routines in the sidebar.** The Routines page lists every routine you have, across all your Bots,
-  and **New routine** opens a form: the Bot, what it should do, when (every day, every weekday, one
+- **New on the Routines page.** Settings → Routines and a Bot's Routines page both have **New**, a
+  menu of **Routine**, **Goal** and **Check-in** (Check-in is left out for a Bot that already has
+  one). **Routine** opens a form: the Bot, what it should do, when (every day, every weekday, one
   day a week, one day a month, or every hour, at a time on your clock), and the conversation it posts
   in, or a new one named after it. A Bot's own Routines page and the clock beside a conversation's
-  message box open the same form with that Bot, and that conversation, already chosen. The form
+  message box open the same form with that Bot, and that conversation, already chosen. **Goal** and
+  **Check-in** open their own dialogs. The form
   sends `POST /api/routines`, which calls `routineStore.create` exactly as `create_routine` does.
 - **Ask a Bot**, in a conversation: "every weekday at 9, post the standup notes here." Anything the
   form's schedules do not cover ("every other Tuesday") goes this way. The same Bot can list what is
@@ -32,7 +58,7 @@ while Extra vigilant is on, and before `delete_routine` always (see
 **Goals too.** The same app carries a goal's tools for a conversation: `create_goal`, `list_goals`,
 `update_goal`, `run_goal`, `pause_goal`, `resume_goal` and `complete_goal`, beside the trigger tools
 that wake a goal. Asked for a goal, a Bot makes one that reports into the conversation it was asked
-in, or into another the person names, and it shows on the Bot's Goals page. A goal has no schedule of
+in, or into another the person names, and it shows on the Bot's Routines page. A goal has no schedule of
 its own: it runs when asked, or when an event wakes it. A goal's own run is not given these copies,
 because it already holds the goal's own tools. See `server/src/responsibilities/chat-tools.ts`.
 

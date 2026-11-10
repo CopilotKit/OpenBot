@@ -337,39 +337,40 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 
 ## Main surfaces
 
-| Route                       | Purpose                                                            |
-| --------------------------- | ------------------------------------------------------------------ |
-| `/`                         | Start and browse channels.                                         |
-| `/channel/new`              | Start a conversation; two or more Bots in To: start a group.       |
-| `/channel/:id`              | Converse with one coworker, watch its screen, and see what it ran. |
-| `/bot`                      | Direct chat with a Bot; `?agent=<id>` selects one.                 |
-| `/bots`                     | Every Bot you can reach; create one, and open its page to change it. |
-| `/bots/:id`                 | One Bot: what it waits on you for, what it is doing, and how it is set up. |
-| `/bots/:id/responsibilities` | Give the Bot a lasting goal, follow its progress, and decide when it should work. |
-| `/bots/:id/reach`           | Continue a conversation with the Bot in Slack, Microsoft Teams, or by text message. |
-| `/bots/:id/memory`          | Which connected apps feed the Bot facts, and its background research. |
-| `/bots/:id/approvals`       | What the Bot may do without asking you first.                      |
-| `/connections`              | Connect your apps so your Bots can work with them.                 |
-| `/capabilities/skills`      | Create and enable personal skills.                                 |
-| `/capabilities/memory`      | What your Bots remember about you, and facts you tell them.        |
-| `/routines`                 | See the routines that are standing, and stop one.                  |
-| `/settings`                 | User preferences.                                                  |
-| `/settings/passwords`       | Logins you saved when signing a Bot in to a website.               |
-| `/settings/notifications`   | Where updates go, your devices, and recent deliveries.             |
-| `/settings/approvals`       | Whether your Bots ask before acting, and rules for every Bot.      |
-| `/admin/credentials`        | Store write-only encrypted credentials.                            |
-| `/admin/approvals`          | Team approval settings, team rules, and shared account requests.   |
-| `/admin/computers`          | View, stop, and reset Bot computers.                               |
-| `/admin/boundaries`         | Configure browser/file/MCP action policy.                          |
-| `/admin/components`         | Publish components and govern which Bots may use them.             |
-| `/admin/playground`         | Draft and publish sandboxed components in the browser.             |
-| `/admin/plugins`            | Configure MCP servers and grant their tools to Bots.               |
-| `/admin/skills`             | Write deployment skills and grant them to Bots.                    |
-| `/admin/learning`           | Assign Learning containers to Bots, or pause Automatic Learning.   |
-| `/admin/people`             | List, promote, demote, and remove people who have signed in.       |
-| `/admin/identity-providers` | Register a company SAML or OIDC provider, routed by email domain.  |
-| `/admin/enterprise`         | What members may use, how Bot computers reach the network, and what is recorded about it. |
-| `/admin/audit`              | Review permitted, refused, and failed actions.                     |
+A Bot has eight things, always listed in this order: Conversations, Routines, Memory, Skills, Apps,
+Computer, Approvals and Activity. [How OpenBot works](docs/how-openbot-works.md) explains each one.
+Each is set in at most three places: for one Bot on its page, for every Bot in Settings, and, in
+the team edition, for everyone in Admin.
+
+| | One Bot | Every Bot | Everyone (Admin) |
+| --- | --- | --- | --- |
+| Conversations | `/channel/:id`, `/bot?agent=<id>` | `/`, `/channel/new` | |
+| Routines | `/bots/:id/routines` | `/settings/routines` | `/admin/proactive` |
+| Memory | `/bots/:id/memory` | `/settings/memory` | |
+| Skills | `/bots/:id/skills` | `/settings/skills` | `/admin/skills`, `/admin/learning` |
+| Apps | `/bots/:id/apps` | `/connections` | `/admin/plugins`, `/admin/components`, `/admin/playground` |
+| Computer | `/bots/:id/computer` | `/settings/computer` | `/admin/computers` |
+| Approvals | `/bots/:id/approvals` | `/settings/approvals` | `/admin/approvals`, `/admin/boundaries`, `/admin/what-if` |
+| Activity | `/bots/:id/activity` | `/settings/activity` (personal edition) | `/admin/audit` |
+
+Beside the eight:
+
+| Route | Purpose |
+| --- | --- |
+| `/bots` | Every Bot you can reach; create one, and open its page to change it. |
+| `/bots/:id` | One Bot: what it waits on you for, what it is doing, and its rows in the order above. |
+| `/bots/:id/setup` | The Bot's name, instructions and who it hands work to. |
+| `/bots/:id/reach`, `/bots/:id/sharing` | Team edition: reach the Bot in Slack, Microsoft Teams or by text, and share it. |
+| `/settings` | Your account and preferences. |
+| `/settings/notifications` | Where updates go, your devices, and recent deliveries. |
+| `/settings/vault` | Your saved logins and, in the personal edition, your keys. No Bot sees what is in it. |
+| `/settings/setup` | What OpenBot has and still needs. |
+| `/admin/credentials` | Admin → Vault: write-only encrypted credentials for the deployment. |
+| `/admin/people`, `/admin/permissions`, `/admin/identity-providers`, `/admin/providers` | Admin → Team: who can sign in, what they may do, and which models Bots use. |
+
+Old addresses (`/capabilities/*`, `/routines`, `/bots/:id/responsibilities`, `/bots/:id/access`,
+`/settings/passwords`, `/settings/credentials`, `/settings/browsers`, `/settings/this-computer`,
+`/settings/learning`) redirect to the pages above.
 
 ## Features
 
@@ -599,6 +600,7 @@ Use `bash scripts/start.sh` for the whole stack and `bash scripts/stop.sh` to ta
 ## Documentation
 
 - [open.bot](https://open.bot)
+- [docs/how-openbot-works.md](docs/how-openbot-works.md): a Bot's eight things, and where you set each one
 - [docs/README.md](docs/README.md)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/configuration.md](docs/configuration.md)
