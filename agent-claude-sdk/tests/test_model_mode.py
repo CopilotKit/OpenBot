@@ -138,7 +138,9 @@ def test_full_bot_cannot_see_claude_code_web_search_or_shell():
         }
     )
     options = adapter.build_options(request, request.thread_id)
-    assert options.tools == []
+    # `Read` alone, held by a hook to the tool results Claude Code saves for the session; see
+    # test_saved_tool_results.py.
+    assert options.tools == ["Read"]
     # The `ag_ui` server, which holds the offered tool, is the one thing allowed.
     assert options.allowed_tools == ["mcp__ag_ui__*"]
     assert set(options.mcp_servers) == {"ag_ui"}
@@ -146,4 +148,4 @@ def test_full_bot_cannot_see_claude_code_web_search_or_shell():
     command = SubprocessCLITransport(
         prompt="contract only", options=options
     )._build_command()
-    assert command[command.index("--tools") + 1] == ""
+    assert command[command.index("--tools") + 1] == "Read"

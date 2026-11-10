@@ -124,6 +124,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Conversations
 
+- **A Claude Agent SDK Bot keeps your request and its tool results through a long task.** A tool
+  result over 50,000 characters (a page of email, an app's tool list, a file read from the Bot's
+  computer) reached the Bot as a 2 KB preview and the path of a file it could not open, so it showed
+  "Blocked: Read file /root/.claude/projects/…" and lost the result, here and in every later turn.
+  And a few such results put the conversation over what the Bot replays each turn, which then left
+  out its oldest messages, your request first: the Bot said it could no longer see the task. A
+  result up to 100,000 characters now reaches the Bot whole, a larger one stays whole in the
+  conversation and the Bot can open the saved copy during the turn, and the replay always keeps
+  your first message, cutting the results of earlier turns before it leaves out any message.
 - **A Bot whose whole answer is something it drew now raises its "replied" notification.**
 - **A Bot that runs its own agent reads your Gmail and finds your Slack channels again.** Such a
   Bot, like the personal starter Bot, can be sent only some of an app's actions in one request, and

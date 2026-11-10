@@ -9,18 +9,25 @@ segments of the same running SDK query, resolving hooks by tool-use ID.
 
 It also keeps a failed tool call failed in the history that ends the turn; see
 `_keep_failures`, and passes a reply Claude Code recovered from a broken stream on once; see
-`_OneReply`.
+`_OneReply`. A large tool result reaches the model whole up to `INLINE_RESULT_CHARS`, the model can
+open one Claude Code saved to a file (`own_tool_results_only`), and the history keeps it whole
+either way (`_keep_saved_results`).
 """
 
 import asyncio
 import json
 import logging
+import os
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from typing import get_args
 
 from ag_ui.core import EventType, RunErrorEvent, RunFinishedEvent, RunStartedEvent
 from ag_ui_claude_sdk import ClaudeAgentAdapter
+from ag_ui_claude_sdk.utils import (
+    convert_agui_tool_to_claude_sdk,
+    create_state_management_tool,
+)
 from claude_agent_sdk import (
     AssistantMessage,
     CLIConnectionError,
@@ -30,9 +37,11 @@ from claude_agent_sdk import (
     ResultMessage,
     TextBlock,
     ThinkingBlock,
+    ToolAnnotations,
     ToolResultBlock,
     ToolUseBlock,
     UserMessage,
+    create_sdk_mcp_server,
 )
 from claude_agent_sdk.types import StreamEvent
 
@@ -48,6 +57,28 @@ AG_UI_TOOL_PREFIX = "mcp__ag_ui__"
 # (https://code.claude.com/docs/en/permissions: "`mcp__puppeteer__*` matches every tool from the
 # `puppeteer` server").
 AG_UI_TOOLS = f"{AG_UI_TOOL_PREFIX}*"
+
+# How large a result of one of OpenBot's tools Claude Code keeps in the conversation, in characters.
+#
+# Claude Code keeps a tool result over 50,000 characters out of the conversation: it saves it to a
+# file (`<config>/projects/<cwd>/<session>/tool-results/`) and shows the model a 2 KB preview and the
+# path. Every OpenBot tool reaches this harness as an MCP tool, so a page of email, an app's tool
+# list or a file the Bot read from its computer (up to 64,000 bytes) crossed it, and the turn's
+# history then kept the preview in place of the result. Claude Code lets an MCP tool raise its own
+# threshold, to at most 500,000, with `anthropic/maxResultSizeChars` (`ToolAnnotations` in the SDK).
+# 100,000 is what Claude Code otherwise lets an MCP tool return (`MAX_MCP_OUTPUT_TOKENS`, 25,000
+# tokens at the four characters a token it counts), so a result is never cut there and kept here.
+INLINE_RESULT_CHARS = 100_000
+
+# Claude Code's file-reading tool, given to a full Bot for its own saved tool results and nothing else.
+READ_TOOL = "Read"
+# What a full Bot is told `Read` is for. Its own description says it reads any file on "the local
+# filesystem", and the person calls the computer's tool "Read file": asked to read a file on its
+# computer, the Bot picked `Read`, was refused, and asked the person what to do.
+READ_TOOL_NOTE = (
+    "The Read tool opens only a tool result that was too large to show and was saved to a file, "
+    "at the path the result names. For files on your computer, use your computer's tools."
+)
 
 # What a person is told when Claude Code never started, in place of the process error.
 START_FAILED = (
@@ -133,6 +164,8 @@ class _Turn:
     # Tool calls Claude Code reported as failed, and the result the turn streamed for each.
     failed: set[str] = field(default_factory=set)
     failed_results: dict[str, str] = field(default_factory=dict)
+    # Client calls whose result Claude Code saved to a file, and the result the browser sent.
+    saved_results: dict[str, str] = field(default_factory=dict)
     # Client calls Claude Code has actually run, and so is waiting on the browser for. See
     # `_hand_to_browser`.
     invoked: set[str] = field(default_factory=set)
@@ -369,6 +402,92 @@ class _OneReply:
         return StreamEvent(uuid="openbot-unstreamed", session_id="", event=event)
 
 
+def _results_kept_inline(input_data):
+    """The `ag_ui` MCP server upstream builds, with each tool's results kept in the conversation up
+    to `INLINE_RESULT_CHARS`.
+
+    Upstream builds it from this run's tools and, when the run carries state, its state tool, with
+    no annotations. The SDK reads a tool's annotations when it builds the server, so it is built
+    again rather than amended.
+    """
+    tools = []
+    for tool in input_data.tools or []:
+        try:
+            tools.append(convert_agui_tool_to_claude_sdk(tool))
+        except Exception as error:  # Upstream leaves out a tool it cannot convert, and so does this.
+            logger.warning("Failed to convert tool: %s", error)
+    if input_data.state is not None:
+        tools.append(create_state_management_tool())
+    return create_sdk_mcp_server(
+        "ag_ui",
+        "1.0.0",
+        tools=[
+            replace(tool, annotations=ToolAnnotations(maxResultSizeChars=INLINE_RESULT_CHARS))
+            for tool in tools
+        ],
+    )
+
+
+def saved_to_a_file(content):
+    """Whether a tool result is Claude Code's notice that it saved the result to a file.
+
+    Claude Code 2.1 words it two ways: `<persisted-output>` ... "Full output saved to: <path>" for a
+    result over its size threshold, and "Error: result (...) exceeds maximum allowed tokens. Output
+    has been saved to <path>" for an MCP result over `MAX_MCP_OUTPUT_TOKENS`.
+    """
+    return (
+        isinstance(content, str)
+        and "/tool-results/" in content
+        and ("<persisted-output>" in content or "Output has been saved to" in content)
+    )
+
+
+def saved_results_folder(hook_input):
+    """Where Claude Code saves this session's large tool results.
+
+    `<config>/projects/<cwd>/<session>/tool-results`, beside the session's transcript at
+    `<config>/projects/<cwd>/<session>.jsonl`; the hook is told both.
+    """
+    transcript = hook_input.get("transcript_path")
+    session = hook_input.get("session_id")
+    if not isinstance(transcript, str) or not transcript or not isinstance(session, str) or not session:
+        return None
+    return os.path.join(os.path.dirname(transcript), session, "tool-results")
+
+
+async def own_tool_results_only(input_data, tool_use_id, context):
+    """Let `Read` open a tool result Claude Code saved for this session, and nothing else.
+
+    A full Bot is given no built-in tools (see `build_options`): its files and commands are on its
+    own computer, under OpenBot's policy. Claude Code saves a tool result larger than its threshold
+    to a file and tells the model to read it, and the model had nothing that could. `Read` is the
+    tool Claude Code expects it to use, and this hook keeps it to this session's own saved results:
+    any other path, in this container or anywhere else, is refused.
+    """
+    if input_data.get("tool_name") != READ_TOOL:
+        return {}
+    folder = saved_results_folder(input_data)
+    path = (input_data.get("tool_input") or {}).get("file_path")
+    if folder and isinstance(path, str) and path:
+        folder = os.path.realpath(folder)
+        target = os.path.realpath(path)
+        if target != folder and os.path.commonpath([folder, target]) == folder:
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "allow",
+                }
+            }
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": "Read only opens a tool result that was saved to a file in "
+            "this conversation. For this file, use your computer's tools instead.",
+        }
+    }
+
+
 def _with_instructions(system_prompt, instructions):
     """The server's instructions first, then whatever the adapter already put there."""
     if isinstance(system_prompt, dict):  # A preset keeps its own prompt; add to its append.
@@ -422,6 +541,10 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
         ]
         if "ag_ui" in (options.mcp_servers or {}):
             options.allowed_tools.append(AG_UI_TOOLS)
+            options.mcp_servers = {
+                **options.mcp_servers,
+                "ag_ui": _results_kept_inline(input_data),
+            }
 
         async def client_result(input_data, tool_use_id, context):
             turn = self._turns.get(thread_id)
@@ -490,7 +613,24 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             # and the rest) run in this container instead, ungoverned and unapproved. Left in
             # view, Claude reached for its own WebSearch, was refused, and told the person to
             # grant it. No built-ins, as on the model endpoint; OpenBot's tools still load.
-            options.tools = []  # SDK 0.2.152 maps this to --tools "".
+            #
+            # Except `Read`, held to the tool results Claude Code saves to a file for this session
+            # (`own_tool_results_only`), which is the tool Claude Code tells the model to open one
+            # with: a result over `INLINE_RESULT_CHARS`. With no `Read`, the Bot tried its
+            # computer's `Read file` on the path, which OpenBot refused for a path outside the Bot's
+            # workspace, then `grep` on its computer, a different machine, and lost the result.
+            options.tools = [READ_TOOL]
+            # After the Bot's own instructions, which come first.
+            prompt = options.system_prompt
+            options.system_prompt = (
+                f"{prompt}\n\n{READ_TOOL_NOTE}"
+                if isinstance(prompt, str) and prompt
+                else _with_instructions(prompt, READ_TOOL_NOTE)
+            )
+            options.hooks["PreToolUse"] = [
+                *options.hooks.get("PreToolUse", []),
+                HookMatcher(matcher=READ_TOOL, hooks=[own_tool_results_only]),
+            ]
         return options
 
     async def _run_query(self, input_data):
@@ -605,6 +745,38 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             pending.cancel()
 
     @staticmethod
+    def _keep_saved_results(event, turn):
+        """The history at the end of a turn, with a result Claude Code saved to a file in it whole.
+
+        A result over its threshold reaches the model as a preview and a path in this container
+        (see `INLINE_RESULT_CHARS`), and that notice is what the turn streamed as the call's result
+        and kept in the history it ended with. Every later turn is a new query, in a session of its
+        own, so the Bot was left with a path to another session's file and none of the result. For
+        a call the browser answered, the browser's own result is put back: the history keeps the
+        result, and the replay fits it to its budget like any other.
+        """
+        if event.type == EventType.TOOL_CALL_RESULT and saved_to_a_file(event.content):
+            pending = turn.results.get(event.tool_call_id)
+            if pending is None or not pending.done() or pending.cancelled():
+                return event
+            turn.saved_results[event.tool_call_id] = pending.result()
+            turn.failed.discard(event.tool_call_id)
+            return event.model_copy(update={"content": pending.result()})
+        if event.type != EventType.MESSAGES_SNAPSHOT or not turn.saved_results:
+            return event
+        return event.model_copy(
+            update={
+                "messages": [
+                    message.model_copy(update={"content": turn.saved_results[message.tool_call_id]})
+                    if getattr(message, "role", None) == "tool"
+                    and getattr(message, "tool_call_id", None) in turn.saved_results
+                    else message
+                    for message in event.messages
+                ]
+            }
+        )
+
+    @staticmethod
     def _keep_failures(event, turn):
         """The history at the end of a turn, with each failed call as the turn streamed it.
 
@@ -650,7 +822,7 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     and event.tool_call_id in turn.offered
                 ):
                     turn.ended.add(event.tool_call_id)
-                event = self._keep_failures(event, turn)
+                event = self._keep_failures(self._keep_saved_results(event, turn), turn)
                 await turn.queue.put(event)
         except Exception as error:
             if not_started(error):
