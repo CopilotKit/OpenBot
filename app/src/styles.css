@@ -309,13 +309,14 @@
 /*
  * The disc's ground. The mesh is transparent in places, and the orb's ground (`--bg`, the page's
  * `--background`) fills the halftone and the inner edge. On the dark page that made a dark hole in
- * the bottom of the sphere, with the halo's pattern showing through it. The disc is drawn on
- * `--orb-ground`, the light page's color, in both themes, so it reads the same on either page and
- * its own colors carry it, as the still orb's do.
+ * the bottom of the sphere, with the halo's pattern showing through it. The disc is drawn on the
+ * light page's `--background` in both themes, so it reads the same on either page and its own
+ * colors carry it, as the still orb's do. Written here rather than as a token, since theme.css
+ * holds only shadcn's tokens.
  */
 .bot-orb-live .agent-orb {
-  --background: var(--orb-ground);
-  background: var(--orb-ground);
+  --background: oklch(0.983 0.003 286.4);
+  background: var(--background);
 }
 
 /*
