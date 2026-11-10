@@ -149,20 +149,20 @@ body {
 }
 
 /*
- * The window's column: the update offer, when there is one, then the step. The step fills whatever
- * the offer leaves rather than a whole window of its own, so the two together are never taller than
- * the window. Were they, fitWindow.ts would grow the window, the step would grow with it, and the
- * window would keep growing to the edge of the screen.
+ * The window's column: the update offer, when there is one, then the step. Exactly the window's
+ * height: the step fills whatever the offer leaves, and the page itself never scrolls.
  */
 #root {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
 }
 
 /*
- * The window opens at 1000x800 and grows to fit a taller step (see fitWindow.ts): one card,
- * centred across and held at the same height from the top on every step.
+ * The window keeps the size and place it opened with (1000x800, or what the person made it): one
+ * card, centred across and held at the same height from the top on every step. A step taller than
+ * the room it has scrolls inside its card. The window used to grow to fit a taller step and move
+ * up to stay on screen, so on Windows it jumped 54 px up and 139 px taller on "Connect your AI".
  *
  * Held from the top, not centred up and down. Rows come and go while a step waits (the update's
  * row, its download bar), and a centred card moved everything already on screen up or down with
@@ -172,11 +172,14 @@ body {
 main {
   position: relative;
   z-index: 1;
-  flex: 1 0 auto;
-  display: grid;
-  place-items: start center;
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   padding: clamp(32px, 12vh, 96px) 24px 32px;
 }
+
 
 /* The one focal surface per screen: a white card on the frame, as OpenBot draws its panels. */
 .sheet {
@@ -532,8 +535,8 @@ fieldset.picker {
 }
 
 /*
- * Every provider shows without scrolling the list: the window grows to fit (see `fitWindow.ts`),
- * and past what the screen allows the page scrolls instead.
+ * Every provider shows without a scrolling list of its own: past the room the window has, the card
+ * scrolls instead.
  */
 fieldset.picker.providers {
   max-height: none;
@@ -1687,4 +1690,17 @@ a:hover {
 
 .troubleshooting .caution.failed {
   color: var(--destructive);
+}
+
+/*
+ * Last, after every `.sheet` rule: the card scrolls once its step is taller than the room it has
+ * (see `main`), and what is in it keeps its size.
+ */
+main > .sheet {
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+main > .sheet > * {
+  flex-shrink: 0;
 }

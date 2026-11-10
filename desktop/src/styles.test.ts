@@ -6,8 +6,9 @@
  *   that is not itself positioned. The offer was not, so it was on the page, clickable through the
  *   backdrop, and invisible.
  * - Each step was `min-height: 100vh` on its own. With the offer above it the page was always taller
- *   than the window, so fitWindow.ts asked for a taller window, the step grew with it, and the
- *   window kept growing to the edge of the screen.
+ *   than the window, so the window was asked to grow, the step grew with it, and the window kept
+ *   growing to the edge of the screen. The window no longer grows at all: the offer and the step
+ *   are exactly the window's height, and a taller step scrolls inside its card.
  */
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -45,14 +46,18 @@ test("the update offer is painted above the fixed backdrop, as the step is", () 
   }
 });
 
-test("the offer and the step together are never taller than the window by themselves", () => {
+test("the offer and the step together are the window's height, and a taller step scrolls in its card", () => {
   expect(rule("#root")).toMatchObject({
-    "min-height": "100vh",
+    height: "100vh",
     display: "flex",
     "flex-direction": "column",
   });
   const step = rule("main");
-  expect(step["min-height"]).toBeUndefined();
-  expect(step.flex).toBe("1 0 auto");
+  expect(step.flex).toBe("1 1 0");
+  expect(step["min-height"]).toBe("0");
   expect(rule(".update-offer").flex).toBe("none");
+  expect(rule("main > .sheet")).toMatchObject({
+    "max-height": "100%",
+    "overflow-y": "auto",
+  });
 });

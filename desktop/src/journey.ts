@@ -23,6 +23,11 @@ export type Plan = {
   milestones: Record<string, number>;
   /** In order: what each stretch of the run is, said plainly. */
   stages: Stage[];
+  /**
+   * The stretch of the run that is its download, when it has one: a download that reports its
+   * bytes stands in for it (`downloadLeg`), so it is never counted twice.
+   */
+  download?: { from: number; to: number };
 };
 
 /** Typical seconds of the whole plan. */
@@ -71,6 +76,7 @@ export const SETUP: Plan = {
     { said: "Setting up your data", until: 160 },
     { said: "Starting OpenBot's services", until: 190 },
   ],
+  download: { from: 32, to: 80 },
 };
 
 /** An update of the back end after an app update (D30 Windows, 2 minutes). */
@@ -110,6 +116,7 @@ export const UPDATE: Plan = {
     { said: "Updating your data", until: 92 },
     { said: "Starting OpenBot's services", until: 120 },
   ],
+  download: { from: 6, to: 11 },
 };
 
 /**
@@ -161,7 +168,7 @@ export type Position = { at: number; slow: boolean };
  * Where a run of `plan` is: past the furthest milestone of the steps it has `ended`, moved on by
  * the `elapsed` seconds since it began, and never at the next milestone until that step ends. Past
  * 80% of the way to it, it eases toward 95% instead of stopping. `slow` once the run is well past
- * where that step typically ends.
+ * where that step typically ends: half as long again, and a minute at least.
  */
 export function position(
   plan: Plan,
@@ -191,7 +198,9 @@ export function position(
       : span * (0.8 + 0.15 * (1 - Math.exp(-(into - 0.8 * span) / span)));
   return {
     at: Math.min(total, passed + eased),
-    slow: elapsed > next + Math.max(15, span * 0.5),
+    // Well past when that step typically ends, not a few seconds past it: on Windows F "Taking
+    // longer than usual" showed 46 seconds into a setup whose parts take minutes.
+    slow: elapsed > Math.max(1.5 * next, next + 60),
   };
 }
 
@@ -212,12 +221,14 @@ export type Leg = {
 };
 
 export type Journey = {
-  /** From 0 to 1, over every leg. */
+  /** From 0 to 1, over every leg, each weighed by how long it typically takes. */
   fraction: number;
   /** What is happening now, in plain words. */
   said: string;
   /** Seconds left, or null while running longer than usual. */
   left: number | null;
+  /** Seconds left by the plans, running long or not. */
+  remaining: number;
 };
 
 /** Where a whole journey is, over its legs, weighed by how long each typically takes. */
@@ -248,34 +259,199 @@ export function journey(legs: readonly Leg[]): Journey {
     fraction: Math.min(1, done / total),
     said,
     left: slow ? null : Math.max(0, Math.round(left)),
+    remaining: Math.max(0, left),
   };
 }
+
+/**
+ * Seconds to plan with for each part of a download still unpacking once its bytes are in, until
+ * its own parts have measured it. On Windows (D30) the last of OpenBot's five parts finished 10 to
+ * 18 seconds apart.
+ */
+export const UNPACK_SECONDS = 15;
+
+/** The share of a download's bar its bytes take when parts unpack after them: the rest is theirs. */
+const BYTES_SHARE = 0.8;
+
+/**
+ * Every byte counts as in from 99%: a download's last bytes can go uncounted between its progress
+ * reports, and Windows F read "1.1 GB of 1.1 GB · 2 of 5 parts left" under a full bar for minutes.
+ */
+export const ALL_IN = 0.99;
+
+/** How far along a download and the unpacking of its parts are. */
+export type DownloadWhere = {
+  /** From 0 to 1, and below 1 while any part is left. Null while its size is not known. */
+  fraction: number | null;
+  /** Once every byte is in: the part unpacking now, of how many. */
+  unpacking: { at: number; of: number } | null;
+  /** Seconds left, or null when not known yet or when it is taking longer than usual. */
+  left: number | null;
+  /** Running well past when the part unpacking now should have finished. */
+  slow: boolean;
+};
+
+/**
+ * Where a download is: its bytes, then its parts unpacking one by one (`done` of `total`), weighed
+ * as one. A full bar while parts were still unpacking read as done, or as stuck; now the bytes take
+ * most of the bar and each part its slice of the rest, and the part unpacking now eases through its
+ * slice, slowing rather than stopping, so the bar keeps moving and is full only once every part is.
+ * `waited` is the seconds since the last part finished, or since every byte came in if that was
+ * later; `perPart` is how long a part has taken in this download once its own parts say.
+ */
+export function downloadWhere(
+  {
+    bytes,
+    size,
+    done = 0,
+    total = 0,
+    bytesPerSecond,
+  }: {
+    bytes: number;
+    size?: number;
+    done?: number;
+    total?: number;
+    bytesPerSecond?: number;
+  },
+  waited = 0,
+  perPart: number | null = null,
+): DownloadWhere {
+  if (!size || size <= 0)
+    return { fraction: null, unpacking: null, left: null, slow: false };
+  const got = Math.min(1, bytes / size);
+  const parts = total > 0;
+  const share = parts ? BYTES_SHARE : 1;
+  const per = Math.max(5, perPart ?? UNPACK_SECONDS);
+  const base =
+    share * got + (1 - share) * (parts ? Math.min(1, done / total) : 0);
+  if (parts && done < total && got >= ALL_IN) {
+    const into = Math.max(0, waited);
+    const eased =
+      into <= 0.8 * per
+        ? into / per
+        : 0.8 + 0.15 * (1 - Math.exp(-(into - 0.8 * per) / per));
+    const slow = into > 2 * per + 15;
+    return {
+      fraction: Math.min(0.999, base + ((1 - share) / total) * eased),
+      unpacking: { at: done + 1, of: total },
+      left: slow ? null : Math.max(0, (total - done - eased) * per),
+      slow,
+    };
+  }
+  const left =
+    bytesPerSecond && bytesPerSecond > 0 && got < 1
+      ? (size - bytes) / bytesPerSecond + (parts && done < total ? per : 0)
+      : null;
+  return {
+    fraction: parts && done < total ? Math.min(0.999, base) : base,
+    unpacking: null,
+    left,
+    slow: false,
+  };
+}
+
+/** What a download's parts have done so far, as one screen has watched them. */
+export type PartsSeen = {
+  done: number;
+  /** When the count of finished parts last changed. */
+  changed: number;
+  /** When every byte was in, once it was. */
+  allIn: number | null;
+  doneAtAllIn: number;
+};
+
+/**
+ * A download's parts as watched at `now`: how long since the last part finished or every byte came
+ * in (`waited`), and how long a part has taken here once any finished after that (`perPart`).
+ */
+export function seeParts(
+  seen: PartsSeen | null,
+  { bytes, size, done = 0 }: { bytes: number; size?: number; done?: number },
+  now: number,
+): { seen: PartsSeen; waited: number; perPart: number | null } {
+  let next: PartsSeen = seen ?? {
+    done,
+    changed: now,
+    allIn: null,
+    doneAtAllIn: 0,
+  };
+  if (done !== next.done) next = { ...next, done, changed: now };
+  if (size && size > 0 && bytes >= size * ALL_IN && next.allIn === null)
+    next = { ...next, allIn: now, doneAtAllIn: done };
+  const perPart =
+    next.allIn !== null && done > next.doneAtAllIn
+      ? (next.changed - next.allIn) / 1000 / (done - next.doneAtAllIn)
+      : null;
+  const waited =
+    next.allIn === null
+      ? 0
+      : Math.max(0, (now - Math.max(next.changed, next.allIn)) / 1000);
+  return { seen: next, waited, perPart };
+}
+
+/**
+ * The time left to show, from the one just worked out (`raw`) and the one shown before: it falls at
+ * once when the work goes faster, and rises by at most `RISE` seconds a second when it goes slower,
+ * so it never says a low number and then a much higher one. On
+ * Windows D an update said "About a minute left", then "About 2", then "About 3" as its parts
+ * came to light.
+ */
+export function steadyLeft(
+  shown: { left: number; at: number } | null,
+  raw: number,
+  now: number,
+): { left: number; at: number } {
+  if (!shown) return { left: raw, at: now };
+  const passed = Math.max(0, (now - shown.at) / 1000);
+  return { left: Math.min(raw, shown.left + RISE * passed), at: now };
+}
+
+/** The most the time left shown may rise, in seconds for each second that passes. */
+export const RISE = 0.5;
 
 /** Bytes a second to plan with until a download's own speed is known: 10 MB a second. */
 const ASSUMED_SPEED = 10_000_000;
 
 /**
- * A download under way, as a leg of its own: how long it takes is what is left of it over its
- * speed so far. The steps it holds up stand still meanwhile (`position` with no time gone), so a
- * slow line reads as a download that is moving, not a step taking longer than usual.
+ * A download under way, as a leg of its own: how long it takes is what is left of it, bytes and
+ * unpacking, at its speed so far (`downloadWhere`). The steps it holds up stand still meanwhile, so
+ * a slow line reads as a download that is moving, not a step taking longer than usual.
  */
 export function downloadLeg(
   said: string,
-  {
-    bytes,
-    size,
-    bytesPerSecond,
-  }: { bytes: number; size?: number; bytesPerSecond?: number },
+  downloads: {
+    bytes: number;
+    size?: number;
+    done?: number;
+    total?: number;
+    bytesPerSecond?: number;
+  },
+  where: DownloadWhere = downloadWhere(downloads),
+  /** How long the stretch it stands in for typically takes, to plan with until it has a speed. */
+  typical: number | null = null,
 ): Leg {
-  const speed =
-    bytesPerSecond && bytesPerSecond > 0 ? bytesPerSecond : ASSUMED_SPEED;
-  // Its size not known yet: a minute to plan with, and nothing of it counted as done.
-  const seconds = size && size > 0 ? Math.max(1, size / speed) : 60;
-  const done = size && size > 0 ? Math.min(1, bytes / size) : 0;
+  const { size, total = 0, bytesPerSecond } = downloads;
+  const measured = Boolean(bytesPerSecond && bytesPerSecond > 0);
+  const speed = measured ? (bytesPerSecond as number) : ASSUMED_SPEED;
+  // Until it has a speed, as long as that stretch usually takes; with no size either, a minute.
+  const planned =
+    !measured && typical !== null
+      ? typical
+      : size && size > 0
+        ? Math.max(1, size / speed) + total * UNPACK_SECONDS * 0.5
+        : 60;
+  const fraction = where.fraction ?? 0;
+  // With a time left it stands behind, the leg is what is left of it from where it is now.
+  const seconds =
+    measured && where.left !== null && fraction < 1
+      ? Math.max(1, where.left / (1 - fraction))
+      : where.unpacking && where.left !== null && fraction < 1
+        ? Math.max(1, where.left / (1 - fraction))
+        : planned;
   return {
     plan: { milestones: {}, stages: [{ said, until: seconds }] },
     state: "now",
-    at: { at: done * seconds, slow: false },
+    at: { at: Math.min(seconds, fraction * seconds), slow: where.slow },
   };
 }
 

@@ -89,7 +89,9 @@ const status = (readiness, licence) => ({
 fake.finishSetUp = () => finishSetUp(status("starting", "valid"));
 const none = { openai: false, anthropic: false };
 export function convertFileSrc(path) { return path; }
+fake.calls = [];
 export async function invoke(command) {
+  fake.calls.push(command);
   switch (command) {
     case "windows_restart_pending":
     case "take_ai_connection_change":
@@ -246,6 +248,59 @@ async function measure(page: Page) {
   return { field: field?.y, advanced: advanced?.y, height };
 }
 
+/*
+ * Seen on Windows F: the window opened at 1016x839, grew to 853 when the sign-in card appeared,
+ * then jumped 54 px up and to 992 tall on "Connect your AI". The window keeps its size and place
+ * now: the page is never taller than it, the window is never asked to grow, and a step taller than
+ * the room it has scrolls inside its card.
+ */
+describe.skipIf(!asked)("the window through a first run", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const) {
+    test(`at ${width}x${height}, the page never outgrows the window and a tall step scrolls in its card`, async () => {
+      const page = await browser.newPage({ viewport: { width, height } });
+      try {
+        await open(page);
+        const fits = () =>
+          page.evaluate(() => ({
+            page: document.documentElement.scrollHeight,
+            window: window.innerHeight,
+            asked: (
+              globalThis as unknown as { __fake: { calls: string[] } }
+            ).__fake.calls.filter((call) => call === "fit_setup_window").length,
+          }));
+        const check = async () => {
+          const now = await fits();
+          expect(now.page).toBeLessThanOrEqual(now.window);
+          expect(now.asked).toBe(0);
+        };
+        await check();
+        await page
+          .getByRole("button", { name: "Install", exact: true })
+          .click();
+        await page.getByRole("heading", { name: "Connect your AI" }).waitFor();
+        await page.waitForTimeout(600);
+        await check();
+        await page.getByText("Any OpenAI-compatible endpoint").click();
+        await page.getByLabel("Base URL", { exact: true }).waitFor();
+        await page.waitForTimeout(600);
+        await check();
+        // Taller than the room it has at the smaller size: its card scrolls, the page does not.
+        const card = await page.evaluate(() => {
+          const sheet = document.querySelector("main > .sheet") as HTMLElement;
+          return { scroll: sheet.scrollHeight, client: sheet.clientHeight };
+        });
+        if (height < 600) expect(card.scroll).toBeGreaterThan(card.client);
+        expect(card.client).toBeLessThanOrEqual(height);
+      } finally {
+        await page.close();
+      }
+    }, 30_000);
+  }
+});
+
 describe.skipIf(!asked)("the AI step while OpenBot installs behind it", () => {
   for (const [width, height] of [
     [1000, 800],
@@ -385,7 +440,8 @@ describe.skipIf(!asked)("the Start screen while OpenBot updates", () => {
           .getByText("100.0 MB of 944.2 MB", { exact: false })
           .waitFor({ state: "hidden" });
         expect(await anchors(page)).toEqual(before);
-        expect(await said.textContent()).toBe("Downloading the update");
+        // Its download done, the update is on to installing what it downloaded.
+        expect(await said.textContent()).toBe("Installing the update");
       } finally {
         await page.close();
       }

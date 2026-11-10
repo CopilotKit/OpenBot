@@ -313,7 +313,9 @@ export function CopilotKitAccount({
       </h1>
       <p className="lede">
         {agreement
-          ? `To run OpenBot on this computer, accept the CopilotKit license agreement for ${agreement.organizationName}.`
+          ? // The organization and the agreement's version are the log's: on Windows F the
+            // lede ended "for CopilotKit🪁." and the link read "(developer-edition-2026-10-01-web)".
+            "To run OpenBot on this computer, accept the CopilotKit license agreement."
           : connecting || appsFailed
             ? "OpenBot uses your CopilotKit account to set up apps like Gmail and Slack."
             : refused
@@ -387,8 +389,9 @@ export function CopilotKitAccount({
       )}
       {agreement && (
         <p className="footnote">
-          <ExternalLink href={agreement.url}>Read the agreement</ExternalLink> (
-          {agreement.version})
+          <ExternalLink href={agreement.url}>
+            Read the license agreement
+          </ExternalLink>
         </p>
       )}
       {seen.at === "failed" && (

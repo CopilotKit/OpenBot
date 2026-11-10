@@ -386,11 +386,14 @@ async fn wake_installation_engine<R: tauri::Runtime>(
                 // The row that said the hand-off ends, so the window stops saying it.
                 if said {
                     match &started {
-                        Ok(()) => {
-                            report(&progress_app, "engine", true, "Docker Desktop is running.")
-                        }
+                        Ok(()) => report_plain(
+                            &progress_app,
+                            "engine",
+                            true,
+                            "Docker Desktop is running.",
+                        ),
                         Err(problem) => {
-                            report(&progress_app, "engine", false, problem.said.clone())
+                            report_plain(&progress_app, "engine", false, problem.said.clone())
                         }
                     }
                 }
@@ -494,13 +497,93 @@ fn ready_responding_engine_after_compose_repair(
     }))
 }
 
+/// Every row step the native side reports, each with a plain line of its own (`plain_row`). The
+/// tests hold each step in this file to it.
+#[cfg(test)]
+const ROW_STEPS: [&str; 17] = [
+    "engine",
+    "install-engine",
+    "create-machine",
+    "start-machine",
+    "health-gate",
+    "deployment",
+    "images",
+    "installation",
+    "env",
+    "services",
+    "carry-over",
+    "answering",
+    "release",
+    "cleanup",
+    "stopped",
+    "open",
+    "quit",
+];
+
+/**
+What a row says in the window when its step gives no plain line of its own: by the step, and
+whether it is running, done or stopped. The text it was given goes to the log only.
+
+Found on Windows F: "Downloading OpenBot internal-d2df1b062ac0." reached the Account step's
+background row, because the deployment step's line was sent as it was, a release name and all. A
+row's raw text can be a release, an engine's output or an error, so it is never what the window
+says unless it comes as a plain line (`report_line`, `report_running_line`).
+*/
+fn plain_row(step: &str, ok: bool, running: bool) -> &'static str {
+    if !ok {
+        return "This part stopped. What happened is said below.";
+    }
+    if running {
+        return match step {
+            "engine" | "install-engine" | "create-machine" | "start-machine" | "health-gate" => {
+                "Preparing this computer to run OpenBot."
+            }
+            "deployment" | "images" => "Downloading OpenBot.",
+            "installation" => "Finishing the installation.",
+            "env" => "Saving your settings.",
+            "services" => "Starting OpenBot's services.",
+            "carry-over" => "Bringing your Bots' files and sign-ins across.",
+            "answering" => "Waiting for OpenBot to respond.",
+            "release" => "Updating OpenBot.",
+            "cleanup" | "stopped" | "quit" => "Stopping OpenBot.",
+            "open" => "Opening OpenBot.",
+            _ => "Working on it.",
+        };
+    }
+    match step {
+        "engine" | "install-engine" | "create-machine" | "start-machine" | "health-gate" => {
+            "This computer is ready to run OpenBot."
+        }
+        "deployment" | "images" => "OpenBot is downloaded.",
+        "installation" => "OpenBot is installed.",
+        "env" => "Your settings are saved.",
+        "services" => "OpenBot's services are running.",
+        "carry-over" => "Your Bots' files and sign-ins are in place.",
+        "answering" | "open" => "OpenBot is ready.",
+        "release" => "OpenBot is updated.",
+        "cleanup" | "stopped" | "quit" => "OpenBot has stopped.",
+        _ => "Done.",
+    }
+}
+
+/// A row whose text has no plain register of its own: `plain_row` in the window, and the text it
+/// was given in the log beside it.
+fn unregistered_line(step: &str, ok: bool, running: bool, text: String) -> engine::StepLine {
+    engine::StepLine::here(plain_row(step, ok, running)).logged(text)
+}
+
 fn report<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     step: &str,
     ok: bool,
     detail: impl Into<String>,
 ) {
-    report_line(app, step, ok, engine::StepLine::here(detail));
+    report_line(
+        app,
+        step,
+        ok,
+        unregistered_line(step, ok, false, detail.into()),
+    );
 }
 
 /// A finished step's line, said plainly in the window, with its technical detail in the log only.
@@ -587,7 +670,32 @@ fn report_running<R: tauri::Runtime>(
     detail: impl Into<String>,
     download_bytes: Option<u64>,
 ) {
-    report_running_line(app, step, engine::StepLine::here(detail), download_bytes);
+    report_running_line(
+        app,
+        step,
+        unregistered_line(step, true, true, detail.into()),
+        download_bytes,
+    );
+}
+
+/// A row's own plain line, said as it is: for a sentence written for the window, or a `Problem`'s
+/// headline, which is plain by construction.
+fn report_plain<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    step: &str,
+    ok: bool,
+    said: impl Into<String>,
+) {
+    report_line(app, step, ok, engine::StepLine::here(said));
+}
+
+/// A running row's own plain line, said as it is.
+fn report_running_plain<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    step: &str,
+    said: impl Into<String>,
+) {
+    report_running_line(app, step, engine::StepLine::here(said), None);
 }
 
 /// A running step's line, marked when it sends the person to another app's window.
@@ -692,7 +800,7 @@ fn report_downloads<R: tauri::Runtime>(
         Progress {
             step: "images".into(),
             ok: true,
-            detail: "Downloading local software.".into(),
+            detail: "Downloading OpenBot.".into(),
             running: true,
             download_bytes: (downloads.bytes > 0).then_some(downloads.bytes),
             downloads: Some(downloads),
@@ -1151,11 +1259,10 @@ async fn upgrade_and_start_now(
             };
             let recovering = upgrade::interrupted(&target);
             if recovering {
-                report_running(
+                report_running_plain(
                     &handle,
                     "release",
                     "Putting back the version OpenBot was updating from.",
-                    None,
                 );
                 upgrade::recover(&target, &mut steps).map_err(|problem| {
                     Problem::with(UPGRADE_INTERRUPTED, upgrade::detail(&problem))
@@ -1829,11 +1936,11 @@ async fn prepare_installation_inner(
                     .map_err(|e| Problem::from(e.to_string()))?,
                 &root,
             )?;
-            report(
+            report_plain(
                 &handle,
                 "installation",
                 true,
-                "Local software is already installed.",
+                "OpenBot is already installed.",
             );
             return Ok(());
         }
@@ -1851,11 +1958,10 @@ async fn prepare_installation_inner(
          * small files it writes. Nothing on the host needs them now: the person's own browser runs
          * on the one computer, from its image, with the Recorder built into that image.
          */
-        report_running(
+        report_running_plain(
             &handle,
             "images",
-            "Checking which local software to download.",
-            None,
+            "Checking what OpenBot needs to download.",
         );
         // Only what this installation runs: see `installation_pull_set`.
         let images = preparation::installation_pull_set(&address, &root, &root, harness.as_ref())?;
@@ -1890,17 +1996,17 @@ async fn prepare_installation_inner(
                 }
             },
         )?;
-        report(
+        report_line(
             &handle,
             "images",
             true,
-            format!(
+            engine::StepLine::here("OpenBot is downloaded.").logged(format!(
                 "Local software is downloaded ({}/{}).",
                 images.len(),
                 images.len()
-            ),
+            )),
         );
-        report_running(&handle, "installation", "Finishing installation.", None);
+        report_running_plain(&handle, "installation", "Finishing the installation.");
         attempt.require_current()?;
         preparation::complete(&root, harness.as_ref(), images, &address)?;
         preparation::save_selected_root(
@@ -1909,12 +2015,7 @@ async fn prepare_installation_inner(
                 .map_err(|e| Problem::from(e.to_string()))?,
             &root,
         )?;
-        report(
-            &handle,
-            "installation",
-            true,
-            "Local software is installed. Continue to sign in.",
-        );
+        report_plain(&handle, "installation", true, "OpenBot is installed.");
         Ok::<(), Problem>(())
     })
     .await
@@ -1939,7 +2040,7 @@ async fn engine_ready(
     app: &tauri::AppHandle,
     saved: Option<engine::Engine>,
 ) -> Result<engine::Address, Problem> {
-    report_running(app, "engine", "Checking the software OpenBot needs.", None);
+    report_running_plain(app, "engine", "Checking the software OpenBot needs.");
     let found = engine::detect_saved(saved);
     desktop_telemetry::observe_engine(app, &found);
     let root = stack::default_root();
@@ -1987,7 +2088,7 @@ async fn engine_ready(
         }
         Ok(None) => {}
         Err(problem) => {
-            report(app, "install-engine", false, problem.said.clone());
+            report_plain(app, "install-engine", false, problem.said.clone());
             return Err(problem);
         }
     }
@@ -2059,7 +2160,7 @@ async fn engine_ready(
             chosen.engine
         }
         Err(problem) => {
-            report(app, "install-engine", false, problem.said.clone());
+            report_plain(app, "install-engine", false, problem.said.clone());
             return Err(problem);
         }
     };
@@ -2191,10 +2292,11 @@ async fn deployment_ready<R: tauri::Runtime>(
     let version = tauri::async_runtime::spawn_blocking(move || {
         let version = deployment_release::resolve_version(&target)?;
         if deployment::needs_fetch(&target, &version) {
-            report_running(
+            report_running_line(
                 &handle,
                 "deployment",
-                format!("Downloading OpenBot {version}."),
+                engine::StepLine::here("Downloading OpenBot.")
+                    .logged(format!("Downloading OpenBot {version}.")),
                 None,
             );
             // A pinned build lays out the commit it was cut from; any other release is a tag.
@@ -3104,7 +3206,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
             );
         }
         let (settings, mut secrets) = persist_start_environment(&root, settings, &credential)?;
-        report(&app, "env", true, "Your settings are saved.");
+        report_plain(&app, "env", true, "Your settings are saved.");
         // Compose gives inherited environment precedence over .env. Pin this run's chosen ports.
         secrets.extend(ports.settings());
         for key in [
@@ -3130,7 +3232,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
 
         // Installation already verified these images. Start only raises the local containers;
         // its no-pull policy sends missing assets back to the installation step.
-        report_running(&app, "services", "Starting OpenBot's services.", None);
+        report_running_plain(&app, "services", "Starting OpenBot's services.");
 
         // Only an installed harness needs the local service; a BYO endpoint is already running elsewhere.
         let installed_harness = picked
@@ -3146,7 +3248,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         let requested_services = stack::up(&found, &root, installed_harness, &secrets)?;
         // The migrations ran with that: `migrate` is the dependency Compose completes before it
         // starts `server`, once, and a failed one fails the `up`.
-        report(&app, "services", true, "OpenBot's services are running.");
+        report_plain(&app, "services", true, "OpenBot's services are running.");
 
         // `compose up` succeeds once it has asked for everything. A service that then exits is not its
         // problem, and both Bots exit immediately without a model key. Reported and made fatal here;
@@ -3177,7 +3279,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
             }
             Err(error) => {
                 log::warn!("[start] could not carry Bots' files and sign-ins over: {error}");
-                report(
+                report_plain(
                     &app,
                     "carry-over",
                     false,
@@ -3198,11 +3300,10 @@ async fn start_stack_inner<R: tauri::Runtime>(
      * counts as ours, and anybody else on them was avoided when the ports were chosen. Docker's
      * restart policy keeps it up from here, so there is nothing to supervise after it answers.
      */
-    report_running(
+    report_running_plain(
         &app,
         "answering",
         "Starting OpenBot. This can take a few minutes the first time.",
-        None,
     );
     let ticket = attempt.generation;
     let waiting = app.clone();
@@ -3233,7 +3334,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
             format!("Last from the server container (up to 40 lines):\n{log}")
         };
         let problem = stack::startup_problem(Problem::with(error, detail), &secrets);
-        report(&app, "answering", false, problem.said.clone());
+        report_plain(&app, "answering", false, problem.said.clone());
         return Err(problem);
     }
     // Stop must not finish between accepting readiness and reporting a successful Start.
@@ -3276,7 +3377,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
     );
     watch_connections(app.clone(), root, host_token, generation, ports.server);
 
-    report(&app, "answering", true, "OpenBot is ready.");
+    report_plain(&app, "answering", true, "OpenBot is ready.");
     Ok(())
 }
 
@@ -3556,13 +3657,11 @@ impl QuitStep {
         }
     }
 
-    /// What the row says while it runs.
+    /// What the row says while it runs: its name says it, and the Shutting down screen's journey
+    /// says why ("Finishing the update so nothing is left half done").
     fn running_detail(self) -> &'static str {
         match self {
-            QuitStep::FinishUpdate => {
-                "Finishing the back end update, so the back end is not left half updated."
-            }
-            QuitStep::OpenBot | QuitStep::Intelligence => "",
+            QuitStep::FinishUpdate | QuitStep::OpenBot | QuitStep::Intelligence => "",
         }
     }
 }
@@ -7521,18 +7620,6 @@ fn show_intelligence_opening<R: tauri::Runtime>(
 /// Room left between a grown or clamped window and the edge of its monitor's work area.
 const SCREEN_MARGIN: f64 = 24.0;
 
-/**
-How tall the window's content area should become, in logical pixels, or None to leave it.
-
-Grows to `wanted` and never shrinks: a window that jumped smaller under somebody's pointer when a
-row collapsed would be worse than one with a little room to spare. `tallest` is the most the content
-area may have on this monitor; past it the page scrolls, as it always could.
-*/
-fn grown_height(current: f64, wanted: f64, tallest: f64) -> Option<f64> {
-    let target = wanted.ceil().min(tallest.floor());
-    (target > current.ceil()).then_some(target)
-}
-
 /// The window's monitor work area in logical pixels, and the height of its title bar and frame.
 fn screen_room<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
@@ -7594,35 +7681,6 @@ fn lifted_top(top: f64, outer: f64, area: &tauri::LogicalRect<f64, f64>) -> Opti
 }
 
 /**
-Make the setup window tall enough for the screen it is showing, within its monitor.
-
-The setup page measures its own content and asks; it is not granted any `core:window` permission,
-so this is the only way it can change the window, and only ever larger. A maximized or full-screen
-window is left as the person made it.
-*/
-#[tauri::command]
-fn fit_setup_window<R: tauri::Runtime>(window: tauri::WebviewWindow<R>, content_height: f64) {
-    if !content_height.is_finite()
-        || window.is_maximized().unwrap_or(true)
-        || window.is_fullscreen().unwrap_or(true)
-    {
-        return;
-    }
-    let (Some((area, frame)), Ok(scale), Ok(inner)) = (
-        screen_room(&window),
-        window.scale_factor(),
-        window.inner_size(),
-    ) else {
-        return;
-    };
-    let current = inner.to_logical::<f64>(scale).height;
-    let tallest = area.size.height - frame - 2.0 * SCREEN_MARGIN;
-    if let Some(height) = grown_height(current, content_height, tallest) {
-        set_window_height(&window, &area, frame, height);
-    }
-}
-
-/**
 On launch: a window taller than its monitor's work area is brought within it, and one whose bottom
 edge is past the work area is moved up.
 
@@ -7634,6 +7692,7 @@ fn fit_main_window_to_screen<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
+    bring_onto_a_screen(&window);
     let (Some((area, frame)), Ok(scale), Ok(inner)) = (
         screen_room(&window),
         window.scale_factor(),
@@ -7647,6 +7706,69 @@ fn fit_main_window_to_screen<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         set_window_height(&window, &area, frame, tallest.floor());
     } else {
         lift_into_work_area(&window, &area, frame, height);
+    }
+}
+
+/**
+Where a window at `window` goes so that its title bar is on one of `areas` (each monitor's work
+area, the primary first), or None when it already is. A window put back where it was last time
+(`tauri_plugin_window_state`) can be on a monitor that is no longer there: it goes to the middle of
+the primary one, as far as it fits.
+*/
+fn onto_a_screen(
+    window: tauri::LogicalRect<f64, f64>,
+    areas: &[tauri::LogicalRect<f64, f64>],
+) -> Option<tauri::LogicalPosition<f64>> {
+    // Enough of the title bar to take hold of: 120 by 24 logical pixels of it.
+    let reachable = |area: &tauri::LogicalRect<f64, f64>| {
+        let left = window.position.x.max(area.position.x);
+        let right = (window.position.x + window.size.width).min(area.position.x + area.size.width);
+        let top = window.position.y.max(area.position.y);
+        let bottom = (window.position.y + 24.0).min(area.position.y + area.size.height);
+        right - left >= 120.0 && bottom - top >= 24.0
+    };
+    if areas.iter().any(reachable) {
+        return None;
+    }
+    let area = areas.first()?;
+    Some(tauri::LogicalPosition::new(
+        area.position.x + ((area.size.width - window.size.width) / 2.0).max(0.0),
+        area.position.y + ((area.size.height - window.size.height) / 2.0).max(0.0),
+    ))
+}
+
+/// Move `window` onto a screen that is there, if it was put back somewhere that is not.
+fn bring_onto_a_screen<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    let (Ok(scale), Ok(position), Ok(size)) = (
+        window.scale_factor(),
+        window.outer_position(),
+        window.outer_size(),
+    ) else {
+        return;
+    };
+    let primary = window.primary_monitor().ok().flatten();
+    let mut monitors = window.available_monitors().unwrap_or_default();
+    // The primary monitor first: where a window with no screen of its own goes.
+    if let Some(primary) = &primary {
+        monitors.sort_by_key(|monitor| monitor.name() != primary.name());
+    }
+    let areas: Vec<_> = monitors
+        .iter()
+        .map(|monitor| {
+            let area = monitor.work_area();
+            tauri::LogicalRect {
+                position: area.position.to_logical(monitor.scale_factor()),
+                size: area.size.to_logical(monitor.scale_factor()),
+            }
+        })
+        .collect();
+    let rect = tauri::LogicalRect {
+        position: position.to_logical(scale),
+        size: size.to_logical(scale),
+    };
+    if let Some(onto) = onto_a_screen(rect, &areas) {
+        log::info!("[window] put back off every screen; moved onto the primary one");
+        let _ = window.set_position(onto);
     }
 }
 
@@ -8083,10 +8205,10 @@ fn stop_then_show_setup<R: tauri::Runtime>(
         logging::outcome("stop", asked, &settled);
         settle_change_ai_connection(&shell, settled.is_ok(), change_ai_connection);
         match settled {
-            Ok(()) => report(&app, "stopped", true, "OpenBot has been stopped"),
+            Ok(()) => report_plain(&app, "stopped", true, "OpenBot has stopped."),
             // Said rather than swallowed. A menu item that fails silently is worse than one
             // that is not there: the person believes the stack is down and it is not.
-            Err(problem) => report(&app, "stopped", false, problem.said),
+            Err(problem) => report_plain(&app, "stopped", false, problem.said),
         }
         let _ = show_setup(app.clone());
     });
@@ -8977,6 +9099,17 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // A reopened window comes back with the size and place it had, not where Windows puts a
+        // new one. `fit_main_window_to_screen` then brings it onto a screen that is still there.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::POSITION
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+                )
+                .build(),
+        )
         .plugin(tauri_plugin_notification::init())
         .plugin(intelligence_bridge::plugin())
         .plugin(desktop_page::plugin())
@@ -8987,7 +9120,6 @@ fn main() {
             bring_setup_to_front,
             allow_podman_install,
             wake_engine,
-            fit_setup_window,
             detect_engine,
             windows_blocker,
             windows_blocker_instruction,
@@ -9249,11 +9381,11 @@ fn main() {
                         },
                     ) {
                         log::error!("[exit] could not start cleanup: {error}");
-                        report(
+                        report_plain(
                             app,
                             "quit",
                             false,
-                            "OpenBot could not start shutting down. Try Quit again.",
+                            "OpenBot couldn't start shutting down. Try Quit again.",
                         );
                     }
                 }
@@ -12836,16 +12968,137 @@ mod tests {
         );
     }
 
+    /// Words a person setting OpenBot up does not know, and a release's name.
+    fn technical(said: &str) -> Option<&'static str> {
+        let lower = said.to_lowercase();
+        [
+            "podman",
+            "wsl",
+            "engine",
+            "back end",
+            "backend",
+            "container",
+            "compose",
+            "helm",
+            "k3s",
+            "image",
+            "internal-",
+            "local software",
+        ]
+        .into_iter()
+        .find(|word| lower.contains(word))
+        .or_else(|| {
+            regex::Regex::new(r"\bv?\d+\.\d+")
+                .unwrap()
+                .is_match(said)
+                .then_some("a version")
+        })
+    }
+
+    /// Every row step the native side reports has a plain line for each state, so a row whose
+    /// text was not written for the window (a release name, an engine's output, an error) still
+    /// says something plain there.
     #[test]
-    fn the_setup_window_only_grows_and_never_past_its_screen() {
-        // Content taller than the window: grown to fit.
-        assert_eq!(grown_height(640.0, 812.4, 900.0), Some(813.0));
-        // Taller than the screen allows: grown to the most it may have, and the page scrolls.
-        assert_eq!(grown_height(640.0, 1400.0, 900.5), Some(900.0));
-        // Content that fits, or a window already as tall as it can be: left alone, never shrunk.
-        assert_eq!(grown_height(800.0, 620.0, 900.0), None);
-        assert_eq!(grown_height(900.0, 1400.0, 900.0), None);
-        assert_eq!(grown_height(799.6, 800.0, 900.0), None);
+    fn every_row_the_native_side_can_show_has_a_plain_line() {
+        for step in ROW_STEPS {
+            for (ok, running) in [(true, true), (true, false), (false, false)] {
+                let said = plain_row(step, ok, running);
+                assert!(!said.is_empty(), "{step}");
+                assert_eq!(technical(said), None, "{step}: {said}");
+            }
+        }
+    }
+
+    /// Found on Windows F: "Downloading OpenBot internal-d2df1b062ac0." reached the Account
+    /// step's background row for two seconds, the one step line of the run with no plain line of
+    /// its own. Its text is the log's now, and the window says the step's plain line.
+    #[test]
+    fn a_row_with_no_plain_line_of_its_own_never_shows_its_text() {
+        for (step, running, text) in [
+            (
+                "deployment",
+                true,
+                "Downloading OpenBot internal-d2df1b062ac0.",
+            ),
+            ("deployment", false, "v1.0.1 in C:\\Users\\you\\OpenBot"),
+            ("install-engine", false, "Compose 5.5.1 installed."),
+            ("health-gate", false, "engine API 6.1.4"),
+        ] {
+            let line = unregistered_line(step, true, running, text.into());
+            assert_eq!(technical(&line.said), None, "{step}: {}", line.said);
+            assert!(!line.said.contains(text), "{step}: {}", line.said);
+            assert!(line.log_entry().contains(text), "{}", line.log_entry());
+        }
+        assert_eq!(
+            unregistered_line(
+                "deployment",
+                true,
+                true,
+                "Downloading OpenBot internal-d2df1b062ac0.".into()
+            )
+            .said,
+            "Downloading OpenBot."
+        );
+    }
+
+    /// Every step this file reports a row for is one `plain_row` knows, so a new step gets a line
+    /// of its own rather than the catch-all.
+    #[test]
+    fn every_step_reported_has_a_plain_line_of_its_own() {
+        let source = include_str!("main.rs");
+        let tests = source
+            .find("#[cfg(test)]\nmod tests")
+            .unwrap_or(source.len());
+        let reported = regex::Regex::new(
+            r#"\b(?:report|report_running|report_plain|report_running_plain|report_line|report_running_line)\(\s*&?[\w.]+,\s*"([\w-]+)""#,
+        )
+        .unwrap();
+        let steps: std::collections::BTreeSet<&str> = reported
+            .captures_iter(&source[..tests])
+            .filter_map(|found| found.get(1).map(|step| step.as_str()))
+            .collect();
+        assert!(steps.contains("deployment"), "{steps:?}");
+        for step in steps {
+            assert!(
+                ROW_STEPS.contains(&step),
+                "{step} has no plain line of its own"
+            );
+        }
+    }
+
+    /// A window put back where it was last time stays there while its title bar is on a screen,
+    /// and goes to the middle of the primary screen when that screen is gone.
+    #[test]
+    fn a_window_put_back_off_every_screen_comes_onto_the_primary_one() {
+        let rect = |x: f64, y: f64, width: f64, height: f64| tauri::LogicalRect {
+            position: tauri::LogicalPosition::new(x, y),
+            size: tauri::LogicalSize::new(width, height),
+        };
+        let primary = rect(0.0, 0.0, 1920.0, 1032.0);
+        let left = rect(-1280.0, 0.0, 1280.0, 760.0);
+        // Where it was left, on the primary screen or the second one: it stays.
+        assert_eq!(
+            onto_a_screen(rect(78.0, 24.0, 1016.0, 992.0), &[primary, left]),
+            None
+        );
+        assert_eq!(
+            onto_a_screen(rect(-1100.0, 40.0, 1016.0, 839.0), &[primary, left]),
+            None
+        );
+        // Mostly off the right edge, with its title bar still reachable: it stays.
+        assert_eq!(
+            onto_a_screen(rect(1700.0, 100.0, 1016.0, 839.0), &[primary]),
+            None
+        );
+        // The second screen is unplugged: onto the primary one, in the middle.
+        assert_eq!(
+            onto_a_screen(rect(-1100.0, 40.0, 1016.0, 839.0), &[primary]),
+            Some(tauri::LogicalPosition::new(452.0, 96.5))
+        );
+        // Its title bar above the top of every screen: the same.
+        assert!(onto_a_screen(rect(200.0, -500.0, 1016.0, 839.0), &[primary]).is_some());
+        // No screen known: left as it is.
+        assert_eq!(onto_a_screen(rect(-5000.0, 0.0, 1016.0, 839.0), &[]), None);
     }
 
     /// Windows cascades a window with no position of its own down and right on every launch. On

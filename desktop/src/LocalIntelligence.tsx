@@ -35,7 +35,6 @@ import {
   type Progress,
   SetupProgress,
   StatusLine,
-  timeLeft,
 } from "./SetupProgress";
 import { StartJourney } from "./StartJourney";
 
@@ -859,9 +858,12 @@ export function LocalIntelligence({
   offerStart = false,
   handOff = null,
   open = [],
+  releaseDue = false,
 }: {
   sequence: LocalSequence;
   offerStart?: boolean;
+  /** Start updates OpenBot itself (`upgrade_due`): the journey counts it from the start. */
+  releaseDue?: boolean;
   /** What Docker Desktop's window may want while the engine wakes: see `handOffNow`. */
   handOff?: string | null;
   /** What OpenBot's own start reports (`setup:progress`): the journey's last stretch. */
@@ -888,7 +890,12 @@ export function LocalIntelligence({
   return (
     <section aria-label="OpenBot on this computer">
       {journeying && (
-        <StartJourney sequence={sequence} open={open} now={handOff} />
+        <StartJourney
+          sequence={sequence}
+          open={open}
+          now={handOff}
+          releaseDue={releaseDue}
+        />
       )}
       <SetupProgress steps={rows} showElapsed={!journeying} />
       {handOff && !journeying && <StatusLine>{handOff}</StatusLine>}
@@ -942,7 +949,8 @@ export function LocalStatus({
             step: "Downloading the rest of OpenBot",
             ok: true,
             running: true,
-            detail: timeLeft(sequence.download) ?? "",
+            // The row says the time left from the download's own speed.
+            detail: "",
             downloads: sequence.download,
             // The install's third part, alongside the second on the Install step.
             position: { at: 3, of: 4 },
@@ -1149,13 +1157,13 @@ function AcceptTerms({
     );
   return (
     <div className="local-needs">
+      {/* The organization and the agreement's version are the log's, as on the Account step. */}
       <p>
-        To run OpenBot on this computer, accept the CopilotKit license agreement
-        for {terms.organizationName}.
+        To run OpenBot on this computer, accept the CopilotKit license
+        agreement.
       </p>
       <p className="footnote">
-        <ExternalLink href={terms.url}>Read the agreement</ExternalLink> (
-        {terms.version})
+        <ExternalLink href={terms.url}>Read the license agreement</ExternalLink>
       </p>
       <div className="row">
         <button type="button" onClick={() => onAccept(terms.version)}>

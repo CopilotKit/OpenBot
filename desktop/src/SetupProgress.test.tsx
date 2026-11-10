@@ -1,4 +1,11 @@
-import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  expect,
+  setSystemTime,
+  test,
+} from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render, within } from "@testing-library/react";
 
@@ -7,7 +14,10 @@ const { INSTALL_BLURB, SetupProgress, plainInstallSteps } = await import(
 );
 
 beforeAll(() => GlobalRegistrator.register());
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  setSystemTime();
+});
 afterAll(() => GlobalRegistrator.unregister());
 
 type Downloads = {
@@ -32,7 +42,7 @@ function installing(downloads: Downloads, running = true) {
   );
 }
 
-test("install progress is the bytes downloaded out of the whole download, and disappears after it", () => {
+test("install progress is the bytes and the parts after them, and disappears after it", () => {
   const view = render(
     <SetupProgress
       steps={installing({ done: 0, total: 0, bytes: 0 })}
@@ -40,7 +50,7 @@ test("install progress is the bytes downloaded out of the whole download, and di
     />,
   );
   const row = within(
-    view.getByRole("listitem", { name: "Installing OpenBot" }),
+    view.getByRole("listitem", { name: "Downloading OpenBot" }),
   );
   // Running, it says how far along the install is.
   expect(row.getByText("Step 2 of 4")).toBeTruthy();
@@ -57,10 +67,14 @@ test("install progress is the bytes downloaded out of the whole download, and di
         showElapsed={false}
       />,
     );
-    // The bar is the bytes, not the items: one big image is most of the wait.
+    // The bytes are most of the bar, and the parts finishing the rest: one big image is most of
+    // the wait.
     const bar = row.getByRole("progressbar", { name: "Download progress" });
-    expect(bar.getAttribute("value")).toBe(String(bytes));
-    expect(bar.getAttribute("max")).toBe("3400000000");
+    expect(Number(bar.getAttribute("value"))).toBeCloseTo(
+      0.8 * (bytes / 3_400_000_000) + 0.2 * (done / 5),
+      3,
+    );
+    expect(bar.getAttribute("max")).toBe("1");
     expect(bar.getAttribute("aria-valuetext")).toBe(said);
     expect(row.getByText(said).getAttribute("aria-hidden")).toBe("true");
     expect(
@@ -82,47 +96,63 @@ test("install progress is the bytes downloaded out of the whole download, and di
 });
 
 // Reported on 1.0.0-rc.1: a full bar read "1.1 GB of 1.1 GB · 1 of 5 parts left" while the
-// last image was still being unpacked, so a person took the step for done.
-test("with every byte in and an item still unpacking, the bar is not full and says it is unpacking", () => {
+// last image was still being unpacked, so a person took the step for done. On Windows F the same
+// line sat under a full bar with no time so far and no time left, its last bytes uncounted, and
+// looked stuck.
+test("with every byte in and parts still unpacking, the bar is never full, keeps moving, and says which part", () => {
   const size = 1_100_000_000;
-  const view = render(
-    <SetupProgress
-      steps={installing({ done: 4, total: 5, bytes: size, size })}
-      showElapsed={false}
-    />,
-  );
+  const start = new Date("2026-11-10T03:05:00Z");
+  setSystemTime(start);
+  const at = (seconds: number) =>
+    setSystemTime(new Date(start.getTime() + seconds * 1000));
+  // As Windows F reported it: the last of the bytes not counted, and two of five parts left.
+  const windowsF = { done: 3, total: 5, bytes: 1_099_000_000, size };
+  const view = render(<SetupProgress steps={installing(windowsF)} />);
   const row = within(
-    view.getByRole("listitem", { name: "Installing OpenBot" }),
+    view.getByRole("listitem", { name: "Downloading OpenBot" }),
   );
-  const said = "1.1 GB downloaded · Finishing the last part";
-  let bar = row.getByRole("progressbar", { name: "Download progress" });
-  // No value: the indeterminate bar, not a full one.
-  expect(bar.hasAttribute("value")).toBe(false);
-  expect(bar.getAttribute("aria-valuetext")).toBe(said);
-  expect(row.getByText(said)).toBeTruthy();
-  expect(row.queryByText(/parts left/)).toBeNull();
-
-  view.rerender(
-    <SetupProgress
-      steps={installing({ done: 2, total: 5, bytes: size, size })}
-      showElapsed={false}
-    />,
-  );
-  bar = row.getByRole("progressbar", { name: "Download progress" });
-  expect(bar.hasAttribute("value")).toBe(false);
+  const value = () =>
+    Number(
+      row
+        .getByRole("progressbar", { name: "Download progress" })
+        .getAttribute("value"),
+    );
+  expect(row.getByText("1.1 GB downloaded")).toBeTruthy();
   expect(
-    row.getByText("1.1 GB downloaded · Finishing the last 3 parts"),
+    row.getByText(/^Unpacking OpenBot \(4 of 5\)\. Less than a minute left\.$/),
   ).toBeTruthy();
+  expect(row.getByText(/elapsed/)).toBeTruthy();
+  const first = value();
+  expect(first).toBeLessThan(0.95);
+  // The part unpacking now moves the bar as time passes, and never fills it.
+  at(10);
+  view.rerender(<SetupProgress steps={installing(windowsF)} />);
+  const later = value();
+  expect(later).toBeGreaterThan(first);
+  expect(later).toBeLessThan(1);
+  // A part finishes: on to the next, further along.
+  at(14);
+  view.rerender(<SetupProgress steps={installing({ ...windowsF, done: 4 })} />);
+  expect(row.getByText(/^Unpacking OpenBot \(5 of 5\)\./)).toBeTruthy();
+  expect(value()).toBeGreaterThan(later);
+  expect(value()).toBeLessThan(1);
+  // Well past when the last part should have finished, it says so instead of a time.
+  at(90);
+  view.rerender(<SetupProgress steps={installing({ ...windowsF, done: 4 })} />);
+  expect(
+    row.getByText(
+      "Unpacking OpenBot (5 of 5). Taking longer than usual, still working.",
+    ),
+  ).toBeTruthy();
+  expect(value()).toBeLessThan(1);
 
-  // Bytes still arriving: the bar shows its fraction, as before.
+  // Bytes still arriving: their share of the bar, and how many parts are left.
   view.rerender(
     <SetupProgress
       steps={installing({ done: 4, total: 5, bytes: 1_000_000_000, size })}
-      showElapsed={false}
     />,
   );
-  bar = row.getByRole("progressbar", { name: "Download progress" });
-  expect(bar.getAttribute("value")).toBe("1000000000");
+  expect(value()).toBeCloseTo(0.8 * (1 / 1.1) + 0.2 * 0.8, 3);
   expect(row.getByText("1.0 GB of 1.1 GB · 1 of 5 parts left")).toBeTruthy();
 });
 
@@ -134,7 +164,7 @@ test("a download whose size is not known yet says so, and its bar does not guess
     />,
   );
   const row = within(
-    view.getByRole("listitem", { name: "Installing OpenBot" }),
+    view.getByRole("listitem", { name: "Downloading OpenBot" }),
   );
   const said = "Total size not known yet · 5 of 5 parts left";
   let bar = row.getByRole("progressbar", { name: "Download progress" });
@@ -181,8 +211,8 @@ test("a row with bytes and no items says only the bytes", () => {
   expect(row.getByText(UPDATING)).toBeTruthy();
   expect(row.getByText("207.0 MB of 315.0 MB")).toBeTruthy();
   const bar = row.getByRole("progressbar", { name: "Download progress" });
-  expect(bar.getAttribute("value")).toBe("207000000");
-  expect(bar.getAttribute("max")).toBe("315000000");
+  expect(Number(bar.getAttribute("value"))).toBeCloseTo(207 / 315, 3);
+  expect(bar.getAttribute("max")).toBe("1");
 });
 
 test("the install blurb names the parts of OpenBot it installs, in two sentences at most", () => {

@@ -14,7 +14,10 @@ import {
   WAIT,
 } from "./journey";
 import type { LocalSequence } from "./LocalIntelligence";
-import { startLegs } from "./StartJourney";
+import type { Progress } from "./SetupProgress";
+import { type QuitClock, quitTick } from "./ShuttingDown";
+import { installingBehind } from "./SetupProgress";
+import { type JourneyClock, journeyTick, startLegs } from "./StartJourney";
 
 /**
  * A first setup of the back end and its update after an app update, as the CLI logged them on a
@@ -215,4 +218,228 @@ test("a long download moves the bar by its bytes and holds up no step's clock", 
   expect(carrying.left).not.toBeNull();
   // Counting the download as the update's own time read as taking longer than usual.
   expect(journey(startLegs(after, [], now)).left).toBeNull();
+});
+
+/**
+ * Windows D updating OpenBot 1.0.1-internal.1008 to 1012, as the Start screen was sampled every 3
+ * to 12 seconds: the back end up at 5 s, the update getting ready (stopping OpenBot, backing up its
+ * data) until 24 s, its 944.3 MB download from 28 s (386.9 MB at 38 s, 783.5 at 50, 929.6 at 62,
+ * 939.1 at 74), installing it at 76 s, starting it at 78 s, and OpenBot open at 110 s.
+ */
+const D_DOWNLOAD: [number, number][] = [
+  [28, 0],
+  [38, 386_900_000],
+  [50, 783_500_000],
+  [62, 929_600_000],
+  [74, 939_100_000],
+  [76, 944_300_000],
+];
+
+function bytesAt(second: number): number {
+  for (let index = 1; index < D_DOWNLOAD.length; index += 1) {
+    const [to, bytes] = D_DOWNLOAD[index] as [number, number];
+    const [from, before] = D_DOWNLOAD[index - 1] as [number, number];
+    if (second <= to)
+      return before + ((bytes - before) * (second - from)) / (to - from);
+  }
+  return 944_300_000;
+}
+
+function windowsD(second: number): {
+  sequence: LocalSequence;
+  open: Progress[];
+} {
+  const start = 1_000_000;
+  const opening = second >= 5;
+  const sequence = {
+    began: "wait",
+    at: opening ? "start" : "wait",
+    running: true,
+    runSince: start,
+    since: opening ? start + 5_000 : start,
+    updating: false,
+    trailKind: null,
+    trail: [],
+    trailSince: null,
+    services: null,
+    download: null,
+  } as unknown as LocalSequence;
+  const open: Progress[] = [];
+  if (opening) {
+    const detail =
+      second < 6
+        ? "Updating OpenBot. Your Bots, sign-ins and data stay as they are."
+        : second < 12
+          ? "Stopping OpenBot."
+          : second < 24
+            ? "Backing up your data."
+            : second < 76
+              ? "Downloading the update."
+              : second < 78
+                ? "Installing the update."
+                : "Starting OpenBot.";
+    open.push({ step: "release", ok: true, running: true, detail });
+  }
+  if (second >= 28 && second < 76)
+    open.push({
+      step: "images",
+      ok: true,
+      running: true,
+      detail: "Downloading local software.",
+      downloads: {
+        bytes: bytesAt(second),
+        size: 944_300_000,
+        done: Math.max(0, Math.min(4, Math.floor((second - 44) / 8))),
+        total: 5,
+        ...(second >= 31
+          ? { bytesPerSecond: (bytesAt(second) - bytesAt(second - 3)) / 3 }
+          : {}),
+      },
+    });
+  return { sequence, open };
+}
+
+test("over Windows D's update, the bar follows the time each part takes and the time left never jumps up", () => {
+  let clock: JourneyClock | null = null;
+  const seen: {
+    second: number;
+    fraction: number;
+    left: number | null;
+    said: string;
+  }[] = [];
+  for (let second = 0; second <= 109; second += 1) {
+    const { sequence, open } = windowsD(second);
+    const ticked = journeyTick(
+      clock,
+      sequence,
+      open,
+      1_000_000 + second * 1000,
+      true,
+    );
+    clock = ticked.clock;
+    seen.push({ second, ...ticked.view });
+  }
+  const at = (second: number) => seen[second] as (typeof seen)[number];
+  // Never back.
+  for (let second = 1; second < seen.length; second += 1)
+    expect(at(second).fraction).toBeGreaterThanOrEqual(at(second - 1).fraction);
+  // Not most of the way before the longest part has begun: D's bar was at 72% here.
+  expect(at(24).fraction).toBeLessThan(0.35);
+  // The download moves it, and is a good share of it.
+  expect(at(50).fraction).toBeGreaterThan(at(38).fraction);
+  expect(at(62).fraction).toBeGreaterThan(at(50).fraction);
+  expect(at(76).fraction - at(28).fraction).toBeGreaterThan(0.25);
+  // Most of the way by the end, never full while it runs.
+  expect(at(105).fraction).toBeGreaterThan(0.85);
+  expect(at(109).fraction).toBeLessThan(1);
+  // Once settled, the time left only ever rises by a small step between samples 3 seconds apart.
+  for (let second = 10; second + 3 < seen.length; second += 1) {
+    const now = at(second).left;
+    const later = at(second + 3).left;
+    if (now !== null && later !== null)
+      expect(later - now).toBeLessThanOrEqual(2);
+  }
+  // It said each part as it came.
+  const said = [...new Set(seen.map((moment) => moment.said))];
+  expect(said).toContain("Getting the update ready");
+  expect(said).toContain("Downloading the update");
+  expect(said).toContain("Starting the updated OpenBot");
+  expect(said.join(" ")).not.toMatch(/back end|Podman|engine/i);
+});
+
+/**
+ * Windows F said "Taking longer than usual, still working" 46 seconds into setting up the rest of
+ * OpenBot, a part that takes about three minutes. It says so only once a step is well past when it
+ * typically ends: half as long again, and a minute at least.
+ */
+test("taking longer than usual is said only well past when a step typically ends", () => {
+  const checked = recorded.setup
+    .filter(([at]) => at <= 13)
+    .map(([, step]) => step);
+  // 46 seconds in, still on a step that typically ends at 15: not yet.
+  expect(position(SETUP, checked, 46).slow).toBe(false);
+  expect(
+    journey([{ plan: SETUP, state: "now", at: position(SETUP, checked, 46) }])
+      .left,
+  ).not.toBeNull();
+  // Two minutes in, on the same step: now it says so.
+  expect(position(SETUP, checked, 120).slow).toBe(true);
+});
+
+/**
+ * Windows F: the background row's "Step 3 of 4 · 3m 26s elapsed" went back to "0s elapsed" as the
+ * back end's setup moved on to its next phase. Its time so far is the whole install's.
+ */
+test("the background row's time so far only goes up as the install moves on", () => {
+  const since = 1_000_000;
+  const backEnd = {
+    at: "setup",
+    running: true,
+    stopped: false,
+    ready: false,
+    detail: null,
+    download: null,
+    since: since + 200_000,
+    runSince: since + 120_000,
+  };
+  const rows = [
+    installingBehind({
+      steps: [],
+      installing: false,
+      installed: true,
+      since,
+      backEnd,
+    }),
+    installingBehind({
+      steps: [],
+      installing: false,
+      installed: true,
+      since,
+      backEnd: { ...backEnd, at: "connect", since: since + 206_000 },
+    }),
+    installingBehind({
+      steps: [],
+      installing: false,
+      installed: true,
+      since,
+      backEnd: { ...backEnd, at: "wait", since: since + 209_000 },
+    }),
+  ];
+  expect(rows.map((row) => row?.startedAt)).toEqual([since, since, since]);
+  // With no install on record (a relaunch), the back end's whole run, not its phase.
+  const relaunch = installingBehind({
+    steps: [],
+    installing: false,
+    installed: true,
+    since: null,
+    backEnd: { ...backEnd, at: "connect", since: since + 206_000 },
+  });
+  expect(relaunch?.startedAt).toBe(since + 120_000);
+});
+
+/** Windows D's Quit: stopping OpenBot took 14 seconds and its services about 12. */
+test("a Quit says what it is doing, moves its bar, and says the time left", () => {
+  let clock: QuitClock | null = null;
+  const seen: { said: string; fraction: number; left: number | null }[] = [];
+  for (let second = 0; second <= 26; second += 1) {
+    const steps: Progress[] =
+      second < 14
+        ? [{ step: "stop-openbot", ok: true, running: true, detail: "" }]
+        : [
+            { step: "stop-openbot", ok: true, detail: "" },
+            { step: "stop-intelligence", ok: true, running: true, detail: "" },
+          ];
+    const ticked = quitTick(clock, steps, 1_000_000 + second * 1000);
+    clock = ticked.clock;
+    seen.push(ticked);
+  }
+  expect(seen[0]?.said).toBe("Closing OpenBot's apps");
+  expect(seen[0]?.left).toBe(28);
+  expect(seen[20]?.said).toBe("Closing OpenBot's services");
+  for (let second = 1; second < seen.length; second += 1)
+    expect(seen[second]?.fraction).toBeGreaterThan(
+      seen[second - 1]?.fraction ?? 1,
+    );
+  expect(seen[26]?.fraction).toBeGreaterThan(0.8);
+  expect(seen[26]?.fraction).toBeLessThan(1);
 });

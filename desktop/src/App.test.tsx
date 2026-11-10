@@ -234,7 +234,11 @@ async function emitProgress(payload: ProgressEvent) {
   });
 }
 
-test("installation shows its active stage immediately without an elapsed timer", async () => {
+/*
+ * The install's rows say their time so far, counted from when the install began. Windows F showed
+ * a row with neither a time so far nor a time left, under a full bar, and it looked stuck.
+ */
+test("installation shows its active stage immediately, with its time so far", async () => {
   const { view, preparation } = await beginPendingInstallation();
   const preparing = within(
     view.getByRole("listitem", { name: "Preparing this computer" }),
@@ -245,7 +249,7 @@ test("installation shows its active stage immediately without an elapsed timer",
   // Running, it says how far along the install is: the first of its four parts.
   expect(preparing.getByText("Step 1 of 4")).toBeTruthy();
   expect(preparing.queryByText("✓")).toBeNull();
-  expect(preparing.queryByText(/elapsed/)).toBeNull();
+  expect(preparing.getByText(/· \d+s elapsed/)).toBeTruthy();
   await act(async () => preparation.resolve());
   // Installed: on to the AI provider screen. The install's rows are done; what is left, setting
   // up the rest of OpenBot, is said on one row under the choice.
@@ -254,7 +258,7 @@ test("installation shows its active stage immediately without an elapsed timer",
     view.queryByRole("listitem", { name: "Preparing this computer" }),
   ).toBeNull();
   expect(
-    view.queryByRole("listitem", { name: "Installing OpenBot" }),
+    view.queryByRole("listitem", { name: "Downloading OpenBot" }),
   ).toBeNull();
   expectBehind(
     view,
@@ -281,7 +285,7 @@ test("installation failure stops active indicators and retry begins fresh", asyn
     preparation.reject({ said: "The download was interrupted." }),
   );
   const installing = within(
-    view.getByRole("listitem", { name: "Installing OpenBot" }),
+    view.getByRole("listitem", { name: "Downloading OpenBot" }),
   );
   expect(installing.getByText("Failed")).toBeTruthy();
   expect(installing.getByText("✗")).toBeTruthy();
@@ -597,7 +601,7 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
     running: true,
     detail: "Checking which local software to download.",
   });
-  const checking = rowStatus(view, "Installing OpenBot");
+  const checking = rowStatus(view, "Downloading OpenBot");
   expect(
     checking.getByText("Checking which local software to download."),
   ).toBeTruthy();
@@ -615,7 +619,7 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
     ).getByText("Complete"),
   ).toBeTruthy();
   const installing = within(
-    view.getByRole("listitem", { name: "Installing OpenBot" }),
+    view.getByRole("listitem", { name: "Downloading OpenBot" }),
   );
   expect(installing.getByText("Step 2 of 4")).toBeTruthy();
   expect(installing.queryByText(/Downloading local software/)).toBeNull();
@@ -640,13 +644,16 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
   expect(
     installing.getByText("52.0 MB of 1.3 GB · 5 of 7 parts left"),
   ).toBeTruthy();
-  // The bar is the bytes, out of the whole download.
-  expect(installing.getByRole("progressbar").getAttribute("value")).toBe(
-    "52000000",
+  // One bar for the bytes and the parts unpacking after them: the bytes most of it.
+  const bar = installing.getByRole("progressbar");
+  expect(bar.getAttribute("max")).toBe("1");
+  expect(Number(bar.getAttribute("value"))).toBeCloseTo(
+    0.8 * (52 / 1300) + 0.2 * (2 / 7),
+    3,
   );
-  expect(installing.getByRole("progressbar").getAttribute("max")).toBe(
-    "1300000000",
-  );
+  // What it is doing and the time left from its speed, with the time so far beside the step.
+  expect(installing.getByText(/^About \d+ minutes left\.$/)).toBeTruthy();
+  expect(installing.getByText(/elapsed/)).toBeTruthy();
   expectPlain(view);
   expect(
     setupEvents().filter(
@@ -705,10 +712,14 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   await view.findByRole("heading", { name: "Accept the license agreement" });
   expect(
     view.getByText(
-      "To run OpenBot on this computer, accept the CopilotKit license agreement for Acme.",
+      "To run OpenBot on this computer, accept the CopilotKit license agreement.",
     ),
   ).toBeTruthy();
-  expect(view.getByRole("link", { name: "Read the agreement" })).toBeTruthy();
+  expect(
+    view.getByRole("link", { name: "Read the license agreement" }),
+  ).toBeTruthy();
+  // The agreement's version and the organization are the log's, not the screen's.
+  expect(document.body.textContent).not.toMatch(/developer-edition|Acme/);
   // Nothing licensed runs before Accept.
   expect(localSequence()).toEqual([]);
   await userEvent.click(view.getByRole("button", { name: "Accept" }));
@@ -1251,11 +1262,13 @@ for (const platform of ["macOS", "Windows"] as const) {
     expect(installed?.text).toContain(
       "OpenBot is installedCompleteOpenBot starts as soon as you connect your AI.",
     );
-    // The Install step's own rows say how far along, and the time left.
+    // The Install step's own rows say how far along, the time so far and the time left. Its row
+    // is not named as the heading above it is: on Windows F both said "Installing OpenBot".
     const install = beats.find(({ beat }) => beat === "install");
-    expect(install?.text).toContain(
-      "Installing OpenBotStep 2 of 4Less than a minute left.",
+    expect(install?.text).toMatch(
+      /Downloading OpenBotStep 2 of 4 · \d+s elapsedLess than a minute left\./,
     );
+    expect(install?.text).not.toContain("Installing OpenBotStep");
   });
 }
 
@@ -1709,7 +1722,7 @@ test("the local sequence starts when installation completes and survives the pro
   expectPlain(view);
 });
 
-test("Continue during setup shows Getting ready, which starts and opens OpenBot by itself", async () => {
+test("Continue during setup shows Finishing setup, which starts and opens OpenBot by itself", async () => {
   setupRootConfiguration("/tmp/local-eval-auto", async () =>
     emptyConfiguration(),
   );
@@ -1722,7 +1735,7 @@ test("Continue during setup shows Getting ready, which starts and opens OpenBot 
   const view = await renderApp();
   await installLocal(view);
   await chooseOpenAi(view);
-  await view.findByRole("heading", { name: "Getting ready" });
+  await view.findByRole("heading", { name: "Finishing setup" });
   expect(stepLabel(view)).toBe("Start");
   const row = view.getByRole("listitem", { name: "Setting up OpenBot" });
   expect(row.textContent).toContain("Step 1 of 4");
@@ -1927,7 +1940,7 @@ test("while a CLI step runs only Cancel is offered, and Cancel stops the call an
   const view = await renderApp();
   await installLocal(view);
   await chooseOpenAi(view);
-  await view.findByRole("heading", { name: "Getting ready" });
+  await view.findByRole("heading", { name: "Finishing setup" });
   expect(buttons(view)).toEqual(["Cancel"]);
   expect(view.queryByText("Installation options")).toBeNull();
   await userEvent.click(view.getByRole("button", { name: "Cancel" }));
@@ -1982,7 +1995,7 @@ test("a blocked setup stops at its row in plain words and Retry resumes there", 
     "The software OpenBot runs on isn't running. Retry to start it.",
   );
   await chooseOpenAi(view);
-  await view.findByRole("heading", { name: "Getting ready" });
+  await view.findByRole("heading", { name: "Finishing setup" });
   // Continue does not retry a blocked step: Retry does.
   expect(setups).toBe(1);
   const row = view.getByRole("listitem", { name: "Setting up OpenBot" });
@@ -2825,7 +2838,6 @@ test("the journey says the update step running now, never one that finished, on 
       "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
     );
   }
-  expect(fraction).toBeGreaterThan(0.5);
   // Nothing an earlier step said is left on the screen.
   for (const finished of [
     "Stopping OpenBot.",
@@ -3136,7 +3148,7 @@ test("relaunch waits for Start when auto-start is off, interrupted, or the stack
   }
 });
 
-test("Back from a stopped Getting ready keeps the AI already chosen", async () => {
+test("Back from a stopped Finishing setup keeps the AI already chosen", async () => {
   setupRootConfiguration("/tmp/back-preserves-setup", async () =>
     emptyConfiguration(),
   );
@@ -3151,7 +3163,7 @@ test("Back from a stopped Getting ready keeps the AI already chosen", async () =
   const view = await renderApp();
   await installLocal(view);
   await chooseOpenAi(view);
-  await view.findByRole("heading", { name: "Getting ready" });
+  await view.findByRole("heading", { name: "Finishing setup" });
   await userEvent.click(await view.findByRole("button", { name: "Back" }));
   expect(view.getByRole("heading", { name: "Connect your AI" })).toBeTruthy();
   expect(view.getByRole("radio", { name: /OpenAI/ })).toHaveProperty(
@@ -3379,7 +3391,7 @@ test.each(["model", "intelligence"])(
         name:
           connection === "model"
             ? "Refresh your AI connection"
-            : "Getting ready",
+            : "Finishing setup",
       }),
     ).toBeTruthy();
     expect(
@@ -3415,7 +3427,9 @@ test.each(["model", "intelligence"])(
     const view = await renderApp();
     await view.findByRole("heading", {
       name:
-        connection === "model" ? "Refresh your AI connection" : "Getting ready",
+        connection === "model"
+          ? "Refresh your AI connection"
+          : "Finishing setup",
     });
     expect(
       view

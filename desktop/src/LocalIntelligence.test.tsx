@@ -270,10 +270,12 @@ test("a first setup shows its download on the journey and on the screen in front
       .textContent,
   ).toContain("245.0 MB of 690.0 MB");
   expect(
-    behind
-      .getByRole("progressbar", { name: "Download progress" })
-      .getAttribute("value"),
-  ).toBe("245000000");
+    Number(
+      behind
+        .getByRole("progressbar", { name: "Download progress" })
+        .getAttribute("value"),
+    ),
+  ).toBeCloseTo(245 / 690, 3);
   // It asked about the setup's own call.
   const setup = invokeCalls.find(
     (call) => call.command === "set_up_local_eval",
@@ -1003,9 +1005,13 @@ test("setup that needs the agreement shows it, and only Accept sets up again wit
   });
   const screen = view();
   await screen.findByText(
-    "To run OpenBot on this computer, accept the CopilotKit license agreement for Acme.",
+    "To run OpenBot on this computer, accept the CopilotKit license agreement.",
   );
-  expect(screen.getByRole("link", { name: "Read the agreement" })).toBeTruthy();
+  expect(
+    screen.getByRole("link", { name: "Read the license agreement" }),
+  ).toBeTruthy();
+  // The agreement's version and the organization are the log's, not the screen's.
+  expect(document.body.textContent).not.toMatch(/developer-edition|Acme/);
   // Nothing is accepted until the person clicks Accept.
   expect(
     invokeCalls.filter((call) => call.command === "set_up_local_eval"),

@@ -160,8 +160,10 @@ function unquote(literal: string): string {
 }
 
 /**
- * The native side's sentences that reach the window: a `Problem`'s headline, a setup row's line,
- * and every literal in the functions that choose a failure's headline. Test modules are cut off.
+ * The native side's sentences that reach the window: a `Problem`'s headline, a setup row's line
+ * (`StepLine`, `report_plain`, `report_running_plain`), and every literal in the functions that
+ * choose a failure's headline. A row's other text goes to the log (`plain_row` in main.rs). Test
+ * modules are cut off.
  */
 function nativeSentences(path: string): Said[] {
   const whole = readFileSync(path, "utf8");
@@ -170,14 +172,14 @@ function nativeSentences(path: string): Said[] {
   const found: Said[] = [];
   const at = (index: number) => text.slice(0, index).split("\n").length;
   const headline = new RegExp(
-    String.raw`(?:Problem::(?:plain|with)|StepLine::(?:here|elsewhere|asks))\(\s*(?:&?format!\(\s*)?(${LITERAL})`,
+    String.raw`(?:Problem::(?:plain|with)|StepLine::(?:here|elsewhere|asks))\(\s*(?:&?format!\(\s*)?(${LITERAL})|report_plain\(\s*&?[\w.]+,\s*"[\w-]+",\s*[\w.]+,\s*(${LITERAL})|report_running_plain\(\s*&?[\w.]+,\s*"[\w-]+",\s*(${LITERAL})`,
     "g",
   );
   for (const match of text.matchAll(headline))
     found.push({
       file: relative(REPO, path),
       line: at(match.index),
-      text: unquote(match[1]),
+      text: unquote(match[1] ?? match[2] ?? match[3] ?? '""'),
     });
   for (const chooser of [
     "explain_machine_error",

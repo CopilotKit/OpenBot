@@ -31,7 +31,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   no longer counts against the step it holds up. Updating OpenBot on Start says "Downloading the
   update" and "Installing the update" rather than a release name, its download's total no longer
   shrinks partway, and the card is held from the top, so nothing already on screen moves as rows
-  and downloads come and go.
+  and downloads come and go. The bar follows how long each part actually takes, so a long download
+  is most of it and moves it, and the time left never jumps up. Once a download's bytes are in, its
+  row says which part is unpacking ("Unpacking OpenBot (4 of 5)") under a bar that is never full
+  while a part is left, with the time so far and the time left. Quit shows the same bar and time
+  left. The window keeps the size and place it opened with, and a step taller than it scrolls
+  inside its card; a reopened window comes back where it was. The license step links "Read the
+  license agreement" without the agreement's id, and no step line shows a release name or the
+  engine's own output.
 - **A first install on a Mac starts the first time, and a reinstall sets its back end up again.**
   Three things a from-zero install of 1.0.0 hit on a Mac with Docker Desktop:
   - The first Start could stop with "Something went wrong" because Docker Desktop refused the
