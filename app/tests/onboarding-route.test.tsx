@@ -449,10 +449,10 @@ test("Welcome says what always asks before the switch, and the switch says it co
     name: "Always ask before making changes",
   });
   const always = view.getByText(
-    /^Bots always ask for your approval before deleting, sending, sharing, or posting content in your apps or on websites\./,
+    /^Bots ask for your approval before deleting, sending, sharing, posting, or paying in your apps or on websites\./,
   );
   expect(always.textContent).toContain(
-    "Bots leave payments and account security changes for you to do yourself.",
+    "Bots leave changing a password on a website for you to do yourself.",
   );
   // Above the switch in the reading order, not under it.
   expect(

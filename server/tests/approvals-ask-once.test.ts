@@ -66,8 +66,8 @@ describe("a Bot OpenBot runs leaves the asking to OpenBot", () => {
     ["send", "Send", "ask"],
     ["share", "Share", "ask"],
     ["post", "Post", "ask"],
-    ["pay for", "Pay", "hand_off"],
-    ["buy", "Buy now", "hand_off"],
+    ["pay for", "Pay", "ask"],
+    ["buy", "Buy now", "ask"],
   ] as const)(
     "the guidance says OpenBot asks before you %s, and it does",
     (said, button, behaviour) => {

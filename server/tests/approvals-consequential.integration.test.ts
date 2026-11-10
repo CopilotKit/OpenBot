@@ -120,7 +120,7 @@ async function gate(
 
 const CONSEQUENTIAL = {
   money: {
-    behaviour: "hand_off",
+    kind: "payments",
     cases: [
       tool("composio-stripe", "STRIPE_CREATE_TRANSFER", {
         amount: 5000,
@@ -146,7 +146,7 @@ const CONSEQUENTIAL = {
     ],
   },
   buying: {
-    behaviour: "hand_off",
+    kind: "payments",
     cases: [
       click(
         "https://www.amazon.com/gp/buy/spc/handlers/display.html",
@@ -160,7 +160,7 @@ const CONSEQUENTIAL = {
     ],
   },
   deleting: {
-    behaviour: "ask",
+    kind: "deleting",
     cases: [
       tool("composio-googledrive", "GOOGLEDRIVE_DELETE_FILE", {
         file_id: "1abc",
@@ -187,7 +187,7 @@ const CONSEQUENTIAL = {
     ],
   },
   sending: {
-    behaviour: "ask",
+    kind: "sending",
     cases: [
       click(
         "https://mail.google.com/mail/u/0/#inbox?compose=new",
@@ -227,7 +227,7 @@ const CONSEQUENTIAL = {
     ],
   },
   sharing: {
-    behaviour: "ask",
+    kind: "sharing",
     cases: [
       tool("composio-googledrive", "GOOGLEDRIVE_ADD_FILE_SHARING_PREFERENCE", {
         file_id: "1abc",
@@ -239,7 +239,7 @@ const CONSEQUENTIAL = {
     ],
   },
   publishing: {
-    behaviour: "ask",
+    kind: "publishing",
     cases: [
       click("https://x.com/compose/post", "button", "Post"),
       click("https://medium.com/new-story", "button", "Publish"),
@@ -357,10 +357,12 @@ describe.each(EDITIONS)("the %s edition", (edition) => {
     owner = await person();
   });
 
-  for (const [category, { behaviour, cases }] of Object.entries(
-    CONSEQUENTIAL,
-  )) {
-    test(`${category} asks, whether by an app or a click, and offers no Always allow`, async () => {
+  /*
+   * OPEN BY DEFAULT, reversing #998: each kind asks, and the card offers Allow once, Allow for this
+   * conversation and Always allow here. An admin can close a kind (approvals-open-by-default).
+   */
+  for (const [category, { kind, cases }] of Object.entries(CONSEQUENTIAL)) {
+    test(`${category} asks, whether by an app or a click, and offers every answer`, async () => {
       setEdition(edition);
       expect(await store.enabled(owner)).toBe(false);
       for (const action of cases) {
@@ -369,16 +371,15 @@ describe.each(EDITIONS)("the %s edition", (edition) => {
           action: action.toolRef,
           target: action.target,
           policy: request?.action.policy,
-        }).toMatchObject({ policy: { behaviour, source: "safety" } });
-        expect(offersStandingRule(request?.action ?? {})).toBeFalse();
-        await expect(
-          service.decide(owner, request?.id ?? "", "allow_always"),
-        ).rejects.toThrow();
+        }).toMatchObject({
+          policy: { behaviour: "ask", source: "safety", kind },
+        });
+        expect(offersStandingRule(request?.action ?? {})).toBeTrue();
       }
     });
   }
 
-  test("an archive is answered with Allow once or Deny, each that one time", async () => {
+  test("an archive answered with Allow once or Deny is answered that one time", async () => {
     setEdition(edition);
     const archive = tool("composio-hubspot", "HUBSPOT_ARCHIVE_CONTACT", {
       contact_id: "51",
@@ -387,7 +388,7 @@ describe.each(EDITIONS)("the %s edition", (edition) => {
     expect(allowed?.action.policy).toMatchObject({
       behaviour: "ask",
       source: "safety",
-      reason: "Deleting something always asks you first.",
+      reason: "Deleting something asks you first.",
     });
     expect(
       (await service.decide(owner, allowed?.id ?? "", "allow_once")).status,
@@ -416,15 +417,15 @@ describe.each(EDITIONS)("the %s edition", (edition) => {
     });
   }
 
-  // A hand-off means the Bot can't do it at all, so one that moves no money must not get one.
-  test("a transfer or a 'pay' that moves no money is not handed to the person as a payment", async () => {
+  // An admin can close payments to a hand-off, so one that moves no money must not count as one.
+  test("a transfer or a 'pay' that moves no money is not asked about as a payment", async () => {
     setEdition(edition);
     for (const action of NOT_MONEY) {
       const request = await gate(owner, action);
       expect({
         action: action.toolRef,
-        behaviour: request?.action.policy?.behaviour,
-      }).not.toMatchObject({ behaviour: "hand_off" });
+        kind: request?.action.policy?.kind,
+      }).not.toMatchObject({ kind: "payments" });
     }
   });
 });
@@ -472,7 +473,7 @@ async function outcomes(
     const policy = request?.action.policy;
     seen[name] = policy
       ? {
-          category: CATEGORY_OF[policy.reason] ?? policy.reason,
+          category: CATEGORY_OF[policy.kind ?? ""] ?? policy.reason,
           behaviour: policy.behaviour as "ask" | "hand_off",
         }
       : { category: null };
@@ -484,11 +485,11 @@ async function outcomes(
 }
 
 const CATEGORY_OF: Record<string, string> = {
-  "Paying, purchasing or moving money is always done by the person.": "money",
-  "Deleting something always asks you first.": "deleting",
-  "Sending something to other people always asks you first.": "sending",
-  "Sharing something with other people always asks you first.": "sharing",
-  "Posting or publishing something always asks you first.": "publishing",
+  payments: "money",
+  deleting: "deleting",
+  sending: "sending",
+  sharing: "sharing",
+  publishing: "publishing",
 };
 
 const nothing: Expected = { category: null };
@@ -610,22 +611,22 @@ const MISSED = {
     tool("composio-deel", "DEEL_SUBMIT_ON_DEMAND_PAYROLL", {
       payroll_id: "p1",
     }),
-    { category: "money", behaviour: "hand_off" },
+    { category: "money" },
   ],
   "a payroll run": [
     tool("composio-gusto", "GUSTO_SUBMIT_PAYROLL", {
       company_id: "co1",
       payroll_id: "p1",
     }),
-    { category: "money", behaviour: "hand_off" },
+    { category: "money" },
   ],
   "an Upgrade button": [
     click("https://app.example.com/settings/workspace", "button", "Upgrade"),
-    { category: "money", behaviour: "hand_off" },
+    { category: "money" },
   ],
   "a Subscribe button on a plans page": [
     click("https://www.nytimes.com/subscription", "button", "Subscribe"),
-    { category: "money", behaviour: "hand_off" },
+    { category: "money" },
   ],
   "a Subscribe button with a price": [
     click(
@@ -633,14 +634,14 @@ const MISSED = {
       "button",
       "Subscribe for $4/month",
     ),
-    { category: "money", behaviour: "hand_off" },
+    { category: "money" },
   ],
   "a paid plan changed by an app": [
     tool("composio-shopify", "SHOPIFY_CREATE_APP_SUBSCRIPTION", {
       name: "Pro",
       price: 29,
     }),
-    { category: "money", behaviour: "hand_off" },
+    { category: "money" },
   ],
 } as const;
 
@@ -765,7 +766,7 @@ describe.each(EDITIONS)("named words in the %s edition", (edition) => {
     expect(seen).toEqual(wanted);
   });
 
-  test("a free subscription and a payroll file are not handed off", async () => {
+  test("a free subscription and a payroll file are not asked about as payments", async () => {
     setEdition(edition);
     const { seen, wanted } = await outcomes(owner, FREE);
     expect(seen).toEqual(wanted);
@@ -907,7 +908,7 @@ describe("a tool its app marks destructive, called through the app", () => {
     );
   };
 
-  test("it asks with Allow once or Deny, whatever it is called; an unmarked tool of the same app runs", async () => {
+  test("it asks, whatever it is called; an unmarked tool of the same app runs", async () => {
     setEdition("personal");
     expect(await store.enabled(owner)).toBe(false);
 
@@ -919,10 +920,11 @@ describe("a tool its app marks destructive, called through the app", () => {
     expect(request?.action.policy).toEqual({
       behaviour: "ask",
       source: "safety",
+      kind: "deleting",
       reason:
-        "The app marks this as deleting or overwriting something, so it always asks you first.",
+        "The app marks this as deleting or overwriting something, so it asks you first.",
     });
-    expect(offersStandingRule(request?.action ?? {})).toBeFalse();
+    expect(offersStandingRule(request?.action ?? {})).toBeTrue();
     expect(vendorCalls).toEqual([]);
 
     expect((await call("rename_workspace")).asked).toBeFalse();

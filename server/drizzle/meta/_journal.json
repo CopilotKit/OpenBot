@@ -610,6 +610,13 @@
       "when": 1794270285119,
       "tag": "0086_channel_title",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1794272949123,
+      "tag": "0087_approval_conversation_grants",
+      "breakpoints": true
     }
   ]
 }

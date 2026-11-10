@@ -1,9 +1,16 @@
 import {
   IconChecklist,
   IconChevronRight,
+  IconCreditCard,
   IconEyeCheck,
+  IconKey,
+  IconLock,
+  IconSend,
+  IconShare,
   IconSparkles,
+  IconSpeakerphone,
   IconTerminal2,
+  IconTrash,
   IconUserCog,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -25,6 +32,8 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import {
+  type ActionKind,
+  type ActionKindPolicy,
   approvalInboxOptions,
   createTeamApprovalRuleMutationOptions,
   revokeTeamApprovalRuleMutationOptions,
@@ -34,6 +43,40 @@ import {
 import { queryClient } from "@/query-client";
 import { HOST_LABELS, LabelSelect, RuleForm, RuleRow } from "./rules";
 import { SharedUseRequests } from "./shared-use-requests";
+
+/** The kinds of action Bots ask about by name, in the order members meet them. */
+const ACTION_KIND_ROWS: {
+  kind: ActionKind;
+  title: string;
+  icon: typeof IconSend;
+}[] = [
+  { kind: "sending", title: "Sending to other people", icon: IconSend },
+  { kind: "deleting", title: "Deleting", icon: IconTrash },
+  { kind: "sharing", title: "Sharing", icon: IconShare },
+  {
+    kind: "publishing",
+    title: "Posting and publishing",
+    icon: IconSpeakerphone,
+  },
+  { kind: "payments", title: "Paying and buying", icon: IconCreditCard },
+  {
+    kind: "security_settings",
+    title: "Security and access settings",
+    icon: IconLock,
+  },
+  {
+    kind: "credentials",
+    title: "Passwords and sign-in details",
+    icon: IconKey,
+  },
+];
+
+/** What members can do about one kind of action. Open unless the admin closes it. */
+const ACTION_KIND_LABELS: Record<ActionKindPolicy, string> = {
+  open: "Members choose",
+  ask: "Ask every time",
+  hand_off: "Members do it themselves",
+};
 
 /**
  * What every member's Bots must do, set by an administrator: the team-wide controls, the rules that
@@ -132,6 +175,39 @@ export function TeamApprovalSettings() {
                 />
               </ItemActions>
             </Item>
+          </PageRows>
+        </PageSection>
+      ) : null}
+      {settings ? (
+        <PageSection
+          description="Bots ask before these. With Members choose, a member can allow one once, for a conversation, or always. Ask every time leaves only Allow once and Deny."
+          title="Actions that ask first"
+        >
+          <PageRows>
+            {ACTION_KIND_ROWS.map(({ kind, title, icon: Icon }, index) => (
+              <Fragment key={kind}>
+                {index > 0 ? <Separator /> : null}
+                <Item size="sm">
+                  <ItemMedia variant="icon">
+                    <Icon />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>{title}</ItemTitle>
+                  </ItemContent>
+                  <ItemActions>
+                    <LabelSelect
+                      disabled={team.isPending}
+                      label={title}
+                      labels={ACTION_KIND_LABELS}
+                      onChange={(policy) =>
+                        team.mutate({ actionKinds: { [kind]: policy } })
+                      }
+                      value={settings.actionKinds?.[kind] ?? "open"}
+                    />
+                  </ItemActions>
+                </Item>
+              </Fragment>
+            ))}
           </PageRows>
         </PageSection>
       ) : null}
