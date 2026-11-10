@@ -29,7 +29,7 @@ import {
   createResponsibilityEngine,
   type ResponsibilityEngine,
 } from "./engine";
-import { responsibilityTools } from "./tools";
+import { goalRunTools } from "./tools";
 import { type ResponsibilityStore, whyItRepeats } from "./types";
 
 /**
@@ -87,14 +87,6 @@ export function createServerResponsibilityEngine(deps: {
           kind: "responsibility",
           id: context.responsibilityId,
         };
-        const tools = responsibilityTools({
-          store: responsibilityStore,
-          engine: responsibilityEngine,
-          ownerUserId: context.ownerUserId,
-          agentId: context.agentId,
-          channelId: context.channelId,
-          responsibilityRunId: context.runId,
-        });
         const runner = createTurnRunner({
           ...(deps.productTelemetry
             ? {
@@ -108,6 +100,15 @@ export function createServerResponsibilityEngine(deps: {
           components: componentCatalog,
           buildAgentFor: (input) => buildAgentFor({ ...input, initiator }),
           toolsForTurn: async () => {
+            // Before the model has any tool, so what repeats is read as the run begins.
+            const tools = await goalRunTools({
+              store: responsibilityStore,
+              engine: responsibilityEngine,
+              ownerUserId: context.ownerUserId,
+              agentId: context.agentId,
+              channelId: context.channelId,
+              responsibilityRunId: context.runId,
+            });
             const actor = await actorFor(context.ownerUserId);
             // A Team Bot's teammate uses the Bot, not its owner's signed-in computer.
             const computer =

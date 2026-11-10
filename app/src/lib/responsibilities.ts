@@ -5,6 +5,7 @@ import {
 } from "@tanstack/react-query";
 import { client } from "@/lib/client";
 import { sharedUseKeys } from "@/lib/plugins/shared-use";
+import { routineKeys } from "@/lib/routines/queries";
 
 export type ResponsibilityRecord = {
   id: string;
@@ -31,6 +32,7 @@ export type ResponsibilityRecord = {
       | "email";
     eventType: string;
   }[];
+  endsWhenMet: boolean;
   updatedAt: string;
 };
 export type ResponsibilityRunRecord = {
@@ -92,6 +94,8 @@ export function createResponsibility(input: {
   instruction: string;
   successCriteria: string;
   subscriptions: ResponsibilityRecord["subscriptions"];
+  recurring?: boolean;
+  endsWhenMet?: boolean;
 }) {
   return client<ResponsibilityRecord>(
     "/api/responsibilities",
@@ -271,13 +275,6 @@ export function removeGithubBindingMutationOptions(queryClient: QueryClient) {
 const settleResponsibilities = (queryClient: QueryClient) => () =>
   queryClient.invalidateQueries({ queryKey: responsibilityKeys.all });
 
-export function createResponsibilityMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: createResponsibility,
-    onSuccess: settleResponsibilities(queryClient),
-  });
-}
-
 export function updateResponsibilityMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: ({
@@ -301,7 +298,18 @@ export function responsibilityActionMutationOptions(queryClient: QueryClient) {
       id: string;
       action: "pause" | "resume" | "complete" | "run";
     }) => responsibilityAction(id, action),
-    onSuccess: settleResponsibilities(queryClient),
+    onSuccess: (_data, { action }) => {
+      const goals = settleResponsibilities(queryClient)();
+      // Completing a goal switches off the routines that serve it, on the server, before this
+      // response returns, so only "complete" refreshes them. A run can also complete a goal, but
+      // it is accepted (202) and finishes later, so refreshing routines now would see nothing
+      // new. Pause and resume leave routines as they were.
+      if (action !== "complete") return goals;
+      return Promise.all([
+        goals,
+        queryClient.invalidateQueries({ queryKey: routineKeys.all }),
+      ]);
+    },
   });
 }
 

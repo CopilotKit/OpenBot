@@ -37,15 +37,20 @@ const store = createResponsibilityStore(database, {
       : null;
   },
 });
-const toolsFor = (runId?: string) =>
-  responsibilityTools({
+const toolsFor = (runId?: string) => {
+  const base = {
     store,
     engine: { ingest: async () => ({}) as never },
     ownerUserId: ownerId,
     agentId: botId,
     channelId,
-    ...(runId ? { responsibilityRunId: runId } : {}),
-  });
+  };
+  return responsibilityTools(
+    runId
+      ? { ...base, responsibilityRunId: runId, repeatedWhenRunBegan: new Map() }
+      : base,
+  );
+};
 const call = (name: string, args: unknown, runId?: string) => {
   const tool = toolsFor(runId).find((each) => each.name === name);
   if (!tool) throw new Error(`${name} is not one of a goal's tools`);

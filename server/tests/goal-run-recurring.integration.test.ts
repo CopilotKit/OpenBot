@@ -13,7 +13,7 @@ import type { RunnerLike } from "@openbot/toolkit/run-turn";
 import { and, eq, inArray } from "drizzle-orm";
 import { Observable } from "rxjs";
 import { createActivityStore } from "../src/activity/activity";
-import { createAuditStore } from "../src/audit";
+import { type AuditInitiator, createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import {
   agentProfiles,
@@ -242,7 +242,12 @@ const engine = createServerResponsibilityEngine({
   },
 });
 
-let routinesWereAdded = false;
+/**
+ * Whether the Routines server row was there before this file ran, read once before the first
+ * `ensureAlwaysOnApp` adds it. Read again after that, it would always be true and `afterAll` would
+ * leave the row behind.
+ */
+let routinesExistedBefore: boolean | undefined;
 
 /** A call the Bot makes in the conversation, or a routine's turn makes there, through Routines. */
 const call = (tool: string, args: Record<string, unknown>) =>
@@ -253,6 +258,30 @@ const call = (tool: string, args: Record<string, unknown>) =>
     actorId: OWNER,
     threadId: CONVERSATION.threadId,
   });
+
+/*
+ * A turn nobody sent, in the conversation: the routine's own firing, a memory run or a handoff.
+ * Its `complete_goal` is held to the run's rule, or the routine's turn ends the goal it runs and,
+ * since completing a goal switches its routines off, switches itself off with it.
+ */
+const firedBy =
+  (initiator: AuditInitiator) =>
+  <T>(work: () => Promise<T>) =>
+    withApprovalContext(
+      {
+        runId: randomUUID(),
+        threadId: CONVERSATION.threadId,
+        toolCallId: "complete-goal",
+        toolName: "complete_goal",
+        args: {},
+        messages: [],
+        state: {},
+        context: [],
+        forwardedProps: {},
+        initiator,
+      },
+      work,
+    );
 
 /** One sweep of the goal engine, as the server's goal sweep runs it. */
 const sweep = () => engine.dispatch({ owner: `goal-recurring-${suite}` });
@@ -331,6 +360,12 @@ async function routineFor(goalId: string) {
     timezone: "UTC",
   });
   expect(routine.isError).toBe(false);
+  const [row] = await database
+    .select()
+    .from(routines)
+    .where(eq(routines.ownerUserId, OWNER));
+  if (!row) throw new Error("The routine was not made.");
+  return row;
 }
 
 async function clean() {
@@ -411,9 +446,9 @@ beforeEach(async () => {
     threadId: CONVERSATION.threadId,
   });
   // Routines, added and given to this Bot exactly as boot does it for every Bot.
-  routinesWereAdded =
-    routinesWereAdded ||
-    Boolean(await pluginStore.serverAddress(ALWAYS_ON_APP));
+  routinesExistedBefore ??= Boolean(
+    await pluginStore.serverAddress(ALWAYS_ON_APP),
+  );
   await ensureAlwaysOnApp(pluginStore, {
     ...personalDefaultsDeps(database),
     bots: async () => [BOT],
@@ -431,7 +466,7 @@ afterAll(async () => {
   useRoutineTools(null);
   useGoalTools(null);
   await clean();
-  if (!routinesWereAdded)
+  if (routinesExistedBefore === false)
     await database.delete(mcpServers).where(eq(mcpServers.id, ALWAYS_ON_APP));
   await database.$client.end({ timeout: 5 });
 });
@@ -439,7 +474,7 @@ afterAll(async () => {
 describe("a run of a goal that repeats", () => {
   test("a routine's goal stays active after its first run, once, and runs again the next morning", async () => {
     const goal = await askedInTheConversation();
-    await routineFor(goal.id);
+    const routine = await routineFor(goal.id);
     expect((await call("run_goal", { id: goal.id })).isError).toBe(false);
 
     const first = await sweep();
@@ -473,8 +508,28 @@ describe("a run of a goal that repeats", () => {
       note: "Recorded. This goal repeats because a routine runs it, so a run can't complete it. It stays active. Only the person ends it.",
     });
 
-    // The next morning, the routine's turn runs it again, and it runs.
-    expect((await call("run_goal", { id: goal.id })).isError).toBe(false);
+    // The next morning, the routine's own turn (its initiator is the routine, as the turn runner
+    // gives it) runs the goal again, and it runs. Asked to end it, that turn is refused.
+    const byRoutine = firedBy({ kind: "routine", id: routine.id });
+    expect(
+      (await byRoutine(() => call("run_goal", { id: goal.id }))).isError,
+    ).toBe(false);
+    const refused = await byRoutine(() =>
+      call("complete_goal", { id: goal.id }),
+    );
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain(
+      "This goal repeats because a routine runs it, so a run can't complete it.",
+    );
+    expect((await goalStore.get(OWNER, goal.id)).status).toBe("active");
+    expect(
+      (
+        await database
+          .select()
+          .from(routines)
+          .where(eq(routines.id, routine.id))
+      )[0]?.enabled,
+    ).toBe(true);
     expect((await sweep()).succeeded).toHaveLength(1);
     expect((await runsOf(goal.id)).map((run) => run.status)).toEqual([
       "succeeded",
@@ -552,6 +607,113 @@ describe("ending a goal that repeats", () => {
       '"Morning OpenBot release check" is complete, so it no longer runs and nothing was done.',
     );
     expect(await runsOf(goal.id)).toEqual([]);
+  });
+
+  async function routineRunning(goalId: string) {
+    const made = await call("create_routine", {
+      instruction: "Check the latest release and report what changed.",
+      goalId,
+      cron: "0 8 * * *",
+      timezone: "UTC",
+    });
+    expect(made.isError).toBe(false);
+    const [routine] = await database
+      .select()
+      .from(routines)
+      .where(eq(routines.ownerUserId, OWNER));
+    if (!routine) throw new Error("The routine was not made.");
+    return routine;
+  }
+
+  test("is not a routine's own turn's to end, and the routine stays on", async () => {
+    const goal = await askedInTheConversation();
+    const routine = await routineRunning(goal.id);
+
+    const ended = await firedBy({ kind: "routine", id: routine.id })(() =>
+      call("complete_goal", { id: goal.id }),
+    );
+    expect(ended.isError).toBe(true);
+    expect(ended.text).toContain(
+      "This goal repeats because a routine runs it, so a run can't complete it. It stays active. Only the person ends it.",
+    );
+    expect((await goalStore.get(OWNER, goal.id)).status).toBe("active");
+    const [after] = await database
+      .select()
+      .from(routines)
+      .where(eq(routines.id, routine.id));
+    expect(after?.enabled).toBe(true);
+  });
+
+  test("is not a memory run's or a handoff's to end either", async () => {
+    const goal = await askedInTheConversation({ recurring: true });
+    for (const initiator of [
+      { kind: "memory", id: "memory-source" },
+      { kind: "handoff", id: "other-bot", origin: { kind: "person" } },
+    ] satisfies AuditInitiator[]) {
+      const ended = await firedBy(initiator)(() =>
+        call("complete_goal", { id: goal.id }),
+      );
+      expect(ended.isError).toBe(true);
+      expect(ended.text).toContain(
+        "This goal repeats because it was set up to repeat, so a run can't complete it.",
+      );
+    }
+    expect((await goalStore.get(OWNER, goal.id)).status).toBe("active");
+  });
+
+  test("a goal done once is still completed by a routine's turn", async () => {
+    const goal = await askedInTheConversation();
+    const ended = await firedBy({ kind: "routine", id: "routine-elsewhere" })(
+      () => call("complete_goal", { id: goal.id }),
+    );
+    expect(ended.isError).toBe(false);
+    expect((await goalStore.get(OWNER, goal.id)).status).toBe("completed");
+  });
+
+  test("the person's own turn ends it, and its routine is switched off", async () => {
+    const goal = await askedInTheConversation();
+    const routine = await routineRunning(goal.id);
+
+    const ended = await firedBy({ kind: "person" })(() =>
+      call("complete_goal", { id: goal.id }),
+    );
+    expect(ended.isError).toBe(false);
+    expect((await goalStore.get(OWNER, goal.id)).status).toBe("completed");
+    const [after] = await database
+      .select()
+      .from(routines)
+      .where(eq(routines.id, routine.id));
+    expect(after?.enabled).toBe(false);
+  });
+
+  /*
+   * FOUND IN REVIEW: a routine's own turn was held to the run's rule on `complete_goal`, but its
+   * `update_goal` took any patch, so it could set `endsWhenMet`, and then the goal no longer repeated
+   * and the same turn completed it, switching its routine off.
+   */
+  test("can't be made to end when met by a routine's own turn, and the person's turn still can", async () => {
+    const goal = await askedInTheConversation();
+    const routine = await routineRunning(goal.id);
+    const byRoutine = firedBy({ kind: "routine", id: routine.id });
+
+    const loosened = await byRoutine(() =>
+      call("update_goal", { id: goal.id, patch: { endsWhenMet: true } }),
+    );
+    expect(loosened.isError).toBe(true);
+    expect(loosened.text).toContain(
+      "can't change whether a goal repeats or what ends it",
+    );
+    expect((await goalStore.get(OWNER, goal.id)).endsWhenMet).toBe(false);
+    expect(
+      (await byRoutine(() => call("complete_goal", { id: goal.id }))).isError,
+    ).toBe(true);
+    expect((await goalStore.get(OWNER, goal.id)).status).toBe("active");
+
+    const changed = await firedBy({ kind: "person" })(() =>
+      call("update_goal", { id: goal.id, patch: { endsWhenMet: true } }),
+    );
+    expect(changed.isError).toBe(false);
+    expect((await goalStore.get(OWNER, goal.id)).endsWhenMet).toBe(true);
   });
 
   test("a change to its title leaves it recurring and keeps the events that wake it", async () => {
@@ -745,6 +907,86 @@ describe("which goal a routine runs", () => {
     expect(fired.isError).toBe(false);
     expect((await routineRow(routine.id))?.goalId).toBe(goal.id);
     expect(await goalStore.repeats(OWNER, goal.id)).toBe("routine");
+  });
+
+  /** The routine's own turn calling `run_goal`, as its firing would. */
+  const firedRunGoal = (routineId: string, goalId: string) =>
+    withApprovalContext(
+      {
+        runId: randomUUID(),
+        threadId: CONVERSATION.threadId,
+        toolCallId: "run-goal",
+        toolName: "run_goal",
+        args: { id: goalId },
+        messages: [],
+        state: {},
+        context: [],
+        forwardedProps: {},
+        initiator: { kind: "routine", id: routineId },
+      },
+      () => call("run_goal", { id: goalId }),
+    );
+
+  /*
+   * FOUND IN REVIEW: an older routine that named two goals was linked to whichever one its firing ran
+   * first. It then ran that goal alone, so the other stopped repeating and a run could complete it,
+   * and completing the first switched the routine off while the other was still open.
+   */
+  test("an older routine that names two goals keeps running both after its firing runs one", async () => {
+    const report = await goalTitled("Weekly report");
+    const inbox = await goalTitled("Inbox zero");
+    const routineId = await olderRoutine(
+      `Run the goal "${report.title}", then the goal "${inbox.title}".`,
+    );
+
+    expect((await firedRunGoal(routineId, report.id)).isError).toBe(false);
+
+    expect((await routineRow(routineId))?.goalId).toBeNull();
+    expect(await goalStore.repeats(OWNER, report.id)).toBe("routine");
+    expect(await goalStore.repeats(OWNER, inbox.id)).toBe("routine");
+    await goalStore.transition(OWNER, report.id, "completed");
+    expect((await routineRow(routineId))?.enabled).toBe(true);
+    expect(await goalStore.repeats(OWNER, inbox.id)).toBe("routine");
+  });
+
+  test("an older routine that names one goal is linked to it when its firing runs it", async () => {
+    const report = await goalTitled("Weekly report");
+    await goalTitled("Inbox zero");
+    const routineId = await olderRoutine(
+      `Run the goal "${report.title}" and post it here.`,
+    );
+
+    expect((await firedRunGoal(routineId, report.id)).isError).toBe(false);
+
+    expect((await routineRow(routineId))?.goalId).toBe(report.id);
+    expect(await goalStore.repeats(OWNER, report.id)).toBe("routine");
+  });
+
+  test("an older routine that names one goal and runs another keeps running the one it names", async () => {
+    const report = await goalTitled("Weekly report");
+    const inbox = await goalTitled("Inbox zero");
+    const routineId = await olderRoutine(
+      `Run the goal "${report.title}" and post it here.`,
+    );
+
+    expect((await firedRunGoal(routineId, inbox.id)).isError).toBe(false);
+
+    expect((await routineRow(routineId))?.goalId).toBeNull();
+    expect(await goalStore.repeats(OWNER, report.id)).toBe("routine");
+  });
+
+  // A completed goal can't be resumed, so naming one besides the goal it runs leaves one to link.
+  test("an older routine that names an open and a completed goal is linked to the open one", async () => {
+    const report = await goalTitled("Weekly report");
+    const inbox = await goalTitled("Inbox zero");
+    await goalStore.transition(OWNER, inbox.id, "completed");
+    const routineId = await olderRoutine(
+      `Run the goal "${report.title}", then the goal "${inbox.title}".`,
+    );
+
+    expect((await firedRunGoal(routineId, report.id)).isError).toBe(false);
+
+    expect((await routineRow(routineId))?.goalId).toBe(report.id);
   });
 
   test("an older routine still runs the goal it names by its exact title in quotes, and no other", async () => {
