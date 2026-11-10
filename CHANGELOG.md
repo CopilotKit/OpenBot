@@ -10,6 +10,21 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **A first install on a Mac starts the first time, and a reinstall sets its back end up again.**
+  Three things a from-zero install of 1.0.0 hit on a Mac with Docker Desktop:
+  - The first Start could stop with "Something went wrong" because Docker Desktop refused the
+    sign-in folder OpenBot had made a moment before (`invalid mount config for type "bind" ...
+    operation not permitted`). Retry worked seconds later. Install now makes that folder, and
+    Start waits and tries again for up to 15 seconds on exactly that refusal. Every other error
+    still stops Start at once.
+  - After the earlier installation's folder and back end were deleted, the AI step said "Back end
+    setup stopped" every time: the CopilotKit CLI still recorded a back end for `~/OpenBot` whose
+    private files were gone. OpenBot now has the CLI forget that back end and sets one up from the
+    start. A back end whose files are damaged, or that another app also uses, is kept, and OpenBot
+    says which folder to restore or delete.
+  - An app copied into Applications without Finder (with `ditto` or `cp`) runs from a temporary
+    copy, and the Recorder said "Move OpenBot Desktop to Applications" though it was there. The
+    Recorder now uses the app's real place in Applications.
 - **Usage data now says why setup stopped.** A failed `local setup`, every failed install or
   Start (a failed `compose up` among them), a failed `local start`, `local connect` or Learning
   model setup, and an Account step that stops on an engine too small or one local setup does not
