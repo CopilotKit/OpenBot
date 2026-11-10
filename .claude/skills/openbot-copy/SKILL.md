@@ -97,5 +97,6 @@ because the admin is the one who sets them. A page anybody can open may not.
 | "rather than", an em dash, "which is" in UI text | Rewrite as two short sentences |
 | A description beginning "The apps…", "What…", "Who…", or "Where…" without a main verb | State the action or behavior in a complete sentence; remove redundant explanation |
 | An env var, OAuth, Composio or "grant" outside Admin | Say what the person sees |
-| "Intelligence", "CopilotKit Intelligence" or "the Intelligence stack" anywhere but the Desktop Account step | Name the part: the back end, the front end, the database |
+| "Intelligence", "CopilotKit Intelligence" or "the Intelligence stack" anywhere | Name the part: the back end, the front end, the database |
 | A test asserting long explanatory copy | Assert the short sentence, or the role and the key words |
+| "CopilotKit Intelligence" on OpenBot Desktop's Account step | Allowed there only, in the one lede `SHOWN_BY_DECISION` lists (above) |
