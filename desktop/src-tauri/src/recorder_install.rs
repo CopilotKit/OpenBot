@@ -992,7 +992,9 @@ mod tests {
 
     /// OpenBot Desktop 1.0.0, copied into Applications with `ditto` from its disk image and opened:
     /// Gatekeeper ran it translocated, and the Recorder said "Move OpenBot Desktop to Applications"
-    /// to an app that was in Applications. The mount is as `mount` showed it that night.
+    /// to an app that was in Applications. The mount is as `mount` showed it that night. Unix paths,
+    /// which Windows does not count as absolute.
+    #[cfg(unix)]
     #[test]
     fn a_translocated_app_that_is_in_applications_names_its_real_path() {
         let mount = "/private/var/folders/15/cbm93f0549jbtwnp4vn063r00000gn/T/AppTranslocation/E35D6529-FB65-4C85-BC60-D38960D7E85A";
