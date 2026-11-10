@@ -73,7 +73,7 @@ import {
 } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
-import { NewRoutineMenu } from "./new-routine-button";
+import { NewRoutineButton } from "./new-routine-button";
 
 /**
  * What the last-run cell says, and in what tone.
@@ -507,7 +507,7 @@ function GoalItem({
 }
 
 const EMPTY_BODY =
-  "Ask a Bot and it makes one. “Every Monday, send me last week's numbers” is a routine. “Get the docs ready for the launch” is a goal. “Watch the launch brief and tell me what changes” is a check-in.";
+  "Make one with New routine, like “every weekday at 9, send me yesterday's new leads”. Or ask a Bot in a conversation.";
 
 /**
  * Every routine a Bot has, in one list: its routines, its goals, and its check-ins, each row the
@@ -598,7 +598,7 @@ export function RoutinesList({
       {pending ? null : rows.length === 0 ? (
         failed.length > 0 ? null : (
           <PageEmpty
-            action={<NewRoutineMenu agentId={agentId} variant="outline" />}
+            action={<NewRoutineButton agentId={agentId} variant="outline" />}
             icon={IconClock}
             title={agentId ? "No routines for this Bot yet" : "No routines yet"}
           >

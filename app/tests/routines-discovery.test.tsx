@@ -8,7 +8,6 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import type * as React from "react";
 import { RoutineComposerButton } from "@/components/routines/new-routine-button";
 import { RoutinesConnectionPage } from "@/components/routines/routines-connection-page";
@@ -111,14 +110,11 @@ test("Connections > Routines says what Routines is and leads to the Routines pag
   expect(view.queryByText(/create_routine/)).toBeNull();
 });
 
-/** The empty list's New menu, opened, and where its Routine item leads. */
+/** The empty list's New routine button, and where it leads. */
 async function newRoutineHref(view: ReturnType<typeof draw>) {
-  const user = userEvent.setup({ document });
-  await user.click(await view.findByRole("button", { name: /^New/ }));
-  const menu = await view.findByRole("menu");
-  return within(menu)
-    .getByRole("menuitem", { name: "Routine" })
-    .getAttribute("href");
+  return (
+    await view.findByRole("button", { name: "New routine" })
+  ).getAttribute("href");
 }
 
 test("an empty Routines page offers New routine, and a Bot's own page starts it for that Bot", async () => {

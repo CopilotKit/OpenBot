@@ -25,8 +25,11 @@ import { queryClient } from "@/query-client";
  * deleted, through the same mutations its own row used.
  */
 export function GoalSchedules({
+  paused = false,
   routines,
 }: {
+  /** The goal is paused, so an enabled schedule waits for it to resume. */
+  paused?: boolean;
   routines: readonly RoutineRecord[];
 }) {
   const setEnabled = useMutation(setRoutineEnabledMutationOptions(queryClient));
@@ -47,7 +50,9 @@ export function GoalSchedules({
               <ItemTitle>{routine.schedule}</ItemTitle>
               <ItemDescription>
                 {routine.enabled
-                  ? `Starts it on a schedule · ${routine.timezone}`
+                  ? paused
+                    ? `Starts it again when you resume it · ${routine.timezone}`
+                    : `Starts it on a schedule · ${routine.timezone}`
                   : "Off. This schedule won't start it."}
               </ItemDescription>
             </ItemContent>

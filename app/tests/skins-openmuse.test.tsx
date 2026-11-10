@@ -318,6 +318,7 @@ const responsibilities: ResponsibilityRecord[] = [
     progress: "Down to 4 unread",
     lastResult: null,
     subscriptions: [],
+    endsWhenMet: false,
     updatedAt: now,
   },
   {
@@ -332,6 +333,7 @@ const responsibilities: ResponsibilityRecord[] = [
     progress: "",
     lastResult: null,
     subscriptions: [],
+    endsWhenMet: false,
     updatedAt: now,
   },
 ];

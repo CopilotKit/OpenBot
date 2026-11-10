@@ -7,15 +7,8 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import {
-  cleanup,
-  fireEvent,
-  render,
-  waitFor,
-  within,
-} from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { NewRoutineMenu } from "@/components/routines/new-routine-button";
+import { cleanup, render, within } from "@testing-library/react";
+import { NewRoutineButton } from "@/components/routines/new-routine-button";
 import { RoutinesList } from "@/components/routines/routines-list";
 import { mergeRoutines } from "@/lib/routines/merged";
 import type { RoutineRecord } from "@/lib/routines/queries";
@@ -25,7 +18,7 @@ import { settleReactWork } from "./settle-react-work";
 
 /**
  * A Bot's Routines: its routines, its goals and its check-ins as one list, each row the same
- * sentence (what, starts, does, until), and New offering each kind.
+ * sentence (what, starts, does, until), and one New routine button.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -52,6 +45,7 @@ const goal = (id: string, agentId: string, title: string) => ({
   progress: "",
   lastResult: null,
   subscriptions: [],
+  endsWhenMet: false,
   updatedAt: "2026-10-09T10:00:00Z",
 });
 
@@ -161,7 +155,7 @@ function draw(agentId: string | undefined = "expenses") {
     routeTree: createRootRoute({
       component: () => (
         <>
-          <NewRoutineMenu agentId={agentId} />
+          <NewRoutineButton agentId={agentId} />
           <RoutinesList agentId={agentId} />
         </>
       ),
@@ -225,73 +219,39 @@ test("a routine that runs a goal is one of that goal's starts, not a row of its 
   expect(view.queryByText("Run the goal.")).toBeNull();
 });
 
-test("New offers a routine, a goal and a check-in, and a new goal needs no Bot picked", async () => {
+test("New routine opens the create screen for this Bot", async () => {
   serving();
   const view = draw();
   await view.findByText("Reconcile receipts");
-  const user = userEvent.setup({ document });
-  await user.click(view.getByRole("button", { name: /^New/ }));
-  const menu = await view.findByRole("menu");
-  expect(
-    within(menu)
-      .getAllByRole("menuitem")
-      .map((item) => item.textContent),
-  ).toEqual(["Routine", "Goal", "Check-in"]);
-  expect(menu.textContent).toContain("Or ask a Bot");
-  await user.click(within(menu).getByRole("menuitem", { name: "Goal" }));
-
-  expect(view.queryByRole("combobox", { name: /^Bot/ })).toBeNull();
-  await user.click(view.getByRole("combobox", { name: /^Conversation/ }));
-  const options = (await view.findAllByRole("option")).map(
-    (option) => option.textContent,
-  );
-  expect(options).toContain("Finance desk");
-  expect(options).not.toContain("Docs desk");
-
-  await user.click(view.getByRole("option", { name: "Finance desk" }));
-  await user.type(view.getByLabelText("Title"), "Close the month");
-  await user.type(view.getByLabelText("Instruction"), "Close it.");
-  await user.type(view.getByLabelText("Success criteria"), "Closed.");
-  fireEvent.submit(
-    (view.getByRole("button", { name: /Create/ }) as HTMLButtonElement)
-      .form as HTMLFormElement,
-  );
-  await waitFor(() =>
-    expect(writes.map((write) => write.body)).toContainEqual(
-      expect.objectContaining({
-        agentId: "expenses",
-        channelId: "channel-expenses",
-        title: "Close the month",
-      }),
-    ),
-  );
+  const buttons = view.getAllByRole("button", { name: "New routine" });
+  expect(buttons.length).toBeGreaterThan(0);
+  for (const button of buttons) {
+    expect(button.getAttribute("href")).toBe("/routines/new?agentId=expenses");
+  }
 });
 
-test("a Bot that already checks in is offered no second check-in", async () => {
-  serving({ checkIns: [checkIn("c1", "expenses", "The launch brief")] });
+test("New offers no kinds", async () => {
+  serving();
   const view = draw();
-  await view.findByText("The launch brief");
-  const user = userEvent.setup({ document });
-  await user.click(view.getByRole("button", { name: /^New/ }));
-  const menu = await view.findByRole("menu");
+  await view.findByText("Reconcile receipts");
   expect(
-    within(menu)
-      .getAllByRole("menuitem")
-      .map((item) => item.textContent),
-  ).toEqual(["Routine", "Goal"]);
+    view.queryAllByRole("menuitem", { name: /^(Goal|Check-in)$/ }),
+  ).toHaveLength(0);
+  expect(
+    view.queryAllByRole("button", { name: /^(Goal|Check-in)$/ }),
+  ).toHaveLength(0);
 });
 
-test("the empty list says routines are made by asking, with one of each kind", async () => {
+test("the empty state gives one example and one way in", async () => {
   serving({ goals: [] });
   const view = draw();
   expect(await view.findByText("No routines for this Bot yet")).toBeTruthy();
-  const said = document.body.textContent ?? "";
-  expect(said).toContain("Ask a Bot");
-  expect(said).toMatch(/is a routine\./);
-  expect(said).toMatch(/is a goal\./);
-  expect(said).toMatch(/is a check-in\./);
-  // One word for one thing: the route and the API say responsibilities, the person never does.
-  expect(said).not.toMatch(/responsibilit/i);
+  expect(document.body.textContent ?? "").toContain(
+    "Make one with New routine, like “every weekday at 9, send me yesterday's new leads”. Or ask a Bot in a conversation.",
+  );
+  expect(
+    view.getAllByRole("button", { name: "New routine" }).length,
+  ).toBeGreaterThan(0);
 });
 
 function redirectOf(route: { options: { beforeLoad?: unknown } }, input = {}) {

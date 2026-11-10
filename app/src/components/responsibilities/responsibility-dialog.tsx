@@ -24,7 +24,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   Item,
@@ -40,6 +45,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { GoalSchedules } from "@/components/routines/goal-schedules";
 import { markdownComponents } from "@/lib/markdown";
+import { goalStarts } from "@/lib/routines/merged";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import {
   type ResponsibilityRecord,
@@ -82,28 +88,34 @@ export const SOURCE_LABEL: Record<Source, string> = {
  * What a responsibility's row says under its title: its state, and while it is active, what starts
  * it. Computed from the queries on every render so it follows whatever the dialog just changed.
  *
+ * The starts are the Routines list's own (`goalStarts`): the schedule of each enabled routine, then
+ * its events, then its enabled triggers. A schedule that is switched off starts nothing, so a goal
+ * with only that reads "Runs when asked", as it does on the list.
+ *
  * `triggers` is undefined until they load, and then nothing is said about what starts it rather than
- * "Runs when asked", which would be a claim about triggers nobody has read yet.
+ * "Runs when asked", which would be a claim about triggers nobody has read yet. An enabled schedule
+ * is already known, so it is named at once.
  */
 export function summaryFor(
   goal: ResponsibilityRecord,
   triggers: TriggerRecord[] | undefined,
+  routines: readonly RoutineRecord[] = [],
 ): string {
   const status = STATUS[goal.status].label;
   if (goal.status === "completed") return status;
   if (goal.status === "paused")
     return `${status} · Nothing starts it until you resume it`;
-  const starts = [
-    ...goal.subscriptions.map(
-      (subscription) =>
-        `${SOURCE_LABEL[subscription.source]} ${subscription.eventType}`,
-    ),
-    ...(triggers ?? [])
-      .filter((trigger) => trigger.enabled)
+  const starts = goalStarts(
+    goal,
+    triggers
+      ?.filter((trigger) => trigger.enabled)
       .map((trigger) => `${KIND_LABEL[trigger.kind]} trigger`),
-  ];
-  if (starts.length) return `${status} · Starts on ${starts.join(", ")}`;
-  return triggers ? `${status} · Runs when asked` : status;
+    routines,
+    (subscription) =>
+      `${SOURCE_LABEL[subscription.source]} ${subscription.eventType}`,
+  );
+  if (starts === null) return status;
+  return `${status} · ${starts === "When you ask" ? "Runs when asked" : starts}`;
 }
 
 /**
@@ -126,9 +138,13 @@ export function ResponsibilityDialog({
   const [title, setTitle] = useState(goal.title);
   const [instruction, setInstruction] = useState(goal.instruction);
   const [successCriteria, setSuccessCriteria] = useState(goal.successCriteria);
+  const [criteriaMissing, setCriteriaMissing] = useState(false);
   const triggers = useQuery(triggersQueryOptions(goal.id));
   const action = useMutation(responsibilityActionMutationOptions(queryClient));
   const edit = useMutation(updateResponsibilityMutationOptions(queryClient));
+  const starters = routines.some((routine) => routine.enabled)
+    ? "schedules, events and triggers"
+    : "events and triggers";
   const standing = [
     goal.progress
       ? {
@@ -154,7 +170,7 @@ export function ResponsibilityDialog({
         <DialogHeader>
           <DialogTitle>{goal.title}</DialogTitle>
           <DialogDescription>
-            {summaryFor(goal, triggers.data)}
+            {summaryFor(goal, triggers.data, routines)}
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 overflow-y-auto">
@@ -169,8 +185,8 @@ export function ResponsibilityDialog({
                     <ItemTitle>Active</ItemTitle>
                     <ItemDescription>
                       {goal.status === "active"
-                        ? "Its events and triggers start it."
-                        : "Paused. Its triggers won't start it."}
+                        ? `Its ${starters} start it.`
+                        : `Paused. Its ${starters} won't start it.`}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
@@ -281,6 +297,12 @@ export function ResponsibilityDialog({
             id={formId}
             onSubmit={(event) => {
               event.preventDefault();
+              // A goal that ends when met has nothing to meet without an outcome. Other goals may
+              // have none, so the field is only required for this one.
+              if (goal.endsWhenMet && !successCriteria.trim()) {
+                setCriteriaMissing(true);
+                return;
+              }
               edit.mutate(
                 {
                   id: goal.id,
@@ -313,17 +335,26 @@ export function ResponsibilityDialog({
                   maxLength={6000}
                 />
               </Field>
-              <Field>
+              <Field data-invalid={criteriaMissing ? true : undefined}>
                 <FieldLabel htmlFor={`${formId}-criteria`}>
                   Success criteria
                 </FieldLabel>
                 <Textarea
                   id={`${formId}-criteria`}
                   value={successCriteria}
-                  onChange={(event) => setSuccessCriteria(event.target.value)}
-                  required
+                  onChange={(event) => {
+                    setSuccessCriteria(event.target.value);
+                    setCriteriaMissing(false);
+                  }}
+                  aria-invalid={criteriaMissing ? true : undefined}
+                  aria-required={goal.endsWhenMet ? true : undefined}
                   maxLength={3000}
                 />
+                {criteriaMissing ? (
+                  <FieldError>
+                    It ends when this is met, so say what done looks like.
+                  </FieldError>
+                ) : null}
               </Field>
             </FieldGroup>
           </form>
@@ -368,7 +399,10 @@ export function ResponsibilityDialog({
             </div>
           ) : null}
 
-          <GoalSchedules routines={routines} />
+          <GoalSchedules
+            paused={goal.status === "paused"}
+            routines={routines}
+          />
           <Triggers goal={goal} />
           <Runs
             channelId={goal.channelId}
