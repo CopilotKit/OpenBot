@@ -416,6 +416,131 @@ describe.skipIf(!asked)("a setup step's foot", () => {
   }
 });
 
+/*
+ * Seen on the Account step while the person signs in: its Cancel sits above the foot, the foot's
+ * own actions row is empty, and the background row sat flush against Cancel with no gap at all. The
+ * row sits the card's one gap (24px) under the step's button on every step, Cancel included.
+ */
+describe.skipIf(!asked)("the background row under the step's button", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const) {
+    test(`at ${width}x${height}, is one card gap below Cancel, Accept and Continue`, async () => {
+      /** The gap from the button's bottom to the background row's top, the card scrolled to its end. */
+      const gap = async (page: Page, name: string) => {
+        await page.waitForTimeout(600);
+        return page.evaluate((label) => {
+          const sheet = document.querySelector("main > .sheet") as HTMLElement;
+          sheet.scrollTop = sheet.scrollHeight;
+          const button = [...document.querySelectorAll("button")].find(
+            (found) => found.textContent?.trim() === label,
+          );
+          const row = document.querySelector(".behind-slot > .steps");
+          if (!button || !row) return null;
+          return Math.round(
+            row.getBoundingClientRect().top -
+              button.getBoundingClientRect().bottom,
+          );
+        }, name);
+      };
+      const scenes: Array<[string, string, string]> = [
+        ["#signin", "Self-contained OpenBot", "Cancel"],
+        ["#licence", "Accept the license agreement", "Accept"],
+        ["", "Connect your AI", "Continue"],
+      ];
+      for (const [hash, heading, button] of scenes) {
+        const page = await browser.newPage({ viewport: { width, height } });
+        try {
+          await open(page, hash);
+          await page
+            .getByRole("button", { name: "Install", exact: true })
+            .click();
+          await page.getByRole("heading", { name: heading }).waitFor();
+          expect({ button, gap: await gap(page, button) }).toEqual({
+            button,
+            gap: 24,
+          });
+        } finally {
+          await page.close();
+        }
+      }
+    }, 40_000);
+  }
+});
+
+/*
+ * Seen on Windows F: on the first screen the download line shrank about 40px when the download
+ * finished ("Downloading OpenBot." with its bar and bytes, then "OpenBot is downloaded and ready to
+ * install."), and the usage-data text under it moved up. The line holds its tallest height in every
+ * state, and before it says anything.
+ */
+describe.skipIf(!asked)("the first screen while its downloads run", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const) {
+    test(`at ${width}x${height}, the text under the download line stays where it is`, async () => {
+      const page = await browser.newPage({ viewport: { width, height } });
+      try {
+        await open(page);
+        await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+        await page.waitForTimeout(400);
+        const usage = async () =>
+          Math.round(
+            (
+              await page
+                .getByText("OpenBot sends CopilotKit usage data", {
+                  exact: false,
+                })
+                .boundingBox()
+            )?.y ?? -1,
+          );
+        const say = async (payload: Record<string, unknown>) => {
+          await page.evaluate((sent) => {
+            (
+              globalThis as unknown as {
+                __fake: { emit: (name: string, payload: unknown) => void };
+              }
+            ).__fake.emit("setup:downloads", sent);
+          }, payload);
+          await page.waitForTimeout(300);
+        };
+        const GB = 1_000_000_000;
+        const seen: Array<[string, number]> = [["nothing yet", await usage()]];
+        for (const [state, payload] of [
+          ["starting", { state: "downloading", bytes: 0 }],
+          [
+            "downloading",
+            {
+              state: "downloading",
+              bytes: 0.15 * GB,
+              size: 0.31 * GB,
+              bytesPerSecond: 9_000_000,
+            },
+          ],
+          ["done", { state: "done", bytes: 0.31 * GB, size: 0.31 * GB }],
+          ["failed", { state: "failed", bytes: 0.2 * GB, size: 0.31 * GB }],
+          [
+            "short of disk",
+            { state: "short", bytes: 0, free: 14.6 * GB, needed: 44.3 * GB },
+          ],
+        ] as const) {
+          await say(payload);
+          seen.push([state, await usage()]);
+        }
+        const first = seen[0]?.[1];
+        expect(first).toBeGreaterThan(0);
+        expect(seen.map(([state, y]) => [state, y - (first ?? 0)])).toEqual(
+          seen.map(([state]) => [state, 0]),
+        );
+      } finally {
+        await page.close();
+      }
+    }, 30_000);
+  }
+});
+
 describe.skipIf(!asked)("the AI step while OpenBot installs behind it", () => {
   for (const [width, height] of [
     [1000, 800],

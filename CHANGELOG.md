@@ -30,6 +30,24 @@ backup taken before the upgrade instead. Three things change for an existing dep
 
 ### OpenBot Desktop
 
+- **OpenBot's own software downloads on the first screen too, before there is anything to run it.**
+  On a new Mac or PC, or with Docker Desktop not running, OpenBot's images (about 1.1 GB for the
+  default Bot) waited for the engine to start, then downloaded behind it. They now download from
+  the first screen with everything else, into the same cache, checked against their digests and
+  carried on after a quit. Once the engine answers, Install loads them into it, so the step after
+  it no longer downloads them. Anything that didn't download or load is downloaded then, as before.
+- **The big downloads start on the first screen, before you click Install.** Nothing used to
+  download until Install, and then one thing at a time: on a new Mac, Podman, then the 937 MB
+  engine image with no progress shown, then 1.1 GB of OpenBot's software. Now the engine image,
+  Podman's installer, the deployment and, when Docker or Podman already runs, OpenBot's software
+  start downloading as soon as the first screen shows, side by side, while you sign in and enter
+  your Mac password. The first screen says how far they are ("Downloading OpenBot. About 3 minutes
+  left.", with the bytes under a bar), and the row for what's installing in the background carries
+  on with it. A download stopped by quitting carries on from where it stopped next time,
+  and every file is checked against its pinned digest before it is used. Podman builds its machine
+  from the downloaded image instead of fetching its own. With less free disk than OpenBot needs,
+  the first screen says how much is free and how much is needed, and the downloads start once
+  there is room. Nothing is installed before you are asked.
 - **An update downloads before you click Update.** As soon as a new version of OpenBot is out,
   OpenBot Desktop downloads what it runs in the background while you keep working: the parts for
   the Bots you use, and the back end's when it changes too, kept until you update. Clicking Update
