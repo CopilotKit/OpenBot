@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { asProblem, Failure, type Problem } from "./Problem";
 import { StatusLine } from "./SetupProgress";
 
@@ -12,11 +12,26 @@ export type Blocker =
   | "nested-virtualization-unavailable"
   | "not-administrator";
 
-/** What running a blocker's fix came to: Windows restarts before it counts, or it already does. */
-type Fixed = "restart-needed" | "done";
+/**
+ * What running a blocker's fix came to: Windows restarts before it counts, or it already does, or
+ * the person said no to Windows' administrator prompt and nothing changed.
+ */
+type Fixed = "restart-needed" | "done" | "declined";
 
+/** How long the line saying Windows will ask stays on screen before its prompt covers it. */
+export const BEFORE_PROMPT_MS = 2500;
+/** How long after a declined prompt OpenBot asks again by itself. */
+export const ASK_AGAIN_MS = 15_000;
+
+const DECLINED =
+  "OpenBot needs Windows' permission to turn on a feature it needs. It asks again in a moment, or choose Try again.";
+
+/*
+ * Windows Subsystem for Linux is named here because it is the Windows feature the person turns on:
+ * Windows calls it that in every window it shows about it.
+ */
 const WHY_WSL =
-  "OpenBot runs its services in Linux containers. On Windows, those need Windows Subsystem for Linux (WSL 2).";
+  "OpenBot needs a Windows feature called Windows Subsystem for Linux (WSL 2) to run.";
 
 /**
  * What each blocker is called, why it matters, and how OpenBot clears it.
@@ -29,7 +44,7 @@ const SCREENS: Record<
   {
     title: string;
     why: string;
-    fix?: { action: string; asks: string };
+    fix?: { asks: string };
     administrator?: "you" | "someone-else";
   }
 > = {
@@ -37,23 +52,21 @@ const SCREENS: Record<
     title: "Turn on Windows Subsystem for Linux",
     why: `${WHY_WSL} It's a one-time setup.`,
     fix: {
-      action: "Set up Windows",
-      asks: "Windows will ask for permission, then needs one restart.",
+      asks: "Windows will ask for your permission so OpenBot can turn it on. Then Windows needs one restart.",
     },
     administrator: "you",
   },
   "wsl-one": {
     title: "Switch Windows Subsystem for Linux to version 2",
-    why: "WSL is installed but set to version 1. OpenBot's containers need version 2.",
-    fix: { action: "Switch to WSL 2", asks: "This takes a few seconds." },
+    why: "WSL is installed but set to version 1. OpenBot needs version 2.",
+    fix: { asks: "OpenBot switches it now. This takes a few seconds." },
     administrator: "you",
   },
   "wsl-no-kernel": {
     title: "Finish installing Windows Subsystem for Linux",
-    why: "WSL is turned on, but its Linux kernel is missing, so nothing can run in it yet.",
+    why: "WSL is turned on, but part of it is missing, so OpenBot can't run yet.",
     fix: {
-      action: "Finish setting up WSL",
-      asks: "Windows will ask for permission, then needs one restart.",
+      asks: "Windows will ask for your permission so OpenBot can finish setting it up. Then Windows needs one restart.",
     },
     administrator: "you",
   },
@@ -61,8 +74,7 @@ const SCREENS: Record<
     title: "Turn on Virtual Machine Platform",
     why: "WSL 2 needs this Windows feature, and it is turned off.",
     fix: {
-      action: "Set up Windows",
-      asks: "Windows will ask for permission, then needs one restart.",
+      asks: "Windows will ask for your permission so OpenBot can turn it on. Then Windows needs one restart.",
     },
     administrator: "you",
   },
@@ -70,8 +82,7 @@ const SCREENS: Record<
     title: "An administrator needs to turn on WSL",
     why: `${WHY_WSL} Turning it on needs administrator rights, which this account does not have.`,
     fix: {
-      action: "Set up Windows",
-      asks: "Windows will ask for an administrator's name and password, then needs one restart.",
+      asks: "Windows will ask for an administrator's name and password so OpenBot can turn it on. Then Windows needs one restart.",
     },
     administrator: "someone-else",
   },
@@ -93,17 +104,25 @@ export function commandsIn(instruction: string): string[] {
 /**
  * The screen for a Windows machine that cannot run OpenBot yet, and what to do about it.
  *
- * One button does it: OpenBot runs the commands behind Windows's own administrator prompt, then
- * hands over to the restart. The commands are still here, under the button, for somebody who would
- * rather run them, or whose machine will not let OpenBot. They come from the native side's
- * instruction, which is what its tests hold to, in a block that copies whole, because nobody
+ * No button first: the screen says what Windows will ask and why, leaves it a moment to be read,
+ * and OpenBot runs the commands behind Windows's own administrator prompt by itself, then hands
+ * over to the restart. An install step informs the person and moves forward (the product's call
+ * for 1.0.1). A prompt the person says no to is said plainly and asked again by itself, with Try
+ * again for now; only a failure asks for Try again alone. The commands are still here, for somebody
+ * who would rather run them, or whose machine will not let OpenBot. They come from the native
+ * side's instruction, which is what its tests hold to, in a block that copies whole, because nobody
  * should have to retype `dism.exe /online /enable-feature …` from a sentence.
+ *
+ * The restart after it is the one step that waits for a click (`WindowsRestart`): OpenBot never
+ * restarts the computer on its own, because the person may have unsaved work open.
  */
 export function WindowsBlocker({
   blocker,
   instruction,
   onRestartNeeded,
   onCleared = () => window.location.reload(),
+  beforePromptMs = BEFORE_PROMPT_MS,
+  askAgainMs = ASK_AGAIN_MS,
 }: {
   blocker: Blocker;
   /** The native instruction; only the commands in it are shown. */
@@ -112,25 +131,52 @@ export function WindowsBlocker({
   onRestartNeeded: () => void;
   /** The fix ran and nothing else is needed: check the machine again. */
   onCleared?: () => void;
+  beforePromptMs?: number;
+  askAgainMs?: number;
 }) {
   const screen = SCREENS[blocker];
   const commands = commandsIn(instruction);
   const [fixing, setFixing] = useState(false);
+  const [declined, setDeclined] = useState(false);
   const [failure, setFailure] = useState<Problem | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const running = useRef(false);
 
   async function fix() {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    if (running.current) return;
+    running.current = true;
     setFixing(true);
+    setDeclined(false);
     setFailure(null);
     try {
       const fixed = await invoke<Fixed>("windows_fix", { blocker });
       if (fixed === "restart-needed") onRestartNeeded();
-      else onCleared();
+      else if (fixed === "declined") {
+        // Said plainly, and asked again by itself after a while.
+        setDeclined(true);
+        timer.current = setTimeout(() => void fix(), askAgainMs);
+      } else onCleared();
     } catch (error) {
       setFailure(asProblem(error));
     } finally {
+      running.current = false;
       setFixing(false);
     }
   }
+  const fixLatest = useRef(fix);
+  fixLatest.current = fix;
+
+  // Starts by itself, once the line saying what Windows will ask has had a moment on screen.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once per blocker.
+  useEffect(() => {
+    if (!screen.fix) return;
+    timer.current = setTimeout(() => void fixLatest.current(), beforePromptMs);
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, [blocker]);
 
   const steps = screen.administrator ? (
     <ol className="blocker-steps">
@@ -195,18 +241,27 @@ export function WindowsBlocker({
         {screen.fix ? (
           <>
             <p className="blocker-asks">{screen.fix.asks}</p>
-            {fixing && (
+            {!declined && !failure && (
               <StatusLine>
-                Setting up Windows. Approve the Windows prompt if it asks; this
-                can take a few minutes.
+                {fixing
+                  ? "Setting up Windows. Approve the Windows prompt when it asks. This can take a few minutes."
+                  : "Getting ready to set up Windows…"}
               </StatusLine>
             )}
+            {declined && (
+              <p className="caution" role="status">
+                {DECLINED}
+              </p>
+            )}
             {failure && <Failure problem={failure} />}
-            <div className="row">
-              <button type="button" disabled={fixing} onClick={fix}>
-                {screen.fix.action}
-              </button>
-            </div>
+            {/* Only after a prompt said no or a failure: never a gate before the prompt. */}
+            {(declined || failure) && (
+              <div className="row">
+                <button type="button" disabled={fixing} onClick={() => fix()}>
+                  Try again
+                </button>
+              </div>
+            )}
             <details className="blocker-manual">
               <summary>Or run the commands yourself</summary>
               {steps}

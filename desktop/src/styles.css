@@ -149,28 +149,37 @@ body {
 }
 
 /*
- * The window's column: the update offer, when there is one, then the step. The step fills whatever
- * the offer leaves rather than a whole window of its own, so the two together are never taller than
- * the window. Were they, fitWindow.ts would grow the window, the step would grow with it, and the
- * window would keep growing to the edge of the screen.
+ * The window's column: the update offer, when there is one, then the step. Exactly the window's
+ * height: the step fills whatever the offer leaves, and the page itself never scrolls.
  */
 #root {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
 }
 
 /*
- * The window opens at 1000x800 and grows to fit a taller step (see fitWindow.ts): one centred card,
- * vertically settled, with the same optical centre on every step.
+ * The window keeps the size and place it opened with (1000x800, or what the person made it): one
+ * card, centred across and held at the same height from the top on every step. A step taller than
+ * the room it has scrolls inside its card. The window used to grow to fit a taller step and move
+ * up to stay on screen, so on Windows it jumped 54 px up and 139 px taller on "Connect your AI".
+ *
+ * Held from the top, not centred up and down. Rows come and go while a step waits (the update's
+ * row, its download bar), and a centred card moved everything already on screen up or down with
+ * each one: on Windows the Start screen jumped 31px when the update's row appeared, 20px when its
+ * bar did, and 20px back when the bar went. Anchored at the top, a step only ever grows downward.
  */
 main {
   position: relative;
   z-index: 1;
-  flex: 1 0 auto;
-  display: grid;
-  place-items: center;
-  padding: 32px 24px;
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* A little room above the card, not a band: on Windows F, 95 px of it pushed the AI step's
+     background row below the fold. */
+  padding: clamp(16px, 3vh, 32px) 24px 24px;
 }
 
 /* The one focal surface per screen: a white card on the frame, as OpenBot draws its panels. */
@@ -527,8 +536,8 @@ fieldset.picker {
 }
 
 /*
- * Every provider shows without scrolling the list: the window grows to fit (see `fitWindow.ts`),
- * and past what the screen allows the page scrolls instead.
+ * Every provider shows without a scrolling list of its own: past the room the window has, the card
+ * scrolls instead.
  */
 fieldset.picker.providers {
   max-height: none;
@@ -1130,6 +1139,100 @@ a:hover {
   animation: step-spin 0.8s linear infinite;
 }
 
+/*
+ * One Start, start to finish (`StartJourney`): what is happening now, the time left and so far, and
+ * one bar over every row that only moves forward. Drawn as the rows are, above them.
+ */
+.journey {
+  margin: 4px 0 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
+  display: grid;
+  gap: 10px;
+}
+
+.journey-head {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 2px;
+  align-items: center;
+  font-size: var(--text-base);
+  line-height: 22px;
+}
+
+.journey-said {
+  font-weight: 500;
+}
+
+/* The time left and so far, under what is happening: one quiet line, as a row's detail. */
+.journey-head .journey-time {
+  grid-column: 2;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.journey progress {
+  width: 100%;
+  height: 6px;
+  appearance: none;
+  border: 0;
+  border-radius: var(--r-full);
+  overflow: hidden;
+  background: var(--border);
+}
+
+.journey progress::-webkit-progress-bar {
+  background: var(--border);
+}
+
+.journey progress::-webkit-progress-value {
+  background: var(--ring);
+  border-radius: inherit;
+  transition: width 0.8s ease-out;
+}
+
+.journey progress::-moz-progress-bar {
+  background: var(--ring);
+  border-radius: inherit;
+}
+
+/*
+ * The background install's row, last in the step (`BehindSlot`). Its height is held for the row's
+ * tallest form, a line of three rows or a download bar under two, so the row coming, changing or
+ * going never moves anything or grows the window.
+ */
+.behind-slot {
+  margin-top: 24px;
+  min-height: 118px;
+}
+
+.behind-slot > .steps {
+  margin-top: 0;
+}
+
+/* Under a row with no buttons in it, as while the account step waits: one gap, not two. */
+.row:empty + .behind-slot {
+  margin-top: 0;
+}
+
+.behind-slot > .local-alert {
+  margin: 12px 0 0;
+}
+
+/* A step that waits on the person, not on work: the spinner's ring, standing still. */
+.step-waiting {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--ring);
+  border-radius: 50%;
+}
+
 @keyframes step-spin {
   to {
     transform: rotate(360deg);
@@ -1588,4 +1691,40 @@ a:hover {
 
 .troubleshooting .caution.failed {
   color: var(--destructive);
+}
+
+/*
+ * Last, after every `.sheet` rule: the card scrolls once its step is taller than the room it has
+ * (see `main`), and what is in it keeps its size.
+ */
+main > .sheet {
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+main > .sheet > * {
+  flex-shrink: 0;
+}
+
+/*
+ * The background install's row stays in view: pinned to the bottom of the card's visible area
+ * while the step scrolls above it, and back in its own place once the step is scrolled to its end,
+ * so it never covers Continue. On Windows F the AI step was taller than the window and the row sat
+ * below the fold, where nobody saw it.
+ */
+main > .sheet > .behind-slot {
+  position: sticky;
+  bottom: -32px;
+  z-index: 1;
+  margin-bottom: -32px;
+  padding-bottom: 32px;
+  background: var(--card);
+}
+
+@media (max-width: 580px) {
+  main > .sheet > .behind-slot {
+    bottom: -24px;
+    margin-bottom: -24px;
+    padding-bottom: 24px;
+  }
 }
