@@ -117,9 +117,10 @@ describe("the Settings sidebar", () => {
     );
   });
 
-  test("lists none of it in the team edition", () => {
+  test("keeps Computer in the team edition, for the Recorder's browsers, and leaves Activity to Admin", () => {
     const titles = settingsSidebarItems("team").map((item) => item.title);
-    for (const [title] of PERSONAL_ENTRIES) expect(titles).not.toContain(title);
+    expect(titles).toContain("Computer");
+    expect(titles).not.toContain("Activity");
   });
 });
 

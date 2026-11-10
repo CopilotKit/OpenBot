@@ -80,6 +80,7 @@ function isOwnBrowser(computer: ComputerProfile): boolean {
 export function ComputersPage({
   children,
   agentId,
+  embedded = false,
 }: {
   children?: ReactNode;
   /**
@@ -87,6 +88,8 @@ export function ComputersPage({
    * browser, with no page frame (the Bot's page draws one). Absent, the whole page.
    */
   agentId?: string;
+  /** The sections only, inside a page that draws its own frame (Settings → Computer). */
+  embedded?: boolean;
 } = {}) {
   const paths = useManagePaths();
   const personal =
@@ -527,7 +530,7 @@ export function ComputersPage({
       {children}
     </>
   );
-  if (agentId) return body;
+  if (agentId || embedded) return body;
   return (
     <PageShell
       description={

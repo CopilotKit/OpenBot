@@ -46,6 +46,7 @@ import { Route as AuthedSettingsIndexRouteImport } from './routes/_authed/settin
 import { Route as AuthedSettingsPersonalRouteImport } from './routes/_authed/settings/_personal'
 import { Route as AuthedSettingsApprovalsRouteImport } from './routes/_authed/settings/approvals'
 import { Route as AuthedSettingsBrowsersRouteImport } from './routes/_authed/settings/browsers'
+import { Route as AuthedSettingsComputerRouteImport } from './routes/_authed/settings/computer'
 import { Route as AuthedSettingsCredentialsRouteImport } from './routes/_authed/settings/credentials'
 import { Route as AuthedSettingsLearningRouteImport } from './routes/_authed/settings/learning'
 import { Route as AuthedSettingsMemoryRouteImport } from './routes/_authed/settings/memory'
@@ -86,7 +87,6 @@ import { Route as AuthedAdminPluginsComposioRouteImport } from './routes/_authed
 import { Route as AuthedAdminSkillsSlugRouteImport } from './routes/_authed/admin/skills_.$slug'
 import { Route as AuthedAdminSkillsNewRouteImport } from './routes/_authed/admin/skills_.new'
 import { Route as AuthedSettingsPersonalActivityRouteImport } from './routes/_authed/settings/_personal/activity'
-import { Route as AuthedSettingsPersonalComputerRouteImport } from './routes/_authed/settings/_personal/computer'
 import { Route as AuthedSettingsComponentsGalleryIndexRouteImport } from './routes/_authed/settings/components-gallery/index'
 import { Route as AuthedSettingsComponentsGalleryNameRouteImport } from './routes/_authed/settings/components-gallery/$name'
 import { Route as AuthedSettingsConnectedAccountsIndexRouteImport } from './routes/_authed/settings/connected-accounts/index'
@@ -298,6 +298,11 @@ const AuthedSettingsApprovalsRoute = AuthedSettingsApprovalsRouteImport.update({
 const AuthedSettingsBrowsersRoute = AuthedSettingsBrowsersRouteImport.update({
   id: '/browsers',
   path: '/browsers',
+  getParentRoute: () => AuthedSettingsRouteRoute,
+} as any)
+const AuthedSettingsComputerRoute = AuthedSettingsComputerRouteImport.update({
+  id: '/computer',
+  path: '/computer',
   getParentRoute: () => AuthedSettingsRouteRoute,
 } as any)
 const AuthedSettingsCredentialsRoute =
@@ -519,12 +524,6 @@ const AuthedSettingsPersonalActivityRoute =
     path: '/activity',
     getParentRoute: () => AuthedSettingsPersonalRoute,
   } as any)
-const AuthedSettingsPersonalComputerRoute =
-  AuthedSettingsPersonalComputerRouteImport.update({
-    id: '/computer',
-    path: '/computer',
-    getParentRoute: () => AuthedSettingsPersonalRoute,
-  } as any)
 const AuthedSettingsComponentsGalleryIndexRoute =
   AuthedSettingsComponentsGalleryIndexRouteImport.update({
     id: '/components-gallery/',
@@ -727,6 +726,7 @@ export interface FileRoutesByFullPath {
   '/admin/what-if': typeof AuthedAdminWhatIfRoute
   '/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/settings/browsers': typeof AuthedSettingsBrowsersRoute
+  '/settings/computer': typeof AuthedSettingsComputerRoute
   '/settings/credentials': typeof AuthedSettingsCredentialsRoute
   '/settings/learning': typeof AuthedSettingsLearningRoute
   '/settings/memory': typeof AuthedSettingsMemoryRoute
@@ -763,7 +763,6 @@ export interface FileRoutesByFullPath {
   '/admin/skills/$slug': typeof AuthedAdminSkillsSlugRoute
   '/admin/skills/new': typeof AuthedAdminSkillsNewRoute
   '/settings/activity': typeof AuthedSettingsPersonalActivityRoute
-  '/settings/computer': typeof AuthedSettingsPersonalComputerRoute
   '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
   '/settings/credentials/new': typeof AuthedSettingsCredentialsNewRoute
@@ -831,6 +830,7 @@ export interface FileRoutesByTo {
   '/settings': typeof AuthedSettingsIndexRoute
   '/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/settings/browsers': typeof AuthedSettingsBrowsersRoute
+  '/settings/computer': typeof AuthedSettingsComputerRoute
   '/settings/credentials': typeof AuthedSettingsCredentialsRoute
   '/settings/learning': typeof AuthedSettingsLearningRoute
   '/settings/memory': typeof AuthedSettingsMemoryRoute
@@ -866,7 +866,6 @@ export interface FileRoutesByTo {
   '/admin/skills/$slug': typeof AuthedAdminSkillsSlugRoute
   '/admin/skills/new': typeof AuthedAdminSkillsNewRoute
   '/settings/activity': typeof AuthedSettingsPersonalActivityRoute
-  '/settings/computer': typeof AuthedSettingsPersonalComputerRoute
   '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
   '/settings/credentials/new': typeof AuthedSettingsCredentialsNewRoute
@@ -938,6 +937,7 @@ export interface FileRoutesById {
   '/_authed/settings/_personal': typeof AuthedSettingsPersonalRouteWithChildren
   '/_authed/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/_authed/settings/browsers': typeof AuthedSettingsBrowsersRoute
+  '/_authed/settings/computer': typeof AuthedSettingsComputerRoute
   '/_authed/settings/credentials': typeof AuthedSettingsCredentialsRoute
   '/_authed/settings/learning': typeof AuthedSettingsLearningRoute
   '/_authed/settings/memory': typeof AuthedSettingsMemoryRoute
@@ -975,7 +975,6 @@ export interface FileRoutesById {
   '/_authed/admin/skills_/$slug': typeof AuthedAdminSkillsSlugRoute
   '/_authed/admin/skills_/new': typeof AuthedAdminSkillsNewRoute
   '/_authed/settings/_personal/activity': typeof AuthedSettingsPersonalActivityRoute
-  '/_authed/settings/_personal/computer': typeof AuthedSettingsPersonalComputerRoute
   '/_authed/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/_authed/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
   '/_authed/settings/credentials_/new': typeof AuthedSettingsCredentialsNewRoute
@@ -1046,6 +1045,7 @@ export interface FileRouteTypes {
     | '/admin/what-if'
     | '/settings/approvals'
     | '/settings/browsers'
+    | '/settings/computer'
     | '/settings/credentials'
     | '/settings/learning'
     | '/settings/memory'
@@ -1082,7 +1082,6 @@ export interface FileRouteTypes {
     | '/admin/skills/$slug'
     | '/admin/skills/new'
     | '/settings/activity'
-    | '/settings/computer'
     | '/settings/components-gallery/$name'
     | '/settings/connected-accounts/$key'
     | '/settings/credentials/new'
@@ -1150,6 +1149,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/settings/approvals'
     | '/settings/browsers'
+    | '/settings/computer'
     | '/settings/credentials'
     | '/settings/learning'
     | '/settings/memory'
@@ -1185,7 +1185,6 @@ export interface FileRouteTypes {
     | '/admin/skills/$slug'
     | '/admin/skills/new'
     | '/settings/activity'
-    | '/settings/computer'
     | '/settings/components-gallery/$name'
     | '/settings/connected-accounts/$key'
     | '/settings/credentials/new'
@@ -1256,6 +1255,7 @@ export interface FileRouteTypes {
     | '/_authed/settings/_personal'
     | '/_authed/settings/approvals'
     | '/_authed/settings/browsers'
+    | '/_authed/settings/computer'
     | '/_authed/settings/credentials'
     | '/_authed/settings/learning'
     | '/_authed/settings/memory'
@@ -1293,7 +1293,6 @@ export interface FileRouteTypes {
     | '/_authed/admin/skills_/$slug'
     | '/_authed/admin/skills_/new'
     | '/_authed/settings/_personal/activity'
-    | '/_authed/settings/_personal/computer'
     | '/_authed/settings/components-gallery/$name'
     | '/_authed/settings/connected-accounts/$key'
     | '/_authed/settings/credentials_/new'
@@ -1596,6 +1595,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSettingsBrowsersRouteImport
       parentRoute: typeof AuthedSettingsRouteRoute
     }
+    '/_authed/settings/computer': {
+      id: '/_authed/settings/computer'
+      path: '/computer'
+      fullPath: '/settings/computer'
+      preLoaderRoute: typeof AuthedSettingsComputerRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
+    }
     '/_authed/settings/credentials': {
       id: '/_authed/settings/credentials'
       path: '/credentials'
@@ -1876,13 +1882,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSettingsPersonalActivityRouteImport
       parentRoute: typeof AuthedSettingsPersonalRoute
     }
-    '/_authed/settings/_personal/computer': {
-      id: '/_authed/settings/_personal/computer'
-      path: '/computer'
-      fullPath: '/settings/computer'
-      preLoaderRoute: typeof AuthedSettingsPersonalComputerRouteImport
-      parentRoute: typeof AuthedSettingsPersonalRoute
-    }
     '/_authed/settings/components-gallery/': {
       id: '/_authed/settings/components-gallery/'
       path: '/components-gallery'
@@ -2157,7 +2156,6 @@ const AuthedAdminRouteRouteWithChildren =
 
 interface AuthedSettingsPersonalRouteChildren {
   AuthedSettingsPersonalActivityRoute: typeof AuthedSettingsPersonalActivityRoute
-  AuthedSettingsPersonalComputerRoute: typeof AuthedSettingsPersonalComputerRoute
   AuthedSettingsPersonalPluginsSplatRoute: typeof AuthedSettingsPersonalPluginsSplatRoute
   AuthedSettingsPersonalSkillsSlugRoute: typeof AuthedSettingsPersonalSkillsSlugRoute
   AuthedSettingsPersonalSkillsNewRoute: typeof AuthedSettingsPersonalSkillsNewRoute
@@ -2167,7 +2165,6 @@ interface AuthedSettingsPersonalRouteChildren {
 const AuthedSettingsPersonalRouteChildren: AuthedSettingsPersonalRouteChildren =
   {
     AuthedSettingsPersonalActivityRoute: AuthedSettingsPersonalActivityRoute,
-    AuthedSettingsPersonalComputerRoute: AuthedSettingsPersonalComputerRoute,
     AuthedSettingsPersonalPluginsSplatRoute:
       AuthedSettingsPersonalPluginsSplatRoute,
     AuthedSettingsPersonalSkillsSlugRoute:
@@ -2185,6 +2182,7 @@ interface AuthedSettingsRouteRouteChildren {
   AuthedSettingsPersonalRoute: typeof AuthedSettingsPersonalRouteWithChildren
   AuthedSettingsApprovalsRoute: typeof AuthedSettingsApprovalsRoute
   AuthedSettingsBrowsersRoute: typeof AuthedSettingsBrowsersRoute
+  AuthedSettingsComputerRoute: typeof AuthedSettingsComputerRoute
   AuthedSettingsCredentialsRoute: typeof AuthedSettingsCredentialsRoute
   AuthedSettingsLearningRoute: typeof AuthedSettingsLearningRoute
   AuthedSettingsMemoryRoute: typeof AuthedSettingsMemoryRoute
@@ -2207,6 +2205,7 @@ const AuthedSettingsRouteRouteChildren: AuthedSettingsRouteRouteChildren = {
   AuthedSettingsPersonalRoute: AuthedSettingsPersonalRouteWithChildren,
   AuthedSettingsApprovalsRoute: AuthedSettingsApprovalsRoute,
   AuthedSettingsBrowsersRoute: AuthedSettingsBrowsersRoute,
+  AuthedSettingsComputerRoute: AuthedSettingsComputerRoute,
   AuthedSettingsCredentialsRoute: AuthedSettingsCredentialsRoute,
   AuthedSettingsLearningRoute: AuthedSettingsLearningRoute,
   AuthedSettingsMemoryRoute: AuthedSettingsMemoryRoute,

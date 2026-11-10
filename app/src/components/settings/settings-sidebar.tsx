@@ -1,16 +1,8 @@
 import {
   IconArrowLeft,
   IconBell,
-  IconBook,
-  IconBrowser,
-  IconChecks,
-  IconClock,
-  IconDeviceDesktop,
-  IconHistory,
   IconLayoutGrid,
   IconListCheck,
-  IconLock,
-  IconBrain,
   IconSettings,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -20,6 +12,7 @@ import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuBadge,
@@ -32,13 +25,24 @@ import {
   deploymentCapabilitiesQueryOptions,
   offersMemory,
 } from "@/lib/deployment/queries";
-import { desktopShell } from "@/lib/desktop/shell";
 import { managePaths } from "@/lib/manage-paths";
+import { primitive, VAULT } from "@/lib/primitives";
 import { mayOpenSetup, setupChecklistQueryOptions } from "@/lib/setup/queries";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
 
+export type SettingsGroup = "you" | "every-bot" | "openbot";
+
+/** The sidebar's three groups, in order, and what each is called. */
+export const SETTINGS_GROUPS: readonly { id: SettingsGroup; label: string }[] =
+  [
+    { id: "you", label: "You" },
+    { id: "every-bot", label: "Every Bot" },
+    { id: "openbot", label: "OpenBot" },
+  ];
+
 type SettingsSidebarItem = {
+  group: SettingsGroup;
   /**
    * Whether this entry lights only on its own route.
    *
@@ -46,18 +50,31 @@ type SettingsSidebarItem = {
    * everywhere else, so an entry stays lit on the pages beneath it.
    */
   exact?: boolean;
-  /** Shown only inside OpenBot Desktop, which is what the page reads from. */
-  desktopOnly?: boolean;
   /** Shown only where OpenBot offers memory (see `offersMemory`). */
   memoryOnly?: boolean;
+  /** Shown only in the personal edition. */
+  personalOnly?: boolean;
   icon: React.ComponentType<{ className?: string }>;
   linkOptions: LinkOptions;
   title: string;
   setup?: boolean;
 };
 
+/**
+ * Settings, for every Bot at once (`docs/how-openbot-works.md`), in three groups:
+ *
+ * - You: your account, where updates reach you, and your Vault.
+ * - Every Bot: the things a Bot has, set for all of them, in the fixed order of `lib/primitives.ts`.
+ *   Conversations is not here: it is where work happens, not something to set. Apps are on
+ *   Connections, in the main menu.
+ * - OpenBot: what OpenBot itself has and needs, and the gallery of what a Bot can draw.
+ *
+ * An entry with nothing to set in this edition is left out: Memory where OpenBot offers none, and
+ * Activity in the team edition, where the trail is an admin's (Admin → Activity).
+ */
 export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
   {
+    group: "you",
     title: "General",
     icon: IconSettings,
     /* `/settings` prefixes every other route here, and would otherwise light up on all of them. */
@@ -66,93 +83,86 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
   },
   {
     /* Where updates go for every Bot at once; how much each Bot sends is on that Bot's page. */
+    group: "you",
     title: "Notifications",
     icon: IconBell,
     linkOptions: { to: "/settings/notifications" },
   },
   {
+    /* Your saved logins and, in the personal edition, your keys. No Bot sees what is in it. */
+    group: "you",
+    title: VAULT.label,
+    icon: VAULT.icon,
+    linkOptions: { to: "/settings/vault" },
+  },
+  {
     /* Every Bot's routines, goals and check-ins in one list, and the switch for all check-ins. */
-    title: "Routines",
-    icon: IconClock,
+    group: "every-bot",
+    title: primitive("routines").label,
+    icon: primitive("routines").icon,
     linkOptions: { to: "/settings/routines" },
   },
   {
-    /* What your Bots remember about you. Only where OpenBot offers memory. */
-    title: "Memory",
-    icon: IconBrain,
+    group: "every-bot",
+    title: primitive("memory").label,
+    icon: primitive("memory").icon,
     memoryOnly: true,
     linkOptions: { to: "/settings/memory" },
   },
   {
     /* The skills that are yours, written, taught or learned, and what waits for your review. */
-    title: "Skills",
-    icon: IconBook,
+    group: "every-bot",
+    title: primitive("skills").label,
+    icon: primitive("skills").icon,
     linkOptions: { to: "/settings/skills" },
   },
   {
-    /* Whether Bots ask first, and rules for every Bot. Team settings are an administrator's. */
-    title: "Approvals",
-    icon: IconChecks,
+    /* The computer Bots work on, folders, what OpenBot runs here, and your Recorder browsers. */
+    group: "every-bot",
+    title: primitive("computer").label,
+    icon: primitive("computer").icon,
+    linkOptions: { to: "/settings/computer" },
+  },
+  {
+    /* Whether Bots ask first, and rules for every Bot. Team settings are an admin's. */
+    group: "every-bot",
+    title: primitive("approvals").label,
+    icon: primitive("approvals").icon,
     linkOptions: { to: "/settings/approvals" },
   },
   {
-    /* The browsers signed in to the Recorder extension as you; each can be disconnected here. */
-    title: "Browsers",
-    icon: IconBrowser,
-    linkOptions: { to: "/settings/browsers" },
+    group: "every-bot",
+    title: managePaths("personal").auditLabel,
+    icon: primitive("activity").icon,
+    personalOnly: true,
+    linkOptions: { to: "/settings/activity" },
   },
   {
     /* What the deployment has and still needs: onboarding's checklist, to come back to. */
+    group: "openbot",
     title: "Setup",
     icon: IconListCheck,
     linkOptions: { to: "/settings/setup" },
     setup: true,
   },
   {
-    /* Your saved logins and, in the personal edition, your keys. No Bot sees what is in it. */
-    title: "Vault",
-    icon: IconLock,
-    linkOptions: { to: "/settings/vault" },
-  },
-  {
-    /* What OpenBot runs here and the memory it takes, with Restart and Stop. */
-    title: "This computer",
-    icon: IconDeviceDesktop,
-    desktopOnly: true,
-    linkOptions: { to: "/settings/this-computer" },
-  },
-  {
     /* The same mark Admin gives UI Components. It is the same subject seen from the other side. */
+    group: "openbot",
     title: "Components gallery",
     icon: IconLayoutGrid,
     linkOptions: { to: "/settings/components-gallery" },
   },
 ];
 
-/**
- * What the personal edition keeps of Admin. There is no Admin there, and the one person still stores
- * writes skills, resets the computer and reads the trail. Apps are not here: adding one and
- * connecting it are the same step, on Connections, which also links to the Vault.
- */
-const PERSONAL_SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
-  {
-    title: "Computer",
-    icon: IconDeviceDesktop,
-    linkOptions: { to: "/settings/computer" },
-  },
-  {
-    title: managePaths("personal").auditLabel,
-    icon: IconHistory,
-    linkOptions: { to: "/settings/activity" },
-  },
-];
-
+/** The entries this edition has, in order. Setup is narrowed further by who may open it. */
 export function settingsSidebarItems(
   edition: "team" | "personal",
 ): SettingsSidebarItem[] {
-  return edition === "personal"
-    ? [...SETTINGS_SIDEBAR_ITEMS, ...PERSONAL_SETTINGS_SIDEBAR_ITEMS]
-    : SETTINGS_SIDEBAR_ITEMS;
+  return SETTINGS_SIDEBAR_ITEMS.filter(
+    (item) =>
+      (!item.personalOnly || edition === "personal") &&
+      (!item.memoryOnly || offersMemory({ edition })),
+  );
 }
 
 export function SettingsSidebar({
@@ -176,7 +186,9 @@ export function SettingsSidebar({
           (row) => row.status === "needs_setup" && row.fix !== null,
         ).length
       : 0;
-  const items = settingsSidebarItems(capabilities?.edition ?? "team");
+  const items = settingsSidebarItems(capabilities?.edition ?? "team").filter(
+    (option) => !option.setup || canSetUp,
+  );
   return (
     <Sidebar variant="inset" {...props}>
       {/* Matched to the app sidebar's header, as Admin's is. See admin-sidebar.tsx. */}
@@ -199,44 +211,44 @@ export function SettingsSidebar({
          * Group outside menu, as Admin has it. The other way round nests a list item inside a div
          * inside the `ul`, which is not markup a list is allowed to be made of.
          */}
-        <SidebarGroup>
-          <SidebarMenu className="gap-px">
-            {items
-              .filter(
-                (option) =>
-                  (!option.setup || canSetUp) &&
-                  (!option.desktopOnly || desktopShell() !== null) &&
-                  (!option.memoryOnly || offersMemory(capabilities)),
-              )
-              .map((option) => (
-                <SidebarMenuItem key={option.title}>
-                  <SidebarMenuButton
-                    render={(props) => (
-                      <Link
-                        {...option.linkOptions}
-                        activeOptions={{ exact: option.exact ?? false }}
-                        activeProps={{ className: "bg-foreground/5" }}
-                        {...props}
-                      >
-                        <option.icon className="mr-2 h-4 w-4" />
-                        {option.title}
-                        {option.setup && toFix > 0 ? (
-                          <span className="sr-only">
-                            , {toFix} {toFix === 1 ? "needs" : "need"} setup
-                          </span>
-                        ) : null}
-                      </Link>
-                    )}
-                  />
-                  {option.setup && toFix > 0 ? (
-                    <SidebarMenuBadge aria-hidden="true">
-                      {toFix}
-                    </SidebarMenuBadge>
-                  ) : null}
-                </SidebarMenuItem>
-              ))}
-          </SidebarMenu>
-        </SidebarGroup>
+        {SETTINGS_GROUPS.map((group) => {
+          const entries = items.filter((option) => option.group === group.id);
+          if (entries.length === 0) return null;
+          return (
+            <SidebarGroup key={group.id}>
+              <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+              <SidebarMenu className="gap-px">
+                {entries.map((option) => (
+                  <SidebarMenuItem key={option.title}>
+                    <SidebarMenuButton
+                      render={(props) => (
+                        <Link
+                          {...option.linkOptions}
+                          activeOptions={{ exact: option.exact ?? false }}
+                          activeProps={{ className: "bg-foreground/5" }}
+                          {...props}
+                        >
+                          <option.icon className="mr-2 h-4 w-4" />
+                          {option.title}
+                          {option.setup && toFix > 0 ? (
+                            <span className="sr-only">
+                              , {toFix} {toFix === 1 ? "needs" : "need"} setup
+                            </span>
+                          ) : null}
+                        </Link>
+                      )}
+                    />
+                    {option.setup && toFix > 0 ? (
+                      <SidebarMenuBadge aria-hidden="true">
+                        {toFix}
+                      </SidebarMenuBadge>
+                    ) : null}
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroup>
+          );
+        })}
       </SidebarContent>
       <SidebarRail />
     </Sidebar>
