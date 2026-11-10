@@ -30,6 +30,18 @@ backup taken before the upgrade instead. Three things change for an existing dep
 
 ### OpenBot Desktop
 
+- **An update downloads before you click Update.** As soon as a new version of OpenBot is out,
+  OpenBot Desktop downloads what it runs in the background while you keep working: the parts for
+  the Bots you use, and the back end's when it changes too, kept until you update. Clicking Update
+  then stops OpenBot, backs it up, updates it and starts it again, with nothing big left to
+  download. The update offer, Settings › This computer and the setup window say the new version
+  "is downloading in the background (40%).", then that it "is ready to install. It takes a few
+  minutes." It downloads one part at a time, waits while OpenBot starts, stops or updates, never
+  stops or restarts anything you are using, and downloads nothing when the disk is short of room
+  (the Desktop log says why, and the update downloads as before). Candidates and internal builds,
+  which do not update themselves, download nothing ahead.
+- **downloads.copilotkit.ai serves each release's `desktop-images.json`.** It answered 403, so the
+  list of a release's images could only come from GitHub.
 - **The Status window, Settings > This computer and the Install step say what's running in plain
   words.** The Status window, opened from the menu bar or the system tray, and Settings > This
   computer said "Back end", "Container engine", "Podman" or "Docker" and the build's commit and
@@ -37,10 +49,10 @@ backup taken before the upgrade instead. Three things change for an existing dep
   on, with "App and Bots" for what was "Front end and Bots". They show the version on its own, and
   the engine, the build and Docker's container names stay in Copy diagnostics and the logs. A
   stopped app on This computer says it isn't using memory, where it said its memory couldn't be
-  measured. On the
-  Install step, the rest of OpenBot downloads alongside OpenBot's own download, and both said they
-  were in progress at once ("Step 2 of 4" and "Step 3 of 4"). The step now shows one step at a
-  time: the rest of OpenBot is step 3, shown once step 2 is done, as far along as it got meanwhile.
+  measured. On the Install step, the rest of OpenBot downloads alongside OpenBot's own download,
+  and both said they were in progress at once ("Step 2 of 4" and "Step 3 of 4"). The step now shows
+  one step at a time: the rest of OpenBot is step 3, shown once step 2 is done, as far along as it
+  got meanwhile.
 - **Setup says what it's doing in plain words, and what's installing behind every step.** The
   setup window said "Preparing the engine machine", "Installing Podman", "Waiting for the back end"
   and "Updating the back end to 0.16.0-rc.10", and a tester waiting on the first step couldn't tell
