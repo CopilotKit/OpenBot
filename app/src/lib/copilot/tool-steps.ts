@@ -1,11 +1,9 @@
 import { NOT_RUN_AFTER_FAILURE } from "@openbot/shared/approval-outcomes";
 import { calledTooEarly } from "@openbot/shared/tool-steps";
-import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { readOutcome } from "@/lib/computers/activity";
 import {
   type PublishedSandboxed,
-  publishedSandboxedQueryOptions,
   sandboxedKeys,
 } from "@/lib/sandboxed/queries";
 import { queryClient } from "@/query-client";
@@ -43,14 +41,16 @@ export function componentTest(
 
 /**
  * The same test for a component that draws: it follows the published components as the page loads
- * them, and never fetches them itself (`SandboxedTools` does).
+ * them, and never fetches them itself (`SandboxedTools` does). Read from the page's own query cache,
+ * as the handlers read it, so a transcript drawn outside a query provider still has its answer.
  */
 export function useComponentTest(): (name: string) => boolean {
-  const { data } = useQuery({
-    ...publishedSandboxedQueryOptions(),
-    enabled: false,
-  });
-  return useMemo(() => componentTest(data), [data]);
+  const published = useSyncExternalStore(
+    (changed) => queryClient.getQueryCache().subscribe(changed),
+    () =>
+      queryClient.getQueryData<PublishedSandboxed[]>(sandboxedKeys.published()),
+  );
+  return useMemo(() => componentTest(published), [published]);
 }
 
 /** The same test, from what the page has loaded of the published components when a call arrives. */
