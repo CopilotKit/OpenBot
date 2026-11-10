@@ -148,6 +148,49 @@ async function announce(database: Pick<Database, "execute">) {
   await database.execute(sql`select pg_notify(${ENTERPRISE_TOPIC}, '')`);
 }
 
+/** One capability switch to write. `allowed: null` removes it. */
+export type CapabilitySwitch = Omit<CapabilityRow, "allowed"> & {
+  allowed: boolean | null;
+};
+
+async function writeCapability(
+  tx: Pick<Database, "insert" | "delete">,
+  row: CapabilitySwitch,
+  by: string,
+) {
+  const where = and(
+    eq(capabilitySettings.scopeKind, row.scopeKind),
+    eq(capabilitySettings.scopeId, row.scopeId),
+    eq(capabilitySettings.capability, row.capability),
+  );
+  if (row.allowed === null) {
+    await tx.delete(capabilitySettings).where(where);
+    return;
+  }
+  await tx
+    .insert(capabilitySettings)
+    .values({
+      scopeKind: row.scopeKind,
+      scopeId: row.scopeId,
+      capability: row.capability,
+      allowed: row.allowed,
+      updatedBy: by,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [
+        capabilitySettings.scopeKind,
+        capabilitySettings.scopeId,
+        capabilitySettings.capability,
+      ],
+      set: {
+        allowed: row.allowed,
+        updatedBy: by,
+        updatedAt: new Date(),
+      },
+    });
+}
+
 export function createEnterpriseStore(database: Database) {
   return {
     async settings(): Promise<EnterpriseSettings> {
@@ -200,42 +243,24 @@ export function createEnterpriseStore(database: Database) {
     },
 
     /** `allowed: null` removes the row, returning that scope to whatever sits beneath it. */
-    async setCapability(
-      row: Omit<CapabilityRow, "allowed"> & { allowed: boolean | null },
+    async setCapability(row: CapabilitySwitch, by: string): Promise<void> {
+      await database.transaction(async (tx) => {
+        await writeCapability(tx, row, by);
+        await announce(tx);
+      });
+    },
+
+    /**
+     * Several switches in one transaction, with one NOTIFY. A change written from a description is
+     * often "off for everybody, on for these groups", and half of it saved takes the permission from
+     * everybody.
+     */
+    async setCapabilities(
+      rows: readonly CapabilitySwitch[],
       by: string,
     ): Promise<void> {
       await database.transaction(async (tx) => {
-        const where = and(
-          eq(capabilitySettings.scopeKind, row.scopeKind),
-          eq(capabilitySettings.scopeId, row.scopeId),
-          eq(capabilitySettings.capability, row.capability),
-        );
-        if (row.allowed === null) {
-          await tx.delete(capabilitySettings).where(where);
-        } else {
-          await tx
-            .insert(capabilitySettings)
-            .values({
-              scopeKind: row.scopeKind,
-              scopeId: row.scopeId,
-              capability: row.capability,
-              allowed: row.allowed,
-              updatedBy: by,
-              updatedAt: new Date(),
-            })
-            .onConflictDoUpdate({
-              target: [
-                capabilitySettings.scopeKind,
-                capabilitySettings.scopeId,
-                capabilitySettings.capability,
-              ],
-              set: {
-                allowed: row.allowed,
-                updatedBy: by,
-                updatedAt: new Date(),
-              },
-            });
-        }
+        for (const row of rows) await writeCapability(tx, row, by);
         await announce(tx);
       });
     },

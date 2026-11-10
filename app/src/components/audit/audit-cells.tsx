@@ -830,7 +830,8 @@ export function decisionDetails(
   if (
     (event.eventType === "approval.rule_changed" ||
       event.eventType === "plugin.grants_changed" ||
-      event.eventType === "network_policy.changed") &&
+      event.eventType === "network_policy.changed" ||
+      event.eventType === "capability.changed") &&
     typeof ruleAuthoring.text === "string"
   )
     lines.push(`Written from: “${ruleAuthoring.text}”`);
@@ -1171,6 +1172,7 @@ const DECISIONS: Record<string, string> = {
   "plugin.grants_changed": "Actions saved",
   // A draft network allowlist, as a boundary's is. Nothing was decided and nothing changed.
   "network_policy.translated": "Drafted, not saved",
+  "capability.changes_translated": "Drafted, not saved",
 
   "configuration.changed": "Configuration changed",
   "credential.created": "Credential saved",

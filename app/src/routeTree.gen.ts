@@ -74,6 +74,7 @@ import { Route as AuthedAdminBoundariesNewRouteImport } from './routes/_authed/a
 import { Route as AuthedAdminComponentsIndexRouteImport } from './routes/_authed/admin/components/index'
 import { Route as AuthedAdminComponentsNameRouteImport } from './routes/_authed/admin/components/$name'
 import { Route as AuthedAdminCredentialsNewRouteImport } from './routes/_authed/admin/credentials_.new'
+import { Route as AuthedAdminPermissionsDescribeRouteImport } from './routes/_authed/admin/permissions_.describe'
 import { Route as AuthedAdminPluginsIndexRouteImport } from './routes/_authed/admin/plugins/index'
 import { Route as AuthedAdminPluginsKeyRouteImport } from './routes/_authed/admin/plugins/$key'
 import { Route as AuthedAdminPluginsArcadeRouteImport } from './routes/_authed/admin/plugins/arcade'
@@ -447,6 +448,12 @@ const AuthedAdminCredentialsNewRoute =
     path: '/credentials/new',
     getParentRoute: () => AuthedAdminRouteRoute,
   } as any)
+const AuthedAdminPermissionsDescribeRoute =
+  AuthedAdminPermissionsDescribeRouteImport.update({
+    id: '/permissions_/describe',
+    path: '/permissions/describe',
+    getParentRoute: () => AuthedAdminRouteRoute,
+  } as any)
 const AuthedAdminPluginsIndexRoute = AuthedAdminPluginsIndexRouteImport.update({
   id: '/plugins/',
   path: '/plugins/',
@@ -706,6 +713,7 @@ export interface FileRoutesByFullPath {
   '/admin/boundaries/new': typeof AuthedAdminBoundariesNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
   '/admin/credentials/new': typeof AuthedAdminCredentialsNewRoute
+  '/admin/permissions/describe': typeof AuthedAdminPermissionsDescribeRoute
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
@@ -801,6 +809,7 @@ export interface FileRoutesByTo {
   '/admin/boundaries/new': typeof AuthedAdminBoundariesNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
   '/admin/credentials/new': typeof AuthedAdminCredentialsNewRoute
+  '/admin/permissions/describe': typeof AuthedAdminPermissionsDescribeRoute
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
@@ -903,6 +912,7 @@ export interface FileRoutesById {
   '/_authed/admin/boundaries_/new': typeof AuthedAdminBoundariesNewRoute
   '/_authed/admin/components/$name': typeof AuthedAdminComponentsNameRoute
   '/_authed/admin/credentials_/new': typeof AuthedAdminCredentialsNewRoute
+  '/_authed/admin/permissions_/describe': typeof AuthedAdminPermissionsDescribeRoute
   '/_authed/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/_authed/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/_authed/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
@@ -1003,6 +1013,7 @@ export interface FileRouteTypes {
     | '/admin/boundaries/new'
     | '/admin/components/$name'
     | '/admin/credentials/new'
+    | '/admin/permissions/describe'
     | '/admin/plugins/$key'
     | '/admin/plugins/arcade'
     | '/admin/plugins/composio'
@@ -1098,6 +1109,7 @@ export interface FileRouteTypes {
     | '/admin/boundaries/new'
     | '/admin/components/$name'
     | '/admin/credentials/new'
+    | '/admin/permissions/describe'
     | '/admin/plugins/$key'
     | '/admin/plugins/arcade'
     | '/admin/plugins/composio'
@@ -1199,6 +1211,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/boundaries_/new'
     | '/_authed/admin/components/$name'
     | '/_authed/admin/credentials_/new'
+    | '/_authed/admin/permissions_/describe'
     | '/_authed/admin/plugins/$key'
     | '/_authed/admin/plugins/arcade'
     | '/_authed/admin/plugins/composio'
@@ -1702,6 +1715,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAdminCredentialsNewRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
+    '/_authed/admin/permissions_/describe': {
+      id: '/_authed/admin/permissions_/describe'
+      path: '/permissions/describe'
+      fullPath: '/admin/permissions/describe'
+      preLoaderRoute: typeof AuthedAdminPermissionsDescribeRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
     '/_authed/admin/plugins/': {
       id: '/_authed/admin/plugins/'
       path: '/plugins'
@@ -1965,6 +1985,7 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminBoundariesNewRoute: typeof AuthedAdminBoundariesNewRoute
   AuthedAdminComponentsNameRoute: typeof AuthedAdminComponentsNameRoute
   AuthedAdminCredentialsNewRoute: typeof AuthedAdminCredentialsNewRoute
+  AuthedAdminPermissionsDescribeRoute: typeof AuthedAdminPermissionsDescribeRoute
   AuthedAdminPluginsKeyRoute: typeof AuthedAdminPluginsKeyRoute
   AuthedAdminPluginsArcadeRoute: typeof AuthedAdminPluginsArcadeRoute
   AuthedAdminPluginsComposioRoute: typeof AuthedAdminPluginsComposioRoute
@@ -1998,6 +2019,7 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminBoundariesNewRoute: AuthedAdminBoundariesNewRoute,
   AuthedAdminComponentsNameRoute: AuthedAdminComponentsNameRoute,
   AuthedAdminCredentialsNewRoute: AuthedAdminCredentialsNewRoute,
+  AuthedAdminPermissionsDescribeRoute: AuthedAdminPermissionsDescribeRoute,
   AuthedAdminPluginsKeyRoute: AuthedAdminPluginsKeyRoute,
   AuthedAdminPluginsArcadeRoute: AuthedAdminPluginsArcadeRoute,
   AuthedAdminPluginsComposioRoute: AuthedAdminPluginsComposioRoute,
