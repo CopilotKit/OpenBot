@@ -897,7 +897,19 @@ pub enum Terms {
         wsl: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         drive: Option<String>,
+        /// What was measured, for the desktop's usage data only. Never sent to the window.
+        #[serde(skip)]
+        measured: EngineMeasure,
     },
+}
+
+/// The engine's CPUs, memory and free disk as OpenBot measured them (`EngineCheck`), in counts and
+/// bytes. Free disk that could not be measured is absent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EngineMeasure {
+    pub cpus: u64,
+    pub memory_bytes: u64,
+    pub free_disk_bytes: Option<u64>,
 }
 
 /// `onboard local-terms --json`: one object, exit 0. The address must be https; the organization
@@ -1741,6 +1753,11 @@ pub fn engine_size_terms() -> Option<Terms> {
         memory: short.memory,
         disk: short.disk,
         wsl: check.wsl(),
+        measured: EngineMeasure {
+            cpus,
+            memory_bytes: memory,
+            free_disk_bytes: check.free_disk(),
+        },
         drive: check.drive.and_then(|drive| drive.drive),
     })
 }
@@ -8592,6 +8609,11 @@ overlay 164506208 20481024 135620148 14% /
                 disk: true,
                 wsl: false,
                 drive: None,
+                measured: EngineMeasure {
+                    cpus: 8,
+                    memory_bytes: 8 * GIB,
+                    free_disk_bytes: Some(GIB),
+                },
             })
             .unwrap(),
             json!({ "status": "engine-too-small", "podman": false, "cpu": false, "memory": false, "disk": true })
@@ -8604,6 +8626,7 @@ overlay 164506208 20481024 135620148 14% /
                 disk: true,
                 wsl: true,
                 drive: Some("C:".into()),
+                measured: EngineMeasure::default(),
             })
             .unwrap(),
             json!({ "status": "engine-too-small", "podman": true, "cpu": false, "memory": false, "disk": true, "wsl": true, "drive": "C:" })
@@ -9173,6 +9196,11 @@ fn main() {
                 disk: false,
                 wsl: false,
                 drive: None,
+                measured: EngineMeasure {
+                    cpus: 2,
+                    memory_bytes: 22011707392,
+                    free_disk_bytes: None,
+                },
             })
         );
     }

@@ -23,6 +23,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   update themselves (candidates and internal builds) download nothing ahead.
 - **downloads.copilotkit.ai serves each release's `desktop-images.json`.** It answered 403, so the
   list of a release's images could only come from GitHub.
+- **Usage data now says why setup stopped.** A failed `local setup`, every failed install or
+  Start (a failed `compose up` among them), a failed `local start`, `local connect` or Learning
+  model setup, and an Account step that stops on an engine too small or one local setup does not
+  run on each send one `setup_failed`, with the step that failed, a reason class, the CLI's own
+  reason, and for an engine too small its CPUs, memory and disk against what setup needs. The
+  Account step's sign-in sends when it starts and whether it completed, failed or was cancelled.
+  The app version keeps a release candidate's label (`1.0.0-rc.5`, not `1.0.0`). Only closed values
+  and numbers are sent, and nothing at all when usage data is off.
 - **Sign-in comes first, and macOS asks for your password only after OpenBot says why.** On a new
   Mac the Account step waited for Install to put Podman in before any browser sign-in opened, and
   the "osascript wants to make changes" password box came up by itself over it. The CopilotKit
