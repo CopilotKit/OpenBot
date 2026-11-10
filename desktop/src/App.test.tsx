@@ -2702,10 +2702,7 @@ test("the line under Start's rows says the upgrade step running now, never one t
       "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
     ],
     [[release("Stopping OpenBot.")], "Stopping OpenBot."],
-    [
-      [release("Backing up your data.")],
-      "Backing up your data.",
-    ],
+    [[release("Backing up your data.")], "Backing up your data."],
     [[release("Downloading the update.")], "Downloading the update."],
     [
       [
