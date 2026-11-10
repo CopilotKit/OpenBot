@@ -238,6 +238,17 @@ test("a sentence becomes the list and its mode, read back independently, replaye
   expect(view.getAllByText("Would allow")).toHaveLength(1);
   // What the replay can't see, said beside it.
   expect(dialog.textContent).toContain("Only page visits are recorded.");
+  // Text beside the host rows runs full width: a Field holding their horizontal separators
+  // balanced it into half-width lines, and a horizontal Field for Lock pushed the dialog wide.
+  const headline = view.getByText(/^Of the last 5 visits/);
+  expect(
+    headline
+      .closest("[data-slot=field]")
+      ?.querySelector("[data-orientation=horizontal]") ?? null,
+  ).toBeNull();
+  expect(
+    dialog.querySelector("[data-slot=field][data-orientation=horizontal]"),
+  ).toBeNull();
 
   fireEvent.click(view.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(saved).toHaveLength(1));

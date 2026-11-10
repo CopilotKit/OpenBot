@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { DescribeField } from "@/components/boundaries/describe-rule";
 import { ReadingStatus } from "@/components/boundaries/rule-reading";
 import { PageRows } from "@/components/layout/page-shell";
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { FieldDescription, FieldLabel } from "@/components/ui/field";
 import {
   Item,
   ItemActions,
@@ -125,8 +125,16 @@ export function AllowlistPreview({
   });
 
   if (!settled || preview.isPending) return null;
+  /*
+   * A fieldset laid out as a field, not a Field: a Field holding the host rows' horizontal separators
+   * balances its descriptions, which squeezed the headline and the honest line to half the dialog.
+   */
   return (
-    <Field aria-labelledby="network-preview" aria-live="polite">
+    <fieldset
+      aria-labelledby="network-preview"
+      aria-live="polite"
+      className="flex w-full min-w-0 flex-col gap-2 *:w-full"
+    >
       <FieldLabel id="network-preview">On recent page visits</FieldLabel>
       {preview.error ? (
         <p className="text-destructive text-sm" role="alert">
@@ -140,7 +148,7 @@ export function AllowlistPreview({
         other ways, such as from its shell or a page's own requests, aren't
         recorded, so they aren't counted here.
       </FieldDescription>
-    </Field>
+    </fieldset>
   );
 }
 
