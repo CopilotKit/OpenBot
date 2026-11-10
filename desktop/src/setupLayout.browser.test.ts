@@ -336,7 +336,7 @@ describe.skipIf(!asked)("the background install's row", () => {
           .getByRole("button", { name: "Install", exact: true })
           .click();
         await account
-          .getByRole("heading", { name: "Sign in to CopilotKit" })
+          .getByRole("heading", { name: "Self-Contained OpenBot" })
           .waitFor();
         await account.waitForTimeout(600);
         await inView(account);
