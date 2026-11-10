@@ -147,14 +147,43 @@ test("with every byte in and parts still unpacking, the bar is never full, keeps
   ).toBeTruthy();
   expect(value()).toBeLessThan(1);
 
-  // Bytes still arriving: their share of the bar, and how many parts are left.
+  // A report that counts its bytes short for a moment does not take it back to downloading: on
+  // Windows F the row read "Downloading OpenBot. About 2 minutes left." for a few seconds between
+  // "Unpacking OpenBot (3 of 5)" and "(5 of 5)".
+  const unpacked = value();
   view.rerender(
+    <SetupProgress
+      steps={installing({
+        done: 4,
+        total: 5,
+        bytes: 1_000_000_000,
+        size,
+        bytesPerSecond: 9_000_000,
+      })}
+    />,
+  );
+  expect(row.getByText(/^Unpacking OpenBot \(5 of 5\)\./)).toBeTruthy();
+  expect(row.queryByText(/^Downloading OpenBot\./)).toBeNull();
+  expect(row.queryByText(/minutes left/)).toBeNull();
+  expect(value()).toBeGreaterThanOrEqual(unpacked);
+
+  // A download whose bytes are still arriving: their share of the bar, and the parts left.
+  cleanup();
+  const arriving = render(
     <SetupProgress
       steps={installing({ done: 4, total: 5, bytes: 1_000_000_000, size })}
     />,
   );
-  expect(value()).toBeCloseTo(0.8 * (1 / 1.1) + 0.2 * 0.8, 3);
-  expect(row.getByText("1.0 GB of 1.1 GB · 1 of 5 parts left")).toBeTruthy();
+  expect(
+    Number(
+      arriving
+        .getByRole("progressbar", { name: "Download progress" })
+        .getAttribute("value"),
+    ),
+  ).toBeCloseTo(0.8 * (1 / 1.1) + 0.2 * 0.8, 3);
+  expect(
+    arriving.getByText("1.0 GB of 1.1 GB · 1 of 5 parts left"),
+  ).toBeTruthy();
 });
 
 /*
