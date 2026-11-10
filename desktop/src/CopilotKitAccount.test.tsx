@@ -96,7 +96,7 @@ test("an engine short of disk says how to raise it, and Try again checks again",
     <CopilotKitAccount root="/tmp/account-engine" onDone={() => {}} />,
   );
   await screen.findByText(
-    "Docker is out of disk space. OpenBot needs 40 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Try again.",
+    "Docker Desktop is out of disk space. OpenBot needs 40 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Try again.",
   );
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));
   await waitFor(() =>
@@ -137,11 +137,13 @@ test("an engine local setup doesn't run on is said at once, with how to switch",
   await screen.findByRole("heading", {
     name: "Switch to Docker Desktop or Podman",
   });
+  // OpenBot's own words: the CLI's names a rootful Podman, and goes to the log.
   expect(
     screen.getByText(
-      "Docker Desktop or rootful Podman is required on macOS. This machine runs OrbStack.",
+      "OpenBot can't run with the app this computer uses to run its software. It works with Docker Desktop or Podman.",
     ),
   ).toBeTruthy();
+  expect(screen.queryByText(/rootful/)).toBeNull();
   expect(screen.getByText("docker context use desktop-linux")).toBeTruthy();
   expect(
     screen.queryByText("Couldn’t check your CopilotKit account. Try again."),
@@ -256,43 +258,38 @@ test("while Install sets up the engine, the signed-in account step says so, then
  * Closing macOS's password prompt without a password is a decision: Install asks again, the step
  * says why, and Continue works again.
  */
-test("a closed password prompt is asked again, with Continue", async () => {
+test("a closed password prompt is said with Try again, and no Continue comes before one", async () => {
   invokeHandler = alreadySignedIn(async ({ command }) => {
     if (command === "local_eval_terms") return noEngine;
     if (command === "allow_podman_install") return true;
     throw new Error(`unexpected ${command}`);
   });
-  const account = (goAhead: string) => (
+  const account = (goAhead: string | null) => (
     <CopilotKitAccount
       root="/tmp/account-go-ahead"
       onDone={() => {}}
       goAhead={goAhead}
     />
   );
-  const screen = render(account("Podman is downloaded and ready to install."));
-  await screen.findByRole("heading", { name: "Install Podman" });
-  await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+  // Before any prompt: nothing to click.
+  const screen = render(account(null));
+  await screen.findByRole("heading", { name: "Setting up this computer" });
+  expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+
+  // Closed without a password: what that means, and Try again.
+  const declined =
+    "OpenBot needs your password to install what it needs to run. It asks again in a moment, or choose Try again.";
+  screen.rerender(account(declined));
+  expect(screen.getByText(declined)).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
   expect(
-    (screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement)
+    (screen.getByRole("button", { name: "Try again" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
-
-  screen.rerender(
-    account("macOS didn't get your password, so Podman isn't installed yet."),
-  );
-  expect(
-    screen.getByText(
-      "macOS didn't get your password, so Podman isn't installed yet.",
-    ),
-  ).toBeTruthy();
-  const again = screen.getByRole("button", {
-    name: "Continue",
-  }) as HTMLButtonElement;
-  expect(again.disabled).toBe(false);
-  await userEvent.click(again);
   expect(
     invokeCalls.filter((call) => call.command === "allow_podman_install"),
-  ).toHaveLength(2);
+  ).toHaveLength(1);
 });
 
 /** A refusal with no sentence of the CLI's own still says what is wrong, and is not waited out. */
@@ -306,7 +303,7 @@ test("a refused engine with no sentence from the CLI says so in OpenBot's words"
     <CopilotKitAccount root="/tmp/account-refused" onDone={() => {}} />,
   );
   await screen.findByText(
-    "OpenBot's backend can't run on the container engine this computer uses.",
+    "OpenBot can't run with the app this computer uses to run its software. It works with Docker Desktop or Podman.",
   );
   expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
 });

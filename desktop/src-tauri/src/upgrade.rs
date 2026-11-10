@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{deployment, preparation, problem::Problem};
+use crate::{deployment, engine::StepLine, preparation, problem::Problem};
 
 /// Where the previous version waits while an upgrade runs. Gone once the upgrade finished or was
 /// undone, so finding it at Start means the app stopped part way, and the previous version goes
@@ -177,26 +177,39 @@ pub enum Now {
 /// What the line under Start's rows says while `now` runs. Downloading and installing name the
 /// release `own` lays out, and starting names the one laid out now: the new release, or the
 /// previous one an upgrade that failed put back.
-pub fn now_said(now: Now, root: &Path, own: &Own) -> String {
+///
+/// The screen says what is happening in plain words; the release names (`v1.0.1`, or a build's
+/// `internal-…` tag) are in the log only, beside it.
+pub fn now_said(now: Now, root: &Path, own: &Own) -> StepLine {
     match now {
-        Now::Stopping => "Stopping OpenBot.".into(),
-        Now::BackingUp => "Backing up OpenBot's database.".into(),
-        Now::Downloading => format!("Downloading OpenBot {}.", own.version),
-        Now::Installing => format!("Installing OpenBot {}.", own.version),
-        Now::Starting => match deployment::installed(root) {
-            Some(found) => format!("Starting OpenBot {}.", found.version),
-            None => "Starting OpenBot.".into(),
-        },
-        Now::Restoring => "Putting OpenBot's database back.".into(),
+        Now::Stopping => StepLine::here("Stopping OpenBot."),
+        Now::BackingUp => {
+            StepLine::here("Backing up your data.").logged("Backing up OpenBot's database.")
+        }
+        Now::Downloading => StepLine::here("Downloading the update.")
+            .logged(format!("Downloading OpenBot {}.", own.version)),
+        Now::Installing => StepLine::here("Installing the update.")
+            .logged(format!("Installing OpenBot {}.", own.version)),
+        Now::Starting => {
+            StepLine::here("Starting OpenBot.").logged(match deployment::installed(root) {
+                Some(found) => format!("Starting OpenBot {}.", found.version),
+                None => "Starting OpenBot.".into(),
+            })
+        }
+        Now::Restoring => {
+            StepLine::here("Putting your data back.").logged("Putting OpenBot's database back.")
+        }
     }
 }
 
 /// An upgrade the app stopped part way is back on the version it was updating from.
-pub fn put_back_said(root: &Path) -> String {
-    match deployment::installed(root) {
-        Some(found) => format!("OpenBot is back on {}.", found.version),
-        None => "OpenBot is back on the version it was updating from.".into(),
-    }
+pub fn put_back_said(root: &Path) -> StepLine {
+    StepLine::here("OpenBot is back on the version it had.").logged(
+        match deployment::installed(root) {
+            Some(found) => format!("OpenBot is back on {}.", found.version),
+            None => "OpenBot is back on the version it was updating from.".into(),
+        },
+    )
 }
 
 /// How an upgrade ended.
@@ -401,36 +414,35 @@ fn write_synced(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// What Start says while it upgrades.
-pub fn moving_said(planned: &Move) -> String {
-    format!(
-        "Updating OpenBot from {} to {}. Your Bots, sign-ins and data stay as they are.",
-        planned.from, planned.to
-    )
+/// What Start says while it upgrades. The releases are the log's: `moved_log`.
+pub fn moving_said(planned: &Move) -> StepLine {
+    StepLine::here("Updating OpenBot. Your Bots, sign-ins and data stay as they are.")
+        .logged(moved_log(planned))
+}
+
+/// The upgrade, by its releases, for the log beside what the screen says.
+pub fn moved_log(planned: &Move) -> String {
+    format!("updating OpenBot from {} to {}", planned.from, planned.to)
 }
 
 /// The upgrade failed, and the previous version is running again.
-pub fn kept_said(planned: &Move) -> String {
-    format!(
-        "OpenBot couldn't update to {}, so it's still on {}, with your data as it was.",
-        planned.to, planned.from
-    )
+pub fn kept_said(_planned: &Move) -> String {
+    "OpenBot couldn't update, so it's still on the version it had, with your data as it was.".into()
 }
 
 /// The upgrade failed, the previous version is back, and it did not start.
-pub fn back_said(planned: &Move, start: &Problem) -> String {
+pub fn back_said(_planned: &Move, start: &Problem) -> String {
     format!(
-        "OpenBot couldn't update to {} and went back to {}. {}",
-        planned.to, planned.from, start.said
+        "OpenBot couldn't update and went back to the version it had. {}",
+        start.said
     )
 }
 
 /// The upgrade failed, and the previous version could not be put back.
-pub fn stuck_said(planned: &Move) -> String {
-    format!(
-        "OpenBot couldn't update to {} or put {} back. Choose Retry to try putting it back again.",
-        planned.to, planned.from
-    )
+pub fn stuck_said(_planned: &Move) -> String {
+    "OpenBot couldn't update or put the version it had back. Choose Retry to try putting it back \
+     again."
+        .into()
 }
 
 /// What Start reports when it upgraded, or tried to.
@@ -613,13 +625,18 @@ mod tests {
             from: "v0.3.0".into(),
             to: "v0.3.1".into(),
         };
-        for said in [kept_said(&planned), moving_said(&planned)] {
+        for said in [kept_said(&planned), moving_said(&planned).said] {
             assert!(!said.contains('\u{2014}'), "{said}");
+            // The releases are the log's, never the screen's.
+            assert!(!said.contains("0.3"), "{said}");
         }
         assert_eq!(
             kept_said(&planned),
-            "OpenBot couldn't update to v0.3.1, so it's still on v0.3.0, with your data as it was."
+            "OpenBot couldn't update, so it's still on the version it had, with your data as it was."
         );
+        assert!(moving_said(&planned)
+            .log_entry()
+            .contains("from v0.3.0 to v0.3.1"));
     }
 
     /// The screen a failed Start leaves has Retry, Change AI connection and Repair installation,
@@ -664,7 +681,7 @@ mod tests {
 
     impl Steps for Recorded {
         fn now(&mut self, now: Now) {
-            self.line = Some(now_said(now, &self.root, &released(&self.version)));
+            self.line = Some(now_said(now, &self.root, &released(&self.version)).said);
         }
         fn stop(&mut self) -> Result<(), Problem> {
             self.step("stop")
@@ -798,10 +815,10 @@ mod tests {
             lines(&steps),
             said(&[
                 ("stop", "Stopping OpenBot."),
-                ("back_up", "Backing up OpenBot's database."),
-                ("lay_out", "Downloading OpenBot v0.3.1."),
-                ("install", "Installing OpenBot v0.3.1."),
-                ("start", "Starting OpenBot v0.3.1."),
+                ("back_up", "Backing up your data."),
+                ("lay_out", "Downloading the update."),
+                ("install", "Installing the update."),
+                ("start", "Starting OpenBot."),
             ])
         );
         std::fs::remove_dir_all(root).unwrap();
@@ -814,9 +831,9 @@ mod tests {
             lines(&steps),
             said(&[
                 ("stop", "Stopping OpenBot."),
-                ("lay_out", "Downloading OpenBot v0.3.1."),
-                ("install", "Installing OpenBot v0.3.1."),
-                ("start", "Starting OpenBot v0.3.1."),
+                ("lay_out", "Downloading the update."),
+                ("install", "Installing the update."),
+                ("start", "Starting OpenBot."),
             ])
         );
         std::fs::remove_dir_all(root).unwrap();
@@ -829,15 +846,22 @@ mod tests {
             lines(&steps),
             said(&[
                 ("stop", "Stopping OpenBot."),
-                ("back_up", "Backing up OpenBot's database."),
-                ("lay_out", "Downloading OpenBot v0.3.1."),
-                ("install", "Installing OpenBot v0.3.1."),
+                ("back_up", "Backing up your data."),
+                ("lay_out", "Downloading the update."),
+                ("install", "Installing the update."),
                 ("stop", "Stopping OpenBot."),
-                ("restore", "Putting OpenBot's database back."),
-                ("start", "Starting OpenBot v0.3.0."),
+                ("restore", "Putting your data back."),
+                ("start", "Starting OpenBot."),
             ])
         );
-        assert_eq!(put_back_said(&root), "OpenBot is back on v0.3.0.");
+        assert_eq!(
+            put_back_said(&root).said,
+            "OpenBot is back on the version it had."
+        );
+        assert_eq!(
+            put_back_said(&root).detail.as_deref(),
+            Some("OpenBot is back on v0.3.0.")
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 

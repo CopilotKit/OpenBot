@@ -13,6 +13,7 @@ import {
   type LocalReport,
   type LocalTerms,
   localEvalDownload,
+  localEvalSteps,
   localEvalTerms,
   localEvalUpdateStep,
   onInstalledRelease,
@@ -31,11 +32,11 @@ import {
 } from "./Problem";
 import {
   type Downloads,
-  formatElapsed,
   type Progress,
   SetupProgress,
   StatusLine,
 } from "./SetupProgress";
+import { StartJourney } from "./StartJourney";
 
 type Call<T> = { attempt: string; answer: Promise<T> };
 
@@ -70,16 +71,21 @@ const POLL_DELAYS: number[] = [2_000, 4_000, 8_000, ...Array(12).fill(15_000)];
 const DOWNLOAD_EVERY_MS = 1_000;
 
 const unreadable: Problem = {
-  said: "OpenBot did not understand its backend's answer.",
+  said: "OpenBot got an answer it couldn't read. Retry. If it happens again, copy the logs below.",
 };
 
 type Phase = "setup" | "connect" | "wait" | "start";
 
+/*
+ * In the person's words: the back end, its releases and the CLI are the log's business. Every row
+ * says what OpenBot is doing for them, and the running one how far along it is ("Step 3 of 4").
+ */
 const PHASES: [Phase, string][] = [
   ["setup", "Setting up OpenBot"],
   ["connect", "Connecting OpenBot"],
-  ["wait", "Waiting for the backend"],
-  ["start", "Starting OpenBot"],
+  ["wait", "Getting OpenBot ready"],
+  // Not "Starting OpenBot": that is the screen's own heading.
+  ["start", "Opening OpenBot"],
 ];
 
 /** The readiness sentence for one CLI answer or failure category. */
@@ -95,7 +101,7 @@ function said(intelligence: LocalReport | LocalFailure): string {
 function connectionSaid(answered: LocalConnection): string {
   // A conflict has no reason of its own, so it is said in this window's words.
   if (answered.conflicted) {
-    return "Settings the backend wrote for OpenBot were changed since. OpenBot did not connect.";
+    return "Settings OpenBot saved were changed since, so it didn't connect. Retry, or repair the installation.";
   }
   return said({
     outcome: answered.outcome,
@@ -138,6 +144,18 @@ type State = {
    * release it had is still there and still runs.
    */
   updateFailed: string | null;
+  /** The phase this run began at, and when: the whole journey on screen counts from here. */
+  began: Phase | null;
+  runSince: number | null;
+  /** The CLI's steps the running setup or update has finished (`local_eval_steps`), and which. */
+  trail: string[];
+  trailKind: "setup" | "update" | null;
+  /** When the running setup or update began. */
+  trailSince: number | null;
+  /** This run updated the back end, or is updating it now. */
+  updating: boolean;
+  /** Of the back end's services, how many the last status said were ready. */
+  services: { ready: number; total: number } | null;
 };
 
 const idle: State = {
@@ -150,21 +168,38 @@ const idle: State = {
   detail: null,
   download: null,
   updateFailed: null,
+  began: null,
+  runSince: null,
+  trail: [],
+  trailKind: null,
+  trailSince: null,
+  updating: false,
+  services: null,
 };
 
 /** The row an update that failed is said on, under the back end's. */
-const UPDATING = "Updating the backend";
+const UPDATING = "Updating OpenBot";
 
 /**
- * An update that failed, and where it stopped once the CLI's record says (`failedStep`). Its data
- * is kept either way: `local update` never deletes it, and the next Start repairs what a stopped
- * update left and tries again.
+ * The back end's row while it updates. How long it takes and what it is doing now are the
+ * journey's (`StartJourney`): the row says only what this part is, and that nothing is lost.
  */
-function updateFailedSaid(to: string, step: string | null): string {
-  const where = step
-    ? ` It stopped at "${updateStepSaid(step)}" (${step}).`
-    : "";
-  return `The backend could not be updated to ${to}.${where} Your data is kept, and OpenBot tries again the next time it starts.`;
+export const UPDATING_SAID =
+  "Updating OpenBot. Your Bots and data stay as they are.";
+
+/** The start's row while Start updates OpenBot itself (`upgrade::now_said`). */
+export const RELEASE_SAID =
+  "Updating OpenBot. Your Bots, sign-ins and data stay as they are.";
+
+/**
+ * An update that failed, and where it stopped once the CLI's record says (`failedStep`), in plain
+ * words. The step's own name and the releases are in the log (`log_update_due`). Its data is kept
+ * either way: `local update` never deletes it, and the next Start repairs what a stopped update left
+ * and tries again.
+ */
+function updateFailedSaid(step: string | null): string {
+  const where = step ? ` It stopped while ${updateStepSaid(step)}.` : "";
+  return `OpenBot couldn't finish updating, so it runs the version it had.${where} Your data is kept, and OpenBot tries again the next time it starts.`;
 }
 
 export type LocalSequence = State & {
@@ -270,19 +305,17 @@ export function useLocalSequence({
   }
 
   /**
-   * While `attempt` runs, its row says how much of the back end's download has arrived, so a slow
-   * line can be told from a stuck one. OpenBot downloads the images before the CLI pulls them; the
-   * row says `after` once that is over, and when following stops. Returns what stops it.
+   * While `attempt` runs, how much of the back end's download has arrived, so a slow line can be
+   * told from a stuck one: the Start journey's bar counts it (`StartJourney`), and a screen about
+   * something else says it in its own row (`LocalStatus`). OpenBot downloads the images before the
+   * CLI pulls them. Returns what stops it.
    */
-  function followDownload(
-    attempt: string,
-    token: number,
-    saying: string,
-    after: string | null,
-  ): () => void {
+  function followDownload(attempt: string, token: number): () => void {
     let following = true;
     let shown = false;
     let next: ReturnType<typeof setTimeout> | null = null;
+    // The first answer with bytes in it, so the speed so far can say how long is left.
+    let first: { at: number; bytes: number } | null = null;
     /*
      * Only while the run it reports on is current. Halting it (the window closed, or Cancel) only asks the CLI to stop,
      * and the call it followed settles once the CLI has, so a poll that waited for that went on asking every second from
@@ -297,14 +330,21 @@ export function useLocalSequence({
             if (!current()) return;
             if (found) {
               shown = true;
-              // The row's bar and "48.0 MB of 147.0 MB", as Install shows its own download.
+              const at = Date.now();
+              first ??= { at, bytes: found.done };
+              const seconds = (at - first.at) / 1000;
               update({
-                detail: `${saying}.`,
-                download: { bytes: found.done, size: found.total },
+                download: {
+                  bytes: found.done,
+                  size: found.total,
+                  ...(seconds >= 3 && found.done > first.bytes
+                    ? { bytesPerSecond: (found.done - first.bytes) / seconds }
+                    : {}),
+                },
               });
             } else if (shown) {
               shown = false;
-              update({ detail: after, download: null });
+              update({ download: null });
             }
           },
           () => {},
@@ -317,8 +357,41 @@ export function useLocalSequence({
     return () => {
       following = false;
       if (next) clearTimeout(next);
-      if (shown && generation.current === token)
-        update({ detail: after, download: null });
+      if (shown && generation.current === token) update({ download: null });
+    };
+  }
+
+  /**
+   * While `attempt` runs, which of the CLI's steps it has finished, so the screen can say what it
+   * is doing now and how far along it is (`journey.ts`). Returns what stops it.
+   */
+  function followSteps(
+    attempt: string,
+    token: number,
+    kind: "setup" | "update",
+  ): () => void {
+    let following = true;
+    let next: ReturnType<typeof setTimeout> | null = null;
+    const current = () => following && generation.current === token;
+    update({ trail: [], trailKind: kind, trailSince: Date.now() });
+    const ask = () => {
+      if (!current()) return;
+      localEvalSteps(attempt)
+        .then(
+          (found) => {
+            // Every answer, so what is said and the time left move on while a step runs.
+            if (current() && found) update({ trail: found.ended });
+          },
+          () => {},
+        )
+        .finally(() => {
+          if (current()) next = setTimeout(ask, DOWNLOAD_EVERY_MS);
+        });
+    };
+    ask();
+    return () => {
+      following = false;
+      if (next) clearTimeout(next);
     };
   }
 
@@ -344,20 +417,15 @@ export function useLocalSequence({
    */
   async function updateIntelligence(
     id: string,
-    to: string,
-    from: string,
     token: number,
   ): Promise<boolean> {
-    const updating = `Updating the backend to ${to}. Its data stays.`;
-    update({ detail: updating, download: null });
+    // The releases it updates from and to are in the log (`log_update_due`), not on the screen.
+    const updating = UPDATING_SAID;
+    update({ detail: updating, download: null, updating: true });
     const started = runLocalEval("update", id);
     attempt.current = started.attempt;
-    const unfollow = followDownload(
-      started.attempt,
-      token,
-      "Downloading the backend update",
-      updating,
-    );
+    const unfollowTrail = followSteps(started.attempt, token, "update");
+    const unfollow = followDownload(started.attempt, token);
     const unfollowSteps = followUpdateSteps(started.attempt, token, updating);
     let updated = false;
     let stalled = false;
@@ -369,10 +437,14 @@ export function useLocalSequence({
         error instanceof LocalEvalError &&
         error.category === "download-stalled";
     } finally {
+      unfollowTrail();
       unfollowSteps();
       unfollow();
       if (attempt.current === started.attempt) attempt.current = null;
     }
+    // The update is done; its services coming up is the wait's, counted from here.
+    if (generation.current === token)
+      update({ trailKind: null, since: Date.now() });
     if (generation.current !== token) return false;
     update({
       detail: null,
@@ -380,16 +452,16 @@ export function useLocalSequence({
       updateFailed: updated
         ? null
         : stalled
-          ? `The backend update stopped downloading, so the backend stays on ${from}. OpenBot continues the download where it left off the next time it starts.`
-          : updateFailedSaid(to, null),
+          ? "The update stopped downloading, so OpenBot runs the version it had. It picks up the download the next time it starts."
+          : updateFailedSaid(null),
     });
     return true;
   }
 
   /**
-   * While the update `attempt` runs, its row says which step it is in and for how long, once it is
-   * in one that waits: the CLI says nothing while a step runs, and some wait ten minutes. Not while
-   * a download is shown, which says more. Returns what stops it.
+   * While the update `attempt` runs, a Job of it that failed, said on its row at once rather than
+   * ten minutes later, when the CLI gives up waiting on it. Which step it is in and how far along
+   * it is are the journey's (`StartJourney`). Returns what stops it.
    */
   function followUpdateSteps(
     attempt: string,
@@ -404,13 +476,10 @@ export function useLocalSequence({
       localEvalUpdateStep(attempt)
         .then(
           (found) => {
-            if (!current() || !found || now.current.download) return;
-            const job = found.job ? ` (${found.job})` : "";
-            const failed = found.failedJob
-              ? ` The backend's job ${found.failedJob} failed, so this update will stop. The backend's tool waits up to 10 minutes for it first. Your data is kept.`
-              : "";
+            if (!current() || !found?.failedJob) return;
+            // The Job's name is in the log (`watch_jobs`).
             update({
-              detail: `${updating} ${found.said}${job}, ${formatElapsed(found.seconds)}.${failed}`,
+              detail: `${updating} Part of the update didn't work, so it will stop. OpenBot waits up to 10 minutes for it first. Your data is kept.`,
             });
           },
           () => {},
@@ -455,6 +524,15 @@ export function useLocalSequence({
     for (let tries = 0; ; tries += 1) {
       const found = await report("status");
       if (!found) return null;
+      // How many of its services are up: how far along the back end's start is.
+      const services = found.stack?.observed?.services;
+      if (services?.length)
+        update({
+          services: {
+            ready: services.filter((service) => service.ready).length,
+            total: services.length,
+          },
+        });
       const unfinished = found.stack?.unfinishedUpdate ?? null;
       const kept = onInstalledRelease(found);
       /*
@@ -481,16 +559,9 @@ export function useLocalSequence({
       ) {
         updatedIntelligence = true;
         woken = found.readiness === "stopped";
-        const going = await updateIntelligence(
-          id,
-          found.updateTo,
-          found.stack.installedRelease,
-          token,
-        );
+        const going = await updateIntelligence(id, token);
         if (!going) return null;
-        if (
-          now.current.updateFailed === updateFailedSaid(found.updateTo, null)
-        ) {
+        if (now.current.updateFailed === updateFailedSaid(null)) {
           failedTo = found.updateTo;
         }
         continue;
@@ -498,7 +569,7 @@ export function useLocalSequence({
       // Where the update that just failed stopped, from the record the CLI kept of it.
       const failedStep = unfinished?.failedStep;
       if (failedTo && failedStep) {
-        update({ updateFailed: updateFailedSaid(failedTo, failedStep) });
+        update({ updateFailed: updateFailedSaid(failedStep) });
       }
       failedTo = null;
       if (isReady(found)) {
@@ -541,7 +612,7 @@ export function useLocalSequence({
       if (tries >= pollDelays.length) {
         update({
           blocked: {
-            said: "The backend did not report ready in time.",
+            said: "OpenBot didn't get ready in time. Retry to check again.",
             reason: null,
           },
         });
@@ -581,6 +652,17 @@ export function useLocalSequence({
      * engine again itself, so a run that only starts OpenBot skips this.
      */
     const began = Date.now();
+    // A new run counts from here; Start OpenBot after a run that got ready carries on its journey.
+    if (from !== "start" || now.current.began === null)
+      update({
+        began: from,
+        runSince: began,
+        trail: [],
+        trailKind: null,
+        trailSince: null,
+        updating: false,
+        services: null,
+      });
     if (from !== "start") {
       update({ at: from, running: true, since: began });
       try {
@@ -605,17 +687,16 @@ export function useLocalSequence({
       if (phase === "setup") {
         const carried = accepted.current;
         const started = setUpLocalEval(root, carried);
+        const unfollowTrail = followSteps(started.attempt, token, "setup");
         // A setup that resumes a stack downloads the images it still needs first.
-        const unfollow = followDownload(
-          started.attempt,
-          token,
-          "Downloading the backend",
-          null,
-        );
+        const unfollow = followDownload(started.attempt, token);
         const report = await call(
           { attempt: started.attempt, answer: started.report },
           token,
-        ).finally(unfollow);
+        ).finally(() => {
+          unfollow();
+          unfollowTrail();
+        });
         if (!report) return stop();
         update({
           refused:
@@ -738,9 +819,12 @@ export function useLocalSequence({
                 step: label,
                 ok: true,
                 running: true,
+                // What is happening now and how long is left is the journey's (`StartJourney`): the
+                // row says only what is particular to it, such as an update's download.
                 detail: state.detail ?? "",
                 downloads: state.download ?? undefined,
                 startedAt: state.since ?? undefined,
+                position: { at: index + 1, of: PHASES.length },
               }
             : stopped
               ? { step: label, ok: false, detail: state.blocked?.said ?? "" }
@@ -773,18 +857,48 @@ export function LocalIntelligence({
   sequence,
   offerStart = false,
   handOff = null,
+  open = [],
+  releaseDue = false,
 }: {
   sequence: LocalSequence;
   offerStart?: boolean;
+  /** Start updates OpenBot itself (`upgrade_due`): the journey counts it from the start. */
+  releaseDue?: boolean;
   /** What Docker Desktop's window may want while the engine wakes: see `handOffNow`. */
   handOff?: string | null;
+  /** What OpenBot's own start reports (`setup:progress`): the journey's last stretch. */
+  open?: readonly Progress[];
 }) {
   const { at, running, stopped, problem } = sequence;
+  // While it runs, one journey says what is happening and how far along the whole Start is. The
+  // rows then say which part is done and which is left, and nothing twice.
+  const journeying = offerStart && running && !stopped;
+  // Its download's bar is the journey's too: the running row keeps only what is particular to it.
+  const releasing = open.some((row) => row.step === "release" && row.running);
+  const rows = journeying
+    ? sequence.steps.map((row) =>
+        row.running
+          ? {
+              ...row,
+              downloads: undefined,
+              detail: at === "start" && releasing ? RELEASE_SAID : row.detail,
+            }
+          : row,
+      )
+    : sequence.steps;
 
   return (
-    <section aria-label="Backend on this computer">
-      <SetupProgress steps={sequence.steps} />
-      {handOff && <StatusLine>{handOff}</StatusLine>}
+    <section aria-label="OpenBot on this computer">
+      {journeying && (
+        <StartJourney
+          sequence={sequence}
+          open={open}
+          now={handOff}
+          releaseDue={releaseDue}
+        />
+      )}
+      <SetupProgress steps={rows} showElapsed={!journeying} />
+      {handOff && !journeying && <StatusLine>{handOff}</StatusLine>}
       <LocalNeeds sequence={sequence} />
       {stopped && problem && <Failure problem={problem} />}
       <div className="row">
@@ -815,21 +929,31 @@ export function LocalIntelligence({
  * at once, because finding out only at that later step would waste the minutes since: one they
  * clear themselves (signing in, accepting the agreement) with its action, anything else with Retry.
  */
-export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
+export function LocalStatus({
+  sequence,
+  download = true,
+}: {
+  sequence: LocalSequence;
+  /** Its download's row too. Off where the background install's row says it already. */
+  download?: boolean;
+}) {
   if (!sequence.stopped) {
-    // The back end downloads behind the screen in front: say how far, so the wait is visible.
-    if (!sequence.running || !sequence.download) return null;
+    // The rest of OpenBot downloads behind the screen in front: say how far, so the wait is visible.
+    if (!download || !sequence.running || !sequence.download) return null;
     return (
       <SetupProgress
-        label="Backend download"
+        label="OpenBot download"
         showElapsed={false}
         steps={[
           {
-            step: "Downloading the backend",
+            step: "Downloading the rest of OpenBot",
             ok: true,
             running: true,
+            // The row says the time left from the download's own speed.
             detail: "",
             downloads: sequence.download,
+            // The install's third part, alongside the second on the Install step.
+            position: { at: 3, of: 4 },
           },
         ]}
       />
@@ -842,14 +966,14 @@ export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
     <section
       className={`local-alert${needs ? " needs" : ""}`}
       role="alert"
-      aria-label={openBot ? "OpenBot" : "Backend"}
+      aria-label={openBot ? "OpenBot" : "Setup"}
     >
       <h2>
         {needs
           ? "Setup needs you"
           : openBot
             ? "OpenBot did not start"
-            : "Backend setup stopped"}
+            : "Setup stopped"}
       </h2>
       {needs ? (
         <LocalNeeds sequence={sequence} />
@@ -857,7 +981,7 @@ export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
         <>
           <p>
             {openBot
-              ? "The backend is ready. Retry starts OpenBot again."
+              ? "Everything else is ready. Retry starts OpenBot again."
               : (sequence.blocked?.said ?? sequence.problem?.said)}
           </p>
           <div className="row">
@@ -958,7 +1082,7 @@ function SignInToCopilotKit({ onSignedIn }: { onSignedIn: () => void }) {
   return (
     <div className="local-needs">
       <CopilotKitLogo />
-      <p>OpenBot's backend needs your CopilotKit account.</p>
+      <p>OpenBot needs your CopilotKit account to finish setting up.</p>
       {waiting ? (
         <CopilotKitSignInWait
           attempt={waiting}
@@ -1021,9 +1145,8 @@ function AcceptTerms({
     return (
       <div className="local-needs">
         <p className="footnote">
-          The backend did not take the acceptance from OpenBot. If a coding
-          agent or a script opened OpenBot, quit it, open it yourself, and
-          accept again.
+          OpenBot couldn't record your acceptance. If a coding agent or a script
+          opened OpenBot, quit it, open it yourself, and accept again.
         </p>
         <div className="row">
           <button type="button" onClick={onRetry}>
@@ -1034,13 +1157,13 @@ function AcceptTerms({
     );
   return (
     <div className="local-needs">
+      {/* The organization and the agreement's version are the log's, as on the Account step. */}
       <p>
-        To run OpenBot on this computer, accept the CopilotKit license agreement
-        for {terms.organizationName}.
+        To run OpenBot on this computer, accept the CopilotKit license
+        agreement.
       </p>
       <p className="footnote">
-        <ExternalLink href={terms.url}>Read the agreement</ExternalLink> (
-        {terms.version})
+        <ExternalLink href={terms.url}>Read the license agreement</ExternalLink>
       </p>
       <div className="row">
         <button type="button" onClick={() => onAccept(terms.version)}>
