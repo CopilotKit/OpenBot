@@ -1,0 +1,28 @@
+{
+  "about": "Real answers from OpenAI Chat Completions to the prompts in server/src/plugins/grant-translate.ts, over Composio's own Gmail listing (composio-gmail-catalogue.json, each action's effect and destructive flag read by effectOf in plugins/composio.ts). Each string is the assistant message content exactly as the model returned it, recorded 2026-11-09. gpt-5.6-terra is the deployment default, asked with response_format json_schema, whose action names are an enum of the app's own. fixedOnRetry is gpt-4o-mini asked without a schema (response_format json_object), as a plan or a gateway that refuses schemas is asked: with the enum a strict provider cannot answer a name the app does not have, so that is where the check earns its keep. Its description names two actions Gmail does not have; the model copied them, and the check sent them back.",
+  "draftsFirstTime": {
+    "model": "gpt-5.6-terra",
+    "text": "Reads Gmail, drafts but never sends or deletes",
+    "writer": [
+      "{\"notes\":\"Allows all read-only Gmail actions. It may create, view, list, and update drafts, but cannot send or delete anything.\",\"otherApps\":[],\"actions\":[\"GMAIL_FETCH_EMAILS\",\"GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID\",\"GMAIL_FETCH_MESSAGE_BY_THREAD_ID\",\"GMAIL_GET_ATTACHMENT\",\"GMAIL_GET_AUTO_FORWARDING\",\"GMAIL_GET_CONTACTS\",\"GMAIL_GET_DRAFT\",\"GMAIL_GET_FILTER\",\"GMAIL_GET_LABEL\",\"GMAIL_GET_LANGUAGE_SETTINGS\",\"GMAIL_GET_PEOPLE\",\"GMAIL_GET_PROFILE\",\"GMAIL_GET_VACATION_SETTINGS\",\"GMAIL_LIST_CSE_IDENTITIES\",\"GMAIL_LIST_CSE_KEYPAIRS\",\"GMAIL_LIST_DRAFTS\",\"GMAIL_LIST_FILTERS\",\"GMAIL_LIST_FORWARDING_ADDRESSES\",\"GMAIL_LIST_HISTORY\",\"GMAIL_LIST_LABELS\",\"GMAIL_LIST_MESSAGES\",\"GMAIL_LIST_SEND_AS\",\"GMAIL_LIST_SMIME_INFO\",\"GMAIL_LIST_THREADS\",\"GMAIL_SEARCH_PEOPLE\",\"GMAIL_SETTINGS_GET_IMAP\",\"GMAIL_SETTINGS_GET_POP\",\"GMAIL_SETTINGS_SEND_AS_GET\",\"GMAIL_WHO_AM_I\",\"GMAIL_CREATE_EMAIL_DRAFT\",\"GMAIL_UPDATE_DRAFT\"]}"
+    ],
+    "reader": "{\"summary\":\"Reads Gmail and creates or updates drafts, but cannot send or delete.\",\"explanation\":\"The Bot can read Gmail messages, threads, attachments, drafts, contacts, labels, filters, forwarding, encryption, send-as, and account settings. It can create and update email drafts, but cannot send or forward email, delete messages or drafts, move or label messages, create or change filters or labels, update contacts, or change Gmail settings.\"}"
+  },
+  "otherAppNamed": {
+    "model": "gpt-5.6-terra",
+    "text": "Reads Salesforce and Gmail, drafts but never sends or deletes",
+    "writer": [
+      "{\"notes\":\"Allows all read-only Gmail actions and creating, viewing, listing, and updating drafts. It excludes sending and all deletion or other mailbox-changing actions; Salesforce is noted as a separate app.\",\"otherApps\":[\"Salesforce\"],\"actions\":[\"GMAIL_FETCH_EMAILS\",\"GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID\",\"GMAIL_FETCH_MESSAGE_BY_THREAD_ID\",\"GMAIL_GET_ATTACHMENT\",\"GMAIL_GET_AUTO_FORWARDING\",\"GMAIL_GET_CONTACTS\",\"GMAIL_GET_DRAFT\",\"GMAIL_GET_FILTER\",\"GMAIL_GET_LABEL\",\"GMAIL_GET_LANGUAGE_SETTINGS\",\"GMAIL_GET_PEOPLE\",\"GMAIL_GET_PROFILE\",\"GMAIL_GET_VACATION_SETTINGS\",\"GMAIL_LIST_CSE_IDENTITIES\",\"GMAIL_LIST_CSE_KEYPAIRS\",\"GMAIL_LIST_DRAFTS\",\"GMAIL_LIST_FILTERS\",\"GMAIL_LIST_FORWARDING_ADDRESSES\",\"GMAIL_LIST_HISTORY\",\"GMAIL_LIST_LABELS\",\"GMAIL_LIST_MESSAGES\",\"GMAIL_LIST_SEND_AS\",\"GMAIL_LIST_SMIME_INFO\",\"GMAIL_LIST_THREADS\",\"GMAIL_SEARCH_PEOPLE\",\"GMAIL_SETTINGS_GET_IMAP\",\"GMAIL_SETTINGS_GET_POP\",\"GMAIL_SETTINGS_SEND_AS_GET\",\"GMAIL_WHO_AM_I\",\"GMAIL_CREATE_EMAIL_DRAFT\",\"GMAIL_UPDATE_DRAFT\"]}"
+    ],
+    "reader": "{\"summary\":\"Reads Gmail and creates or updates drafts, but can't send or delete.\",\"explanation\":\"The Bot can read Gmail messages, threads, attachments, drafts, contacts, labels, filters, forwarding, mail settings, aliases, and account information, and can create or update email drafts. It cannot send or forward email, delete messages, threads, drafts, filters, or labels, change labels or settings, or modify contacts; it has no destructive actions. This set changes nothing in Salesforce, and each app is set on its own page.\"}"
+  },
+  "fixedOnRetry": {
+    "model": "gpt-4o-mini",
+    "text": "Reads mail, and can use GMAIL_ARCHIVE_THREAD and GMAIL_STAR_MESSAGE",
+    "writer": [
+      "{\"notes\":\"The description allows the bot to read mail and specifically mentions the ability to archive threads and star messages. Therefore, the bot can call read actions along with the write actions for archiving and starring.\",\"otherApps\":[],\"actions\":[\"GMAIL_FETCH_EMAILS\",\"GMAIL_ARCHIVE_THREAD\",\"GMAIL_STAR_MESSAGE\"]}",
+      "{\"notes\":\"The Bot can read emails and can perform actions to archive threads and star messages using Gmail actions related to modifying labels and managing message state. The actions chosen correspond directly to the Bot's permitted capabilities as specified.\",\"otherApps\":[],\"actions\":[\"GMAIL_FETCH_EMAILS\",\"GMAIL_MODIFY_THREAD_LABELS\"]}"
+    ],
+    "reader": "{\"summary\":\"Reads Gmail and modifies thread labels, but can't send or delete emails.\",\"explanation\":\"The Bot can read emails and modify thread labels. It cannot send emails, create drafts, delete messages, or change settings such as filters and labels. The only destructive action it can perform is modifying labels on threads.\"}"
+  }
+}

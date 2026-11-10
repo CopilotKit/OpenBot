@@ -553,21 +553,32 @@ pub fn start_machine() -> StepOutcome {
 /// Every string matched here was produced by a real failure on a real machine during S2. A person
 /// reading "exit status 0xffffffff" learns nothing; a person reading "Windows needs restarting"
 /// knows what to do next.
+///
+/// In the person's words, with what to do. Podman's own words stay behind the sentence, in the
+/// failure's detail and the logs; a failure nobody has explained here says so plainly rather than
+/// putting them on the screen.
 fn explain_machine_error(error: &str) -> String {
     if error.contains("WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED") {
-        return "WSL will not run as the system account, so this step has to run as you. \
-                Restart OpenBot without elevation."
+        return "OpenBot was opened as an administrator, and this step can't run that way. Quit \
+                OpenBot and open it again normally."
             .into();
     }
     if error.contains("WSL_E_WSL_OPTIONAL_COMPONENT_REQUIRED") {
-        return "Windows Subsystem for Linux is installed but not active yet. Windows needs \
-                restarting before a machine can be created."
+        return "Windows needs a restart to finish turning on a feature OpenBot needs. Restart \
+                Windows, then open OpenBot again."
+            .into();
+    }
+    if error.contains("without Podman user-mode networking") {
+        return "OpenBot needs to restart the software it runs on, and can't while it runs. Quit \
+                OpenBot, restart your computer, then open OpenBot again."
             .into();
     }
     if error.contains("not enough space") || error.contains("no space left") {
-        return "There is not enough disk space to create the engine's virtual machine.".into();
+        return "There isn't enough disk space to prepare this computer for OpenBot. Free up \
+                some space, then try again."
+            .into();
     }
-    error.to_string()
+    "OpenBot couldn't prepare this computer to run it. Try again.".into()
 }
 
 /// How to reach the machine this app just started.
@@ -658,7 +669,7 @@ pub fn health_gate(address: &Address) -> StepOutcome {
 /// reads the healthchecks and `depends_on` conditions in `docker-compose.yml`. `podman-compose` is
 /// a separate reimplementation with its own coverage of those, and choosing it here would mean
 /// shipping a deployment nobody has run.
-pub fn missing_compose(binary: &str) -> String {
+pub fn missing_compose(_binary: &str) -> String {
     // Named per platform, because the generic sentence sent a Windows install looking for a
     // package manager it does not have. Podman ships no Compose provider on Windows either, which
     // was measured rather than assumed: a fresh Podman 6.1.1 there stops at exactly this gate.
@@ -667,15 +678,15 @@ pub fn missing_compose(binary: &str) -> String {
          `sudo dnf install docker-compose` on Fedora."
     } else if cfg!(target_os = "windows") {
         "Install Compose v2: either install Docker Desktop, or download `docker-compose` from \
-         github.com/docker/compose/releases and put it beside the engine on PATH."
+         github.com/docker/compose/releases and put it in a folder on your PATH."
     } else {
         "Install Compose v2: `brew install docker-compose`, or install Docker Desktop, and make \
          sure `docker-compose` is on PATH."
     };
+    // Which engine has no Compose is for the logs, which name it: the sentence says what to do.
     format!(
-        "{binary} is answering, but it has no Compose to run the stack with, and OpenBot's own \
-         copy of one is not being found. Restart OpenBot and try again. If this comes back: \
-         {install}"
+        "OpenBot is missing a piece it needs to start its software. Quit OpenBot, open it again \
+         and try again. If this comes back: {install}"
     )
 }
 
@@ -711,7 +722,6 @@ mod tests {
     #[test]
     fn a_missing_compose_names_what_to_install_rather_than_what_was_not_found() {
         let said = missing_compose("podman");
-        assert!(said.contains("podman"), "{said}");
         assert!(said.to_lowercase().contains("install"), "{said}");
         // The engine's own answer names docker-compose, which reads as "install Docker" to
         // somebody who chose Podman on purpose.
@@ -1433,8 +1443,8 @@ mod tests {
     fn the_local_system_refusal_is_turned_into_an_instruction() {
         let explained = explain_machine_error("Error code: Wsl/WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED");
         assert!(
-            explained.contains("as you"),
-            "did not say whose session it needs: {explained}"
+            explained.contains("open it again normally"),
+            "did not say how to open it: {explained}"
         );
         assert!(!explained.contains("0xffffffff"));
     }
@@ -1468,9 +1478,16 @@ mod tests {
         assert_eq!(went.detail, None);
     }
 
+    /// Podman's own words are kept behind the sentence, never made the sentence: a person reads
+    /// what to do, and the detail and the logs carry the rest.
     #[test]
-    fn an_error_we_do_not_recognise_is_passed_through_rather_than_swallowed() {
+    fn an_error_we_do_not_recognise_is_said_plainly_and_kept_behind_the_sentence() {
         let explained = explain_machine_error("some novel failure");
-        assert_eq!(explained, "some novel failure");
+        assert_eq!(
+            explained,
+            "OpenBot couldn't prepare this computer to run it. Try again."
+        );
+        let stopped = StepOutcome::stopped(Step::CreateMachine, "some novel failure");
+        assert_eq!(stopped.detail.as_deref(), Some("some novel failure"));
     }
 }

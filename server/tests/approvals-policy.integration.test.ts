@@ -140,9 +140,10 @@ test("personal and team rules layer, the strictest wins, and switching custom ru
 });
 
 test("a safety hand-off is stored, cannot be allowed, and is marked done by the person", async () => {
+  // A password typed on a website: the one thing always handed to the person.
   const paying = candidate({
-    toolRef: "computer_click",
-    args: { element: "Pay now" },
+    toolRef: "computer_type",
+    args: { field: "New password", text: "x" },
   });
   expect(await suspends(service.gate(paying))).toBeTrue();
   const [request] = (await store.list(owner)).filter(

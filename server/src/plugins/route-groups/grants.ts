@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { PERSON_INITIATOR } from "../../audit";
 import type { AppVariables } from "../../auth/guards";
 import { currentEdition } from "../../edition";
@@ -418,26 +419,187 @@ export function mountGrantRoutes({
     }
     const trimmedRef = ref.trim();
     const trimmedAgentId = agentId.trim();
-    if (kind === "mcp" && isAlwaysOn(trimmedRef))
-      return context.json({ error: ALWAYS_ON_REFUSAL }, 403);
-    // One person: every Bot has every connected app. See personal-defaults.ts.
-    if (kind === "mcp" && currentEdition() === "personal")
-      return context.json({ error: EVERY_BOT_REFUSAL }, 403);
-    // One person: every Bot can ask every other. A removed row would change nothing.
-    if (kind === "bot" && currentEdition() === "personal")
-      return context.json({ error: EVERY_BOT_ASKS_REFUSAL }, 403);
-    const refusal = await enablementRefusal(
+    const refusal = await revokeRefusal(
       context,
       kind,
       trimmedRef,
       trimmedAgentId,
-      "revoke",
     );
     if (refusal) return context.json({ error: refusal }, 403);
 
     await store.revoke(kind, trimmedRef, trimmedAgentId, actorEmail(context));
     return context.json({ ok: true });
   });
+
+  /**
+   * May this person take this from that Bot? The DELETE route's whole answer, and the one a change
+   * saved together asks of each action it turns off.
+   */
+  async function revokeRefusal(
+    context: { var: AppVariables },
+    kind: PluginKind,
+    ref: string,
+    agentId: string,
+  ): Promise<string | null> {
+    if (kind === "mcp" && isAlwaysOn(ref)) return ALWAYS_ON_REFUSAL;
+    // One person: every Bot has every connected app. See personal-defaults.ts.
+    if (kind === "mcp" && currentEdition() === "personal")
+      return EVERY_BOT_REFUSAL;
+    // One person: every Bot can ask every other. A removed row would change nothing.
+    if (kind === "bot" && currentEdition() === "personal")
+      return EVERY_BOT_ASKS_REFUSAL;
+    return enablementRefusal(context, kind, ref, agentId, "revoke");
+  }
+
+  const refList = z.array(z.string().trim().min(1).max(300)).max(2_000);
+  const changeInput = z.strictObject({
+    add: refList,
+    remove: refList,
+    authoring: z
+      .strictObject({
+        source: z.literal("english"),
+        text: z.string().trim().min(1).max(2_000),
+      })
+      .optional(),
+    approval: z.unknown().optional(),
+  });
+
+  /**
+   * Turn several of one app's actions on and off for one Bot as one change: what the Bot's app page
+   * saves once an admin has read a set chosen from their description.
+   *
+   * EXACTLY THE CHECKS THE TWO ROUTES ABOVE MAKE, asked of every action before any is written. Each
+   * action turned on goes through {@link enablementRefusal} as `POST /grants` sends it, and each one
+   * turned off through {@link revokeRefusal} as `DELETE /grants` does. One refusal refuses the whole
+   * change, with every action's reason, so nobody is left with half of what they approved. Then each
+   * is written by the store as the routes write it, with its own row on the trail, and one more row
+   * says they were one change, with the sentence it came from.
+   *
+   * A SHARED APP'S AUDIENCE IS DECIDED ONCE, as `POST /grants` decides it for each grant: every action
+   * here is the same app's, and {@link sharedGrantApproval} depends on the app and the Bot alone.
+   */
+  routes.post(
+    "/for/:agentId/apps/:app/grants",
+    requireUser,
+    async (context) => {
+      const agentId = context.req.param("agentId");
+      const app = context.req.param("app");
+      const parsed = changeInput.safeParse(
+        await context.req.json().catch(() => null),
+      );
+      if (!parsed.success)
+        return context.json(
+          {
+            error:
+              "Send the actions to turn on and off as add and remove, each a list of refs.",
+          },
+          400,
+        );
+      const add = [...new Set(parsed.data.add)];
+      const remove = [...new Set(parsed.data.remove)];
+      if (add.length + remove.length === 0)
+        return context.json({ error: "There's nothing to change." }, 400);
+      const foreign = [...add, ...remove].find(
+        (ref) => !ref.startsWith(`${app}/`),
+      );
+      if (foreign)
+        return context.json(
+          { error: `${foreign} isn't one of ${app}'s actions.` },
+          400,
+        );
+      if (add.some((ref) => remove.includes(ref)))
+        return context.json(
+          { error: "An action can't be turned on and off in one change." },
+          400,
+        );
+
+      const problems: { ref: string; error: string }[] = [];
+      for (const ref of add) {
+        const refusal = await enablementRefusal(
+          context,
+          "mcp",
+          ref,
+          agentId,
+          "grant",
+        );
+        if (refusal) problems.push({ ref, error: refusal });
+      }
+      for (const ref of remove) {
+        const refusal = await revokeRefusal(context, "mcp", ref, agentId);
+        if (refusal) problems.push({ ref, error: refusal });
+      }
+      if (problems.length > 0)
+        return context.json({ error: problems[0]?.error ?? "", problems }, 403);
+      /*
+       * And the check a set chosen from a description was held to, asked again at the save, as a team
+       * rule's is: every action turned on is one the app advertises now. Asked after the permission
+       * checks, so somebody who may not change this Bot learns nothing about the app from the answer.
+       * Turning off is not held to it: taking away is always allowed.
+       */
+      if (add.length > 0) {
+        const offered = new Set(
+          (await store.appTools(app)).map((tool) => tool.ref),
+        );
+        const unknown = add.filter((ref) => !offered.has(ref));
+        if (unknown.length > 0)
+          return context.json(
+            {
+              error: `${unknown.join(", ")} ${unknown.length === 1 ? "isn't an action" : "aren't actions"} this app offers now.`,
+              problems: unknown.map((ref) => ({
+                ref,
+                error: `${ref} isn't an action this app offers now.`,
+              })),
+            },
+            400,
+          );
+      }
+
+      const asOwner = !skillActor(context).isAdmin;
+      const first = add[0];
+      const decided =
+        first && !asOwner
+          ? await sharedGrantApproval(
+              { store, shared },
+              first,
+              agentId,
+              parsed.data.approval,
+            )
+          : null;
+      if (decided === "unreadable")
+        return context.json(
+          { error: "That approval is not one this deployment can read." },
+          400,
+        );
+
+      const by = actorEmail(context);
+      for (const ref of add)
+        await store.grant("mcp", ref, agentId, by, asOwner ? "owner" : "admin");
+      if (decided?.approval && shared)
+        await shared.use.setApproval({
+          botId: agentId,
+          serverId: decided.appId,
+          approval: decided.approval,
+          by: context.var.actor.id,
+        });
+      if (asOwner && shared && first)
+        await approveOwnersSharedUse(store, shared.use, {
+          botId: agentId,
+          serverId: app,
+          ownerId: context.var.actor.id,
+        });
+      for (const ref of remove) await store.revoke("mcp", ref, agentId, by);
+      await store.recordGrantsChanged({
+        app,
+        agentId,
+        by,
+        actorUserId: context.var.actor.id,
+        added: add,
+        removed: remove,
+        ...(parsed.data.authoring ? { authoring: parsed.data.authoring } : {}),
+      });
+      return context.json({ ok: true, added: add, removed: remove });
+    },
+  );
 
   /** What one Bot holds. The runtime reads this to decide what to offer a model. */
   routes.get("/for/:agentId", requireUser, async (context) => {

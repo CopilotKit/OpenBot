@@ -1,0 +1,52 @@
+{
+  "about": "The deployment the questions in audit-ask-recorded.json were asked of: its Bots, people, apps, tools and boundary rules, and when and where each question was asked.",
+  "asked": {
+    "now": "2026-11-09T21:05:00.000Z",
+    "timeZone": "America/Los_Angeles"
+  },
+  "vocabulary": {
+    "bots": [
+      { "id": "4b1f7c2e-research", "name": "Research" },
+      { "id": "9a0d3e51-sales", "name": "Sales assistant" },
+      { "id": "c2e8f610-inbox", "name": "Inbox triage" }
+    ],
+    "people": [
+      { "id": "user-dana", "name": "Dana Ruiz", "email": "dana@example.com" },
+      { "id": "user-sam", "name": "Sam Okafor", "email": "sam@example.com" }
+    ],
+    "apps": [
+      { "key": "gmail", "name": "Gmail" },
+      { "key": "googledrive", "name": "Google Drive" },
+      { "key": "salesforce", "name": "Salesforce" },
+      { "key": "slack", "name": "Slack" }
+    ],
+    "tools": [
+      { "app": "gmail", "tool": "GMAIL_FETCH_EMAILS", "calls": 120 },
+      { "app": "gmail", "tool": "GMAIL_SEND_EMAIL", "calls": 42 },
+      { "app": "salesforce", "tool": "SALESFORCE_QUERY", "calls": 30 },
+      { "app": "googledrive", "tool": "GOOGLEDRIVE_FIND_FILE", "calls": 15 },
+      { "app": "slack", "tool": "SLACK_SEND_MESSAGE", "calls": 12 },
+      { "app": "gmail", "tool": "GMAIL_CREATE_EMAIL_DRAFT", "calls": 8 },
+      { "app": "salesforce", "tool": "SALESFORCE_UPDATE_RECORD", "calls": 5 },
+      { "app": "salesforce", "tool": "SALESFORCE_CREATE_RECORD", "calls": 3 },
+      { "app": "salesforce", "tool": "SALESFORCE_DELETE_RECORD", "calls": 0 }
+    ],
+    "rules": [
+      {
+        "rule": "intent == \"navigate\" && (page.host == \"facebook.com\" || matches(page.host, \"[.]facebook[.]com$\") || page.host == \"x.com\" || matches(page.host, \"[.]x[.]com$\"))",
+        "name": "Social media",
+        "refusals": 6
+      },
+      {
+        "rule": "mcp.effect == \"write\" && contains(mcp.server, \"salesforce\")",
+        "name": "No Salesforce changes",
+        "refusals": 4
+      },
+      {
+        "rule": "intent == \"run_command\" && initiator.kind != \"person\"",
+        "name": "No shell commands when nobody is watching",
+        "refusals": 2
+      }
+    ]
+  }
+}

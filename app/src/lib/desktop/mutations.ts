@@ -1,9 +1,24 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import {
   type DesktopAppUpdateCheck,
+  type DesktopUsageData,
   desktopKeys,
   invokeDesktop,
 } from "./queries";
+
+/**
+ * Turn Share usage data on or off. The desktop app keeps the choice for the next launch, stops its
+ * own events and the CLI's at once, and starts the server with it the next time OpenBot starts.
+ * It answers with the setting as it now stands.
+ */
+export function setUsageDataMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (share: boolean): Promise<DesktopUsageData> =>
+      invokeDesktop("set_usage_data", { share }),
+    onSuccess: (usageData) =>
+      queryClient.setQueryData(desktopKeys.usageData, usageData),
+  });
+}
 
 function invalidateDesktop(queryClient: QueryClient) {
   return queryClient.invalidateQueries({ queryKey: desktopKeys.all });
@@ -28,6 +43,16 @@ export function restartOpenBotMutationOptions(queryClient: QueryClient) {
 export function stopOpenBotMutationOptions() {
   return mutationOptions({
     mutationFn: (): Promise<void> => invokeDesktop("stop"),
+  });
+}
+
+/**
+ * Change the AI connection. The desktop app stops OpenBot and its window shows setup at the AI
+ * screen, where the new choice starts OpenBot again. Like Stop, this page goes with it.
+ */
+export function changeAiConnectionMutationOptions() {
+  return mutationOptions({
+    mutationFn: (): Promise<void> => invokeDesktop("change_ai_connection"),
   });
 }
 

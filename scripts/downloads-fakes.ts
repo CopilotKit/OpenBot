@@ -60,6 +60,20 @@ if [ "$1" = api ] && [[ "$2" == repos/*/releases/latest ]]; then
   release_json "$latest" | jq -c '{tag_name: .tagName, draft: .isDraft, prerelease: .isPrerelease}' | emit "$@"
   exit 0
 fi
+if [ "$1 $2" = "release list" ]; then
+  fields=""
+  prev=""
+  for arg in "$@"; do
+    if [ "$prev" = --json ]; then fields="$arg"; fi
+    prev="$arg"
+  done
+  for dir in "$FAKE_STATE/releases"/*/; do
+    [ -d "$dir" ] || continue
+    tag="\${dir%/}"
+    release_json "\${tag##*/}"
+  done | jq -sc --arg fields "$fields" 'map(. as $r | ($fields | split(",")) | map({(.): $r[.]}) | add)' | emit "$@"
+  exit 0
+fi
 if [ "$1 $2" = "release view" ]; then
   tag="$3"
   if [ ! -d "$FAKE_STATE/releases/$tag" ]; then
@@ -257,7 +271,7 @@ export type FakeDownloads = {
   release(
     tag: string,
     assets: Record<string, string>,
-    flags?: { prerelease?: boolean; draft?: boolean },
+    flags?: { prerelease?: boolean; draft?: boolean; createdAt?: string },
   ): void;
   setLatest(tag: string): void;
   /** Everything in the bucket, by key. */
@@ -341,6 +355,7 @@ export function fakeDownloads(): FakeDownloads {
         JSON.stringify({
           isDraft: flags.draft ?? false,
           isPrerelease: flags.prerelease ?? false,
+          createdAt: flags.createdAt ?? new Date().toISOString(),
           assets: attached,
         }),
       );

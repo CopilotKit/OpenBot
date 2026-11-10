@@ -16,11 +16,15 @@ import {
   mountDesktopConnectionFailure,
 } from "../src/desktop-connection-failure";
 
-// The native status store is process-wide and survives between test files.
-const clearOrganizationFailure = () =>
-  clearDesktopConnectionFailure("organization");
-beforeEach(clearOrganizationFailure);
-afterEach(clearOrganizationFailure);
+// The native status store is process-wide and survives between test files. Every kind is cleared,
+// not just the organization's: the endpoint answers with whichever failure it holds, so a model
+// failure an earlier file left behind would stand in for the one these tests expect.
+const clearDesktopFailures = () => {
+  for (const connection of ["model", "intelligence", "organization"] as const)
+    clearDesktopConnectionFailure(connection);
+};
+beforeEach(clearDesktopFailures);
+afterEach(clearDesktopFailures);
 
 const employee = {
   id: "employee-1",

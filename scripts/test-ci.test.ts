@@ -54,10 +54,15 @@ async function runBun(directory: string, script: string) {
 }
 
 async function runBunThroughLogPipe(directory: string, script: string) {
+  // Without the shard CI hands the outer run, so this nested run is the whole synthetic project.
+  const env: Record<string, string | undefined> = { ...process.env };
+  delete env.TEST_SHARD;
+  delete env.TEST_COUNT_DIR;
   const proc = Bun.spawn(
     ["bash", "-o", "pipefail", "-c", 'bun "$1" 2>&1 | cat', "bash", script],
     {
       cwd: directory,
+      env,
       stdout: "pipe",
       stderr: "pipe",
     },

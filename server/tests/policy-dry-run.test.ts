@@ -241,6 +241,117 @@ describe("dryRunAgainstHistory", () => {
     expect(report.unchanged).toBe(1);
   });
 
+  test("a routine's command replays as the routine's, read from the row's columns where the gateway writes it", () => {
+    // The gateway records the initiator in `initiator_kind` and `initiator_id`, never in the payload.
+    // Read from the payload only, every routine's action replayed as a person's, and the design's own
+    // example rule previewed as stopping nothing.
+    const candidate: ActionPolicy = {
+      mode: "enforce",
+      deny: ['initiator.kind == "routine" && intent == "run_command"'],
+      allow: ["true"],
+    };
+    const report = dryRunAgainstHistory(candidate, [
+      {
+        id: "nightly",
+        actorUserId: "user-1",
+        initiatorKind: "routine",
+        initiatorId: "nightly-cleanup",
+        eventType: "computer.action_allowed",
+        targetType: "computer",
+        targetId: "general-assistant",
+        createdAt: "2026-08-01T03:00:00.000Z",
+        payload: {
+          action: "computer_run_command",
+          bot: "general-assistant",
+          actor: "user-1",
+          page: "",
+          command: "rm -rf tmp",
+          attempt: "a-1",
+          decision: { allowed: true, mode: "enforce", rule: "true" },
+        },
+      },
+    ]);
+    expect(report.wouldRefuse).toBe(1);
+    expect(report.changes[0]).toMatchObject({
+      kind: "computer",
+      initiator: { kind: "routine", id: "nightly-cleanup" },
+    });
+  });
+
+  test("an app call from before rows carried an attempt is still scored once, from its decision row", () => {
+    // A trial-mode refusal writes the refusal and then the outcome of the call it let through, both
+    // with the refused decision. Rows written before `attempt` existed are paired by which one is the
+    // decision: the refusal with no `refusal` reason of its own.
+    const decided = {
+      actor: "user-1",
+      bot: "general-assistant",
+      server: "salesforce",
+      tool: "update_record",
+      effect: "write",
+      reachedAs: "person:user-1",
+      decision: {
+        allowed: false,
+        mode: "dry-run",
+        rule: 'mcp.server == "salesforce"',
+        source: "deny",
+        carriedOut: true,
+      },
+    };
+    const row = (id: string, eventType: string, extra = {}): AuditEvent => ({
+      id,
+      actorUserId: null,
+      initiatorKind: "person",
+      initiatorId: null,
+      eventType,
+      targetType: "mcp_tool",
+      targetId: "salesforce/update_record",
+      createdAt: "2026-08-01T00:00:00.000Z",
+      payload: { ...decided, ...extra },
+    });
+    const history = [
+      row("outcome", "mcp.call_succeeded"),
+      row("refusal", "mcp.call_rejected"),
+      // Refused again afterwards by the content check; still the same call.
+      row("later", "mcp.call_rejected", {
+        refusal: "sensitive_tool_arguments",
+        decision: { ...decided.decision, carriedOut: false },
+      }),
+    ];
+    const lifted = dryRunAgainstHistory(PERMIT_EVERYTHING, history);
+    expect(lifted.scanned).toBe(1);
+    expect(lifted.wouldAllow).toBe(1);
+    expect(lifted.changes.map((change) => change.id)).toEqual(["refusal"]);
+    expect(lifted.changes[0]).toMatchObject({
+      kind: "app",
+      action: "salesforce/update_record",
+      was: "refused",
+      would: "allowed",
+    });
+  });
+
+  test("an app call refused before the boundary was asked is not the boundary's to replay", () => {
+    const report = dryRunAgainstHistory(PERMIT_EVERYTHING, [
+      {
+        id: "not-granted",
+        actorUserId: null,
+        initiatorKind: "person",
+        initiatorId: null,
+        eventType: "mcp.call_rejected",
+        targetType: "mcp_tool",
+        targetId: "salesforce/update_record",
+        createdAt: "2026-08-01T00:00:00.000Z",
+        payload: {
+          actor: "user-1",
+          bot: "general-assistant",
+          server: "salesforce",
+          tool: "update_record",
+          refusal: "not_granted",
+        },
+      },
+    ]);
+    expect(report.scanned).toBe(0);
+  });
+
   test("counts cover every scanned row even past the detail cap", () => {
     const candidate: ActionPolicy = {
       mode: "enforce",

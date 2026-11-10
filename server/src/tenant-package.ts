@@ -845,6 +845,16 @@ const PERSONAL_ASSISTANT = "personal-assistant";
 const PICKED_HARNESS = "picked-harness";
 
 /**
+ * Every `system_prompt` an earlier OpenBot shipped for the Personal Assistant, newest first, as YAML
+ * folds it. A personal starter still holding one of these exactly moves to the package's current
+ * text; see `synchronizeTenantPackage`.
+ */
+const EARLIER_STARTER_INSTRUCTIONS: readonly string[] = [
+  "You are a personal assistant for one person. Help with their email, calendar, research, planning and everyday errands. Be clear and brief, and ask when something is ambiguous rather than guessing. When you send, buy, delete or post anything, say exactly what you are doing; OpenBot asks the person before it happens, so do not ask them yourself first. Never type a password yourself: ask the person to sign in, and wait for them.",
+  "You are a personal assistant for one person. Help with their email, calendar, research, planning and everyday errands. Be clear and brief, and ask when something is ambiguous rather than guessing. Before you send, buy, delete or post anything, say exactly what you are about to do. Never type a password yourself: ask the person to sign in, and wait for them.",
+];
+
+/**
  * Names the catalogue gave a framework before its current one. A Bot an earlier version seeded under
  * one of these is still named after its framework, so it follows a change of harness like one under
  * the current name.
@@ -1253,6 +1263,62 @@ export async function synchronizeTenantPackage(
           .update(agentProfiles)
           .set({ roleDescription: description, updatedAt })
           .where(eq(agentProfiles.agentId, starter.id));
+      }
+    }
+
+    /*
+     * A personal starter still running on instructions an earlier OpenBot shipped, word for word.
+     *
+     * The starter's instructions are seeded once and then belong to the person, so a fix to the
+     * package's `system_prompt` reached only fresh installs. The earlier wording told the Bot to ask
+     * whenever something was ambiguous, which stopped it short of finishing, and to ask the person
+     * to sign in and wait, which contradicted OpenBot's own rule that a sign-in is handed over with
+     * a tool call. A starter that still carries one of those texts exactly has never been edited, so
+     * it moves to the current one. One that somebody changed, by a single word, is theirs and stays.
+     */
+    const shippedInstructions = tenantPackage.agents.find(
+      ({ id }) => id === PERSONAL_ASSISTANT,
+    )?.configuration.systemPrompt;
+    if (
+      bundledPersonal &&
+      !freshPersonal &&
+      typeof shippedInstructions === "string"
+    ) {
+      const starters = await transaction
+        .select({
+          id: agentTable.id,
+          type: agentTable.type,
+          configuration: agentTable.configuration,
+        })
+        .from(agentTable)
+        .innerJoin(agentProfiles, eq(agentTable.id, agentProfiles.agentId))
+        .where(
+          and(
+            eq(agentTable.packageId, deploymentPackage.id),
+            inArray(agentTable.id, [PERSONAL_ASSISTANT, PICKED_HARNESS]),
+            isNull(agentProfiles.ownerUserId),
+          ),
+        );
+      for (const starter of starters) {
+        const configuration = storedConfiguration(starter.configuration);
+        if (configuration?.personalStarter !== true) continue;
+        // Where `starterInstructionsKey` keeps them: the prompt a Bot that runs here runs on, or
+        // the instructions a harness is sent in its standing role.
+        const key =
+          starter.type === "built_in" ? "systemPrompt" : "standingInstructions";
+        const stored = configuration[key];
+        if (
+          typeof stored !== "string" ||
+          !EARLIER_STARTER_INSTRUCTIONS.includes(stored.trim())
+        )
+          continue;
+        await transaction
+          .update(agentTable)
+          .set({
+            configuration: { ...configuration, [key]: shippedInstructions },
+            updatedAt: new Date(),
+          })
+          .where(eq(agentTable.id, starter.id));
       }
     }
 

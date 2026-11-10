@@ -1,9 +1,11 @@
 import {
   IconChevronRight,
+  IconSparkles,
   IconToggleRight,
   IconUsersGroup,
 } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { PageRows } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
@@ -107,6 +109,24 @@ export function CapabilitiesSection() {
                     {overrideCount === 0
                       ? "None. Everybody gets the switches above"
                       : `${overrideCount} set`}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <IconChevronRight className="size-4 text-muted-foreground" />
+                </ItemActions>
+              </Item>
+              <Separator />
+              <Item
+                render={<Link to="/admin/permissions/describe" />}
+                size="sm"
+              >
+                <ItemMedia variant="icon">
+                  <IconSparkles />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>Describe it in words</ItemTitle>
+                  <ItemDescription>
+                    Say who may use what, and your model writes the changes.
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>

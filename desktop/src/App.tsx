@@ -3,7 +3,6 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckForUpdates } from "./CheckForUpdates";
 import { CopilotKitAccount } from "./CopilotKitAccount";
-import { useWindowFitsContent } from "./fitWindow";
 import { DEFAULT_HARNESS, type HarnessChoice } from "./harness";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import {
@@ -27,10 +26,14 @@ import {
 } from "./ProviderPicker";
 import { Sections } from "./Sections";
 import { StartFresh } from "./StartFresh";
+import { PodmanGoAhead } from "./PodmanGoAhead";
 import {
   engineNow,
+  goAheadNow,
   handOffNow,
+  BehindSlot,
   INSTALL_BLURB,
+  installingBehind,
   type Progress,
   plainInstallSteps,
   SetupProgress,
@@ -89,8 +92,13 @@ function comeForward(why: string) {
   invoke("bring_setup_to_front", { why }).catch(() => {});
 }
 
+/*
+ * The window keeps the size and the place it opened with. It used to grow to fit a taller step and
+ * move up to stay on screen: on Windows it grew 14 px when the sign-in card appeared, then jumped
+ * 54 px up and 139 px taller on "Connect your AI". A step taller than the window scrolls inside its
+ * card instead (`main > .sheet` in styles.css).
+ */
 export function App() {
-  useWindowFitsContent();
   return <Setup />;
 }
 
@@ -139,6 +147,8 @@ function Setup() {
   const [backEndNotice, setBackEndNotice] = useState<string | null>(null);
   const [step, setStep] = useState<SetupStep>("welcome");
   const [steps, setSteps] = useState<Progress[]>([]);
+  // When the install now running began: its row on the other screens counts from here.
+  const [installSince, setInstallSince] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [checkingResume, setCheckingResume] = useState(true);
   const savedLaunch = useRef<string | null>(null);
@@ -229,6 +239,26 @@ function Setup() {
       if (connected) setLocalConnected(true);
     },
   });
+  /*
+   * Whether this Start updates OpenBot itself, asked once the back end is waited on, so the Start
+   * journey counts the update from the start rather than learning of it when it begins: on Windows
+   * D the time left said "About a minute", then "About 2", then "About 3". Start uses this answer.
+   */
+  const releaseDueAsked = useRef<{
+    root: string;
+    answer: Promise<ReleaseMove | null>;
+  } | null>(null);
+  const [releaseDue, setReleaseDue] = useState(false);
+  useEffect(() => {
+    const at = root.trim();
+    if (!local.running || local.at !== "wait" || !at) return;
+    if (releaseDueAsked.current?.root === at) return;
+    const answer = invoke<ReleaseMove | null>("upgrade_due", {
+      root: at,
+    }).catch(() => null);
+    releaseDueAsked.current = { root: at, answer };
+    void answer.then((due) => setReleaseDue(Boolean(due)));
+  }, [local.running, local.at, root]);
   // A recorded stack: the OpenBot app's page may offer its dashboard (intelligence_bridge.rs).
   const intelligenceOffered = localStack !== null;
   // What the shell was last told. Starts hidden, so nothing is said before a stack is recorded.
@@ -336,6 +366,14 @@ function Setup() {
           configured?.localEval && installed
             ? recordedModel({ ...configured.values, saved: configured.saved })
             : null;
+        /*
+         * Settings' Change on the AI model row stopped OpenBot to come here: open at the AI screen,
+         * as this window's own Change AI connection does. Asked every load, and answered once.
+         */
+        const changeAiConnection = await invoke<boolean>(
+          "take_ai_connection_change",
+        ).catch(() => false);
+        if (!active) return;
         if (installed) {
           const key = installationKeyFor(found, installed.harness);
           setHarness(installed.harness);
@@ -343,7 +381,7 @@ function Setup() {
           if (configured?.localEval) {
             setModel(resumedModel);
             if (configured.launch) savedLaunch.current = key;
-            setStep(resumedModel ? "connect" : "model");
+            setStep(resumedModel && !changeAiConnection ? "connect" : "model");
           }
         }
         if (interrupted?.connection) {
@@ -371,7 +409,9 @@ function Setup() {
         )
           return;
         // An interrupted run needs an explicit Start, with its saved setup still available.
-        if (interrupted || configured.autoStart === false) return;
+        // Nor one asked to change the AI connection: the new choice is what starts it.
+        if (interrupted || configured.autoStart === false || changeAiConnection)
+          return;
         // Intelligence must report ready and licensed first, which only its screen asks.
         if (configured.localEval.connected) setLocalAutoStart(true);
       })
@@ -407,6 +447,7 @@ function Setup() {
     setBusy(true);
     setFailure(null);
     setRecoveryFailure(null);
+    setInstallSince(Date.now());
     setSteps([
       {
         step: "engine",
@@ -553,9 +594,16 @@ function Setup() {
       };
       // The installation runs this app's own release: one that does not is upgraded as part of
       // this Start. An upgrade that fails is undone and the version it had starts instead.
-      const due = await invoke<ReleaseMove | null>("upgrade_due", {
-        root: root.trim(),
-      }).catch(() => null);
+      const asked =
+        releaseDueAsked.current?.root === root.trim()
+          ? releaseDueAsked.current.answer
+          : null;
+      // Asked afresh by the next Start.
+      releaseDueAsked.current = null;
+      const due = await (asked ??
+        invoke<ReleaseMove | null>("upgrade_due", {
+          root: root.trim(),
+        }).catch(() => null));
       let outcome: ReleaseOutcome | null = null;
       if (due) {
         outcome = await invoke<ReleaseOutcome>("upgrade_and_start", startWith);
@@ -712,6 +760,25 @@ function Setup() {
     if (localAuto) local.start();
   }, [localAuto, resumingStart]);
 
+  // The person closed macOS's password prompt: whichever screen they are on says so, with Try
+  // again, while Install asks again by itself. See `install::GoAhead`.
+  const goAhead = goAheadNow(steps);
+
+  /*
+   * What is installing behind a screen that asks the person for something else, as one row: the
+   * account step and the AI step. It says what OpenBot is doing, how far along it is and for how
+   * long, so the screen never looks stuck while minutes of install go on behind it.
+   */
+  const behind = (said: { waitingFor?: string; done?: string }) =>
+    installingBehind({
+      steps,
+      installing: preparation?.status === "preparing",
+      installed: installationReady,
+      since: installSince,
+      backEnd: local,
+      ...said,
+    });
+
   // Quit outranks every screen: the app is closing, whatever was on it.
   const quitting = useQuitStatus(false);
   if (quitting) return <ShuttingDown status={quitting} />;
@@ -788,10 +855,9 @@ function Setup() {
               ? "OpenBot’s local software is ready. Next, connect your AI."
               : INSTALL_BLURB}
           </p>
-          <SetupProgress
-            steps={plainInstallSteps(steps, busy)}
-            showElapsed={false}
-          />
+          <SetupProgress steps={plainInstallSteps(steps, busy, installSince)} />
+          {/* The person closed macOS's password prompt: said, with Try again. */}
+          {goAhead && <PodmanGoAhead asking={goAhead} />}
           {/* Intelligence sets itself up alongside, once the install has Docker answering. */}
           <LocalStatus sequence={local} />
           {displayedFailure && <Failure problem={displayedFailure} />}
@@ -842,8 +908,22 @@ function Setup() {
       <main>
         <CopilotKitAccount
           root={root.trim()}
-          // Install runs behind this step. When it opens Docker Desktop, this step says so.
+          // Install runs behind this step. When it opens Docker Desktop, this step says so, and
+          // while the account check waits on the engine, it says what Install is doing about it.
           handOff={handOffNow(steps)}
+          engine={engineNow(steps)}
+          // Once signed in, the step explains the password prompt Install waits to raise.
+          goAhead={goAhead}
+          // No slot once the install has failed: its failure is in the card, and nothing will
+          // come into the slot until the person starts it again.
+          behind={
+            preparation?.status === "failed"
+              ? undefined
+              : behind({
+                  waitingFor:
+                    "The rest of the install starts after you sign in and accept the license agreement.",
+                })
+          }
           onDone={(acceptedVersion) => {
             if (acceptedVersion) local.acceptTerms(acceptedVersion);
             // Intelligence sets itself up once the install has Docker answering; see above. The
@@ -870,7 +950,20 @@ function Setup() {
           chosen={model}
           returning={returningToInstallation}
           busy={busy}
-          status={<LocalStatus sequence={local} />}
+          status={
+            returningToInstallation ? (
+              <LocalStatus sequence={local} />
+            ) : (
+              <BehindSlot>
+                <BehindRow
+                  row={behind({
+                    done: "OpenBot starts as soon as you connect your AI.",
+                  })}
+                />
+                <LocalStatus sequence={local} download={false} />
+              </BehindSlot>
+            )
+          }
           onInstallRequired={(problem, choice) => {
             // The record is from an earlier run. Install again, keeping the provider chosen.
             localInstall.current = null;
@@ -922,7 +1015,25 @@ function Setup() {
             row.running,
         )
     : undefined;
-  const updatingLine = updating && <StatusLine>{updating.detail}</StatusLine>;
+  // One row while it updates, with its download's bar once there is one: "Installing OpenBot" sat
+  // unchanged for minutes while the update's software downloaded. Not while the Start journey
+  // shows, whose one bar counts the update too (`StartJourney`).
+  const updatingLine = updating && !(local.running && !local.stopped) && (
+    <SetupProgress
+      label="Update progress"
+      steps={[
+        {
+          step: "Updating OpenBot",
+          ok: true,
+          running: true,
+          detail: updating.detail,
+          unpacking: "Unpacking the update",
+          downloads: steps.find((row) => row.step === "images" && row.running)
+            ?.downloads,
+        },
+      ]}
+    />
+  );
   // Docker Desktop opened, or the engine machine started, before the back end starts, as after a
   // restart: said under the rows.
   const handOff = engineNow(steps);
@@ -934,10 +1045,17 @@ function Setup() {
           <h1>{localStarting ? "Starting OpenBot" : "OpenBot is stopped"}</h1>
           <p className="lede">
             {localStarting
-              ? "Starting the back end first, then the rest of OpenBot."
+              ? "OpenBot is getting ready and opens by itself. This usually takes a minute or two."
               : "Your installation and saved connections are ready to reopen."}
           </p>
-          <LocalIntelligence sequence={local} offerStart handOff={handOff} />
+          <LocalIntelligence
+            sequence={local}
+            offerStart
+            handOff={handOff}
+            open={steps}
+            releaseDue={releaseDue}
+          />
+          {goAhead && <PodmanGoAhead asking={goAhead} />}
           {updatingLine}
           {displayedFailure && <Failure problem={displayedFailure} />}
           {/* While a local step runs, its Cancel is the only control. */}
@@ -1006,12 +1124,20 @@ function Setup() {
             />
           )}
           {!returningToInstallation && <Sections at="Start" />}
-          <h1>Getting ready</h1>
+          {/* Not "Getting ready" over a "Getting OpenBot ready" row: Windows F read them as one. */}
+          <h1>Finishing setup</h1>
           <p className="lede">
             OpenBot is setting up on this computer and starts by itself when
             it’s ready. This can take a few minutes.
           </p>
-          <LocalIntelligence sequence={local} offerStart handOff={handOff} />
+          <LocalIntelligence
+            sequence={local}
+            offerStart
+            handOff={handOff}
+            open={steps}
+            releaseDue={releaseDue}
+          />
+          {goAhead && <PodmanGoAhead asking={goAhead} />}
           {updatingLine}
           {/* Leftover data is a choice, offered above, not a failure to report here. */}
           {displayedFailure && leftoverVolumes.length === 0 && (
@@ -1100,6 +1226,11 @@ function Setup() {
       </div>
     </main>
   );
+}
+
+/** The background install's row, when there is one. */
+function BehindRow({ row }: { row: Progress | null }) {
+  return row && <SetupProgress steps={[row]} label="Background install" />;
 }
 
 function settleProgress(steps: Progress[], problem?: Problem): Progress[] {

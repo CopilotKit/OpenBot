@@ -855,16 +855,12 @@ export function createComputerGateway(
         actorId: actor.id,
         botId: seat.botId,
         toolRef: toolName,
-        effect: ["activate", "type", "write_file", "run_command"].includes(
-          intent ?? "",
-        )
-          ? "write"
-          : "read",
-        scope: filePath
-          ? filePath.split("/").slice(0, -1).join("/") || "workspace"
-          : subject.command
-            ? "workspace"
-            : hostOf(pageUrl) || "browser",
+        effect: approvalEffectOf(intent),
+        scope: approvalScopeOf({
+          filePath,
+          command: subject.command,
+          pageUrl,
+        }),
         args: continuation?.args ?? { ...subject, signal: undefined },
         target: {
           pageUrl,
@@ -1792,6 +1788,36 @@ export function intentOf(
   }
 }
 
+/**
+ * Whether the approval gate is asked about a computer action as a change or a read: pressing, typing,
+ * saving a file and running a command change something; everything else reads.
+ */
+export function approvalEffectOf(
+  intent: PolicyContext["intent"],
+): "read" | "write" {
+  return ["activate", "type", "write_file", "run_command"].includes(
+    intent ?? "",
+  )
+    ? "write"
+    : "read";
+}
+
+/**
+ * Where an approval rule finds a computer action: the folder a file is in, the workspace for a
+ * command, or the page's host.
+ */
+export function approvalScopeOf(subject: {
+  filePath?: string | undefined;
+  command?: string | undefined;
+  pageUrl: string;
+}): string {
+  return subject.filePath
+    ? subject.filePath.split("/").slice(0, -1).join("/") || "workspace"
+    : subject.command
+      ? "workspace"
+      : hostOf(subject.pageUrl) || "browser";
+}
+
 type ActionRow = {
   toolName: string;
   seat: ComputerSeat;
@@ -1906,6 +1932,14 @@ function auditRow(entry: ActionRow): AuditEventInput {
         mode: entry.decision.mode,
         source: entry.decision.source,
         rule: entry.decision.matched,
+        /**
+         * The rule's name from the Boundaries page, where it has one, so the row reads by what the
+         * rule is called. Beside `rule`, never instead of it: the replay and the trail match on the
+         * expression.
+         */
+        ...(entry.decision.ruleName
+          ? { ruleName: entry.decision.ruleName }
+          : {}),
         /** Present so the trail explains a dry-run row that was recorded as refused but still ran. */
         carriedOut: entry.refusal ? false : entry.decision.forward,
       },

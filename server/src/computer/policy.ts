@@ -14,7 +14,7 @@
  * Precedence: deny beats allow. A rule that removes permission must never be
  * defeated by a broader rule that grants it, or a company cannot reason about what it has forbidden.
  */
-import { evaluate } from "cel-js";
+import { evaluate, parse } from "cel-js";
 import type { AuditInitiator, AuditInitiatorKind } from "../audit";
 
 export type PolicyMode = "dry-run" | "enforce";
@@ -207,6 +207,14 @@ export type PolicyDecision = {
   mode: PolicyMode;
   /** Which expression decided it, so the audit row can say why and an operator can find the rule. */
   matched: string | null;
+  /**
+   * What the Boundaries page calls that expression, where somebody named it.
+   *
+   * A rule written from a sentence is a CEL expression of a thousand characters, and an audit row
+   * that can only quote it names nothing a person would recognise. The name is read from the policy
+   * that decided, at the moment it decided, so a later rename does not rewrite what the trail says.
+   */
+  ruleName?: string;
   /** Which list that expression came from. `default` means nothing matched and the floor applied. */
   source: "deny" | "allow" | "default";
   /** True when the action should actually be carried out. False for a refusal in `enforce`. */
@@ -347,9 +355,20 @@ export function evaluateActionPolicy(
   policy: ActionPolicy | null | undefined,
   context: PolicyContext,
 ): PolicyDecision {
-  const enterprise = enterpriseDecision(context);
-  if (enterprise) return enterprise;
+  return enterpriseDecision(context) ?? evaluateBoundaryRules(policy, context);
+}
 
+/**
+ * The boundary's own rules, without the enterprise controls asked in front of them.
+ *
+ * What {@link evaluateActionPolicy} falls through to when the controls have nothing to say, and
+ * exported so "What would happen if…" (`what-if-check.ts`) can show the boundary's answer beside the
+ * controls' rather than only whichever came first.
+ */
+export function evaluateBoundaryRules(
+  policy: ActionPolicy | null | undefined,
+  context: PolicyContext,
+): PolicyDecision {
   const mode: PolicyMode = policy?.mode ?? "enforce";
   const deny = policy?.deny ?? [];
   const allow = policy?.allow ?? [];
@@ -363,6 +382,7 @@ export function evaluateActionPolicy(
         allowed: false,
         mode,
         matched: expression,
+        ...nameOf(policy, expression),
         source: "deny",
         // dry-run records the refusal and lets the work continue, which is what makes it safe to
         // switch on against live traffic.
@@ -378,6 +398,7 @@ export function evaluateActionPolicy(
         allowed: true,
         mode,
         matched: expression,
+        ...nameOf(policy, expression),
         source: "allow",
         forward: true,
         reason: "Permitted by policy.",
@@ -395,6 +416,20 @@ export function evaluateActionPolicy(
       "No rule in this deployment's policy permits that action, so it was refused. " +
       "An administrator can add one.",
   };
+}
+
+/** The deciding rule's name, spread into a decision, or nothing for a rule nobody named. */
+function nameOf(
+  policy: ActionPolicy | null | undefined,
+  expression: string,
+): { ruleName?: string } {
+  // Own keys only: the labels are keyed by rule text, and a rule reading `constructor` must not
+  // find a name on the object's prototype.
+  const label =
+    policy?.labels && Object.hasOwn(policy.labels, expression)
+      ? policy.labels[expression]
+      : undefined;
+  return label?.name ? { ruleName: label.name } : {};
 }
 
 /** A refusal a person can act on: what was refused, and on what. */
@@ -440,4 +475,219 @@ function describeRefusal(context: PolicyContext, expression: string): string {
     `This deployment's policy does not allow that: ${what} on ${context.page.host} ` +
     `is blocked by the rule \`${expression}\`.`
   );
+}
+
+/**
+ * Every variable a rule can name, with the value each takes when an action has none of it.
+ *
+ * `Required` so the type is the list: a field added to {@link PolicyContext} does not compile here
+ * until it is added, and a rule naming it is then accepted by {@link checkPolicyRule}. The values are
+ * the neutral ones every call site binds for a fact its action does not have, so evaluating a rule
+ * against this is evaluating it against an action with nothing to match.
+ */
+const RULE_SCHEMA: Required<PolicyContext> = {
+  tool: { name: "" },
+  intent: "read",
+  bot: { id: "" },
+  actor: { id: "" },
+  initiator: { kind: "person", id: "" },
+  page: { url: "", host: "" },
+  element: { ref: "", role: "", name: "", type: "" },
+  key: "",
+  file: { path: "", name: "", extension: "" },
+  command: "",
+  mcp: { server: "", tool: "", effect: "" },
+};
+
+/** cel-js's own functions, beside the two this policy registers. */
+const RULE_FUNCTIONS = [...Object.keys(POLICY_FUNCTIONS), "size", "has"];
+
+/** The parts of cel-js's syntax tree the check reads. Chevrotain's own types are not a dependency here. */
+type RuleNode = {
+  name: string;
+  children: Record<string, unknown[]>;
+};
+
+function isNode(value: unknown): value is RuleNode {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "children" in value &&
+    "name" in value
+  );
+}
+
+function imageOf(node: RuleNode, key: string): string {
+  const first = node.children[key]?.[0] as { image?: unknown } | undefined;
+  return typeof first?.image === "string" ? first.image : "";
+}
+
+function listed(names: string[]): string {
+  return names.length < 2
+    ? names.join("")
+    : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
+
+/**
+ * Why a variable a rule names is not one the evaluator binds, or null when it is.
+ *
+ * Read off the syntax tree rather than found by evaluating, because evaluating stops early: `&&`
+ * returns at the first false, so in `tool.name == "computer_key" && elemnt.name == "x"` the misspelt
+ * half is never reached by an action that is not a keypress, and is reached, throws and refuses on
+ * every one that is.
+ */
+function variableProblem(node: RuleNode): string | null {
+  const root = imageOf(node, "Identifier");
+  if (!Object.hasOwn(RULE_SCHEMA, root)) {
+    return `A rule can't check "${root}". It can check ${listed(Object.keys(RULE_SCHEMA))}.`;
+  }
+  let value: unknown = RULE_SCHEMA[root as keyof PolicyContext];
+  let path = root;
+  for (const dot of (node.children.identifierDotExpression ?? []).filter(
+    isNode,
+  )) {
+    const field = imageOf(dot, "Identifier");
+    if (dot.children.OpenParenthesis) {
+      return field === "contains" || field === "matches"
+        ? `Write ${field}(${path}, "…"), not ${path}.${field}("…").`
+        : `A rule can't call ${field}() on ${path}. Use contains(${path}, "…") or matches(${path}, "…").`;
+    }
+    if (!value || typeof value !== "object") {
+      return `A rule can't check "${path}.${field}". ${path} is text, so compare it with == or use contains(${path}, "…").`;
+    }
+    if (!Object.hasOwn(value, field)) {
+      return `A rule can't check "${path}.${field}". ${path} has ${listed(Object.keys(value))}.`;
+    }
+    value = (value as Record<string, unknown>)[field];
+    path = `${path}.${field}`;
+  }
+  return null;
+}
+
+/** The first thing in a rule that names something the evaluator does not provide. */
+function namingProblem(node: RuleNode): string | null {
+  if (node.name === "identifierExpression") {
+    const problem = variableProblem(node);
+    if (problem) return problem;
+  }
+  if (node.name === "macrosExpression") {
+    const name = imageOf(node, "Identifier");
+    if (!RULE_FUNCTIONS.includes(name)) {
+      return `A rule can't use ${name}(). It can use ${listed(RULE_FUNCTIONS.map((one) => `${one}()`))}.`;
+    }
+  }
+  for (const children of Object.values(node.children)) {
+    for (const child of children) {
+      if (!isNode(child)) continue;
+      const problem = namingProblem(child);
+      if (problem) return problem;
+    }
+  }
+  return null;
+}
+
+/**
+ * The parser's complaint, in a sentence. Chevrotain lists every token it would have accepted, which
+ * is a page of grammar for what is nearly always one missing quote, bracket or operator.
+ */
+function syntaxProblem(rule: string, errors: string[]): string {
+  /*
+   * A lone `=` is the commonest slip of all, and the parser never sees it: cel-js drops a character
+   * its lexer has no token for, so `mcp.server = "x"` reaches the parser as two values side by side
+   * and the complaint names the second of them. Looked for outside quoted text.
+   */
+  const unquoted = rule.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""');
+  if (/(^|[^=!<>])=($|[^=])/.test(unquoted)) {
+    return "Use == to compare two values. A single = isn't valid in a rule.";
+  }
+  const first = errors[0] ?? "";
+  const found = /but found:? (?:--> )?'?(.*?)'?(?: <--)?$/.exec(
+    first.split("\n").at(-1) ?? "",
+  )?.[1];
+  if (found === undefined) {
+    return `This rule isn't valid CEL. ${first.split("\n")[0]}`;
+  }
+  if (found === "") {
+    return "This rule stops before it's finished. Check for a missing value after an operator, or a missing bracket or quote.";
+  }
+  const shown = /^".*"$/.test(found) ? found : `"${found}"`;
+  return `This rule has ${shown} where it doesn't fit. Check for a missing operator such as && or ==, or a missing quote.`;
+}
+
+/**
+ * Whether a rule can be enforced as written: it parses, every variable and function it names is one
+ * the evaluator provides, and it answers true or false.
+ *
+ * The gate a rule passes before it is saved or replayed. Without it a rule is checked only for being
+ * text, and a deny rule that cannot be evaluated refuses every action it meets (see `matches`), so a
+ * typo saved on the Boundaries page stops every Bot.
+ *
+ * It answers about the rule, not about any action. To learn what kind of answer the rule gives, it is
+ * evaluated against the neutral values the call sites bind for facts an action does not have.
+ */
+export function checkPolicyRule(
+  rule: string,
+): { ok: true } | { ok: false; error: string } {
+  if (!rule.trim()) return { ok: false, error: "A rule can't be empty." };
+
+  const parsed = parse(rule);
+  if (!parsed.isSuccess) {
+    return { ok: false, error: syntaxProblem(rule, parsed.errors) };
+  }
+
+  const naming = namingProblem(parsed.cst as unknown as RuleNode);
+  if (naming) return { ok: false, error: naming };
+
+  let answer: unknown;
+  try {
+    answer = evaluate(
+      parsed.cst,
+      RULE_SCHEMA as unknown as Record<string, unknown>,
+      POLICY_FUNCTIONS as Record<string, CallableFunction>,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      error: `This rule can't be evaluated: ${message.replace(/\.$/, "")}.`,
+    };
+  }
+  if (typeof answer !== "boolean") {
+    const what =
+      answer === null
+        ? "nothing"
+        : typeof answer === "string"
+          ? "text"
+          : `a ${typeof answer}`;
+    return {
+      ok: false,
+      error: `This rule gives ${what}, not true or false. Compare a value with == or use contains(…).`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * The first rule in a policy that can't be enforced as written, and why, or null.
+ *
+ * `inForce` exempts the rules already being enforced. A save carries every rule the policy has, and a
+ * rule written before this check existed, or set in configuration, would otherwise refuse every save
+ * that kept it: the one removing a second broken rule beside it, and the one switching trial mode on.
+ * A rule in force is enforced the same way after the save as before it. What the check stops is a
+ * broken rule being added.
+ */
+export function uncheckableRule(
+  policy: Pick<ActionPolicy, "deny" | "allow">,
+  inForce?: Pick<ActionPolicy, "deny" | "allow">,
+): { rule: string; error: string } | null {
+  const enforced = new Set([
+    ...(inForce?.deny ?? []),
+    ...(inForce?.allow ?? []),
+  ]);
+  for (const rule of [...policy.deny, ...policy.allow]) {
+    if (enforced.has(rule)) continue;
+    const checked = checkPolicyRule(rule);
+    if (!checked.ok) return { rule, error: checked.error };
+  }
+  return null;
 }

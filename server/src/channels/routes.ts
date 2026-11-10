@@ -41,7 +41,12 @@ import {
   type ChannelEventHub,
 } from "./events";
 import { upgradeWebSocket } from "./socket";
-import { firstPlainLine, MAX_TITLE_GRAPHEMES, plainLine } from "./text";
+import {
+  firstPlainLine,
+  MAX_TITLE_GRAPHEMES,
+  oneLine,
+  plainLine,
+} from "./text";
 import type { ThreadIdentity } from "./thread-identity";
 import { type ChannelWork, channelWorkDto, workIn } from "./working";
 
@@ -64,7 +69,10 @@ export type AgentChannel = {
 
 /** A channel plus the last thing said in it, which is what a roster renders. */
 export type ChannelSummary = AgentChannel & {
-  /** A few words about the conversation, or null. Readers fall back to the channel's name. */
+  /**
+   * What the conversation is called, or null: the name its owner gave it, else the few words the
+   * naming sweep wrote. Readers fall back to `opening`, then the channel's name.
+   */
   summary: string | null;
   /** The person's first words here, plain, or null: the conversation's name until `summary`. */
   opening: string | null;
@@ -75,6 +83,8 @@ export type ChannelSummary = AgentChannel & {
   pinned: boolean;
   /** When the caller last had this channel open, or null for never. The caller's, only. */
   lastReadAt: Date | null;
+  /** Whether the caller started this conversation, which is who may rename it. See `rename`. */
+  canRename: boolean;
   /**
    * Whether this is a task's own conversation (tasks/*), which holds one piece of work. Choosers of
    * "a conversation with this Bot", such as where its check-ins reach the person, leave these out.
@@ -219,6 +229,19 @@ export type ChannelStore = {
   /** Stamp the caller's own membership as read now. Throws ChannelNotFoundError for a non-member. */
   markRead(actor: AgentActor, channelId: string): Promise<void>;
   /**
+   * Name the conversation, or clear the name with null, for every member.
+   *
+   * Only the person who started it may: the earliest member, the same person a group calls its
+   * creator. Throws ChannelNotFoundError for a non-member and ChannelNotOwnerError for any other
+   * member. Resolves to what the conversation is called now, which is the summary again once a
+   * name is cleared.
+   */
+  rename(
+    actor: AgentActor,
+    channelId: string,
+    title: string | null,
+  ): Promise<string | null>;
+  /**
    * Hide the channel for every member. Soft: the row and the thread survive, every read filters.
    * Throws ChannelNotFoundError for a non-member and ChannelPackageOwnedError for a channel the
    * tenant package defines, which configuration owns rather than any member.
@@ -331,6 +354,25 @@ export const conversationName = sql<string>`case when ${channels.packageId} is n
   ) named
   where named.joined is not null
 ), ${channels.name}) else ${channels.name} end`;
+
+/**
+ * Who started a conversation: its earliest member, ties broken by id. The order `summary.ts` reads
+ * a thread in and a group names its creator by, so all three agree on one person.
+ */
+function starterOf(channelId: typeof channels.id) {
+  return sql<
+    string | null
+  >`(select ${channelMemberships.userId} from ${channelMemberships} where ${channelMemberships.channelId} = ${channelId} order by ${channelMemberships.createdAt} asc, ${channelMemberships.userId} asc limit 1)`;
+}
+
+/**
+ * What a conversation is called: the name the person who started it gave it, else the summary the
+ * naming sweep wrote, else null. Every reader of a conversation's name reads it through this, so a
+ * chosen name shows wherever the summary did.
+ */
+export const conversationCalled = sql<
+  string | null
+>`coalesce(${channels.title}, ${channels.summary})`;
 
 export function createChannelStore(
   database: Database,
@@ -659,7 +701,7 @@ export function createChannelStore(
           agentId: channelAgents.agentId,
           threadId: intelligenceChannelMappings.threadId,
           deletedAt: agentProfiles.deletedAt,
-          channelSummary: channels.summary,
+          channelSummary: conversationCalled,
           opening: channels.opening,
           lastMessage: channels.lastMessage,
           lastMessageAt: channels.lastMessageAt,
@@ -667,6 +709,7 @@ export function createChannelStore(
           createdAt: channels.createdAt,
           pinnedAt: channelMemberships.pinnedAt,
           lastReadAt: channelMemberships.lastReadAt,
+          canRename: sql<boolean>`${starterOf(channels.id)} = ${actor.id}`,
           task: sql<boolean>`exists (select 1 from ${botTasks} where ${botTasks.channelId} = ${channels.id})`,
         })
         .from(channels)
@@ -728,6 +771,7 @@ export function createChannelStore(
           createdAt: row.createdAt,
           pinned: row.pinnedAt !== null,
           lastReadAt: row.lastReadAt,
+          canRename: row.canRename,
           task: row.task,
         });
       }
@@ -819,6 +863,57 @@ export function createChannelStore(
         .returning({ channelId: channelMemberships.channelId });
       // Not a member, or no such channel: the same answer either way, matching setPinned.
       if (updated.length === 0) throw new ChannelNotFoundError(channelId);
+    },
+
+    async rename(actor, channelId, title) {
+      return await database.transaction(
+        async (transaction) => {
+          const [row] = await transaction
+            .select({ starter: starterOf(channels.id) })
+            .from(channels)
+            .innerJoin(
+              channelMemberships,
+              and(
+                eq(channelMemberships.channelId, channels.id),
+                eq(channelMemberships.userId, actor.id),
+              ),
+            )
+            .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)));
+          // Not a member, no such channel, or a deleted one: the same answer every way.
+          if (!row) throw new ChannelNotFoundError(channelId);
+          if (row.starter !== actor.id)
+            throw new ChannelNotOwnerError(channelId);
+
+          const [renamed] = await transaction
+            .update(channels)
+            .set({ title, updatedAt: new Date() })
+            .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)))
+            .returning({
+              name: conversationCalled,
+            });
+          if (!renamed) throw new ChannelNotFoundError(channelId);
+
+          const members = await transaction
+            .select({ userId: channelMemberships.userId })
+            .from(channelMemberships)
+            .where(eq(channelMemberships.channelId, channelId));
+
+          // Every member, on commit, like a summary: the name is the conversation's, not one person's.
+          const event: ChannelActivityEvent = {
+            channelId,
+            memberIds: members.map((member) => member.userId),
+            lastMessage: null,
+            lastMessageAt: null,
+            lastMessageAgentId: null,
+            summary: renamed.name,
+          };
+          await transaction.execute(
+            sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
+          );
+          return renamed.name;
+        },
+        { isolationLevel: "read committed" },
+      );
     },
 
     async softDelete(actor, channelId, discardFailedStart = false) {
@@ -1149,6 +1244,14 @@ export class ChannelNotFoundError extends Error {
   }
 }
 
+/** A member asked to rename a conversation somebody else started. */
+export class ChannelNotOwnerError extends Error {
+  constructor(id: string) {
+    super(`Channel ${id} was started by somebody else.`);
+    this.name = "ChannelNotOwnerError";
+  }
+}
+
 export class ChannelPackageOwnedError extends Error {
   constructor(id: string) {
     super(`Channel ${id} is defined by the deployment package.`);
@@ -1161,6 +1264,39 @@ type ChannelInputParseResult =
   | { ok: false; error: string };
 
 type ChannelInputObject = { agentIds?: unknown };
+
+/** How long a name a person gives a conversation may be: the same cap the naming sweep keeps to. */
+export const MAX_CHOSEN_TITLE_GRAPHEMES = MAX_TITLE_GRAPHEMES;
+
+/**
+ * A rename's body: `{ title }`, one line. Blank or null clears the name, so the conversation goes
+ * back to the summary it was given.
+ */
+export function parseTitleInput(
+  input: unknown,
+): { ok: true; title: string | null } | { ok: false; error: string } {
+  if (!isChannelInputObject(input) || !("title" in input)) {
+    return { ok: false, error: "Send the new name as title." };
+  }
+  const { title } = input as { title: unknown };
+  if (title === null) return { ok: true, title: null };
+  if (typeof title !== "string") {
+    return { ok: false, error: "The name must be text." };
+  }
+  // The roster draws one line, so a pasted newline or tab becomes a space here rather than there.
+  const line = oneLine(title, Number.MAX_SAFE_INTEGER);
+  if (!line) return { ok: true, title: null };
+  if (
+    Array.from(new Intl.Segmenter().segment(line)).length >
+    MAX_CHOSEN_TITLE_GRAPHEMES
+  ) {
+    return {
+      ok: false,
+      error: `Keep the name to ${MAX_CHOSEN_TITLE_GRAPHEMES} characters or fewer.`,
+    };
+  }
+  return { ok: true, title: line };
+}
 
 export function parseChannelInput(input: unknown): ChannelInputParseResult {
   if (!isChannelInputObject(input)) {
@@ -1467,6 +1603,22 @@ export function createChannelRoutes(
     }
   });
 
+  routes.put("/:channelId/title", requireUser, async (context) => {
+    const parsed = parseTitleInput(await context.req.json().catch(() => null));
+    if (!parsed.ok) return context.json({ error: parsed.error }, 400);
+
+    try {
+      const summary = await store.rename(
+        context.var.actor,
+        context.req.param("channelId"),
+        parsed.title,
+      );
+      return context.json({ summary });
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
   routes.put("/:channelId/read", requireUser, async (context) => {
     try {
       await store.markRead(context.var.actor, context.req.param("channelId"));
@@ -1547,6 +1699,7 @@ function channelSummaryDto(
     pinned: channel.pinned,
     // Serialised as ISO-8601 like lastMessageAt, so the browser can compare the two as strings.
     lastReadAt: channel.lastReadAt?.toISOString() ?? null,
+    canRename: channel.canRename,
     task: channel.task,
     work: work.map(channelWorkDto),
     /*
@@ -1563,6 +1716,14 @@ function mapStoreError(context: Context, error: unknown): Response {
   }
   if (error instanceof ChannelNotFoundError) {
     return context.json({ error: "Couldn't find that conversation." }, 404);
+  }
+  if (error instanceof ChannelNotOwnerError) {
+    return context.json(
+      {
+        error: "Only the person who started this conversation can rename it.",
+      },
+      403,
+    );
   }
   if (error instanceof ChannelPackageOwnedError) {
     return context.json(

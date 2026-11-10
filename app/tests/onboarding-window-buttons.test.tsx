@@ -9,10 +9,11 @@ import { OnboardingFrame } from "../src/components/onboarding/onboarding-frame";
 /**
  * Onboarding's Back stays clear of the window's buttons in OpenBot Desktop on macOS.
  *
- * The Mac window's close, minimise and zoom buttons sit over the page's top-left corner, in a 28px
- * strip (the overlay title bar). The desktop's window is 1000px wide, so onboarding draws its one
- * column, whose round Back sits at the top left, under those buttons. The desktop marks the page
- * with `data-desktop-titlebar="overlay"` on macOS only, and the header then starts below the strip.
+ * The Mac window's close, minimise and zoom buttons sit over the page's top-left corner, 20pt in
+ * and level with the sidebar header's first row (`TRAFFIC_LIGHTS` in the desktop's main.rs). The
+ * desktop's window is 1000px wide, so onboarding draws its one column, whose round Back sits at the
+ * top left, under those buttons. The desktop marks the page with `data-desktop-titlebar="overlay"`
+ * on macOS only, and the header then starts below them.
  * Windows has its own title bar above the page and no such mark, so it gets no inset.
  *
  * Rendered in a real Chromium, because what matters is where Back lands once the browser has laid
@@ -23,8 +24,8 @@ import { OnboardingFrame } from "../src/components/onboarding/onboarding-frame";
  */
 const asked = process.env.OPENBOT_APP_BROWSER === "1";
 
-/** Where macOS draws the window's buttons over the page: the overlay title bar's strip. */
-const WINDOW_BUTTONS = { left: 0, top: 0, right: 80, bottom: 28 };
+/** Where macOS draws the window's buttons over the page, as measured in OpenBot Desktop on macOS 26. */
+const WINDOW_BUTTONS = { left: 19, top: 25, right: 81, bottom: 41 };
 
 const frame = renderToStaticMarkup(
   <OnboardingFrame
@@ -111,7 +112,7 @@ describe.skipIf(!asked)("onboarding's Back and the window's buttons", () => {
     const page = await open(1000, true);
     try {
       const { back, inset } = await place(page);
-      expect(inset).toBe("28px");
+      expect(inset).toBe("48px");
       expect(back).not.toBeNull();
       expect(back?.y).toBeGreaterThanOrEqual(WINDOW_BUTTONS.bottom);
       expect(overlaps(back as NonNullable<typeof back>, WINDOW_BUTTONS)).toBe(
@@ -134,11 +135,11 @@ describe.skipIf(!asked)("onboarding's Back and the window's buttons", () => {
     }
   });
 
-  test("two columns already start below the window's buttons, so they keep their own space", async () => {
+  test("two columns start below the window's buttons too", async () => {
     const page = await open(1280, true);
     try {
       const { inset } = await place(page);
-      expect(inset).toBe("40px");
+      expect(inset).toBe("48px");
     } finally {
       await page.close();
     }

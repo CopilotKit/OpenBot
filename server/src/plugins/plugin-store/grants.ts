@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { recordAuditEvent } from "../../audit";
 import { mcpTools, pluginGrants, skills } from "../../db/schema";
+import { catalogueEntry, classifyTool } from "../catalogue";
 import type { StoreContext } from "./context";
 import {
   type GrantedPlugins,
@@ -159,6 +160,36 @@ export function grantMethods(context: StoreContext) {
       return refs;
     },
 
+    /**
+     * One row for a change to a Bot's actions on one app saved together, beside the row each grant
+     * and revoke writes for itself: who saved it, what was turned on and off, and, when the set was
+     * chosen from a description, the sentence. See `plugin.grants_changed`.
+     */
+    async recordGrantsChanged(input: {
+      app: string;
+      agentId: string;
+      by: string;
+      actorUserId: string;
+      added: string[];
+      removed: string[];
+      authoring?: { source: "english"; text: string };
+    }): Promise<void> {
+      await recordAuditEvent(auditStore, {
+        eventType: "plugin.grants_changed",
+        targetType: "mcp_server",
+        targetId: input.app,
+        actorUserId: input.actorUserId,
+        payload: {
+          actor: input.by,
+          app: input.app,
+          bot: input.agentId,
+          added: input.added,
+          removed: input.removed,
+          ...(input.authoring ? { authoring: input.authoring } : {}),
+        },
+      });
+    },
+
     async revoke(
       kind: PluginKind,
       ref: string,
@@ -241,6 +272,14 @@ export function grantMethods(context: StoreContext) {
             description: row.description,
             inputSchema: row.inputSchema as Record<string, unknown>,
             destructive: row.destructive,
+            // The same answer `callTool` gates the call on, so a read here is a read there.
+            read:
+              classifyTool(
+                catalogueEntry(row.serverId),
+                row.name,
+                true,
+                row.effect,
+              ) === "read",
           };
         });
 

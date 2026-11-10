@@ -40,20 +40,45 @@ const anthropicListing = await Bun.file(
   `${FIXTURES}/anthropic-models.json`,
 ).json();
 
+/** A Claude plan's own sign-in, which its listing is read with. */
+const CLAUDE_PLAN_OAUTH = "synthetic-claude-plan-oauth-token";
+
 /** The catalogue as the deployment builds it, reading the providers' own listings. */
-function catalogueFor(model: RuntimeModel) {
+function catalogueFor(
+  model: RuntimeModel,
+  environment: Record<string, string | undefined> = {},
+) {
   return createModelCatalogue({
     model,
     apiKey: async () => "synthetic-key",
-    environment: {},
+    environment,
     fetch: ((url: string | URL | Request, init?: RequestInit) => {
       const at = String(url);
       if (at === "https://models.dev/api.json")
         return Promise.resolve(Response.json(modelsDev));
       if (at.startsWith("https://api.openai.com/"))
         return Promise.resolve(Response.json(openAIListing));
-      if (at.startsWith("https://api.anthropic.com/"))
-        return Promise.resolve(Response.json(anthropicListing));
+      if (at.startsWith("https://api.anthropic.com/")) {
+        // Anthropic takes a key or a plan's OAuth token, never OpenBot's harness token.
+        const headers = (init?.headers ?? {}) as Record<string, string>;
+        const accepted =
+          headers["x-api-key"] === "synthetic-key" ||
+          headers.authorization === `Bearer ${CLAUDE_PLAN_OAUTH}`;
+        return Promise.resolve(
+          accepted
+            ? Response.json(anthropicListing)
+            : Response.json(
+                {
+                  type: "error",
+                  error: {
+                    type: "authentication_error",
+                    message: "Invalid bearer token",
+                  },
+                },
+                { status: 401 },
+              ),
+        );
+      }
       // A ChatGPT plan's listing, from its harness.
       return fetch(url, init);
     }) as typeof fetch,
@@ -315,7 +340,12 @@ describe("a Bot on OpenBot's own harness, on a plan", () => {
             token: "managed-token",
           },
         };
-        const catalogue = catalogueFor(model);
+        const catalogue = catalogueFor(
+          model,
+          plan === "claude"
+            ? { CLAUDE_CODE_OAUTH_TOKEN: CLAUDE_PLAN_OAUTH }
+            : {},
+        );
         expect(await chipLabel(catalogue)).toBe(first);
 
         await builtInBot(model, catalogue);

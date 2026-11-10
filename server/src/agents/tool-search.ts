@@ -160,10 +160,9 @@ function staysInFront(tool: GrantedTool): boolean {
  * and OpenAI refused all 135 ("array too long ... maximum length 128"), so it could not answer
  * anything. With a 64-action app on, it was 202.
  *
- * What a Bot needs on every step comes first, then what the run's chosen skills asked for, then an
- * app's tools ranked by the words of the person's request (`rankTools`), then the rest in the order
- * they were held. The same tools in the same order always give the same answer. Returned in the
- * order they were given.
+ * What a Bot needs on every step comes first, then what the run's chosen skills asked for, then the
+ * apps' tools in {@link appToolsInOrder}'s order. The same tools in the same order always give the
+ * same answer. Returned in the order they were given.
  */
 export function fitToolLimit(
   tools: readonly GrantedTool[],
@@ -194,8 +193,149 @@ export function fitToolLimit(
   const core = tools.filter(staysInFront);
   keep(core.length > limit ? ranked(core) : core);
   keep(tools.filter((tool) => !kept.has(tool) && pinned.has(tool.name)));
-  keep(ranked(tools.filter((tool) => !kept.has(tool))));
+  keep(
+    appToolsInOrder(
+      options.text,
+      tools.filter((tool) => !kept.has(tool)),
+    ),
+  );
   return tools.filter((tool) => kept.has(tool));
+}
+
+/**
+ * The order an app's tools are kept in when only some of them fit: the person's request first, and
+ * an app's reads before its writes, one app at a time.
+ *
+ * FOUND IN 1.0.0. The personal starter Bot, on an endpoint, held all 63 of Gmail's actions and was
+ * sent eleven: DELETE_MESSAGE, GET_PROFILE, LIST_LABELS, three SEND_AS settings, SEND_DRAFT,
+ * SEND_EMAIL and the POP settings. Nothing that reads a message. Asked to find some emails and read
+ * them, it told the person its Gmail could only send, and that an administrator had to add a tool to
+ * read mail. The cut ranked every app tool by word overlap with the latest message alone: "send",
+ * "email", "settings" matched the writes and the settings best, the reads that fetch a message
+ * scored lower, and where a large app was on as well (HubSpot lists 344 actions, many of them about
+ * email), it took most of the room.
+ *
+ * So the cut now follows the rule a Bot's apps already run on: reads by default, more on request.
+ * - ONE APP AT A TIME. Each app takes a turn, the apps the person names first and then the app that
+ *   matches the request best, so a large app cannot crowd a small one out.
+ * - WHAT THE PERSON ASKED TO DO FIRST. A tool whose verb is a word the person said ("send",
+ *   "reply", "delete") leads its app. The word itself, not one an everyday word stands for: "find"
+ *   stands for list and get, and taken as the verb it put LIST_LABELS and GET_PROFILE ahead of the
+ *   action that fetches a message.
+ * - THEN READS AND WRITES IN TURN. Among the rest of what matches, the best read, then the best
+ *   write, and so on, so whatever the room an app keeps its best ways to look as well as to act.
+ * - "BEST" IS WHAT THE TOOL ACTS ON FIRST. A tool's name says what it acts on after its verb
+ *   (FETCH_EMAILS, LIST_THREADS), and a tool acting on what the person named (emails, or the
+ *   messages and threads an everyday "email" or "inbox" stands for) comes before one that only
+ *   mentions it. Overlap with the whole description decides the rest: inside one app the app's own
+ *   noun is in every description, so on its own it ranked LIST_LABELS above FETCH_EMAILS.
+ * - THEN WHAT DID NOT MATCH, READS FIRST. A follow-up such as "yes, go ahead" matches nothing, and
+ *   what it is offered is the apps' reads before their writes.
+ *
+ * Writes still ask before they run (`callTool`); this decides what is offered, never what is allowed.
+ */
+export function appToolsInOrder(
+  text: string,
+  candidates: readonly GrantedTool[],
+): GrantedTool[] {
+  if (candidates.length === 0) return [];
+  const said = new Set(askedWords(text));
+  // What was said counts in full; the everyday words it stands for count half.
+  const weight = new Map<string, number>();
+  for (const word of said)
+    for (const meant of EVERYDAY[word] ?? [])
+      if (!said.has(meant)) weight.set(meant, 0.5);
+  for (const word of said) weight.set(word, 1);
+  const score = new Map(
+    scoreIndexed(text, candidates.map(indexed)).map((match) => [
+      match.tool,
+      match.score,
+    ]),
+  );
+  const scoreOf = (tool: GrantedTool) => score.get(tool) ?? 0;
+  const actsOn = new Map(
+    candidates.map((tool) => [
+      tool,
+      nameOf(tool).object.reduce(
+        (sum, word) => sum + (weight.get(word) ?? 0),
+        0,
+      ),
+    ]),
+  );
+  const best = (list: readonly GrantedTool[]) =>
+    [...list].sort(
+      (a, b) =>
+        (actsOn.get(b) ?? 0) - (actsOn.get(a) ?? 0) || scoreOf(b) - scoreOf(a),
+    );
+
+  const byApp = new Map<string, GrantedTool[]>();
+  for (const tool of candidates) {
+    const app = systemOf(tool.name);
+    byApp.set(app, [...(byApp.get(app) ?? []), tool]);
+  }
+  const apps = [...byApp].map(([app, held], position) => {
+    const matched = held.filter((tool) => scoreOf(tool) > 0);
+    const asked = best(
+      matched.filter((tool) => said.has(nameOf(tool).verb ?? "")),
+    );
+    const rest = matched.filter((tool) => !asked.includes(tool));
+    return {
+      position,
+      named: words(app).some((word) => said.has(word)),
+      top: Math.max(0, ...matched.map(scoreOf)),
+      front: [
+        ...asked,
+        ...inTurn([
+          best(rest.filter((tool) => tool.reads)),
+          best(rest.filter((tool) => !tool.reads)),
+        ]),
+      ],
+      back: [
+        ...held.filter((tool) => scoreOf(tool) === 0 && tool.reads),
+        ...held.filter((tool) => scoreOf(tool) === 0 && !tool.reads),
+      ],
+    };
+  });
+  apps.sort(
+    (a, b) =>
+      Number(b.named) - Number(a.named) ||
+      b.top - a.top ||
+      a.position - b.position,
+  );
+  return [
+    ...inTurn(apps.filter((app) => app.named).map((app) => app.front)),
+    ...inTurn(apps.filter((app) => !app.named).map((app) => app.front)),
+    ...inTurn(
+      [...apps].sort((a, b) => a.position - b.position).map((app) => app.back),
+    ),
+  ];
+}
+
+/**
+ * What a tool's name says it does, and to what: `send` and `email` for
+ * `mcp__composio-gmail__GMAIL_SEND_EMAIL`. The verb is the first word of the name that is not the
+ * app's own, which a Composio action leads with; what it acts on is the rest.
+ */
+function nameOf(tool: GrantedTool): { verb?: string; object: string[] } {
+  const app = words(systemOf(tool.name));
+  const action = words(tool.name.split("__").at(-1) ?? tool.name);
+  const start = action.findIndex(
+    (word) => !app.some((part) => part.startsWith(word)),
+  );
+  if (start < 0) return { object: [] };
+  return { verb: action[start], object: action.slice(start + 1) };
+}
+
+/** The first of each list, then the second of each, until all are spent. */
+function inTurn<T>(lists: readonly (readonly T[])[]): T[] {
+  const out: T[] = [];
+  const longest = Math.max(0, ...lists.map((list) => list.length));
+  for (let index = 0; index < longest; index += 1)
+    for (const list of lists) {
+      const item = list[index];
+      if (item !== undefined) out.push(item);
+    }
+  return out;
 }
 
 /** Words a query carries that say nothing about which tool. */
@@ -251,7 +391,21 @@ const EVERYDAY: Record<string, readonly string[]> = {
   text: ["message", "sms"],
   customer: ["contact", "client"],
   people: ["contact", "user"],
+  // FOUND IN 1.0.0, on Slack: "what did Sam say in #design" found Sam's user settings and not the
+  // channel's messages, and "find my DM with Sam" needed the conversation the DM is.
+  say: ["message", "conversation"],
+  said: ["message", "conversation"],
+  wrote: ["message"],
+  dm: ["conversation", "message"],
 };
+
+/**
+ * The words of what a person asked. `#design` is a channel named design, as Slack, Teams and
+ * Discord all spell one, so the `#` reads as the word channel.
+ */
+function askedWords(text: string): string[] {
+  return words(text.replace(/(^|\s)#(?=[a-z0-9])/gi, "$1channel "));
+}
 
 /** Lower-cased words of a name, a description or a query, with plurals folded into the singular. */
 function words(text: string): string[] {
@@ -318,8 +472,21 @@ function rankIndexed(
   index: readonly Indexed[],
   limit: number,
 ): GrantedTool[] {
-  const said = [...new Set(words(query))];
-  if (said.length === 0) return [];
+  return scoreIndexed(query, index)
+    .filter((match) => match.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((match) => match.tool);
+}
+
+/** How well each tool matches a query, in the order given; zero where nothing matches. */
+function scoreIndexed(
+  query: string,
+  index: readonly Indexed[],
+): { tool: GrantedTool; score: number }[] {
+  const said = [...new Set(askedWords(query))];
+  if (said.length === 0)
+    return index.map((entry) => ({ tool: entry.tool, score: 0 }));
   // What was said counts in full; the everyday words it stands for count half.
   const weight = new Map<string, number>(said.map((word) => [word, 1]));
   for (const word of said)
@@ -334,22 +501,17 @@ function rankIndexed(
       return [word, Math.log(1 + index.length / (1 + holding))];
     }),
   );
-  return index
-    .map((entry) => ({
-      tool: entry.tool,
-      score: asked.reduce(
-        (sum, word) =>
-          sum +
-          (rarity.get(word) ?? 0) *
-            (weight.get(word) ?? 0) *
-            ((entry.name.has(word) ? 3 : 0) + (entry.rest.has(word) ? 1 : 0)),
-        0,
-      ),
-    }))
-    .filter((match) => match.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
-    .map((match) => match.tool);
+  return index.map((entry) => ({
+    tool: entry.tool,
+    score: asked.reduce(
+      (sum, word) =>
+        sum +
+        (rarity.get(word) ?? 0) *
+          (weight.get(word) ?? 0) *
+          ((entry.name.has(word) ? 3 : 0) + (entry.rest.has(word) ? 1 : 0)),
+      0,
+    ),
+  }));
 }
 
 /** The system a tool belongs to: `shopify` for `mcp__shopify__LIST_ORDERS`. `grantedToolGuidance` reads it too. */

@@ -33,6 +33,14 @@ export type GrantedTool = {
    */
   searchable?: true;
   /**
+   * The app's action only reads: classified a read by the same rule a call is gated with
+   * (`classifyTool`). Absent is a write, or an action nobody classified.
+   *
+   * Read when a run can be sent only some of an app's actions (`fitToolLimit`), so the ones that
+   * read come first and the Bot can always look before it is offered what changes things.
+   */
+  reads?: true;
+  /**
    * `<serverId>/<toolName>`, carried alongside the name the model is offered.
    *
    * The two spellings exist because a model tool name may not contain a slash, and selection has to

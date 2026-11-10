@@ -107,7 +107,7 @@ export function directoryDescriptions(edition: Edition = "team"): {
 } {
   return edition === "personal"
     ? {
-        page: "Add an app to give your Bots its tools. Then connect your account on its page so they can use it.",
+        page: "Add an app and connect your account so your Bots can use it.",
         search: "Search by name. OpenBot hasn't reviewed these apps.",
       }
     : {

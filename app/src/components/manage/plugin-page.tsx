@@ -20,6 +20,7 @@ import { AccessRequestsSection } from "@/components/plugins/access-requests";
 import { AccountModeDialog } from "@/components/plugins/account-mode-dialog";
 import {
   BrokeredAccountRow,
+  NotConnected,
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
 import { SkippedToolsNotice } from "@/components/plugins/skipped-tools-notice";
@@ -241,7 +242,14 @@ function ConnectionStateUnreadable() {
   );
 }
 
-export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
+export function PluginPage({
+  pluginKey: key,
+  startConnect = false,
+}: {
+  pluginKey: string;
+  /** Open the key form on arrival, for an app Browse apps just added that takes a key. */
+  startConnect?: boolean;
+}) {
   const paths = useManagePaths();
   // One person: adding and connecting are one step, and nothing here is about other people.
   const personal =
@@ -1115,6 +1123,7 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                        that finishes the connector. */
                     disconnectedReassurance={personal ? undefined : reassurance}
                     provider={provider}
+                    startConnect={startConnect}
                     title={title}
                   />
                 )}
@@ -1154,20 +1163,23 @@ export function PluginPage({ pluginKey: key }: { pluginKey: string }) {
                           </span>
                         </>
                       ) : (
-                        /* The arrow says this leaves OpenBot for the vendor's consent page. It does. */
-                        <Button
-                          disabled={connectSelf.isPending}
-                          onClick={() => {
-                            setError(null);
-                            connectSelf.mutate(key);
-                          }}
-                          size="sm"
-                          type="button"
-                          variant="outline"
-                        >
-                          Connect
-                          <IconArrowUpRight />
-                        </Button>
+                        <>
+                          <NotConnected />
+                          {/* The arrow says this leaves OpenBot for the vendor's consent page. It does. */}
+                          <Button
+                            disabled={connectSelf.isPending}
+                            onClick={() => {
+                              setError(null);
+                              connectSelf.mutate(key);
+                            }}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            Connect
+                            <IconArrowUpRight />
+                          </Button>
+                        </>
                       )}
                     </ItemActions>
                   </Item>

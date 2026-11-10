@@ -142,7 +142,10 @@ pub fn begin(
     cli_sha256: &str,
 ) -> Result<State, Problem> {
     if !digest_valid(cli_sha256) {
-        return Err(Problem::plain("OpenBot refused an invalid CLI digest."));
+        return Err(Problem::with(
+            "Part of OpenBot didn't pass its download check. Repair the installation.",
+            "OpenBot refused an invalid CLI digest",
+        ));
     }
     let record = Record {
         version: 1,
@@ -177,7 +180,13 @@ pub fn advance(root: &Path, cli_sha256: &str, to: Phase) -> Result<State, Proble
 pub fn mark_connected(root: &Path, stack: &StackId) -> Result<State, Problem> {
     let mut record = load(root)
         .filter(|record| record.stack == stack.as_str())
-        .ok_or_else(|| Problem::plain("OpenBot has no record of that back end."))?;
+        .ok_or_else(|| {
+            Problem::with(
+                "OpenBot has no record of its services on this computer. Start OpenBot to set \
+                 them up again.",
+                "OpenBot has no record of that back end",
+            )
+        })?;
     record.connected = true;
     write(root, &record)?;
     Ok(read(root, None).expect("the record just written reads back"))
