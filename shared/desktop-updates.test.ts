@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { Glob } from "bun";
-import { DOESNT_UPDATE_ITSELF } from "./desktop-updates";
+import { DOESNT_UPDATE_ITSELF, updateOffered } from "./desktop-updates";
 
 const ROOT = join(import.meta.dir, "..");
 
@@ -29,4 +29,22 @@ test("the setup window and Settings say it only through the shared sentence", as
     }
   }
   expect(spelled).toEqual([]);
+});
+
+test("a newer version says how ready it is, in one plain sentence", () => {
+  expect(updateOffered("1.0.1")).toBe("OpenBot 1.0.1 is available.");
+  expect(updateOffered("1.0.1", null)).toBe("OpenBot 1.0.1 is available.");
+  expect(
+    updateOffered("1.0.1", { state: "preparing", done: 40, total: 100 }),
+  ).toBe("OpenBot 1.0.1 is downloading in the background (40%).");
+  // Never 100% until every byte is in and the app says it is ready.
+  expect(
+    updateOffered("1.0.1", { state: "preparing", done: 999, total: 1000 }),
+  ).toContain("(99%)");
+  expect(
+    updateOffered("1.0.1", { state: "preparing", done: 0, total: 0 }),
+  ).toContain("(0%)");
+  expect(updateOffered("1.0.1", { state: "ready" })).toBe(
+    "OpenBot 1.0.1 is ready to install. It takes a few minutes.",
+  );
 });

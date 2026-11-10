@@ -29,6 +29,13 @@ ENV BUN_INSTALL=/usr/local
 ENV PATH="/usr/local/bin:${PATH}"
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# Ubuntu's primary mirror can serve a package index that disagrees with its own release file for
+# hours ("File has unexpected size ... Mirror sync in progress?"), and then every build here fails.
+# The Azure mirror is public and kept in step, so apt reads from it unless UBUNTU_MIRROR says
+# otherwise (arm64 reads ports.ubuntu.com, which this leaves alone). Retries cover a dropped download.
+ARG UBUNTU_MIRROR=http://azure.archive.ubuntu.com/ubuntu
+RUN sed -i "s#http://archive.ubuntu.com/ubuntu/\?#${UBUNTU_MIRROR}/#; s#http://security.ubuntu.com/ubuntu/\?#${UBUNTU_MIRROR}/#" /etc/apt/sources.list.d/ubuntu.sources \
+  && printf 'Acquire::Retries "5";\n' > /etc/apt/apt.conf.d/80-retries
 COPY --from=node-toolchain /usr/local /usr/local
 COPY --from=bun-toolchain /usr/local/bin/bun /usr/local/bin/bun
 # `--no-shell` and the bunx cache: see agent-computer/Dockerfile, which installs the same browser.
