@@ -180,7 +180,6 @@ main {
   padding: clamp(32px, 12vh, 96px) 24px 32px;
 }
 
-
 /* The one focal surface per screen: a white card on the frame, as OpenBot draws its panels. */
 .sheet {
   width: 100%;
