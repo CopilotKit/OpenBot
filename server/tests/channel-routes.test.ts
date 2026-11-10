@@ -78,6 +78,7 @@ function fakeStore(
     signalBusy: unexpected,
     signalChannelBusy: unexpected,
     signalWork: unexpected,
+    rename: unexpected,
     async create(receivedActor, agentIds) {
       calls.push(["create", receivedActor, agentIds]);
       return channel({ agentIds });
