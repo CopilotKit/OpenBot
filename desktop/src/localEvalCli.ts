@@ -298,16 +298,38 @@ export async function localEvalDownload(
     : null;
 }
 
+/** The CLI's steps a running setup, start or update has finished, by name, and for how long since. */
+export type LocalSteps = { ended: string[]; quietSeconds: number };
+
+/** A CLI step name, and nothing that could carry more. */
+function stepName(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z][a-z0-9-]{0,63}$/.test(value);
+}
+
+/**
+ * The steps the running call `attempt` has finished, while it runs (`local_eval_steps`), or null.
+ * Only step names: the window turns them into plain words (`journey.ts`).
+ */
+export async function localEvalSteps(
+  attempt: string,
+): Promise<LocalSteps | null> {
+  const found = await invoke<unknown>("local_eval_steps", { attempt });
+  if (!found || typeof found !== "object") return null;
+  const { ended, quietSeconds } = found as Record<string, unknown>;
+  if (!Array.isArray(ended) || typeof quietSeconds !== "number") return null;
+  return { ended: ended.filter(stepName), quietSeconds };
+}
+
 /**
  * The steps of a back end update that wait long enough to need saying, as the native side names
  * them (`local_update::UpdateStep`), in the CLI's own words for them.
  */
 const UPDATE_STEPS = {
-  "update-quiesce": "Stopping the back end's services",
-  "dependencies-install": "Installing databases and storage",
-  "dependencies-wait": "Waiting for databases and storage",
-  jobs: "Running the database jobs",
-  "services-start": "Starting services and waiting for readiness",
+  "update-quiesce": "Pausing OpenBot's services",
+  "dependencies-install": "Updating where OpenBot keeps your data",
+  "dependencies-wait": "Waiting for where OpenBot keeps your data",
+  jobs: "Updating your data",
+  "services-start": "Starting OpenBot's services",
 } as const;
 
 export type LocalUpdateStep = {
@@ -356,31 +378,35 @@ export async function localEvalUpdateStep(
 }
 
 /**
- * The CLI's step names (`failedStep`) as the phases its own progress shows them, so the window can
- * say where an update stopped (`localSetupStepLabel` in the CLI's `local-setup-progress.ts`).
+ * The CLI's step names (`failedStep`) in plain words, for "It stopped while …": what the step was
+ * doing for the person, from the phases its own progress shows (`localSetupStepLabel` in the CLI's
+ * `local-setup-progress.ts`). The step's own name is in the log.
  */
 export function updateStepSaid(step: string): string {
-  if (/^(docker|engine|resource)-/.test(step))
-    return "Checking Docker and available resources";
-  if (step.startsWith("release-")) return "Selecting the local release";
-  if (step === "chart-download") return "Downloading the installation chart";
-  if (step === "chart-render") return "Preparing the installation";
+  if (/^(docker|engine|resource|runtime)-/.test(step))
+    return "checking this computer";
+  if (step.startsWith("release-")) return "choosing the version to install";
+  if (
+    /^(chart-download|image-download|system-image-download|system-image-tag)$/.test(
+      step,
+    )
+  )
+    return "downloading the update";
+  if (step === "chart-render") return "preparing the update";
   if (/^(cluster-|kubeconfig|ownership-check|running-check)/.test(step))
-    return "Preparing the local cluster";
-  if (step.startsWith("runtime-")) return "Checking the local runtime identity";
-  if (/^(image-download|system-image-download|system-image-tag)$/.test(step))
-    return "Downloading container images";
-  if (step === "secrets-apply") return "Applying private configuration";
-  if (step.startsWith("update-")) return UPDATE_STEPS["update-quiesce"];
+    return "preparing this computer";
+  if (step === "secrets-apply") return "applying your settings";
+  if (step.startsWith("update-")) return "pausing OpenBot's services";
   if (step === "dependencies-install")
-    return UPDATE_STEPS["dependencies-install"];
-  if (step === "dependencies-wait") return UPDATE_STEPS["dependencies-wait"];
-  if (step.startsWith("migration-")) return "Preparing the database schema";
+    return "updating where OpenBot keeps your data";
+  if (step === "dependencies-wait")
+    return "waiting for where OpenBot keeps your data";
+  if (step.startsWith("migration-")) return "updating your data";
   if (/^(hook-|bootstrap-)/.test(step))
-    return "Preparing your local organization and project";
+    return "preparing your organization and project";
   if (/^(services-|stack-|service-status)/.test(step))
-    return "Starting services and waiting for readiness";
-  return "Preparing the update";
+    return "starting OpenBot's services";
+  return "updating";
 }
 
 /**
@@ -600,7 +626,7 @@ export function splitStopFailure(thrown: unknown): {
 
 export function intelligenceStopProblem(line: string): Problem {
   return {
-    said: "OpenBot stopped, but could not stop its back end.",
+    said: "OpenBot stopped, but some of its services didn't. They may still be running.",
     detail: line,
   };
 }

@@ -1,23 +1,22 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
-import { StatusLine } from "./SetupProgress";
 
-/** What happens next and why, said before macOS asks for the person's password. */
-export const PODMAN_EXPLAINED =
-  "OpenBot installs Podman, which runs OpenBot's back end on this computer. macOS asks for your password once to install it.";
+/** The heading over a password prompt the person closed. */
+export const PASSWORD_AGAIN = "Your password is needed";
 
 /**
- * Continue, under the explanation: Install raises macOS's password prompt (`install::GoAhead`).
+ * After the person closed the system's password prompt without a password: what that means, and
+ * Try again, which asks at once. Install also asks again by itself after a short wait
+ * (`install::ASK_AGAIN_AFTER`), so nobody has to find the button.
  *
- * The prompt used to come up by itself, over the Account step, before the person knew what Podman
- * was. Apple's guidance for a screen shown before a system prompt is one button, titled to say it
- * goes on to the prompt ("Continue", never "Allow"), and no way past it but the prompt. Install
- * waits for nothing else, so there is nothing else to offer here.
+ * Never a gate before the prompt. #1385 put Continue there, and the product's call for 1.0.1 was
+ * that an install step informs the person and moves forward: the step says "Your Mac will ask for
+ * your password so OpenBot can install what it needs to run.", leaves it a moment to be read, and
+ * the prompt comes up by itself. This card is only for a prompt that was closed.
  *
- * Give it `key={asking}`: asked again after the prompt was closed without a password, Continue
- * works again.
+ * Give it `key={asking}`: asked again after the prompt was closed again, Try again works again.
  */
-export function ContinueToPodman() {
+export function TryPasswordAgain() {
   const [sent, setSent] = useState(false);
   return (
     <div className="row">
@@ -35,32 +34,27 @@ export function ContinueToPodman() {
           );
         }}
       >
-        Continue
+        Try again
       </button>
     </div>
   );
 }
 
 /**
- * Before macOS asks for a password to install Podman, on a screen about something else (Install,
- * Start): the card a step that waits on the person gets (`.local-alert.needs`), saying what happens
- * next and why, Install's own line about it unless `quiet`, and Continue.
+ * The closed prompt's card, on whichever screen the person is on: Install's own line about it
+ * (`install::podman_declined`), and Try again.
  */
 export function PodmanGoAhead({
   asking,
-  quiet = false,
 }: {
-  /** Install's line while it waits (`goAheadNow`). */
+  /** Install's line while it waits to ask again (`goAheadNow`). */
   asking: string;
-  /** Install's line is said already, in its row on this screen. */
-  quiet?: boolean;
 }) {
   return (
-    <section className="local-alert needs" aria-label="Install Podman">
-      <h2>Install Podman</h2>
-      <p>{PODMAN_EXPLAINED}</p>
-      {!quiet && <StatusLine working={false}>{asking}</StatusLine>}
-      <ContinueToPodman key={asking} />
+    <section className="local-alert needs" aria-label={PASSWORD_AGAIN}>
+      <h2>{PASSWORD_AGAIN}</h2>
+      <p>{asking}</p>
+      <TryPasswordAgain key={asking} />
     </section>
   );
 }

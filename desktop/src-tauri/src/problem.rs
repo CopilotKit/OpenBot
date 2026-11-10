@@ -176,8 +176,8 @@ pub fn said_about(output: &str) -> String {
         || lower.contains("is the docker daemon running")
         || lower.contains("connection refused")
     {
-        return "OpenBot cannot reach the container engine. Start Docker or Podman, wait for it to \
-                finish starting, and try again."
+        return "OpenBot can't reach the software it runs on. If you use Docker Desktop, open it and \
+                wait for it to start. Then try again."
             .into();
     }
     if lower.contains("timeout") || lower.contains("timed out") {
@@ -229,7 +229,10 @@ mod tests {
         }
         // The engine itself not answering still says so.
         let said = said_about("dial unix /var/run/docker.sock: connect: connection refused");
-        assert!(said.contains("Start Docker or Podman"), "{said}");
+        assert!(
+            said.contains("can't reach the software it runs on"),
+            "{said}"
+        );
     }
 
     #[test]
@@ -242,7 +245,10 @@ mod tests {
     fn an_engine_that_is_not_running_says_to_start_it() {
         let said =
             said_about("Cannot connect to the Docker daemon at unix:///var/run/docker.sock.");
-        assert!(said.contains("Start Docker or Podman"), "{said}");
+        assert!(
+            said.contains("can't reach the software it runs on"),
+            "{said}"
+        );
     }
 
     /// Unrecognised output keeps a general sentence. Guessing at somebody's machine is worse than
