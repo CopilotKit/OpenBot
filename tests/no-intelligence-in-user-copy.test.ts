@@ -192,13 +192,15 @@ test("no text a person reads in the desktop app, the app, the server or the Reco
 });
 
 /**
- * "Backend" is one word in what a person reads. The one two-word "back end" left is the Recorder
- * matching a message OpenBot does not write.
+ * "Backend" is one word in what a person reads, never "back end" or "Back-end". The one two-word
+ * "back end" left is the Recorder matching a message OpenBot does not write. The bare "back-end" is
+ * the id of a group of containers (partNames.ts), never shown.
  */
 test("no text a person reads says back end in two words", () => {
   expect(
-    shown(/\b[Bb]ack(?:\s|\\\n)+ends?\b/).filter(
+    shown(/\b[Bb]ack(?:[\s-]|\\\n)+ends?\b/).filter(
       (hit) =>
+        !/\s{2}back-end$/.test(hit) &&
         !(
           hit.startsWith("extension/src/offscreen/grant.ts:") &&
           hit.includes("Could not connect to OpenBot's back end")

@@ -37,7 +37,7 @@ const BACK_END: [RegExp, string][] = [
 /** A container OpenBot runs that the table doesn't know yet still says which side it's on. */
 const UNKNOWN: Record<PartGroup, string> = {
   bots: "OpenBot service",
-  "back-end": "Back-end service",
+  "back-end": "Backend service",
 };
 
 export function partLabel(name: string, group: PartGroup): string {

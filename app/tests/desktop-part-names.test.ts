@@ -31,7 +31,7 @@ const NAMES: [string, "bots" | "back-end", string][] = [
 /** Containers the table doesn't know: each still says which side of OpenBot it's on. */
 const UNKNOWN: [string, "bots" | "back-end", string][] = [
   ["something-new-1", "bots", "OpenBot service"],
-  ["k3d-local-abc123-serverlb", "back-end", "Back-end service"],
+  ["k3d-local-abc123-serverlb", "back-end", "Backend service"],
 ];
 
 test.each([...NAMES, ...UNKNOWN])(

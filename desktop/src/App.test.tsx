@@ -3734,7 +3734,7 @@ test("Stop that fails for OpenBot itself keeps OpenBot running", async () => {
   invokeHandler = async (command, args) => {
     if (command === "last_failure") return null;
     if (command === "stop_stack")
-      throw "Compose down failed: busy\nBack end stop failed: the CLI timed out";
+      throw "Compose down failed: busy\nBackend stop failed: the CLI timed out";
     return previous(command, args);
   };
   const view = await renderApp();
