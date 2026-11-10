@@ -30,6 +30,15 @@ import {
   askPersonReplayStart,
   askPersonStored,
 } from "./ask-person-replay.fixture";
+import {
+  ANSWER_TEXT,
+  ANSWERED_EARLY,
+  answerOf,
+  LOOKUPS,
+  lookupsReplayEnd,
+  lookupsReplayStart,
+  lookupsStored,
+} from "./parallel-lookups.fixture";
 
 /*
  * Opening a conversation joins its thread, and the join replays the thread onto the screen. A Bot's
@@ -473,3 +482,52 @@ test("a reply is shown once and whole after leaving its conversation and coming 
   expect(shown(view.container, ASKING_TEXT)).toBe(1);
   expect(shown(view.container, ASKED_TEXT)).toBe(1);
 }, 20_000);
+
+test("the answers a step was still waiting on reach a conversation opened part way through it", async () => {
+  // 20 lookups sent in one step, 11 answered and 9 still running. The gateway replays that later
+  // than the join's deadline, as a busy one does, then carries the 9 answers and the Bot's reply
+  // live, and says the thread is idle once the turn is over.
+  const start = lookupsReplayStart(channel.threadId);
+  const end = lookupsReplayEnd(channel.threadId);
+  script = async (send) => {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    sending(send, start);
+    send("replay_complete", { latestEventId: `event-${start.length - 1}` });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    sending(send, end, start.length);
+    send("stream_idle", {
+      latestEventId: `event-${start.length + end.length - 1}`,
+    });
+  };
+  // The store, read on opening, holds the answers that were in by then.
+  history = () =>
+    NativeResponse.json({ messages: lookupsStored("asked", ANSWERED_EARLY) });
+  // And the roster says the Bot is working in this conversation.
+  roster("2026-11-08T00:00:01.000Z", "Planning the cycle");
+  queryClient.setQueryData<ChannelCache>(channelKeys.list(), (cache) =>
+    cache
+      ? {
+          ...cache,
+          pages: cache.pages.map((page) => ({
+            ...page,
+            channels: page.channels.map((row) => ({ ...row, busy: true })),
+          })),
+        }
+      : cache,
+  );
+
+  const view = opened();
+  await view.findByText(ANSWER_TEXT, undefined, { timeout: 6000 });
+  // Every lookup has its own answer in the conversation, none of them made up.
+  const answers = new Map(
+    (core?.getAgent(`channel:${channel.id}`)?.messages ?? []).flatMap(
+      (message) =>
+        message.role === "tool"
+          ? [[message.toolCallId, String(message.content)] as const]
+          : [],
+    ),
+  );
+  expect(LOOKUPS.map((lookup) => answers.get(lookup.id))).toEqual(
+    LOOKUPS.map((_, index) => answerOf(index)),
+  );
+}, 15_000);

@@ -308,6 +308,14 @@ export const channels = pgTable(
     /** When the summary above was written, so a later change can decide whether to redo it. */
     summaryAt: timestamp("summary_at", { withTimezone: true }),
     /**
+     * The name the person who started the conversation gave it, or null for none.
+     *
+     * Its own column, not written over `summary`: a chosen name wins wherever the conversation is
+     * named, and clearing it brings back the summary as it was. The naming sweep never writes here
+     * and passes over a conversation that has one, so a later summary cannot replace it.
+     */
+    title: text("title"),
+    /**
      * The first thing a person said here, as one plain line: what the conversation is called until
      * `summary` names it.
      *

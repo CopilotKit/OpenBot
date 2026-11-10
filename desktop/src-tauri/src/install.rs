@@ -74,38 +74,37 @@ pub struct Download {
 /// The Intel Mac case is real and not hypothetical: Podman 6.1.1 publishes `arm64` only. Answering
 /// with the arm64 package there would install something that cannot run, so it says so instead.
 pub fn podman_download() -> Result<Download, Problem> {
-    let (file, sha256) = match (std::env::consts::OS, crate::windows::machine_arch()) {
-        ("windows", "x86_64") => (
-            "podman-installer-windows-amd64.msi",
-            "91d0e8ea0846c0151d531c88c329bb2729387231e4d1e42306a8e3ae9d09fc8a",
-        ),
-        ("windows", "aarch64") => (
-            "podman-installer-windows-arm64.msi",
-            "8ededac563c3b96abe55560f3379962ff59fd8bda1a185ed221891cb6ccf5cba",
-        ),
-        ("macos", "aarch64") => (
-            "podman-installer-macos-arm64.pkg",
-            "9c7b90b406681e5458d69cdb1164a589f7c9b214cab1ca6705fe375876491c09",
-        ),
-        ("macos", _) => {
-            return Err(Problem::with(
-                "OpenBot cannot install the container engine on an Intel Mac. Install Podman \
-                 Desktop or Docker Desktop, then start OpenBot again.",
+    let (file, sha256) =
+        match (std::env::consts::OS, crate::windows::machine_arch()) {
+            ("windows", "x86_64") => (
+                "podman-installer-windows-amd64.msi",
+                "91d0e8ea0846c0151d531c88c329bb2729387231e4d1e42306a8e3ae9d09fc8a",
+            ),
+            ("windows", "aarch64") => (
+                "podman-installer-windows-arm64.msi",
+                "8ededac563c3b96abe55560f3379962ff59fd8bda1a185ed221891cb6ccf5cba",
+            ),
+            ("macos", "aarch64") => (
+                "podman-installer-macos-arm64.pkg",
+                "9c7b90b406681e5458d69cdb1164a589f7c9b214cab1ca6705fe375876491c09",
+            ),
+            ("macos", _) => return Err(Problem::with(
+                "OpenBot can't install the software it runs on on an Intel Mac. Install Docker \
+                 Desktop or Podman Desktop, then start OpenBot again.",
                 format!("Podman {PODMAN} publishes an arm64 package only"),
-            ))
-        }
-        ("linux", _) => {
-            return Err(Problem::plain(
-                "On Linux the engine comes from the distribution's own packages.",
-            ))
-        }
-        (os, arch) => {
-            return Err(Problem::with(
-                "OpenBot cannot install the container engine on this kind of computer.",
-                format!("no Podman installer for {os} on {arch}"),
-            ))
-        }
-    };
+            )),
+            ("linux", _) => return Err(Problem::with(
+                "On Linux, the software OpenBot runs on comes from your system's own packages. \
+                 Install the podman package, then start OpenBot again.",
+                "on Linux the engine comes from the distribution's own packages",
+            )),
+            (os, arch) => {
+                return Err(Problem::with(
+                    "OpenBot can't install the software it runs on on this kind of computer.",
+                    format!("no Podman installer for {os} on {arch}"),
+                ))
+            }
+        };
     Ok(Download {
         url: format!(
             "https://github.com/podman-container-tools/podman/releases/download/v{PODMAN}/{file}"
@@ -147,8 +146,7 @@ pub fn compose_download() -> Result<Download, Problem> {
         ),
         (os, arch) => {
             return Err(Problem::with(
-                "OpenBot cannot install the piece that runs the containers on this kind of \
-                 computer.",
+                "OpenBot can't install the software it runs on on this kind of computer.",
                 format!("no Compose build for {os} on {arch}"),
             ))
         }
@@ -584,8 +582,8 @@ fn install_engine_with(
     // reporting no engine on a machine that has just installed one.
     if engine::program(Engine::Podman).is_none() {
         return Err(Problem::with(
-            "OpenBot installed the container engine, but cannot find it afterwards. Install \
-             Podman Desktop and start OpenBot again.",
+            "OpenBot installed the software it runs on, but can't find it afterwards. Install \
+             Podman Desktop, then start OpenBot again.",
             format!(
                 "the {PODMAN} installer reported success; podman is on neither PATH nor any \
                  install location this platform uses"
@@ -627,7 +625,7 @@ fn place_compose(into: &Path) -> Result<String, Problem> {
         std::fs::set_permissions(&named, std::fs::Permissions::from_mode(0o755)).map_err(
             |error| {
                 Problem::with(
-                    "OpenBot could not finish installing the piece that runs the containers.",
+                    "OpenBot couldn't finish installing the software it runs on. Try again.",
                     format!("chmod 755 {}: {error}", named.display()),
                 )
             },
@@ -727,9 +725,9 @@ fn installer_stopped(verb: &str, msi: &Path, failure: MsiexecFailure, log: &Path
             if code == 1625 {
                 // ERROR_INSTALL_PACKAGE_REJECTED requires an administrator to resolve policy.
                 // https://learn.microsoft.com/en-us/windows/win32/msi/error-codes
-                "Windows policy blocks installing Podman, the container engine OpenBot needs. \
-                 Ask an administrator to allow the installation or install Podman for your \
-                 account, then try again."
+                "Windows policy blocks installing Podman, which OpenBot needs to run. Ask an \
+                 administrator to allow the installation or install Podman for your account, \
+                 then try again."
             } else {
                 "Installing the software OpenBot needs did not finish. Try again."
             },
@@ -818,8 +816,8 @@ fn install_podman(
 fn install_podman_with_pkexec() -> Result<(), Problem> {
     let (manager, args) = linux_package_manager().ok_or_else(|| {
         Problem::with(
-            "OpenBot cannot install the software it needs on this system. Install the `podman` \
-             package, then start OpenBot again.",
+            "OpenBot can't install the software it needs on this system. Install the podman \
+             package with your system's package manager, then start OpenBot again.",
             "no apt-get, dnf, zypper or pacman in /usr/bin",
         )
     })?;
@@ -1374,9 +1372,9 @@ mod tests {
         );
         assert_eq!(
             problem.said,
-            "Windows policy blocks installing Podman, the container engine \
-            OpenBot needs. Ask an administrator to allow the installation or install Podman for \
-            your account, then try again."
+            "Windows policy blocks installing Podman, which OpenBot needs to run. Ask an \
+             administrator to allow the installation or install Podman for your account, then \
+             try again."
         );
         assert_eq!(
             problem.detail,

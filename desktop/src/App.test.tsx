@@ -1317,6 +1317,201 @@ test("a start that wakes the computer's software and updates OpenBot says it in 
   expect(said["running on the version it had"]).toContain(KEPT_RELEASE);
 });
 
+/*
+ * When setup stops: every failure screen says what happened and what to do, in plain words. The
+ * engine's output and the CLI's words are behind "Technical details" and in the logs a person
+ * copies, never the headline. A product is named only where the person acts in it: Docker Desktop,
+ * a Podman command they run.
+ */
+
+/** A failure's headline as the native side now sends it (`acquire.rs`, `problem.rs`). */
+const NATIVE_FAILURE = {
+  machine: "OpenBot couldn't prepare this computer to run it. Try again.",
+  unreachable:
+    "OpenBot can't reach the software it runs on. If you use Docker Desktop, open it and wait for it to start. Then try again.",
+  lastQuit:
+    "When OpenBot last quit, some of its services didn't stop. They may still be running. Stopping OpenBot again asks them to stop.",
+};
+
+/** What a person reads on a failure screen: not the technical details or the logs' own controls. */
+function readable(view: ReturnType<typeof render>): string {
+  const copy = view.container.cloneNode(true) as HTMLElement;
+  for (const hidden of copy.querySelectorAll(".detail-of, .troubleshooting"))
+    hidden.remove();
+  return copy.textContent ?? "";
+}
+
+/** Where the person acts in Podman: switching to it, or a command they run in it. */
+const ACTS_IN_PODMAN =
+  /Docker Desktop or Podman|To use Podman instead|start Podman|Stop your Podman machine|run podman machine set(?: --[a-z-]+(?: \d+)?)+|your Podman machine/g;
+
+const FAILURE_TECHNICAL = [
+  ...TECHNICAL,
+  /\bcontainers?\b/i,
+  /\brootful\b/i,
+  /\bcluster\b/i,
+];
+
+function failureTechnical(beats: Beat[]) {
+  return beats.flatMap(({ beat, text }) => {
+    const left = text.replace(ACTS_IN_PODMAN, "");
+    return FAILURE_TECHNICAL.filter((word) => word.test(left)).map(
+      (word) => `${beat}: ${left.match(word)?.[0]}`,
+    );
+  });
+}
+
+/** The AI step with setup stopped behind it, on `answer` from the CLI's setup. */
+async function stoppedBehindAi(answer: () => unknown): Promise<string> {
+  setupRootConfiguration("/tmp/plain-failure", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({ set_up_local_eval: answer });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByRole("heading", { name: "Connect your AI" });
+  await view.findByRole("alert", undefined, { timeout: 3000 });
+  const text = readable(view);
+  cleanup();
+  invokeCalls = [];
+  return text;
+}
+
+test("every failure screen says what happened and what to do, in plain words", async () => {
+  const beats: Beat[] = [];
+  const seen = (beat: string, text: string) =>
+    beats.push({ beat, text, behind: null });
+  const blocked =
+    (reason: string, more: Record<string, unknown> = {}) =>
+    () => ({
+      ...localStatus("unknown", "unknown"),
+      outcome: "blocked",
+      stack: null,
+      reason,
+      ...more,
+    });
+
+  // Setup stopping behind the AI step, for what stops it most.
+  for (const reason of [
+    "docker-unavailable",
+    "port-unavailable",
+    "local-command-failed",
+    "local-command-busy",
+    "unsupported-engine",
+    "confirmation-required",
+  ])
+    seen(`AI step, ${reason}`, await stoppedBehindAi(blocked(reason)));
+  seen(
+    "AI step, out of disk on Windows",
+    await stoppedBehindAi(
+      blocked("resources-short", {
+        shortfall: {
+          podman: true,
+          cpu: false,
+          memory: false,
+          disk: true,
+          diskGb: "30",
+          wsl: true,
+          drive: "C:",
+        },
+      }),
+    ),
+  );
+  seen(
+    "AI step, short of memory in Podman",
+    await stoppedBehindAi(
+      blocked("resources-short", {
+        shortfall: { podman: true, cpu: false, memory: true, disk: false },
+      }),
+    ),
+  );
+  for (const category of ["timeout", "unexpected-exit", "unverified", "spawn"])
+    seen(
+      `AI step, ${category}`,
+      await stoppedBehindAi(() => {
+        throw category;
+      }),
+    );
+
+  // The account step, refused the software this computer runs things on.
+  {
+    setupRootConfiguration("/tmp/plain-refused", async () =>
+      emptyConfiguration(),
+    );
+    withLocalCli({
+      local_eval_terms: () => ({
+        status: "blocked",
+        reason: "unsupported-engine",
+        switchEngine: true,
+        said: "Docker Desktop or rootful Podman is required on macOS. This machine runs OrbStack.",
+      }),
+    });
+    const view = await renderApp();
+    await installLocal(view);
+    await view.findByRole("heading", {
+      name: "Switch to Docker Desktop or Podman",
+    });
+    seen("account, refused", readable(view));
+    cleanup();
+    invokeCalls = [];
+  }
+
+  // Install failing while it prepares this computer, with the engine's own words behind it.
+  {
+    const { view, preparation } = await beginPendingInstallation();
+    await act(async () =>
+      preparation.reject({
+        said: NATIVE_FAILURE.machine,
+        detail: "Error: podman machine init openbot: exit status 125",
+      }),
+    );
+    await view.findByRole("button", { name: "Retry installation" });
+    seen("install, failed", readable(view));
+    expect(view.container.textContent).toContain("exit status 125");
+    cleanup();
+    invokeCalls = [];
+  }
+
+  // Start failing, and the notice a start shows after a quit that left something running.
+  {
+    setupConnectedLocalStack(
+      "/tmp/plain-start-failed",
+      localStatus("ready", "valid"),
+    );
+    const previous = invokeHandler;
+    invokeHandler = async (command, args) => {
+      if (command === "start_stack")
+        throw {
+          said: NATIVE_FAILURE.unreachable,
+          detail: "dial unix /var/run/docker.sock: connect: connection refused",
+        };
+      if (command === "last_local_eval_stop_failure")
+        return {
+          said: NATIVE_FAILURE.lastQuit,
+          detail: "the back end stack did not stop when OpenBot last quit",
+        };
+      return previous(command, args);
+    };
+    const view = await renderApp();
+    await waitFor(() =>
+      expect(view.container.textContent).toContain(
+        "can't reach the software it runs on",
+      ),
+    );
+    seen("start, failed", readable(view));
+  }
+
+  expect(failureTechnical(beats)).toEqual([]);
+  // Each says what to do: retry, a setting, a command, or who to ask.
+  for (const { beat, text } of beats)
+    expect({
+      beat,
+      next: /Retry|Try again|try again|Repair|Start OpenBot|Free up|Quit|Open Docker Desktop|Stop your Podman machine|Wait|update|copy the logs|Copy the logs/.test(
+        text,
+      ),
+    }).toEqual({ beat, next: true });
+});
+
 test("a finished install brings the window to the front for the next step", async () => {
   const { view, preparation } = await beginPendingInstallation();
   // Nothing is the person's while it installs: the window stays where they left it.
@@ -1744,7 +1939,7 @@ test("a blocked setup stops at its row in plain words and Retry resumes there", 
   const alert = await view.findByRole("alert", { name: "Setup" });
   expect(alert.textContent).toContain("Setup stopped");
   expect(alert.textContent).toContain(
-    "The back end cannot start until the software it runs on is running.",
+    "The software OpenBot runs on isn't running. Retry to start it.",
   );
   await chooseOpenAi(view);
   await view.findByRole("heading", { name: "Getting ready" });
@@ -1752,7 +1947,7 @@ test("a blocked setup stops at its row in plain words and Retry resumes there", 
   expect(setups).toBe(1);
   const row = view.getByRole("listitem", { name: "Setting up OpenBot" });
   expect(row.textContent).toContain(
-    "The back end cannot start until the software it runs on is running.",
+    "The software OpenBot runs on isn't running. Retry to start it.",
   );
   expectPlain(view);
   expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
@@ -2193,7 +2388,7 @@ test("relaunch with Docker Desktop quit opens it, says so, and starts once it an
   ]);
   expect(
     view.queryByText(
-      "The back end cannot start until the software it runs on is running.",
+      "The software OpenBot runs on isn't running. Retry to start it.",
     ),
   ).toBeNull();
 });
@@ -2673,10 +2868,14 @@ test("relaunch never starts a local stack that is not exactly ready and valid", 
     [
       "unknown",
       "unknown",
-      "The back end started. Its licence and readiness are not reported yet.",
+      "OpenBot started, and hasn't said yet whether it's ready.",
     ],
     ["ready", "expired", "The evaluation licence has expired."],
-    ["degraded", "valid", "The back end is running but not healthy."],
+    [
+      "degraded",
+      "valid",
+      "OpenBot is running but not working properly. Retry to start it again.",
+    ],
   ]) {
     setupConnectedLocalStack(
       `/tmp/local-eval-${readiness}-${licence}`,
@@ -2752,7 +2951,9 @@ async function startedOnKeptRelease(
     view.getByRole("heading", { name: "OpenBot is running" }),
   ).toBeTruthy();
   expect(
-    view.queryByText("The back end is running but not healthy."),
+    view.queryByText(
+      "OpenBot is running but not working properly. Retry to start it again.",
+    ),
   ).toBeNull();
   expect(
     view.queryByRole("heading", { name: "OpenBot is stopped" }),
@@ -2777,7 +2978,7 @@ async function startedOnKeptRelease(
  * Found on 0.3.3 on a slow connection. Start began updating the back end from 0.16.0-rc.5 to
  * 0.16.0-rc.9; the CLI stopped downloading one image at its own limit and kept the update on
  * record. Nothing in the cluster had changed and every check passed, but the CLI said `degraded`,
- * and the window said "The back end is running but not healthy." and stopped OpenBot.
+ * and the window said "OpenBot is running but not working properly. Retry to start it again." and stopped OpenBot.
  */
 test("an update that did not finish opens OpenBot on the release the back end runs, and says so", async () => {
   const after = pinnedCli.updateDidNotFinish;
@@ -2830,7 +3031,9 @@ test("a back end whose check fails is still not healthy, with an update on recor
     pinnedCli.apiCheckFails,
   ]);
   const view = await renderApp();
-  await view.findByText("The back end is running but not healthy.");
+  await view.findByText(
+    "OpenBot is running but not working properly. Retry to start it again.",
+  );
   expect(
     view.getByRole("heading", { name: "OpenBot is stopped" }),
   ).toBeTruthy();
@@ -3392,7 +3595,7 @@ function useInterruptedShutdownSetup() {
 test("a local Intelligence stack left running at Quit is shown without holding auto-start", async () => {
   useInterruptedShutdownSetup();
   const notice = {
-    said: "When OpenBot last quit, it could not stop its back end.",
+    said: "When OpenBot last quit, some of its services didn't stop. They may still be running. Stopping OpenBot again asks them to stop.",
     detail: "Back end stop failed: the CLI timed out",
   };
   const previous = invokeHandler;
@@ -3427,7 +3630,7 @@ test("Stop that fails only for the local Intelligence stack still stops OpenBot"
     expect(view.queryByRole("button", { name: "Stop OpenBot" })).toBeNull(),
   );
   expect(view.getByRole("alert").textContent).toContain(
-    "OpenBot stopped, but could not stop its back end.",
+    "OpenBot stopped, but some of its services didn't. They may still be running.",
   );
 });
 
@@ -3828,7 +4031,7 @@ test("starting fresh names every container and volume and removes only that list
     view.getByText(/Restore the previous installation’s folder/),
   ).toBeTruthy();
   for (const volume of volumes) expect(view.getByText(volume)).toBeTruthy();
-  expect(view.getByText(/stopped containers/)).toBeTruthy();
+  expect(view.getByText(/stopped parts of the previous/)).toBeTruthy();
   for (const container of containers)
     expect(view.getByText(container)).toBeTruthy();
   await userEvent.click(startFresh);

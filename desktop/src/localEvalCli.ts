@@ -604,7 +604,7 @@ export function splitStopFailure(thrown: unknown): {
 
 export function intelligenceStopProblem(line: string): Problem {
   return {
-    said: "OpenBot stopped, but could not stop its back end.",
+    said: "OpenBot stopped, but some of its services didn't. They may still be running.",
     detail: line,
   };
 }

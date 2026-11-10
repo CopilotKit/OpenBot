@@ -795,7 +795,7 @@ test("a setup whose download stopped offers Retry, which continues where it left
   });
   await waitFor(() =>
     expect(row(screen, "Setting up OpenBot").textContent).toContain(
-      "The back end download stopped. Retry continues where it left off.",
+      "The download stopped. Retry continues where it left off.",
     ),
   );
   await userEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -872,7 +872,7 @@ test("a setup refused for a full Docker disk says so, with Retry", async () => {
   await screen.findByRole("button", { name: "Retry" });
   const setup = row(screen, SETUP).textContent;
   expect(setup).toContain(
-    "Docker has 0 GB of free disk. OpenBot needs 40 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+    "Docker Desktop has 0 GB of free disk. OpenBot needs 40 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   expect(setup).not.toContain("partway through");
 });
@@ -1039,11 +1039,11 @@ test("a blocked or conflicted connection stops at its row, and Retry resumes at 
   for (const [answer, said] of [
     [
       connection({ outcome: "blocked", reason: "confirmation-required" }),
-      "The back end asked for a confirmation OpenBot cannot give.",
+      "Setup stopped to ask something OpenBot can't answer. Copy the logs below and ask for help.",
     ],
     [
       connection({ outcome: "blocked", conflicted: true }),
-      "Settings the back end wrote for OpenBot were changed since. OpenBot did not connect.",
+      "Settings OpenBot saved were changed since, so it didn't connect. Retry, or repair the installation.",
     ],
   ] as const) {
     invokeHandler = answers({
@@ -1075,17 +1075,14 @@ test("a blocked or conflicted connection stops at its row, and Retry resumes at 
 
 test("readiness or a licence that is not exactly ready and valid never starts", async () => {
   for (const [answer, said] of [
-    [
-      report(),
-      "The back end started. Its licence and readiness are not reported yet.",
-    ],
+    [report(), "OpenBot started, and hasn't said yet whether it's ready."],
     [
       report({ readiness: "ready", licence: "expired" }),
       "The evaluation licence has expired.",
     ],
     [
       report({ readiness: "degraded", licence: "valid" }),
-      "The back end is running but not healthy.",
+      "OpenBot is running but not working properly. Retry to start it again.",
     ],
   ] as const) {
     invokeHandler = answers({ run_local_eval: [answer] });
@@ -1268,7 +1265,7 @@ test("a relaunch whose start fails on a nearly full disk names the disk on its r
   await screen.findByRole("button", { name: "Retry" });
   const waiting = row(screen, WAIT).textContent;
   expect(waiting).toContain(
-    "The back end's disk is nearly full. Podman has 30.5 GB free of 1006.8 GB. OpenBot needs 40 GB. Free space on the drive that holds OpenBot's engine (C:), then Retry.",
+    "OpenBot is nearly out of disk space. It has 30.5 GB free of 1006.8 GB. It needs 40 GB. Free up space on drive C:, then Retry.",
   );
   expect(waiting).not.toContain("partway through");
   expect(commands()).toEqual(["run_local_eval:status", "run_local_eval:start"]);
@@ -1276,7 +1273,7 @@ test("a relaunch whose start fails on a nearly full disk names the disk on its r
 
 /**
  * Windows, after space was freed: Retry reads the status of the back end the failed start left
- * running, which says `degraded`, and the row said only "The back end is running but not healthy."
+ * running, which says `degraded`, and the row said only "OpenBot is running but not working properly. Retry to start it again."
  * while k3s still reported low disk. `local_eval::checked_when_unhealthy` now says why.
  */
 test("a back end running but not healthy after low disk says it is recovering, and Retry asks again", async () => {
@@ -1306,7 +1303,7 @@ test("a back end running but not healthy after low disk says it is recovering, a
   const retry = await screen.findByRole("button", { name: "Retry" });
   const waiting = row(screen, WAIT).textContent;
   expect(waiting).toContain(
-    "The back end is recovering from low disk space. Wait a few minutes, then Retry.",
+    "OpenBot is recovering from low disk space. Wait a few minutes, then Retry.",
   );
   expect(waiting).not.toContain("running but not healthy");
   await userEvent.click(retry);
@@ -1453,7 +1450,9 @@ test("the screen in front hears nothing while Intelligence works, and a stop int
   const failed = view({ prepare: true });
   const stopped = await failed.findByRole("alert", { name: "Setup" });
   expect(stopped.textContent).toContain("Setup stopped");
-  expect(stopped.textContent).toContain("A port the back end needs is in use.");
+  expect(stopped.textContent).toContain(
+    "Another app is using a network port OpenBot needs. Quit that app, then Retry.",
+  );
   expect(within(stopped).getByRole("button", { name: "Retry" })).toBeTruthy();
   // The logs to paste into an AI assistant, beside the card that says it stopped.
   expect(
@@ -1492,7 +1491,7 @@ test("failures arrive as categories, and a stack that could not be recorded as a
   const screen = view();
   await waitFor(() =>
     expect(row(screen, SETUP).textContent).toContain(
-      "The back end took too long to start",
+      "OpenBot took too long to set up",
     ),
   );
   invokeHandler = async () => {

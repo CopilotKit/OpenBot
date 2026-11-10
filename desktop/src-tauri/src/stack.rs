@@ -166,7 +166,8 @@ fn volume_inventory(engine: &Address, root: &Path) -> Result<Vec<String>, Proble
 
 fn postgres_volume_problem(detail: impl Into<String>) -> Problem {
     Problem::with(
-        "OpenBot could not verify whether this installation has saved database data. No encryption key was created. Check the selected container engine and Compose configuration, then try again.",
+        "OpenBot couldn't check whether this installation already has your data saved, so it \
+         changed nothing. Try again.",
         detail,
     )
 }
@@ -405,7 +406,8 @@ impl LeftoverVolumes {
     pub fn running_said(&self) -> Option<String> {
         (!self.running.is_empty()).then(|| {
             format!(
-                "A container from the previous installation is still running: {}. Stop it in Docker or Podman, then try Start again.",
+                "Part of the previous installation is still running: {}. Stop it in Docker Desktop \
+                 or Podman, then try Start again.",
                 self.running.join(", ")
             )
         })
@@ -414,7 +416,8 @@ impl LeftoverVolumes {
 
 fn leftover_container_problem(detail: impl Into<String>) -> Problem {
     Problem::with(
-        "OpenBot could not verify which containers a previous installation left. Nothing was changed. Check the selected container engine, then try again.",
+        "OpenBot couldn't check what an earlier installation left behind, so it changed nothing. \
+         Try again.",
         detail,
     )
 }
@@ -652,7 +655,12 @@ pub fn reset_leftover_volumes(
         || leftovers.volumes != sorted(confirmed)
         || leftovers.container_names() != sorted(confirmed_containers)
     {
-        return Err(Problem::plain("The leftover data no longer matches the containers and volumes you confirmed, or OpenBot could not verify that it owns them. Nothing was removed. Try Start again."));
+        return Err(Problem::with(
+            "What the earlier installation left has changed since you confirmed it, so nothing was \
+             removed. Try Start again.",
+            "the leftovers no longer match the containers and volumes confirmed, or their \
+             ownership could not be verified",
+        ));
     }
     let mut removed: Vec<&str> = Vec::new();
     let removals = leftovers
@@ -688,7 +696,7 @@ pub fn reset_leftover_volumes(
             let why = if kind == "container" {
                 "It may have started again."
             } else {
-                "It may still be attached to a container."
+                "It may still be in use."
             };
             return Err(Problem::with(
                 format!("OpenBot could not remove {name}. {why} {} Stop the installation using it, then try Start again.", so_far()),
@@ -817,7 +825,7 @@ fn append_compose_overlay(
     if std::fs::read(&overlay).ok().as_deref() != Some(contents.as_bytes()) {
         std::fs::write(&overlay, contents).map_err(|error| {
             Problem::with(
-                "OpenBot could not prepare its local Compose settings.",
+                "OpenBot couldn't prepare its settings on this computer. Try again.",
                 error.to_string(),
             )
         })?;
@@ -875,18 +883,22 @@ fn compose_start_command(
     }
     let environment = environment.map_err(|error| {
         Problem::with(
-            "OpenBot could not read the deployment's Compose settings.",
+            "OpenBot couldn't read its installation's settings. Repair the installation.",
             error.to_string(),
         )
     })?;
     if !environment.status.success() {
         return Err(Problem::with(
-            "OpenBot could not read the deployment's Compose settings.",
+            "OpenBot couldn't read its installation's settings. Repair the installation.",
             command_said(&environment.stderr),
         ));
     }
-    let environment = String::from_utf8(environment.stdout)
-        .map_err(|_| Problem::plain("Compose returned unreadable deployment settings."))?;
+    let environment = String::from_utf8(environment.stdout).map_err(|_| {
+        Problem::with(
+            "OpenBot couldn't read its installation's settings. Repair the installation.",
+            "Compose returned unreadable deployment settings",
+        )
+    })?;
     let files = compose_files(root, &environment)?;
     for (index, file) in files.iter().enumerate() {
         command.arg("-f").arg(file);
@@ -962,7 +974,12 @@ fn compose_files(root: &Path, environment: &str) -> Result<Vec<String>, Problem>
         "docker-compose.yml",
         "docker-compose.yaml",
     ])
-    .ok_or_else(|| Problem::plain("The selected installation has no Compose file."))?;
+    .ok_or_else(|| {
+        Problem::with(
+            "Part of OpenBot's installation is missing. Repair the installation.",
+            "the selected installation has no Compose file",
+        )
+    })?;
     let mut files = vec![base];
     if let Some(existing) = first(&[
         "compose.override.yml",
@@ -2849,7 +2866,7 @@ pub fn services_that_exited_among(
         .output()
         .map_err(|error| {
             crate::problem::Problem::with(
-                "OpenBot could not inspect its Compose services.",
+                "OpenBot couldn't check on its own services. Try again.",
                 format!("could not run {operation}: {error}"),
             )
         })?;
@@ -2867,7 +2884,7 @@ pub fn services_that_exited_among(
             detail.push_str(&stdout);
         }
         return Err(crate::problem::Problem::with(
-            "OpenBot could not inspect its Compose services.",
+            "OpenBot couldn't check on its own services. Try again.",
             detail,
         ));
     }
@@ -2879,7 +2896,7 @@ pub fn services_that_exited_among(
         }
         let Some((service, state)) = line.split_once('\t') else {
             return Err(crate::problem::Problem::with(
-                "OpenBot could not inspect its Compose services.",
+                "OpenBot couldn't check on its own services. Try again.",
                 format!("unusable {operation} row: {line}"),
             ));
         };
@@ -2887,7 +2904,7 @@ pub fn services_that_exited_among(
         let state = state.trim();
         if service.is_empty() || state.is_empty() {
             return Err(crate::problem::Problem::with(
-                "OpenBot could not inspect its Compose services.",
+                "OpenBot couldn't check on its own services. Try again.",
                 format!("unusable {operation} row: {line}"),
             ));
         }
@@ -2963,13 +2980,13 @@ pub fn server_publishes(engine: &Address, root: &Path, ports: &[u16]) -> Result<
         .output()
         .map_err(|error| {
             Problem::with(
-                "OpenBot could not inspect its Compose services.",
+                "OpenBot couldn't check on its own services. Try again.",
                 format!("could not run {operation}: {error}"),
             )
         })?;
     if !output.status.success() {
         return Err(Problem::with(
-            "OpenBot could not inspect its Compose services.",
+            "OpenBot couldn't check on its own services. Try again.",
             format!("{operation}: {}", command_said(&output.stderr)),
         ));
     }
@@ -3194,7 +3211,7 @@ pub fn project_choosing(engine: &Address, root: &Path, legacy: &str) -> Result<S
     )
     .map_err(|error| {
         Problem::with(
-            "OpenBot could not record which containers belong to this installation.",
+            "OpenBot couldn't save which parts of OpenBot belong to this installation. Try again.",
             error,
         )
     })?;
@@ -3203,7 +3220,8 @@ pub fn project_choosing(engine: &Address, root: &Path, legacy: &str) -> Result<S
 
 fn project_choice_problem(detail: impl Into<String>) -> Problem {
     Problem::with(
-        "OpenBot could not tell which containers belong to this installation. Nothing was changed. Check the selected container engine, then try again.",
+        "OpenBot couldn't tell which parts of OpenBot belong to this installation, so it changed \
+         nothing. Try again.",
         detail,
     )
 }
@@ -4208,7 +4226,11 @@ mod tests {
             "invalid-json-secret".into(),
         ] {
             let error = postgres_volume_name(content.as_bytes()).unwrap_err();
-            assert!(error.said.contains("No encryption key was created"));
+            assert!(
+                error.said.contains("so it changed nothing"),
+                "{}",
+                error.said
+            );
             assert!(!format!("{error:?}").contains("secret"));
         }
     }
@@ -4243,7 +4265,11 @@ mod tests {
             for failure in [".fixture-volume-failure", ".fixture-config-failure"] {
                 std::fs::write(root.join(failure), "").unwrap();
                 let error = postgres_volume_exists(&address, &root, &Secrets::new()).unwrap_err();
-                assert!(error.said.contains("No encryption key was created"));
+                assert!(
+                    error.said.contains("so it changed nothing"),
+                    "{}",
+                    error.said
+                );
                 assert!(!format!("{error:?}").contains("synthetic-secret"));
                 std::fs::remove_file(root.join(failure)).unwrap();
             }
@@ -4688,7 +4714,11 @@ mod tests {
             ] {
                 let error = reset_leftover_volumes(&address, &root, &Secrets::new(), &stale, &[])
                     .expect_err("a changed set must not be removed");
-                assert!(error.said.contains("Nothing was removed"), "{}", error.said);
+                assert!(
+                    error.said.to_lowercase().contains("nothing was removed"),
+                    "{}",
+                    error.said
+                );
                 assert!(!std::fs::read_to_string(&record)
                     .unwrap_or_default()
                     .contains("volume rm"));
@@ -4707,7 +4737,11 @@ mod tests {
                 "{}",
                 error.said
             );
-            assert!(error.said.contains("Nothing was removed"), "{}", error.said);
+            assert!(
+                error.said.to_lowercase().contains("nothing was removed"),
+                "{}",
+                error.said
+            );
             assert!(!format!("{error:?}").contains("synthetic-secret"));
             std::fs::remove_file(root.join(".fixture-attached-openbot-profile-general-assistant"))
                 .unwrap();
@@ -4832,7 +4866,11 @@ mod tests {
                     &stale_containers,
                 )
                 .expect_err("a changed set must not be removed");
-                assert!(error.said.contains("Nothing was removed"), "{}", error.said);
+                assert!(
+                    error.said.to_lowercase().contains("nothing was removed"),
+                    "{}",
+                    error.said
+                );
                 assert!(!std::fs::read_to_string(&record).unwrap().contains(" rm "));
             }
 
@@ -6543,7 +6581,7 @@ fn main() {
 
         assert_eq!(
             problem.said,
-            "OpenBot could not inspect its Compose services."
+            "OpenBot couldn't check on its own services. Try again."
         );
         assert!(
             problem
@@ -6572,7 +6610,7 @@ fn main() {
 
         assert_eq!(
             problem.said,
-            "OpenBot could not inspect its Compose services."
+            "OpenBot couldn't check on its own services. Try again."
         );
         let detail = problem.detail.as_deref().unwrap_or_default();
         assert!(
@@ -6638,7 +6676,7 @@ fn main() {
 
             assert_eq!(
                 problem.said,
-                "OpenBot could not inspect its Compose services."
+                "OpenBot couldn't check on its own services. Try again."
             );
             assert!(
                 problem

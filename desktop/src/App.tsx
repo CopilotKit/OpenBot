@@ -886,10 +886,16 @@ function Setup() {
           engine={engineNow(steps)}
           // Once signed in, the step explains the password prompt Install waits to raise.
           goAhead={goAhead}
-          behind={behind({
-            waitingFor:
-              "The rest of the install starts after you sign in and accept the license agreement.",
-          })}
+          // No slot once the install has failed: its failure is in the card, and nothing will
+          // come into the slot until the person starts it again.
+          behind={
+            preparation?.status === "failed"
+              ? undefined
+              : behind({
+                  waitingFor:
+                    "The rest of the install starts after you sign in and accept the license agreement.",
+                })
+          }
           onDone={(acceptedVersion) => {
             if (acceptedVersion) local.acceptTerms(acceptedVersion);
             // Intelligence sets itself up once the install has Docker answering; see above. The

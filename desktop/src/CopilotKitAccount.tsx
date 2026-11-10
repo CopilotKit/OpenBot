@@ -52,9 +52,13 @@ const COULD_NOT_CHECK = "Couldn’t check your CopilotKit account. Try again.";
 const SIGN_IN_DID_NOT_FINISH = "Sign-in didn’t finish. Try again.";
 const SETTING_UP_ENGINE =
   "You're signed in. OpenBot is setting up the software it runs on. The license agreement comes next.";
+/*
+ * OpenBot's own sentences, not the CLI's: its words name rootful Podman and engines, which go to
+ * the log (`terms_said`). The steps under them name the apps the person switches in.
+ */
 const ENGINE_REFUSED =
-  "OpenBot's back end can't run on the container engine this computer uses.";
-const BLOCKED = "OpenBot's back end can't run on this computer as it's set up.";
+  "OpenBot can't run with the app this computer uses to run its software. It works with Docker Desktop or Podman.";
+const BLOCKED = "OpenBot can't run on this computer as it's set up.";
 
 /**
  * How long the account check waits for a container engine, and how often it asks again. A new
@@ -203,13 +207,13 @@ export function CopilotKitAccount({
         )
           setSeen({
             at: "unsupported-engine",
-            said: terms.said ?? ENGINE_REFUSED,
+            said: ENGINE_REFUSED,
             switchEngine: terms.switchEngine === true,
           });
         else if (terms.status === "blocked")
           setSeen({
             at: "failed",
-            said: terms.said ?? BLOCKED,
+            said: BLOCKED,
             retry: "check",
           });
         else if (terms.status === "signed-out") setSeen({ at: "signed-out" });
@@ -314,7 +318,7 @@ export function CopilotKitAccount({
                 : refused
                   ? refused.switchEngine
                     ? "Switch to Docker Desktop or Podman"
-                    : "Change your container engine setup"
+                    : "Change this computer's setup"
                   : waitingForEngine
                     ? "Setting up this computer"
                     : "Sign in to CopilotKit"}
@@ -335,12 +339,12 @@ export function CopilotKitAccount({
       {refused?.switchEngine && (
         <ol className="blocker-steps">
           <li>
-            Open Docker Desktop. To use Podman instead, quit the engine you use
-            now and start Podman.
+            Open Docker Desktop. To use Podman instead, quit the app you use now
+            and start Podman.
           </li>
           <li>
-            If Docker still uses another engine, run this in a terminal to
-            switch it to Docker Desktop:
+            If Docker still uses the other app, run this in a terminal to switch
+            it to Docker Desktop:
             <Command lines={["docker context use desktop-linux"]} />
           </li>
           <li>Choose Try again.</li>

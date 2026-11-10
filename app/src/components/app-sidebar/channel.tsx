@@ -1,8 +1,14 @@
-import { IconPin, IconPinnedOff, IconTrash } from "@tabler/icons-react";
+import {
+  IconPencil,
+  IconPin,
+  IconPinnedOff,
+  IconTrash,
+} from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { memo, useState } from "react";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
+import { RenameConversationDialog } from "@/components/channels/rename-conversation-dialog";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -18,8 +24,9 @@ import { ChannelItemContent } from "./channel-item-content";
  * Memoized roster row. `use-channel-events` preserves unchanged row identity, and
  * `content-visibility` keeps off-screen rows cheap without virtualization.
  *
- * Right-click opens Pin and Delete. Deleting is confirmed in a dialog that names the channel,
- * because the row it was invoked on is one of several identical-looking rows.
+ * Right-click opens Pin, Rename and Delete. Rename is offered only to the person who started the
+ * conversation, which is who the server lets rename it. Deleting is confirmed in a dialog that
+ * names the channel, because the row it was invoked on is one of several identical-looking rows.
  */
 export const Channel = memo(function Channel({
   channelId,
@@ -29,6 +36,7 @@ export const Channel = memo(function Channel({
   untitled,
   lastMessageAt,
   pinned,
+  canRename,
   unread,
   busy,
   emphasis,
@@ -42,6 +50,8 @@ export const Channel = memo(function Channel({
   untitled?: string;
   lastMessageAt?: string;
   pinned: boolean;
+  /** Whether this person started the conversation, and so may rename it. The server's answer. */
+  canRename: boolean;
   unread: boolean;
   busy: boolean;
   emphasis: MessageListEmphasis;
@@ -60,6 +70,7 @@ export const Channel = memo(function Channel({
   const threadTitle = revealed.text || untitled || "New conversation";
   const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   /**
    * Why a pin did not take, said on the row it was asked of.
    *
@@ -115,6 +126,12 @@ export const Channel = memo(function Channel({
             {pinned ? <IconPinnedOff /> : <IconPin />}
             {pinned ? "Unpin conversation" : "Pin conversation"}
           </ContextMenuItem>
+          {canRename ? (
+            <ContextMenuItem onClick={() => setRenaming(true)}>
+              <IconPencil />
+              Rename conversation…
+            </ContextMenuItem>
+          ) : null}
           <ContextMenuItem
             variant="destructive"
             onClick={() => setConfirming(true)}
@@ -129,6 +146,12 @@ export const Channel = memo(function Channel({
           {pinProblem}
         </p>
       ) : null}
+      <RenameConversationDialog
+        channelId={channelId}
+        onOpenChange={setRenaming}
+        open={renaming}
+        title={summary || untitled || ""}
+      />
       <DeleteConversationDialog
         channelId={channelId}
         // Away first when this row's channel is the one on screen.

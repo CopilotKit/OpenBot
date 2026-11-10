@@ -1,0 +1,244 @@
+import { expect, test } from "bun:test";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
+import ts from "typescript";
+
+/**
+ * Guard: what OpenBot Desktop says while it sets up, starts or updates, and when that stops, is in
+ * plain words. A tester waited minutes on "Preparing the engine machine" and could not tell
+ * whether setup was stuck, and a failure read "The back end's disk is nearly full. Podman has…".
+ * The log keeps the technical parts; the screen says what happened and what to do.
+ *
+ * Read are the sentences of the desktop window (string literals, template text and JSX text with a
+ * space in them, so identifiers and command names are not) and the native side's sentences that
+ * reach it: a `Problem`'s headline, a setup row's line (`StepLine`), and the sentences
+ * `explain_machine_error`, `missing_compose` and `said_about` choose. Not read: comments, tests,
+ * log calls, a `Problem`'s detail and a `StepLine`'s `logged` detail, which are the log's.
+ */
+const REPO = join(import.meta.dir, "..");
+
+const TECHNICAL: RegExp[] = [
+  /Podman/,
+  /\bWSL\b/,
+  /Windows Subsystem for Linux/,
+  /engine machine/i,
+  /\bengines?\b/i,
+  /back ?end/i,
+  /\bk3[sd]\b/i,
+  /\bHelm\b/,
+  /\bkubectl\b/,
+  /\bCLI\b/,
+  /\bCompose\b/,
+  /\bcontainers?\b/i,
+  /\brootful\b/,
+  /\bcluster\b/i,
+];
+
+/**
+ * Where a word stays: the person has to act in the product it names, or it is never shown. Each
+ * entry must still be needed, so one that goes stale is removed rather than kept as a hole.
+ */
+const ALLOWED: { file: string; word: RegExp; why: string }[] = [
+  {
+    file: "desktop/src/WindowsBlocker.tsx",
+    word: /\bWSL\b|Windows Subsystem for Linux/,
+    why: "the Windows feature the person turns on, by the name Windows gives it",
+  },
+  {
+    file: "desktop/src-tauri/src/windows.rs",
+    word: /\bWSL\b|Windows Subsystem for Linux/,
+    why: "the Windows blocker's own failures, about the feature the person turns on",
+  },
+  {
+    file: "desktop/src-tauri/src/main.rs",
+    word: /\bWSL\b|Windows Subsystem for Linux/,
+    why: "the Windows blocker's fix failing, with the commands the person can run instead",
+  },
+  {
+    file: "desktop/src/CopilotKitAccount.tsx",
+    word: /Podman/,
+    why: "the person switches to Docker Desktop or Podman",
+  },
+  {
+    file: "desktop/src/localReadiness.ts",
+    word: /Podman|\brootful\b/,
+    why: "the Podman commands the person runs to give OpenBot more room or root",
+  },
+  {
+    file: "desktop/src-tauri/src/install.rs",
+    word: /Podman/,
+    why: "the person installs Podman Desktop or the podman package, or asks IT to allow it",
+  },
+  {
+    file: "desktop/src-tauri/src/acquire.rs",
+    word: /\bCompose\b/,
+    why: "the last resort: the person installs Compose v2 themselves",
+  },
+  {
+    file: "desktop/src/ProviderPicker.tsx",
+    word: /\bcontainers?\b/i,
+    why: "an advanced field for a model the person hosts: the address OpenBot's containers use",
+  },
+  {
+    file: "desktop/src/localEvalCli.ts",
+    word: /back ?end/i,
+    why: "the marker a native stop failure line starts with, matched and never the headline",
+  },
+];
+
+/**
+ * Not read: the Status window, opened from the tray once OpenBot is running, names each part for
+ * whoever is troubleshooting. It is not part of setup, start or update.
+ */
+const NOT_SETUP = ["desktop/src/StatusWindow.tsx"];
+
+const LOGGING = /^(console\.\w+|log|logger\.\w+|this\.log|options\.log)$/;
+
+function* files(directory: string, source: RegExp): Generator<string> {
+  for (const name of readdirSync(directory)) {
+    if (
+      ["node_modules", "dist", "target", "tests", "gen", "marks"].includes(name)
+    )
+      continue;
+    const path = join(directory, name);
+    if (statSync(path).isDirectory()) yield* files(path, source);
+    else if (source.test(name) && !/\.test\.tsx?$|_tests\.rs$/.test(name))
+      yield path;
+  }
+}
+
+function logged(node: ts.Node): boolean {
+  for (let at = node.parent; at && !ts.isSourceFile(at); at = at.parent) {
+    if (ts.isCallExpression(at) && LOGGING.test(at.expression.getText()))
+      return true;
+    if (ts.isImportDeclaration(at) || ts.isExportDeclaration(at)) return true;
+  }
+  return false;
+}
+
+type Said = { file: string; line: number; text: string };
+
+/** The window's sentences: text with a space in it, so not an identifier or a command name. */
+function windowSentences(path: string): Said[] {
+  const text = readFileSync(path, "utf8");
+  const file = ts.createSourceFile(
+    path,
+    text,
+    ts.ScriptTarget.Latest,
+    true,
+    path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  const found: Said[] = [];
+  const visit = (node: ts.Node) => {
+    const said =
+      ts.isStringLiteral(node) ||
+      ts.isNoSubstitutionTemplateLiteral(node) ||
+      ts.isTemplateHead(node) ||
+      ts.isTemplateMiddle(node) ||
+      ts.isTemplateTail(node) ||
+      ts.isJsxText(node)
+        ? node.text.trim()
+        : null;
+    if (said && /\s/.test(said) && !logged(node)) {
+      const line = file.getLineAndCharacterOfPosition(node.getStart(file)).line;
+      found.push({ file: relative(REPO, path), line: line + 1, text: said });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return found;
+}
+
+const LITERAL = String.raw`"(?:\\[\s\S]|[^"\\])*"`;
+
+/** A Rust literal as the person reads it: line continuations joined, escapes undone. */
+function unquote(literal: string): string {
+  return literal
+    .slice(1, -1)
+    .replace(/\\\n\s*/g, "")
+    .replace(/\\(["\\])/g, "$1");
+}
+
+/**
+ * The native side's sentences that reach the window: a `Problem`'s headline, a setup row's line,
+ * and every literal in the functions that choose a failure's headline. Test modules are cut off.
+ */
+function nativeSentences(path: string): Said[] {
+  const whole = readFileSync(path, "utf8");
+  const tests = whole.search(/\n#\[cfg\(test\)\]\s*\n\s*mod \w+\s*\{/);
+  const text = tests === -1 ? whole : whole.slice(0, tests);
+  const found: Said[] = [];
+  const at = (index: number) => text.slice(0, index).split("\n").length;
+  const headline = new RegExp(
+    String.raw`(?:Problem::(?:plain|with)|StepLine::(?:here|elsewhere|asks))\(\s*(?:&?format!\(\s*)?(${LITERAL})`,
+    "g",
+  );
+  for (const match of text.matchAll(headline))
+    found.push({
+      file: relative(REPO, path),
+      line: at(match.index),
+      text: unquote(match[1]),
+    });
+  for (const chooser of [
+    "explain_machine_error",
+    "missing_compose",
+    "said_about",
+  ]) {
+    const start = text.search(new RegExp(String.raw`fn ${chooser}\(`));
+    if (start === -1) continue;
+    const end = text.indexOf("\n}\n", start);
+    const body = text.slice(start, end);
+    // A sentence starts with a capital; what a chooser matches the output against does not
+    // ("pinging container registry", "without Podman user-mode networking").
+    for (const match of body.matchAll(new RegExp(LITERAL, "g")))
+      if (/^"[A-Z{]/.test(match[0]))
+        found.push({
+          file: relative(REPO, path),
+          line: at(start + match.index),
+          text: unquote(match[0]),
+        });
+  }
+  return found;
+}
+
+function sentences(): Said[] {
+  return [
+    ...[...files(join(REPO, "desktop/src"), /\.tsx?$/)]
+      .filter((path) => !NOT_SETUP.includes(relative(REPO, path)))
+      .flatMap(windowSentences),
+    ...[...files(join(REPO, "desktop/src-tauri/src"), /\.rs$/)].flatMap(
+      nativeSentences,
+    ),
+  ];
+}
+
+function technical(said: Said): string[] {
+  return TECHNICAL.filter((word) => word.test(said.text))
+    .filter(
+      (word) =>
+        !ALLOWED.some(
+          (allowed) =>
+            allowed.file === said.file &&
+            allowed.word.test(said.text.match(word)?.[0] ?? ""),
+        ),
+    )
+    .map(
+      (word) =>
+        `${said.file}:${said.line}  ${said.text.match(word)?.[0]}  in: ${said.text}`,
+    );
+}
+
+test("what OpenBot Desktop says while it sets up, starts or updates, and when that stops, is plain words", () => {
+  expect(sentences().flatMap(technical)).toEqual([]);
+});
+
+test("every word kept for the person to act in is still needed", () => {
+  const all = sentences();
+  for (const allowed of ALLOWED)
+    expect({
+      file: allowed.file,
+      used: all.some(
+        (said) => said.file === allowed.file && allowed.word.test(said.text),
+      ),
+    }).toEqual({ file: allowed.file, used: true });
+});

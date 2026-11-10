@@ -495,7 +495,7 @@ describe("naming a claimed conversation", () => {
       const notifications = postgres(databaseUrl, { max: 1 });
       const barrier = `summary-barrier-${randomUUID()}`;
       const observed = Promise.withResolvers<void>();
-      const summaries: string[] = [];
+      const summaries: (string | null)[] = [];
       try {
         await notifications.listen(CHANNEL_ACTIVITY_TOPIC, (payload) => {
           if (payload === barrier) {

@@ -133,6 +133,7 @@ import { MAX_PAGE, type PeopleStore } from "./people/store";
 import type { BrokerProvider } from "./plugins/access";
 import type { AccountModeSwitch } from "./plugins/account-mode";
 import type { ComposioBroker } from "./plugins/broker";
+import { createAppGrantDraftRoutes } from "./plugins/grant-translate";
 import { createPluginRoutes } from "./plugins/routes";
 import { createSharedUseRoutes } from "./plugins/shared-use-routes";
 import type { SharedUseStore } from "./plugins/shared-use-store";
@@ -513,9 +514,10 @@ export function createApp(
     learningModel?: LearningModelEndpoint;
     /**
      * The deployment's own model, for writing a boundary from an admin's description
-     * (computer/policy-translate.ts) and team approval rules from one (approvals/rule-translate.ts).
-     * Absent, `/api/computers/policy-translate` is not mounted, and approval rules say a model is
-     * needed.
+     * (computer/policy-translate.ts), team approval rules from one (approvals/rule-translate.ts) and
+     * a Bot's actions in one app from one (plugins/grant-translate.ts). Absent,
+     * `/api/computers/policy-translate` is not mounted, and approval rules and app actions say a
+     * model is needed.
      */
     boundaryWriter?: ModelCompleter;
     /**
@@ -1991,6 +1993,19 @@ export function createApp(
   }
 
   if (pluginStore) {
+    // Describing what one Bot may do in one app, and replaying it. The save is the grants route's own.
+    app.route(
+      "/api/plugins",
+      createAppGrantDraftRoutes({
+        requireUser,
+        store: pluginStore,
+        ...(coworker?.boundaryWriter
+          ? { complete: coworker.boundaryWriter }
+          : {}),
+        ...(auditStore ? { auditStore } : {}),
+        ...(auditReader ? { auditReader } : {}),
+      }),
+    );
     app.route(
       "/api/plugins",
       createPluginRoutes(

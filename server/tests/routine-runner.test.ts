@@ -126,6 +126,7 @@ function harness(options: {
     list: () => unreachable("channels.list"),
     setPinned: () => unreachable("channels.setPinned"),
     markRead: () => unreachable("channels.markRead"),
+    rename: () => unreachable("channels.rename"),
     softDelete: () => unreachable("channels.softDelete"),
     direct: () => unreachable("channels.direct"),
     signalChannelBusy: () => unreachable("channels.signalChannelBusy"),

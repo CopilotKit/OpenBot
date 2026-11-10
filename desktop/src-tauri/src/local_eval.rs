@@ -1109,7 +1109,11 @@ fn terms_said(terms: &Terms) -> String {
         Terms::Unavailable => "unavailable".to_owned(),
         Terms::SignedOut => "signed-out".to_owned(),
         Terms::EngineNotReady { cause } => format!("engine-not-ready ({cause})"),
-        Terms::Blocked { reason, .. } => format!("blocked ({reason:?})"),
+        // The CLI's own sentence for it: the window says OpenBot's, and the log keeps this one.
+        Terms::Blocked { reason, said, .. } => match said {
+            Some(said) => format!("blocked ({reason:?}): {said}"),
+            None => format!("blocked ({reason:?})"),
+        },
         Terms::EngineTooSmall { .. } => "engine-too-small".to_owned(),
     }
 }
