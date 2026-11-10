@@ -23,6 +23,7 @@ import {
   type Progress,
   SetupProgress,
   StatusLine,
+  StepFooter,
 } from "./SetupProgress";
 import { Command } from "./WindowsBlocker";
 
@@ -415,53 +416,59 @@ export function CopilotKitAccount({
       )}
       {failure}
 
-      <div className="row">
-        {seen.at === "signed-out" && (
-          <button type="button" onClick={signIn}>
-            Sign in for a free local license key
-          </button>
-        )}
-        {agreement && (
-          <button type="button" onClick={() => connectApps(agreement.version)}>
-            Accept
-          </button>
-        )}
-        {seen.at === "apps-failed" && (
-          <>
-            <button type="button" onClick={() => connectApps(seen.version)}>
-              Connect apps
+      {/* The step's actions and the background install, pinned in view (`StepFooter`). */}
+      <StepFooter>
+        <div className="row">
+          {seen.at === "signed-out" && (
+            <button type="button" onClick={signIn}>
+              Sign in for a free local license key
             </button>
+          )}
+          {agreement && (
             <button
               type="button"
-              className="quiet"
-              onClick={() => finish(seen.version)}
+              onClick={() => connectApps(agreement.version)}
             >
-              Continue
+              Accept
             </button>
-          </>
-        )}
-        {seen.at === "failed" && (
-          <button
-            type="button"
-            onClick={() => (seen.retry === "sign-in" ? signIn() : check())}
-          >
-            Try again
-          </button>
-        )}
-        {refused && (
-          <button type="button" onClick={check}>
-            Try again
-          </button>
-        )}
-      </div>
-      {/* Last, under whatever the step asks: OpenBot is still installing meanwhile. */}
-      {behind !== undefined && (
-        <BehindSlot>
-          {behind && (
-            <SetupProgress steps={[behind]} label="Background install" />
           )}
-        </BehindSlot>
-      )}
+          {seen.at === "apps-failed" && (
+            <>
+              <button type="button" onClick={() => connectApps(seen.version)}>
+                Connect apps
+              </button>
+              <button
+                type="button"
+                className="quiet"
+                onClick={() => finish(seen.version)}
+              >
+                Continue
+              </button>
+            </>
+          )}
+          {seen.at === "failed" && (
+            <button
+              type="button"
+              onClick={() => (seen.retry === "sign-in" ? signIn() : check())}
+            >
+              Try again
+            </button>
+          )}
+          {refused && (
+            <button type="button" onClick={check}>
+              Try again
+            </button>
+          )}
+        </div>
+        {/* Last, under whatever the step asks: OpenBot is still installing meanwhile. */}
+        {behind !== undefined && (
+          <BehindSlot>
+            {behind && (
+              <SetupProgress steps={[behind]} label="Background install" />
+            )}
+          </BehindSlot>
+        )}
+      </StepFooter>
     </div>
   );
 }
