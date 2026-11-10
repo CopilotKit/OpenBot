@@ -31,7 +31,7 @@ export function onInstalledReleaseSaid({
   const unfinished = update.stoppedDownloading
     ? `Downloading ${update.to} did not finish`
     : `The update to ${update.to} did not finish`;
-  return `The back end is running ${release}. ${unfinished}, so OpenBot tries again the next time it starts.`;
+  return `The backend is running ${release}. ${unfinished}, so OpenBot tries again the next time it starts.`;
 }
 
 export type ReadinessState = "ready" | "blocked" | "unknown";
@@ -74,25 +74,25 @@ function blocked(said: string, action?: ReadinessAction): ReadinessRow {
 }
 
 const unavailableHere =
-  "The back end is not available on this computer or release.";
-const contract = "OpenBot did not understand its back end's reply.";
+  "The backend is not available on this computer or release.";
+const contract = "OpenBot did not understand its backend's reply.";
 const couldNotStart = blocked(
-  "The back end could not start.",
+  "The backend could not start.",
   "restart-intelligence",
 );
-const busy = blocked("The back end is still running another command.", "retry");
+const busy = blocked("The backend is still running another command.", "retry");
 // The three ways a back end command ends with no answer OpenBot can act on, each said apart, so
 // the card is never only "could not start". The CLI's own words go to OpenBot's log, not here.
 const failedPartway = blocked(
-  "The back end stopped with an error partway through. OpenBot's log has the details.",
+  "The backend stopped with an error partway through. OpenBot's log has the details.",
   "restart-intelligence",
 );
 const couldNotRun = blocked(
-  "OpenBot could not run the back end's software.",
+  "OpenBot could not run the backend's software.",
   "restart-intelligence",
 );
 const quitUnexplained = blocked(
-  "The back end's software quit without saying why. OpenBot's log has the details.",
+  "The backend's software quit without saying why. OpenBot's log has the details.",
   "restart-intelligence",
 );
 
@@ -136,13 +136,13 @@ function shortfallSaid(
   );
   // Space was freed, and k3s still says the disk is low for a few minutes after.
   if (shortfall.recovering && short.length === 0) {
-    return `The back end is recovering from low disk space. Wait a few minutes, then ${then}.`;
+    return `The backend is recovering from low disk space. Wait a few minutes, then ${then}.`;
   }
   if (short.length === 0) {
     const fix = shortfall.podman
       ? "Stop your Podman machine, raise them with podman machine set, start it again"
       : "Raise them in Docker Desktop > Settings > Resources";
-    return `${engine} doesn't have enough CPUs, memory or disk space for the back end. ${fix}, then ${then}.`;
+    return `${engine} doesn't have enough CPUs, memory or disk space for the backend. ${fix}, then ${then}.`;
   }
   const fix = shortfall.podman
     ? podmanFix(short, shortfall)
@@ -156,7 +156,7 @@ function shortfallSaid(
       shortfall.diskGb && Number(shortfall.diskGb) < 40
         ? ` OpenBot needs ${needed.disk}.`
         : "";
-    return `The back end's disk is nearly full.${free}${needs40} ${fix}, then ${then}.`;
+    return `The backend's disk is nearly full.${free}${needs40} ${fix}, then ${then}.`;
   }
   // The CLI's own numbers, when its error gave one for every resource that is short.
   const measured: Record<Resource, string | undefined> = {
@@ -175,7 +175,7 @@ function shortfallSaid(
       ? `${engine} is out of disk space. OpenBot needs ${needs.disk}.`
       : `${engine} doesn't have enough ${listed(short.map((resource) => resourceName[resource]))}. OpenBot needs ${listed(short.map((resource) => needs[resource]))}.`;
   const full = shortfall.nearlyFull
-    ? "The back end's disk is nearly full. "
+    ? "The backend's disk is nearly full. "
     : "";
   return `${full}${said} ${fix}, then ${then}.`;
 }
@@ -258,22 +258,22 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
   "update-recovery-required": blocked(unavailableHere),
   // The runtime row carries the Docker detail. Here Intelligence is simply blocked behind it.
   "unsupported-engine": blocked(
-    "The back end cannot run on this computer's current setup.",
+    "The backend cannot run on this computer's current setup.",
   ),
   "docker-unavailable": blocked(
-    "The back end cannot start until the software it runs on is running.",
+    "The backend cannot start until the software it runs on is running.",
     "retry",
   ),
-  "port-unavailable": blocked("A port the back end needs is in use.", "retry"),
+  "port-unavailable": blocked("A port the backend needs is in use.", "retry"),
   "local-command-busy": busy,
   "local-command-failed": failedPartway,
   // OpenBot always approves the connection it asks for, so this is the CLI asking for more.
   "confirmation-required": blocked(
-    "The back end asked for a confirmation OpenBot cannot give.",
+    "The backend asked for a confirmation OpenBot cannot give.",
   ),
   // Reasons only `local login` gives; a status that gave one is still blocked, never ready.
   "dashboard-unavailable": blocked(
-    "The back end is not responding yet.",
+    "The backend is not responding yet.",
     "retry",
   ),
   "browser-open-failed": blocked("Your browser did not open.", "retry"),
@@ -296,7 +296,7 @@ const licenceRows: Record<
   ReadinessRow
 > = {
   expired: blocked("The evaluation licence has expired."),
-  missing: blocked("The back end has no evaluation licence."),
+  missing: blocked("The backend has no evaluation licence."),
   invalid: blocked("The evaluation licence is not valid."),
   "organization-mismatch": blocked(
     "The licence belongs to a different organization.",
@@ -305,10 +305,10 @@ const licenceRows: Record<
 
 const failureRows: Record<LocalFailure, ReadinessRow> = {
   unavailable: blocked(
-    "This version of OpenBot cannot set up its back end on this computer.",
+    "This version of OpenBot cannot set up its backend on this computer.",
   ),
   unverified: blocked(
-    "The back end's software failed its integrity check.",
+    "The backend's software failed its integrity check.",
     "repair",
   ),
   // Cancelled is the person's own call stopping, not another command holding the stack.
@@ -318,7 +318,7 @@ const failureRows: Record<LocalFailure, ReadinessRow> = {
   // the images it fetched are still there for the retry. Seen at exactly 30 minutes on a Windows VM
   // that was installing OpenBot's packages at the same time.
   timeout: blocked(
-    "The back end took too long to start, so OpenBot stopped waiting. What it already downloaded is kept, so trying again picks up from there.",
+    "The backend took too long to start, so OpenBot stopped waiting. What it already downloaded is kept, so trying again picks up from there.",
     "restart-intelligence",
   ),
   "unexpected-exit": quitUnexplained,
@@ -339,12 +339,12 @@ const failureRows: Record<LocalFailure, ReadinessRow> = {
   // the person's call. OpenBot stays in the storage its database is in, and Intelligence runs on
   // the machine's rootful engine.
   "rootless-podman": blocked(
-    "The back end needs Podman in rootful mode. Stop your Podman machine, run podman machine set --rootful, then start it again.",
+    "The backend needs Podman in rootful mode. Stop your Podman machine, run podman machine set --rootful, then start it again.",
     "retry",
   ),
   // No new bytes for three minutes. What arrived is kept, and the next download continues from it.
   "download-stalled": blocked(
-    "The back end download stopped. Retry continues where it left off.",
+    "The backend download stopped. Retry continues where it left off.",
     "retry",
   ),
 };
@@ -356,7 +356,7 @@ function intelligenceRow(
   if (intelligence === null) {
     return {
       state: "unknown",
-      said: "The back end has not been checked yet.",
+      said: "The backend has not been checked yet.",
     };
   }
   if (typeof intelligence === "string") return failureRows[intelligence];
@@ -372,8 +372,8 @@ function intelligenceRow(
     return {
       state: "ready",
       said: licenceExpiresSoon(intelligence, now)
-        ? "The back end is ready. Its evaluation licence expires within 5 days."
-        : "The back end is ready.",
+        ? "The backend is ready. Its evaluation licence expires within 5 days."
+        : "The backend is ready.",
     };
   }
   if (intelligence.reason === "resources-short" && intelligence.shortfall) {
@@ -384,10 +384,10 @@ function intelligenceRow(
   const licence = intelligence.licence;
   if (licence !== "valid" && licence !== "unknown") return licenceRows[licence];
   if (intelligence.readiness === "starting") {
-    return { state: "unknown", said: "The back end is starting." };
+    return { state: "unknown", said: "The backend is starting." };
   }
   if (intelligence.readiness === "stopped") {
-    return blocked("The back end is stopped.", "start-intelligence");
+    return blocked("The backend is stopped.", "start-intelligence");
   }
   if (intelligence.readiness === "degraded") {
     // OpenBot's check of a back end that runs but does not answer: a full disk, or one recovering.
@@ -398,13 +398,13 @@ function intelligenceRow(
       );
     }
     return blocked(
-      "The back end is running but not healthy.",
+      "The backend is running but not healthy.",
       "restart-intelligence",
     );
   }
   return {
     state: "unknown",
-    said: "The back end started. Its licence and readiness are not reported yet.",
+    said: "The backend started. Its licence and readiness are not reported yet.",
   };
 }
 
@@ -441,10 +441,10 @@ export function localReadiness(input: ReadinessInput): Readiness {
     intelligence: intelligenceRow(input.intelligence, input.now ?? Date.now()),
     openBot:
       input.openBot === "connected"
-        ? { state: "ready", said: "OpenBot is connected to its back end." }
+        ? { state: "ready", said: "OpenBot is connected to its backend." }
         : input.openBot === "not-connected"
           ? blocked(
-              "OpenBot is not connected to its back end.",
+              "OpenBot is not connected to its backend.",
               "restart-openbot",
             )
           : {

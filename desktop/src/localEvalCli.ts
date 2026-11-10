@@ -303,7 +303,7 @@ export async function localEvalDownload(
  * them (`local_update::UpdateStep`), in the CLI's own words for them.
  */
 const UPDATE_STEPS = {
-  "update-quiesce": "Stopping the back end's services",
+  "update-quiesce": "Stopping the backend's services",
   "dependencies-install": "Installing databases and storage",
   "dependencies-wait": "Waiting for databases and storage",
   jobs: "Running the database jobs",
@@ -574,7 +574,7 @@ export function licenceExpiresSoon(
 }
 
 /** How main.rs starts an Intelligence stop failure (`INTELLIGENCE_STOP_FAILED`). */
-export const intelligenceStopFailed = "Back end stop failed: ";
+export const intelligenceStopFailed = "Backend stop failed: ";
 
 /**
  * Splits a Stop failure into OpenBot's own lines and the local Intelligence stack's. OpenBot has
@@ -600,7 +600,7 @@ export function splitStopFailure(thrown: unknown): {
 
 export function intelligenceStopProblem(line: string): Problem {
   return {
-    said: "OpenBot stopped, but could not stop its back end.",
+    said: "OpenBot stopped, but could not stop its backend.",
     detail: line,
   };
 }

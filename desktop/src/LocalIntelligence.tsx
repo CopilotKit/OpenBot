@@ -70,7 +70,7 @@ const POLL_DELAYS: number[] = [2_000, 4_000, 8_000, ...Array(12).fill(15_000)];
 const DOWNLOAD_EVERY_MS = 1_000;
 
 const unreadable: Problem = {
-  said: "OpenBot did not understand its back end's answer.",
+  said: "OpenBot did not understand its backend's answer.",
 };
 
 type Phase = "setup" | "connect" | "wait" | "start";
@@ -78,7 +78,7 @@ type Phase = "setup" | "connect" | "wait" | "start";
 const PHASES: [Phase, string][] = [
   ["setup", "Setting up OpenBot"],
   ["connect", "Connecting OpenBot"],
-  ["wait", "Waiting for the back end"],
+  ["wait", "Waiting for the backend"],
   ["start", "Starting OpenBot"],
 ];
 
@@ -95,7 +95,7 @@ function said(intelligence: LocalReport | LocalFailure): string {
 function connectionSaid(answered: LocalConnection): string {
   // A conflict has no reason of its own, so it is said in this window's words.
   if (answered.conflicted) {
-    return "Settings the back end wrote for OpenBot were changed since. OpenBot did not connect.";
+    return "Settings the backend wrote for OpenBot were changed since. OpenBot did not connect.";
   }
   return said({
     outcome: answered.outcome,
@@ -153,7 +153,7 @@ const idle: State = {
 };
 
 /** The row an update that failed is said on, under the back end's. */
-const UPDATING = "Updating the back end";
+const UPDATING = "Updating the backend";
 
 /**
  * An update that failed, and where it stopped once the CLI's record says (`failedStep`). Its data
@@ -164,7 +164,7 @@ function updateFailedSaid(to: string, step: string | null): string {
   const where = step
     ? ` It stopped at "${updateStepSaid(step)}" (${step}).`
     : "";
-  return `The back end could not be updated to ${to}.${where} Your data is kept, and OpenBot tries again the next time it starts.`;
+  return `The backend could not be updated to ${to}.${where} Your data is kept, and OpenBot tries again the next time it starts.`;
 }
 
 export type LocalSequence = State & {
@@ -348,14 +348,14 @@ export function useLocalSequence({
     from: string,
     token: number,
   ): Promise<boolean> {
-    const updating = `Updating the back end to ${to}. Its data stays.`;
+    const updating = `Updating the backend to ${to}. Its data stays.`;
     update({ detail: updating, download: null });
     const started = runLocalEval("update", id);
     attempt.current = started.attempt;
     const unfollow = followDownload(
       started.attempt,
       token,
-      "Downloading the back end update",
+      "Downloading the backend update",
       updating,
     );
     const unfollowSteps = followUpdateSteps(started.attempt, token, updating);
@@ -380,7 +380,7 @@ export function useLocalSequence({
       updateFailed: updated
         ? null
         : stalled
-          ? `The back end update stopped downloading, so the back end stays on ${from}. OpenBot continues the download where it left off the next time it starts.`
+          ? `The backend update stopped downloading, so the backend stays on ${from}. OpenBot continues the download where it left off the next time it starts.`
           : updateFailedSaid(to, null),
     });
     return true;
@@ -407,7 +407,7 @@ export function useLocalSequence({
             if (!current() || !found || now.current.download) return;
             const job = found.job ? ` (${found.job})` : "";
             const failed = found.failedJob
-              ? ` The back end's job ${found.failedJob} failed, so this update will stop. The back end's tool waits up to 10 minutes for it first. Your data is kept.`
+              ? ` The backend's job ${found.failedJob} failed, so this update will stop. The backend's tool waits up to 10 minutes for it first. Your data is kept.`
               : "";
             update({
               detail: `${updating} ${found.said}${job}, ${formatElapsed(found.seconds)}.${failed}`,
@@ -541,7 +541,7 @@ export function useLocalSequence({
       if (tries >= pollDelays.length) {
         update({
           blocked: {
-            said: "The back end did not report ready in time.",
+            said: "The backend did not report ready in time.",
             reason: null,
           },
         });
@@ -609,7 +609,7 @@ export function useLocalSequence({
         const unfollow = followDownload(
           started.attempt,
           token,
-          "Downloading the back end",
+          "Downloading the backend",
           null,
         );
         const report = await call(
@@ -782,7 +782,7 @@ export function LocalIntelligence({
   const { at, running, stopped, problem } = sequence;
 
   return (
-    <section aria-label="Back end on this computer">
+    <section aria-label="Backend on this computer">
       <SetupProgress steps={sequence.steps} />
       {handOff && <StatusLine>{handOff}</StatusLine>}
       <LocalNeeds sequence={sequence} />
@@ -821,11 +821,11 @@ export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
     if (!sequence.running || !sequence.download) return null;
     return (
       <SetupProgress
-        label="Back end download"
+        label="Backend download"
         showElapsed={false}
         steps={[
           {
-            step: "Downloading the back end",
+            step: "Downloading the backend",
             ok: true,
             running: true,
             detail: "",
@@ -842,14 +842,14 @@ export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
     <section
       className={`local-alert${needs ? " needs" : ""}`}
       role="alert"
-      aria-label={openBot ? "OpenBot" : "Back end"}
+      aria-label={openBot ? "OpenBot" : "Backend"}
     >
       <h2>
         {needs
           ? "Setup needs you"
           : openBot
             ? "OpenBot did not start"
-            : "Back end setup stopped"}
+            : "Backend setup stopped"}
       </h2>
       {needs ? (
         <LocalNeeds sequence={sequence} />
@@ -857,7 +857,7 @@ export function LocalStatus({ sequence }: { sequence: LocalSequence }) {
         <>
           <p>
             {openBot
-              ? "The back end is ready. Retry starts OpenBot again."
+              ? "The backend is ready. Retry starts OpenBot again."
               : (sequence.blocked?.said ?? sequence.problem?.said)}
           </p>
           <div className="row">
@@ -958,7 +958,7 @@ function SignInToCopilotKit({ onSignedIn }: { onSignedIn: () => void }) {
   return (
     <div className="local-needs">
       <CopilotKitLogo />
-      <p>OpenBot's back end needs your CopilotKit account.</p>
+      <p>OpenBot's backend needs your CopilotKit account.</p>
       {waiting ? (
         <CopilotKitSignInWait
           attempt={waiting}
@@ -1021,7 +1021,7 @@ function AcceptTerms({
     return (
       <div className="local-needs">
         <p className="footnote">
-          The back end did not take the acceptance from OpenBot. If a coding
+          The backend did not take the acceptance from OpenBot. If a coding
           agent or a script opened OpenBot, quit it, open it yourself, and
           accept again.
         </p>

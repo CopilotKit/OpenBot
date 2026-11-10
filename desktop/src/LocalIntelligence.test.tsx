@@ -184,7 +184,7 @@ function row(screen: ReturnType<typeof view>, name: string) {
 
 const SETUP = "Setting up OpenBot";
 const CONNECT = "Connecting OpenBot";
-const WAIT = "Waiting for the back end";
+const WAIT = "Waiting for the backend";
 const START = "Starting OpenBot";
 
 test("the whole sequence runs by itself: set up, connect, wait for ready and valid, start", async () => {
@@ -247,16 +247,14 @@ test("a first setup shows its download on its row and on the screen in front of 
     { timeout: 3_000 },
   );
   const setting = within(row(screen, SETUP));
-  expect(setting.getByText("Downloading the back end.")).toBeTruthy();
+  expect(setting.getByText("Downloading the backend.")).toBeTruthy();
   const bar = setting.getByRole("progressbar", { name: "Download progress" });
   expect(bar.getAttribute("value")).toBe("245000000");
   expect(bar.getAttribute("max")).toBe("690000000");
   // The screen in front (Install, or Connect your AI) shows the same download while it runs.
-  const behind = within(
-    screen.getByRole("list", { name: "Back end download" }),
-  );
+  const behind = within(screen.getByRole("list", { name: "Backend download" }));
   expect(
-    behind.getByRole("listitem", { name: "Downloading the back end" })
+    behind.getByRole("listitem", { name: "Downloading the backend" })
       .textContent,
   ).toContain("245.0 MB of 690.0 MB");
   expect(
@@ -278,7 +276,7 @@ test("a first setup shows its download on its row and on the screen in front of 
   await waitFor(() => expect(screen.queryByRole("progressbar")).toBeNull(), {
     timeout: 3_000,
   });
-  expect(screen.queryByRole("list", { name: "Back end download" })).toBeNull();
+  expect(screen.queryByRole("list", { name: "Backend download" })).toBeNull();
 });
 
 test("a recorded, connected stack skips straight to waiting", async () => {
@@ -303,7 +301,7 @@ function onRelease(installedRelease: string, updateTo: string | null) {
   return { ...base, stack: base.stack && { ...base.stack, installedRelease } };
 }
 
-test("a back end an older app installed is updated to this app's release before OpenBot starts on it", async () => {
+test("a backend an older app installed is updated to this app's release before OpenBot starts on it", async () => {
   const updating = deferred<LocalReport>();
   let calls = 0;
   invokeHandler = async (command, args) => {
@@ -327,7 +325,7 @@ test("a back end an older app installed is updated to this app's release before 
   // One plain line while it runs, on the back end's own row.
   await waitFor(() =>
     expect(row(screen, WAIT).textContent).toContain(
-      "Updating the back end to 0.16.0-rc.9. Its data stays.",
+      "Updating the backend to 0.16.0-rc.9. Its data stays.",
     ),
   );
   expect(started).toEqual([]);
@@ -344,7 +342,7 @@ test("a back end an older app installed is updated to this app's release before 
     )?.args,
   ).toMatchObject({ stack: "local-abc123" });
   expect(
-    screen.queryByRole("listitem", { name: "Updating the back end" }),
+    screen.queryByRole("listitem", { name: "Updating the backend" }),
   ).toBeNull();
 });
 
@@ -353,7 +351,7 @@ test("a back end an older app installed is updated to this app's release before 
  * stack stopped. Updated while stopped, the CLI waited three minutes for services that were not
  * running and failed. It is started first, as any stopped stack is, and updated once it is up.
  */
-test("a stopped back end an older app installed is started first, then updated", async () => {
+test("a stopped backend an older app installed is started first, then updated", async () => {
   const stopped = {
     ...onRelease("0.16.0-rc.8", "0.16.0-rc.9"),
     readiness: "stopped" as const,
@@ -389,7 +387,7 @@ test("a stopped back end an older app installed is started first, then updated",
   ]);
 });
 
-test("a back end already on this app's release is not updated", async () => {
+test("a backend already on this app's release is not updated", async () => {
   invokeHandler = answers({
     run_local_eval: [onRelease("0.16.0-rc.9", null)],
   });
@@ -406,7 +404,7 @@ test("a back end already on this app's release is not updated", async () => {
   expect(commands()).toEqual(["run_local_eval:status"]);
 });
 
-test("an update that fails says so and starts OpenBot on the release the back end still has", async () => {
+test("an update that fails says so and starts OpenBot on the release the backend still has", async () => {
   for (const failed of [
     report({
       outcome: "failed",
@@ -443,8 +441,8 @@ test("an update that fails says so and starts OpenBot on the release the back en
       "run_local_eval:update",
       "run_local_eval:status",
     ]);
-    expect(row(screen, "Updating the back end").textContent).toContain(
-      "The back end could not be updated to 0.16.0-rc.9. Your data is kept, and OpenBot tries again the next time it starts.",
+    expect(row(screen, "Updating the backend").textContent).toContain(
+      "The backend could not be updated to 0.16.0-rc.9. Your data is kept, and OpenBot tries again the next time it starts.",
     );
     expect(calls).toBe(2);
     cleanup();
@@ -491,8 +489,8 @@ test("an update that fails says the step it stopped at and that the data is kept
   };
   const screen = view({ stack: "local-abc123", connected: true });
   await waitFor(() =>
-    expect(row(screen, "Updating the back end").textContent).toContain(
-      `The back end could not be updated to 0.16.0-rc.10. It stopped at "Stopping the back end's services" (update-quiesce). Your data is kept, and OpenBot tries again the next time it starts.`,
+    expect(row(screen, "Updating the backend").textContent).toContain(
+      `The backend could not be updated to 0.16.0-rc.10. It stopped at "Stopping the backend's services" (update-quiesce). Your data is kept, and OpenBot tries again the next time it starts.`,
     ),
   );
 });
@@ -518,14 +516,14 @@ test("a running update says which step it is waiting on, and for how long", asyn
   const screen = view({ stack: "local-abc123", connected: true });
   await waitFor(() =>
     expect(row(screen, WAIT).textContent).toContain(
-      "Updating the back end to 0.16.0-rc.10. Its data stays.",
+      "Updating the backend to 0.16.0-rc.10. Its data stays.",
     ),
   );
   updateStep = { step: "dependencies-wait", seconds: 130 };
   await waitFor(
     () =>
       expect(row(screen, WAIT).textContent).toContain(
-        "Updating the back end to 0.16.0-rc.10. Its data stays. Waiting for databases and storage, 2m 10s.",
+        "Updating the backend to 0.16.0-rc.10. Its data stays. Waiting for databases and storage, 2m 10s.",
       ),
     { timeout: 3_000 },
   );
@@ -551,7 +549,7 @@ test("a running update says which step it is waiting on, and for how long", asyn
   await waitFor(
     () =>
       expect(row(screen, WAIT).textContent).toContain(
-        "Running the database jobs, 40s. The back end's job cpki-bootstrap-ef56ab78 failed, so this update will stop. The back end's tool waits up to 10 minutes for it first. Your data is kept.",
+        "Running the database jobs, 40s. The backend's job cpki-bootstrap-ef56ab78 failed, so this update will stop. The backend's tool waits up to 10 minutes for it first. Your data is kept.",
       ),
     { timeout: 3_000 },
   );
@@ -621,7 +619,7 @@ test("after Quit, the unfinished update starts the stack, and the release it had
         apiUrl: "http://localhost:18082",
         gatewayWsUrl: "ws://localhost:14401",
         notice:
-          "The back end is running 0.16.0-rc.5. Downloading 0.16.0-rc.9 did not finish, so OpenBot tries again the next time it starts.",
+          "The backend is running 0.16.0-rc.5. Downloading 0.16.0-rc.9 did not finish, so OpenBot tries again the next time it starts.",
       },
     ]),
   );
@@ -671,7 +669,7 @@ test("a retried update shows its download, and a stall keeps the line that it di
         apiUrl: "http://localhost:18082",
         gatewayWsUrl: "ws://localhost:14401",
         notice:
-          "The back end is running 0.16.0-rc.5. Downloading 0.16.0-rc.9 did not finish, so OpenBot tries again the next time it starts.",
+          "The backend is running 0.16.0-rc.5. Downloading 0.16.0-rc.9 did not finish, so OpenBot tries again the next time it starts.",
       },
     ]),
   );
@@ -707,7 +705,7 @@ test("an update says how much of its download has arrived, so a slow line reads 
   });
   await waitFor(() =>
     expect(row(screen, WAIT).textContent).toContain(
-      "Updating the back end to 0.16.0-rc.9. Its data stays.",
+      "Updating the backend to 0.16.0-rc.9. Its data stays.",
     ),
   );
   arrived = { done: 48_200_000, total: 147_000_000 };
@@ -718,7 +716,7 @@ test("an update says how much of its download has arrived, so a slow line reads 
   );
   // The same bar Install shows, driven by the bytes, out of the whole download.
   const waiting = within(row(screen, WAIT));
-  expect(waiting.getByText("Downloading the back end update.")).toBeTruthy();
+  expect(waiting.getByText("Downloading the backend update.")).toBeTruthy();
   const bar = waiting.getByRole("progressbar", { name: "Download progress" });
   expect(bar.getAttribute("value")).toBe("48200000");
   expect(bar.getAttribute("max")).toBe("147000000");
@@ -727,7 +725,7 @@ test("an update says how much of its download has arrived, so a slow line reads 
   await waitFor(
     () =>
       expect(row(screen, WAIT).textContent).toContain(
-        "Updating the back end to 0.16.0-rc.9. Its data stays.",
+        "Updating the backend to 0.16.0-rc.9. Its data stays.",
       ),
     { timeout: 3_000 },
   );
@@ -766,8 +764,8 @@ test("an update whose download stopped says so, and that the next start continue
     },
   });
   await waitFor(() => expect(started).toEqual([startableUrls]));
-  expect(row(screen, "Updating the back end").textContent).toContain(
-    "The back end update stopped downloading, so the back end stays on 0.16.0-rc.5. OpenBot continues the download where it left off the next time it starts.",
+  expect(row(screen, "Updating the backend").textContent).toContain(
+    "The backend update stopped downloading, so the backend stays on 0.16.0-rc.5. OpenBot continues the download where it left off the next time it starts.",
   );
   expect(calls).toBe(2);
 });
@@ -794,7 +792,7 @@ test("a setup whose download stopped offers Retry, which continues where it left
   });
   await waitFor(() =>
     expect(row(screen, "Setting up OpenBot").textContent).toContain(
-      "The back end download stopped. Retry continues where it left off.",
+      "The backend download stopped. Retry continues where it left off.",
     ),
   );
   await userEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -1007,7 +1005,7 @@ test("an acceptance setup does not take is said once, not offered again", async 
   });
   const screen = view();
   await userEvent.click(await screen.findByRole("button", { name: "Accept" }));
-  await screen.findByText(/The back end did not take the acceptance/);
+  await screen.findByText(/The backend did not take the acceptance/);
   expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
   expect(
     invokeCalls.filter((call) => call.command === "set_up_local_eval"),
@@ -1038,11 +1036,11 @@ test("a blocked or conflicted connection stops at its row, and Retry resumes at 
   for (const [answer, said] of [
     [
       connection({ outcome: "blocked", reason: "confirmation-required" }),
-      "The back end asked for a confirmation OpenBot cannot give.",
+      "The backend asked for a confirmation OpenBot cannot give.",
     ],
     [
       connection({ outcome: "blocked", conflicted: true }),
-      "Settings the back end wrote for OpenBot were changed since. OpenBot did not connect.",
+      "Settings the backend wrote for OpenBot were changed since. OpenBot did not connect.",
     ],
   ] as const) {
     invokeHandler = answers({
@@ -1076,7 +1074,7 @@ test("readiness or a licence that is not exactly ready and valid never starts", 
   for (const [answer, said] of [
     [
       report(),
-      "The back end started. Its licence and readiness are not reported yet.",
+      "The backend started. Its licence and readiness are not reported yet.",
     ],
     [
       report({ readiness: "ready", licence: "expired" }),
@@ -1084,7 +1082,7 @@ test("readiness or a licence that is not exactly ready and valid never starts", 
     ],
     [
       report({ readiness: "degraded", licence: "valid" }),
-      "The back end is running but not healthy.",
+      "The backend is running but not healthy.",
     ],
   ] as const) {
     invokeHandler = answers({ run_local_eval: [answer] });
@@ -1121,7 +1119,7 @@ test("polling is bounded, and says so when Intelligence never became ready", asy
     connected: true,
     pollDelays: [0, 0],
   });
-  await screen.findByText("The back end did not report ready in time.");
+  await screen.findByText("The backend did not report ready in time.");
   expect(statusCalls()).toHaveLength(3);
   expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
 });
@@ -1265,7 +1263,7 @@ test("a relaunch whose start fails on a nearly full disk names the disk on its r
   await screen.findByRole("button", { name: "Retry" });
   const waiting = row(screen, WAIT).textContent;
   expect(waiting).toContain(
-    "The back end's disk is nearly full. Podman has 30.5 GB free of 1006.8 GB. OpenBot needs 40 GB. Free space on the drive that holds OpenBot's engine (C:), then Retry.",
+    "The backend's disk is nearly full. Podman has 30.5 GB free of 1006.8 GB. OpenBot needs 40 GB. Free space on the drive that holds OpenBot's engine (C:), then Retry.",
   );
   expect(waiting).not.toContain("partway through");
   expect(commands()).toEqual(["run_local_eval:status", "run_local_eval:start"]);
@@ -1276,7 +1274,7 @@ test("a relaunch whose start fails on a nearly full disk names the disk on its r
  * running, which says `degraded`, and the row said only "The back end is running but not healthy."
  * while k3s still reported low disk. `local_eval::checked_when_unhealthy` now says why.
  */
-test("a back end running but not healthy after low disk says it is recovering, and Retry asks again", async () => {
+test("a backend running but not healthy after low disk says it is recovering, and Retry asks again", async () => {
   const recovering = report({
     readiness: "degraded",
     licence: "valid",
@@ -1303,7 +1301,7 @@ test("a back end running but not healthy after low disk says it is recovering, a
   const retry = await screen.findByRole("button", { name: "Retry" });
   const waiting = row(screen, WAIT).textContent;
   expect(waiting).toContain(
-    "The back end is recovering from low disk space. Wait a few minutes, then Retry.",
+    "The backend is recovering from low disk space. Wait a few minutes, then Retry.",
   );
   expect(waiting).not.toContain("running but not healthy");
   await userEvent.click(retry);
@@ -1344,8 +1342,8 @@ test("a start that fails says OpenBot did not start, not that Intelligence stopp
   });
   const card = await screen.findByRole("alert", { name: "OpenBot" });
   expect(card.textContent).toContain("OpenBot did not start");
-  expect(card.textContent).toContain("The back end is ready");
-  expect(card.textContent).not.toContain("Back end setup stopped");
+  expect(card.textContent).toContain("The backend is ready");
+  expect(card.textContent).not.toContain("Backend setup stopped");
   expect(within(card).getByRole("button", { name: "Retry" })).toBeTruthy();
 });
 
@@ -1419,7 +1417,7 @@ test("prepare runs to ready and waits for the go-ahead, which starts at once", a
   await waitFor(() =>
     expect(row(screen, WAIT).textContent).toContain("Complete"),
   );
-  expect(screen.queryByRole("alert", { name: "Back end" })).toBeNull();
+  expect(screen.queryByRole("alert", { name: "Backend" })).toBeNull();
   expect(screen.queryByRole("listitem", { name: START })).toBeNull();
   expect(started).toEqual([]);
   // No Start OpenBot once it has run: the go-ahead comes from the screen in front.
@@ -1437,7 +1435,7 @@ test("the screen in front hears nothing while Intelligence works, and a stop int
   await waitFor(() =>
     expect(row(working, SETUP).textContent).toContain("In progress"),
   );
-  expect(working.queryByRole("alert", { name: "Back end" })).toBeNull();
+  expect(working.queryByRole("alert", { name: "Backend" })).toBeNull();
   cleanup();
   invokeCalls = [];
 
@@ -1448,9 +1446,9 @@ test("the screen in front hears nothing while Intelligence works, and a stop int
     cancel_local_eval: [null],
   });
   const failed = view({ prepare: true });
-  const stopped = await failed.findByRole("alert", { name: "Back end" });
-  expect(stopped.textContent).toContain("Back end setup stopped");
-  expect(stopped.textContent).toContain("A port the back end needs is in use.");
+  const stopped = await failed.findByRole("alert", { name: "Backend" });
+  expect(stopped.textContent).toContain("Backend setup stopped");
+  expect(stopped.textContent).toContain("A port the backend needs is in use.");
   expect(within(stopped).getByRole("button", { name: "Retry" })).toBeTruthy();
   // The logs to paste into an AI assistant, beside the card that says it stopped.
   expect(
@@ -1468,7 +1466,7 @@ test("the screen in front hears nothing while Intelligence works, and a stop int
     cancel_local_eval: [null],
   });
   const waiting = view({ prepare: true });
-  const needs = await waiting.findByRole("alert", { name: "Back end" });
+  const needs = await waiting.findByRole("alert", { name: "Backend" });
   expect(needs.textContent).toContain("Setup needs you");
   expect(
     await within(needs).findByRole("button", { name: "Accept" }),
@@ -1489,7 +1487,7 @@ test("failures arrive as categories, and a stack that could not be recorded as a
   const screen = view();
   await waitFor(() =>
     expect(row(screen, SETUP).textContent).toContain(
-      "The back end took too long to start",
+      "The backend took too long to start",
     ),
   );
   invokeHandler = async () => {

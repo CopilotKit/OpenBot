@@ -44,8 +44,8 @@ const SIGN_IN_DID_NOT_FINISH = "Sign-in didn’t finish. Try again.";
 const SETTING_UP_ENGINE =
   "You're signed in. OpenBot is setting up the software it runs on. The license agreement comes next.";
 const ENGINE_REFUSED =
-  "OpenBot's back end can't run on the container engine this computer uses.";
-const BLOCKED = "OpenBot's back end can't run on this computer as it's set up.";
+  "OpenBot's backend can't run on the container engine this computer uses.";
+const BLOCKED = "OpenBot's backend can't run on this computer as it's set up.";
 
 /**
  * How long the account check waits for a container engine, and how often it asks again. A new

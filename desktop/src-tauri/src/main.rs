@@ -29,7 +29,7 @@ const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
 /// Kept apart from the quit cleanup notice, whose presence alone means OpenBot needs recovery.
 const LOCAL_EVAL_STOP_NOTICE_FILE: &str = ".openbot-local-eval-stop-notice";
 /// How an Intelligence failure starts, so Stop and Quit can tell it from OpenBot's own.
-const INTELLIGENCE_STOP_FAILED: &str = "Back end stop failed: ";
+const INTELLIGENCE_STOP_FAILED: &str = "Backend stop failed: ";
 const QUIT_MENU_ACCELERATOR: &str = "CmdOrCtrl+KeyQ";
 const QUIT_CLEANUP_NOTICE_LIMIT: usize = 16 * 1024;
 use serde::{Deserialize, Serialize};
@@ -2431,7 +2431,7 @@ fn intelligence_key_for_start(
     })?;
     if key.trim().is_empty() {
         return Err(Problem::plain(
-            "OpenBot's connection to its back end on this computer is no longer available. Set up the back end again.",
+            "OpenBot's connection to its backend on this computer is no longer available. Set up the backend again.",
         )
         .connection(openbot_desktop_lib::problem::Connection::Intelligence));
     }
@@ -3530,7 +3530,7 @@ impl QuitStep {
     fn running_detail(self) -> &'static str {
         match self {
             QuitStep::FinishUpdate => {
-                "Finishing the back end update, so the back end is not left half updated."
+                "Finishing the backend update, so the backend is not left half updated."
             }
             QuitStep::OpenBot | QuitStep::Intelligence => "",
         }
@@ -3806,7 +3806,7 @@ where
         return Ok(());
     };
     let not_stopped =
-        |why: String| format!("the back end's command-line tool did not stop the back end ({why})");
+        |why: String| format!("the backend's command-line tool did not stop the backend ({why})");
     match stop(&state.stack_id()) {
         Ok(report) => match report.outcome {
             local_eval::Outcome::Completed => Ok(()),
@@ -3816,7 +3816,7 @@ where
             })),
         },
         Err(local_eval::Failure::Unavailable) => {
-            Err("this build has no command-line tool to stop the back end OpenBot created".into())
+            Err("this build has no command-line tool to stop the backend OpenBot created".into())
         }
         Err(failure) => Err(not_stopped(wire_name(failure))),
     }
@@ -4094,7 +4094,7 @@ fn write_quit_cleanup_notice(root: &Path, lines: &[String]) -> Result<(), String
         .and_then(|()| std::fs::write(&path, br#"{"version":1}"#))
         .map_err(|error| {
             format!(
-                "{}: could not write the back end shutdown notice: {error}",
+                "{}: could not write the backend shutdown notice: {error}",
                 path.display()
             )
         })
@@ -4110,7 +4110,7 @@ notice records only that it happened.
 fn take_local_eval_stop_notice(root: &Path) -> Option<Problem> {
     std::fs::remove_file(root.join(LOCAL_EVAL_STOP_NOTICE_FILE)).ok()?;
     Some(Problem::with(
-        "When OpenBot last quit, it could not stop its back end.",
+        "When OpenBot last quit, it could not stop its backend.",
         "It may still be running. Stopping OpenBot again asks it to stop.",
     ))
 }
@@ -7080,7 +7080,7 @@ where
 {
     let unconnected = |said: &str| ConnectError::Unconnected(Problem::plain(said));
     let recorded = local_eval_state::read(root, None)
-        .ok_or_else(|| unconnected("Set up the back end before connecting OpenBot to it."))?;
+        .ok_or_else(|| unconnected("Set up the backend before connecting OpenBot to it."))?;
     let connection = connect(root).map_err(ConnectError::Failure)?;
     if connection.outcome != local_eval::Outcome::Completed || connection.conflicted {
         return Ok(connection);
@@ -7091,7 +7091,7 @@ where
         .filter(|stack| stack.id == recorded.stack)
     else {
         return Err(unconnected(
-            "A different back end was connected. OpenBot did not use it.",
+            "A different backend was connected. OpenBot did not use it.",
         ));
     };
     let env_file = root.join(".env");
@@ -7105,7 +7105,7 @@ where
     )
     .map_err(|error| {
         ConnectError::Unconnected(Problem::with(
-            "OpenBot could not read the connection settings for its back end.",
+            "OpenBot could not read the connection settings for its backend.",
             format!("{}: {}", env_file.display(), error.kind()),
         ))
     })?;
@@ -7132,7 +7132,7 @@ where
             != Some(reported)
     }) {
         return Err(unconnected(
-            "The connection settings do not match the back end that was set up. OpenBot did not use them.",
+            "The connection settings do not match the backend that was set up. OpenBot did not use them.",
         ));
     }
     match written
@@ -7149,7 +7149,7 @@ where
             let purge = [(LOCAL_EVAL_CONNECTED_KEY.to_owned(), String::new())].into();
             openbot_env::write(&env_file, &settings, &purge).map_err(|error| {
                 ConnectError::Unconnected(Problem::with(
-                    "OpenBot kept the back end's key but could not remove it from its settings file.",
+                    "OpenBot kept the backend's key but could not remove it from its settings file.",
                     format!("{}: {}", env_file.display(), error.kind()),
                 ))
             })?;
@@ -7161,7 +7161,7 @@ where
                     .is_some_and(|key| !key.trim().is_empty());
             if !kept {
                 return Err(unconnected(
-                    "The back end connected, but OpenBot has no key for it.",
+                    "The backend connected, but OpenBot has no key for it.",
                 ));
             }
         }
@@ -8031,7 +8031,7 @@ fn settle_menu_stop(shell: &Shell, fallback_root: &Path, stopped: Stopped) -> Op
         )
     } else {
         Problem::with(
-            "OpenBot stopped, but could not stop its back end.",
+            "OpenBot stopped, but could not stop its backend.",
             stopped.intelligence?,
         )
     };
@@ -12989,13 +12989,13 @@ mod tests {
             stopped,
             Stopped {
                 openbot: vec!["Compose down failed: compose refused".into()],
-                intelligence: Some("Back end stop failed: the CLI timed out".into()),
+                intelligence: Some("Backend stop failed: the CLI timed out".into()),
             }
         );
         assert_eq!(
             stopped.into_result(),
             Err("Compose down failed: compose refused\n\
-                 Back end stop failed: the CLI timed out"
+                 Backend stop failed: the CLI timed out"
                 .into())
         );
         let _ = std::fs::remove_dir_all(active);
@@ -13043,7 +13043,7 @@ mod tests {
             failures,
             Stopped {
                 openbot: vec!["Compose down failed: compose down refused".into()],
-                intelligence: Some("Back end stop failed: the CLI timed out".into()),
+                intelligence: Some("Backend stop failed: the CLI timed out".into()),
             }
         );
         let _ = std::fs::remove_dir_all(active);
@@ -13139,7 +13139,7 @@ mod tests {
             stopped,
             Stopped {
                 openbot: vec!["Compose down failed: compose down refused".into()],
-                intelligence: Some("Back end stop failed: the CLI timed out".into()),
+                intelligence: Some("Backend stop failed: the CLI timed out".into()),
             }
         );
         report_exit_cleanup_failures(stopped.lines(), |lines| {
@@ -13349,7 +13349,7 @@ mod tests {
         assert!(stopped.openbot.is_empty(), "{stopped:?}");
         assert_eq!(
             stopped.into_result(),
-            Err("Back end stop failed: the CLI timed out".into()),
+            Err("Backend stop failed: the CLI timed out".into()),
             "an Intelligence failure is not a silent success"
         );
         assert!(!recovery_required(&shell, &active));
@@ -13367,10 +13367,7 @@ mod tests {
             |_| Ok(()),
             |_| Err("the CLI timed out".to_string()),
         );
-        assert_eq!(
-            failures.lines(),
-            ["Back end stop failed: the CLI timed out"]
-        );
+        assert_eq!(failures.lines(), ["Backend stop failed: the CLI timed out"]);
         assert!(!recovery_required(&shell, &active));
         let _ = std::fs::remove_dir_all(active);
     }
@@ -13438,22 +13435,22 @@ mod tests {
 
         assert_eq!(
             failed(Err(local_eval::Failure::Unavailable)),
-            "this build has no command-line tool to stop the back end OpenBot created"
+            "this build has no command-line tool to stop the backend OpenBot created"
         );
         assert_eq!(
             failed(Err(local_eval::Failure::Timeout)),
-            "the back end's command-line tool did not stop the back end (timeout)"
+            "the backend's command-line tool did not stop the backend (timeout)"
         );
         assert_eq!(
             failed(Ok(local_eval_report(
                 local_eval::Outcome::Blocked,
                 Some(local_eval::Reason::LocalCommandBusy)
             ))),
-            "the back end's command-line tool did not stop the back end (blocked: local-command-busy)"
+            "the backend's command-line tool did not stop the backend (blocked: local-command-busy)"
         );
         assert_eq!(
             failed(Ok(local_eval_report(local_eval::Outcome::Failed, None))),
-            "the back end's command-line tool did not stop the back end (failed)"
+            "the backend's command-line tool did not stop the backend (failed)"
         );
         let _ = std::fs::remove_dir_all(root);
     }
@@ -13479,7 +13476,7 @@ mod tests {
             failures.lines(),
             [
                 "Compose down failed: compose down refused",
-                "Back end stop failed: this build has no command-line tool to stop the back end \
+                "Backend stop failed: this build has no command-line tool to stop the backend \
                  OpenBot created"
             ]
         );
@@ -13487,7 +13484,7 @@ mod tests {
     }
 
     const NO_CLI_LINE: &str =
-        "Back end stop failed: this build has no command-line tool to stop the back end OpenBot created";
+        "Backend stop failed: this build has no command-line tool to stop the backend OpenBot created";
 
     #[test]
     fn an_intelligence_failure_on_quit_is_shown_next_launch_without_recovery() {
@@ -13518,7 +13515,7 @@ mod tests {
         // Said in the window's words: the part of OpenBot that did not stop, not its product name.
         assert_eq!(
             problem.said,
-            "When OpenBot last quit, it could not stop its back end."
+            "When OpenBot last quit, it could not stop its backend."
         );
         assert!(!problem.said.contains("app processes"), "{problem:?}");
         assert_eq!(take_local_eval_stop_notice(&root), None, "shown once");
@@ -13561,7 +13558,7 @@ mod tests {
             .expect("an Intelligence failure is still said");
         assert_eq!(
             problem.said,
-            "OpenBot stopped, but could not stop its back end."
+            "OpenBot stopped, but could not stop its backend."
         );
         assert_eq!(problem.detail.as_deref(), Some(NO_CLI_LINE));
         assert!(!recovery_required(&shell, &root));
@@ -16328,7 +16325,7 @@ fn main() {
         assert!(
             problem
                 .said
-                .starts_with("The back end's saved settings can't be read."),
+                .starts_with("The backend's saved settings can't be read."),
             "{problem:?}"
         );
         assert!(

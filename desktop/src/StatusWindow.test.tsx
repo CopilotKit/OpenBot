@@ -75,12 +75,12 @@ test("memory reads as people read it, and a total ignores what could not be meas
   expect(totalMemory([{ name: "b", memoryBytes: null }])).toBeNull();
 });
 
-test("each part shows its state and memory, and the back end its CLI readiness", async () => {
+test("each part shows its state and memory, and the backend its CLI readiness", async () => {
   invokeHandler = answers();
   const view = render(<StatusWindow readEveryMs={60_000} />);
   const bots = await view.findByRole("region", { name: "App" });
   expect(bots.textContent).toContain("Running · 400 MB");
-  const intelligence = view.getByRole("region", { name: "Back end" });
+  const intelligence = view.getByRole("region", { name: "Backend" });
   await waitFor(() =>
     expect(intelligence.textContent).toContain("Ready · 2.4 GB"),
   );
@@ -105,7 +105,7 @@ test("Restart OpenBot restarts its processes; Stop Intelligence stops only the s
   invokeHandler = answers();
   const view = render(<StatusWindow readEveryMs={60_000} />);
   const intelligence = await view.findByRole("region", {
-    name: "Back end",
+    name: "Backend",
   });
   await userEvent.click(
     within(intelligence).getByRole("button", { name: "Stop" }),
@@ -181,7 +181,7 @@ test("a desktop app without a log offers no Open log folder", async () => {
   expect(view.queryByRole("button", { name: "Open log folder" })).toBeNull();
 });
 
-test("the back end is named in words on screen, and its stack id goes only to Copy diagnostics", async () => {
+test("the backend is named in words on screen, and its stack id goes only to Copy diagnostics", async () => {
   invokeHandler = answers({
     desktop_status: { ...running, intelligenceStack: "local-08ff56ec9469e95e" },
   });
@@ -195,14 +195,14 @@ test("the back end is named in words on screen, and its stack id goes only to Co
     },
   });
   const view = render(<StatusWindow readEveryMs={60_000} />);
-  await view.findByRole("region", { name: "Back end" });
+  await view.findByRole("region", { name: "Backend" });
   expect(
     view.container.querySelector(".status-details")?.textContent,
-  ).toContain("Back endOn this computer");
+  ).toContain("BackendOn this computer");
   expect(view.container.textContent).not.toContain("local-08ff56ec9469e95e");
   await userEvent.click(view.getByRole("button", { name: "Copy diagnostics" }));
   await waitFor(() =>
-    expect(copied).toContain("Back end: local-08ff56ec9469e95e"),
+    expect(copied).toContain("Backend: local-08ff56ec9469e95e"),
   );
 });
 
@@ -212,7 +212,7 @@ test("diagnostics carry versions, places and memory, and nothing secret", () => 
   expect(text).toContain(
     "Installed in /Users/someone/OpenBot, app on port 3010",
   );
-  expect(text).toContain("Back end: local-abc, ready");
+  expect(text).toContain("Backend: local-abc, ready");
   expect(text).toContain("k3d-local-abc-server-0 2.4 GB");
   expect(text).toContain("openbot-desktop-postgres-1 150 MB");
   expect(text).not.toMatch(/key|token|secret/i);

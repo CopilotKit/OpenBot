@@ -306,7 +306,7 @@ test("a refused engine with no sentence from the CLI says so in OpenBot's words"
     <CopilotKitAccount root="/tmp/account-refused" onDone={() => {}} />,
   );
   await screen.findByText(
-    "OpenBot's back end can't run on the container engine this computer uses.",
+    "OpenBot's backend can't run on the container engine this computer uses.",
   );
   expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
 });

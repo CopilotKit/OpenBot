@@ -5,7 +5,7 @@ import ts from "typescript";
 
 /**
  * Guard: no text a person reads names Intelligence. To a person it is all OpenBot, and the part of
- * OpenBot they mean is the back end (see .claude/skills/openbot-copy).
+ * OpenBot they mean is the backend (see .claude/skills/openbot-copy), one word.
  *
  * Read are the string literals, template text and JSX text of the desktop window, the app, the
  * server, the Recorder extension and the shared Recorder disclosure, and the string literals of the
@@ -90,8 +90,8 @@ function logged(node: ts.Node): boolean {
   return false;
 }
 
-/** Every piece of text in a TypeScript file that names Intelligence, as `file:line  text`. */
-function scriptText(path: string): string[] {
+/** Every piece of text in a TypeScript file that says `word`, as `file:line  text`. */
+function scriptText(path: string, word = WORD): string[] {
   const text = readFileSync(path, "utf8");
   const file = ts.createSourceFile(
     path,
@@ -111,7 +111,7 @@ function scriptText(path: string): string[] {
       ts.isJsxText(node)
         ? node.text
         : null;
-    if (said !== null && WORD.test(said) && !logged(node)) {
+    if (said !== null && word.test(said) && !logged(node)) {
       const line = file.getLineAndCharacterOfPosition(node.getStart(file)).line;
       found.push(`${relative(REPO, path)}:${line + 1}  ${said.trim()}`);
     }
@@ -122,11 +122,11 @@ function scriptText(path: string): string[] {
 }
 
 /**
- * Every string literal in a Rust file's own code that names Intelligence. Comments and every
+ * Every string literal in a Rust file's own code that says `word`. Comments and every
  * `#[cfg(test)] mod … { … }` block are passed over, and a literal inside `eprintln!` or `println!`
  * is a log line.
  */
-function nativeText(path: string): string[] {
+function nativeText(path: string, word = WORD): string[] {
   const text = readFileSync(path, "utf8");
   const found: string[] = [];
   // Strings, comments and braces in one pass, so neither a `//` nor a brace inside a string counts.
@@ -148,7 +148,7 @@ function nativeText(path: string): string[] {
       if (depth === tests) tests = null;
     }
     if (tests !== null || !/^b?r?#*"/.test(literal)) continue;
-    if (!WORD.test(literal)) continue;
+    if (!word.test(literal)) continue;
     const before = text.slice(0, match.index);
     const statement = before.slice(
       Math.max(
@@ -167,16 +167,16 @@ function nativeText(path: string): string[] {
   return found;
 }
 
-function shown(): string[] {
+function shown(word = WORD): string[] {
   const found = [
     ...["desktop/src", "app/src", "server/src", "extension/src"].flatMap(
       (root) => [...files(join(REPO, root), /\.tsx?$/)],
     ),
     join(REPO, "shared/recorder-disclosure.ts"),
-  ].flatMap(scriptText);
+  ].flatMap((path) => scriptText(path, word));
   found.push(
     ...[...files(join(REPO, "desktop/src-tauri/src"), /\.rs$/)].flatMap(
-      nativeText,
+      (path) => nativeText(path, word),
     ),
   );
   return found;
@@ -189,6 +189,22 @@ const isNotShown = (hit: string) =>
 
 test("no text a person reads in the desktop app, the app, the server or the Recorder says Intelligence", () => {
   expect(shown().filter((hit) => !isNotShown(hit))).toEqual([]);
+});
+
+/**
+ * "Backend" is one word in what a person reads. The one two-word "back end" left is the Recorder
+ * matching a message OpenBot does not write.
+ */
+test("no text a person reads says back end in two words", () => {
+  expect(
+    shown(/\b[Bb]ack(?:\s|\\\n)+ends?\b/).filter(
+      (hit) =>
+        !(
+          hit.startsWith("extension/src/offscreen/grant.ts:") &&
+          hit.includes("Could not connect to OpenBot's back end")
+        ),
+    ),
+  ).toEqual([]);
 });
 
 test("every exception for text that is never shown still matches", () => {

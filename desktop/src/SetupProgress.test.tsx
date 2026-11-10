@@ -164,10 +164,10 @@ test("a row with bytes and no items says only the bytes", () => {
     <SetupProgress
       steps={[
         {
-          step: "Waiting for the back end",
+          step: "Waiting for the backend",
           ok: true,
           running: true,
-          detail: "Updating the back end to 0.16.0-rc.9. Its data stays.",
+          detail: "Updating the backend to 0.16.0-rc.9. Its data stays.",
           downloads: { bytes: 207_000_000, size: 315_000_000 },
         },
       ]}
@@ -175,10 +175,10 @@ test("a row with bytes and no items says only the bytes", () => {
     />,
   );
   const row = within(
-    view.getByRole("listitem", { name: "Waiting for the back end" }),
+    view.getByRole("listitem", { name: "Waiting for the backend" }),
   );
   expect(
-    row.getByText("Updating the back end to 0.16.0-rc.9. Its data stays."),
+    row.getByText("Updating the backend to 0.16.0-rc.9. Its data stays."),
   ).toBeTruthy();
   expect(row.getByText("207.0 MB of 315.0 MB")).toBeTruthy();
   const bar = row.getByRole("progressbar", { name: "Download progress" });
@@ -188,7 +188,7 @@ test("a row with bytes and no items says only the bytes", () => {
 
 test("the install blurb names the parts of OpenBot it installs, in two sentences at most", () => {
   expect(INSTALL_BLURB).toContain(
-    "This installs OpenBot on this computer: the front end, the back end, the database, your Bots, and the computers they work on.",
+    "This installs OpenBot on this computer: the front end, the backend, the database, your Bots, and the computers they work on.",
   );
   expect(INSTALL_BLURB.split(/(?<=\.)\s/).length).toBeLessThanOrEqual(2);
   // A person installing OpenBot knows its parts, not the product names behind them.

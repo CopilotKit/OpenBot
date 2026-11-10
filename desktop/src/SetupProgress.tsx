@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useState } from "react";
 
 /** What the Install step says while it downloads OpenBot's software. */
 export const INSTALL_BLURB =
-  "This installs OpenBot on this computer: the front end, the back end, the database, your Bots, and the computers they work on. It's a large download the first time, so you might want to grab a coffee or tea.";
+  "This installs OpenBot on this computer: the front end, the backend, the database, your Bots, and the computers they work on. It's a large download the first time, so you might want to grab a coffee or tea.";
 
 /**
  * A download while it runs: Install's images (`pull_metrics::Downloads`), or the back end's update
@@ -394,11 +394,11 @@ function label(step: string): string {
     case "migrate":
       return "Database";
     case "finish-update":
-      return "Finishing the back end update";
+      return "Finishing the backend update";
     case "stop-openbot":
       return "Stopping OpenBot";
     case "stop-intelligence":
-      return "Stopping the back end";
+      return "Stopping the backend";
     default:
       return step;
   }

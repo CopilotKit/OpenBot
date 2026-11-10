@@ -42,7 +42,7 @@ test.each([...NAMES, ...UNKNOWN])(
   },
 );
 
-test("every container OpenBot and its back end run has its own name", () => {
+test("every container OpenBot and its backend run has its own name", () => {
   const fallbacks = new Set(UNKNOWN.map(([, , label]) => label));
   for (const [name, group] of NAMES) {
     expect(fallbacks.has(partLabel(name, group))).toBe(false);

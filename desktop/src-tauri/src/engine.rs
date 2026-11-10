@@ -1066,7 +1066,7 @@ pub mod local_api {
         let address = super::ROOTLESS_HOST_LOOPBACK;
         format!(
             "# Written by OpenBot Desktop: lets its containers reach services this machine runs on\n\
-             # 127.0.0.1, such as OpenBot's back end, at {address}.\n\
+             # 127.0.0.1, such as OpenBot's backend, at {address}.\n\
              [engine]\n\
              network_cmd_options = [\"allow_host_loopback=true\", {{append=true}}]\n\
              \n\

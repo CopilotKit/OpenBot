@@ -148,7 +148,7 @@ test("specific wording and actions", () => {
     said(report({ outcome: "blocked", reason: "port-unavailable" })),
   ).toEqual({
     state: "blocked",
-    said: "A port the back end needs is in use.",
+    said: "A port the backend needs is in use.",
     action: "retry",
   });
   expect(
@@ -164,20 +164,20 @@ test("specific wording and actions", () => {
   );
   expect(
     said(report({ outcome: "blocked", reason: "local-command-busy" })).said,
-  ).toBe("The back end is still running another command.");
+  ).toBe("The backend is still running another command.");
   expect(said("timeout")).toEqual({
     state: "blocked",
-    said: "The back end took too long to start, so OpenBot stopped waiting. What it already downloaded is kept, so trying again picks up from there.",
+    said: "The backend took too long to start, so OpenBot stopped waiting. What it already downloaded is kept, so trying again picks up from there.",
     action: "restart-intelligence",
   });
   expect(said("unexpected-exit").said).toBe(
-    "The back end's software quit without saying why. OpenBot's log has the details.",
+    "The backend's software quit without saying why. OpenBot's log has the details.",
   );
   // A setup the CLI itself failed says so, not only that the back end could not start.
   expect(
     said(report({ outcome: "failed", reason: "local-command-failed" })).said,
   ).toBe(
-    "The back end stopped with an error partway through. OpenBot's log has the details.",
+    "The backend stopped with an error partway through. OpenBot's log has the details.",
   );
   // The CLI's resource check: which resource is short and where to raise it, on each engine.
   const short = (shortfall: Partial<Shortfall>) =>
@@ -244,7 +244,7 @@ test("specific wording and actions", () => {
       drive: "C:",
     }).said,
   ).toBe(
-    "The back end's disk is nearly full. Podman has 30.5 GB free of 1006.8 GB. OpenBot needs 40 GB. Free space on the drive that holds OpenBot's engine (C:), then Retry.",
+    "The backend's disk is nearly full. Podman has 30.5 GB free of 1006.8 GB. OpenBot needs 40 GB. Free space on the drive that holds OpenBot's engine (C:), then Retry.",
   );
   expect(
     short({ podman: true, disk: true, diskGb: "30", wsl: true, drive: "C:" })
@@ -265,7 +265,7 @@ test("specific wording and actions", () => {
       diskSizeGb: "1827.9",
     }).said,
   ).toBe(
-    "The back end's disk is nearly full. Docker has 160 GB free of 1827.9 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+    "The backend's disk is nearly full. Docker has 160 GB free of 1827.9 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   expect(
     short({
@@ -276,14 +276,14 @@ test("specific wording and actions", () => {
       diskSizeGb: "60",
     }).said,
   ).toBe(
-    "The back end's disk is nearly full. Podman has 8 GB free of 60 GB. OpenBot needs 40 GB. Stop your Podman machine, run podman machine set --disk-size 160, start it again, then Retry.",
+    "The backend's disk is nearly full. Podman has 8 GB free of 60 GB. OpenBot needs 40 GB. Stop your Podman machine, run podman machine set --disk-size 160, start it again, then Retry.",
   );
   // Space was freed and k3s still says the disk is low: wait, rather than free more.
   expect(
     short({ podman: true, recovering: true, wsl: true, drive: "C:" }),
   ).toEqual({
     state: "blocked",
-    said: "The back end is recovering from low disk space. Wait a few minutes, then Retry.",
+    said: "The backend is recovering from low disk space. Wait a few minutes, then Retry.",
     action: "retry",
   });
   // A back end that runs but does not answer, with OpenBot's check of its disk, and without.
@@ -307,7 +307,7 @@ test("specific wording and actions", () => {
     );
   expect(degraded({ recovering: true, wsl: true, drive: "C:" })).toEqual({
     state: "blocked",
-    said: "The back end is recovering from low disk space. Wait a few minutes, then Retry.",
+    said: "The backend is recovering from low disk space. Wait a few minutes, then Retry.",
     action: "restart-intelligence",
   });
   expect(
@@ -320,9 +320,9 @@ test("specific wording and actions", () => {
       drive: "C:",
     }).said,
   ).toBe(
-    "The back end's disk is nearly full. Podman has 30.5 GB free of 1006.8 GB. OpenBot needs 40 GB. Free space on the drive that holds OpenBot's engine (C:), then Retry.",
+    "The backend's disk is nearly full. Podman has 30.5 GB free of 1006.8 GB. OpenBot needs 40 GB. Free space on the drive that holds OpenBot's engine (C:), then Retry.",
   );
-  expect(degraded().said).toBe("The back end is running but not healthy.");
+  expect(degraded().said).toBe("The backend is running but not healthy.");
   // The account step's check before a first setup, on Windows.
   expect(
     engineTooSmallSaid({
@@ -340,13 +340,13 @@ test("specific wording and actions", () => {
   expect(
     said(report({ outcome: "failed", reason: "resources-short" })).said,
   ).toBe(
-    "Docker doesn't have enough CPUs, memory or disk space for the back end. Raise them in Docker Desktop > Settings > Resources, then Retry.",
+    "Docker doesn't have enough CPUs, memory or disk space for the backend. Raise them in Docker Desktop > Settings > Resources, then Retry.",
   );
   expect(said("unavailable").action).toBeUndefined();
   expect(said("unverified").action).toBe("repair");
   expect(said("invalid-json")).toEqual({
     state: "blocked",
-    said: "OpenBot did not understand its back end's reply.",
+    said: "OpenBot did not understand its backend's reply.",
   });
 });
 
@@ -365,7 +365,7 @@ test("a v1 report is unknown, never ready", () => {
   const row = localReadiness(base).intelligence;
   expect(row).toEqual({
     state: "unknown",
-    said: "The back end started. Its licence and readiness are not reported yet.",
+    said: "The backend started. Its licence and readiness are not reported yet.",
   });
   expect(
     localReadiness({ ...base, intelligence: null }).intelligence.state,
@@ -517,7 +517,7 @@ test("types: the failure and reason inputs are the upstream ones", () => {
   const failure: LocalFailure = "spawn";
   expect(
     localReadiness({ ...base, intelligence: failure }).intelligence.said,
-  ).toBe("OpenBot could not run the back end's software.");
+  ).toBe("OpenBot could not run the backend's software.");
 });
 
 test("each readiness state of a valid licence has its own row", () => {
@@ -528,25 +528,25 @@ test("each readiness state of a valid licence has its own row", () => {
     }).intelligence;
   expect(row("ready")).toEqual({
     state: "ready",
-    said: "The back end is ready.",
+    said: "The backend is ready.",
   });
   expect(row("starting")).toEqual({
     state: "unknown",
-    said: "The back end is starting.",
+    said: "The backend is starting.",
   });
   expect(row("stopped")).toEqual({
     state: "blocked",
-    said: "The back end is stopped.",
+    said: "The backend is stopped.",
     action: "start-intelligence",
   });
   expect(row("degraded")).toEqual({
     state: "blocked",
-    said: "The back end is running but not healthy.",
+    said: "The backend is running but not healthy.",
     action: "restart-intelligence",
   });
   expect(row("unknown")).toEqual({
     state: "unknown",
-    said: "The back end started. Its licence and readiness are not reported yet.",
+    said: "The backend started. Its licence and readiness are not reported yet.",
   });
 });
 
@@ -562,7 +562,7 @@ test("a licence that is not valid blocks a ready Intelligence", () => {
   });
   expect(row("missing")).toEqual({
     state: "blocked",
-    said: "The back end has no evaluation licence.",
+    said: "The backend has no evaluation licence.",
   });
   expect(row("invalid")).toEqual({
     state: "blocked",
@@ -589,10 +589,10 @@ test("a licence expiring in four days is ready with a warning", () => {
     }).intelligence;
   expect(expiring("2026-10-25T18:00:00.000Z")).toEqual({
     state: "ready",
-    said: "The back end is ready. Its evaluation licence expires within 5 days.",
+    said: "The backend is ready. Its evaluation licence expires within 5 days.",
   });
   expect(expiring("2026-10-27T18:00:00.000Z")).toEqual({
     state: "ready",
-    said: "The back end is ready.",
+    said: "The backend is ready.",
   });
 });

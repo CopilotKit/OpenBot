@@ -89,13 +89,13 @@ function emptySentence(
 ): string {
   if (personal) {
     return data.skills === null
-      ? "Couldn't read your Skills from the back end just now. Reload the page to try again."
+      ? "Couldn't read your Skills from the backend just now. Reload the page to try again."
       : "No skills learned from your recordings and conversations yet. Once there are, they show up here.";
   }
   if (data.unavailable === "off")
     return "An admin has turned off automatic learning, so no skills are learned from your recordings.";
   if (data.skills === null)
-    return "Couldn't read your Skills from the back end just now. Your choice above still applies to them.";
+    return "Couldn't read your Skills from the backend just now. Your choice above still applies to them.";
   return mode === "choose"
     ? "No Skills learned from your recordings yet. Once there are, each one you open here reaches every Bot."
     : "No Skills learned from your recordings yet. Once there are, they show up here.";

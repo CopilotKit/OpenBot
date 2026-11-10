@@ -271,8 +271,8 @@ export function AfterStop({
             <ItemContent>
               <ItemTitle>
                 {sent
-                  ? "Sent to OpenBot's back end"
-                  : "Sending to OpenBot's back end"}
+                  ? "Sent to OpenBot's backend"
+                  : "Sending to OpenBot's backend"}
               </ItemTitle>
               {sent ? null : (
                 <ItemDescription className="line-clamp-none">
@@ -335,7 +335,7 @@ export function AfterStop({
             <DialogTitle>Discard kept events?</DialogTitle>
           </DialogHeader>
           <DialogBody className="mt-4 text-sm">
-            OpenBot's back end will never receive them.
+            OpenBot's backend will never receive them.
           </DialogBody>
           <DialogFooter className="mt-4">
             <Button size="sm" variant="ghost" onClick={() => setAsking(false)}>

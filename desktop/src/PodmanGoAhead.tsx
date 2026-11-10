@@ -4,7 +4,7 @@ import { StatusLine } from "./SetupProgress";
 
 /** What happens next and why, said before macOS asks for the person's password. */
 export const PODMAN_EXPLAINED =
-  "OpenBot installs Podman, which runs OpenBot's back end on this computer. macOS asks for your password once to install it.";
+  "OpenBot installs Podman, which runs OpenBot's backend on this computer. macOS asks for your password once to install it.";
 
 /**
  * Continue, under the explanation: Install raises macOS's password prompt (`install::GoAhead`).

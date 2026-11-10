@@ -78,7 +78,7 @@ const ADMIN: Checklist = {
   rows: [
     ROW({
       id: "intelligence",
-      title: "Back end",
+      title: "Backend",
       required: true,
       detail: "Keeps your conversations and what OpenBot remembers.",
     }),

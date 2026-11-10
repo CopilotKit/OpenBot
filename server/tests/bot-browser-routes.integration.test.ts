@@ -1138,7 +1138,7 @@ describe("recording in a Bot's browser", () => {
     );
   });
 
-  test("a Stop the computer has done is answered as done when the trail cannot take the revoke, and the hand back ends the connection", async () => {
+  test("a Stop the computer has done is answered as done when the trail cannot take the revoke, and the hand backends the connection", async () => {
     const requestId = await takeWheel("ada");
     expect((await record("ada", "Pay the March invoice")).status).toBe(200);
     const [connection] = await held();
@@ -1284,7 +1284,7 @@ describe("a Bot on each person's own seat", () => {
       .filter((connection) => connection.userId === person)
       .map((connection) => connection.id);
 
-  test("one person's hand-back ends only their own recording, never another person's on their own seat", async () => {
+  test("one person's hand-backends only their own recording, never another person's on their own seat", async () => {
     // Ada and Ben each record in the Bot's browser on their own seat: two browsers, two recordings, two connections.
     const adaRequest = await takeOwnWheel("ada");
     await takeOwnWheel("ben");

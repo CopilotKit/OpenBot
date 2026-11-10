@@ -80,9 +80,9 @@ function automaticMessage(
   if (automatic.state === "not_entitled")
     return "This project's plan doesn't include Learning. No container was assigned.";
   if (automatic.state === "learning_off")
-    return "Learning is switched off in the back end. Nothing is collected until it's turned on there.";
+    return "Learning is switched off in the backend. Nothing is collected until it's turned on there.";
   if (automatic.state === "unavailable")
-    return "Couldn't reach the back end to find this project's Learning container. OpenBot will try again.";
+    return "Couldn't reach the backend to find this project's Learning container. OpenBot will try again.";
   return undefined;
 }
 
@@ -168,7 +168,7 @@ function ContainerSetup({
               : `Create the ${automatic.containerId} container`}
           </Button>
           <span className="text-muted-foreground">
-            Uses this deployment's back end credentials.
+            Uses this deployment's backend credentials.
           </span>
         </div>
       )}
@@ -400,7 +400,7 @@ export function LearningPage() {
               ))}
             </select>
           </label>
-          {overview.isPending && <p role="status">Checking the back end…</p>}
+          {overview.isPending && <p role="status">Checking the backend…</p>}
           {overview.error && (
             <p role="alert" className="text-destructive">
               {overview.error.message}
@@ -456,7 +456,7 @@ export function LearningPage() {
                       target="_blank"
                       rel="noreferrer"
                     >
-                      Manage Learning in the back end dashboard
+                      Manage Learning in the backend dashboard
                     </a>
                   )}
                   {snapshot.links.candidates && (
@@ -529,7 +529,7 @@ export function LearningPage() {
           <p className="text-muted-foreground text-sm">
             OpenBot keeps project credentials on the server. Turning Learning
             off here keeps settings and conversation assignments. Schedules stay
-            in the back end.
+            in the backend.
           </p>
         </div>
       </PageSection>
@@ -669,9 +669,9 @@ const RUN_STATUS: Record<LearningRunSummary["status"], string> = {
 
 const FAILURES: Record<string, string> = {
   LEARNING_MODEL_NOT_CONFIGURED:
-    "The back end has no model set up for Learning yet.",
-  LEARNING_NOT_ENABLED: "Learning isn't turned on in the back end.",
-  LEARNING_CONTAINER_NOT_FOUND: "The back end no longer has this container.",
+    "The backend has no model set up for Learning yet.",
+  LEARNING_NOT_ENABLED: "Learning isn't turned on in the backend.",
+  LEARNING_CONTAINER_NOT_FOUND: "The backend no longer has this container.",
 };
 
 /** What an admin reads for a failed run. The code itself stays in the row's title. */

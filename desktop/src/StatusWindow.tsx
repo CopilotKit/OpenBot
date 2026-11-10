@@ -75,8 +75,8 @@ export function diagnostics(
     `  processes: ${parts(status.processes)}`,
     `  containers: ${parts(status.containers)}`,
     status.intelligenceStack
-      ? `Back end: ${status.intelligenceStack}, ${readiness ?? "not checked"}`
-      : "Back end: not on this computer",
+      ? `Backend: ${status.intelligenceStack}, ${readiness ?? "not checked"}`
+      : "Backend: not on this computer",
     ...(status.intelligenceStack
       ? [`  containers: ${parts(status.intelligenceContainers)}`]
       : []),
@@ -93,9 +93,9 @@ type Busy =
 const BUSY_SAID: Record<Busy, string> = {
   "openbot-restart": "Restarting OpenBot…",
   "openbot-stop": "Stopping OpenBot…",
-  "intelligence-restart": "Restarting the back end…",
-  "intelligence-stop": "Stopping the back end…",
-  "intelligence-start": "Starting the back end…",
+  "intelligence-restart": "Restarting the backend…",
+  "intelligence-stop": "Stopping the backend…",
+  "intelligence-start": "Starting the backend…",
 };
 
 /**
@@ -254,9 +254,9 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
             </section>
 
             {status.intelligenceStack && (
-              <section className="status-part" aria-label="Back end">
+              <section className="status-part" aria-label="Backend">
                 <div className="status-head">
-                  <h2>Back end</h2>
+                  <h2>Backend</h2>
                   <span className="status-state">
                     {intelligenceRunning
                       ? READINESS_SAID[readiness ?? "unknown"]
@@ -312,7 +312,7 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
                 </div>
                 {status.openbotRunning && (
                   <p className="footnote">
-                    OpenBot uses its back end while it runs. Stopping it frees
+                    OpenBot uses its backend while it runs. Stopping it frees
                     memory until you start it again here.
                   </p>
                 )}
@@ -341,7 +341,7 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
               {/* Where the back end is, in words. Its stack id is for support, in Copy diagnostics. */}
               {status.intelligenceStack && (
                 <>
-                  <dt>Back end</dt>
+                  <dt>Backend</dt>
                   <dd>On this computer</dd>
                 </>
               )}

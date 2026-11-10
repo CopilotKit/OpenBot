@@ -62,7 +62,7 @@ test("a failure offers its troubleshooting logs, with what failed", async () => 
   });
   const view = render(
     <Failure
-      problem={{ said: "The back end could not start.", detail: "exit 1" }}
+      problem={{ said: "The backend could not start.", detail: "exit 1" }}
     />,
   );
   expect(view.getByRole("alert").textContent).toContain(
@@ -73,7 +73,7 @@ test("a failure offers its troubleshooting logs, with what failed", async () => 
   await view.findByRole("button", { name: "Copied" });
   expect(invokeCalls[0]).toEqual({
     command: "troubleshooting_logs",
-    args: { failure: "The back end could not start.\nexit 1" },
+    args: { failure: "The backend could not start.\nexit 1" },
   });
   // The stub answers null; what reaches the clipboard is whatever the native side returned.
   expect(copied).toEqual([null as unknown as string]);
@@ -81,7 +81,7 @@ test("a failure offers its troubleshooting logs, with what failed", async () => 
   fireEvent.click(view.getByRole("button", { name: "Save to a file" }));
   expect(invokeCalls[1]).toEqual({
     command: "save_troubleshooting_logs",
-    args: { failure: "The back end could not start.\nexit 1" },
+    args: { failure: "The backend could not start.\nexit 1" },
   });
   await view.findByText("Saved in the log folder.");
 });

@@ -274,7 +274,7 @@ pub const PODMAN_DECLINED: &str = "macOS didn't get your password, so Podman isn
 
 /// What macOS's password prompt says, under the name of the process that raised it.
 pub const PODMAN_PASSWORD_PROMPT: &str =
-    "OpenBot needs your password to install Podman, which runs OpenBot's back end.";
+    "OpenBot needs your password to install Podman, which runs OpenBot's backend.";
 
 /**
 The person's go-ahead for a step that raises the system's password prompt.
@@ -1584,7 +1584,7 @@ esac
                 r#"do shell script "/usr/sbin/installer -pkg '/Users/a b/Library/Caches/OpenBot/"#,
                 r#"podman-installer-macos-arm64.pkg' -target /" with administrator privileges "#,
                 r#"with prompt "OpenBot needs your password to install Podman, which runs "#,
-                r#"OpenBot's back end.""#
+                r#"OpenBot's backend.""#
             )]
         );
     }
