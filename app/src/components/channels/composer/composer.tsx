@@ -1688,16 +1688,14 @@ export function Composer({
       <RejectedFiles onDismiss={dismissRejections} rejected={rejected} />
       {tooManyStagedNotice}
       {/*
-       * A SLOT OF NO HEIGHT, AND THE NOTICE GROWS UP OUT OF IT. This composer is the one Home centres
-       * in the page, so anything above it in the flow pushed the box down by half its height while it
-       * showed (16px for one line). Here it takes no room: it sits over the space above the box,
-       * the way the thread's composer, pinned to the bottom, lets it grow upward.
+       * THE NOTICE TAKES ITS OWN ROOM, AND THE BOX STAYS WHERE IT IS. This composer is the one Home
+       * centres in the page. Above the box in the flow alone, the notice pushed the box down by half
+       * its height (16px for one line); drawn over the space above it instead, it sat on the starter
+       * tasks. So it is in the flow above the box, and an invisible copy of it, the same height, is
+       * in the flow below: the centred block grows by the same amount on both sides of the box, the
+       * greeting and the tasks move up to make room, and the box holds still.
        */}
-      <div className="relative h-0" data-slot="composer-dictate-notice-slot">
-        <div className="absolute inset-x-0 bottom-0">
-          <LiveDictationNotice dictation={dictation} />
-        </div>
-      </div>
+      <LiveDictationNotice dictation={dictation} />
       <form
         aria-busy={isBusy}
         className="overflow-hidden rounded-2xl border border-border bg-card"
@@ -1767,6 +1765,15 @@ export function Composer({
           </div>
         </DictationSurface>
       </form>
+      {/* The notice's invisible copy, below the box: see above. Hidden from everyone and inert. */}
+      <div
+        aria-hidden="true"
+        className="invisible"
+        data-slot="composer-dictate-notice-balance"
+        inert
+      >
+        <LiveDictationNotice dictation={dictation} />
+      </div>
     </div>
   );
 }
