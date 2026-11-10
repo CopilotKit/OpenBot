@@ -124,6 +124,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Conversations
 
+- **Allow a send, or anything else that asks, for the rest of a conversation.** Approving every
+  message in a back-and-forth on Slack was tiring, and sending, deleting, sharing and posting
+  offered only Allow once and Deny. Those cards now offer **Allow for this conversation** and
+  **Always allow here** too, and paying and account-setting changes now ask with the same four
+  answers instead of being handed to you. Allowed for the conversation, the same action by the
+  same Bot runs again there without a card, and the line above the message box says so, with Turn
+  off. Every such call is still on the audit trail. Admins can set each kind to ask every time, or
+  to be done by members themselves, in Admin → Approvals. A password changed on a website is still
+  yours to do. This reverses #998's "always asks" rule.
 - **A Claude Agent SDK Bot keeps your request and its tool results through a long task.** A tool
   result over 50,000 characters (a page of email, an app's tool list, a file read from the Bot's
   computer) reached the Bot as a 2 KB preview and the path of a file it could not open, so it showed

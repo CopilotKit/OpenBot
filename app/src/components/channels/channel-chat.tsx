@@ -9,6 +9,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BotOrb } from "@/components/agents/bot-orb";
+import { ConversationAllowances } from "@/components/approvals/conversation-allowances";
 import {
   answerMessage,
   askedSinceLastMessage,
@@ -1429,6 +1430,10 @@ export function ChannelChat({
                * it — and they are independent, so neither is an `else` for the other.
                */
               <>
+                {/* What the person allowed for this conversation, each with Turn off. */}
+                {channel.active ? (
+                  <ConversationAllowances threadId={channel.threadId} />
+                ) : null}
                 <HandoffResumeNotice
                   botId={runtimeAgentId}
                   agent={agent}

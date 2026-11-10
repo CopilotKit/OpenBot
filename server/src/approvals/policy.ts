@@ -1,7 +1,10 @@
 import type { Message } from "@ag-ui/client";
 import { z } from "zod";
 import type {
+  ActionKind,
+  ActionKindPolicy,
   ApprovalCandidate,
+  ApprovalConversationGrant,
   ApprovalPolicyOutcome,
   ApprovalRule,
   ApprovalTeamRule,
@@ -41,7 +44,28 @@ export function globMatches(pattern: string, value: string): boolean {
 type AnyRule = Pick<
   ApprovalRule,
   "id" | "botId" | "toolRef" | "effect" | "scope" | "behaviour"
-> & { account?: string | null };
+> & { account?: string | null; kind?: ActionKind | null };
+
+/** The layers a rule can come from: the admin's, the person's, and this conversation's answers. */
+export type RuleLayer = "team_rule" | "personal_rule" | "conversation";
+
+/**
+ * Whether a rule may decide an action of this kind (see `ActionKind`).
+ *
+ * ASKING ALWAYS REACHES: a rule that asks or hands off is stricter, so it holds for any kind.
+ *
+ * ALLOWING REACHES ONLY ITS OWN KIND. An allow saved from a send card ("Always allow here", "Allow
+ * for this conversation") carries `kind: "sending"`, and reaches later sends of that action. A rule
+ * typed in Settings, a team rule, or one saved from an ordinary card carries none, and never reaches
+ * a delete, a send, a share, a post, a payment or an account-setting change: it was written about
+ * something else. "Always allow here" on an ordinary click on a site does not, by itself, let the Bot
+ * press that site's Send or Place your order button.
+ */
+export function reachesKind(rule: AnyRule, kind: ActionKind | undefined) {
+  if (kind === undefined) return true;
+  if (rule.behaviour === "ask" || rule.behaviour === "hand_off") return true;
+  return rule.kind === kind;
+}
 
 /**
  * Whether a rule is about this action.
@@ -76,19 +100,77 @@ export function ruleMatches(
   );
 }
 
-/** The strictest matching rule across both layers. A tie goes to the team's locked row. */
+/** A conversation answer as a rule: it allows exactly the action it was given on. */
+function grantRule(grant: ApprovalConversationGrant): AnyRule {
+  return {
+    id: grant.id,
+    botId: grant.botId,
+    toolRef: grant.toolRef,
+    effect: grant.effect,
+    scope: grant.scope,
+    behaviour: "allow",
+    account: grant.account,
+    kind: grant.kind,
+  };
+}
+
+/**
+ * The person's "Allow for this conversation" answer that covers this action, if any: the same Bot,
+ * tool, target and account, and the same kind. Exact values, never globs: it was given on one card.
+ * The caller passes only the answers of this conversation (`conversationGrants` on the store).
+ */
+export function conversationGrant(
+  candidate: ApprovalCandidate,
+  grants: readonly ApprovalConversationGrant[],
+  kind: ActionKind | undefined,
+): ApprovalConversationGrant | undefined {
+  const account = candidate.account?.trim().toLowerCase() || null;
+  return grants.find(
+    (grant) =>
+      grant.botId === candidate.botId &&
+      grant.toolRef === candidate.toolRef &&
+      grant.effect === candidate.effect &&
+      grant.scope === candidate.scope &&
+      (grant.account?.trim().toLowerCase() || null) === account &&
+      reachesKind(grantRule(grant), kind),
+  );
+}
+
+/**
+ * The strictest matching rule across the layers. A tie goes to the team's locked row, then to the
+ * person's saved rule, then to this conversation's answer. A team rule that asks or hands off beats
+ * any allow of the person's, saved or for this conversation.
+ */
 export function strictestRule(
   candidate: ApprovalCandidate,
   team: readonly ApprovalTeamRule[],
   personal: readonly ApprovalRule[],
-): { rule: AnyRule; layer: "team_rule" | "personal_rule" } | undefined {
-  let best: { rule: AnyRule; layer: "team_rule" | "personal_rule" } | undefined;
+  options: {
+    conversation?: readonly ApprovalConversationGrant[];
+    kind?: ActionKind;
+  } = {},
+): { rule: AnyRule; layer: RuleLayer } | undefined {
+  let best: { rule: AnyRule; layer: RuleLayer } | undefined;
+  const granted = conversationGrant(
+    candidate,
+    options.conversation ?? [],
+    options.kind,
+  );
   for (const [layer, rules] of [
     ["team_rule", team],
     ["personal_rule", personal],
+    ["conversation", granted ? [grantRule(granted)] : []],
   ] as const) {
     for (const rule of rules) {
-      if (!ruleMatches(rule, candidate, layer)) continue;
+      if (
+        !ruleMatches(
+          rule,
+          candidate,
+          layer === "team_rule" ? "team_rule" : "personal_rule",
+        )
+      )
+        continue;
+      if (!reachesKind(rule, options.kind)) continue;
       if (!best || RANK[rule.behaviour] > RANK[best.rule.behaviour])
         best = { rule, layer };
     }
@@ -101,17 +183,43 @@ const CONFIRMING =
   "(?:(?:yes|ok|okay|confirm|continue and|i want to|permanently)[,\\s]+)?";
 
 /**
- * Built-in safety requirements. These always hand the action to the person, before and regardless of
- * any rule, preference or reviewer verdict, and they are not configurable.
+ * What each kind of action is, in the words its card and its reasons use.
+ */
+export const KIND_PHRASES: Record<ActionKind, string> = {
+  deleting: "Deleting something",
+  sending: "Sending something to other people",
+  sharing: "Sharing something with other people",
+  publishing: "Posting or publishing something",
+  payments: "Paying, buying or moving money",
+  credentials: "Changing a password or other sign-in detail",
+  security_settings: "Changing security, sharing or access settings",
+};
+
+/** Why a kind asks, on its card, while it is open: the person can allow it from there. */
+const askReason = (kind: ActionKind) => `${KIND_PHRASES[kind]} asks you first.`;
+
+/**
+ * THE ONE KIND THAT STAYS WITH THE PERSON WHATEVER IS SET: a credential changed on a website. The
+ * Bot would type a password or a code into a form, and only the person has it. No standing answer can
+ * supply it, so it is handed to them. A credential an app's own tool changes (rotating an API key)
+ * needs nothing only the person has, and asks like every other kind.
+ */
+const TYPED_CREDENTIAL =
+  "Changing a password or other sign-in detail on a website needs you to type it, so it's yours to do.";
+
+/**
+ * Account-level actions: credentials, security settings and payments.
  *
  * Matched on the words of the action and its target, for effects that change something, and for
- * payments also on what the action is called (see {@link actionName}). A read is never handed off
- * here: reading a checkout page is not paying. Deliberately broad; a false hand-off
- * costs the person one click, a missed one costs them their account or their money.
+ * payments also on what the action is called (see {@link actionName}). A read never matches here:
+ * reading a checkout page is not paying. Deliberately broad; a false ask costs the person one click,
+ * a missed one costs them their account or their money.
+ *
+ * Each asks, open by default as every kind is (see {@link decideAction}), except a credential typed
+ * on a website ({@link TYPED_CREDENTIAL}).
  */
 const SAFETY_REQUIREMENTS: readonly {
-  id: string;
-  reason: string;
+  id: ActionKind;
   /** Matched on every word of the action: its tool, target, arguments and page. */
   pattern: RegExp;
   /** Matched on the page's address without its query string and fragment (see {@link pageWithoutQuery}). */
@@ -123,8 +231,6 @@ const SAFETY_REQUIREMENTS: readonly {
 }[] = [
   {
     id: "credentials",
-    reason:
-      "Changing a password, passcode, two-factor setting, recovery code or other credential is always done by the person.",
     pattern:
       /pass(word|code|phrase)|passwd|\b2fa\b|two[-_ ]?factor|\bmfa\b|one[-_ ]?time[-_ ]?code|\botp\b|recovery[-_ ]?(code|key|email|phone)|security[-_ ]?question|api[-_ ]?key|access[-_ ]?token|credential|sign[-_ ]?in[-_ ]?method/i,
     /*
@@ -137,14 +243,11 @@ const SAFETY_REQUIREMENTS: readonly {
   },
   {
     id: "security_settings",
-    reason:
-      "Changing security, sharing or access settings on an account is always done by the person.",
     pattern:
       /security[-_ ]?settings?|\/settings\/security|account[-_ ]?security|sharing[-_ ]?settings?|share[-_ ]?with[-_ ]?(anyone|public)|make[-_ ]?public|admin[-_ ]?role|grant[-_ ]?admin|permission[-_ ]?settings?|delete[-_ ]?(my[-_ ]?)?account|close[-_ ]?account/i,
   },
   {
     id: "payments",
-    reason: "Paying, purchasing or moving money is always done by the person.",
     pattern:
       // A wire of money, not a news wire: "Business Wire" is where press releases go out, so a Bot
       // filling in where its research came from would otherwise hand that typing to the person.
@@ -170,10 +273,13 @@ const SAFETY_REQUIREMENTS: readonly {
 ];
 
 /**
- * Consequential actions: deleting, sending to other people, sharing and publishing. Each one asks,
- * before and regardless of any rule, preference or reviewer verdict, in every edition, and it is not
- * configurable. Unlike the requirements above the person can let the Bot do it, once: Allow once
- * and Deny, never a standing "Always allow" (see `offersStandingRule`).
+ * Consequential actions: deleting, sending to other people, sharing and publishing. Each one asks in
+ * every edition, whatever the person's "Ask before making changes" says. OPEN BY DEFAULT: the person
+ * can allow it once, for the conversation, or always, and an admin can close each kind so it asks
+ * every time or is left to the person (see {@link decideAction} and `offersStandingRule`).
+ *
+ * This reverses #998, which made these ask every time with Allow once and Deny only. OpenBot opens
+ * things by default, and closing them is the organisation's call.
  *
  * Matched only on what the action is called (see {@link actionName}), never on what it carries.
  * A tool name holds the verb anywhere ("GOOGLEDRIVE_DELETE_FILE"). A button holds it first
@@ -197,14 +303,12 @@ const SAFETY_REQUIREMENTS: readonly {
  * listed) asks as deleting whatever it is called (see {@link ApprovalCandidate.destructive}).
  */
 const CONSEQUENTIAL: readonly {
-  id: string;
-  reason: string;
+  id: ActionKind;
   tool: { test(name: string): boolean };
   click: RegExp;
 }[] = [
   {
     id: "deleting",
-    reason: "Deleting something always asks you first.",
     tool: /\b(delete|deletes|trash|destroy|erase|purge|wipe|discard)\b/,
     click: new RegExp(
       `^${CONFIRMING}(delete|permanently delete|move to (the )?(trash|bin)|trash|empty (the )?(trash|bin)|discard|erase|destroy)\\b|^${CONFIRMING}remove( permanently)?$`,
@@ -212,7 +316,6 @@ const CONSEQUENTIAL: readonly {
   },
   {
     id: "sending",
-    reason: "Sending something to other people always asks you first.",
     // A scheduled send is a send: it goes to them later, with nobody asked then either.
     tool: toOthers(
       actsBy(
@@ -224,13 +327,11 @@ const CONSEQUENTIAL: readonly {
   },
   {
     id: "sharing",
-    reason: "Sharing something with other people always asks you first.",
     tool: /\b(share|shares|sharing|shared link|permission|permissions|collaborators?|acl|grant (access|role))\b/,
     click: new RegExp(`^${CONFIRMING}(share|invite|add people)\\b`),
   },
   {
     id: "publishing",
-    reason: "Posting or publishing something always asks you first.",
     tool: actsBy(
       /\b(publish|publishes|go live|(create|publish) (an? )?release|retweets?|reposts?|tweets?|post (an? |the |new )?(\w+ ){0,3}?(comments?|repl(y|ies)|messages?|mentions?|tweets?|threads?|status(es)?|stor(y|ies)|photos?|videos?|articles?|reels?)|(create|creation of|publish|submit|schedule|reschedule|share|write|send) (an? |the |new )?(\w+ ){0,3}?(?<!\bvia )posts?(?! (drafts?|templates?)\b))\b/,
     ),
@@ -411,11 +512,18 @@ const NOT_ACCOUNT_ACTIONS =
 
 /** Why a tool its app marks destructive asks, when its name doesn't say it deletes. */
 const DESTRUCTIVE_REASON =
-  "The app marks this as deleting or overwriting something, so it always asks you first.";
+  "The app marks this as deleting or overwriting something, so it asks you first.";
 
+/**
+ * The kind of action this is, where OpenBot recognises one, and how it asks by default: `ask` for
+ * every kind, open to standing answers, and `hand_off` only for a credential typed on a website
+ * ({@link TYPED_CREDENTIAL}). The admin's setting for the kind is applied in {@link decideAction}.
+ */
 export function safetyRequirement(
   candidate: ApprovalCandidate,
-): { id: string; reason: string; behaviour: "hand_off" | "ask" } | undefined {
+):
+  | { id: ActionKind; reason: string; behaviour: "hand_off" | "ask" }
+  | undefined {
   if (candidate.effect === "read") return undefined;
   if (NOT_ACCOUNT_ACTIONS.test(candidate.toolRef)) return undefined;
   // What a Bot types is content, as reading a checkout page is not paying: a CRM note about a
@@ -452,7 +560,10 @@ export function safetyRequirement(
       ? SAFETY_REQUIREMENTS.find((entry) => entry.id === "payments")
       : undefined);
   if (handOff)
-    return { id: handOff.id, reason: handOff.reason, behaviour: "hand_off" };
+    return handOff.id === "credentials" &&
+      candidate.toolRef.startsWith("computer_")
+      ? { id: handOff.id, reason: TYPED_CREDENTIAL, behaviour: "hand_off" }
+      : { id: handOff.id, reason: askReason(handOff.id), behaviour: "ask" };
   // The Bot's own memory and settings are its own, as auto-review treats them (see `reviewable`).
   if (OWN_TOOLS.test(candidate.toolRef)) return undefined;
   const asks =
@@ -479,7 +590,8 @@ export function safetyRequirement(
     /^(removes?|archives?)$/.test(named.name.match(FIRST_VERB)?.[1] ?? "")
       ? CONSEQUENTIAL.find((entry) => entry.id === "deleting")
       : undefined);
-  if (asks) return { id: asks.id, reason: asks.reason, behaviour: "ask" };
+  if (asks)
+    return { id: asks.id, reason: askReason(asks.id), behaviour: "ask" };
   // Whatever it is called, a tool its app marks destructive asks as deleting does.
   return named?.kind === "tool" && candidate.destructive === true
     ? { id: "deleting", reason: DESTRUCTIVE_REASON, behaviour: "ask" }
@@ -659,11 +771,11 @@ const verdictSchema = z.object({
 const SAFETY_REASONS: Record<(typeof SAFETY_CATEGORIES)[number], string> = {
   none: "",
   credentials:
-    "The reviewer found this changes a password, passcode, two-factor setting or other credential, which is always done by the person.",
+    "The reviewer found this changes a password or other sign-in detail, so it asks you first.",
   security_settings:
-    "The reviewer found this changes security, sharing or access settings, which is always done by the person.",
+    "The reviewer found this changes security, sharing or access settings, so it asks you first.",
   payments:
-    "The reviewer found this pays, purchases or moves money, which is always done by the person.",
+    "The reviewer found this pays, buys or moves money, so it asks you first.",
 };
 
 /**
@@ -735,33 +847,95 @@ export async function reviewAction(input: {
   }
 }
 
+/** Why a kind the admin closed asks every time, or is left to the person. */
+const closedReason = (kind: ActionKind, to: "ask" | "hand_off") =>
+  to === "ask"
+    ? `${KIND_PHRASES[kind]} asks you every time. Your admin set this.`
+    : `${KIND_PHRASES[kind]} is yours to do. Your admin set this.`;
+
 /**
- * The whole decision, layer by layer. Safety first and unconditionally; then the strictest rule;
- * then the reviewer where it applies; then the person's own "ask before making changes" default.
+ * A kind of action, as the admin set it (`actionKinds` in the team settings): handed to the person,
+ * asked every time, or undefined while it is open and the rules below decide it.
+ */
+export function closedKind(
+  kind: ActionKind,
+  actionKinds: Partial<Record<ActionKind, ActionKindPolicy>> | undefined,
+): ApprovalPolicyOutcome | undefined {
+  const set = actionKinds?.[kind] ?? "open";
+  if (set === "hand_off")
+    return {
+      behaviour: "hand_off",
+      source: "safety",
+      kind,
+      reason: closedReason(kind, "hand_off"),
+    };
+  if (set === "ask")
+    return {
+      behaviour: "ask",
+      source: "safety",
+      kind,
+      closed: true,
+      reason: closedReason(kind, "ask"),
+    };
+  return undefined;
+}
+
+/**
+ * The whole decision, layer by layer.
+ *
+ * 1. A kind of action OpenBot recognises (`safetyRequirement`): a credential typed on a website is
+ *    handed to the person, and a kind the admin closed asks every time or is handed to the person
+ *    (`closedKind`). Nothing below changes either.
+ * 2. The strictest rule: the admin's, the person's, and the person's "Allow for this conversation"
+ *    answers in this conversation (`conversationGrant`). For a kind, only an allow saved from that
+ *    kind's card reaches it (`reachesKind`); a team rule that asks or hands off always does.
+ * 3. The reviewer, where it applies.
+ * 4. A kind still open with nothing allowing it asks, with every answer offered. Otherwise the
+ *    person's own "ask before making changes" default.
  */
 export async function decideAction(input: {
   candidate: ApprovalCandidate;
   messages?: readonly Message[];
   team: readonly ApprovalTeamRule[];
   personal: readonly ApprovalRule[];
+  /** This person's "Allow for this conversation" answers in the conversation the action is in. */
+  conversation?: readonly ApprovalConversationGrant[];
   customRulesEnabled: boolean;
   autoReview: boolean;
   askBeforeChanges: boolean;
+  /** The kinds the admin closed (`ApprovalTeamSettings.actionKinds`). */
+  actionKinds?: Partial<Record<ActionKind, ActionKindPolicy>>;
   model?: ReviewModel;
 }): Promise<ApprovalPolicyOutcome> {
   const { candidate } = input;
   const safety = safetyRequirement(candidate);
-  if (safety)
+  if (safety?.behaviour === "hand_off")
     return {
-      behaviour: safety.behaviour,
+      behaviour: "hand_off",
       source: "safety",
+      kind: safety.id,
       reason: safety.reason,
     };
-  const matched = strictestRule(
-    candidate,
-    input.team,
-    input.customRulesEnabled ? input.personal : [],
-  );
+  if (safety) {
+    const closed = closedKind(safety.id, input.actionKinds);
+    if (closed) return closed;
+  }
+  /*
+   * A personal rule and a conversation answer are both the person's own standing answers, so a
+   * workspace that switched personal rules off switches both off.
+   */
+  const personal = input.customRulesEnabled ? input.personal : [];
+  const conversation = input.customRulesEnabled
+    ? (input.conversation ?? [])
+    : [];
+  const ruleFor = (kind: ActionKind | undefined) =>
+    strictestRule(candidate, input.team, personal, {
+      conversation,
+      ...(kind ? { kind } : {}),
+    });
+  const kind = safety?.id;
+  const matched = ruleFor(kind);
+  const kindOf = kind ? { kind } : {};
   const rule = matched
     ? {
         ruleId: matched.rule.id,
@@ -771,9 +945,10 @@ export async function decideAction(input: {
   if (matched?.rule.behaviour === "hand_off")
     return {
       behaviour: "hand_off",
-      source: matched.layer,
+      source: matched.layer === "team_rule" ? "team_rule" : "personal_rule",
       ruleId: matched.rule.id,
       reason: "A rule hands this kind of action to the person.",
+      ...kindOf,
     };
   const review =
     (input.autoReview && reviewable(candidate)) ||
@@ -793,22 +968,40 @@ export async function decideAction(input: {
         })
       : undefined;
   /*
-   * The reviewer's own safety classification, on top of the keyword floor above. It can only add a
-   * hand-off: a reviewer that says "none" or cannot be reached leaves the keyword result standing.
+   * The reviewer's own safety classification, on top of the keyword match above. It can only make
+   * the action ask (or what the admin set for the kind): a reviewer that says "none" or cannot be
+   * reached leaves the keyword result standing. Open, it asks unless an allow saved from that kind's
+   * card covers it.
    */
   const category = review?.safety;
   if (
+    !safety &&
     category &&
     category !== "none" &&
     !review.failedClosed &&
     !NOT_ACCOUNT_ACTIONS.test(candidate.toolRef)
-  )
+  ) {
+    const reason = SAFETY_REASONS[category];
+    const closed = closedKind(category, input.actionKinds);
+    if (closed) return { ...closed, review };
+    const allowed = ruleFor(category);
+    if (allowed?.rule.behaviour === "allow")
+      return {
+        behaviour: "allow",
+        source: allowed.layer,
+        ruleId: allowed.rule.id,
+        kind: category,
+        reason: allowedReason(allowed.layer),
+        review,
+      };
     return {
-      behaviour: "hand_off",
+      behaviour: "ask",
       source: "safety",
-      reason: SAFETY_REASONS[category],
+      kind: category,
+      reason,
       review,
     };
+  }
   if (review && input.autoReview && reviewable(candidate)) {
     if (review.verdict === "hand_off")
       return {
@@ -817,6 +1010,7 @@ export async function decideAction(input: {
         reason: review.reason,
         review,
         ...(rule ? { ruleId: rule.ruleId } : {}),
+        ...kindOf,
       };
     if (review.verdict === "needs_approval")
       return {
@@ -825,15 +1019,17 @@ export async function decideAction(input: {
         reason: review.reason,
         review,
         ...(rule ? { ruleId: rule.ruleId } : {}),
+        ...kindOf,
       };
   }
   if (matched?.rule.behaviour === "ask")
     return {
       behaviour: "ask",
-      source: matched.layer,
+      source: matched.layer === "team_rule" ? "team_rule" : "personal_rule",
       ruleId: matched.rule.id,
       reason: "A rule asks before this kind of action.",
       ...(review ? { review } : {}),
+      ...kindOf,
     };
   if (matched?.rule.behaviour === "pre_approved")
     return review?.preApproved && !review.failedClosed
@@ -843,6 +1039,7 @@ export async function decideAction(input: {
           ruleId: matched.rule.id,
           reason: "The person asked for this exact action in this run.",
           review,
+          ...kindOf,
         }
       : {
           behaviour: "ask",
@@ -851,13 +1048,24 @@ export async function decideAction(input: {
           reason:
             "A rule allows this only when the person asked for it, and this run's request did not.",
           ...(review ? { review } : {}),
+          ...kindOf,
         };
   if (matched?.rule.behaviour === "allow")
     return {
       behaviour: "allow",
       source: matched.layer,
       ruleId: matched.rule.id,
-      reason: "A rule allows this kind of action.",
+      reason: allowedReason(matched.layer),
+      ...(review ? { review } : {}),
+      ...kindOf,
+    };
+  // A kind, open, that nothing allows: it asks, and the card offers every answer.
+  if (safety)
+    return {
+      behaviour: "ask",
+      source: "safety",
+      kind: safety.id,
+      reason: safety.reason,
       ...(review ? { review } : {}),
     };
   if (input.askBeforeChanges && candidate.effect !== "read")
@@ -873,6 +1081,13 @@ export async function decideAction(input: {
     reason: review ? review.reason : "No rule or preference asks about this.",
     ...(review ? { review } : {}),
   };
+}
+
+/** Why an allow decided it, by the layer it came from. */
+function allowedReason(layer: RuleLayer): string {
+  return layer === "conversation"
+    ? "You allowed this for this conversation."
+    : "A rule allows this kind of action.";
 }
 
 const HOST_RANK: Record<HostCommandPolicy, number> = {

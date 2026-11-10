@@ -507,9 +507,9 @@ test.each(["team", "personal"] as const)(
     await view.findByText("Rules for every Bot");
     const said = view.container.textContent ?? "";
     for (const sentence of [
-      "Bots always ask for your approval before deleting, sending, sharing, or posting content in your apps or on websites.",
+      "Bots ask for your approval before deleting, sending, sharing, posting, or paying in your apps or on websites. You can allow each one once, for a conversation, or always.",
       "They also ask before every edit or command in a folder on your own computer.",
-      "Bots leave payments and account security changes for you to do yourself.",
+      "Bots leave changing a password on a website for you to do yourself.",
       "Bots can create, edit, and delete files in their own workspace without asking, unless your settings or rules say so.",
       "Require your approval for every change to your apps, websites, and files, including routine edits and updates.",
     ])

@@ -252,6 +252,7 @@ export function replayWords(
 /** What the person said when they were asked, in their words. */
 const ANSWERS: Record<NonNullable<BacktestChange["person"]>, string> = {
   allow_once: "A person allowed it once.",
+  allow_conversation: "A person allowed it for that conversation.",
   allow_always: "A person always allowed it.",
   deny: "A person denied it.",
   handled: "A person did it themselves.",
