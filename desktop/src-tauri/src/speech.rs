@@ -1,5 +1,6 @@
 /*!
-Narration's speech recognition, on this computer, for OpenBot's own page in the Desktop window.
+Speech recognition on this computer, for OpenBot's own page in the Desktop window: dictation in the
+message box (`app/src/lib/dictation/live.ts`, when OpenBot has no transcription provider) and narration.
 
 The page narrates a recording with the browser's own speech recognition, and only ever on the
 device (`app/src/lib/browser/narration.ts`, `shared/on-device-speech.ts`). The window that shows it
