@@ -31,11 +31,12 @@ import {
 } from "./ProviderPicker";
 import { Sections } from "./Sections";
 import { StartFresh } from "./StartFresh";
-import { PodmanGoAhead } from "./PodmanGoAhead";
+import { PausePodman, PodmanGoAhead } from "./PodmanGoAhead";
 import {
   engineNow,
   goAheadNow,
   handOffNow,
+  pauseOfferNow,
   BehindSlot,
   INSTALL_BLURB,
   installingBehind,
@@ -780,6 +781,12 @@ function Setup() {
   // The person closed macOS's password prompt: whichever screen they are on says so, with Try
   // again, while Install asks again by itself. See `install::GoAhead`.
   const goAhead = goAheadNow(steps);
+  // On a Mac whose own Podman OpenBot can't use: the offer to pause it while OpenBot runs, on
+  // whichever screen the person is on, with the button that says yes. See `own_machine`.
+  const pauseOffer = pauseOfferNow(steps);
+  const pauseCard = pauseOffer && (
+    <PausePodman key={pauseOffer} offer={pauseOffer} />
+  );
 
   /*
    * What is installing behind a screen that asks the person for something else, as one row: the
@@ -887,6 +894,7 @@ function Setup() {
           />
           {/* The person closed macOS's password prompt: said, with Try again. */}
           {goAhead && <PodmanGoAhead asking={goAhead} />}
+          {pauseCard}
           <LocalStatus sequence={local} download={false} />
           {/* The first screen's downloads, until a row of Install's own shows the one it waits on. */}
           {!steps.some((row) => row.running && row.downloads) && (
@@ -952,6 +960,8 @@ function Setup() {
             (row) => row.step === "engine" && row.running && row.updating,
           )}
           retried={setupRetries}
+          // The offer to pause the person's own Podman, said on this step while it waits.
+          pauseOffer={pauseOffer}
           // No slot once the install has failed: its failure is in the card, and nothing will
           // come into the slot until the person starts it again.
           behind={
@@ -1111,6 +1121,7 @@ function Setup() {
             releaseDue={releaseDue}
           />
           {goAhead && <PodmanGoAhead asking={goAhead} />}
+          {pauseCard}
           {updatingLine}
           {displayedFailure && <Failure problem={displayedFailure} />}
           {/* While a local step runs, its Cancel is the only control. */}
@@ -1193,6 +1204,7 @@ function Setup() {
             releaseDue={releaseDue}
           />
           {goAhead && <PodmanGoAhead asking={goAhead} />}
+          {pauseCard}
           {updatingLine}
           {/* Leftover data is a choice, offered above, not a failure to report here. */}
           {displayedFailure && leftoverVolumes.length === 0 && (

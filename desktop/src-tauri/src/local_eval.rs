@@ -7531,6 +7531,34 @@ printf '%s' '{completed}'
         ));
     }
 
+    /// With the person's own machine passed over (`engine::passed_over_machine`), OpenBot runs on
+    /// its own, and the CLI is told that machine's API and connection. The machine behind Podman's
+    /// default connection, which is the person's, is never the one asked about.
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn the_cli_is_told_openbots_own_machine_and_never_the_default_one() {
+        use crate::acquire::MachineFacts;
+        use crate::engine::{Address, Engine};
+        let pipe = "npipe:////./pipe/podman-openbot";
+        let address = Address::new(Engine::Podman, Some("openbot-root".into()));
+        let mut asked = Vec::new();
+        let engine = CliEngine::of_with(&address, |connection| {
+            asked.push(connection.to_string());
+            Ok(MachineFacts {
+                rootful: Some(true),
+                api: Some(pipe.into()),
+            })
+        });
+        assert_eq!(asked, ["openbot-root"]);
+        assert!(!engine.rootless);
+        let variables = engine_variables(Some(&engine));
+        assert_eq!(variables.get("DOCKER_HOST"), Some(&Some(pipe.to_string())));
+        assert_eq!(
+            variables.get("CONTAINER_CONNECTION"),
+            Some(&Some("openbot-root".to_string()))
+        );
+    }
+
     #[test]
     fn a_rootless_podman_declines_setup_start_and_update_and_nothing_else() {
         use crate::engine::Engine;

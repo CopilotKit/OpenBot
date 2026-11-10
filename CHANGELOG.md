@@ -30,6 +30,16 @@ backup taken before the upgrade instead. Three things change for an existing dep
 
 ### OpenBot Desktop
 
+- **OpenBot uses its own Podman machine when yours can't run it, and leaves yours as it is.** A
+  Podman machine made with `podman machine init` is rootless, and OpenBot used it and stopped at
+  "Change this computer's setup" because local Intelligence needs rootful Podman. On Windows even a
+  rootful machine of yours left chat unable to reach OpenBot's back end. OpenBot now makes and uses
+  its own rootful machine, `openbot`, as on a computer with none. On Windows it runs beside yours,
+  which keeps running untouched. On a Mac, where Podman runs one machine at a time, OpenBot asks
+  before it pauses your rootless machine while it runs (**Pause my Podman**), and Quit starts yours
+  again with its containers. Docker, and a rootful machine of yours on a Mac, are used as before.
+  Your default Podman connection is never changed. An installation that ran in your own machine
+  starts fresh in `openbot`; its old data stays in your machine.
 - **Start says in the log what it is waiting on, and why it gave up.** A Start that waited five
   minutes for OpenBot's services and then said "OpenBot didn't get ready in time" left nothing in
   the log in between. Each wait now writes what it asked (the address or the back end's status),

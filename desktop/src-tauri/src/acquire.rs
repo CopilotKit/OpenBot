@@ -288,14 +288,15 @@ pub fn machine_exists() -> Result<bool, String> {
 /// `--rootful`, for local Intelligence: see the module comment.
 ///
 /// AN EXISTING MACHINE IS NEVER SWITCHED TO ROOTFUL, OURS INCLUDED. `podman machine set --rootful`
-/// would do it, on a stopped machine, which is the person's to stop. A rootless machine keeps its
-/// containers and volumes in the rootless engine's storage, and the rootful engine in the same VM
-/// does not see them. Releases up to 0.2.0 created this machine rootless, so "ours" is not
-/// "empty". A rootless machine is left as it is and OpenBot keeps running on it; local
-/// Intelligence then declines to start there with a sentence that names the switch (see
-/// `local_eval::Failure::RootlessPodman`). After the switch OpenBot stays in the rootless storage
-/// its database is in (see `connection_keeping_openbot`), and Intelligence runs on the rootful
-/// engine of the same machine.
+/// would do it, on a stopped machine, which is the person's to stop. A machine of the person's own
+/// that OpenBot can't run on is passed over instead, and this one made beside it (see
+/// `own_machine`). A rootless machine keeps its containers and volumes in the rootless engine's
+/// storage, and the rootful engine in the same VM does not see them. Releases up to 0.2.0 created
+/// this machine rootless, so "ours" is not "empty". Ours, made rootless, is left as it is and
+/// OpenBot keeps running on it; local Intelligence then declines to start there with a sentence
+/// that names the switch (see `local_eval::Failure::RootlessPodman`). After the switch OpenBot
+/// stays in the rootless storage its database is in (see `connection_keeping_openbot`), and
+/// Intelligence runs on the rootful engine of the same machine.
 ///
 /// `image` is the machine image already downloaded (`early_downloads`), which Podman builds the
 /// machine from instead of pulling its own from quay.io: `--image` takes a local path, and unpacks a
