@@ -9,6 +9,7 @@
  * only their role: asked to file an issue on a site it was not signed in to, one browsed to the page
  * and then said it could not, never calling `computer_request_help` to have a person sign in.
  */
+import { notRun } from "./approval-outcomes";
 import { SHOW_APP_ACCESS_TOOL } from "./connect-prompt";
 import { RESEARCH_APP_NAMES } from "./research";
 import { SUBAGENT_TOOL, SUBAGENTS_PER_ANSWER } from "./subagent";
@@ -492,7 +493,6 @@ function dayIn(
  * `agent-langgraph` alone, and `agent-bot` — the Bot that ships in the box, and the one behind the
  * Browser Bot — went on failing in exactly the same way until somebody drove it.
  */
-export const NO_ANSWER_CAME =
-  "No result. The person did not answer this, and the run it belonged to has ended. " +
-  "Do not wait for it and do not assume it succeeded. Carry on without it, and say plainly what " +
-  "you could not do if it mattered.";
+export const NO_ANSWER_CAME = notRun(
+  "no result came back, because the person did not answer this and the run it belonged to has ended.",
+);

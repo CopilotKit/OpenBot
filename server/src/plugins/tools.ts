@@ -18,6 +18,7 @@ import {
   catalogueEntry,
   researchRoleFor,
 } from "./catalogue";
+import { runCalls, sameArguments } from "./run-calls";
 import type { SelectableSkill } from "./selection";
 import {
   isDeploymentFault,
@@ -546,6 +547,13 @@ export async function grantedTools(options: {
       : tool.inputSchema;
   };
 
+  /*
+   * This run's app calls, a few at a time, and a read asked twice answered once. One per call of this
+   * function, which is one per run: a run builds its tools afresh (`loadTools` in copilot.ts), so
+   * nothing is cached past the run it was read in. See `./run-calls`.
+   */
+  const calls = runCalls();
+
   return granted.tools.map((tool) => ({
     name: tool.toolName,
     ref: tool.ref,
@@ -561,60 +569,71 @@ export async function grantedTools(options: {
       : tool.description,
     parameters: parametersFor(schemaFor(tool)),
     execute: async (args: unknown) => {
-      try {
-        const result = await store.callTool({
-          ref: tool.ref,
-          // The runtime hands through whatever the model produced. Anything that is not an object
-          // is not a set of arguments, and the vendor should be the one to say so.
-          args:
-            args && typeof args === "object" && !Array.isArray(args)
-              ? (args as Record<string, unknown>)
-              : {},
-          botId,
-          actorId,
-          ...(initiator ? { initiator } : {}),
-          ...(credentialActorFor
-            ? { credentialActorId: await credentialActorFor(tool.ref) }
-            : {}),
-        });
-        return vendorAnswer(result);
-      } catch (error) {
-        if (error instanceof HeadlessToolSuspension) throw error;
-        if (
-          error instanceof PluginRefusedError ||
-          error instanceof ApprovalRefusedError
-        ) {
-          /*
-           * A refusal that carries an app card names the Bot here, the one place both are known:
-           * in a channel several Bots answer in, the card has to ask what the app is for this
-           * person on THIS Bot, not on whichever one the surface happens to have declared.
-           */
-          return `${REFUSAL_MARKER} ${addressedTo(error.message, botId)}`;
+      // The runtime hands through whatever the model produced. Anything that is not an object is
+      // not a set of arguments, and the vendor should be the one to say so.
+      const callArgs =
+        args && typeof args === "object" && !Array.isArray(args)
+          ? (args as Record<string, unknown>)
+          : {};
+      // Only a read is answered again from earlier in the run: a write asked twice is done twice.
+      const key = tool.read ? `${tool.ref} ${sameArguments(callArgs)}` : null;
+      return calls.call(key, async () => {
+        try {
+          const result = await store.callTool({
+            ref: tool.ref,
+            args: callArgs,
+            botId,
+            actorId,
+            ...(initiator ? { initiator } : {}),
+            ...(credentialActorFor
+              ? { credentialActorId: await credentialActorFor(tool.ref) }
+              : {}),
+          });
+          return { text: vendorAnswer(result), reusable: !result.isError };
+        } catch (error) {
+          if (error instanceof HeadlessToolSuspension) throw error;
+          return { text: failedCall(error, botId), reusable: false };
         }
-        /*
-         * A contradiction in this deployment's own tables says nothing to a model.
-         *
-         * CRITERION. Nothing on the `isDeploymentFault` shelf may have its message relayed from
-         * here, whatever it says.
-         *
-         * REASON. The branch below hands `error.message` to the model, which is right for a
-         * vendor's own words — that is somebody else's software explaining itself, and the
-         * diagnosis is worth having. These are not that. `ServerRowAmbiguousError` names two of
-         * our columns and tells the reader to rename a row or correct its provenance: an
-         * instruction only an operator can carry out, arriving in an end user's model context as
-         * the reason their tool failed, from which the model can only invent something to tell
-         * them. The operator who can act on it is served on the admin surface instead, where the
-         * refresh route now answers with the sentence in full.
-         */
-        if (isDeploymentFault(error)) return "That tool could not be called.";
-        // A vendor that failed is not a refusal, and the difference matters to the person reading
-        // the answer: one means "not allowed", the other means "it broke".
-        return error instanceof Error
-          ? `That tool could not be called: ${error.message}`
-          : "That tool could not be called.";
-      }
+      });
     },
   }));
+}
+
+/**
+ * What a Bot is told about a call that did not come back with an answer: a refusal, or a failure.
+ */
+function failedCall(error: unknown, botId: string): string {
+  if (
+    error instanceof PluginRefusedError ||
+    error instanceof ApprovalRefusedError
+  ) {
+    /*
+     * A refusal that carries an app card names the Bot here, the one place both are known: in a
+     * channel several Bots answer in, the card has to ask what the app is for this person on THIS
+     * Bot, not on whichever one the surface happens to have declared.
+     */
+    return `${REFUSAL_MARKER} ${addressedTo(error.message, botId)}`;
+  }
+  /*
+   * A contradiction in this deployment's own tables says nothing to a model.
+   *
+   * CRITERION. Nothing on the `isDeploymentFault` shelf may have its message relayed from here,
+   * whatever it says.
+   *
+   * REASON. The branch below hands `error.message` to the model, which is right for a vendor's own
+   * words — that is somebody else's software explaining itself, and the diagnosis is worth having.
+   * These are not that. `ServerRowAmbiguousError` names two of our columns and tells the reader to
+   * rename a row or correct its provenance: an instruction only an operator can carry out, arriving
+   * in an end user's model context as the reason their tool failed, from which the model can only
+   * invent something to tell them. The operator who can act on it is served on the admin surface
+   * instead, where the refresh route now answers with the sentence in full.
+   */
+  if (isDeploymentFault(error)) return "That tool could not be called.";
+  // A vendor that failed is not a refusal, and the difference matters to the person reading the
+  // answer: one means "not allowed", the other means "it broke".
+  return error instanceof Error
+    ? `That tool could not be called: ${error.message}`
+    : "That tool could not be called.";
 }
 
 /**
