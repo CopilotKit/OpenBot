@@ -405,6 +405,13 @@ a model key is needed.
 
 - An interface a Bot draws in a card, such as the "Build a trip budget" starter task, has one frame
   in the conversation. It had a second border around the card, with a gap between the two.
+- The Personal Assistant on a framework picked in setup reads "Everyday life agent. (powered by a
+  LangChain agent; you can bring your own agent from any stack.)" under its name (with its own
+  framework's name), on a new install and on an existing one that kept "Powered by LangChain
+  (LangGraph)" after an upgrade. Any other Bot OpenBot subtitled under LangChain's earlier names
+  reads "Powered by LangChain". Only what a person sees changes: nothing stored changes, a Bot is
+  told its subtitle as before, and words a person wrote stay theirs. A Bot's page shows a long
+  subtitle on up to three lines.
 - Onboarding's OpenBot for Business step says what OpenBot for Business is before it asks for a
   demo: work sign-in, Bots shared in Slack and Microsoft Teams, and the controls and audit trail,
   beside the picture of running OpenBot yourself that the step showed before. Book a demo then
@@ -419,13 +426,6 @@ a model key is needed.
   mark.
 - The OpenBot version sits to the right of your name at the foot of the sidebar, where it was a
   line under it.
-- The Personal Assistant on a framework picked in setup reads "Everyday life agent. (powered by a
-  LangChain agent; you can bring your own agent from any stack.)" under its name (with its own
-  framework's name), on a new install and on an existing one that kept "Powered by LangChain
-  (LangGraph)" after an upgrade. Any other Bot OpenBot subtitled under LangChain's earlier names
-  reads "Powered by LangChain". Only what a person sees changes: nothing stored changes, a Bot is
-  told its subtitle as before, and words a person wrote stay theirs. A Bot's page shows a long
-  subtitle on up to three lines.
 
 ### Personal edition
 
