@@ -138,6 +138,35 @@ test("the first sync copies every signed installer and latest.json, and invalida
   );
 });
 
+test("the release's full image list is served beside it, where an older app reads it to get the update ready", () => {
+  // The app on the version before reads this file as soon as the update feed names the release,
+  // and pulls the images it lists while it keeps running (desktop/src-tauri/src/update_ready.rs).
+  // It asks this address first, so a 403 here sends every install to GitHub.
+  const fake = downloads();
+  const list = JSON.stringify({
+    openbot: "v0.3.0",
+    intelligence: "0.16.0-rc.10",
+    images: ["ghcr.io/copilotkit/openbot-server@sha256:abc"],
+  });
+  fake.release("v0.3.0", {
+    ...signed("0.3.0"),
+    "desktop-images.json": list,
+  });
+  fake.setLatest("v0.3.0");
+  expect(run(fake).code).toBe(0);
+  expect(fake.bucket()["releases/v0.3.0/desktop-images.json"]).toEqual({
+    content: list,
+    cacheControl: IMMUTABLE,
+    contentType: "application/json",
+    sha256: true,
+  });
+  // Uploaded with the release's other files, before the feed that names the release.
+  const order = puts(fake);
+  expect(order.indexOf("releases/v0.3.0/desktop-images.json")).toBeLessThan(
+    order.indexOf("latest/latest.json"),
+  );
+});
+
 test("a second sync with nothing new uploads nothing and does not invalidate", () => {
   const fake = downloads();
   fake.release("v0.3.0", signed("0.3.0"));

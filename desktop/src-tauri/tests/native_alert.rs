@@ -49,6 +49,7 @@ fn main() {
     let offer = app_update::prompt(&Ok(app_update::Asked::Available {
         version: "1.0.1".into(),
         current: "1.0.0".into(),
+        ready: None,
     }));
     let (yes, no) = offer.buttons.expect("the offer asks");
     let shown = alert(mtm, &offer.title, &offer.message, offer.buttons);
