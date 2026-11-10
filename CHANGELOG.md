@@ -24,7 +24,7 @@ backup taken before the upgrade instead. Three things change for an existing dep
   to ask every time in Admin > Approvals.
 - A Personal Assistant whose instructions nobody changed takes the new ones at the next start
   (below). One whose instructions were edited keeps them.
-- OpenBot Desktop's bundled CLI moves to `copilotkit@f5c45eb`, and Start writes
+- OpenBot Desktop's bundled CLI moves to `copilotkit@f72e270`, and Start writes
   `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` in `~/OpenBot/.env` as empty (below). The back end stays
   on CopilotKit Intelligence 0.16.0-rc.10.
 
@@ -231,10 +231,18 @@ backup taken before the upgrade instead. Three things change for an existing dep
   `~/OpenBot/.env`, and the other folder's back end and `.env` are left alone. OpenBot also counts
   a back end as its own, to stop with Stop and Quit, only when the CLI records it for `~/OpenBot`;
   one it was handed for another folder is never stopped.
-- **CopilotKit CLI `copilotkit@f5c45eb`.** OpenBot Desktop's bundled CLI moves to the production
-  build of Intelligence `f5c45ebc0`: `6bfaa0f5c`, which added `telemetry link`, with `--app-path`
-  added to its `local` commands. It keeps Intelligence 0.16.0-rc.10 and CopilotKit v1.85.0
-  templates.
+- **Connecting the back end a second time no longer stops setup.** Setup Retry, going Back and
+  forward through setup, and reinstalling over an existing install connect `~/OpenBot` to its back
+  end again. After the first connection OpenBot writes the back end's addresses at `127.0.0.1`
+  where the CLI wrote `localhost`, and the CLI then refused every later connection with "App
+  settings changed after connection was planned", so setup could not finish. The CLI now treats
+  `localhost`, `127.0.0.1` and `[::1]` with the same port as the same address, connects again, and
+  leaves OpenBot's addresses as they are. An address changed to another port or host is still
+  refused.
+- **CopilotKit CLI `copilotkit@f72e270`.** OpenBot Desktop's bundled CLI moves to the production
+  build of Intelligence `f72e2704d`: `6bfaa0f5c`, which added `telemetry link`, with `--app-path`
+  added to its `local` commands and a second `local connect` accepted after OpenBot rewrote its
+  addresses to `127.0.0.1`. It keeps Intelligence 0.16.0-rc.10 and CopilotKit v1.85.0 templates.
 - **A Learning container left in `~/OpenBot/.env` by an earlier setup no longer fails every
   message.** A folder set up against hosted Intelligence kept
   `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID="openbot"`, which the local back end did not have, so every
