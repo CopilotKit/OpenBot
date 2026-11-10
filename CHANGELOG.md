@@ -170,6 +170,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   reply as they come, and holds anything you type until the turn is over. A message sent from a
   conversation that still missed some answers takes them from the stored conversation first;
   only a lookup that truly never answered is said to have no result.
+- **The Bots OpenBot ships do the work instead of asking about it.** The Personal Assistant was
+  told to ask whenever something was ambiguous and to ask you to sign in and wait, so it stopped to
+  ask about choices it could make and sent a sentence where it should have handed you the browser.
+  It, General Assistant and Knowledge now take the step in the same reply, use what they already
+  have before asking, ask only when a wrong guess would be hard to undo or only you know the
+  answer, try a failed call once more, and end with what they could not confirm. A Personal
+  Assistant whose instructions you never changed moves to the new ones on the next start; one you
+  edited keeps yours. The ten Bots in `examples/fintech/catalog` now run on their rules: those lived
+  in the description shown under each Bot's name, which a Bot that runs here is never given, so
+  one copied in ran on its output format alone. Each now has a one-line
+  description and keeps its rules in its instructions.
 - **A Claude Agent SDK Bot keeps your request and its tool results through a long task.** A tool
   result over 50,000 characters (a page of email, an app's tool list, a file read from the Bot's
   computer) reached the Bot as a 2 KB preview and the path of a file it could not open, so it showed
