@@ -108,7 +108,10 @@ async function chat(text: string): Promise<Message[]> {
 }
 
 /** A routine's firing, through the headless turn runner, as the routine runner calls it. */
-async function fire(instruction: string) {
+async function fire(
+  instruction: string,
+  initiator: AuditInitiator = { kind: "routine", id: "routine-cycle" },
+) {
   const runTurn = createTurnRunner({
     admission: async () => new AbortController().signal,
     intelligence: {
@@ -146,7 +149,7 @@ async function fire(instruction: string) {
     agentId: bot.id,
     threadId: "thread-routine",
     instruction,
-    initiator: { kind: "routine", id: "routine-cycle" } as AuditInitiator,
+    initiator,
   });
 }
 
@@ -213,6 +216,24 @@ describe("a run's last step", () => {
     expect(asked.at(-1)?.tool_choice).toBe("none");
     expect(textOf(asked.at(-1))).toContain(LAST_STEP_NOTICE);
     expect(replyText).toContain("Could not confirm the rest.");
+  });
+  test("every run told it runs unattended gets the same budget: a goal's run too", async () => {
+    modelAnswers((request, index) =>
+      offersTools(request)
+        ? toolCall(`ENG-${index + 1}`, index)
+        : { content: "Done what I could. Could not confirm the rest." },
+    );
+
+    // A goal's run is told nobody is watching (`runModeOf`), so it has the steps to finish.
+    await fire("Look up every issue in the current cycle.", {
+      kind: "responsibility",
+      id: "goal-cycle",
+    });
+
+    const told = JSON.stringify(asked[0]?.messages ?? []);
+    expect(told).toContain("run_mode");
+    expect(asked).toHaveLength(UNATTENDED_STEPS.base);
+    expect(asked.at(-1)?.tool_choice).toBe("none");
   });
 });
 

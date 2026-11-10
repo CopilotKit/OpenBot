@@ -32,7 +32,7 @@ import {
   readRunAssertion,
 } from "./agents/callback-token";
 import { canUseComputer } from "./agents/computer-access";
-import { runModeOf } from "./agents/run-mode";
+import { isUnattended, runModeOf } from "./agents/run-mode";
 import { wireCoordination } from "./agents/coordination-wiring";
 import { createAgentFetch } from "./agents/endpoint";
 import { createHandoffDesk } from "./agents/handoff";
@@ -2204,7 +2204,7 @@ const actorAgentResolver = createActorAgentResolver({
   resolveModelApiKey: resolveRuntimeModelApiKey,
   pickedModelForActor: (actorId, initiator) => (input) =>
     modelChoices.forRun(actorId, input.threadId, {
-      unattended: runModeOf(initiator) !== "attended",
+      unattended: isUnattended(runModeOf(initiator)),
     }),
   stallGuard,
   loadToolsForActor: (actorId, initiator) =>

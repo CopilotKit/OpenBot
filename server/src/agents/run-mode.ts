@@ -29,3 +29,8 @@ export function runModeOf(
       return "attended";
   }
 }
+
+/** Whether nobody is watching a run of this mode, so it has to finish on its own. */
+export function isUnattended(mode: RunMode | undefined): boolean {
+  return mode !== undefined && mode !== "attended";
+}

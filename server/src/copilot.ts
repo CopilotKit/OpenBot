@@ -48,7 +48,6 @@ import {
   type PlatformRun,
   stopRecorder,
 } from "@openbot/toolkit/run-stop";
-import { runsUnattended } from "@openbot/toolkit/initiator";
 import { historyOrEmpty } from "@openbot/toolkit/thread-history";
 import { defer, from, switchMap } from "rxjs";
 import { z } from "zod";
@@ -65,7 +64,7 @@ import {
   planModelForEnvironment,
 } from "./agents/plan-model";
 import type { AgentActor } from "./agents/profile-types";
-import { runModeOf } from "./agents/run-mode";
+import { isUnattended, runModeOf } from "./agents/run-mode";
 import {
   type RefusingProvider,
   sayingProviderRefusals,
@@ -705,21 +704,19 @@ export function builtInAgentConfiguration(
    */
   apps?: readonly BotApp[],
   /**
-   * Nobody is watching this run: a routine's firing or a check-in (`runsUnattended`). It may take
-   * up to `UNATTENDED_STEPS.most` steps rather than chat's {@link TOOL_STEPS}; which step it answers
-   * on is decided per run, from the routine's parts (`unattendedLastStep`).
-   */
-  unattended = false,
-  /**
    * What this run is, beyond its tools. Appended last for the positional reason `buildAgents` gives.
    *
    * `mode` says whether anybody is watching (`runModeOf`): a routine or a check-in is told it runs
-   * unattended. `usesComputer` says whether this run was offered a computer tool. Absent means
+   * unattended, and a run told that may take up to `UNATTENDED_STEPS.most` steps rather than chat's
+   * {@link TOOL_STEPS} (which step it answers on is decided per run, from the routine's parts, in
+   * `unattendedLastStep`). One reading, so a run is never told to finish with chat's budget.
+   * `usesComputer` says whether this run was offered a computer tool. Absent means
    * nobody knows yet (a Bot built before its first request), and the computer guidance goes in
    * whenever the deployment has a computer, as it always did.
    */
   run: { mode?: RunMode; usesComputer?: boolean } = {},
 ): BuiltInAgentConfiguration {
+  const unattended = isUnattended(run.mode);
   if (!apiKey && !planModel) {
     return {
       type: "custom",
@@ -1345,8 +1342,8 @@ async function buildAgent(
   // Whether anybody is watching this run: a routine or a check-in is told it runs unattended.
   const mode = runModeOf(initiator);
   const granted = await loadTools(agent.id);
-  // A routine's firing or a check-in: nobody is watching, so the run has to finish on its own.
-  const unattended = runsUnattended(initiator);
+  // Nobody is watching, so the run has to finish on its own: the same reading the prompt is given.
+  const unattended = isUnattended(mode);
   /*
    * Best-effort, like the vendors: a failed read leaves the Bot told what its tools say, as before,
    * and must not stop the run. Never log the thrown value: database errors can carry row contents.
@@ -1645,7 +1642,6 @@ async function buildAgent(
       timeZone,
       pickedSkill,
       apps,
-      unattended,
       {
         mode,
         /*
