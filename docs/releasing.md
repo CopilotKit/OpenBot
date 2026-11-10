@@ -637,7 +637,10 @@ it: they hash what they receive. A key that is not there answers 403, not 404 (C
 
 Docker Hub's images are copied the same way under `v2/docker.io/<repo>/`, official images under
 `library/` (`v2/docker.io/library/busybox`), so a client uses `downloads.copilotkit.ai/docker.io` as
-the mirror for `docker.io`. Images on any other registry are left where they are.
+the mirror for `docker.io`. quay.io's are copied under `v2/quay.io/<repo>/`: the Podman engine machine
+images, which the app downloads itself from the first setup screen as plain blobs
+(`v2/quay.io/podman/machine-os/blobs/<digest>`, then quay.io), and builds the machine from
+(`desktop/src-tauri/src/early_downloads.rs`). Images on any other registry are left where they are.
 
 Which images: every image the release's `container-images.json` pins, all of them, and every image
 `desktop-images.json` on the release names. The `image list` job of the publish workflow writes that
@@ -647,7 +650,9 @@ list with the app's own code (`desktop/src-tauri/src/release_images.rs`, run as
 every Bot the app can install (`pgvector` included), the two sign-in images, the bundled CLI's back
 end images (its runtime images at its release's tag, its pinned ones and the Kubernetes system
 images), and the cluster's own images that the host's engine pulls when k3d creates the cluster (the
-k3s node image and k3d's proxy and tools, at the digests the CLI gives k3d). A release published
+k3s node image and k3d's proxy and tools, at the digests the CLI gives k3d), and the engine machine
+images Podman's machine is built from (`quay.io/podman/machine-os`, by the digests
+`early_downloads.rs` pins). A release published
 before this carries no list, and only its `container-images.json` images are copied;
 `DOWNLOADS_IMAGES_FILE` names a list to use instead. Images
 are read with [crane](https://github.com/google/go-containerregistry) (a pinned release, checked by

@@ -70,6 +70,23 @@ fn row_running_at<R: tauri::Runtime>(
     }
 }
 
+/// A download the running row `step` waits on brought in more bytes: the machine image or OpenBot's
+/// images the first screen started (`early_downloads`). Its clock restarts, as a moving download
+/// restarts the clock of the CLI step it holds up (`follow_cli`).
+pub fn moved<R: tauri::Runtime>(app: &tauri::AppHandle<R>, step: &str) {
+    moved_at(app, step, Instant::now());
+}
+
+fn moved_at<R: tauri::Runtime>(app: &tauri::AppHandle<R>, step: &str, now: Instant) {
+    let Some(stalls) = app.try_state::<Stalls>() else {
+        return;
+    };
+    let mut steps = lock(&stalls.steps);
+    if steps.timing(telemetry::StallPart::Start) == Some(step) {
+        steps.moved(telemetry::StallPart::Start, now);
+    }
+}
+
 /// A setup row finished, or failed.
 pub fn row_done<R: tauri::Runtime>(app: &tauri::AppHandle<R>, step: &str) {
     let Some(stalls) = app.try_state::<Stalls>() else {
@@ -448,6 +465,27 @@ mod tests {
             })
         );
         assert!(sink.next(Duration::from_secs(2)).is_none(), "said twice");
+    }
+
+    /// A step that waits on a download the first screen started is not stuck while its bytes come
+    /// in: each one restarts its clock. Once they stop coming, it is said as any step is.
+    #[test]
+    fn a_step_whose_download_keeps_moving_is_not_recorded() {
+        let sink = Sink::start();
+        let app = app("stall-moving", true, &sink);
+        let app = app.handle();
+        let start = Instant::now();
+        row_running_at(app, "installation", "Finishing the installation.", start);
+        // Ten minutes of a download moving under a step that typically takes 4 seconds.
+        for second in (0..=600).step_by(5) {
+            moved_at(app, "installation", at(start, second));
+            tick(app, at(start, second), Some(true));
+        }
+        assert!(app.state::<DesktopTelemetry>().queued().is_empty());
+        // A row that is not the one being timed restarts nothing.
+        moved_at(app, "services", at(start, 700));
+        tick(app, at(start, 730), Some(true));
+        assert_eq!(app.state::<DesktopTelemetry>().queued().len(), 1);
     }
 
     /// Minimised or hidden, the page may be held back by the system: nothing it misses is a stall.

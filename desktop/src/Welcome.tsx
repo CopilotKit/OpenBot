@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { EarlyDownloadsLine } from "./EarlyDownloads";
 import { ExternalLink } from "./ExternalLink";
 
 /** What OpenBot Desktop sends, and what it never does, in full. */
@@ -15,6 +16,9 @@ export const USAGE_DATA_DOC =
  *
  * The usage-data notice is here because this is the first screen, and the CopilotKit sign-in that
  * links the data to an account is the next. Settings > General turns it off.
+ *
+ * The big downloads start while this screen shows, before Install is clicked, and its line says how
+ * far they are (`EarlyDownloadsLine`).
  */
 export function Welcome({
   onInstall,
@@ -40,6 +44,7 @@ export function Welcome({
           Install
         </button>
       </div>
+      <EarlyDownloadsLine firstScreen />
       <p className="footnote">
         OpenBot sends CopilotKit usage data, linked to your CopilotKit account.
         It never sends your conversations, files or keys. You can turn this off

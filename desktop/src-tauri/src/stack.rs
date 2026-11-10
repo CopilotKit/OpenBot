@@ -91,6 +91,11 @@ pub type Secrets = std::collections::BTreeMap<String, String>;
 /// below only `-p`, so every caller's arguments stay exactly as they were. A project that could not
 /// be decided, because the engine could not be asked, is `DESKTOP_PROJECT`: never the folder's
 /// name, which would be adopting whatever else runs under it.
+/// The engine's Compose for the installation in `root`, with `secrets` in its environment.
+pub fn compose_command_for(engine: &Address, root: &Path, secrets: &Secrets) -> Command {
+    compose_command(engine, root, secrets)
+}
+
 fn compose_command(engine: &Address, root: &Path, secrets: &Secrets) -> Command {
     let project = project(engine, root).unwrap_or_else(|_| DESKTOP_PROJECT.to_owned());
     let mut command = engine.command();
@@ -1011,9 +1016,33 @@ pub fn installation_images_in(
     harness: bool,
     settings: &Secrets,
 ) -> Result<Vec<String>, Problem> {
+    installation_images_by(
+        compose_command(engine, root, settings),
+        root,
+        release,
+        harness,
+    )
+}
+
+/// A Compose of OpenBot's own that runs without any engine, for `config`: the standalone binary
+/// `install.rs` downloads (`docker-compose`), with the same settings as `compose_command`. Before
+/// Podman is on a computer, this is the only Compose there is.
+pub fn standalone_compose_command(compose: &Path, root: &Path, secrets: &Secrets) -> Command {
+    let mut command = crate::quiet::command(compose);
+    command.current_dir(root).envs(secrets);
+    command.env("COMPOSE_PROJECT_NAME", DESKTOP_PROJECT);
+    command
+}
+
+/// [`installation_images_in`], with the Compose `command` to ask given.
+pub fn installation_images_by(
+    mut command: Command,
+    root: &Path,
+    release: &Path,
+    harness: bool,
+) -> Result<Vec<String>, Problem> {
     let mut requested = selected_services(harness);
     requested.push("migrate");
-    let mut command = compose_command(engine, root, settings);
     if release != root {
         // Compose reads the release's file from where it runs, and `.env` from there too, so the
         // installation's own settings are named explicitly.
