@@ -54,6 +54,12 @@ backup taken before the upgrade instead. Three things change for an existing dep
   from the downloaded image instead of fetching its own. With less free disk than OpenBot needs,
   the first screen says how much is free and how much is needed, and the downloads start once
   there is room. Nothing is installed before you are asked.
+- **Windows setup no longer opens Microsoft's "Welcome to Windows Subsystem for Linux" window, and
+  the installer asks plainly to close a running OpenBot.** The welcome window opened partway
+  through setup, the first time OpenBot's Podman machine was made on a computer with no Linux
+  distribution. It isn't OpenBot's and isn't needed, so OpenBot now marks it as already seen for
+  you before it makes the machine. Installing over a running OpenBot said "OpenBot is running!
+  Click OK to kill it". It now says "OpenBot is open. Click OK to close it and continue."
 - **Setup says what it's doing in plain words, and what's installing behind every step.** The
   setup window said "Preparing the engine machine", "Installing Podman", "Waiting for the back end"
   and "Updating the back end to 0.16.0-rc.10", and a tester waiting on the first step couldn't tell
