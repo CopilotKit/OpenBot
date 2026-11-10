@@ -424,6 +424,13 @@ a model key is needed.
   mark.
 - The OpenBot version sits to the right of your name at the foot of the sidebar, where it was a
   line under it.
+- The "Always ask before making changes" switch is called "Extra vigilant", on Welcome, in
+  Settings → Approvals and on a Bot's Tools section in the personal edition. Its description,
+  behaviour and default are unchanged.
+- Welcome's permissions section is shorter: "Choose when Bots ask", one sentence saying Bots ask
+  before they delete, send, share, post or pay in your apps or on websites, the Extra vigilant
+  switch, and where to change it later. Allowing an action always, passwords and a Bot's own
+  workspace are still explained in Settings → Approvals.
 
 ### Personal edition
 
