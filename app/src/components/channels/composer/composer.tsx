@@ -28,6 +28,7 @@ import {
 } from "react";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { IconWaveform } from "@/components/icons/waveform";
+import { RoutineComposerButton } from "@/components/routines/new-routine-button";
 import {
   attachmentUrl,
   classifyAttachment,
@@ -260,6 +261,12 @@ export type ComposerProps = {
    * that can sum this; a caller with no queue leaves it out and nothing changes.
    */
   queuedAttachmentCount?: number;
+  /**
+   * The Bot this box sends to and the conversation it is in, for the clock beside `+` that sets up
+   * a routine for them. Absent draws no clock: a box with no conversation yet has nowhere for a
+   * routine to post. Drawn by the compact layout, the one a conversation uses.
+   */
+  routine?: { agentId: string; channelId: string };
 };
 
 /**
@@ -326,6 +333,13 @@ const UNACCEPTED_DROP_REASON = {
     "first, then attach files in the conversation it starts.",
 } as const;
 
+/**
+ * A drop that announced files and delivered none (see `handleDrop`). The `+` button reads the file
+ * through the system's own picker, so it is the next step that works.
+ */
+const UNREADABLE_DROP_REASON =
+  "couldn't be attached. Attach it with + instead.";
+
 export function Composer({
   className,
   editorClassName,
@@ -347,6 +361,7 @@ export function Composer({
   droppedAttachments,
   // Nothing parked is the right answer for every caller without a queue, which is most of them.
   queuedAttachmentCount = 0,
+  routine,
 }: ComposerProps) {
   const [value, setValue] = useState<Segment[]>(
     initialValue ? [{ type: "text", text: initialValue }] : [],
@@ -853,7 +868,30 @@ export function Composer({
        * to suspect the drop path. It costs one function call per drop.
        */
       handleDragLeave(event);
-      void stageFiles(Array.from(event.dataTransfer.files));
+      const files = Array.from(event.dataTransfer?.files ?? []);
+      if (files.length === 0) {
+        /*
+         * A DROP THAT SAID IT CARRIED FILES AND HANDED OVER NONE IS ANSWERED, NOT SWALLOWED.
+         *
+         * `types` carrying "Files" is the drag announcing files; an empty `files` is the webview
+         * failing to produce them (a file from another app it could not read, say). Staging an
+         * empty list does nothing, so the person let go of a screenshot over the box that takes
+         * screenshots and saw nothing at all, which is the report this exists for. A drag carrying
+         * no file (a link, a selection of text) is still nobody's business here.
+         */
+        if (event.dataTransfer?.types.includes("Files")) {
+          setRejected((current) => [
+            ...current,
+            {
+              id: newId(),
+              name: "Dropped file",
+              reason: UNREADABLE_DROP_REASON,
+            },
+          ]);
+        }
+        return;
+      }
+      void stageFiles(files);
     },
     [handleDragLeave, stageFiles],
   );
@@ -1581,6 +1619,7 @@ export function Composer({
                     <IconPlus className="size-5" />
                   </Button>
                 )}
+                {routine ? <RoutineComposerButton {...routine} /> : null}
                 {modelPicker}
               </div>
               <div className="flex shrink-0 items-center gap-1">

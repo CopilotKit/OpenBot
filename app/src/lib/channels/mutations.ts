@@ -100,6 +100,26 @@ export function setChannelPinnedMutationOptions(queryClient: QueryClient) {
 }
 
 /**
+ * Name a conversation, or clear its name with an empty one so it goes back to its summary.
+ *
+ * Only the person who started it may; the server refuses anybody else, and the roster's `canRename`
+ * is that same answer read ahead of time. The name is the conversation's, for every member.
+ */
+export function renameChannelMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (variables: { channelId: string; title: string }) => {
+      await client(`/api/channels/${variables.channelId}/title`, {
+        method: "PUT",
+        body: { title: variables.title.trim() || null },
+        fallback: "Couldn't rename this conversation.",
+      });
+    },
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: channelKeys.list() }),
+  });
+}
+
+/**
  * Stamp a channel read for this member, patching the cache before the wire answers.
  *
  * Patched in onMutate rather than refetched on success: the dot must clear the instant the channel

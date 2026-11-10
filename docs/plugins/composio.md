@@ -221,7 +221,7 @@ and writes, with *turn on every read-only action* as the one bulk action, which 
 that Bot will then carry before it does it. Every call then checks the grant, evaluates the action
 policy, and writes an audit row.
 
-A destructive action renders as danger, and always asks with Allow once or Deny before it runs (see
+A destructive action renders as danger, and asks before it runs, as deleting does (see
 [Approvals](../approvals.md)). Nothing renders as reassurance: an action that does not claim to be
 destructive is not claiming to be safe, so the absence of the marker is drawn plain, never as green.
 An action Composio labels nothing about at all is recorded as an unclassified write, as Arcade's

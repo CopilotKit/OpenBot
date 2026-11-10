@@ -293,7 +293,7 @@ export function modelSourceFor(
   if (host === hostOf(OPENAI_API)) return "openai";
   if (host === "generativelanguage.googleapis.com") return "google";
   if (host === "api.x.ai") return "xai";
-  if (/\/api\/model-provider\/v1\/?$/.test(configured)) {
+  if (signedInThroughProxy(environment)) {
     const vendor = modelVendor(environment.BOT_MODEL?.trim() ?? "");
     if (vendor === "google" || vendor === "xai") return vendor;
   }
@@ -338,7 +338,8 @@ export function modelsUrl(
 /**
  * Where a source's listing is read, and how. xAI is asked for `/language-models`, its own richer
  * listing, which carries each model's efforts, default effort, modalities and price; everything else
- * answers on `/models`. A ChatGPT plan is asked of the harness that holds its credential.
+ * answers on `/models`. A ChatGPT plan is asked of the harness that holds its credential; a Claude
+ * plan's harness has no listing, so Anthropic is asked with the plan's own OAuth token.
  */
 function listingRequest(
   model: RuntimeModel,
@@ -355,12 +356,17 @@ function listingRequest(
     };
   }
   if (source === "claude") {
-    const plan = model.plan;
-    if (!plan) return null;
+    /*
+     * The plan's own OAuth token, the one `claude setup-token` minted and the harness runs on. Not
+     * `plan.token`: that is MANAGED_AGENT_TOKEN, which proves the server to its harness, and sent
+     * here Anthropic answered 401, nothing was listed, and no Claude plan had a model picker.
+     */
+    const oauth = environment.CLAUDE_CODE_OAUTH_TOKEN?.trim();
+    if (!model.plan || !oauth) return null;
     return {
       url: modelsUrl("anthropic", environment),
       headers: {
-        authorization: `Bearer ${plan.token}`,
+        authorization: `Bearer ${oauth}`,
         "anthropic-version": ANTHROPIC_VERSION,
         "anthropic-beta": ANTHROPIC_OAUTH_BETA,
       },
@@ -382,6 +388,128 @@ function listingRequest(
         : url,
     headers: key ? { authorization: `Bearer ${key}` } : {},
   };
+}
+
+/** OpenBot's own sign-in proxy for Google and xAI, which the Desktop points `OPENAI_BASE_URL` at. */
+function signedInThroughProxy(
+  environment: Record<string, string | undefined>,
+): boolean {
+  return /\/api\/model-provider\/v1\/?$/.test(
+    environment.OPENAI_BASE_URL?.trim() ?? "",
+  );
+}
+
+const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+
+/**
+ * THE MODELS A SIGN-IN CAN USE WHEN NOTHING WILL LIST THEM. A sign-in whose credential may not be
+ * allowed to read the provider's listing still runs on the provider's models, and the person still
+ * picks among them. Without these, a listing that could not be read left one model and no picker.
+ *
+ * A Claude plan: Claude Code's own `/model` picker is a set of built-in rows, not a listing (Opus,
+ * Sonnet, Haiku, and Fable billed to usage credits; code.claude.com/docs/en/model-config), and
+ * Anthropic documents `/v1/models` with an API key: with a plan's OAuth token it is asked, and may
+ * refuse. The three every plan includes are offered, as Anthropic's own listing names and describes
+ * them. Fable is left out: it is never a
+ * plan's default, and on many plans it draws on usage credits rather than the plan.
+ *
+ * xAI through OpenBot's sign-in: xAI documents `/v1/language-models` for API keys, not for the
+ * Grok sign-in's token. The Desktop's own model for that sign-in, and the model third-party Grok
+ * sign-ins default to.
+ *
+ * Used only while nothing better has been read: the first listing that answers replaces them, and a
+ * refresh that fails afterwards keeps that listing. The deployment's own model of the same vendor is
+ * always among them, so the model somebody named stays theirs.
+ */
+function signInFallback(
+  source: ModelSource,
+  environment: Record<string, string | undefined>,
+): Entry[] | undefined {
+  if (source === "claude")
+    return [
+      {
+        id: "claude-haiku-5-5",
+        label: "Claude Haiku 5.5",
+        created: seconds("2026-10-07T18:00:00Z"),
+        family: "claude-haiku",
+        price: 0.1,
+        efforts: CLAUDE_EFFORTS,
+      },
+      {
+        id: "claude-sonnet-5-5",
+        label: "Claude Sonnet 5.5",
+        created: seconds("2026-09-28T00:00:00Z"),
+        family: "claude-sonnet",
+        price: 2,
+        efforts: CLAUDE_EFFORTS,
+      },
+      {
+        id: "claude-opus-5-5",
+        label: "Claude Opus 5.5",
+        created: seconds("2026-09-21T16:24:00Z"),
+        family: "claude-opus",
+        price: 4,
+        efforts: CLAUDE_EFFORTS,
+      },
+    ];
+  if (source === "xai" && signedInThroughProxy(environment)) {
+    const entries: Entry[] = [
+      {
+        id: "grok-4.7",
+        label: "Grok 4.7",
+        created: seconds("2026-09-21T00:00:00Z"),
+        family: "grok",
+        price: 2,
+        efforts: ["low", "medium", "high", "xhigh"],
+        defaultEffort: "high",
+      },
+      {
+        id: "grok-4.3",
+        label: "Grok 4.3",
+        created: seconds("2026-04-17T00:00:00Z"),
+        family: "grok",
+        price: 1.25,
+        efforts: ["none", "low", "medium", "high", "xhigh"],
+        defaultEffort: "low",
+      },
+    ];
+    const named = environment.BOT_MODEL?.trim();
+    if (
+      named &&
+      modelVendor(named) === "xai" &&
+      !entries.some((entry) => entry.id === named)
+    )
+      entries.unshift({ id: named, created: 0, family: "grok" });
+    return entries;
+  }
+  return undefined;
+}
+
+/**
+ * Whether a listing request would carry OpenBot's own harness token anywhere but the plan's harness.
+ * `MANAGED_AGENT_TOKEN` (a plan's `token`) is what the server proves itself to the harness it
+ * started with, and no provider, gateway or catalogue is ever sent it, whatever a listing asks for.
+ */
+function sendsHarnessTokenAway(
+  model: RuntimeModel,
+  environment: Record<string, string | undefined>,
+  asked: { url: string; headers: Record<string, string> },
+): boolean {
+  const tokens = [model.plan?.token, environment.MANAGED_AGENT_TOKEN]
+    .map((token) => token?.trim())
+    .filter((token): token is string => !!token);
+  const carried = Object.values(asked.headers).some((value) =>
+    tokens.some((token) => value.includes(token)),
+  );
+  if (!carried) return false;
+  return (
+    !model.plan || new URL(asked.url).origin !== model.plan.endpoint.origin
+  );
+}
+
+/** Where an effort sits in {@link EFFORT_ORDER}; -1 for none or one nothing says, the weakest. */
+function effortRank(effort: string | undefined): number {
+  return effort ? (EFFORT_ORDER as readonly string[]).indexOf(effort) : -1;
 }
 
 /** Efforts in the order every provider documents them, duplicates and blanks dropped. */
@@ -637,6 +765,7 @@ export function createModelCatalogue(options: {
   const { provider, defaultModel } = options.model;
   const source = modelSourceFor(options.model, environment);
   const vendor = sourceVendor(source);
+  const fallback = signInFallback(source, environment);
   const capabilitiesUrl = (() => {
     const configured =
       options.capabilitiesUrl === undefined
@@ -659,6 +788,16 @@ export function createModelCatalogue(options: {
           : await options.apiKey();
       const asked = listingRequest(options.model, source, environment, key);
       if (!asked) return null;
+      if (sendsHarnessTokenAway(options.model, environment, asked)) {
+        log(
+          JSON.stringify({
+            type: "model-list-unreadable",
+            source,
+            reason: "harness-token-elsewhere",
+          }),
+        );
+        return null;
+      }
       const response = await request(asked.url, {
         headers: asked.headers,
         redirect: "error",
@@ -722,6 +861,12 @@ export function createModelCatalogue(options: {
       attemptedAt = now();
       const [entries] = await Promise.all([readListing(), readCapabilities()]);
       if (entries) snapshot = { entries, at: now() };
+      else if (!snapshot && fallback) {
+        // Nothing listed yet, and this sign-in may never be allowed to: its own models stand in,
+        // and the listing is asked again on the schedule.
+        snapshot = { entries: fallback, at: now() };
+        log(JSON.stringify({ type: "model-list-fallback", source }));
+      }
     })().finally(() => {
       inFlight = undefined;
     });
@@ -914,6 +1059,12 @@ export function createModelCatalogue(options: {
    */
   async function choose(
     saved: { model?: string | null; effort?: string | null } | null | undefined,
+    /**
+     * The effort to use when the person picked none: sent only when the model takes it and thinks
+     * less than that on its own default. A routine runs at `high`, because nobody is watching it
+     * and models stop early more often at `low` and `medium`.
+     */
+    atLeast?: (typeof EFFORT_ORDER)[number],
   ): Promise<RunChoice> {
     const catalogue = await read();
     const listed = snapshot !== undefined;
@@ -926,7 +1077,11 @@ export function createModelCatalogue(options: {
     const effort =
       saved?.effort && model?.efforts?.includes(saved.effort)
         ? saved.effort
-        : undefined;
+        : atLeast &&
+            model?.efforts?.includes(atLeast) &&
+            effortRank(model.defaultEffort) < effortRank(atLeast)
+          ? atLeast
+          : undefined;
     return {
       model: id,
       label: model?.label ?? modelLabel(id),

@@ -1,11 +1,39 @@
-import { infiniteQueryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import type { AuditEvent } from "@/components/audit/audit-cells";
 import { client } from "@/lib/client";
 
 export const auditKeys = {
   all: ["audit-events"] as const,
   list: (search = "") => ["audit-events", "list", { search }] as const,
+  vocabulary: ["audit-events", "vocabulary"] as const,
 };
+
+/**
+ * What a filter on the trail may name in this deployment: its Bots, the people the trail has, the
+ * apps and tools it has seen, and the boundary rules, now and in the trail. The values a chip on
+ * the Audit page is edited from, and the only ones the model may choose.
+ */
+export type AuditVocabulary = {
+  bots: { id: string; name: string }[];
+  people: { id: string; name: string | null; email: string }[];
+  /** Apps by their key (`gmail`), whichever broker carried them. */
+  apps: { key: string; name: string }[];
+  /** `calls` is how many rows the trail holds for the tool; 0 for one never called. */
+  tools: { app: string; tool: string; calls: number }[];
+  rules: { rule: string; name: string | null; refusals: number }[];
+};
+
+export function auditVocabularyQueryOptions() {
+  return queryOptions({
+    queryKey: auditKeys.vocabulary,
+    queryFn: async (): Promise<AuditVocabulary> =>
+      (
+        await client("/api/admin/audit-events/vocabulary", {
+          fallback: "Couldn't load the filters",
+        })
+      ).json(),
+  });
+}
 
 /** One page of the trail as `GET /api/admin/audit-events` answers it, newest first. */
 export type AuditEventsPage = {

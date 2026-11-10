@@ -265,7 +265,7 @@ export const GALLERY: GalleryComponent[] = [
     summary:
       "Asks you to approve or decline something. The Bot waits for your answer.",
     description:
-      "Ask the person to approve or decline something, and WAIT for their answer. You are given their decision: `approved`, `declined`, or `other` with `note`, what they wrote instead. Use it for a decision that is theirs to make, or before something you cannot undo, unless your instructions say the person is already asked before that kind of action.",
+      "Ask the person to approve or decline something, and wait for their answer. You are given their decision: `approved`, `declined`, or `other` with `note`, what they wrote instead. Use it only before something you cannot undo that nothing else asks them about (your instructions say which kinds of action the person is already asked about), or for a decision only they can make. Do not use it to confirm a step they already asked you to take.",
     parameters: ApprovalCardProps,
     Component: ApprovalCard as GalleryComponent["Component"],
     preview: {
@@ -293,7 +293,7 @@ export const GALLERY: GalleryComponent[] = [
     summary:
       "Asks you to pick one of several options. The Bot waits for your answer.",
     description:
-      "Ask the person to pick one of several options, and WAIT for their answer. Use when you cannot sensibly guess which one they meant. You are given the id of the option they chose as `choice`, or `answer`, what they wrote instead.",
+      "Ask the person to pick one of several options, and wait for their answer. Use it only when the options lead to materially different work and nothing you can read settles it; otherwise pick the most reasonable one, say which, and carry on. You are given the id of the option they chose as `choice`, or `answer`, what they wrote instead.",
     parameters: ChoiceCardProps,
     Component: ChoiceCard as GalleryComponent["Component"],
     preview: {

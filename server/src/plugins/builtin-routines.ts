@@ -91,9 +91,9 @@ const TOOLS: readonly McpTool[] = Object.freeze([
   {
     name: "create_routine",
     description: [
-      "Set up a standing instruction that you carry out on a schedule for the person you are talking to.",
+      "Set up a routine: an instruction you carry out on a schedule for the person you are talking to.",
       "",
-      "Write the `instruction` as the work of ONE firing, in the imperative, and do not restate the schedule",
+      "Write the `instruction` as the work of a single firing, in the imperative, and do not restate the schedule",
       'inside it: `Append the current UTC time to the page "Log"`, not `Every 15 minutes, append the current',
       'UTC time to the page "Log"`. The schedule belongs in `cron`, and the instruction is handed to a turn',
       "that has already fired on it — an instruction that describes a schedule reads as a request to set one",
@@ -169,7 +169,7 @@ const TOOLS: readonly McpTool[] = Object.freeze([
   {
     name: "list_routines",
     description: [
-      "List the standing instructions this person has: each one's title when it has one, its schedule in",
+      "List the routines this person has: each one's title when it has one, its schedule in",
       "words, its timezone, the channel it posts into, when it next runs, how the last run went, and its id.",
       "",
       "Take the id from here before changing or deleting one. The id is for your routine tools only: never",

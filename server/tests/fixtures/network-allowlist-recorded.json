@@ -1,0 +1,28 @@
+{
+  "about": "Real answers from OpenAI Chat Completions to the prompts in server/src/admin/network-translate.ts, with response_format json_schema. Each string is the assistant message content exactly as the model returned it, recorded 2026-11-09. gpt-5.6-terra is the deployment default and wrote a list that parses first time, from the vendors' published lists in the prompt. gpt-4o-mini is where the parse gate earns its keep: it copies a host name with an underscore, which the computer's parser refuses. Sent back, it once changed the name to a different host (fixedOnRetry, which the independent reading then names), and once wrote the same names again (neverParses).",
+  "writtenFirstTime": {
+    "model": "gpt-5.6-terra",
+    "text": "Only Salesforce and Google Workspace",
+    "writer": [
+      "{\"notes\":\"Covered Salesforce and Google Workspace, including their sign-in, application, API, static-content, and Google Meet media hosts.\",\"mode\":\"allowlist_only\",\"entries\":[{\"type\":\"domain\",\"value\":\"salesforce.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"force.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"lightning.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"visualforce.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"salesforce-setup.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"salesforce-sites.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"salesforce-experience.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"salesforce-communities.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"salesforce-hub.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"salesforce-scrt.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"force-user-content.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"documentforce.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"sfdc.sh\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"google.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"googleapis.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"gstatic.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"googleusercontent.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"usercontent.goog\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"accounts.youtube.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"pki.goog\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"googlevideo.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"ytimg.com\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"youtube-nocookie.com\",\"ports\":\"\"}]}"
+    ],
+    "reader": "{\"summary\":\"Bots can reach Salesforce, Google services, and YouTube hosts, and nothing else.\",\"reachable\":[\"Salesforce: salesforce.com, force.com, lightning.com, visualforce.com, salesforce-setup.com, salesforce-sites.com, salesforce-experience.com, salesforce-communities.com, salesforce-hub.com, salesforce-scrt.com, force-user-content.com, documentforce.com, sfdc.sh\",\"Google services and content hosts: google.com, googleapis.com, gstatic.com, googleusercontent.com, usercontent.goog, pki.goog\",\"YouTube: accounts.youtube.com, googlevideo.com, ytimg.com, youtube-nocookie.com\"],\"explanation\":\"Bots can connect only to the listed Salesforce, Google, and YouTube domain families, including their subdomains. The google.com entry also permits Google Search and every host under google.com.\"}"
+  },
+  "fixedOnRetry": {
+    "model": "gpt-4o-mini",
+    "text": "Only our internal tools at my_tools.corp.example and wiki.corp.example",
+    "writer": [
+      "{\"notes\":\"This allowlist covers the internal tools and wiki specified in the description. No additional hosts or services were included as they were not mentioned.\",\"mode\":\"allowlist_only\",\"entries\":[{\"type\":\"domain\",\"value\":\"my_tools.corp.example\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"wiki.corp.example\",\"ports\":\"\"}]}",
+      "{\"notes\":\"Covered internal tools and wiki for access as specified. No additional hosts were added beyond what was requested.\",\"mode\":\"allowlist_only\",\"entries\":[{\"type\":\"domain\",\"value\":\"my-tools.corp.example\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"wiki.corp.example\",\"ports\":\"\"}]}"
+    ],
+    "reader": "{\"summary\":\"Bots can reach my-tools.corp.example and wiki.corp.example, and nothing else.\",\"reachable\":[\"my-tools.corp.example: corporate tools\",\"wiki.corp.example: corporate wiki\"], \"explanation\":\"Bots can connect to the specified corporate sites only. There are no other recognizable services available.\"}"
+  },
+  "neverParses": {
+    "model": "gpt-4o-mini",
+    "text": "Only the hosts db_primary.corp.example and db_replica.corp.example",
+    "writer": [
+      "{\"notes\":\"The allowlist includes the primary and replica database hosts specified in the description. No other hosts or services were included as they were not mentioned.\",\"mode\":\"allowlist_only\",\"entries\":[{\"type\":\"domain\",\"value\":\"db_primary.corp.example\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"db_replica.corp.example\",\"ports\":\"\"}]}",
+      "{\"notes\":\"This allowlist includes the primary and replica database hosts as specified. No additional hosts were included as the description strictly limits allowed connections.\",\"mode\":\"allowlist_only\",\"entries\":[{\"type\":\"domain\",\"value\":\"db_primary.corp.example\",\"ports\":\"\"},{\"type\":\"domain\",\"value\":\"db_replica.corp.example\",\"ports\":\"\"}]}"
+    ]
+  }
+}

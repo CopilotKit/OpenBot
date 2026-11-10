@@ -16,20 +16,36 @@ import {
   signInToCopilotKit,
 } from "./localEvalCli";
 import { engineTooSmallSaid } from "./localReadiness";
+import { ContinueToPodman, PODMAN_EXPLAINED } from "./PodmanGoAhead";
 import { InlineFailure, type Problem } from "./Problem";
 import { Sections } from "./Sections";
 import { StatusLine } from "./SetupProgress";
+import { Command } from "./WindowsBlocker";
 
 type Seen =
   | { at: "checking" }
+  /**
+   * Signed in, and no engine answers yet, so the CLI can't read the agreement. Install is bringing
+   * one up.
+   */
+  | { at: "waiting-for-engine" }
   | { at: "signed-out" }
   | { at: "signing-in"; attempt: string }
   | { at: "agreement"; terms: Extract<LocalTerms, { status: "required" }> }
   | { at: "apps"; version: string | null }
   | { at: "apps-failed"; version: string | null; problem: Problem }
-  | { at: "failed"; said: string };
+  /** `retry` is what Try again starts again: the sign-in, or the check after it. */
+  | { at: "failed"; said: string; retry: "sign-in" | "check" }
+  /** The CLI refused the container engine. Trying again by itself would not change it. */
+  | { at: "unsupported-engine"; said: string; switchEngine: boolean };
 
 const COULD_NOT_CHECK = "Couldn’t check your CopilotKit account. Try again.";
+const SIGN_IN_DID_NOT_FINISH = "Sign-in didn’t finish. Try again.";
+const SETTING_UP_ENGINE =
+  "You're signed in. OpenBot is setting up the software it runs on. The license agreement comes next.";
+const ENGINE_REFUSED =
+  "OpenBot's back end can't run on the container engine this computer uses.";
+const BLOCKED = "OpenBot's back end can't run on this computer as it's set up.";
 
 /**
  * How long the account check waits for a container engine, and how often it asks again. A new
@@ -47,6 +63,12 @@ const ENGINE_WAIT_LIMIT_MS = 15 * 60 * 1000;
  * local evaluation licence is issued to this account and under this agreement. Somebody already
  * signed in who has accepted the current agreement passes through it without a click.
  *
+ * The sign-in comes first, the moment the step opens, and waits for nothing. The CLI's `login`
+ * needs no container engine: it answers at once for a sign-in it already has, and otherwise opens
+ * the browser. Only the agreement waits for the engine (`onboard local-terms` checks it first). On a
+ * new Mac that is minutes of Podman installing behind this step, and the sign-in waited behind it
+ * too: people who left in that time had never signed in, so nobody knew who they were.
+ *
  * Accepting is the person's own act: they read the agreement at its address and click Accept here,
  * and that click is what setup later passes to the CLI as the version they accepted (a product
  * decision of 2026-10-22). Nothing accepts it without the click.
@@ -61,6 +83,8 @@ export function CopilotKitAccount({
   onDone,
   failure,
   handOff = null,
+  engine = null,
+  goAhead = null,
 }: {
   /** The installation folder the apps are connected for. */
   root: string;
@@ -69,6 +93,18 @@ export function CopilotKitAccount({
    * starting, or a password prompt. See `handOffNow`.
    */
   handOff?: string | null;
+  /**
+   * What Install, behind this step, is doing to bring the engine up, as its own row says it
+   * ("Preparing the engine machine."), the hand-off included. See `engineNow`. Said while the
+   * account check waits for an engine.
+   */
+  engine?: string | null;
+  /**
+   * Install, behind this step, waits for the person's go-ahead before macOS asks for their
+   * password to install Podman: its line, from `goAheadNow`. Once signed in, the step explains and
+   * offers Continue.
+   */
+  goAhead?: string | null;
   /** Signed in and agreed: the version accepted here, or null when nothing needed accepting. */
   onDone: (acceptedVersion: string | null) => void;
   /** A failure from setup itself, shown inside this card rather than under it. */
@@ -114,7 +150,8 @@ export function CopilotKitAccount({
   const waitingSince = useRef<number | null>(null);
   const askAgain = useRef<ReturnType<typeof setTimeout> | null>(null);
   const check = useCallback(() => {
-    setSeen({ at: "checking" });
+    // While it waits for the engine, each check asked again keeps saying what it waits on.
+    if (waitingSince.current === null) setSeen({ at: "checking" });
     const started = localEvalTerms();
     attempt.current = started.attempt;
     started.terms.then(
@@ -122,10 +159,12 @@ export function CopilotKitAccount({
         if (attempt.current !== started.attempt) return;
         attempt.current = null;
         if (terms.status === "engine-not-ready") {
-          // Install is still bringing the engine up: keep checking rather than fail.
+          // Install is still bringing the engine up: keep checking rather than fail, and say so.
+          // On a new Mac that is minutes of Podman installing, under "Checking your account".
           const since = waitingSince.current ?? Date.now();
           waitingSince.current = since;
           if (Date.now() - since < ENGINE_WAIT_LIMIT_MS) {
+            setSeen({ at: "waiting-for-engine" });
             askAgain.current = setTimeout(
               () => checkAgain.current(),
               ENGINE_WAIT_MS,
@@ -135,7 +174,27 @@ export function CopilotKitAccount({
         }
         waitingSince.current = null;
         if (terms.status === "engine-too-small")
-          setSeen({ at: "failed", said: engineTooSmallSaid(terms) });
+          setSeen({
+            at: "failed",
+            said: engineTooSmallSaid(terms),
+            retry: "check",
+          });
+        // Refused, not missing: said at once, in the CLI's own sentence when it gave one.
+        else if (
+          terms.status === "blocked" &&
+          terms.reason === "unsupported-engine"
+        )
+          setSeen({
+            at: "unsupported-engine",
+            said: terms.said ?? ENGINE_REFUSED,
+            switchEngine: terms.switchEngine === true,
+          });
+        else if (terms.status === "blocked")
+          setSeen({
+            at: "failed",
+            said: terms.said ?? BLOCKED,
+            retry: "check",
+          });
         else if (terms.status === "signed-out") setSeen({ at: "signed-out" });
         else if (terms.status === "required" && !terms.accepted)
           setSeen({ at: "agreement", terms });
@@ -143,26 +202,54 @@ export function CopilotKitAccount({
           setSeen({
             at: "failed",
             said: "The license agreement isn’t available right now. Try again later.",
+            retry: "check",
           });
         // Accepted already, or none needed: nothing to accept here.
         else if (terms.status === "required" || terms.status === "not-required")
           connectApps(null);
         // A status this window does not know is never taken as nothing to do.
-        else setSeen({ at: "failed", said: COULD_NOT_CHECK });
+        else setSeen({ at: "failed", said: COULD_NOT_CHECK, retry: "check" });
       },
       () => {
         if (attempt.current !== started.attempt) return;
         attempt.current = null;
-        setSeen({ at: "failed", said: COULD_NOT_CHECK });
+        waitingSince.current = null;
+        setSeen({ at: "failed", said: COULD_NOT_CHECK, retry: "check" });
       },
     );
   }, [connectApps]);
   const checkAgain = useRef(check);
   checkAgain.current = check;
 
+  /** Signed in during this step: from here on, the step is about the agreement and the engine. */
+  const signedIn = useRef(false);
+  /**
+   * The CLI's `login`: done at once when it already has a sign-in, otherwise it opens the browser
+   * and waits for the person to approve. Then the agreement.
+   */
+  const signIn = useCallback(async () => {
+    const started = signInToCopilotKit();
+    attempt.current = started.attempt;
+    setSeen({ at: "signing-in", attempt: started.attempt });
+    const failed = () =>
+      setSeen({ at: "failed", said: SIGN_IN_DID_NOT_FINISH, retry: "sign-in" });
+    try {
+      const signed = await started.signedIn;
+      if (attempt.current !== started.attempt) return;
+      attempt.current = null;
+      if (!signed) return failed();
+      signedIn.current = true;
+      checkAgain.current();
+    } catch {
+      if (attempt.current !== started.attempt) return;
+      attempt.current = null;
+      failed();
+    }
+  }, []);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: once, on arrival.
   useEffect(() => {
-    check();
+    void signIn();
     return () => {
       // Leaving stops whatever is still waiting, the browser sign-in included.
       if (askAgain.current) clearTimeout(askAgain.current);
@@ -170,23 +257,6 @@ export function CopilotKitAccount({
       attempt.current = null;
     };
   }, []);
-
-  async function signIn() {
-    const started = signInToCopilotKit();
-    attempt.current = started.attempt;
-    setSeen({ at: "signing-in", attempt: started.attempt });
-    try {
-      const signedIn = await started.signedIn;
-      if (attempt.current !== started.attempt) return;
-      attempt.current = null;
-      if (signedIn) check();
-      else setSeen({ at: "failed", said: "Sign-in didn’t finish. Try again." });
-    } catch {
-      if (attempt.current !== started.attempt) return;
-      attempt.current = null;
-      setSeen({ at: "failed", said: "Sign-in didn’t finish. Try again." });
-    }
-  }
 
   /** Stop the CLI's sign-in and go back to the start of this step. */
   function cancelSignIn() {
@@ -201,6 +271,14 @@ export function CopilotKitAccount({
   // too, a few seconds after Accept, which flashed "Sign in to CopilotKit" and its sign-in lede.
   const connecting = seen.at === "apps";
   const appsFailed = seen.at === "apps-failed";
+  const refused = seen.at === "unsupported-engine" ? seen : null;
+  const waitingForEngine = seen.at === "waiting-for-engine";
+  // Signed in, and Install waits for the person before macOS asks for their password. Not while
+  // they sign in: only the step that needs them waits for them, and the sign-in comes first.
+  const asking =
+    goAhead !== null &&
+    signedIn.current &&
+    (waitingForEngine || seen.at === "checking");
   return (
     <div className="sheet">
       {/* OpenBot is what is being set up, so its mark heads this step as it heads every other.
@@ -208,37 +286,88 @@ export function CopilotKitAccount({
       <Sections at="Account" />
       <CopilotKitLogo />
       <h1>
-        {agreement
-          ? "Accept the license agreement"
-          : connecting
-            ? "Setting up your apps"
-            : appsFailed
-              ? "Connect your apps"
-              : "Sign in to CopilotKit"}
+        {asking
+          ? "Install Podman"
+          : agreement
+            ? "Accept the license agreement"
+            : connecting
+              ? "Setting up your apps"
+              : appsFailed
+                ? "Connect your apps"
+                : refused
+                  ? refused.switchEngine
+                    ? "Switch to Docker Desktop or Podman"
+                    : "Change your container engine setup"
+                  : waitingForEngine
+                    ? "Setting up this computer"
+                    : "Sign in to CopilotKit"}
       </h1>
       <p className="lede">
-        {agreement
-          ? `To run OpenBot on this computer, accept the CopilotKit license agreement for ${agreement.organizationName}.`
-          : connecting || appsFailed
-            ? "OpenBot uses your CopilotKit account to set up apps like Gmail and Slack."
-            : "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the license agreement."}
+        {asking
+          ? PODMAN_EXPLAINED
+          : agreement
+            ? `To run OpenBot on this computer, accept the CopilotKit license agreement for ${agreement.organizationName}.`
+            : connecting || appsFailed
+              ? "OpenBot uses your CopilotKit account to set up apps like Gmail and Slack."
+              : refused
+                ? refused.said
+                : waitingForEngine
+                  ? SETTING_UP_ENGINE
+                  : "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the license agreement."}
       </p>
-      {!agreement && !connecting && !appsFailed && (
-        <p className="footnote">
-          Your conversations and files are stored on this computer. Signing in
-          does not send them to CopilotKit.
-        </p>
+      {refused?.switchEngine && (
+        <ol className="blocker-steps">
+          <li>
+            Open Docker Desktop. To use Podman instead, quit the engine you use
+            now and start Podman.
+          </li>
+          <li>
+            If Docker still uses another engine, run this in a terminal to
+            switch it to Docker Desktop:
+            <Command lines={["docker context use desktop-linux"]} />
+          </li>
+          <li>Choose Try again.</li>
+        </ol>
       )}
+      {refused && !refused.switchEngine && (
+        <p className="footnote">Make the change, then choose Try again.</p>
+      )}
+      {/* Said where signing in is what the step is about, not once it is done. */}
+      {!agreement &&
+        !connecting &&
+        !appsFailed &&
+        !refused &&
+        !waitingForEngine &&
+        !asking && (
+          <p className="footnote">
+            Your conversations and files are stored on this computer. Signing in
+            does not send them to CopilotKit.
+          </p>
+        )}
 
-      {/* The account check waits on the engine too. While Docker Desktop starts, this says what
-          it waits on and what the person may have to do in Docker's window. */}
-      {handOff && <StatusLine>{handOff}</StatusLine>}
-      {seen.at === "checking" && !handOff && (
+      {/* The agreement waits on the engine. While it does, this says what Install is doing to bring
+          it up, as Install's own row says it. While Docker Desktop starts or a password prompt is
+          up, it says what the person may have to do in that window, whatever the step is at. When
+          Install waits for the person instead, it says that, and Continue goes on to the prompt. */}
+      {asking ? (
+        <>
+          <StatusLine working={false}>{goAhead}</StatusLine>
+          <ContinueToPodman key={goAhead} />
+        </>
+      ) : waitingForEngine ? (
+        <StatusLine>
+          {engine ?? handOff ?? "Preparing this computer…"}
+        </StatusLine>
+      ) : (
+        handOff && <StatusLine>{handOff}</StatusLine>
+      )}
+      {seen.at === "checking" && !handOff && !asking && (
         <StatusLine>Checking your CopilotKit account…</StatusLine>
       )}
       {seen.at === "signing-in" && (
         <CopilotKitSignInWait
           attempt={seen.attempt}
+          before="Checking your CopilotKit account…"
           waiting="Finish signing in to CopilotKit in your browser…"
           onCancel={cancelSignIn}
         />
@@ -290,6 +419,14 @@ export function CopilotKitAccount({
           </>
         )}
         {seen.at === "failed" && (
+          <button
+            type="button"
+            onClick={() => (seen.retry === "sign-in" ? signIn() : check())}
+          >
+            Try again
+          </button>
+        )}
+        {refused && (
           <button type="button" onClick={check}>
             Try again
           </button>

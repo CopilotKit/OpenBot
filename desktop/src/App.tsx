@@ -27,8 +27,10 @@ import {
 } from "./ProviderPicker";
 import { Sections } from "./Sections";
 import { StartFresh } from "./StartFresh";
+import { PodmanGoAhead } from "./PodmanGoAhead";
 import {
   engineNow,
+  goAheadNow,
   handOffNow,
   INSTALL_BLURB,
   type Progress,
@@ -336,6 +338,14 @@ function Setup() {
           configured?.localEval && installed
             ? recordedModel({ ...configured.values, saved: configured.saved })
             : null;
+        /*
+         * Settings' Change on the AI model row stopped OpenBot to come here: open at the AI screen,
+         * as this window's own Change AI connection does. Asked every load, and answered once.
+         */
+        const changeAiConnection = await invoke<boolean>(
+          "take_ai_connection_change",
+        ).catch(() => false);
+        if (!active) return;
         if (installed) {
           const key = installationKeyFor(found, installed.harness);
           setHarness(installed.harness);
@@ -343,7 +353,7 @@ function Setup() {
           if (configured?.localEval) {
             setModel(resumedModel);
             if (configured.launch) savedLaunch.current = key;
-            setStep(resumedModel ? "connect" : "model");
+            setStep(resumedModel && !changeAiConnection ? "connect" : "model");
           }
         }
         if (interrupted?.connection) {
@@ -371,7 +381,9 @@ function Setup() {
         )
           return;
         // An interrupted run needs an explicit Start, with its saved setup still available.
-        if (interrupted || configured.autoStart === false) return;
+        // Nor one asked to change the AI connection: the new choice is what starts it.
+        if (interrupted || configured.autoStart === false || changeAiConnection)
+          return;
         // Intelligence must report ready and licensed first, which only its screen asks.
         if (configured.localEval.connected) setLocalAutoStart(true);
       })
@@ -712,6 +724,10 @@ function Setup() {
     if (localAuto) local.start();
   }, [localAuto, resumingStart]);
 
+  // Install waits for the person before macOS asks for their password: whichever screen they are
+  // on says why, with Continue. See `install::GoAhead`.
+  const goAhead = goAheadNow(steps);
+
   // Quit outranks every screen: the app is closing, whatever was on it.
   const quitting = useQuitStatus(false);
   if (quitting) return <ShuttingDown status={quitting} />;
@@ -792,6 +808,8 @@ function Setup() {
             steps={plainInstallSteps(steps, busy)}
             showElapsed={false}
           />
+          {/* Install waits for the person before macOS asks for their password. Its row says so. */}
+          {goAhead && <PodmanGoAhead asking={goAhead} quiet />}
           {/* Intelligence sets itself up alongside, once the install has Docker answering. */}
           <LocalStatus sequence={local} />
           {displayedFailure && <Failure problem={displayedFailure} />}
@@ -842,8 +860,12 @@ function Setup() {
       <main>
         <CopilotKitAccount
           root={root.trim()}
-          // Install runs behind this step. When it opens Docker Desktop, this step says so.
+          // Install runs behind this step. When it opens Docker Desktop, this step says so, and
+          // while the account check waits on the engine, it says what Install is doing about it.
           handOff={handOffNow(steps)}
+          engine={engineNow(steps)}
+          // Once signed in, the step explains the password prompt Install waits to raise.
+          goAhead={goAhead}
           onDone={(acceptedVersion) => {
             if (acceptedVersion) local.acceptTerms(acceptedVersion);
             // Intelligence sets itself up once the install has Docker answering; see above. The
@@ -938,6 +960,7 @@ function Setup() {
               : "Your installation and saved connections are ready to reopen."}
           </p>
           <LocalIntelligence sequence={local} offerStart handOff={handOff} />
+          {goAhead && <PodmanGoAhead asking={goAhead} />}
           {updatingLine}
           {displayedFailure && <Failure problem={displayedFailure} />}
           {/* While a local step runs, its Cancel is the only control. */}
@@ -1012,6 +1035,7 @@ function Setup() {
             it’s ready. This can take a few minutes.
           </p>
           <LocalIntelligence sequence={local} offerStart handOff={handOff} />
+          {goAhead && <PodmanGoAhead asking={goAhead} />}
           {updatingLine}
           {/* Leftover data is a choice, offered above, not a failure to report here. */}
           {displayedFailure && leftoverVolumes.length === 0 && (

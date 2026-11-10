@@ -224,6 +224,11 @@ const sessions = createSessions({
   profilesDirectory: process.env.PROFILES_DIR?.trim() || "/profiles",
   // A recording in the Bot's browser is the person's who holds the wheel, and ends the moment they no longer do.
   onWheelLeft: (botId) => botBrowser.wheelLeft(botId),
+  // A navigation and the two element waits an action can make after it: past that, an action is not finishing.
+  turnLimitMs: numberFromEnv(
+    "BROWSER_TURN_LIMIT_MS",
+    NAVIGATION_TIMEOUT_MS + 2 * ACTION_TIMEOUT_MS,
+  ),
 });
 
 /**
@@ -1179,11 +1184,35 @@ serve<StreamData & TerminalSocketData>({
      * refused by being added to it rather than by remembering to repeat this.
      */
     let releaseAction: (() => void) | undefined;
+    let releaseTurn: (() => void) | undefined;
     try {
       if (actsOnTheComputer(url.pathname)) {
         releaseAction = session.control.admitBotAction(
           mutatesBrowser(url.pathname),
         );
+      }
+
+      /*
+       * The browser's turn, before anything else is awaited, so actions take it in the order they arrived: a model
+       * that calls tools in parallel sends a form's worth of typing at once, and side by side each took the focus
+       * from the others (browser-turns.ts). A look at the page waits for what was sent before it and holds nothing.
+       */
+      const turn = HOLDS_THE_BROWSER.has(url.pathname)
+        ? session.turns.hold(request.signal).then((release) => {
+            releaseTurn = release;
+          })
+        : WAITS_FOR_THE_BROWSER.has(url.pathname)
+          ? session.turns.after(request.signal)
+          : undefined;
+      if (turn) {
+        try {
+          await turn;
+        } catch (error) {
+          // Its caller went away while it waited: it never ran, and nothing is listening for the answer.
+          if (request.signal.aborted)
+            return json({ error: "Stopped.", stopped: true }, 499);
+          throw error;
+        }
       }
 
       if (url.pathname === "/stream") {
@@ -2007,6 +2036,7 @@ serve<StreamData & TerminalSocketData>({
         );
       throw error;
     } finally {
+      releaseTurn?.();
       releaseAction?.();
     }
   },
@@ -2022,6 +2052,21 @@ type ActionBody = {
 };
 
 const ACTIONS = new Set(["/click", "/type", "/key", "/scroll"]);
+
+/**
+ * What the Bot does to its browser, one at a time (browser-turns.ts). A snapshot is here because it stamps the page and
+ * moves the snapshot on, so an action must not resolve a ref while one is being taken.
+ */
+const HOLDS_THE_BROWSER = new Set([
+  "/navigate",
+  ...ACTIONS,
+  "/snapshot",
+  "/sign-in/fill",
+  "/sign-in/code",
+]);
+
+/** A look at the page: after what was sent before it, beside what is sent after it. */
+const WAITS_FOR_THE_BROWSER = new Set(["/screenshot", "/read"]);
 
 const HUMAN_INPUT = new Set([
   "/human/click",

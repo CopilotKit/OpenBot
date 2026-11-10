@@ -491,7 +491,27 @@ async def execute_tools(state):
         raise ValueError(
             "This turn must return to the surface before tools can execute."
         )
-    results = await asyncio.gather(
-        *[_call_tool(call, context) for call in state["messages"][-1].tool_calls]
+    calls = state["messages"][-1].tool_calls
+    # A Bot has one browser. Its computer calls go one after another, in the order the model made
+    # them: a form's fields sent together took the focus from each other, and a click on Save could
+    # overtake the typing before it. Everything else still runs alongside them.
+    computer = [call for call in calls if call["name"].startswith("computer_")]
+
+    async def in_order():
+        return [await _call_tool(call, context) for call in computer]
+
+    ordered, *others = await asyncio.gather(
+        in_order(),
+        *[
+            _call_tool(call, context)
+            for call in calls
+            if not call["name"].startswith("computer_")
+        ],
     )
+    answered = iter(ordered)
+    elsewhere = iter(others)
+    results = [
+        next(answered if call["name"].startswith("computer_") else elsewhere)
+        for call in calls
+    ]
     return {"messages": results}

@@ -1,4 +1,9 @@
 import type { ReactNode } from "react";
+import { ExternalLink } from "./ExternalLink";
+
+/** What OpenBot Desktop sends, and what it never does, in full. */
+export const USAGE_DATA_DOC =
+  "https://github.com/CopilotKit/OpenBot/blob/main/desktop/TELEMETRY.md";
 
 /**
  * What OpenBot is, before it asks for anything.
@@ -7,6 +12,9 @@ import type { ReactNode } from "react";
  * to care yet: they need to know what this is, that it will not ask them for anything technical,
  * and where the button is. Install sets up OpenBot and CopilotKit Intelligence on this computer;
  * everything else waits for a screen that needs it.
+ *
+ * The usage-data notice is here because this is the first screen, and the CopilotKit sign-in that
+ * links the data to an account is the next. Settings > General turns it off.
  */
 export function Welcome({
   onInstall,
@@ -32,6 +40,12 @@ export function Welcome({
           Install
         </button>
       </div>
+      <p className="footnote">
+        OpenBot sends CopilotKit usage data, linked to your CopilotKit account.
+        It never sends your conversations, files or keys. You can turn this off
+        in Settings.{" "}
+        <ExternalLink href={USAGE_DATA_DOC}>What OpenBot sends</ExternalLink>
+      </p>
       {failure}
     </div>
   );
