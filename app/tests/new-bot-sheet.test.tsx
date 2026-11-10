@@ -21,6 +21,7 @@ import {
   fireEvent,
   render,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
@@ -526,7 +527,17 @@ test("personal: the sheet lists every app that is turned on, with nothing to unt
   const list = await view.findByRole("list", { name: "Apps it can use" });
   expect(
     Array.from(list.querySelectorAll("li")).map((item) => item.textContent),
-  ).toEqual(["Gmail", "Parallel Search", "Routines"]);
+  ).toEqual([
+    "Gmail",
+    "Parallel Search",
+    // Routines says what asking for one sounds like, and where they all are.
+    "Routinese.g. “every weekday at 9, send me…”Open Routines",
+  ]);
+  expect(
+    within(list)
+      .getByRole("link", { name: "Open Routines" })
+      .getAttribute("href"),
+  ).toBe("/routines");
   expect(
     view.getByText("Every Bot can use every app you turn on in Connections."),
   ).toBeTruthy();

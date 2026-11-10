@@ -35,8 +35,8 @@ import { Input } from "@/components/ui/input";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { groupRoster } from "@/lib/agents/roster";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
-import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { untitledLine } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import {
@@ -508,7 +508,10 @@ function WorkspaceLinks({
    * is no rail. Bots is the row under the list of Bots above.
    */
   const drawerOnly = "md:hidden";
-  const navigation = useNavigationItems().filter((item) => item.id !== "bots");
+  // Routines is OpenDots' own row above, so the shared list's entry is not drawn twice.
+  const navigation = useNavigationItems().filter(
+    (item) => item.id !== "bots" && item.id !== "routines",
+  );
   return (
     <nav
       aria-label="Workspace"
