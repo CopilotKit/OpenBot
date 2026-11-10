@@ -3,6 +3,7 @@ import type { Hono as HonoApp, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
+import { createCapabilityChangeRoutes } from "./admin/capability-translate";
 import { enterpriseControls } from "./admin/controls";
 import { createEnterpriseGate } from "./admin/gate";
 import { createNetworkAllowlistRoutes } from "./admin/network-routes";
@@ -775,6 +776,18 @@ export function createApp(
         ? { complete: coworker.boundaryWriter }
         : {}),
       ...(auditStore ? { auditStore } : {}),
+      ...(auditReader ? { auditReader } : {}),
+    }),
+  );
+  // Before `/api/admin/enterprise`, which shares the prefix: describing, previewing and saving
+  // permission changes together.
+  app.route(
+    "/api/admin/enterprise/capabilities",
+    createCapabilityChangeRoutes({
+      requireUser,
+      ...(coworker?.boundaryWriter
+        ? { complete: coworker.boundaryWriter }
+        : {}),
       ...(auditReader ? { auditReader } : {}),
     }),
   );

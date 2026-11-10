@@ -241,7 +241,14 @@ export function createEnterpriseAdminRoutes(
       targetType: "capability",
       targetId: input.capability,
       actorUserId: context.var.actor.id,
-      payload: { ...input, by: context.var.actor.email },
+      // The permission by its title, so the trail reads which switch without a lookup.
+      payload: {
+        ...input,
+        title: isCapability(input.capability)
+          ? CAPABILITY_LABELS[input.capability].title
+          : input.capability,
+        by: context.var.actor.email,
+      },
     });
     return context.json({ saved: input });
   });

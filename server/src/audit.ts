@@ -678,8 +678,25 @@ export const auditEventTypes = [
   /*
    * Enterprise controls (server/src/admin). Every switch an administrator flips is on the trail with
    * who flipped it, because the table only holds the current answer.
+   *
+   * `capability.changed` is one switch: `scopeKind`, `scopeId`, `capability`, `allowed`, `by`.
+   * Switches saved together from a description (admin/capability-translate.ts) are one row each, and
+   * each also carries `before` (the switch's value, null when unset), `batch` (one id for the save)
+   * and `authoring` (`{ source: "english", text }`).
    */
   "capability.changed",
+  /**
+   * An admin described a permission change in English and the deployment's model wrote it as switch
+   * changes (admin/capability-translate.ts).
+   *
+   * Nothing changed: the changes are a draft until the admin saves them, and the save is its own
+   * `capability.changed` rows. This one answers "who asked for this change, in what words, and what
+   * came back", including changes that never checked and a request no model was set up to answer.
+   * Target `capability`; payload `actor`, `text` (the admin's words), `outcome` (`written`,
+   * `did_not_check`, `no_model` or `model_failed`), and when changes came back `changes`, `summary`,
+   * `explanation`, `warning`, `checked`, `attempts` and, for changes that did not check, `error`.
+   */
+  "capability.changes_translated",
   "enterprise.setting_changed",
   // Turning SSO-required on ended the sessions made before it.
   "auth.sessions_revoked",

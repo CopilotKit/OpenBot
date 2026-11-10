@@ -192,6 +192,8 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "approval.guidance_changed": "Change guidance for auto-review",
   "approval.settings_changed": "Change approval settings",
   "capability.changed": "Change a permission",
+  "capability.changes_translated":
+    "Write permission changes from a description",
   "enterprise.setting_changed": "Change an organization setting",
   "network_policy.changed": "Change the network policy",
   "network_policy.removed": "Remove a network policy",
