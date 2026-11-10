@@ -52,6 +52,7 @@ import type { WebBotAuth } from "../web-bot-auth";
 import { lastUsedByComputer, runningComputers } from "../work/culler";
 import {
   type Capability,
+  type CapabilityAnswer,
   type CapabilityRow,
   capabilityRefusal,
   DEFAULT_CAPABILITIES,
@@ -218,11 +219,69 @@ export function decideFromSnapshot(
   snapshot: Snapshot | undefined,
   context: PolicyContext,
 ): PolicyDecision | null {
+  // The first refusal, and nothing past it is worked out: a generator stops where this stops.
+  for (const check of enterpriseChecks(snapshot, context))
+    if (check.refusal) return check.refusal;
+  return null;
+}
+
+/** The snapshot the computer boundary answers from, for a reader outside this module. */
+export type EnterpriseSnapshot = Snapshot;
+
+/** The snapshot as {@link installEnterpriseControls} reads it, for a reader that needs one now. */
+export const loadEnterpriseSnapshot = (store: EnterpriseStore) =>
+  loadSnapshot(store);
+
+/**
+ * One switch the overlay looked at, what it found, and the refusal it makes, if any. In the order the
+ * overlay looks at them, which is the order {@link decideFromSnapshot} refuses in.
+ */
+export type EnterpriseCheck =
+  | { control: "unavailable"; refusal: PolicyDecision }
+  | {
+      control: "app_allowlist";
+      server: string;
+      enabled: boolean;
+      /** Built in and always on (Routines), which the list never holds back. */
+      builtIn: boolean;
+      approved: boolean;
+      refusal: PolicyDecision | null;
+    }
+  | {
+      control: "capability";
+      capability: Capability;
+      answer: CapabilityAnswer;
+      refusal: PolicyDecision | null;
+    }
+  | {
+      control: "network";
+      host: string;
+      port: number;
+      policy: EgressPolicy & { from: string };
+      /** Null when only the computer can decide: an IP-range rule needs the resolved address. */
+      decision: { allowed: boolean; reason: string } | null;
+      refusal: PolicyDecision | null;
+    };
+
+/**
+ * Every switch the overlay asks about one action, each with what it found.
+ *
+ * The overlay itself ({@link decideFromSnapshot}) stops at the first refusal. "What would happen if…"
+ * (`what-if-check.ts`) reads all of them, so an admin sees every switch's answer and which one decides.
+ */
+export function* enterpriseChecks(
+  snapshot: Snapshot | undefined,
+  context: PolicyContext,
+): Generator<EnterpriseCheck> {
   if (!snapshot) {
-    return refusal(
-      "enterprise:unavailable",
-      "This deployment's enterprise controls have not loaded yet, so the action was refused.",
-    );
+    yield {
+      control: "unavailable",
+      refusal: refusal(
+        "enterprise:unavailable",
+        "This deployment's enterprise controls have not loaded yet, so the action was refused.",
+      ),
+    };
+    return;
   }
   const member = memberFrom(snapshot, context.actor.id);
   const needed: Capability[] = ["useBots"];
@@ -234,16 +293,22 @@ export function decideFromSnapshot(
      * not an outside server for the allowlist to approve. Holding it to the list would leave every
      * Bot offered tools refused on every call, which nobody could remove.
      */
-    if (
-      allowlist.enabled &&
-      !isAlwaysOn(context.mcp.server) &&
-      !allowlist.servers.includes(context.mcp.server)
-    ) {
-      return refusal(
-        "mcp_allowlist",
-        `The MCP server "${context.mcp.server}" is not on this deployment's approved list, so ${context.mcp.tool} was not called.`,
-      );
-    }
+    const builtIn = isAlwaysOn(context.mcp.server);
+    const approved = allowlist.servers.includes(context.mcp.server);
+    yield {
+      control: "app_allowlist",
+      server: context.mcp.server,
+      enabled: allowlist.enabled,
+      builtIn,
+      approved,
+      refusal:
+        allowlist.enabled && !builtIn && !approved
+          ? refusal(
+              "mcp_allowlist",
+              `The MCP server "${context.mcp.server}" is not on this deployment's approved list, so ${context.mcp.tool} was not called.`,
+            )
+          : null,
+    };
   } else if (context.tool.name.startsWith("computer_")) {
     if (context.intent && COMPUTER_INTENTS.has(context.intent)) {
       needed.push("cloudComputer");
@@ -254,9 +319,15 @@ export function decideFromSnapshot(
   }
 
   for (const capability of needed) {
-    if (!resolveCapability(snapshot.rows, member, capability).allowed) {
-      return refusal(`capability:${capability}`, capabilityRefusal(capability));
-    }
+    const answer = resolveCapability(snapshot.rows, member, capability);
+    yield {
+      control: "capability",
+      capability,
+      answer,
+      refusal: answer.allowed
+        ? null
+        : refusal(`capability:${capability}`, capabilityRefusal(capability)),
+    };
   }
 
   /*
@@ -272,21 +343,25 @@ export function decideFromSnapshot(
   if (destination) {
     const policy = effectiveNetworkPolicy(snapshot.network, member, true);
     const hasRanges = policy.rules.some((rule) => rule.type === "cidr");
-    if (!hasRanges || /^[\d.:[\]]+$/.test(destination.host)) {
-      const decision = egressDecision(
-        policy,
-        destination.host,
-        destination.port,
-      );
-      if (!decision.allowed) {
-        return refusal(
-          `network:${policy.from}`,
-          `${decision.reason} An admin can add it.`,
-        );
-      }
-    }
+    const decision =
+      !hasRanges || /^[\d.:[\]]+$/.test(destination.host)
+        ? egressDecision(policy, destination.host, destination.port)
+        : null;
+    yield {
+      control: "network",
+      host: destination.host,
+      port: destination.port,
+      policy,
+      decision,
+      refusal:
+        decision && !decision.allowed
+          ? refusal(
+              `network:${policy.from}`,
+              `${decision.reason} An admin can add it.`,
+            )
+          : null,
+    };
   }
-  return null;
 }
 
 /**

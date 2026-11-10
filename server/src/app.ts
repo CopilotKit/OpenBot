@@ -1,4 +1,5 @@
 import { MAX_IMAGE_BYTES } from "@openbot/shared/attachments";
+import type { WhatIfVocabulary } from "@openbot/shared/what-if";
 import type { Hono as HonoApp, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -33,6 +34,7 @@ import type { RuleVocabulary } from "./approvals/rule-vocabulary";
 import type { ApprovalService } from "./approvals/service";
 import { type AuditVocabulary, createAuditAskRoutes } from "./audit-ask";
 import {
+  type AuditEvent,
   type AuditEventType,
   type AuditInitiator,
   AuditQueryError,
@@ -197,6 +199,8 @@ import {
   DIRECTORY_PATH as WEB_BOT_AUTH_DIRECTORY_PATH,
   directoryResponse as webBotAuthDirectory,
 } from "./web-bot-auth";
+import { createWhatIfRoutes } from "./what-if";
+import type { GovernanceReaders } from "./what-if-check";
 
 /**
  * How much of a multipart body is boundary, headers and other fields rather than file.
@@ -540,6 +544,17 @@ export function createApp(
       vocabulary: () => Promise<AuditVocabulary>;
       /** The clock a question's "yesterday" is read against. A test fixes it; absent is now. */
       now?: () => Date;
+    };
+    /**
+     * "What would happen if…" (what-if.ts): the deployment's own model to read a question as one
+     * action, what an action may name, the stores the real deciders read, and one audit row by id
+     * for "Why did this happen?". Absent, `/api/admin/what-if` is not mounted.
+     */
+    whatIf?: {
+      complete: ModelCompleter;
+      vocabulary: () => Promise<WhatIfVocabulary>;
+      readers: GovernanceReaders;
+      event: (id: string) => Promise<AuditEvent | null>;
     };
   },
   /**
@@ -1093,6 +1108,15 @@ export function createApp(
         ...(coworker.auditQuestions.now
           ? { now: coworker.auditQuestions.now }
           : {}),
+        ...(auditStore ? { auditStore } : {}),
+      }),
+    );
+  if (coworker?.whatIf)
+    app.route(
+      "/api/admin/what-if",
+      createWhatIfRoutes({
+        requireUser,
+        ...coworker.whatIf,
         ...(auditStore ? { auditStore } : {}),
       }),
     );

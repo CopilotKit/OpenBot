@@ -354,6 +354,7 @@ import { createUserInstructionsStore } from "./user-instructions";
 import { createUserPreferencesStore } from "./user-preferences";
 import { createVoiceSessionStore } from "./voice/sessions";
 import { createVoiceSummarizer } from "./voice/summary";
+import { readAuditEvent, readWhatIfVocabulary } from "./what-if";
 import { repeatAfterEach } from "./work/loop";
 import { createWorkQueue, type WorkOfferedListener } from "./work/queue";
 
@@ -870,6 +871,14 @@ const writeBoundaries = createModelCompleter({
  * reason: an admin pressed Ask and is waiting.
  */
 const askTheAuditTrail = createModelCompleter({
+  model: runtimeModel,
+  resolveApiKey: resolveDeploymentModelKey,
+  timeoutMs: 45_000,
+  maxTokens: 16_000,
+});
+
+/** Reads "what would happen if…" as one action (what-if.ts), for an admin who pressed Ask. */
+const readWhatIfQuestions = createModelCompleter({
   model: runtimeModel,
   resolveApiKey: resolveDeploymentModelKey,
   timeoutMs: 45_000,
@@ -3220,6 +3229,28 @@ const app = createApp(
     auditQuestions: {
       complete: askTheAuditTrail,
       vocabulary: () => readAuditVocabulary(database, () => policyStore.get()),
+    },
+    // The stores the live path decides from: the same boundary, controls snapshot, grants and gate.
+    whatIf: {
+      complete: readWhatIfQuestions,
+      vocabulary: () => readWhatIfVocabulary(database),
+      readers: {
+        policy: () => policyStore.get(),
+        enterprise: () => {
+          const controls = enterpriseControls();
+          return controls ? { snapshot: controls.snapshot() } : null;
+        },
+        grant: (ref, botId) => pluginStore.decide("mcp", ref, botId),
+        ...(approvalService.store.policy
+          ? {
+              approvals: {
+                policy: approvalService.store.policy,
+                rules: (owner: string) => approvalService.store.rules(owner),
+              },
+            }
+          : {}),
+      },
+      event: (id) => readAuditEvent(database, id),
     },
     personalLearning: {
       store: learningSharingStore,

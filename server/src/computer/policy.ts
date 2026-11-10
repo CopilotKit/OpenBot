@@ -355,9 +355,20 @@ export function evaluateActionPolicy(
   policy: ActionPolicy | null | undefined,
   context: PolicyContext,
 ): PolicyDecision {
-  const enterprise = enterpriseDecision(context);
-  if (enterprise) return enterprise;
+  return enterpriseDecision(context) ?? evaluateBoundaryRules(policy, context);
+}
 
+/**
+ * The boundary's own rules, without the enterprise controls asked in front of them.
+ *
+ * What {@link evaluateActionPolicy} falls through to when the controls have nothing to say, and
+ * exported so "What would happen if…" (`what-if-check.ts`) can show the boundary's answer beside the
+ * controls' rather than only whichever came first.
+ */
+export function evaluateBoundaryRules(
+  policy: ActionPolicy | null | undefined,
+  context: PolicyContext,
+): PolicyDecision {
   const mode: PolicyMode = policy?.mode ?? "enforce";
   const deny = policy?.deny ?? [];
   const allow = policy?.allow ?? [];

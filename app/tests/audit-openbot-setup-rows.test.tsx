@@ -338,6 +338,8 @@ test("Admin keeps routing, a build's components, the computer's start-up and the
         "Blocked",
         "Local computer access is off for you.",
         "capability:localComputer",
+        // Admin asks the controls about the row: see what-if/why-button.tsx.
+        "Why?",
       ],
     },
     {
