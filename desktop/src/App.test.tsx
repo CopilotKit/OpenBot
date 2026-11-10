@@ -624,7 +624,7 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
     installing.queryByText("Checking which local software to download."),
   ).toBeNull();
   expect(
-    installing.getByText("52.0 MB of 1.3 GB · 5 of 7 items remaining"),
+    installing.getByText("52.0 MB of 1.3 GB · 5 of 7 parts left"),
   ).toBeTruthy();
   // The bar is the bytes, out of the whole download.
   expect(installing.getByRole("progressbar").getAttribute("value")).toBe(
@@ -2615,7 +2615,7 @@ test("relaunch upgrades an older installation to this app's release as part of S
   );
   // Said while the upgrade runs, which can take minutes.
   const said =
-    "Updating OpenBot from v0.3.0 to v0.3.1. Your Bots, sign-ins and data stay as they are.";
+    "Updating OpenBot. Your Bots, sign-ins and data stay as they are.";
   await emitProgress({
     step: "release",
     ok: true,
@@ -2696,20 +2696,20 @@ test("the line under Start's rows says the upgrade step running now, never one t
     [
       [
         release(
-          "Updating OpenBot from v0.3.0 to v0.3.1. Your Bots, sign-ins and data stay as they are.",
+          "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
         ),
       ],
-      "Updating OpenBot from v0.3.0 to v0.3.1. Your Bots, sign-ins and data stay as they are.",
+      "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
     ],
     [[release("Stopping OpenBot.")], "Stopping OpenBot."],
     [
-      [release("Backing up OpenBot's database.")],
-      "Backing up OpenBot's database.",
+      [release("Backing up your data.")],
+      "Backing up your data.",
     ],
-    [[release("Downloading OpenBot v0.3.1.")], "Downloading OpenBot v0.3.1."],
+    [[release("Downloading the update.")], "Downloading the update."],
     [
       [
-        release("Installing OpenBot v0.3.1."),
+        release("Installing the update."),
         {
           step: "engine",
           ok: true,
@@ -2736,11 +2736,11 @@ test("the line under Start's rows says the upgrade step running now, never one t
           detail: "Installed.",
         },
       ],
-      "Installing OpenBot v0.3.1.",
+      "Installing the update.",
     ],
     [
       [
-        release("Starting OpenBot v0.3.1."),
+        release("Starting OpenBot."),
         {
           step: "services",
           ok: true,
@@ -2755,7 +2755,7 @@ test("the line under Start's rows says the upgrade step running now, never one t
           detail: "Waiting for OpenBot to answer.",
         },
       ],
-      "Starting OpenBot v0.3.1.",
+      "Starting OpenBot.",
     ],
   ];
   for (const [events, said] of upgrade) {
@@ -2775,16 +2775,16 @@ test("the line under Start's rows says the upgrade step running now, never one t
   // Nothing an earlier step said is left on the screen.
   for (const finished of [
     "Stopping OpenBot.",
-    "Backing up OpenBot's database.",
-    "Downloading OpenBot v0.3.1.",
-    "Installing OpenBot v0.3.1.",
+    "Backing up your data.",
+    "Downloading the update.",
+    "Installing the update.",
   ])
     expect(view.queryByText(finished)).toBeNull();
   await act(async () =>
     moving.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
   );
   await view.findByRole("heading", { name: "OpenBot is running" });
-  expect(view.queryByText("Starting OpenBot v0.3.1.")).toBeNull();
+  expect(view.queryByText("Starting OpenBot.")).toBeNull();
 });
 
 test("an upgrade that could not put the previous version back is retried from the Retry its sentence names", async () => {

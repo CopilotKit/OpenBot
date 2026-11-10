@@ -979,7 +979,7 @@ impl DesktopSteps {
 impl upgrade::Steps for DesktopSteps {
     /// The release row's sentence, which is the line under Start's rows while it upgrades.
     fn now(&mut self, now: upgrade::Now) {
-        report_running(
+        report_running_line(
             &self.app,
             "release",
             upgrade::now_said(now, &self.root, &upgrade::own()),
@@ -1165,11 +1165,11 @@ async fn upgrade_and_start_now(
                 // Put back, and nothing to move: an ordinary Start, with no step of putting back
                 // still said under its rows.
                 if recovering {
-                    report(&handle, "release", true, upgrade::put_back_said(&target));
+                    report_line(&handle, "release", true, upgrade::put_back_said(&target));
                 }
                 return Ok::<_, Problem>(None);
             };
-            report_running(&handle, "release", upgrade::moving_said(&planned), None);
+            report_running_line(&handle, "release", upgrade::moving_said(&planned), None);
             let ran = upgrade::run(&target, &mut steps);
             Ok(Some((planned, ran)))
         })
@@ -1193,30 +1193,43 @@ async fn upgrade_and_start_now(
         .load(std::sync::atomic::Ordering::SeqCst);
     match ran {
         upgrade::Ran::Moved => {
-            report(
+            report_line(
                 &app,
                 "release",
                 true,
-                format!("OpenBot is on {}.", planned.to),
+                engine::StepLine::here("OpenBot is updated.")
+                    .logged(format!("OpenBot is on {}.", planned.to)),
             );
             desktop_telemetry::record(&app, telemetry::EventData::Activated);
             Ok(upgrade::Outcome::moved(&planned))
         }
         upgrade::Ran::Kept(failed) => {
-            report(&app, "release", false, upgrade::kept_said(&planned));
+            report_line(
+                &app,
+                "release",
+                false,
+                engine::StepLine::here(upgrade::kept_said(&planned))
+                    .logged(upgrade::moved_log(&planned)),
+            );
             desktop_telemetry::record(&app, telemetry::EventData::Activated);
             Ok(upgrade::Outcome::kept(&planned, &failed))
         }
         upgrade::Ran::Back { failed, .. } if cancelled => Err(Problem::with(
+            "OpenBot stopped before it finished updating, and the version it had is back in place.",
             format!(
-                "OpenBot stopped before it finished updating to {}, and {} is back in place.",
-                planned.to, planned.from
+                "{}: {}",
+                upgrade::moved_log(&planned),
+                upgrade::detail(&failed)
             ),
-            upgrade::detail(&failed),
         )),
         upgrade::Ran::Back { failed, start } => {
             let said = upgrade::back_said(&planned, &start);
-            report(&app, "release", false, said.clone());
+            report_line(
+                &app,
+                "release",
+                false,
+                engine::StepLine::here(said.clone()).logged(upgrade::moved_log(&planned)),
+            );
             Err(Problem {
                 said,
                 detail: Some(format!(
@@ -1229,7 +1242,12 @@ async fn upgrade_and_start_now(
         }
         upgrade::Ran::Stuck { failed, undo } => {
             let said = upgrade::stuck_said(&planned);
-            report(&app, "release", false, said.clone());
+            report_line(
+                &app,
+                "release",
+                false,
+                engine::StepLine::here(said.clone()).logged(upgrade::moved_log(&planned)),
+            );
             Err(Problem::with(
                 said,
                 format!(
@@ -1266,7 +1284,7 @@ async fn put_back_interrupted_upgrade(app: &tauri::AppHandle, root: &Path) -> Re
             .map(|_| {
                 // Install goes on from the version that is back, with no step of putting back
                 // still said as its own.
-                report(&handle, "release", true, upgrade::put_back_said(&target));
+                report_line(&handle, "release", true, upgrade::put_back_said(&target));
             })
             .map_err(|problem| {
                 Problem::with(UPGRADE_INTERRUPTED_INSTALL, upgrade::detail(&problem))

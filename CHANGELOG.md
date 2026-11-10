@@ -22,7 +22,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   moves. When setup, a start or an update stops, the card says what happened and what to do in the
   same plain words ("OpenBot has 30 GB of free disk. It needs 40 GB. Free up space on drive C:,
   then Retry."), with the engine's own output under Technical details and in the logs you can
-  copy. Docker Desktop and Podman are named only where you act in them.
+  copy. Docker Desktop and Podman are named only where you act in them. Updating OpenBot on Start
+  says "Downloading the update", "Installing the update" and "Starting OpenBot" rather than a
+  release name, its download's total no longer shrinks partway, and the setup card is held from
+  the top, so rows coming and going no longer move what is already on screen.
 - **Usage data now says why setup stopped.** A failed `local setup`, every failed install or
   Start (a failed `compose up` among them), a failed `local start`, `local connect` or Learning
   model setup, and an Account step that stops on an engine too small or one local setup does not

@@ -314,7 +314,7 @@ function showsDownload({ bytes, size, total }: Downloads): boolean {
  * is known the line says so and the bar is indeterminate: it claims no fraction it cannot know.
  *
  * Once every byte is in and items are still being unpacked, the bar is indeterminate again. A full
- * bar beside "1 of 5 items remaining" read as nothing left to do while the last image was still
+ * bar beside "1 of 5 parts left" read as nothing left to do while the last image was still
  * being unpacked and tagged.
  */
 function DownloadProgress({ downloads }: { downloads: Downloads }) {
@@ -353,15 +353,15 @@ function unpacking({ bytes, size, done, total }: Downloads): boolean {
 }
 
 /**
- * "1.2 GB of 3.4 GB · 1 of 5 items remaining", or what is known of it. Once every byte is in:
- * "3.4 GB downloaded · Unpacking the last item".
+ * "1.2 GB of 3.4 GB · 1 of 5 parts left", or what is known of it. Once every byte is in:
+ * "3.4 GB downloaded · Finishing the last part".
  */
 export function downloadSummary(downloads: Downloads): string {
   const { bytes, size, done, total } = downloads;
   if (unpacking(downloads)) {
     const remaining = (total ?? 0) - (done ?? 0);
-    return `${formatDownloadBytes(bytes)} downloaded · Unpacking ${
-      remaining === 1 ? "the last item" : `the last ${remaining} items`
+    return `${formatDownloadBytes(bytes)} downloaded · Finishing ${
+      remaining === 1 ? "the last part" : `the last ${remaining} parts`
     }`;
   }
   const parts: string[] = [];
@@ -380,7 +380,7 @@ export function downloadSummary(downloads: Downloads): string {
   if (total != null && total > 0) {
     const remaining = total - (done ?? 0);
     parts.push(
-      `${remaining} of ${total} ${total === 1 ? "item" : "items"} remaining`,
+      `${remaining} of ${total} ${total === 1 ? "part" : "parts"} left`,
     );
   }
   return parts.join(" · ");

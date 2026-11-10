@@ -42,9 +42,9 @@ type Page = {
   route(url: string, handler: (route: Route) => Promise<void>): Promise<void>;
   goto(url: string): Promise<unknown>;
   getByRole(role: string, options: { name: string; exact?: boolean }): Locator;
-  getByText(text: string): Locator;
+  getByText(text: string, options?: { exact?: boolean }): Locator;
   getByLabel(text: string, options: { exact: boolean }): Locator;
-  evaluate<T>(run: () => T): Promise<T>;
+  evaluate<T, A = undefined>(run: (arg: A) => T, arg?: A): Promise<T>;
   waitForTimeout(ms: number): Promise<void>;
   close(): Promise<void>;
 };
@@ -56,12 +56,18 @@ type Browser = {
 };
 type Chromium = { launch(options: { channel: string }): Promise<Browser> };
 
-/** `@tauri-apps/api/core`, scripted. The page's `__download` is what the download poll answers. */
+/**
+ * `@tauri-apps/api/core`, scripted. The page's `__fake.download` is what the download poll answers,
+ * and `__fake.emit` sends setup progress as the native side does. `#start` is a relaunch whose
+ * Start updates OpenBot; otherwise it is a first run.
+ */
 const FAKE_CORE = `
 const fake = (globalThis.__fake ??= { listeners: {}, download: null });
 const emit = (name, payload) => {
   for (const listener of fake.listeners[name] ?? []) listener({ payload });
 };
+fake.emit = emit;
+const relaunch = location.hash === "#start";
 let finishSetUp;
 const setUp = new Promise((resolve) => (finishSetUp = resolve));
 const stack = {
@@ -89,7 +95,18 @@ export async function invoke(command) {
     case "default_root":
       return "/Users/you/OpenBot";
     case "already_configured":
-      return { values: {}, saved: { modelApiKeys: none, modelSessions: none } };
+      return relaunch
+        ? {
+            values: {},
+            saved: { modelApiKeys: { openai: true, anthropic: false }, modelSessions: none, model: "open-ai-api-key" },
+            launch: { harness: { id: "langgraph" } },
+            localEval: { stack: "local-abc123", ownership: "created", phase: "installed", connected: true },
+          }
+        : { values: {}, saved: { modelApiKeys: none, modelSessions: none } };
+    case "upgrade_due":
+      return relaunch ? { from: "1.0.0", to: "1.0.1" } : null;
+    case "upgrade_and_start":
+      return new Promise(() => {});
     case "providers":
       return [
         { id: "openai", name: "OpenAI", summary: "Use OpenAI.", logins: ["api-key"], mark: null, caution: null },
@@ -176,7 +193,7 @@ async function buildWindow(): Promise<Window> {
 }
 
 /** Served as the shell serves the window: its page, its script and its stylesheet. */
-async function open(page: Page) {
+async function open(page: Page, hash = "") {
   await page.route("https://openbot.test/**", (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/main.js")
@@ -194,7 +211,7 @@ async function open(page: Page) {
     return route.fulfill({ status: 404, body: "" });
   });
   // A secure origin, as the shell's own is: the window's calls are named with `crypto.randomUUID`.
-  await page.goto("https://openbot.test/");
+  await page.goto(`https://openbot.test/${hash}`);
 }
 
 let browser: Browser;
@@ -272,6 +289,95 @@ describe.skipIf(!asked)("the AI step while OpenBot installs behind it", () => {
         );
         await page.getByText("OpenBot is installed").waitFor();
         expect(await measure(page)).toEqual(before);
+      } finally {
+        await page.close();
+      }
+    }, 30_000);
+  }
+});
+
+/** Where the step's heading and its first row are: what a person is reading. */
+async function anchors(page: Page) {
+  const heading = await page
+    .getByRole("heading", { name: "Starting OpenBot" })
+    .boundingBox();
+  const first = await page
+    .getByRole("listitem", { name: "Setting up OpenBot" })
+    .boundingBox();
+  return { heading: heading?.y, first: first?.y };
+}
+
+/*
+ * Seen on Windows: Start's card re-centred as rows came and went while OpenBot updated, so the
+ * heading and the rows jumped up 31px when the update's row appeared, up 20px when its download
+ * bar did, and down 20px when the bar went. The card is held from the top now.
+ */
+describe.skipIf(!asked)("the Start screen while OpenBot updates", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const) {
+    test(`at ${width}x${height}, nothing on screen moves as the update's row and its download come and go`, async () => {
+      const page = await browser.newPage({ viewport: { width, height } });
+      try {
+        await open(page, "#start");
+        await page
+          .getByRole("listitem", { name: "Starting OpenBot" })
+          .waitFor();
+        await page.waitForTimeout(600);
+        const before = await anchors(page);
+        expect(before.heading).toBeGreaterThan(0);
+
+        const emit = (payload: Record<string, unknown>) =>
+          page.evaluate(
+            (sent) =>
+              (
+                globalThis as unknown as {
+                  __fake: { emit: (name: string, payload: unknown) => void };
+                }
+              ).__fake.emit("setup:progress", sent),
+            payload,
+          );
+        // The update begins: its row appears under Start's.
+        await emit({
+          step: "release",
+          ok: true,
+          running: true,
+          detail: "Downloading the update.",
+        });
+        await page
+          .getByRole("listitem", { name: "Updating OpenBot" })
+          .waitFor();
+        expect(await anchors(page)).toEqual(before);
+        // Its download, with a bar.
+        await emit({
+          step: "images",
+          ok: true,
+          running: true,
+          detail: "Downloading local software.",
+          downloadBytes: 100_000_000,
+          downloads: {
+            done: 1,
+            total: 5,
+            bytes: 100_000_000,
+            size: 944_200_000,
+          },
+        });
+        await page
+          .getByText("100.0 MB of 944.2 MB", { exact: false })
+          .waitFor();
+        expect(await anchors(page)).toEqual(before);
+        // The download ends, and the bar goes.
+        await emit({
+          step: "images",
+          ok: true,
+          running: false,
+          detail: "Local software is downloaded (5/5).",
+        });
+        await page
+          .getByText("100.0 MB of 944.2 MB", { exact: false })
+          .waitFor({ state: "hidden" });
+        expect(await anchors(page)).toEqual(before);
       } finally {
         await page.close();
       }
