@@ -6,6 +6,7 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor, within } from "@testing-library/react";
@@ -13,8 +14,8 @@ import userEvent from "@testing-library/user-event";
 import { AuditPage } from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
 import { Route as WhatIfRoute } from "@/routes/_authed/admin/what-if";
-import answers from "./what-if.fixture.json";
 import { settleReactWork } from "./settle-react-work";
+import answers from "./what-if.fixture.json";
 
 /**
  * Admin > What would happen, and Audit's "Why?".
@@ -70,12 +71,28 @@ function client() {
 }
 
 function renderWhatIf() {
-  const root = createRootRoute();
-  const page = createRoute({
+  /*
+   * The page reads its search through its own route, `/_authed/admin/what-if`, so it is mounted at
+   * that id, under the same layout routes the app has. Mounted at `/admin/what-if`, its
+   * `Route.useSearch()` found no match and threw whenever the shard ran it after other route tests.
+   */
+  const root = createRootRoute({ component: Outlet });
+  const authed = createRoute({
+    id: "/_authed",
     getParentRoute: () => root,
-    path: "/admin/what-if",
-    validateSearch: WhatIfRoute.options.validateSearch,
-    component: WhatIfRoute.options.component,
+    component: Outlet,
+  });
+  const admin = createRoute({
+    path: "/admin",
+    getParentRoute: () => authed,
+    component: Outlet,
+  });
+  const page = (
+    WhatIfRoute as unknown as { update: (options: unknown) => never }
+  ).update({
+    id: "/what-if",
+    path: "/what-if",
+    getParentRoute: () => admin,
   });
   // The pages the rows link to, so a link resolves; nothing here opens them.
   const pages = [
@@ -86,13 +103,15 @@ function renderWhatIf() {
     "approvals",
   ].map((name) =>
     createRoute({
-      getParentRoute: () => root,
-      path: `/admin/${name}`,
+      getParentRoute: () => admin,
+      path: `/${name}`,
       component: () => null,
     }),
   );
   const router = createRouter({
-    routeTree: root.addChildren([page, ...pages]),
+    routeTree: root.addChildren([
+      authed.addChildren([admin.addChildren([page, ...pages])]),
+    ]),
     history: createMemoryHistory({ initialEntries: ["/admin/what-if"] }),
   });
   return render(
