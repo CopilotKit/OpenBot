@@ -1219,14 +1219,6 @@ a:hover {
   min-height: 132px;
 }
 
-.behind-slot .step-label,
-.behind-slot .step .detail,
-.behind-slot .step .downloads > span {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
 
 .behind-slot > .steps {
   margin-top: 0;
@@ -1290,6 +1282,16 @@ a:hover {
   font-size: var(--text-sm);
   line-height: 20px;
   font-variant-numeric: tabular-nums;
+}
+
+/* The background row's lines stay on one line each (see `.behind-slot`). After the rules they cut. */
+.behind-slot .step-label,
+.behind-slot .step .detail,
+.behind-slot .step .downloads > span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .downloads progress {
