@@ -34,7 +34,7 @@ import type { ComputerProvider } from "../src/computer/provider";
 import { loadConfig } from "../src/config";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { auditEvents } from "../src/db/schema";
+import { approvalRules, auditEvents } from "../src/db/schema";
 import { PluginRefusedError } from "../src/plugins/plugin-store/model";
 import { createPluginStore } from "../src/plugins/store";
 import { createModelCompleter } from "../src/routing/model";
@@ -46,8 +46,8 @@ import { testEnvironment } from "./support/environment";
 import {
   ADMIN,
   CASEY,
-  clearWhatIf,
   CRM,
+  clearWhatIf,
   GMAIL,
   NO_SOCIAL,
   NO_UNATTENDED_EMAIL,
@@ -375,7 +375,7 @@ describe("asking what would happen", () => {
     ]);
     expect(layerOf(body.result, "boundaries").basis).toBe("Everything else");
     expect(layerOf(body.result, "safety").summary).toBe(
-      "Built in: sending something to other people always asks the person first.",
+      "Built in: sending something to other people asks the person first. They can allow it once, for the conversation, or always.",
     );
   });
 
@@ -511,6 +511,66 @@ describe("asking what would happen", () => {
 });
 
 describe("checking an action the admin set", () => {
+  /*
+   * A kind of action is open by default, so what decides it is the gate's own answer: an admin who
+   * closed the kind, or an allow the person saved from its card. Read from the kind alone, both once
+   * showed "Built in: ... always asks" deciding, which was wrong both times.
+   */
+  test("a kind the team leaves to the person is handed off by that setting", async () => {
+    const { app } = appFor({});
+    await approvals.policy?.setTeamSettings(ADMIN.id, {
+      actionKinds: { sending: "hand_off" },
+    });
+    try {
+      const { body } = await checkOf(app, action({}));
+      expect(body.result.outcome).toBe("hands_off");
+      expect(body.result.decidedBy).toBe("safety");
+      expect(layerOf(body.result, "safety")).toMatchObject({
+        verdict: "hands_off",
+        summary:
+          "The team set sending something to other people to be left to the person.",
+        basis: "Actions that ask first",
+      });
+    } finally {
+      await approvals.policy?.setTeamSettings(ADMIN.id, {
+        actionKinds: { sending: "open" },
+      });
+    }
+  });
+
+  test("an allow the person saved for the kind lets it through, and the approvals layer says whose", async () => {
+    const { app } = appFor({});
+    // As "Always allow here" on a sending card saves it: the rule with the kind it was given for.
+    const [rule] = await database
+      .insert(approvalRules)
+      .values({
+        id: crypto.randomUUID(),
+        ownerUserId: SAM.id,
+        botId: SALES_BOT.id,
+        toolRef: `${GMAIL}/send_email`,
+        effect: "write",
+        scope: "*",
+        kind: "sending",
+      })
+      .returning();
+    try {
+      const { body } = await checkOf(app, action({}));
+      expect(body.result.outcome).toBe("allowed");
+      expect(body.result.decidedBy).toBeNull();
+      expect(layerOf(body.result, "safety")).toMatchObject({
+        verdict: "allows",
+        summary:
+          "Built in: sending something to other people asks the person first, unless a rule or an allow saved for it decides. Here one does.",
+      });
+      expect(layerOf(body.result, "approvals")).toMatchObject({
+        verdict: "allows",
+        summary: "A personal rule lets it run without asking.",
+      });
+    } finally {
+      if (rule) await approvals.revoke(SAM.id, rule.id);
+    }
+  });
+
   test("a member of a group the Permissions page turns commands off for is refused by the permission", async () => {
     const { app } = appFor({});
     const { body } = await checkOf(

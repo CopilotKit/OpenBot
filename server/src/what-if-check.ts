@@ -51,6 +51,7 @@ import {
   enterpriseChecks,
 } from "./admin/controls";
 import {
+  closedKind,
   decideAction,
   reviewable,
   safetyRequirement,
@@ -384,28 +385,71 @@ async function approvalLayers(
   appName: (id: string) => string = connectorName,
 ): Promise<{ safety: Layer; approvals: Layer }> {
   const safety = safetyRequirement(candidate);
-  const safetyLayer = safety
+  const words = safety ? (SAFETY_WORDS[safety.id] ?? "this") : "";
+  // Before the approvals are read: a kind OpenBot always hands to the person, or none at all.
+  const fixedSafety: Layer | undefined = !safety
     ? layer(
-        "safety",
-        safety.behaviour === "hand_off" ? "hands_off" : "asks",
-        safety.behaviour === "hand_off"
-          ? `Built in: ${SAFETY_WORDS[safety.id] ?? "this"} is always done by the person.`
-          : // A tool its app marks destructive asks whatever it is called: the reason says so.
-            safety.reason.startsWith("The app marks")
-            ? "Built in: the app marks this tool as deleting or overwriting something, so it always asks the person first."
-            : `Built in: ${SAFETY_WORDS[safety.id] ?? "this"} always asks the person first.`,
-      )
-    : layer(
         "safety",
         "allows",
         candidate.effect === "read"
           ? "It only reads, and no built-in safety requirement applies to a read."
           : "No built-in safety requirement applies.",
+      )
+    : safety.behaviour === "hand_off"
+      ? layer(
+          "safety",
+          "hands_off",
+          `Built in: ${words} is always done by the person.`,
+        )
+      : undefined;
+  /*
+   * A kind of action that asks (deleting, sending, sharing, posting, paying, account changes) is open
+   * by default: it asks unless an allow saved from that kind's card covers it, and an admin can close
+   * it to ask every time or to leave it to the person. So this layer is read from what the gate did.
+   */
+  const kindLayer = (
+    outcome: Awaited<ReturnType<typeof decideAction>>,
+    actionKinds: Parameters<typeof closedKind>[1],
+  ): Layer => {
+    if (fixedSafety) return fixedSafety;
+    const id = safety?.id as Parameters<typeof closedKind>[0];
+    const closed = closedKind(id, actionKinds);
+    if (closed?.behaviour === "hand_off")
+      return layer(
+        "safety",
+        "hands_off",
+        `The team set ${words} to be left to the person.`,
+        { page: "/admin/approvals", basis: "Actions that ask first" },
       );
+    if (closed)
+      return layer(
+        "safety",
+        "asks",
+        `The team set ${words} to ask every time, with Allow once and Deny only.`,
+        { page: "/admin/approvals", basis: "Actions that ask first" },
+      );
+    const asksFirst = safety?.reason.startsWith("The app marks")
+      ? "the app marks this tool as deleting or overwriting something, so it asks the person first"
+      : `${words} asks the person first`;
+    if (outcome.source === "safety")
+      return layer(
+        "safety",
+        "asks",
+        `Built in: ${asksFirst}. They can allow it once, for the conversation, or always.`,
+      );
+    // A rule, or an allow the person saved for this kind, decides it: the approvals layer says which.
+    return layer(
+      "safety",
+      "allows",
+      `Built in: ${asksFirst}, unless a rule or an allow saved for it decides. Here one does.`,
+    );
+  };
 
   if (!readers.approvals)
     return {
-      safety: safetyLayer,
+      safety:
+        fixedSafety ??
+        layer("safety", "asks", `Built in: ${words} asks the person first.`),
       approvals: layer(
         "approvals",
         "allows",
@@ -433,6 +477,7 @@ async function approvalLayers(
     customRulesEnabled: team.customRulesEnabled,
     autoReview: false,
     askBeforeChanges: preferences.enabled,
+    actionKinds: team.actionKinds,
   });
   const reviewer =
     (preferences.autoReview || team.enforceAutoReview) && reviewable(candidate)
@@ -442,6 +487,7 @@ async function approvalLayers(
     candidate,
     teamRules,
     team.customRulesEnabled ? personal : [],
+    safety && safety.behaviour !== "hand_off" ? { kind: safety.id } : {},
   );
   const whose =
     matched?.layer === "team_rule" ? "A team rule" : "A personal rule";
@@ -503,7 +549,7 @@ async function approvalLayers(
       ruleExtra,
     );
   }
-  return { safety: safetyLayer, approvals };
+  return { safety: kindLayer(outcome, team.actionKinds), approvals };
 }
 
 function behaviourVerdict(
