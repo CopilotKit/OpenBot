@@ -21,6 +21,7 @@ import { HarnessMark } from "@/components/agents/harness-mark";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BusinessComputerLink } from "@/components/edition/team-features-dialog";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
+import { RoutinesAppHint } from "@/components/routines/routines-app-hint";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -67,6 +68,7 @@ import {
   giveableAppsQueryOptions,
 } from "@/lib/app-access/queries";
 import { isComposing } from "@/lib/composing";
+import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
 import {
@@ -759,23 +761,33 @@ function AboutStep({
           </FieldDescription>
           <div className="grid gap-2 sm:grid-cols-2">
             {apps.map((app) => (
-              <label
-                className="flex items-center gap-3 rounded-lg bg-muted/50 p-3 text-sm"
-                htmlFor={`new-bot-app-${app.key}`}
+              // The tile holds the label, and beside Routines an example and a link the box's name
+              // must not take in, so they sit outside the label.
+              <div
+                className={cn(
+                  "flex items-center gap-3 rounded-lg bg-muted/50 pr-3 text-sm",
+                  app.key === ALWAYS_ON_APP && "sm:col-span-2",
+                )}
                 key={app.key}
               >
-                <Checkbox
-                  checked={!leftOut.has(app.key)}
-                  id={`new-bot-app-${app.key}`}
-                  onCheckedChange={(checked) =>
-                    onApp(app.key, checked === true)
-                  }
-                />
-                <PluginLogo logo={app.logo} />
-                <span className="min-w-0 truncate font-medium">
-                  {app.displayName}
-                </span>
-              </label>
+                <label
+                  className="flex min-w-0 flex-1 items-center gap-3 py-3 pl-3"
+                  htmlFor={`new-bot-app-${app.key}`}
+                >
+                  <Checkbox
+                    checked={!leftOut.has(app.key)}
+                    id={`new-bot-app-${app.key}`}
+                    onCheckedChange={(checked) =>
+                      onApp(app.key, checked === true)
+                    }
+                  />
+                  <PluginLogo logo={app.logo} />
+                  <span className="min-w-0 truncate font-medium">
+                    {app.displayName}
+                  </span>
+                </label>
+                {app.key === ALWAYS_ON_APP ? <RoutinesAppHint /> : null}
+              </div>
             ))}
           </div>
         </FieldSet>
@@ -807,13 +819,17 @@ function EveryAppList({ turnedOn }: { turnedOn: UseQueryResult<PluginsPage> }) {
         <ul aria-label="Apps it can use" className="grid gap-2 sm:grid-cols-2">
           {servers.map((server) => (
             <li
-              className="flex items-center gap-3 rounded-lg bg-muted/50 p-3 text-sm"
+              className={cn(
+                "flex items-center gap-3 rounded-lg bg-muted/50 p-3 text-sm",
+                server.id === ALWAYS_ON_APP && "sm:col-span-2",
+              )}
               key={server.id}
             >
               <PluginLogo logo={server.logo} />
               <span className="min-w-0 truncate font-medium">
                 {server.title}
               </span>
+              {server.id === ALWAYS_ON_APP ? <RoutinesAppHint /> : null}
             </li>
           ))}
         </ul>

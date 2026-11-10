@@ -1,0 +1,26 @@
+{
+  "about": "Real answers from OpenAI Chat Completions to the prompts in server/src/admin/capability-translate.ts, with response_format json_schema, sent by the real route in createApp over the people and groups who-can.integration.test.ts seeds (Contractors, Engineering, Field Sales (EMEA), Sales, and two people in no group). Each string is the assistant message content exactly as the model returned it, recorded 2026-11-09. gpt-5.6-terra is the deployment default. readingCatchesInversion is gpt-4o-mini taking a literal request for a group's off switch and inverting it: on for Contractors, everybody else back to off. The changes check, because each is a switch the rule honours; the reading, which never saw the request, says what they do. No recording has a second attempt: across about twenty real calls, with and without the schema, neither model wrote a change the check refuses, so the retry is covered by the check's own test.",
+  "trap": {
+    "model": "gpt-5.6-terra",
+    "text": "Contractors can't use their own computer",
+    "writer": [
+      "{\"notes\":\"Turns off local computer access organization-wide, then restores it for every group other than Contractors. People in no group will also lose this access.\",\"changes\":[{\"scopeKind\":\"organization\",\"scopeId\":\"\",\"capability\":\"localComputer\",\"setting\":\"off\"},{\"scopeKind\":\"group\",\"scopeId\":\"Engineering\",\"capability\":\"localComputer\",\"setting\":\"on\"},{\"scopeKind\":\"group\",\"scopeId\":\"Field Sales (EMEA)\",\"capability\":\"localComputer\",\"setting\":\"on\"},{\"scopeKind\":\"group\",\"scopeId\":\"Sales\",\"capability\":\"localComputer\",\"setting\":\"on\"}]}"
+    ],
+    "reader": "{\"summary\":\"Contractors and ungrouped people lose \\\"Local computer access\\\"; specified groups keep it.\",\"explanation\":\"\\\"Local computer access\\\" is turned off for everybody, then turned back on for \\\"Engineering\\\", \\\"Field Sales (EMEA)\\\", and \\\"Sales\\\". \\\"Contractors\\\" are left without it, as are people in no group and admins who are not in one of those groups. Someone in two groups keeps it if they are also in a group where it is turned back on.\"}"
+  },
+  "groupOffRefused": {
+    "model": "gpt-5.6-terra",
+    "text": "Set the Contractors group switch for Local computer access to off",
+    "writer": [
+      "{\"notes\":\"A group switch cannot be set to off; group switches can only grant permissions. No change is written.\",\"changes\":[]}"
+    ]
+  },
+  "readingCatchesInversion": {
+    "model": "gpt-4o-mini",
+    "text": "Set the Contractors group switch for Local computer access to off",
+    "writer": [
+      "{\"notes\":\"The Contractors group switch for Local computer access is being set to off. This will prevent all members of the Contractors group from accessing local computer functionalities.\",\"changes\":[{\"scopeKind\":\"organization\",\"scopeId\":\"\",\"capability\":\"localComputer\",\"setting\":\"off\"},{\"scopeKind\":\"group\",\"scopeId\":\"Contractors\",\"capability\":\"localComputer\",\"setting\":\"on\"},{\"scopeKind\":\"group\",\"scopeId\":\"Engineering\",\"capability\":\"localComputer\",\"setting\":\"inherit\"},{\"scopeKind\":\"group\",\"scopeId\":\"Field Sales (EMEA)\",\"capability\":\"localComputer\",\"setting\":\"inherit\"},{\"scopeKind\":\"group\",\"scopeId\":\"Sales\",\"capability\":\"localComputer\",\"setting\":\"inherit\"}]}"
+    ],
+    "reader": "{\"summary\":\"Contractors gain Local computer access; everyone else loses it.\",\"explanation\":\"'Local computer access' is turned off for everyone in the organization. It is turned back on for the 'Contractors' group. This means that all members and admins not in this group will not have access. Additionally, people in no group, including the admins, also do not have access. Therefore, only the two 'Contractors' can use it now.\"}"
+  }
+}

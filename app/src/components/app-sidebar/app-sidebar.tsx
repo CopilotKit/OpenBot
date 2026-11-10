@@ -196,6 +196,7 @@ function ChannelRow({
             : undefined
         }
         pinned={channel.pinned}
+        canRename={channel.canRename ?? false}
         unread={unread}
         // A turn running, or work the conversation waits on between turns: a hop, a routine.
         busy={(channel.busy ?? false) || (channel.work?.length ?? 0) > 0}

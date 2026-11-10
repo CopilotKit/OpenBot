@@ -24,8 +24,10 @@ import type { ApprovalQuestions } from "./questions";
 import {
   type ApprovalAction,
   ApprovalAlreadyAnsweredError,
+  APPROVAL_DECISIONS,
   type ApprovalCandidate,
   type ApprovalContinuation,
+  type ApprovalConversationGrant,
   type ApprovalDecision,
   type ApprovalPermit,
   type ApprovalPolicyOutcome,
@@ -178,22 +180,36 @@ export function createApprovalService(
   ): Promise<ApprovalPolicyOutcome | undefined> {
     const policy = store.policy;
     if (!policy) return undefined;
-    const [preferences, team, teamRules, personal] = await Promise.all([
-      policy.preferences(candidate.actorId),
-      policy.teamSettings(),
-      policy.teamRules(),
-      store.rules(candidate.actorId),
-    ]);
+    const [preferences, team, teamRules, personal, guidance] =
+      await Promise.all([
+        policy.preferences(candidate.actorId),
+        policy.teamSettings(),
+        policy.teamRules(),
+        store.rules(candidate.actorId),
+        // The admin's guidance for auto-review, which the reviewer reads below the built-in rules.
+        policy.reviewerGuidance?.() ?? null,
+      ]);
     const continuation = candidate.continuation ?? currentApprovalContext();
+    // Only this conversation's answers: one given in another conversation never reaches this one.
+    const conversation =
+      continuation?.threadId && policy.conversationGrants
+        ? await policy.conversationGrants(
+            candidate.actorId,
+            continuation.threadId,
+          )
+        : [];
     const outcome = await decideAction({
       candidate,
       messages: continuation?.messages,
       team: teamRules,
       personal,
+      conversation,
+      actionKinds: team.actionKinds,
       customRulesEnabled: team.customRulesEnabled,
       autoReview: preferences.autoReview || team.enforceAutoReview,
       askBeforeChanges: preferences.enabled,
       ...(options.review ? { model: options.review } : {}),
+      ...(guidance ? { guidance } : {}),
     });
     // An unremarkable read is not a verdict anybody asked for; everything else is on the trail.
     if (
@@ -218,6 +234,11 @@ export function createApprovalService(
   }
   return {
     store,
+    /**
+     * The reviewer model the gate asks, so a replay of auto-review over past requests asks the very
+     * same one (./reviewer-guidance.ts). Absent where none is configured, and then the gate fails closed.
+     */
+    reviewer: options.review,
     async frontendAction(ownerUserId: string, botId: string, input: unknown) {
       if (!frontend)
         throw new ApprovalRefusedError(
@@ -446,13 +467,21 @@ export function createApprovalService(
       );
     },
     async decide(ownerUserId: string, id: string, decision: ApprovalDecision) {
-      if (!["allow_once", "allow_always", "deny", "handled"].includes(decision))
+      if (!(APPROVAL_DECISIONS as readonly string[]).includes(decision))
         throw new ApprovalRefusedError(
-          "Choose allow once, allow always, deny, or done.",
+          "Choose allow once, allow for this conversation, always allow, deny, or done.",
         );
       return store.decide(ownerUserId, id, decision);
     },
     revoke: (ownerUserId: string, id: string) => store.revoke(ownerUserId, id),
+    /** Turn off one "Allow for this conversation": the next such call in it asks again. */
+    async revokeConversationGrant(ownerUserId: string, id: string) {
+      if (!store.policy?.revokeConversationGrant)
+        throw new ApprovalRefusedError(
+          "Conversation approvals are unavailable here.",
+        );
+      return store.policy.revokeConversationGrant(ownerUserId, id);
+    },
     async answerQuestion(
       ownerUserId: string,
       id: string,
@@ -487,6 +516,9 @@ export function createApprovalService(
         requests: requests.map(publicApproval),
         rules: await store.rules(ownerUserId),
         teamRules,
+        conversationGrants: (
+          (await policy?.allConversationGrants?.(ownerUserId)) ?? []
+        ).map(publicGrant),
         ...(preferences && team
           ? {
               preferences,
@@ -781,6 +813,20 @@ function permanentReason(error: unknown): string {
     return "the saved request no longer has a valid shape.";
   return "the app it needs is no longer available.";
 }
+/** A conversation answer as the browser reads it: what it allows, where, and how to turn it off. */
+function publicGrant(grant: ApprovalConversationGrant) {
+  return {
+    id: grant.id,
+    threadId: grant.threadId,
+    botId: grant.botId,
+    toolRef: grant.toolRef,
+    effect: grant.effect,
+    scope: grant.scope,
+    ...(grant.account ? { account: grant.account } : {}),
+    ...(grant.kind ? { kind: grant.kind } : {}),
+    createdAt: grant.createdAt,
+  };
+}
 function publicApproval(request: ApprovalRecord) {
   const { action, ...record } = request;
   return {
@@ -804,6 +850,8 @@ function publicApproval(request: ApprovalRecord) {
               behaviour: action.policy.behaviour,
               source: action.policy.source,
               reason: action.policy.reason,
+              ...(action.policy.kind ? { kind: action.policy.kind } : {}),
+              ...(action.policy.closed ? { closed: true } : {}),
             },
           }
         : {}),

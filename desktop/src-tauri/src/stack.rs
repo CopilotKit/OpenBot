@@ -166,7 +166,8 @@ fn volume_inventory(engine: &Address, root: &Path) -> Result<Vec<String>, Proble
 
 fn postgres_volume_problem(detail: impl Into<String>) -> Problem {
     Problem::with(
-        "OpenBot could not verify whether this installation has saved database data. No encryption key was created. Check the selected container engine and Compose configuration, then try again.",
+        "OpenBot couldn't check whether this installation already has your data saved, so it \
+         changed nothing. Try again.",
         detail,
     )
 }
@@ -405,7 +406,8 @@ impl LeftoverVolumes {
     pub fn running_said(&self) -> Option<String> {
         (!self.running.is_empty()).then(|| {
             format!(
-                "A container from the previous installation is still running: {}. Stop it in Docker or Podman, then try Start again.",
+                "Part of the previous installation is still running: {}. Stop it in Docker Desktop \
+                 or Podman, then try Start again.",
                 self.running.join(", ")
             )
         })
@@ -414,7 +416,8 @@ impl LeftoverVolumes {
 
 fn leftover_container_problem(detail: impl Into<String>) -> Problem {
     Problem::with(
-        "OpenBot could not verify which containers a previous installation left. Nothing was changed. Check the selected container engine, then try again.",
+        "OpenBot couldn't check what an earlier installation left behind, so it changed nothing. \
+         Try again.",
         detail,
     )
 }
@@ -652,7 +655,12 @@ pub fn reset_leftover_volumes(
         || leftovers.volumes != sorted(confirmed)
         || leftovers.container_names() != sorted(confirmed_containers)
     {
-        return Err(Problem::plain("The leftover data no longer matches the containers and volumes you confirmed, or OpenBot could not verify that it owns them. Nothing was removed. Try Start again."));
+        return Err(Problem::with(
+            "What the earlier installation left has changed since you confirmed it, so nothing was \
+             removed. Try Start again.",
+            "the leftovers no longer match the containers and volumes confirmed, or their \
+             ownership could not be verified",
+        ));
     }
     let mut removed: Vec<&str> = Vec::new();
     let removals = leftovers
@@ -688,7 +696,7 @@ pub fn reset_leftover_volumes(
             let why = if kind == "container" {
                 "It may have started again."
             } else {
-                "It may still be attached to a container."
+                "It may still be in use."
             };
             return Err(Problem::with(
                 format!("OpenBot could not remove {name}. {why} {} Stop the installation using it, then try Start again.", so_far()),
@@ -817,7 +825,7 @@ fn append_compose_overlay(
     if std::fs::read(&overlay).ok().as_deref() != Some(contents.as_bytes()) {
         std::fs::write(&overlay, contents).map_err(|error| {
             Problem::with(
-                "OpenBot could not prepare its local Compose settings.",
+                "OpenBot couldn't prepare its settings on this computer. Try again.",
                 error.to_string(),
             )
         })?;
@@ -875,18 +883,22 @@ fn compose_start_command(
     }
     let environment = environment.map_err(|error| {
         Problem::with(
-            "OpenBot could not read the deployment's Compose settings.",
+            "OpenBot couldn't read its installation's settings. Repair the installation.",
             error.to_string(),
         )
     })?;
     if !environment.status.success() {
         return Err(Problem::with(
-            "OpenBot could not read the deployment's Compose settings.",
+            "OpenBot couldn't read its installation's settings. Repair the installation.",
             command_said(&environment.stderr),
         ));
     }
-    let environment = String::from_utf8(environment.stdout)
-        .map_err(|_| Problem::plain("Compose returned unreadable deployment settings."))?;
+    let environment = String::from_utf8(environment.stdout).map_err(|_| {
+        Problem::with(
+            "OpenBot couldn't read its installation's settings. Repair the installation.",
+            "Compose returned unreadable deployment settings",
+        )
+    })?;
     let files = compose_files(root, &environment)?;
     for (index, file) in files.iter().enumerate() {
         command.arg("-f").arg(file);
@@ -962,7 +974,12 @@ fn compose_files(root: &Path, environment: &str) -> Result<Vec<String>, Problem>
         "docker-compose.yml",
         "docker-compose.yaml",
     ])
-    .ok_or_else(|| Problem::plain("The selected installation has no Compose file."))?;
+    .ok_or_else(|| {
+        Problem::with(
+            "Part of OpenBot's installation is missing. Repair the installation.",
+            "the selected installation has no Compose file",
+        )
+    })?;
     let mut files = vec![base];
     if let Some(existing) = first(&[
         "compose.override.yml",
@@ -1078,7 +1095,79 @@ pub fn up(
     harness: bool,
     secrets: &Secrets,
 ) -> Result<Vec<&'static str>, crate::problem::Problem> {
-    crate::logging::timed("compose up", || up_now(engine, root, harness, secrets))
+    crate::logging::timed("compose up", || {
+        up_retrying(engine, root, harness, secrets, &FOLDER_NOT_SHARED_YET_WAITS)
+    })
+}
+
+/**
+Make the sign-in folder Compose bind-mounts into the server, as the person.
+
+Compose's bind mount does not create it, because Docker would make it as root on Linux and this app
+could then not write a sign-in into it. Installation makes it, minutes before the first Start, and
+Start makes it again in case it went since: a folder made a moment before `up` was refused by Docker
+Desktop's file sharing on a Mac (`folder_not_shared_yet`).
+*/
+pub fn make_sign_in_folder(root: &Path) -> Result<PathBuf, crate::problem::Problem> {
+    let folder = root.join(".openbot");
+    std::fs::create_dir_all(&folder).map_err(|error| {
+        crate::problem::Problem::with(
+            "OpenBot couldn't prepare its sign-in folder. Try again.",
+            format!("{}: {error}", folder.display()),
+        )
+    })?;
+    Ok(folder)
+}
+
+/// How long `up` waits before each new try while Docker Desktop cannot see a folder yet: 15
+/// seconds in all. On OpenBot Desktop 1.0.0's first Start it took seconds.
+const FOLDER_NOT_SHARED_YET_WAITS: [std::time::Duration; 4] = [
+    std::time::Duration::from_secs(1),
+    std::time::Duration::from_secs(2),
+    std::time::Duration::from_secs(4),
+    std::time::Duration::from_secs(8),
+];
+
+/**
+Docker Desktop's file sharing refused a bind mount's source folder, which the host has.
+
+Seen on a Mac on the first Start of a new installation, for the sign-in folder Start had made a
+moment before: `invalid mount config for type "bind": stat /host_mnt/Users/<name>/OpenBot/.openbot:
+operation not permitted`. A few seconds later the same mount worked, and so did Retry. Docker Desktop
+documents no such delay, so this matches the daemon's own words for exactly that refusal and nothing
+else: every other error still fails the `up` at once.
+*/
+fn folder_not_shared_yet(said: &str) -> bool {
+    said.lines().any(|line| {
+        line.contains("invalid mount config for type \"bind\": stat ")
+            && line.trim_end().ends_with(": operation not permitted")
+    })
+}
+
+/// `up`, tried again after each of `waits` while the engine still cannot see a bind mount's folder.
+fn up_retrying(
+    engine: &Address,
+    root: &Path,
+    harness: bool,
+    secrets: &Secrets,
+    waits: &[std::time::Duration],
+) -> Result<Vec<&'static str>, crate::problem::Problem> {
+    let mut waits = waits.iter();
+    loop {
+        match up_now(engine, root, harness, secrets) {
+            Err(problem) if problem.detail.as_deref().is_some_and(folder_not_shared_yet) => {
+                let Some(wait) = waits.next() else {
+                    return Err(problem);
+                };
+                log::warn!(
+                    "[compose up] the engine cannot see a folder it mounts yet; trying again in {}s",
+                    wait.as_secs()
+                );
+                std::thread::sleep(*wait);
+            }
+            answer => return answer,
+        }
+    }
 }
 
 fn up_now(
@@ -2849,7 +2938,7 @@ pub fn services_that_exited_among(
         .output()
         .map_err(|error| {
             crate::problem::Problem::with(
-                "OpenBot could not inspect its Compose services.",
+                "OpenBot couldn't check on its own services. Try again.",
                 format!("could not run {operation}: {error}"),
             )
         })?;
@@ -2867,7 +2956,7 @@ pub fn services_that_exited_among(
             detail.push_str(&stdout);
         }
         return Err(crate::problem::Problem::with(
-            "OpenBot could not inspect its Compose services.",
+            "OpenBot couldn't check on its own services. Try again.",
             detail,
         ));
     }
@@ -2879,7 +2968,7 @@ pub fn services_that_exited_among(
         }
         let Some((service, state)) = line.split_once('\t') else {
             return Err(crate::problem::Problem::with(
-                "OpenBot could not inspect its Compose services.",
+                "OpenBot couldn't check on its own services. Try again.",
                 format!("unusable {operation} row: {line}"),
             ));
         };
@@ -2887,7 +2976,7 @@ pub fn services_that_exited_among(
         let state = state.trim();
         if service.is_empty() || state.is_empty() {
             return Err(crate::problem::Problem::with(
-                "OpenBot could not inspect its Compose services.",
+                "OpenBot couldn't check on its own services. Try again.",
                 format!("unusable {operation} row: {line}"),
             ));
         }
@@ -2963,13 +3052,13 @@ pub fn server_publishes(engine: &Address, root: &Path, ports: &[u16]) -> Result<
         .output()
         .map_err(|error| {
             Problem::with(
-                "OpenBot could not inspect its Compose services.",
+                "OpenBot couldn't check on its own services. Try again.",
                 format!("could not run {operation}: {error}"),
             )
         })?;
     if !output.status.success() {
         return Err(Problem::with(
-            "OpenBot could not inspect its Compose services.",
+            "OpenBot couldn't check on its own services. Try again.",
             format!("{operation}: {}", command_said(&output.stderr)),
         ));
     }
@@ -3194,7 +3283,7 @@ pub fn project_choosing(engine: &Address, root: &Path, legacy: &str) -> Result<S
     )
     .map_err(|error| {
         Problem::with(
-            "OpenBot could not record which containers belong to this installation.",
+            "OpenBot couldn't save which parts of OpenBot belong to this installation. Try again.",
             error,
         )
     })?;
@@ -3203,7 +3292,8 @@ pub fn project_choosing(engine: &Address, root: &Path, legacy: &str) -> Result<S
 
 fn project_choice_problem(detail: impl Into<String>) -> Problem {
     Problem::with(
-        "OpenBot could not tell which containers belong to this installation. Nothing was changed. Check the selected container engine, then try again.",
+        "OpenBot couldn't tell which parts of OpenBot belong to this installation, so it changed \
+         nothing. Try again.",
         detail,
     )
 }
@@ -4208,7 +4298,11 @@ mod tests {
             "invalid-json-secret".into(),
         ] {
             let error = postgres_volume_name(content.as_bytes()).unwrap_err();
-            assert!(error.said.contains("No encryption key was created"));
+            assert!(
+                error.said.contains("so it changed nothing"),
+                "{}",
+                error.said
+            );
             assert!(!format!("{error:?}").contains("secret"));
         }
     }
@@ -4243,7 +4337,11 @@ mod tests {
             for failure in [".fixture-volume-failure", ".fixture-config-failure"] {
                 std::fs::write(root.join(failure), "").unwrap();
                 let error = postgres_volume_exists(&address, &root, &Secrets::new()).unwrap_err();
-                assert!(error.said.contains("No encryption key was created"));
+                assert!(
+                    error.said.contains("so it changed nothing"),
+                    "{}",
+                    error.said
+                );
                 assert!(!format!("{error:?}").contains("synthetic-secret"));
                 std::fs::remove_file(root.join(failure)).unwrap();
             }
@@ -4688,7 +4786,11 @@ mod tests {
             ] {
                 let error = reset_leftover_volumes(&address, &root, &Secrets::new(), &stale, &[])
                     .expect_err("a changed set must not be removed");
-                assert!(error.said.contains("Nothing was removed"), "{}", error.said);
+                assert!(
+                    error.said.to_lowercase().contains("nothing was removed"),
+                    "{}",
+                    error.said
+                );
                 assert!(!std::fs::read_to_string(&record)
                     .unwrap_or_default()
                     .contains("volume rm"));
@@ -4707,7 +4809,11 @@ mod tests {
                 "{}",
                 error.said
             );
-            assert!(error.said.contains("Nothing was removed"), "{}", error.said);
+            assert!(
+                error.said.to_lowercase().contains("nothing was removed"),
+                "{}",
+                error.said
+            );
             assert!(!format!("{error:?}").contains("synthetic-secret"));
             std::fs::remove_file(root.join(".fixture-attached-openbot-profile-general-assistant"))
                 .unwrap();
@@ -4832,7 +4938,11 @@ mod tests {
                     &stale_containers,
                 )
                 .expect_err("a changed set must not be removed");
-                assert!(error.said.contains("Nothing was removed"), "{}", error.said);
+                assert!(
+                    error.said.to_lowercase().contains("nothing was removed"),
+                    "{}",
+                    error.said
+                );
                 assert!(!std::fs::read_to_string(&record).unwrap().contains(" rm "));
             }
 
@@ -6211,6 +6321,27 @@ fn main() {
         }
         panic!("unexpected startup command: {actual:?}");
     }
+    // Docker Desktop on a Mac, for a sign-in folder made just before `up`: `.fixture-refusals`
+    // `up`s are refused as its daemon refused them, then `up` succeeds. `.fixture-other-error` is a
+    // refusal that is not that one.
+    if scenario == "folder-not-shared-yet" {
+        assert_eq!(args.first().map(String::as_str), Some("compose"), "{args:?}");
+        assert!(args.iter().any(|arg| arg == "up"), "unexpected startup command: {args:?}");
+        let tries = std::fs::read_to_string(".fixture-up-tries").unwrap_or_default().len() + 1;
+        std::fs::write(".fixture-up-tries", "x".repeat(tries)).unwrap();
+        let home = std::env::var("HOME").unwrap_or_default();
+        if let Ok(other) = std::fs::read_to_string(".fixture-other-error") {
+            eprint!(" Container openbot-desktop-server-1 Creating \n Container openbot-desktop-server-1 {other} \n{other}\n");
+            std::process::exit(1);
+        }
+        let refusals: usize = std::fs::read_to_string(".fixture-refusals").unwrap().trim().parse().unwrap();
+        if tries <= refusals {
+            let said = format!("Error response from daemon: invalid mount config for type \"bind\": stat /host_mnt{home}/OpenBot/.openbot: operation not permitted");
+            eprint!(" Network openbot-desktop_default Creating \n Network openbot-desktop_default Created \n Container openbot-desktop-postgres-1 Created \n Container openbot-desktop-migrate-1 Created \n Container openbot-desktop-server-1 Creating \n Container openbot-desktop-server-1 {said} \n{said}\n");
+            std::process::exit(1);
+        }
+        return;
+    }
     if scenario == "computer-stop" {
         let root = std::path::PathBuf::from(std::env::var("OPENBOT_TEST_ENGINE_RECORD").unwrap()).with_extension("");
         let race = root.join(".fixture-race").exists();
@@ -6543,7 +6674,7 @@ fn main() {
 
         assert_eq!(
             problem.said,
-            "OpenBot could not inspect its Compose services."
+            "OpenBot couldn't check on its own services. Try again."
         );
         assert!(
             problem
@@ -6572,7 +6703,7 @@ fn main() {
 
         assert_eq!(
             problem.said,
-            "OpenBot could not inspect its Compose services."
+            "OpenBot couldn't check on its own services. Try again."
         );
         let detail = problem.detail.as_deref().unwrap_or_default();
         assert!(
@@ -6638,7 +6769,7 @@ fn main() {
 
             assert_eq!(
                 problem.said,
-                "OpenBot could not inspect its Compose services."
+                "OpenBot couldn't check on its own services. Try again."
             );
             assert!(
                 problem
@@ -8668,6 +8799,70 @@ fn main() {
             .unwrap()
             .contains("synthetic invalid deployment override"));
         assert!(!std::fs::read_to_string(record).unwrap().contains(" up "));
+    }
+
+    /**
+    OpenBot Desktop 1.0.0's first Start on a Mac with Docker Desktop: `up` was refused with
+    `invalid mount config for type "bind": stat /host_mnt/Users/<name>/OpenBot/.openbot: operation
+    not permitted` for the sign-in folder made a moment before, and the person was told "Something
+    went wrong". Seconds later the same mount worked. Start now waits and tries again on exactly
+    that refusal, and on nothing else.
+    */
+    #[test]
+    fn up_tries_again_while_docker_desktop_cannot_see_a_new_folder_and_only_then() {
+        if crate::test_support::isolated_process(
+            "stack::tests::up_tries_again_while_docker_desktop_cannot_see_a_new_folder_and_only_then",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("folder-not-shared-yet");
+        let [docker, _] = computer_stop_addresses(&path);
+        let (root, _) = computer_stop_root(&path, "folder-not-shared-yet", "{}");
+        let tries = || {
+            std::fs::read_to_string(root.join(".fixture-up-tries"))
+                .unwrap_or_default()
+                .len()
+        };
+
+        // Refused twice, then mounted: Start goes on, after the first two waits.
+        std::fs::write(root.join(".fixture-refusals"), "2").unwrap();
+        let began = std::time::Instant::now();
+        let services = up(&docker, &root, false, &Secrets::new()).unwrap();
+        assert_eq!(services, selected_services(false));
+        assert_eq!(tries(), 3);
+        assert!(began.elapsed() >= std::time::Duration::from_secs(3));
+
+        // Refused every time: the daemon's own words come back once the waits run out.
+        std::fs::remove_file(root.join(".fixture-up-tries")).unwrap();
+        std::fs::write(root.join(".fixture-refusals"), "99").unwrap();
+        let problem = up_retrying(
+            &docker,
+            &root,
+            false,
+            &Secrets::new(),
+            &[std::time::Duration::ZERO; 4],
+        )
+        .unwrap_err();
+        assert_eq!(tries(), 5);
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains("/OpenBot/.openbot: operation not permitted"),
+            "{problem:?}"
+        );
+
+        // Any other refusal fails at once, as before.
+        std::fs::remove_file(root.join(".fixture-up-tries")).unwrap();
+        std::fs::write(
+            root.join(".fixture-other-error"),
+            "Error response from daemon: Conflict. The container name \"/openbot-desktop-server-1\" is already in use",
+        )
+        .unwrap();
+        let problem = up(&docker, &root, false, &Secrets::new()).unwrap_err();
+        assert_eq!(tries(), 1);
+        assert!(problem.detail.unwrap().contains("is already in use"));
     }
 
     #[test]

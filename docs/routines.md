@@ -7,10 +7,20 @@ the same way any other message from that Bot does.
 
 ## Creating one
 
-There is no form for this. Ask a Bot, in a channel: "every weekday at 9, post the standup notes
-here." Turning a sentence into a five-field cron expression and a channel is conversational work, and
-that is what the conversation is for. The same Bot can list what is standing, change one, or delete
-one, all by being asked.
+Two ways, and they write through the same store call.
+
+- **Routines in the sidebar.** The Routines page lists every routine you have, across all your Bots,
+  and **New routine** opens a form: the Bot, what it should do, when (every day, every weekday, one
+  day a week, one day a month, or every hour, at a time on your clock), and the conversation it posts
+  in, or a new one named after it. A Bot's own Routines page and the clock beside a conversation's
+  message box open the same form with that Bot, and that conversation, already chosen. The form
+  sends `POST /api/routines`, which calls `routineStore.create` exactly as `create_routine` does.
+- **Ask a Bot**, in a conversation: "every weekday at 9, post the standup notes here." Anything the
+  form's schedules do not cover ("every other Tuesday") goes this way. The same Bot can list what is
+  standing, change one, or delete one, all by being asked. There is no edit form.
+
+Connections > Routines points to the Routines page, and the New Bot form shows an example beside
+Routines under "Apps it can use".
 
 **Always on.** Every Bot can do this, in every edition. The server adds Routines at startup and gives
 every Bot all of its tools, including the write tools `create_routine`, `update_routine` and

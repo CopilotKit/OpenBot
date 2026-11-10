@@ -1,4 +1,14 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type DownloadWhere,
+  downloadWhere,
+  journey,
+  leftSaid,
+  type PartsSeen,
+  position,
+  SETUP,
+  seeParts,
+} from "./journey";
 
 /** What the Install step says while it downloads OpenBot's software. */
 export const INSTALL_BLURB =
@@ -35,8 +45,8 @@ export type Progress = {
    */
   elsewhere?: boolean;
   /**
-   * The step waits for the person's go-ahead in this window before it raises the system's password
-   * prompt (`install::GoAhead`). See `goAheadNow`.
+   * The step waits on the person in this window: they closed the system's password prompt, and
+   * Install asks again by itself or on Try again (`install::GoAhead`). See `goAheadNow`.
    */
   asks?: boolean;
   /**
@@ -46,6 +56,11 @@ export type Progress = {
   position?: { at: number; of: number };
   /** The step waits on the person, not on work: no spinner, and its status says so. */
   waiting?: boolean;
+  /**
+   * What its download's parts are doing once every byte is in, said with the part: "Unpacking
+   * OpenBot" reads "Unpacking OpenBot (3 of 5)." Without it the row says its detail.
+   */
+  unpacking?: string;
 };
 
 /**
@@ -84,9 +99,9 @@ export function engineNow(steps: Progress[]): string | null {
 }
 
 /**
- * The line of a step that waits for the person's go-ahead before macOS asks for their password
- * ("Podman is downloaded and ready to install."), or null. The screens explain what comes next
- * and offer Continue (`PodmanGoAhead`).
+ * The line of a step that waits on the person after they closed macOS's password prompt ("OpenBot
+ * needs your password to install what it needs to run…"), or null. The screens say it in a card
+ * with Try again (`PodmanGoAhead`). Nothing waits on the person before a prompt.
  */
 export function goAheadNow(steps: Progress[]): string | null {
   const asking = [...steps]
@@ -189,6 +204,8 @@ const PREPARING = new Set([
 export function plainInstallSteps(
   steps: Progress[],
   installing: boolean,
+  /** When this install began: its running row's time so far counts from here. */
+  since?: number | null,
 ): Progress[] {
   const preparing = steps.filter((step) => PREPARING.has(step.step));
   const rest = steps.filter((step) => !PREPARING.has(step.step));
@@ -209,6 +226,7 @@ export function plainInstallSteps(
       downloadBytes: preparingNow?.downloadBytes,
       downloads: preparingNow?.downloads,
       position: { at: 1, of: INSTALL_PARTS },
+      startedAt: since ?? undefined,
     });
   }
   if (rest.length > 0 || (installing && !stillPreparing && !preparingFailed)) {
@@ -221,16 +239,18 @@ export function plainInstallSteps(
     const pulling =
       restNow?.downloads != null ||
       (restNow?.step === "images" && restNow.downloadBytes != null);
+    // Not "Installing OpenBot": that is the step's heading, right above it.
     rows.push({
-      step: "Installing OpenBot",
+      step: "Downloading OpenBot",
       ok: !installingFailed,
       running: installingNow,
-      detail: pulling
-        ? (timeLeft(restNow?.downloads) ?? "")
-        : (restNow?.detail ?? ""),
+      // The row's name says it downloads: its line says the time left, then which part unpacks.
+      detail: pulling ? "" : (restNow?.detail ?? ""),
       downloadBytes: pulling ? undefined : restNow?.downloadBytes,
       downloads: restNow?.downloads,
+      unpacking: "Unpacking OpenBot",
       position: { at: 2, of: INSTALL_PARTS },
+      startedAt: since ?? undefined,
     });
   }
   return rows;
@@ -246,8 +266,10 @@ function SetupProgressRow({
   const waiting = step.waiting ?? false;
   const running = !waiting && (step.running ?? false);
   const elapsed = useElapsed(running && showElapsed, step.startedAt);
-  // A step waiting on the person still shows a download going on under it: the first screen's.
-  const downloads = running || waiting ? step.downloads : undefined;
+  const downloads = running ? step.downloads : undefined;
+  const where = useDownloadWhere(
+    downloads && showsDownload(downloads) ? downloads : null,
+  );
   const at =
     step.position && (running || waiting)
       ? `Step ${step.position.at} of ${step.position.of}`
@@ -290,13 +312,13 @@ function SetupProgressRow({
         )}
       </span>
       <span className="detail">
-        {step.detail}
+        {where ? downloadSaid(step, where) : step.detail}
         {step.downloadBytes != null &&
           downloads == null &&
           ` ${formatDownloadBytes(step.downloadBytes)} downloaded.`}
       </span>
-      {downloads && showsDownload(downloads) && (
-        <DownloadProgress downloads={downloads} />
+      {downloads && where && (
+        <DownloadProgress downloads={downloads} where={where} />
       )}
     </li>
   );
@@ -311,25 +333,81 @@ export function showsDownload({ bytes, size, total }: Downloads): boolean {
 }
 
 /**
- * The bytes downloaded out of the whole download, with a bar driven by the bytes. Until the size
- * is known the line says so and the bar is indeterminate: it claims no fraction it cannot know.
- *
- * Once every byte is in and items are still being unpacked, the bar is indeterminate again. A full
- * bar beside "1 of 5 items remaining" read as nothing left to do while the last image was still
- * being unpacked and tagged.
+ * Where a running download is, second by second: its bytes, then its parts unpacking
+ * (`downloadWhere`). It keeps the time the count of finished parts last changed and when every
+ * byte came in, so the part unpacking now moves the bar and the time left, and the parts that
+ * finished say how long one takes here.
  */
-export function DownloadProgress({ downloads }: { downloads: Downloads }) {
-  const summary = downloadSummary(downloads);
-  const known =
-    downloads.size != null && downloads.size > 0 && !unpacking(downloads);
+export function useDownloadWhere(
+  downloads: Downloads | null,
+): DownloadWhere | null {
+  const [, tick] = useState(0);
+  const seen = useRef<PartsSeen | null>(null);
+  const now = Date.now();
+  const watched = downloads ? seeParts(seen.current, downloads, now) : null;
+  if (watched) seen.current = watched.seen;
+  // Every second while it runs: the time left and the part unpacking move with time, and a
+  // speed becomes steady enough to say a time from.
+  const running = downloads !== null;
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(() => tick((count) => count + 1), 1000);
+    return () => clearInterval(timer);
+  }, [running]);
+  if (!downloads || !watched) return null;
+  return downloadWhere(
+    downloads,
+    watched.waited,
+    watched.perPart,
+    watched.steady,
+    watched.allIn,
+  );
+}
+
+/**
+ * What a row with a download says: what it is doing, and how long is left. Once every byte is in,
+ * which part is unpacking ("Unpacking OpenBot (3 of 5)."); before that, its own line.
+ */
+function downloadSaid(step: Progress, where: DownloadWhere): string {
+  const doing =
+    where.unpacking && step.unpacking
+      ? `${step.unpacking} (${where.unpacking.at} of ${where.unpacking.of}).`
+      : step.detail;
+  const left = where.slow
+    ? `${leftSaid(null)}.`
+    : where.left !== null
+      ? `${leftSaid(where.left)}.`
+      : "";
+  return [doing, left].filter(Boolean).join(" ");
+}
+
+/**
+ * The bytes downloaded out of the whole download, with one bar for the download and the unpacking
+ * of its parts after it (`downloadWhere`). Until the size is known the line says so and the bar is
+ * indeterminate: it claims no fraction it cannot know.
+ *
+ * Never full while a part is left. A full bar beside "1 of 5 parts left" read as nothing left to
+ * do on 1.0.0-rc.1, and on Windows F, with its last bytes uncounted, "1.1 GB of 1.1 GB · 2 of 5
+ * parts left" sat under a full bar with no time left, and looked stuck.
+ */
+export function DownloadProgress({
+  downloads,
+  where,
+}: {
+  downloads: Downloads;
+  where: DownloadWhere;
+}) {
+  const summary = where.unpacking
+    ? `${formatDownloadBytes(downloads.bytes)} downloaded`
+    : downloadSummary(downloads);
   return (
     <div className="downloads">
-      {known ? (
+      {where.fraction !== null ? (
         <progress
           aria-label="Download progress"
           aria-valuetext={summary}
-          value={Math.min(downloads.bytes, downloads.size ?? 0)}
-          max={downloads.size}
+          value={where.fraction}
+          max={1}
         />
       ) : (
         <progress aria-label="Download progress" aria-valuetext={summary} />
@@ -354,15 +432,15 @@ function unpacking({ bytes, size, done, total }: Downloads): boolean {
 }
 
 /**
- * "1.2 GB of 3.4 GB · 1 of 5 items remaining", or what is known of it. Once every byte is in:
- * "3.4 GB downloaded · Unpacking the last item".
+ * "1.2 GB of 3.4 GB · 1 of 5 parts left", or what is known of it. Once every byte is in:
+ * "3.4 GB downloaded · Finishing the last part".
  */
 export function downloadSummary(downloads: Downloads): string {
   const { bytes, size, done, total } = downloads;
   if (unpacking(downloads)) {
     const remaining = (total ?? 0) - (done ?? 0);
-    return `${formatDownloadBytes(bytes)} downloaded · Unpacking ${
-      remaining === 1 ? "the last item" : `the last ${remaining} items`
+    return `${formatDownloadBytes(bytes)} downloaded · Finishing ${
+      remaining === 1 ? "the last part" : `the last ${remaining} parts`
     }`;
   }
   const parts: string[] = [];
@@ -381,7 +459,7 @@ export function downloadSummary(downloads: Downloads): string {
   if (total != null && total > 0) {
     const remaining = total - (done ?? 0);
     parts.push(
-      `${remaining} of ${total} ${total === 1 ? "item" : "items"} remaining`,
+      `${remaining} of ${total} ${total === 1 ? "part" : "parts"} left`,
     );
   }
   return parts.join(" · ");
@@ -424,6 +502,11 @@ export type BackEndNow = {
   detail: string | null;
   download: Downloads | null;
   since: number | null;
+  /** When its run began: the same across its setup, connection and wait. */
+  runSince?: number | null;
+  /** The CLI's steps its running setup has finished, and when it began (`local_eval_steps`). */
+  trail?: readonly string[];
+  trailSince?: number | null;
 };
 
 /**
@@ -483,61 +566,94 @@ export function installingBehind({
       now?.downloads && showsDownload(now.downloads) ? now.downloads : null;
     const meanwhile = early && showsDownload(early) ? early : null;
     if (preparing) {
-      // Waiting on the download it needs next, such as the machine it runs on.
-      if (own)
-        return row(1, withTimeLeft("Downloading OpenBot.", own), {
-          downloads: own,
+      // A closed password prompt has its own card, with Try again: the row says only what it
+      // waits for.
+      const waiting = now?.asks === true;
+      if (waiting)
+        return row(1, "Waiting for your password.", {
+          waiting,
           startedAt: since ?? undefined,
         });
-      // What the person has to do keeps its words; the download goes on under them.
-      if (meanwhile && (now?.asks || now?.elsewhere))
-        return row(1, now.detail, {
-          waiting: now.asks === true,
-          downloads: meanwhile,
-          startedAt: since ?? undefined,
-        });
-      if (meanwhile)
-        return row(1, withTimeLeft("Downloading OpenBot.", meanwhile), {
-          downloads: meanwhile,
+      // The first screen's downloads while they run, the machine it runs on among them, so one bar
+      // carries them all and only moves forward; then a download of Install's own. A prompt in
+      // another window keeps its words.
+      const downloading = now?.elsewhere ? null : (meanwhile ?? own);
+      if (downloading)
+        return row(1, "Downloading OpenBot.", {
+          downloads: downloading,
           startedAt: since ?? undefined,
         });
       return row(1, now?.detail || "Preparing this computer to run OpenBot.", {
-        waiting: now?.asks === true,
         startedAt: since ?? undefined,
       });
     }
-    const downloads = own ?? meanwhile;
+    const downloads = meanwhile ?? own;
     return row(
       2,
       downloads
-        ? withTimeLeft("Downloading OpenBot.", downloads)
+        ? "Downloading OpenBot."
         : now?.detail || "Downloading OpenBot.",
-      { downloads: downloads ?? undefined, startedAt: since ?? undefined },
+      {
+        downloads: downloads ?? undefined,
+        unpacking: "Unpacking OpenBot",
+        startedAt: since ?? undefined,
+      },
     );
   }
   if (backEnd.stopped) return null;
-  if (backEnd.running && (backEnd.at === "setup" || backEnd.at === "connect"))
+  /*
+   * The row's time so far is the whole install's, and only ever goes up. It counted from when the
+   * back end's current phase began, so on Windows F "Step 3 of 4 · 3m 26s elapsed" went back to
+   * "0s elapsed" as the setup moved on.
+   */
+  const counting = since ?? backEnd.runSince ?? backEnd.since ?? undefined;
+  if (backEnd.running && (backEnd.at === "setup" || backEnd.at === "connect")) {
+    // What the setup is doing now, from the steps it has finished, and the time left by how long
+    // its parts take (`journey.ts`). A download says its own time left from its speed.
+    const following =
+      backEnd.at === "setup" && (backEnd.trail?.length ?? 0) > 0;
+    const where = following
+      ? journey([
+          {
+            plan: SETUP,
+            state: "now",
+            at: position(
+              SETUP,
+              backEnd.trail ?? [],
+              Math.max(
+                0,
+                (Date.now() -
+                  (backEnd.trailSince ?? backEnd.since ?? Date.now())) /
+                  1000,
+              ),
+            ),
+          },
+        ])
+      : null;
     return row(
       3,
       backEnd.download
-        ? withTimeLeft("Downloading the rest of OpenBot.", backEnd.download)
-        : backEnd.detail ||
+        ? "Downloading the rest of OpenBot."
+        : where
+          ? `${where.said}. ${leftSaid(where.left)}.`
+          : backEnd.detail ||
             "Setting up OpenBot on this computer. This takes a few minutes the first time.",
       {
         downloads: backEnd.download ?? undefined,
-        startedAt: backEnd.since ?? undefined,
+        startedAt: counting,
       },
     );
+  }
   if (backEnd.running && backEnd.at === "wait")
     return row(
       4,
       backEnd.download
-        ? withTimeLeft("Downloading an update.", backEnd.download)
+        ? "Downloading an update."
         : backEnd.detail ||
             "Getting OpenBot ready to start. This can take a few minutes.",
       {
         downloads: backEnd.download ?? undefined,
-        startedAt: backEnd.since ?? undefined,
+        startedAt: counting,
       },
     );
   if (!installed) return null;
@@ -562,9 +678,16 @@ export function BehindSlot({ children }: { children?: ReactNode }) {
   return <div className="behind-slot">{children}</div>;
 }
 
-function withTimeLeft(said: string, downloads: Downloads): string {
-  const left = timeLeft(downloads);
-  return left ? `${said} ${left}` : said;
+/**
+ * The foot of a setup step: its actions (Continue, Accept, Try again) and the background install's
+ * row, pinned to the bottom of the card's view while the step scrolls above them.
+ *
+ * On Windows F the AI step was taller than the window: first the background row sat below the
+ * fold, then, with only that row pinned, Continue sat under it with a grey sliver showing until
+ * the person scrolled. Both are in view now, on every step that has them.
+ */
+export function StepFooter({ children }: { children?: ReactNode }) {
+  return <div className="step-footer">{children}</div>;
 }
 
 export function formatDownloadBytes(bytes: number): string {

@@ -16,11 +16,7 @@ import {
   signInToCopilotKit,
 } from "./localEvalCli";
 import { engineTooSmallSaid } from "./localReadiness";
-import {
-  ContinueToPodman,
-  PODMAN_EXPLAINED,
-  PODMAN_HEADING,
-} from "./PodmanGoAhead";
+import { PodmanGoAhead } from "./PodmanGoAhead";
 import { InlineFailure, type Problem } from "./Problem";
 import { Sections } from "./Sections";
 import {
@@ -28,6 +24,7 @@ import {
   type Progress,
   SetupProgress,
   StatusLine,
+  StepFooter,
 } from "./SetupProgress";
 import { Command } from "./WindowsBlocker";
 
@@ -52,9 +49,13 @@ const COULD_NOT_CHECK = "Couldn’t check your CopilotKit account. Try again.";
 const SIGN_IN_DID_NOT_FINISH = "Sign-in didn’t finish. Try again.";
 const SETTING_UP_ENGINE =
   "You're signed in. OpenBot is setting up the software it runs on. The license agreement comes next.";
+/*
+ * OpenBot's own sentences, not the CLI's: its words name rootful Podman and engines, which go to
+ * the log (`terms_said`). The steps under them name the apps the person switches in.
+ */
 const ENGINE_REFUSED =
-  "OpenBot's back end can't run on the container engine this computer uses.";
-const BLOCKED = "OpenBot's back end can't run on this computer as it's set up.";
+  "OpenBot can't run with the app this computer uses to run its software. It works with Docker Desktop or Podman.";
+const BLOCKED = "OpenBot can't run on this computer as it's set up.";
 
 /**
  * How long the account check waits for a container engine, and how often it asks again. A new
@@ -203,13 +204,13 @@ export function CopilotKitAccount({
         )
           setSeen({
             at: "unsupported-engine",
-            said: terms.said ?? ENGINE_REFUSED,
+            said: ENGINE_REFUSED,
             switchEngine: terms.switchEngine === true,
           });
         else if (terms.status === "blocked")
           setSeen({
             at: "failed",
-            said: terms.said ?? BLOCKED,
+            said: BLOCKED,
             retry: "check",
           });
         else if (terms.status === "signed-out") setSeen({ at: "signed-out" });
@@ -238,8 +239,6 @@ export function CopilotKitAccount({
   const checkAgain = useRef(check);
   checkAgain.current = check;
 
-  /** Signed in during this step: from here on, the step is about the agreement and the engine. */
-  const signedIn = useRef(false);
   /**
    * The CLI's `login`: done at once when it already has a sign-in, otherwise it opens the browser
    * and waits for the person to approve. Then the agreement.
@@ -255,7 +254,6 @@ export function CopilotKitAccount({
       if (attempt.current !== started.attempt) return;
       attempt.current = null;
       if (!signed) return failed();
-      signedIn.current = true;
       checkAgain.current();
     } catch {
       if (attempt.current !== started.attempt) return;
@@ -290,12 +288,9 @@ export function CopilotKitAccount({
   const appsFailed = seen.at === "apps-failed";
   const refused = seen.at === "unsupported-engine" ? seen : null;
   const waitingForEngine = seen.at === "waiting-for-engine";
-  // Signed in, and Install waits for the person before macOS asks for their password. Not while
-  // they sign in: only the step that needs them waits for them, and the sign-in comes first.
-  const asking =
-    goAhead !== null &&
-    signedIn.current &&
-    (waitingForEngine || seen.at === "checking");
+  // The person closed macOS's password prompt: said in a card of its own, with Try again, on
+  // whatever this step shows. Install asks again by itself meanwhile.
+  const asking = goAhead !== null;
   return (
     <div className="sheet">
       {/* OpenBot is what is being set up, so its mark heads this step as it heads every other.
@@ -303,44 +298,42 @@ export function CopilotKitAccount({
       <Sections at="Account" />
       <CopilotKitLogo />
       <h1>
-        {asking
-          ? PODMAN_HEADING
-          : agreement
-            ? "Accept the license agreement"
-            : connecting
-              ? "Setting up your apps"
-              : appsFailed
-                ? "Connect your apps"
-                : refused
-                  ? refused.switchEngine
-                    ? "Switch to Docker Desktop or Podman"
-                    : "Change your container engine setup"
-                  : waitingForEngine
-                    ? "Setting up this computer"
-                    : "Sign in to CopilotKit"}
+        {agreement
+          ? "Accept the license agreement"
+          : connecting
+            ? "Setting up your apps"
+            : appsFailed
+              ? "Connect your apps"
+              : refused
+                ? refused.switchEngine
+                  ? "Switch to Docker Desktop or Podman"
+                  : "Change this computer's setup"
+                : waitingForEngine
+                  ? "Setting up this computer"
+                  : "Sign in to CopilotKit"}
       </h1>
       <p className="lede">
-        {asking
-          ? PODMAN_EXPLAINED
-          : agreement
-            ? `To run OpenBot on this computer, accept the CopilotKit license agreement for ${agreement.organizationName}.`
-            : connecting || appsFailed
-              ? "OpenBot uses your CopilotKit account to set up apps like Gmail and Slack."
-              : refused
-                ? refused.said
-                : waitingForEngine
-                  ? SETTING_UP_ENGINE
-                  : "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the license agreement."}
+        {agreement
+          ? // The organization and the agreement's version are the log's: on Windows F the
+            // lede ended "for CopilotKit🪁." and the link read "(developer-edition-2026-10-01-web)".
+            "To run OpenBot on this computer, accept the CopilotKit license agreement."
+          : connecting || appsFailed
+            ? "OpenBot uses your CopilotKit account to set up apps like Gmail and Slack."
+            : refused
+              ? refused.said
+              : waitingForEngine
+                ? SETTING_UP_ENGINE
+                : "OpenBot runs on this computer with your CopilotKit account. Sign in, then accept the license agreement."}
       </p>
       {refused?.switchEngine && (
         <ol className="blocker-steps">
           <li>
-            Open Docker Desktop. To use Podman instead, quit the engine you use
-            now and start Podman.
+            Open Docker Desktop. To use Podman instead, quit the app you use now
+            and start Podman.
           </li>
           <li>
-            If Docker still uses another engine, run this in a terminal to
-            switch it to Docker Desktop:
+            If Docker still uses the other app, run this in a terminal to switch
+            it to Docker Desktop:
             <Command lines={["docker context use desktop-linux"]} />
           </li>
           <li>Choose Try again.</li>
@@ -354,8 +347,7 @@ export function CopilotKitAccount({
         !connecting &&
         !appsFailed &&
         !refused &&
-        !waitingForEngine &&
-        !asking && (
+        !waitingForEngine && (
           <p className="footnote">
             Your conversations and files are stored on this computer. Signing in
             does not send them to CopilotKit.
@@ -364,22 +356,17 @@ export function CopilotKitAccount({
 
       {/* The agreement waits on the engine. While it does, this says what Install is doing to bring
           it up, as Install's own row says it. While Docker Desktop starts or a password prompt is
-          up, it says what the person may have to do in that window, whatever the step is at. When
-          Install waits for the person instead, it says that, and Continue goes on to the prompt. */}
-      {asking ? (
-        <>
-          {!behind && <StatusLine working={false}>{goAhead}</StatusLine>}
-          <ContinueToPodman key={goAhead} />
-        </>
-      ) : waitingForEngine ? (
-        !behind && (
-          <StatusLine>
-            {engine ?? handOff ?? "Preparing this computer…"}
-          </StatusLine>
-        )
-      ) : (
-        handOff && !behind && <StatusLine>{handOff}</StatusLine>
-      )}
+          coming or up, it says what the person may have to do in that window, whatever the step
+          is at. Nobody is asked to click before a prompt: a closed one has its card, with Try
+          again. */}
+      {asking && <PodmanGoAhead asking={goAhead} />}
+      {waitingForEngine
+        ? !behind && (
+            <StatusLine>
+              {engine ?? handOff ?? "Preparing this computer…"}
+            </StatusLine>
+          )
+        : handOff && !behind && <StatusLine>{handOff}</StatusLine>}
       {seen.at === "checking" && !handOff && !asking && (
         <StatusLine>Checking your CopilotKit account…</StatusLine>
       )}
@@ -403,8 +390,9 @@ export function CopilotKitAccount({
       )}
       {agreement && (
         <p className="footnote">
-          <ExternalLink href={agreement.url}>Read the agreement</ExternalLink> (
-          {agreement.version})
+          <ExternalLink href={agreement.url}>
+            Read the license agreement
+          </ExternalLink>
         </p>
       )}
       {seen.at === "failed" && (
@@ -412,53 +400,59 @@ export function CopilotKitAccount({
       )}
       {failure}
 
-      <div className="row">
-        {seen.at === "signed-out" && (
-          <button type="button" onClick={signIn}>
-            Sign in to CopilotKit
-          </button>
-        )}
-        {agreement && (
-          <button type="button" onClick={() => connectApps(agreement.version)}>
-            Accept
-          </button>
-        )}
-        {seen.at === "apps-failed" && (
-          <>
-            <button type="button" onClick={() => connectApps(seen.version)}>
-              Connect apps
+      {/* The step's actions and the background install, pinned in view (`StepFooter`). */}
+      <StepFooter>
+        <div className="row">
+          {seen.at === "signed-out" && (
+            <button type="button" onClick={signIn}>
+              Sign in to CopilotKit
             </button>
+          )}
+          {agreement && (
             <button
               type="button"
-              className="quiet"
-              onClick={() => finish(seen.version)}
+              onClick={() => connectApps(agreement.version)}
             >
-              Continue
+              Accept
             </button>
-          </>
-        )}
-        {seen.at === "failed" && (
-          <button
-            type="button"
-            onClick={() => (seen.retry === "sign-in" ? signIn() : check())}
-          >
-            Try again
-          </button>
-        )}
-        {refused && (
-          <button type="button" onClick={check}>
-            Try again
-          </button>
-        )}
-      </div>
-      {/* Last, under whatever the step asks: OpenBot is still installing meanwhile. */}
-      {behind !== undefined && (
-        <BehindSlot>
-          {behind && (
-            <SetupProgress steps={[behind]} label="Background install" />
           )}
-        </BehindSlot>
-      )}
+          {seen.at === "apps-failed" && (
+            <>
+              <button type="button" onClick={() => connectApps(seen.version)}>
+                Connect apps
+              </button>
+              <button
+                type="button"
+                className="quiet"
+                onClick={() => finish(seen.version)}
+              >
+                Continue
+              </button>
+            </>
+          )}
+          {seen.at === "failed" && (
+            <button
+              type="button"
+              onClick={() => (seen.retry === "sign-in" ? signIn() : check())}
+            >
+              Try again
+            </button>
+          )}
+          {refused && (
+            <button type="button" onClick={check}>
+              Try again
+            </button>
+          )}
+        </div>
+        {/* Last, under whatever the step asks: OpenBot is still installing meanwhile. */}
+        {behind !== undefined && (
+          <BehindSlot>
+            {behind && (
+              <SetupProgress steps={[behind]} label="Background install" />
+            )}
+          </BehindSlot>
+        )}
+      </StepFooter>
     </div>
   );
 }

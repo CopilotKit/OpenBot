@@ -28,6 +28,7 @@ export type BacktestChange = {
   /** What the person answered when they were asked. */
   person:
     | "allow_once"
+    | "allow_conversation"
     | "allow_always"
     | "deny"
     | "handled"

@@ -693,10 +693,16 @@ impl Speed {
 
 /// Paces `Downloads` reports for the window: at most one per `interval`, except that a pull
 /// finishing is always shown at once. Measures the speed from every report it is offered.
+///
+/// It also holds the total still. A layer the engine finds already on this computer partway
+/// through drops out of the download (`Transfer::size`), and on Windows the total read 944.2 MB,
+/// then 747.6 MB: a total that shrinks reads as wrong. So the largest total stands, and what
+/// dropped out of it counts as done, which it is. The speed is measured from what was downloaded.
 pub struct Pacer {
     interval: Duration,
     last: Option<(Instant, usize)>,
     speed: Speed,
+    largest: Option<u64>,
 }
 
 impl Default for Pacer {
@@ -705,6 +711,7 @@ impl Default for Pacer {
             interval: Duration::from_millis(250),
             last: None,
             speed: Speed::default(),
+            largest: None,
         }
     }
 }
@@ -712,6 +719,15 @@ impl Default for Pacer {
 impl Pacer {
     pub fn offer(&mut self, now: Instant, downloads: &Downloads) -> Option<Downloads> {
         let bytes_per_second = self.speed.observe(now, downloads.bytes);
+        // The total as the person has seen it: never smaller than before.
+        let (bytes, size) = match downloads.size {
+            Some(size) => {
+                let largest = self.largest.unwrap_or(size).max(size);
+                self.largest = Some(largest);
+                (downloads.bytes + (largest - size), Some(largest))
+            }
+            None => (downloads.bytes, None),
+        };
         let due = match self.last {
             None => true,
             Some((at, done)) => {
@@ -723,6 +739,8 @@ impl Pacer {
         }
         self.last = Some((now, downloads.done));
         Some(Downloads {
+            bytes,
+            size,
             bytes_per_second,
             ..downloads.clone()
         })
@@ -819,7 +837,11 @@ fn run_with_progress(
         bytes,
     });
     let output = output.map_err(|error| {
-        Problem::plain(format!("Could not pull the images OpenBot needs: {error}"))
+        Problem::with(
+            "OpenBot couldn't download what it needs. Check your internet connection, then try \
+             again.",
+            format!("could not pull the images OpenBot needs: {error}"),
+        )
     })?;
     if output.status.success() {
         return Ok(());
@@ -1364,6 +1386,41 @@ Executing external compose provider
         );
     }
 
+    /// Seen on Windows: the total read 944.2 MB, then 747.6 MB, once the engine found layers it
+    /// already had. The person sees a total that never shrinks, and what dropped out counts as done.
+    #[test]
+    fn the_total_shown_never_shrinks_and_what_dropped_out_counts_as_done() {
+        let mut pacer = Pacer::default();
+        let at = Instant::now();
+        let report = |bytes: u64, size: u64| Downloads {
+            done: 0,
+            total: 5,
+            bytes,
+            size: Some(size),
+            bytes_per_second: None,
+        };
+        let first = pacer.offer(at, &report(0, 944_200_000)).unwrap();
+        assert_eq!((first.bytes, first.size), (0, Some(944_200_000)));
+        // 196.6 MB of layers turn out to be here already.
+        let later = pacer
+            .offer(
+                at + Duration::from_secs(1),
+                &report(100_000_000, 747_600_000),
+            )
+            .unwrap();
+        assert_eq!(later.size, Some(944_200_000));
+        assert_eq!(later.bytes, 100_000_000 + 196_600_000);
+        // The speed is what downloaded, not what was found here.
+        assert!(later.bytes_per_second.unwrap_or(0) <= 100_000_000);
+        let done = pacer
+            .offer(
+                at + Duration::from_secs(2),
+                &report(747_600_000, 747_600_000),
+            )
+            .unwrap();
+        assert_eq!((done.bytes, done.size), (944_200_000, Some(944_200_000)));
+    }
+
     /// Compose not reaching the engine at all still says to start it.
     #[test]
     fn an_engine_that_does_not_answer_a_pull_still_says_to_start_it() {
@@ -1371,7 +1428,7 @@ Executing external compose provider
             include_str!("../test-fixtures/image-pull-failures/compose-engine-not-running.txt");
         let problem = failed_pull(&crate::quiet::said(captured.as_bytes()));
         assert!(
-            problem.said.contains("Start Docker or Podman"),
+            problem.said.contains("can't reach the software it runs on"),
             "{problem:?}"
         );
         assert!(

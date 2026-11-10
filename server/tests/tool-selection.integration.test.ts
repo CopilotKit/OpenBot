@@ -310,7 +310,7 @@ function mastraAgent(): RegisteredAgent {
  * (`todayGuidance`), in UTC when the run carries no time zone.
  */
 const STANDING_ROLE_WITH_TODAY =
-  /^You are Risk Mastra\.\n\nToday is \w+, \d{4}-\d{2}-\d{2} \(UTC\)\. /;
+  /^You are Risk Mastra\.\n\n<model_and_date>\nToday is \w+, \d{4}-\d{2}-\d{2} \(UTC\)\. /;
 
 /**
  * Run one Bot the way the runtime does, including the clone.

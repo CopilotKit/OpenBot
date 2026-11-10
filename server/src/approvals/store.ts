@@ -1,14 +1,15 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, notExists, sql } from "drizzle-orm";
 import { createAuditStore, recordAuditEvent } from "../audit";
 import type { Database } from "../db/client";
 import {
+  approvalConversationGrants,
   approvalPreferences,
   approvalRequests,
   approvalRules,
   approvalTeamRules,
   approvalTeamSettings,
 } from "../db/schema/approvals";
-import { intelligenceChannelMappings } from "../db/schema/core";
+import { channels, intelligenceChannelMappings } from "../db/schema/core";
 import { botTasks } from "../db/schema/tasks";
 import { workItems } from "../db/schema/work";
 import { currentEdition } from "../edition";
@@ -44,7 +45,21 @@ const DEFAULT_TEAM: ApprovalTeamSettings = {
   enforceAutoReview: false,
   customRulesEnabled: true,
   hostCommandsCap: "allow",
+  // Every kind open: OpenBot opens things by default, and closing one is the admin's call.
+  actionKinds: {},
 };
+
+/**
+ * A conversation answer still in force: not turned off, and its conversation not deleted. Deleting a
+ * conversation ends what was allowed in it, though the soft-deleted row and its thread stay.
+ */
+const grantInForce = () =>
+  and(
+    isNull(approvalConversationGrants.revokedAt),
+    notExists(
+      sql`(select 1 from ${intelligenceChannelMappings} inner join ${channels} on ${channels.id} = ${intelligenceChannelMappings.channelId} where ${intelligenceChannelMappings.threadId} = ${approvalConversationGrants.threadId} and ${channels.deletedAt} is not null)`,
+    ),
+  );
 
 export function createApprovalStore(database: Database): ApprovalStore {
   const owned = (owner: string, id: string) =>
@@ -167,10 +182,17 @@ export function createApprovalStore(database: Database): ApprovalStore {
           throw new ApprovalRefusedError(
             "Only an action handed to you can be marked done by you.",
           );
-        if (decision === "allow_always" && !offersStandingRule(request.action))
+        if (
+          (decision === "allow_always" || decision === "allow_conversation") &&
+          !offersStandingRule(request.action)
+        )
           throw new ApprovalRefusedError(
-            "Tasks started from a check-in ask before every change. Allow this once, or deny it.",
+            request.action.policy?.closed
+              ? "Your admin set this to ask every time. Allow it once, or deny it."
+              : "Tasks started from a check-in ask before every change. Allow this once, or deny it.",
           );
+        // The kind the card was for, so the answer reaches later actions of that kind and no other.
+        const kind = request.action.policy?.kind ?? null;
         if (decision === "allow_always")
           await tx.insert(approvalRules).values({
             id: crypto.randomUUID(),
@@ -180,6 +202,20 @@ export function createApprovalStore(database: Database): ApprovalStore {
             effect: request.action.effect,
             scope: request.action.scope,
             account: request.action.account ?? null,
+            kind,
+          });
+        if (decision === "allow_conversation")
+          await tx.insert(approvalConversationGrants).values({
+            id: crypto.randomUUID(),
+            ownerUserId: owner,
+            threadId: request.action.threadId,
+            approvalId: id,
+            botId: request.action.botId,
+            toolRef: request.action.toolRef,
+            effect: request.action.effect,
+            scope: request.action.scope,
+            account: request.action.account ?? null,
+            kind,
           });
         const [updated] = await tx
           .update(approvalRequests)
@@ -247,6 +283,20 @@ export function createApprovalStore(database: Database): ApprovalStore {
             .for("share")
             .limit(1);
           if (!rule) return false;
+        }
+        // Turned off before it ran: not carried out, as a revoked "Always allow" is not.
+        if (request.decision === "allow_conversation") {
+          const [grant] = await tx
+            .select({ id: approvalConversationGrants.id })
+            .from(approvalConversationGrants)
+            .where(
+              and(
+                eq(approvalConversationGrants.approvalId, id),
+                isNull(approvalConversationGrants.revokedAt),
+              ),
+            )
+            .limit(1);
+          if (!grant) return false;
         }
         const rows = await tx
           .update(approvalRequests)
@@ -384,6 +434,7 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
           enforceAutoReview: row.enforceAutoReview,
           customRulesEnabled: row.customRulesEnabled,
           hostCommandsCap: row.hostCommandsCap,
+          actionKinds: row.actionKinds ?? {},
         }
       : { ...DEFAULT_TEAM };
   };
@@ -411,7 +462,13 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
     },
     teamSettings,
     async setTeamSettings(by, input) {
-      const next = { ...(await teamSettings()), ...input };
+      const current = await teamSettings();
+      // One kind at a time: a change to one leaves the others as the admin set them.
+      const next = {
+        ...current,
+        ...input,
+        actionKinds: { ...current.actionKinds, ...input.actionKinds },
+      };
       await database
         .insert(approvalTeamSettings)
         .values({ id: TEAM, ...next, updatedBy: by })
@@ -516,6 +573,59 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
         .from(approvalRequests)
         .orderBy(desc(approvalRequests.createdAt))
         .limit(limit);
+    },
+    async reviewerGuidance() {
+      // No team and no admin screen: the gate reads none, as it reads no team settings.
+      if (currentEdition() === "personal") return null;
+      const [row] = await database
+        .select({ guidance: approvalTeamSettings.reviewerGuidance })
+        .from(approvalTeamSettings)
+        .where(eq(approvalTeamSettings.id, TEAM))
+        .limit(1);
+      return row?.guidance?.trim() || null;
+    },
+    /*
+     * One save, one row on the trail, in the same transaction: the guidance either side and how it
+     * was read, so "who told the reviewer this, and in what words" has an answer for as long as the
+     * trail is kept. The table only holds the words in force now.
+     */
+    async setReviewerGuidance(by, change) {
+      const after = change.text?.trim() || null;
+      return database.transaction(async (tx) => {
+        const [current] = await tx
+          .select({ guidance: approvalTeamSettings.reviewerGuidance })
+          .from(approvalTeamSettings)
+          .where(eq(approvalTeamSettings.id, TEAM))
+          .limit(1);
+        const before = current?.guidance?.trim() || null;
+        await tx
+          .insert(approvalTeamSettings)
+          .values({ id: TEAM, reviewerGuidance: after, updatedBy: by })
+          .onConflictDoUpdate({
+            target: approvalTeamSettings.id,
+            set: {
+              reviewerGuidance: after,
+              updatedBy: by,
+              updatedAt: sql`now()`,
+            },
+          });
+        await recordAuditEvent(createAuditStore(tx as unknown as Database), {
+          eventType: "approval.guidance_changed",
+          targetType: "approval_settings",
+          targetId: TEAM,
+          actorUserId: by,
+          payload: {
+            ...(change.actor ? { actor: change.actor } : {}),
+            change: after === null ? "removed" : "saved",
+            before,
+            after,
+            ...(after !== null && change.reading
+              ? { reading: change.reading }
+              : {}),
+          },
+        });
+        return after;
+      });
     },
     async updateRule(owner, id, input) {
       const [row] = await database
@@ -668,6 +778,63 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
         });
       }
       return withdrawn;
+    },
+    async conversationGrants(owner, threadId) {
+      return database
+        .select()
+        .from(approvalConversationGrants)
+        .where(
+          and(
+            eq(approvalConversationGrants.ownerUserId, owner),
+            eq(approvalConversationGrants.threadId, threadId),
+            grantInForce(),
+          ),
+        );
+    },
+    async allConversationGrants(owner) {
+      return database
+        .select()
+        .from(approvalConversationGrants)
+        .where(
+          and(
+            eq(approvalConversationGrants.ownerUserId, owner),
+            grantInForce(),
+          ),
+        )
+        .orderBy(desc(approvalConversationGrants.createdAt))
+        .limit(100);
+    },
+    async revokeConversationGrant(owner, id) {
+      const [row] = await database
+        .update(approvalConversationGrants)
+        .set({ revokedAt: sql`now()` })
+        .where(
+          and(
+            eq(approvalConversationGrants.ownerUserId, owner),
+            eq(approvalConversationGrants.id, id),
+            isNull(approvalConversationGrants.revokedAt),
+          ),
+        )
+        .returning();
+      if (!row) throw new ApprovalNotFoundError();
+      await recordAuditEvent(audit, {
+        eventType: "approval.rule_changed",
+        targetType: "approval_rule",
+        targetId: id,
+        actorUserId: owner,
+        payload: {
+          change: "revoked",
+          layer: "conversation",
+          rule: {
+            botId: row.botId,
+            toolRef: row.toolRef,
+            effect: row.effect,
+            scope: row.scope,
+            ...(row.kind ? { kind: row.kind } : {}),
+          },
+          threadId: row.threadId,
+        },
+      });
     },
     async recordDecision(input) {
       await recordAuditEvent(audit, {

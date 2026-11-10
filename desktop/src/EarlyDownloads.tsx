@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
+import { leftSaid } from "./journey";
 import {
   type Downloads,
   DownloadProgress,
   StatusLine,
-  timeLeft,
+  useDownloadWhere,
 } from "./SetupProgress";
 
 /**
@@ -66,8 +67,9 @@ function gigabytes(bytes: number): string {
 }
 
 /**
- * The line for `downloads`, or null when there is nothing to say. In the words the background
- * install's row uses ("Downloading OpenBot. About 3 minutes left."), with the bytes under the bar.
+ * The line for `downloads`, or null when there is nothing to say. In the words of the background
+ * install's row: "Downloading OpenBot. About 3 minutes left.", the time left as that row works it
+ * out (`left`, in seconds; null while it is not known, `slow` when it is taking longer than usual).
  * The first screen also says when everything is downloaded, or when something will download at
  * Install instead; later screens say only what is still going on, since Install's own rows take
  * over from there.
@@ -75,12 +77,15 @@ function gigabytes(bytes: number): string {
 export function earlyDownloadsSaid(
   downloads: EarlyDownloads,
   firstScreen: boolean,
+  time: { left: number | null; slow: boolean } | null = null,
 ): string | null {
   const { state, free, needed } = downloads;
   switch (state) {
     case "downloading": {
-      const left = timeLeft(earlyDownload(downloads));
-      return left ? `Downloading OpenBot. ${left}` : "Downloading OpenBot.";
+      if (time?.slow) return `Downloading OpenBot. ${leftSaid(null)}.`;
+      return time?.left != null
+        ? `Downloading OpenBot. ${leftSaid(time.left)}.`
+        : "Downloading OpenBot.";
     }
     case "short":
       return free != null && needed != null
@@ -97,7 +102,10 @@ export function earlyDownloadsSaid(
   }
 }
 
-/** The early downloads' line, with a bar while they download. Nothing when there is nothing to say. */
+/**
+ * The early downloads' line, with the background row's bar while they download: one bar over every
+ * download, that only moves forward. Nothing when there is nothing to say.
+ */
 export function EarlyDownloadsLine({
   firstScreen = false,
 }: {
@@ -105,14 +113,17 @@ export function EarlyDownloadsLine({
   firstScreen?: boolean;
 }) {
   const downloads = useEarlyDownloads();
-  if (!downloads) return null;
-  const said = earlyDownloadsSaid(downloads, firstScreen);
-  if (!said) return null;
   const download = earlyDownload(downloads);
+  const where = useDownloadWhere(download);
+  if (!downloads) return null;
+  const said = earlyDownloadsSaid(downloads, firstScreen, where);
+  if (!said) return null;
   return (
     <div className="early-downloads">
       <StatusLine working={download != null}>{said}</StatusLine>
-      {download && <DownloadProgress downloads={download} />}
+      {download && where && (
+        <DownloadProgress downloads={download} where={where} />
+      )}
     </div>
   );
 }

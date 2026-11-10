@@ -27,6 +27,7 @@ import { AuditTable } from "@/components/audit/audit-table";
 import { PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { explainable, WhyButton } from "@/components/what-if/why-button";
 import { useBotNames } from "@/lib/agents/bot-names";
 import {
   CALLS_RECORDED_AS_CHANGES,
@@ -129,6 +130,10 @@ function withSkillTitles(
     return title ? { ...event, subjectTitle: title } : event;
   });
 }
+
+/** Admin's "Why?" on a row one of OpenBot's controls decided: see `what-if/why-button.tsx`. */
+const whyFor = (event: AuditEvent) =>
+  explainable(event) ? <WhyButton event={event} /> : null;
 
 /** What the page says under its title in Admin, where an admin reviews every Bot against policy. */
 const ADMIN_DESCRIPTION =
@@ -333,6 +338,7 @@ export function AuditPage({
               nameFor={nameFor}
               query={query}
               storedNames={edition !== "personal"}
+              {...(ask ? { rowAction: whyFor } : {})}
               toolbar={({ count, filters }) => (
                 <div className="flex shrink-0 flex-col gap-3 border-border border-b px-4 pb-3">
                   {/*

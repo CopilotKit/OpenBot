@@ -252,6 +252,7 @@ export function replayWords(
 /** What the person said when they were asked, in their words. */
 const ANSWERS: Record<NonNullable<BacktestChange["person"]>, string> = {
   allow_once: "A person allowed it once.",
+  allow_conversation: "A person allowed it for that conversation.",
   allow_always: "A person always allowed it.",
   deny: "A person denied it.",
   handled: "A person did it themselves.",
@@ -288,7 +289,7 @@ function auditRowOf(change: BacktestChange): AuditEvent {
 }
 
 /** Where an action acted, by its tool: an app, a computer, a folder, another Bot. */
-function mediaOf(toolRef: string): ReplayRow["media"] {
+export function mediaOf(toolRef: string): ReplayRow["media"] {
   if (toolRef.startsWith("computer_"))
     return { icon: <IconDeviceDesktop />, label: "Computer action" };
   if (toolRef.startsWith("host/"))

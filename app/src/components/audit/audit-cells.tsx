@@ -335,8 +335,11 @@ export function subjectText(event: AuditEvent, storedNames = true): string {
       ? `${payload.offered} of ${payload.granted} tools`
       : "";
   // What an admin asked the trail, in their words.
-  if (event.eventType === "audit.asked")
+  if (event.eventType === "audit.asked" || event.eventType === "what_if.asked")
     return typeof payload.question === "string" ? payload.question : "";
+  // Which permission, for whom: one sentence can save several switches, each a row of its own.
+  if (event.eventType === "capability.changed")
+    return permissionSubject(payload);
   if (!storedNames) {
     const words = subjectWords(event);
     if (words !== undefined) return words;
@@ -495,8 +498,41 @@ function givenWithoutAsking(event: AuditEvent): boolean {
  * What came of a row. `storedNames` is false on the personal edition's Activity; see
  * {@link givenWithoutAsking}.
  */
+/**
+ * "Local computer access · Group: Sales", in the Permissions page's own words. Rows written before
+ * they carried the title name the permission by its key.
+ */
+function permissionSubject(payload: Record<string, unknown>): string {
+  const title =
+    typeof payload.title === "string"
+      ? payload.title
+      : typeof payload.capability === "string"
+        ? payload.capability
+        : "";
+  const scope =
+    payload.scopeKind === "organization"
+      ? "Everybody"
+      : payload.scopeKind === "role"
+        ? payload.scopeId === "admin"
+          ? "Admins"
+          : "Members"
+        : payload.scopeKind === "group" && typeof payload.scopeId === "string"
+          ? `Group: ${payload.scopeId}`
+          : "";
+  return [title, scope].filter(Boolean).join(" · ");
+}
+
+/** What a switch was set to, as the Permissions page says it: a group grants, the rest turn on or off. */
+function permissionSetting(payload: Record<string, unknown>): string {
+  if (payload.allowed === null) return "Set back to inherit";
+  if (payload.allowed === false) return "Turned off";
+  return payload.scopeKind === "group" ? "Granted" : "Turned on";
+}
+
 export function decisionText(event: AuditEvent, storedNames = true): string {
   const payload = event.payload ?? {};
+  if (event.eventType === "capability.changed")
+    return permissionSetting(payload);
   const outcome = outcomeOf(event);
   if (!storedNames && givenWithoutAsking(event)) return "Allowed automatically";
   /*
@@ -580,17 +616,44 @@ function approvalText(event: AuditEvent): string | undefined {
       ? PERSON_DECISIONS[payload.decision]
       : undefined;
   if (event.eventType === "approval.evaluated") {
-    const behaviour = (payload.outcome as { behaviour?: unknown } | undefined)
-      ?.behaviour;
+    const outcome = payload.outcome as
+      | { behaviour?: unknown; source?: unknown }
+      | undefined;
+    // Allowed by the person's own answer earlier in the conversation, not by a rule.
+    if (outcome?.source === "conversation" && outcome.behaviour === "allow")
+      return "Allowed for this conversation";
+    const behaviour = outcome?.behaviour;
     return typeof behaviour === "string"
       ? GATE_DECISIONS[behaviour]
       : undefined;
   }
+  // An admin's guidance for auto-review, saved or taken away. Nothing was decided about an action.
+  if (event.eventType === "approval.guidance_changed")
+    return payload.after === null ? "Guidance removed" : "Guidance saved";
   return undefined;
+}
+
+/**
+ * What a guidance save says under its decision: the words saved, and how the reading the admin saw
+ * put them, or the words a removal took away.
+ */
+function guidanceLines(payload: Record<string, unknown>): string[] {
+  const reading = (payload.reading ?? {}) as { summary?: unknown };
+  if (typeof payload.after === "string")
+    return [
+      `Guidance: “${payload.after}”`,
+      ...(typeof reading.summary === "string" && reading.summary
+        ? [`Read as: ${reading.summary}`]
+        : []),
+    ];
+  return typeof payload.before === "string"
+    ? [`Removed: “${payload.before}”`]
+    : [];
 }
 
 const PERSON_DECISIONS: Record<string, string> = {
   allow_once: "Allowed once by a person",
+  allow_conversation: "Allowed for this conversation by a person",
   allow_always: "Always allowed by a person",
   deny: "Denied by a person",
   handled: "Done by a person",
@@ -797,13 +860,19 @@ export function decisionDetails(
    */
   const named = ruleNameLine(event, storedNames);
   if (named) lines.push(named);
-  // Team rules saved from a description say the sentence they were written from, as a boundary does.
+  // Rules, a Bot's actions, a network allowlist and permissions saved from a description say
+  // the sentence they were written from, as a boundary does.
   const ruleAuthoring = (payload.authoring ?? {}) as { text?: unknown };
   if (
-    event.eventType === "approval.rule_changed" &&
+    (event.eventType === "approval.rule_changed" ||
+      event.eventType === "plugin.grants_changed" ||
+      event.eventType === "network_policy.changed" ||
+      event.eventType === "capability.changed") &&
     typeof ruleAuthoring.text === "string"
   )
     lines.push(`Written from: “${ruleAuthoring.text}”`);
+  if (event.eventType === "approval.guidance_changed")
+    lines.push(...guidanceLines(payload));
   if (
     decision.mode === "dry-run" &&
     decision.allowed === false &&
@@ -1097,6 +1166,8 @@ const DECISIONS: Record<string, string> = {
   "computer.policy_translated": "Drafted, not saved",
   // A question read into filters. Not "Allowed": nothing was decided, and nothing left the trail.
   "audit.asked": "Asked, nothing changed",
+  "what_if.asked": "Asked, nothing changed",
+  "what_if.checked": "Checked, nothing changed",
   "computer.isolation_loaded": "Isolation at start-up",
   "computer.control_taken": "A person took control",
   "computer.control_released": "Control went back to the Bot",
@@ -1135,6 +1206,11 @@ const DECISIONS: Record<string, string> = {
   "approval.withdrawn": "Withdrawn",
   // A draft for the admin to read, as a boundary's is. Nothing was decided and nothing changed.
   "approval.rules_translated": "Drafted, not saved",
+  "plugin.grants_translated": "Drafted, not saved",
+  "plugin.grants_changed": "Actions saved",
+  // A draft network allowlist, as a boundary's is. Nothing was decided and nothing changed.
+  "network_policy.translated": "Drafted, not saved",
+  "capability.changes_translated": "Drafted, not saved",
 
   "configuration.changed": "Configuration changed",
   "credential.created": "Credential saved",

@@ -11,12 +11,27 @@ agents:
     role_description: Help with email, your calendar, research, planning and everyday errands.
     avatar_seed: personal-assistant
     type: built-in
+    # What the model reads, and what the person edits on the Setup page, so it stays inside that
+    # page's 1,000-character limit. OpenBot's own prompt already tells every Bot how to work; this
+    # says who it works for and the few habits that make an assistant finish what it was asked.
+    #
+    # It used to say "ask when something is ambiguous rather than guessing", which made it stop to
+    # ask about choices it could have made and said it made, and "ask the person to sign in, and
+    # wait for them", which contradicted the platform's own rule: a sign-in is handed over with a
+    # tool call, never asked for in a sentence. `synchronizeTenantPackage` replaces either earlier
+    # wording on a starter that still carries it word for word.
     system_prompt: >-
-      You are a personal assistant for one person. Help with their email, calendar, research,
-      planning and everyday errands. Be clear and brief, and ask when something is ambiguous rather
-      than guessing. When you send, buy, delete or post anything, say exactly what you are doing;
-      OpenBot asks the person before it happens, so do not ask them yourself first. Never type a
-      password yourself: ask the person to sign in, and wait for them.
+      You are a personal assistant for one person. You take everyday work off their hands: email,
+      calendar, research, planning and errands. Do the work, not a description of it: when you
+      decide on a step, take it in the same reply. Look in what you already have first, this
+      conversation, earlier results and their apps, then the web, and ask the person last. Ask only
+      when a wrong guess would be hard to undo, when the possible readings lead to different work,
+      or when only they know the answer. Otherwise make the sensible choice, say what you assumed,
+      and keep going, with any question at the end. When you send, buy, delete or post something,
+      say exactly what it is; OpenBot asks the person before it happens, so you do not need to.
+      Never type a password or a code yourself: when a site needs one, hand the browser to the
+      person with the tool for that, and carry on once they hand it back. Be clear and brief, and
+      end with anything you could not confirm.
     # `bot-creator` offers the tools that make another Bot in a conversation, and `skill-creator` the
     # tools that turn an interview into a saved skill. Both are defined in skills.yaml.
     skills:

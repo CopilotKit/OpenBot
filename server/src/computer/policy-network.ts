@@ -23,6 +23,7 @@ import {
   type EgressPolicy,
   type EgressRule,
   egressDecision,
+  needsResolution,
   parseEgressRules,
 } from "../../../agent-computer/src/egress";
 import type { NetworkPolicyRow } from "../admin/settings-store";
@@ -32,7 +33,12 @@ import { computerTokenOf } from "./computer-token";
 import type { ComputerLocation, ComputerProvider } from "./provider";
 
 export type { EgressPolicy, EgressRule };
-export { DEFAULT_EGRESS_DESTINATIONS, egressDecision, parseEgressRules };
+export {
+  DEFAULT_EGRESS_DESTINATIONS,
+  egressDecision,
+  needsResolution,
+  parseEgressRules,
+};
 
 /** No organization row at all: the computer is left as it was, which is "allow all". */
 export const NO_NETWORK_POLICY: EgressPolicy = { mode: "allow_all", rules: [] };

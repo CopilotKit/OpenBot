@@ -769,6 +769,8 @@ pub enum Fixed {
     RestartNeeded,
     /// Done, and nothing else needed.
     Done,
+    /// The person said no to Windows' administrator prompt. Nothing changed; the window asks again.
+    Declined,
 }
 
 /// Turn the outcome of running a fix into what the screen says.
@@ -785,10 +787,8 @@ fn fixed(
         } else {
             Fixed::Done
         }),
-        Some(DECLINED) => Err(Problem::plain(
-            "Windows did not get permission to make the change. Choose Set up Windows again and \
-             approve the prompt, or run the commands yourself.",
-        )),
+        // A decision, not a failure: the window says OpenBot needs it, and asks again.
+        Some(DECLINED) => Ok(Fixed::Declined),
         status => Err(Problem::with(
             "OpenBot could not set up Windows Subsystem for Linux. Try again, or run the commands \
              yourself.",
@@ -2182,8 +2182,8 @@ mod tests {
         let version = Blocker::WslOne.fix().unwrap();
         assert_eq!(fixed(enable, Some(0), None, ""), Ok(Fixed::RestartNeeded));
         assert_eq!(fixed(version, Some(0), None, ""), Ok(Fixed::Done));
-        let declined = fixed(enable, Some(DECLINED), None, "").unwrap_err();
-        assert!(declined.said.contains("did not get permission"));
+        // Saying no to the prompt is recoverable, not an error: the window asks again.
+        assert_eq!(fixed(enable, Some(DECLINED), None, ""), Ok(Fixed::Declined));
         let failed = fixed(
             enable,
             Some(1),
