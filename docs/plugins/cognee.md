@@ -1,14 +1,83 @@
 # Cognee
 
-A Bot with this connector granted reaches [Cognee](https://www.cognee.ai) **as the person asking**,
-through the hosted MCP server Cognee runs at `mcp.aws.cognee.ai`, on the catalogue's default MCP
-transport. Cognee keeps memory as a knowledge graph built from what was stored in it. Each person
-signs in with their own Cognee account, and every call reaches that person's own Cognee Cloud
-workspace, so two people asking the same question get what their own workspaces hold.
+[Cognee](https://www.cognee.ai) is long-term memory that a person's AI tools share. What somebody
+stores from one Cognee client, for example Claude Code, Codex or n8n, can be searched from the
+others. A Bot with this connector granted becomes one more of those clients: it searches that memory
+and adds to it **as the person asking**.
 
 This is separate from the memory OpenBot keeps in CopilotKit Intelligence. Intelligence keeps a
-person's threads and what a Bot learned about them. Cognee is a store the person already uses
-elsewhere, for example from Claude Code, Codex or n8n, and that a Bot can now read from and add to.
+person's threads and what a Bot learned about them, and stays inside OpenBot. Cognee is a store the
+person already uses elsewhere. A Bot uses OpenBot's own memory unless it is asked to use Cognee.
+
+The Bot reaches Cognee through the hosted MCP server Cognee runs at `mcp.aws.cognee.ai`, on the
+catalogue's default MCP transport. That is one address for every customer: each person signs in with
+their own Cognee account, and Cognee sends every call to that person's current workspace.
+
+## What a Bot can reach
+
+- `recall` searches everything the person's Cognee account can access in their current workspace.
+  That is every dataset, not only the one OpenBot writes to, so it includes what the person stored
+  from their other tools. A workspace can have several members, so it can also include memory that
+  is not theirs alone.
+- `check_ingestion_status` reports the progress of something stored with `remember` in the
+  background.
+
+Two people asking the same question each get what their own account can access. Nobody reaches a
+workspace they are not a member of.
+
+## What a Bot can change or delete
+
+- `remember` stores text or a file in the person's Cognee memory. It files into a dataset named
+  after the client, `openbot_memory`, unless the Bot names another. It is stored at Cognee, so the
+  person's other tools can find it, and turning the connector off in OpenBot does not remove it.
+- `forget` deletes one item, one dataset, or, with `everything` set, all the data the person owns.
+  It is not limited to what OpenBot stored. It can delete memory the person saved from every other
+  client, and it deletes it at Cognee, where OpenBot cannot bring it back.
+
+## What protects it
+
+Cognee has **no read-only scope**. Its server advertises one scope, `openid`, and a connection is
+the person's whole access to their workspace, so nothing at Cognee stands behind a tool's
+read-or-write classification. The catalogue's tool lists, plus the action policy, are the **entire**
+write barrier for this connector, the same as for [Notion](notion.md).
+
+| Tool                     | Treated as         | Asks the person first                                                    |
+| ------------------------ | ------------------ | ------------------------------------------------------------------------ |
+| `recall`                 | Read               | No                                                                       |
+| `check_ingestion_status` | Read               | No                                                                       |
+| `remember`               | Write              | Only when Always ask before making changes, Auto-review or a rule says so |
+| `forget`                 | Write, destructive | Every time: **Allow once** or **Deny**                                   |
+
+- **A Bot has no Cognee tool until it is granted one**, and each tool is granted on its own. A Bot
+  that should only search memory gets `recall` and nothing else. Leave `forget` ungranted unless a
+  Bot needs it.
+- **The catalogue names the two reads.** Every other tool the server advertises is a write,
+  including one Cognee adds later, until somebody reads it and lists it.
+- **`forget` asks every time.** Cognee's server marks it destructive, OpenBot records that on
+  Refresh tools, and a tool its app marks destructive always asks, the same as deleting does. No
+  setting, rule or reviewer switches that off, and it never offers **Always allow here**. The name
+  `forget` is not one of the words OpenBot recognises as deleting, so this depends on Cognee's mark.
+  The server sent it on 2026-11-09.
+- **`remember` is an ordinary change.** With the default settings a Bot stores to Cognee without
+  asking. Turn on Always ask before making changes or Auto-review, or add a rule, to make it ask. A
+  task started from a check-in asks before every change.
+- Every call checks the grant, evaluates the action policy, and writes an audit row.
+
+See [Approvals](../approvals.md) for the order these are decided in.
+
+## Memory flows both ways
+
+- **Out of OpenBot.** What a Bot stores with `remember` is in the person's Cognee workspace, in
+  `openbot_memory`. Their other Cognee clients search every dataset the person can access, so they
+  find it there.
+- **Into OpenBot.** `recall` searches the datasets those clients write to as well, so a Bot can
+  answer from something the person stored from Claude Code or Codex.
+- **Deleting reaches both.** `forget` works on the same shared memory, which is why it asks.
+
+Only what goes through these tools moves. OpenBot's own memory is not copied to Cognee, and Cognee
+memory is not copied into OpenBot.
+
+## Setting it up
 
 Setting it up takes two people, and neither can do the other's half:
 
@@ -16,21 +85,6 @@ Setting it up takes two people, and neither can do the other's half:
 | ----------------- | ------------------------------------------ | ----------------------------- |
 | An administrator  | Enables the connector                      | `/admin/plugins/cognee`       |
 | Each person       | Signs in with their own Cognee account     | `/connections`                |
-
-## The tools
-
-The hosted server offers four tools. The catalogue names all four, so a tool Cognee adds later is
-treated as a write until somebody reads it and lists it.
-
-| Tool             | What it does                                                    | Treated as |
-| ---------------- | --------------------------------------------------------------- | ---------- |
-| `recall`         | Searches the person's memory and answers from it                | Read       |
-| `check_ingestion_status` | Reports progress of something stored with `remember` in the background | Read |
-| `remember`       | Stores text or a file in the person's memory                    | Write      |
-| `forget`         | Deletes one item, one dataset, or everything the person owns    | Write      |
-
-`forget` with `everything` set deletes all of a person's Cognee data, in Cognee and not only in
-OpenBot, so it asks first like every other write.
 
 ## What an administrator does
 
@@ -49,15 +103,15 @@ needs a credential, and it uses the connection of whoever presses the button, so
 
 ### 3. Press Refresh tools
 
-This records the tool list Cognee's hosted server advertises today. Check it against the table above.
-A name that has changed at Cognee is a write until the catalogue is updated, which is the safe
-direction.
+This records the tool list Cognee's hosted server advertises today, and whether it marks each tool
+destructive. Check the list against the table above: four tools, with `recall` and
+`check_ingestion_status` shown as reads and `remember` and `forget` as changes. A name that has
+changed at Cognee is a write until the catalogue is updated, which is the safe direction.
 
 ### 4. Grant tools to a Bot
 
 Enabling the connector does not give any Bot access to it. Each tool is granted per Bot, the same as
-every other plugin tool. Every call then checks the grant, evaluates the action policy, and writes an
-audit row.
+every other plugin tool. Decide here whether a Bot gets `forget`.
 
 ## What each person does
 
@@ -69,21 +123,22 @@ connecting.
 
 ## Try it
 
-1. In a conversation with the Bot: "Remember that the staging migration is owned by Ravit."
-2. In a **new** conversation: "Who owns the staging migration?"
+Before you start: an administrator has granted the Bot `remember` and `recall`, and your own account
+reads **Connected** at `/connections`.
 
-Use a new conversation, so the answer cannot come from the conversation's own history. Cognee builds
-its graph in the background, so a fact can take a short while to become recallable.
+1. In a conversation with the Bot: "Use Cognee to remember that the staging migration is owned by
+   Ravit." Say "Use Cognee". A Bot also has OpenBot's own memory, and without the name it may save
+   there instead. The conversation shows a **Remember** step marked `cognee` when it went to Cognee.
+2. Wait about a minute. Cognee builds its graph in the background, so a fact can take a short while
+   to become recallable. The Bot's reply says so when processing is still running.
+3. In a **new** conversation: "Use Cognee to recall who owns the staging migration." A new
+   conversation, so the answer cannot come from the conversation's own history.
 
-Name Cognee in the request ("Use Cognee to remember…"). A Bot also has OpenBot's own memory, and
-without the name it may save there instead.
-
-`remember` files into a dataset named after the client, `openbot_memory`, unless the Bot names
-another. `recall` searches every dataset the person owns, so a Bot can find what the person stored
-from Claude Code, Codex or any other Cognee client.
+If the Bot finds nothing, wait another minute and ask again in the same conversation.
 
 ## See also
 
+- [Approvals](../approvals.md): what always asks, and the settings that make ordinary changes ask.
 - [Notion](notion.md), the other connector on a hosted MCP server with dynamic client registration.
 - [Configuration](../configuration.md): `OPENBOT_PUBLIC_URL`, `OPENBOT_APP_URL`, `KEY_ENCRYPTION_KEY`.
 - [Cognee's guide](https://docs.cognee.ai/cognee-cloud/connections/cloud-mcp) to its hosted MCP

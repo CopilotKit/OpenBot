@@ -490,13 +490,18 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     key: "cognee",
     title: "Cognee",
     vendor: "Cognee",
-    summary: "Memory in the Cognee workspace of whoever is asking.",
-    personalSummary: "Your Cognee memory.",
+    summary:
+      "Long-term memory of whoever is asking, shared with their other AI tools.",
+    personalSummary: "Your long-term memory, shared with your other AI tools.",
     /*
-     * The hosted MCP server Cognee runs for Cognee Cloud, on the default MCP transport, the same
-     * shape as Notion's entry. One host for every customer: the server signs a person in with their
-     * own Cognee account and calls their own workspace, so two people asking the same question get
-     * what their own workspaces hold.
+     * ONE HOST FOR EVERY CUSTOMER, which is why `host` is pinned and there is no `hostPattern`.
+     * Every Cognee Cloud workspace has an API host of its own (`tenant-….aws.cognee.ai`), but the
+     * hosted MCP server is this single address: it signs a person in with their own Cognee account
+     * and sends each call to that person's current workspace. A tenant host is therefore never an
+     * address for this entry, and the catalogue test refuses one.
+     *
+     * A workspace can have several members, so it is not a private store: what comes back is what
+     * that person's Cognee account can access. Nobody reaches a workspace they are not a member of.
      */
     host: "https://mcp.aws.cognee.ai",
     path: "/mcp",
@@ -507,20 +512,32 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
       tokenUrl: "https://mcp.aws.cognee.ai/token",
       revokeUrl: "https://mcp.aws.cognee.ai/revoke",
       /*
-       * Cognee's server advertises only `openid`, and access is the person's whole workspace, so a
-       * scope string here would assert a narrower grant than the one that exists.
+       * Cognee's server advertises one scope, `openid`, and no read-only scope: a connection is
+       * the person's whole access to their workspace. `writeTools` and `readTools` below plus the
+       * action policy are the ENTIRE write barrier, as for Notion. Nothing at Cognee backs them
+       * up, and a scope string here would assert a narrower grant than the one that exists.
        */
       scopes: Object.freeze([]),
       clientRegistration: "dynamic",
       registrationUrl: "https://mcp.aws.cognee.ai/register",
     },
-    // `remember` stores into the person's memory and `forget` deletes from it.
+    /*
+     * `remember` stores into the person's Cognee memory. `forget` deletes from it, and it reaches
+     * all of that memory, not only what OpenBot stored: one item, a whole dataset, or with
+     * `everything` all the data the person owns, including what their other Cognee clients saved.
+     * The hosted server marks `forget` destructive (`destructiveHint`), and that mark is what makes
+     * OpenBot ask before every call to it. This list only makes it a write.
+     */
     writeTools: Object.freeze(["remember", "forget"]),
     /*
      * THE READS, NAMED, so a tool Cognee adds later is a write until somebody reads it and lists it
-     * here. As the hosted server advertised them on 2026-11-09, which is what Refresh tools records.
-     * Cognee's own page (https://docs.cognee.ai/cognee-cloud/connections/cloud-mcp) calls the
-     * status tool `cognify_status`; the server names it `check_ingestion_status`.
+     * here.
+     *
+     * Checked against the hosted server's own `tools/list` on 2026-11-09, through Refresh tools on
+     * a connected account: it advertised exactly four tools, the two writes above and these two.
+     * `recall` searches, and `check_ingestion_status` reports the progress of a background
+     * `remember`. The names are the live server's. Where Cognee's documentation spells one
+     * differently, follow the server.
      */
     readTools: Object.freeze(["recall", "check_ingestion_status"]),
     docsUrl: "https://docs.cognee.ai/cognee-cloud/connections/cloud-mcp",

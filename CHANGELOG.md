@@ -132,9 +132,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
-- Cognee is in the app catalogue. A Bot granted it reaches Cognee's hosted MCP server as the
-  person asking, who connects their own Cognee account in one press: `recall` and
-  `check_ingestion_status` read, `remember` and `forget` ask first. See `docs/plugins/cognee.md`.
+- Cognee is in the app catalogue. A Bot granted it can use the long-term memory a person already
+  keeps in Cognee from their other AI tools, and what the Bot stores there is available to those
+  tools too. Each person connects their own Cognee account. Deleting from Cognee always asks first.
+  See `docs/plugins/cognee.md`.
 - The sidebar floats as frosted glass over the colours of OpenBot's orb, the orb sits beside
   OpenBot's name, and the app is set in Atkinson Hyperlegible Next. The glass turns off with the
   system's reduce transparency or increase contrast setting, and a skin keeps its own look.

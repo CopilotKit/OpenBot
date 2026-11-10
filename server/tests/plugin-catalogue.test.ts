@@ -289,7 +289,11 @@ describe("Cognee", () => {
       "https://mcp.aws.cognee.ai/mcp",
     );
     expect(hostAdmissible(entry!, "https://mcp.aws.cognee.ai")).toBe(true);
-    // A tenant's own API host, a lookalike and a suffix are each refused.
+    // Cognee gives every workspace an API host of its own (tenant-….aws.cognee.ai), but the hosted
+    // MCP server is one address for all of them and picks the workspace from who signed in. So the
+    // entry pins that one host, and a tenant host must be refused: it is a real Cognee address, and
+    // accepting it would send a person's token to something that is not the MCP server. A lookalike
+    // that only starts with the host, and plain http, are refused too.
     expect(hostAdmissible(entry!, "https://tenant-1234.aws.cognee.ai")).toBe(
       false,
     );
