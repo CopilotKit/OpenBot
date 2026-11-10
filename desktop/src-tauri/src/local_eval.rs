@@ -478,7 +478,7 @@ pub fn status_waited(
     }
     let waiting = wait.get_or_insert_with(|| {
         crate::logging::WaitLog::new(
-            "the back end, `local status` until it is ready with a valid licence",
+            "the backend, `local status` until it is ready with a valid licence",
             now,
         )
     });
@@ -5333,7 +5333,7 @@ mod tests {
         let first = status_waited(&mut wait, at(0), &Ok(starting.clone()));
         assert_eq!(first.len(), 1, "{first:#?}");
         assert!(first[0].starts_with(
-            "[wait] the back end, `local status` until it is ready with a valid licence: readiness starting, licence valid"
+            "[wait] the backend, `local status` until it is ready with a valid licence: readiness starting, licence valid"
         ), "{first:#?}");
         assert!(
             first[0].contains("services 1 of 2 ready (not ready: cpki-gateway Pending)"),
