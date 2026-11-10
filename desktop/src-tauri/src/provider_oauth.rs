@@ -1508,6 +1508,13 @@ mod tests {
         assert!(root.join(format!("{FILE}.lock/owner.lock")).is_file());
         std::fs::remove_dir_all(root).unwrap();
     }
+    /// How long a lock owner has to say it holds the lock, or to exit. Every owner answers by
+    /// itself: the Bun helper is stopped after 60 seconds (`WINDOWS_LOCK_HELPER_ANSWER_MS` in
+    /// server/src/provider-oauth-lock.ts) and the native lock gives up after 5 seconds of waiting.
+    /// This outlasts both, so a failure is the owner's own answer. A shorter wait gave up first
+    /// while Windows PowerShell was still starting on a busy runner.
+    const LOCK_OWNER_ANSWER: Duration = Duration::from_secs(90);
+
     struct LockChild(std::process::Child);
     impl Drop for LockChild {
         fn drop(&mut self) {
@@ -1555,44 +1562,6 @@ mod tests {
         receive
     }
 
-    fn diag(what: &str) {
-        let ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
-        let _ = std::io::stderr().write_all(format!("diag rust-{what} {ms}\n").as_bytes());
-    }
-
-    #[test]
-    fn credential_lock_diag_bun_timing() {
-        use std::process::Stdio;
-        let root = crate::test_support::temp_root("provider-oauth-diag");
-        std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("model-oauth.json");
-        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../server/tests/fixtures/provider-oauth-lock-owner.ts");
-        for round in 0..6 {
-            let started = Instant::now();
-            diag(&format!("loop{round}-spawn"));
-            let mut child = LockChild(
-                crate::quiet::command("bun")
-                    .args([fixture.as_os_str(), path.as_os_str()])
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::inherit())
-                    .spawn()
-                    .unwrap(),
-            );
-            let ready = lock_child_ready(&mut child);
-            let said = ready.recv_timeout(Duration::from_secs(120));
-            diag(&format!(
-                "loop{round}-said-{said:?}-after-{}ms",
-                started.elapsed().as_millis()
-            ));
-            drop(child.0.stdin.take());
-            let _ = child.0.wait();
-            diag(&format!("loop{round}-exited-after-{}ms", started.elapsed().as_millis()));
-        }
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
     #[test]
     fn credential_lock_excludes_bun_in_both_directions_and_recovers_after_kill() {
         use std::process::Stdio;
@@ -1612,19 +1581,13 @@ mod tests {
                 .spawn()
                 .unwrap(),
         );
-        diag("main-spawned");
         let ready = lock_child_ready(&mut child);
         assert!(matches!(
             ready.recv_timeout(Duration::from_millis(150)),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout)
         ));
         drop(native);
-        diag("main-native-dropped");
-        assert_eq!(
-            ready.recv_timeout(Duration::from_secs(15)).unwrap(),
-            "locked"
-        );
-        diag("main-bun-locked");
+        assert_eq!(ready.recv_timeout(LOCK_OWNER_ANSWER).unwrap(), "locked");
         let other_path = path.clone();
         let (send, receive) = std::sync::mpsc::channel();
         let waiter = std::thread::spawn(move || {
@@ -1636,13 +1599,64 @@ mod tests {
         ));
         child.0.kill().unwrap();
         child.0.wait().unwrap();
-        drop(
-            receive
-                .recv_timeout(Duration::from_secs(5))
-                .unwrap()
+        drop(receive.recv_timeout(LOCK_OWNER_ANSWER).unwrap().unwrap());
+        waiter.join().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Windows PowerShell starts and compiles the lock's C# on every Bun acquisition. That is
+    /// under a second on an idle machine and has been more than 15 seconds on a busy one, where
+    /// the helper was stopped at 15 and said the store was busy while nobody held the lock. Here
+    /// PowerShell starts 20 seconds late and Bun still takes the lock and gives it back.
+    #[cfg(windows)]
+    #[test]
+    fn credential_lock_waits_for_a_windows_powershell_that_starts_slowly() {
+        use std::process::Stdio;
+        let root = crate::test_support::temp_root("provider-oauth-slow-powershell");
+        let shims = root.join("bin");
+        std::fs::create_dir_all(&shims).unwrap();
+        let source = root.join("slow_powershell.rs");
+        std::fs::write(
+            &source,
+            r#"fn main() {
+    std::thread::sleep(std::time::Duration::from_secs(20));
+    let real = std::path::Path::new(&std::env::var_os("SystemRoot").unwrap())
+        .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+    let status = std::process::Command::new(real)
+        .args(std::env::args_os().skip(1))
+        .status()
+        .unwrap();
+    std::process::exit(status.code().unwrap_or(1));
+}
+"#,
+        )
+        .unwrap();
+        crate::test_support::compile_fixture(&source, &shims.join("powershell.exe"));
+        let mut search = shims.into_os_string();
+        search.push(";");
+        search.push(std::env::var_os("PATH").unwrap());
+        let path = root.join("model-oauth.json");
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../server/tests/fixtures/provider-oauth-lock-owner.ts");
+        let bun = std::env::var_os("OPENBOT_TEST_BUN").unwrap_or_else(|| "bun".into());
+        let started = Instant::now();
+        let mut child = LockChild(
+            crate::quiet::command(bun)
+                .args([fixture.as_os_str(), path.as_os_str()])
+                .env("PATH", search)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
                 .unwrap(),
         );
-        waiter.join().unwrap();
+        let ready = lock_child_ready(&mut child);
+        assert_eq!(ready.recv_timeout(LOCK_OWNER_ANSWER).unwrap(), "locked");
+        // The delay really sat in front of the PowerShell that took the lock.
+        assert!(started.elapsed() >= Duration::from_secs(20));
+        drop(child.0.stdin.take());
+        assert!(child.0.wait().unwrap().success());
+        drop(credential_lock::acquire(&path).unwrap());
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1667,10 +1681,7 @@ mod tests {
                 .unwrap(),
         );
         let ready = lock_child_ready(&mut child);
-        assert_eq!(
-            ready.recv_timeout(Duration::from_secs(5)).unwrap(),
-            "locked"
-        );
+        assert_eq!(ready.recv_timeout(LOCK_OWNER_ANSWER).unwrap(), "locked");
         child.0.kill().unwrap();
         child.0.wait().unwrap();
         drop(credential_lock::acquire(&path).unwrap());
