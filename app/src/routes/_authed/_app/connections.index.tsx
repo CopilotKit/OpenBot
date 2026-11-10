@@ -4,7 +4,6 @@ import {
   IconBrandNotion,
   IconCheck,
   IconChevronRight,
-  IconKey,
   IconLock,
   IconPlug,
   IconSearch,
@@ -39,7 +38,6 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import { Separator } from "@/components/ui/separator";
 import { useConnectApp } from "@/lib/connections/connect-app";
 import {
   type ConnectionRow,
@@ -560,44 +558,29 @@ function RouteComponent() {
         ) : null}
       </PageSection>
       {/*
-       * The rest of what a Bot signs in with. Saved logins and keys live under Settings; these rows
-       * are a way in from beside the apps that use them, in the personal edition.
+       * The rest of what a Bot signs in with. Saved logins and keys live in the Vault, under
+       * Settings; this row is a way in from beside the apps that use them.
        */}
-      {personal ? (
-        <PageSection title="Sign-ins and keys">
-          <PageRows>
-            <Item render={<Link to="/settings/passwords" />} size="sm">
-              <ItemMedia variant="icon">
-                <IconLock />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>Saved logins</ItemTitle>
-                <ItemDescription>
-                  Website logins you saved when signing a Bot in.
-                </ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
-              </ItemActions>
-            </Item>
-            <Separator />
-            <Item render={<Link {...paths.credentials()} />} size="sm">
-              <ItemMedia variant="icon">
-                <IconKey />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>Keys</ItemTitle>
-                <ItemDescription>
-                  API keys and tokens your apps and models use.
-                </ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
-              </ItemActions>
-            </Item>
-          </PageRows>
-        </PageSection>
-      ) : null}
+      <PageSection>
+        <PageRows>
+          <Item render={<Link to="/settings/vault" />} size="sm">
+            <ItemMedia variant="icon">
+              <IconLock />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Vault</ItemTitle>
+              <ItemDescription>
+                {personal
+                  ? "Your saved logins and the keys your apps and models use."
+                  : "Website logins you saved when signing a Bot in."}
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+            </ItemActions>
+          </Item>
+        </PageRows>
+      </PageSection>
     </PageShell>
   );
 }

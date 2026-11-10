@@ -223,15 +223,14 @@ describe("Connections in the personal edition", () => {
     expect(within(tile(view, "exa")).getByText("Add")).toBeTruthy();
   });
 
-  test("links to saved logins and keys, which live under Settings", async () => {
+  test("links to the Vault, where saved logins and keys live", async () => {
     const { view } = draw("personal");
     await view.findByTestId("account-notion");
     expect(
-      view.getByRole("link", { name: /Saved logins/ }).getAttribute("href"),
-    ).toBe("/settings/passwords");
-    expect(view.getByRole("link", { name: /^Keys/ }).getAttribute("href")).toBe(
-      "/settings/credentials",
-    );
+      view.getByRole("link", { name: /^Vault/ }).getAttribute("href"),
+    ).toBe("/settings/vault");
+    expect(view.queryByRole("link", { name: /Saved logins/ })).toBeNull();
+    expect(view.queryByRole("link", { name: /^Keys/ })).toBeNull();
   });
 
   test("apps that need something typed first wait behind one button, or a search", async () => {

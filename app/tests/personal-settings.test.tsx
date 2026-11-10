@@ -61,8 +61,6 @@ function clientFor(edition: "team" | "personal" | undefined) {
 }
 
 const PERSONAL_ENTRIES = [
-  ["Saved logins", "/settings/passwords"],
-  ["Keys", "/settings/credentials"],
   ["Skills", "/settings/skills"],
   ["Computer", "/settings/computer"],
   ["Activity", "/settings/activity"],
@@ -89,13 +87,18 @@ describe("the Settings sidebar", () => {
     ).toBe(false);
   });
 
-  test("keeps saved logins and keys, named as on Connections", () => {
-    const titles = settingsSidebarItems("personal").map((item) => item.title);
-    expect(titles).not.toContain("Passwords");
-    expect(titles).not.toContain("Credentials");
-    expect(settingsSidebarItems("team").map((item) => item.title)).toContain(
-      "Passwords",
-    );
+  test("keeps saved logins and keys in one Vault, in both editions", () => {
+    for (const edition of ["personal", "team"] as const) {
+      const titles = settingsSidebarItems(edition).map((item) => item.title);
+      expect(titles).toContain("Vault");
+      for (const retired of [
+        "Passwords",
+        "Saved logins",
+        "Keys",
+        "Credentials",
+      ])
+        expect(titles).not.toContain(retired);
+    }
   });
 
   test("Learning shows in the personal edition's settings", () => {

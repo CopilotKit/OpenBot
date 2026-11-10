@@ -6,7 +6,6 @@ import {
   IconChecks,
   IconDeviceDesktop,
   IconHistory,
-  IconKey,
   IconLayoutGrid,
   IconListCheck,
   IconLock,
@@ -91,10 +90,10 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
     setup: true,
   },
   {
-    /* Logins saved from a Bot's private sign-in form. */
-    title: "Passwords",
-    icon: IconKey,
-    linkOptions: { to: "/settings/passwords" },
+    /* Your saved logins and, in the personal edition, your keys. No Bot sees what is in it. */
+    title: "Vault",
+    icon: IconLock,
+    linkOptions: { to: "/settings/vault" },
   },
   {
     /* What OpenBot runs here and the memory it takes, with Restart and Stop. */
@@ -113,16 +112,10 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
 
 /**
  * What the personal edition keeps of Admin. There is no Admin there, and the one person still stores
- * keys, writes skills, resets the computer and reads the trail. Apps are not here:
- * adding one and connecting it are the same step, on Connections, which also links here for keys and
- * saved logins.
+ * writes skills, resets the computer and reads the trail. Apps are not here: adding one and
+ * connecting it are the same step, on Connections, which also links to the Vault.
  */
 const PERSONAL_SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
-  {
-    title: "Keys",
-    icon: IconLock,
-    linkOptions: { to: "/settings/credentials" },
-  },
   {
     title: "Skills",
     icon: IconBook,
@@ -143,16 +136,8 @@ const PERSONAL_SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
 export function settingsSidebarItems(
   edition: "team" | "personal",
 ): SettingsSidebarItem[] {
-  // Passwords is called Saved logins there, as on Connections.
   return edition === "personal"
-    ? [
-        ...SETTINGS_SIDEBAR_ITEMS.map((item) =>
-          item.title === "Passwords"
-            ? { ...item, title: "Saved logins" }
-            : item,
-        ),
-        ...PERSONAL_SETTINGS_SIDEBAR_ITEMS,
-      ]
+    ? [...SETTINGS_SIDEBAR_ITEMS, ...PERSONAL_SETTINGS_SIDEBAR_ITEMS]
     : SETTINGS_SIDEBAR_ITEMS;
 }
 

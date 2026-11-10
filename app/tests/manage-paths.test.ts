@@ -55,8 +55,8 @@ describe("where the pages a person manages live", () => {
     expect(href(paths.skills())).toBe("/settings/skills");
     expect(href(paths.newSkill())).toBe("/settings/skills/new");
     expect(href(paths.skill("triage"))).toBe("/settings/skills/triage");
-    expect(href(paths.credentials())).toBe("/settings/credentials");
-    expect(href(paths.newCredential())).toBe("/settings/credentials/new");
+    expect(href(paths.credentials())).toBe("/settings/vault");
+    expect(href(paths.newCredential())).toBe("/settings/vault/new");
     expect(href(paths.computers())).toBe("/settings/computer");
     expect(href(paths.audit())).toBe("/settings/activity");
   });

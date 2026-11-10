@@ -34,10 +34,10 @@ export function managePaths(edition: "team" | "personal") {
       newSkill: () => linkOptions({ to: "/settings/skills/new" }),
       skill: (slug: string) =>
         linkOptions({ to: "/settings/skills/$slug", params: { slug } }),
-      // Under Settings, and linked from Connections beside the apps that use them.
-      credentialsLabel: "Keys",
-      credentials: () => linkOptions({ to: "/settings/credentials" }),
-      newCredential: () => linkOptions({ to: "/settings/credentials/new" }),
+      // The Keys section of the Vault, under Settings, and linked from Connections.
+      credentialsLabel: "Vault",
+      credentials: () => linkOptions({ to: "/settings/vault" }),
+      newCredential: () => linkOptions({ to: "/settings/vault/new" }),
       computers: () => linkOptions({ to: "/settings/computer" }),
       /*
        * What the trail is called, on its page, in the sidebar and wherever another page sends a
@@ -112,7 +112,7 @@ export function personalAppsAddress(rest: string): string {
 /** Each other Admin page the personal edition keeps, and where it is now. */
 const MOVED: readonly (readonly [admin: string, settings: string])[] = [
   ["/admin/skills", "/settings/skills"],
-  ["/admin/credentials", "/settings/credentials"],
+  ["/admin/credentials", "/settings/vault"],
   ["/admin/computers", "/settings/computer"],
   ["/admin/audit", "/settings/activity"],
 ];
