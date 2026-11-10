@@ -491,8 +491,9 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     title: "Cognee",
     vendor: "Cognee",
     summary:
-      "Long-term memory of whoever is asking, shared with their other AI tools.",
-    personalSummary: "Your long-term memory, shared with your other AI tools.",
+      "Long-term memory for whoever is asking: notes and files their Bots store and search.",
+    personalSummary:
+      "Long-term memory for your Bots: notes and files they store and search.",
     /*
      * ONE HOST FOR EVERY CUSTOMER, which is why `host` is pinned and there is no `hostPattern`.
      * Every Cognee Cloud workspace has an API host of its own (`tenant-….aws.cognee.ai`), but the

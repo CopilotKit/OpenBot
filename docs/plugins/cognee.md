@@ -1,13 +1,18 @@
 # Cognee
 
-[Cognee](https://www.cognee.ai) is long-term memory that a person's AI tools share. What somebody
-stores from one Cognee client, for example Claude Code, Codex or n8n, can be searched from the
-others. A Bot with this connector granted becomes one more of those clients: it searches that memory
-and adds to it **as the person asking**.
+[Cognee](https://www.cognee.ai) gives a Bot long-term memory for the material it works with. Ask a
+Bot to remember a decision, a set of notes or a file (up to 10 MB), and Cognee builds a knowledge
+graph from it. Later, in any conversation and with any Bot that has this connector, a Bot can search
+that graph and answer from it. All of it is stored and searched **as the person asking**, in their
+own Cognee account.
 
-This is separate from the memory OpenBot keeps in CopilotKit Intelligence. Intelligence keeps a
-person's threads and what a Bot learned about them, and stays inside OpenBot. Cognee is a store the
-person already uses elsewhere. A Bot uses OpenBot's own memory unless it is asked to use Cognee.
+It sits beside the memory OpenBot keeps in CopilotKit Intelligence and does not replace it. OpenBot's
+own memory keeps facts about the person, which they can review and edit. Cognee keeps what the
+person asks a Bot to store. A Bot uses OpenBot's own memory unless it is asked to use Cognee.
+
+Cognee also works outside OpenBot. A person who uses it from other AI tools, for example Claude Code,
+Codex or n8n, reaches the same memory from all of them. See
+[Memory flows both ways](#memory-flows-both-ways).
 
 The Bot reaches Cognee through the hosted MCP server Cognee runs at `mcp.aws.cognee.ai`, on the
 catalogue's default MCP transport. That is one address for every customer: each person signs in with
@@ -16,8 +21,8 @@ their own Cognee account, and Cognee sends every call to that person's current w
 ## What a Bot can reach
 
 - `recall` searches everything the person's Cognee account can access in their current workspace.
-  That is every dataset, not only the one OpenBot writes to, so it includes what the person stored
-  from their other tools. A workspace can have several members, so it can also include memory that
+  That is what their Bots stored, and every other dataset too, so it includes anything the person
+  stored from other tools. A workspace can have several members, so it can also include memory that
   is not theirs alone.
 - `check_ingestion_status` reports the progress of something stored with `remember` in the
   background.
@@ -66,6 +71,9 @@ write barrier for this connector, the same as for [Notion](notion.md).
 See [Approvals](../approvals.md) for the order these are decided in.
 
 ## Memory flows both ways
+
+This matters to a person who also uses Cognee from other AI tools. Their Bots and those tools work
+on the same memory.
 
 - **Out of OpenBot.** What a Bot stores with `remember` is in the person's Cognee workspace, in
   `openbot_memory`. Their other Cognee clients search every dataset the person can access, so they
