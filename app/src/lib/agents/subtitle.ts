@@ -9,7 +9,9 @@ import { withCurrentFrameworkNames } from "@openbot/shared/harnesses";
  * call), what a New Bot interview reads, and what an edit sends back. Mapping it on the server would
  * change all of those, and an edit to any other field would store the new wording.
  */
-export function shownSubtitle(title: string): string {
+export function shownSubtitle(title: string): string;
+export function shownSubtitle(title: string | undefined): string | undefined;
+export function shownSubtitle(title: string | undefined): string | undefined {
   // A roster entry can arrive without one (an older server, a group's roster): drawn as before.
   if (!title) return title;
   return withCurrentFrameworkNames(title);
