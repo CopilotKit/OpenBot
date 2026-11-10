@@ -416,6 +416,59 @@ describe.skipIf(!asked)("a setup step's foot", () => {
   }
 });
 
+/*
+ * Seen on the Account step while the person signs in: its Cancel sits above the foot, the foot's
+ * own actions row is empty, and the background row sat flush against Cancel with no gap at all. The
+ * row sits the card's one gap (24px) under the step's button on every step, Cancel included.
+ */
+describe.skipIf(!asked)("the background row under the step's button", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const) {
+    test(`at ${width}x${height}, is one card gap below Cancel, Accept and Continue`, async () => {
+      /** The gap from the button's bottom to the background row's top, the card scrolled to its end. */
+      const gap = async (page: Page, name: string) => {
+        await page.waitForTimeout(600);
+        return page.evaluate((label) => {
+          const sheet = document.querySelector("main > .sheet") as HTMLElement;
+          sheet.scrollTop = sheet.scrollHeight;
+          const button = [...document.querySelectorAll("button")].find(
+            (found) => found.textContent?.trim() === label,
+          );
+          const row = document.querySelector(".behind-slot > .steps");
+          if (!button || !row) return null;
+          return Math.round(
+            row.getBoundingClientRect().top -
+              button.getBoundingClientRect().bottom,
+          );
+        }, name);
+      };
+      const scenes: Array<[string, string, string]> = [
+        ["#signin", "Sign in to CopilotKit", "Cancel"],
+        ["#licence", "Accept the license agreement", "Accept"],
+        ["", "Connect your AI", "Continue"],
+      ];
+      for (const [hash, heading, button] of scenes) {
+        const page = await browser.newPage({ viewport: { width, height } });
+        try {
+          await open(page, hash);
+          await page
+            .getByRole("button", { name: "Install", exact: true })
+            .click();
+          await page.getByRole("heading", { name: heading }).waitFor();
+          expect({ button, gap: await gap(page, button) }).toEqual({
+            button,
+            gap: 24,
+          });
+        } finally {
+          await page.close();
+        }
+      }
+    }, 40_000);
+  }
+});
+
 describe.skipIf(!asked)("the AI step while OpenBot installs behind it", () => {
   for (const [width, height] of [
     [1000, 800],
