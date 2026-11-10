@@ -1,12 +1,13 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
-  ALL_IN,
   type DownloadWhere,
   downloadWhere,
   journey,
   leftSaid,
+  type PartsSeen,
   position,
   SETUP,
+  seeParts,
 } from "./journey";
 
 /** What the Install step says while it downloads OpenBot's software. */
@@ -339,37 +340,25 @@ function showsDownload({ bytes, size, total }: Downloads): boolean {
  */
 function useDownloadWhere(downloads: Downloads | null): DownloadWhere | null {
   const [, tick] = useState(0);
-  const seen = useRef({
-    done: downloads?.done ?? 0,
-    changed: Date.now(),
-    allIn: null as number | null,
-    doneAtAllIn: 0,
-  });
+  const seen = useRef<PartsSeen | null>(null);
   const now = Date.now();
-  const done = downloads?.done ?? 0;
-  const total = downloads?.total ?? 0;
-  const size = downloads?.size ?? 0;
-  const allIn =
-    downloads !== null && size > 0 && downloads.bytes >= size * ALL_IN;
-  if (done !== seen.current.done)
-    seen.current = { ...seen.current, done, changed: now };
-  if (allIn && seen.current.allIn === null)
-    seen.current = { ...seen.current, allIn: now, doneAtAllIn: done };
-  const unpackingNow = allIn && total > 0 && done < total;
+  const watched = downloads ? seeParts(seen.current, downloads, now) : null;
+  if (watched) seen.current = watched.seen;
+  // Every second while it runs: the time left and the part unpacking move with time, and a
+  // speed becomes steady enough to say a time from.
+  const running = downloads !== null;
   useEffect(() => {
-    if (!unpackingNow) return;
+    if (!running) return;
     const timer = setInterval(() => tick((count) => count + 1), 1000);
     return () => clearInterval(timer);
-  }, [unpackingNow]);
-  if (!downloads) return null;
-  const { allIn: allInAt, doneAtAllIn, changed } = seen.current;
-  const perPart =
-    allInAt !== null && done > doneAtAllIn
-      ? (changed - allInAt) / 1000 / (done - doneAtAllIn)
-      : null;
-  const waited =
-    allInAt === null ? 0 : (now - Math.max(changed, allInAt)) / 1000;
-  return downloadWhere(downloads, waited, perPart);
+  }, [running]);
+  if (!downloads || !watched) return null;
+  return downloadWhere(
+    downloads,
+    watched.waited,
+    watched.perPart,
+    watched.steady,
+  );
 }
 
 /**

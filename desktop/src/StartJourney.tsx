@@ -109,6 +109,8 @@ export type LegClocks = {
   releaseDue?: boolean;
   /** Where the download under way is, with its parts as watched (`downloadWhere`). */
   where?: DownloadWhere;
+  /** The download's speed is steady enough to plan with (`seeParts`). */
+  steady?: boolean;
 };
 
 /**
@@ -128,6 +130,7 @@ export function startLegs(
     downloaded = false,
     releaseDue = false,
     where,
+    steady = true,
   }: LegClocks = {},
 ): Leg[] {
   const began = PHASE_ORDER.indexOf(sequence.began ?? "wait");
@@ -235,6 +238,7 @@ export function startLegs(
         download.downloads,
         going,
         stretch ? stretch.to - stretch.from : null,
+        steady,
       ),
     );
   }
@@ -318,10 +322,17 @@ export function journeyTick(
   // OpenBot's own start counts from when it began.
   if (sequence.at === "start" && next.opening === null) next.opening = now;
   let where: DownloadWhere | undefined;
+  let steady = true;
   if (download) {
     const watched = seeParts(next.parts, download.downloads, now);
     next.parts = watched.seen;
-    where = downloadWhere(download.downloads, watched.waited, watched.perPart);
+    where = downloadWhere(
+      download.downloads,
+      watched.waited,
+      watched.perPart,
+      watched.steady,
+    );
+    steady = watched.steady;
   }
   const plans = journey(
     startLegs(sequence, open, now, {
@@ -330,6 +341,7 @@ export function journeyTick(
       downloaded: next.downloaded,
       releaseDue,
       where,
+      steady,
     }),
   );
   const slow = plans.left === null;

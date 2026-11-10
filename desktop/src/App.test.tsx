@@ -1,4 +1,12 @@
-import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  expect,
+  mock,
+  setSystemTime,
+  test,
+} from "bun:test";
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, render, waitFor, within } from "@testing-library/react";
@@ -82,6 +90,7 @@ beforeAll(() => GlobalRegistrator.register());
 afterEach(() => {
   // Unmounting can still call (a running local step is cancelled), so clear the record after it.
   cleanup();
+  setSystemTime();
   invokeCalls = [];
   localSteps = null;
   progressListeners.clear();
@@ -232,6 +241,15 @@ async function emitProgress(payload: ProgressEvent) {
   await act(async () => {
     for (const listener of progressListeners) listener({ payload });
   });
+}
+
+/**
+ * A download's report again, once it has run long enough for its speed to say a time from: a
+ * row says no time left before 3 seconds and 5 MB (`STEADY_SECONDS`, `STEADY_BYTES`).
+ */
+async function steadied(payload: ProgressEvent) {
+  setSystemTime(new Date(Date.now() + 3_500));
+  await emitProgress(payload);
 }
 
 /*
@@ -624,7 +642,7 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
   expect(installing.getByText("Step 2 of 4")).toBeTruthy();
   expect(installing.queryByText(/Downloading local software/)).toBeNull();
   expect(installing.queryByRole("progressbar")).toBeNull();
-  await emitProgress({
+  const pulling: ProgressEvent = {
     step: "images",
     ok: true,
     running: true,
@@ -637,7 +655,11 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
       size: 1_300_000_000,
       bytesPerSecond: 3_000_000,
     },
-  });
+  };
+  await emitProgress(pulling);
+  // No time left before its speed is steady: Windows F said "About 164011 minutes left".
+  expect(installing.queryByText(/left\.$/)).toBeNull();
+  await steadied(pulling);
   expect(
     installing.queryByText("Checking which local software to download."),
   ).toBeNull();
@@ -1158,7 +1180,7 @@ async function walkFirstRun(platform: "macOS" | "Windows"): Promise<Beat[]> {
   await done("deployment", "v0.3.4 in /tmp/plain-walk");
   await running("images", NATIVE.images);
   seen("checking what to download");
-  await emitProgress({
+  const downloading: ProgressEvent = {
     step: "images",
     ok: true,
     running: true,
@@ -1171,7 +1193,9 @@ async function walkFirstRun(platform: "macOS" | "Windows"): Promise<Beat[]> {
       size: 3_400_000_000,
       bytesPerSecond: 9_000_000,
     },
-  });
+  };
+  await emitProgress(downloading);
+  await steadied(downloading);
   seen("downloading");
 
   // The agreement, once the software it is checked on answers.
@@ -1179,7 +1203,7 @@ async function walkFirstRun(platform: "macOS" | "Windows"): Promise<Beat[]> {
   seen("agreement");
   await userEvent.click(view.getByRole("button", { name: "Accept" }));
   await view.findByRole("heading", { name: "Installing OpenBot" });
-  await emitProgress({
+  const installing: ProgressEvent = {
     step: "images",
     ok: true,
     running: true,
@@ -1192,7 +1216,9 @@ async function walkFirstRun(platform: "macOS" | "Windows"): Promise<Beat[]> {
       size: 3_400_000_000,
       bytesPerSecond: 9_000_000,
     },
-  });
+  };
+  await emitProgress(installing);
+  await steadied(installing);
   seen("install");
 
   await act(async () => preparation.resolve());

@@ -265,10 +265,10 @@ export function journey(legs: readonly Leg[]): Journey {
 
 /**
  * Seconds to plan with for each part of a download still unpacking once its bytes are in, until
- * its own parts have measured it. On Windows (D30) the last of OpenBot's five parts finished 10 to
- * 18 seconds apart.
+ * its own parts have measured it. On Windows F the last two of OpenBot's five parts took about 10
+ * seconds once every byte was in; on Windows D the update's last parts took two.
  */
-export const UNPACK_SECONDS = 15;
+export const UNPACK_SECONDS = 6;
 
 /** The share of a download's bar its bytes take when parts unpack after them: the rest is theirs. */
 const BYTES_SHARE = 0.8;
@@ -278,6 +278,32 @@ const BYTES_SHARE = 0.8;
  * reports, and Windows F read "1.1 GB of 1.1 GB · 2 of 5 parts left" under a full bar for minutes.
  */
 export const ALL_IN = 0.99;
+
+/**
+ * Every byte is in, or as good as: 99% of them, or 90% with nothing arriving any more (a speed of
+ * 0 over the last seconds). On Windows F the row read "1.1 GB of 1.1 GB · 3 of 5 parts left" for
+ * ten seconds after the transfer had ended, with some of its bytes never counted.
+ */
+export function allBytesIn({
+  bytes,
+  size,
+  bytesPerSecond,
+}: {
+  bytes: number;
+  size?: number;
+  bytesPerSecond?: number;
+}): boolean {
+  if (!size || size <= 0) return false;
+  const got = bytes / size;
+  return got >= ALL_IN || (got >= 0.9 && bytesPerSecond === 0);
+}
+
+/**
+ * A download's speed is steady enough to say a time from once it has run 3 seconds and brought in
+ * 5 MB. Before that, Windows F said "About 164011 minutes left" for its first 538 bytes.
+ */
+export const STEADY_SECONDS = 3;
+export const STEADY_BYTES = 5_000_000;
 
 /** How far along a download and the unpacking of its parts are. */
 export type DownloadWhere = {
@@ -315,22 +341,26 @@ export function downloadWhere(
   },
   waited = 0,
   perPart: number | null = null,
+  /** Its speed is steady enough to say a time from (`STEADY_SECONDS`, `STEADY_BYTES`). */
+  steady = true,
 ): DownloadWhere {
   if (!size || size <= 0)
     return { fraction: null, unpacking: null, left: null, slow: false };
-  const got = Math.min(1, bytes / size);
   const parts = total > 0;
+  const allIn = allBytesIn({ bytes, size, bytesPerSecond });
+  // As good as in: counted whole, so the bar does not sit short of its share.
+  const got = allIn && parts && done < total ? 1 : Math.min(1, bytes / size);
   const share = parts ? BYTES_SHARE : 1;
-  const per = Math.max(5, perPart ?? UNPACK_SECONDS);
+  const per = Math.max(2, perPart ?? UNPACK_SECONDS);
   const base =
     share * got + (1 - share) * (parts ? Math.min(1, done / total) : 0);
-  if (parts && done < total && got >= ALL_IN) {
+  if (parts && done < total && allIn) {
     const into = Math.max(0, waited);
     const eased =
       into <= 0.8 * per
         ? into / per
         : 0.8 + 0.15 * (1 - Math.exp(-(into - 0.8 * per) / per));
-    const slow = into > 2 * per + 15;
+    const slow = into > 3 * per + 20;
     return {
       fraction: Math.min(0.999, base + ((1 - share) / total) * eased),
       unpacking: { at: done + 1, of: total },
@@ -339,7 +369,7 @@ export function downloadWhere(
     };
   }
   const left =
-    bytesPerSecond && bytesPerSecond > 0 && got < 1
+    steady && bytesPerSecond && bytesPerSecond > 0 && got < 1
       ? (size - bytes) / bytesPerSecond + (parts && done < total ? per : 0)
       : null;
   return {
@@ -352,6 +382,8 @@ export function downloadWhere(
 
 /** What a download's parts have done so far, as one screen has watched them. */
 export type PartsSeen = {
+  /** When the download was first seen. */
+  first: number;
   done: number;
   /** When the count of finished parts last changed. */
   changed: number;
@@ -366,18 +398,33 @@ export type PartsSeen = {
  */
 export function seeParts(
   seen: PartsSeen | null,
-  { bytes, size, done = 0 }: { bytes: number; size?: number; done?: number },
+  downloads: {
+    bytes: number;
+    size?: number;
+    done?: number;
+    bytesPerSecond?: number;
+  },
   now: number,
-): { seen: PartsSeen; waited: number; perPart: number | null } {
+): {
+  seen: PartsSeen;
+  waited: number;
+  perPart: number | null;
+  /** Its speed is steady enough to say a time from. */
+  steady: boolean;
+} {
+  const { bytes, done = 0 } = downloads;
   let next: PartsSeen = seen ?? {
+    first: now,
     done,
     changed: now,
     allIn: null,
     doneAtAllIn: 0,
   };
   if (done !== next.done) next = { ...next, done, changed: now };
-  if (size && size > 0 && bytes >= size * ALL_IN && next.allIn === null)
+  if (allBytesIn(downloads) && next.allIn === null)
     next = { ...next, allIn: now, doneAtAllIn: done };
+  const steady =
+    now - next.first >= STEADY_SECONDS * 1000 && bytes >= STEADY_BYTES;
   const perPart =
     next.allIn !== null && done > next.doneAtAllIn
       ? (next.changed - next.allIn) / 1000 / (done - next.doneAtAllIn)
@@ -386,13 +433,14 @@ export function seeParts(
     next.allIn === null
       ? 0
       : Math.max(0, (now - Math.max(next.changed, next.allIn)) / 1000);
-  return { seen: next, waited, perPart };
+  return { seen: next, waited, perPart, steady };
 }
 
 /**
- * The time left to show, from the one just worked out (`raw`) and the one shown before: it falls at
- * once when the work goes faster, and rises by at most `RISE` seconds a second when it goes slower,
- * so it never says a low number and then a much higher one. On
+ * The time left to show, from the one just worked out (`raw`) and the one shown before: it falls
+ * by at most `FALL` seconds a second more than the time that passed when the work goes faster, and
+ * rises by at most `RISE` seconds a second when it goes slower, so it never says a low number and
+ * then a much higher one, and the bar never leaps. On
  * Windows D an update said "About a minute left", then "About 2", then "About 3" as its parts
  * came to light.
  */
@@ -403,11 +451,23 @@ export function steadyLeft(
 ): { left: number; at: number } {
   if (!shown) return { left: raw, at: now };
   const passed = Math.max(0, (now - shown.at) / 1000);
-  return { left: Math.min(raw, shown.left + RISE * passed), at: now };
+  return {
+    left: Math.max(
+      shown.left - (1 + FALL) * passed,
+      Math.min(raw, shown.left + RISE * passed),
+    ),
+    at: now,
+  };
 }
 
 /** The most the time left shown may rise, in seconds for each second that passes. */
 export const RISE = 0.5;
+
+/**
+ * The most it may fall beyond the second that passed, so a better estimate (a download's speed
+ * once steady) eases in over a few seconds rather than leaping the bar forward.
+ */
+export const FALL = 3;
 
 /** Bytes a second to plan with until a download's own speed is known: 10 MB a second. */
 const ASSUMED_SPEED = 10_000_000;
@@ -429,9 +489,11 @@ export function downloadLeg(
   where: DownloadWhere = downloadWhere(downloads),
   /** How long the stretch it stands in for typically takes, to plan with until it has a speed. */
   typical: number | null = null,
+  /** Its speed is steady enough to plan with (`seeParts`). */
+  steady = true,
 ): Leg {
   const { size, total = 0, bytesPerSecond } = downloads;
-  const measured = Boolean(bytesPerSecond && bytesPerSecond > 0);
+  const measured = steady && Boolean(bytesPerSecond && bytesPerSecond > 0);
   const speed = measured ? (bytesPerSecond as number) : ASSUMED_SPEED;
   // Until it has a speed, as long as that stretch usually takes; with no size either, a minute.
   const planned =

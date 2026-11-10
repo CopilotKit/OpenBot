@@ -25,6 +25,7 @@ type Downloads = {
   total?: number;
   bytes: number;
   size?: number;
+  bytesPerSecond?: number;
 };
 
 function installing(downloads: Downloads, running = true) {
@@ -154,6 +155,66 @@ test("with every byte in and parts still unpacking, the bar is never full, keeps
   );
   expect(value()).toBeCloseTo(0.8 * (1 / 1.1) + 0.2 * 0.8, 3);
   expect(row.getByText("1.0 GB of 1.1 GB · 1 of 5 parts left")).toBeTruthy();
+});
+
+/*
+ * Windows F, at the start of a download: "About 164011 minutes left" for its first 538 bytes. No
+ * time left until its speed is steady, 3 seconds and 5 MB in. Then, when the transfer ended with
+ * some bytes never counted, "1.1 GB of 1.1 GB · 3 of 5 parts left" sat for ten seconds with no
+ * time left and no word of unpacking. Nothing arriving any more and 90% in counts as all in.
+ */
+test("a download says no time left until its speed is steady, and unpacks once nothing more arrives", () => {
+  const size = 1_100_000_000;
+  const start = new Date("2026-11-10T04:37:00Z");
+  setSystemTime(start);
+  const at = (seconds: number) =>
+    setSystemTime(new Date(start.getTime() + seconds * 1000));
+  const first = { done: 0, total: 5, bytes: 538, size, bytesPerSecond: 1_076 };
+  const view = render(<SetupProgress steps={installing(first)} />);
+  const row = within(
+    view.getByRole("listitem", { name: "Downloading OpenBot" }),
+  );
+  expect(row.queryByText(/minutes? left/)).toBeNull();
+  // A second in, a burst: still not steady.
+  at(1);
+  view.rerender(
+    <SetupProgress
+      steps={installing({
+        ...first,
+        bytes: 40_000_000,
+        bytesPerSecond: 80_000_000,
+      })}
+    />,
+  );
+  expect(row.queryByText(/left\.$/)).toBeNull();
+  // Steady: a time from its speed.
+  at(4);
+  view.rerender(
+    <SetupProgress
+      steps={installing({
+        ...first,
+        bytes: 300_000_000,
+        bytesPerSecond: 70_000_000,
+      })}
+    />,
+  );
+  expect(row.getByText(/^Less than a minute left\.$/)).toBeTruthy();
+  // The transfer ends a little short of its total, two parts in: unpacking the third, with a time.
+  at(20);
+  view.rerender(
+    <SetupProgress
+      steps={installing({
+        ...first,
+        done: 2,
+        bytes: 1_060_000_000,
+        bytesPerSecond: 0,
+      })}
+    />,
+  );
+  expect(
+    row.getByText(/^Unpacking OpenBot \(3 of 5\)\. Less than a minute left\.$/),
+  ).toBeTruthy();
+  expect(row.getByText("1.1 GB downloaded")).toBeTruthy();
 });
 
 test("a download whose size is not known yet says so, and its bar does not guess", () => {

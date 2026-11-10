@@ -4881,7 +4881,14 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
     // than above them (`TRAFFIC_LIGHTS`, and the page's styles that make room beside them).
     #[cfg(target_os = "macos")]
     let builder = builder.traffic_light_position(TRAFFIC_LIGHTS);
+    /*
+     * Hidden until it is where it belongs. `tauri_plugin_window_state` puts it back at the size and
+     * place it had as it is built, and `fit_main_window_to_screen` brings it onto a screen that is
+     * there; only then is it shown. Shown as built, it flashed blank at Windows' default spot for a
+     * moment and then jumped (52,52 to 360,90 on Windows D).
+     */
     let window = builder
+        .visible(false)
         .on_new_window(move |destination, _features| {
             outside_links::new_window(&destination, |to| {
                 use tauri_plugin_opener::OpenerExt;
@@ -4892,6 +4899,8 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
         .build()?;
     // At the level kept from the last launch before anything paints (`zoom`).
     let _ = window.set_zoom(saved_zoom(app));
+    fit_main_window_to_screen(app);
+    let _ = window.show();
     Ok(())
 }
 
@@ -13173,6 +13182,17 @@ mod tests {
             (Some(720.0), Some(560.0))
         );
         assert_eq!(window.label(), "main");
+
+        // Built hidden, put where it belongs, then shown: never a flash at the system's default
+        // spot before it moves (Windows D, reopening).
+        let body = &main[main.find("fn build_main_window").unwrap()..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        let hidden = body.find(".visible(false)").expect("built hidden");
+        let built = body.find(".build()?").unwrap();
+        let fitted = body.find("fit_main_window_to_screen(app)").expect("fitted");
+        let shown = body.find("window.show()").expect("shown");
+        assert!(hidden < built && built < fitted && fitted < shown, "{body}");
+        assert!(window.is_visible().unwrap_or(true));
     }
 
     /// The developer's app is trusted only at a loopback IP, so `localhost` is read as `127.0.0.1`.

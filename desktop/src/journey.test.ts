@@ -287,13 +287,17 @@ function windowsD(second: number): {
       running: true,
       detail: "Downloading local software.",
       downloads: {
-        bytes: bytesAt(second),
+        // Its first report, as Windows F's: 538 bytes in half a second, then a burst.
+        bytes: second === 28 ? 538 : bytesAt(second),
         size: 944_300_000,
         done: Math.max(0, Math.min(4, Math.floor((second - 44) / 8))),
         total: 5,
-        ...(second >= 31
-          ? { bytesPerSecond: (bytesAt(second) - bytesAt(second - 3)) / 3 }
-          : {}),
+        bytesPerSecond:
+          second === 28
+            ? 1_076
+            : second < 31
+              ? 120_000_000
+              : (bytesAt(second) - bytesAt(second - 3)) / 3,
       },
     });
   return { sequence, open };
@@ -325,10 +329,17 @@ test("over Windows D's update, the bar follows the time each part takes and the 
     expect(at(second).fraction).toBeGreaterThanOrEqual(at(second - 1).fraction);
   // Not most of the way before the longest part has begun: D's bar was at 72% here.
   expect(at(24).fraction).toBeLessThan(0.35);
-  // The download moves it, and is a good share of it.
+  // No leap as the download begins, whatever its first reports say: on Windows F the bar jumped
+  // from 22% to 42% in two seconds just before it.
+  for (let second = 20; second <= 34; second += 1)
+    expect(at(second + 2).fraction - at(second).fraction).toBeLessThan(0.06);
+  // The download carries the bar, as its share of the time: about half of D's update. On F the
+  // 60 second download moved it only from 44% to 53%.
   expect(at(50).fraction).toBeGreaterThan(at(38).fraction);
   expect(at(62).fraction).toBeGreaterThan(at(50).fraction);
-  expect(at(76).fraction - at(28).fraction).toBeGreaterThan(0.25);
+  expect(at(76).fraction - at(28).fraction).toBeGreaterThan(0.38);
+  // Never an absurd time left, from a first report or otherwise.
+  for (const moment of seen) expect(moment.left ?? 0).toBeLessThan(240);
   // Most of the way by the end, never full while it runs.
   expect(at(105).fraction).toBeGreaterThan(0.85);
   expect(at(109).fraction).toBeLessThan(1);
