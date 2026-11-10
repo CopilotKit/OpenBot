@@ -116,19 +116,29 @@ export function useConnectInNewTab() {
    * shows why.
    */
   const open = (serverId: string, first?: () => Promise<unknown>) => {
-    const tab = claimTab();
-    handle.current = tab;
     if (first) {
-      first().then(
-        () => void ask(serverId, tab),
-        () => {
-          tab?.close();
-          handle.current = null;
-        },
-      );
+      openAfter(() => first().then(() => serverId));
       return;
     }
+    const tab = claimTab();
+    handle.current = tab;
     void ask(serverId, tab);
+  };
+
+  /**
+   * The same, for a press whose `first` is what names the app: adding an app from Browse apps
+   * answers the id of the row it made, and that row is what the sign-in is for.
+   */
+  const openAfter = (first: () => Promise<string>) => {
+    const tab = claimTab();
+    handle.current = tab;
+    first().then(
+      (serverId) => void ask(serverId, tab),
+      () => {
+        tab?.close();
+        handle.current = null;
+      },
+    );
   };
 
   /*
@@ -178,6 +188,7 @@ export function useConnectInNewTab() {
 
   return {
     open,
+    openAfter,
     /** A consent is open in the other tab; whoever drew the button should be watching. */
     waiting,
     /** Called once the server lists the connection, so the button stops saying it is waiting. */

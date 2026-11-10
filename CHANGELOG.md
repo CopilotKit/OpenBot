@@ -21,6 +21,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   from the downloaded image instead of fetching its own. With less free disk than OpenBot needs,
   the first screen says how much is free and how much is needed, and the downloads start once
   there is room. Nothing is installed before you are asked.
+- **Usage data now says why setup stopped.** A failed `local setup`, every failed install or
+  Start (a failed `compose up` among them), a failed `local start`, `local connect` or Learning
+  model setup, and an Account step that stops on an engine too small or one local setup does not
+  run on each send one `setup_failed`, with the step that failed, a reason class, the CLI's own
+  reason, and for an engine too small its CPUs, memory and disk against what setup needs. The
+  Account step's sign-in sends when it starts and whether it completed, failed or was cancelled.
+  The app version keeps a release candidate's label (`1.0.0-rc.5`, not `1.0.0`). Only closed values
+  and numbers are sent, and nothing at all when usage data is off.
 - **Sign-in comes first, and macOS asks for your password only after OpenBot says why.** On a new
   Mac the Account step waited for Install to put Podman in before any browser sign-in opened, and
   the "osascript wants to make changes" password box came up by itself over it. The CopilotKit
@@ -226,6 +234,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Personal edition
 
+- **Adding an app in Browse apps signs you in to it.** Add on an app you sign in to, such as Slack,
+  GitHub or Gmail, turned the row to "Added" and signed nobody in, so a Bot then said the app wasn't
+  connected. Add now adds the app and opens its sign-in in a new tab, as a Bot's Connect card does.
+  Add on an app that takes a key opens its page with the key form. In either edition, an app that
+  is added and not signed in to reads **Not connected** beside **Connect** in Browse apps, on
+  Connections and on the app's page, where it read "Added" or showed Connect alone. The team
+  edition's Add is still the admin's act and reads "Added, not connected" until the admin connects
+  their own account. GitHub on Connections no longer reads Connected off the GitHub sign-in alone
+  while its tools are not connected.
 - **Settings → Learning says Waiting for your review only when a skill is waiting.** With
   **Approve new skills automatically** on, the heading showed while Learning was in progress and
   after it finished, though nothing waited. The section is now **New skills** until a learned skill
