@@ -84,7 +84,8 @@ beforeEach(() => {
         await slackWaits;
         return json({ error: SLACK_REFUSAL }, 409);
       }
-      return json({ ok: true });
+      // The route's own answer: the row it made.
+      return json({ server: { id: `composio-${slug}` } }, 201);
     }
     if (path === "/api/plugins/composio/apps") {
       return json({

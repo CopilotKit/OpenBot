@@ -603,6 +603,13 @@
       "when": 1794155767768,
       "tag": "0085_approval_rule_account",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1794270285119,
+      "tag": "0086_channel_title",
+      "breakpoints": true
     }
   ]
 }
