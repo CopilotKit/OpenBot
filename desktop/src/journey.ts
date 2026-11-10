@@ -343,11 +343,17 @@ export function downloadWhere(
   perPart: number | null = null,
   /** Its speed is steady enough to say a time from (`STEADY_SECONDS`, `STEADY_BYTES`). */
   steady = true,
+  /**
+   * Every byte was in once already (`seeParts`). It stays unpacking until every part is: on
+   * Windows F the row went back for a few seconds from "Unpacking OpenBot (3 of 5)" to
+   * "Downloading OpenBot. About 2 minutes left." as a report briefly counted its bytes short.
+   */
+  wasAllIn = false,
 ): DownloadWhere {
   if (!size || size <= 0)
     return { fraction: null, unpacking: null, left: null, slow: false };
   const parts = total > 0;
-  const allIn = allBytesIn({ bytes, size, bytesPerSecond });
+  const allIn = wasAllIn || allBytesIn({ bytes, size, bytesPerSecond });
   // As good as in: counted whole, so the bar does not sit short of its share.
   const got = allIn && parts && done < total ? 1 : Math.min(1, bytes / size);
   const share = parts ? BYTES_SHARE : 1;
@@ -411,6 +417,8 @@ export function seeParts(
   perPart: number | null;
   /** Its speed is steady enough to say a time from. */
   steady: boolean;
+  /** Every byte has been in at some point. */
+  allIn: boolean;
 } {
   const { bytes, done = 0 } = downloads;
   let next: PartsSeen = seen ?? {
@@ -433,7 +441,7 @@ export function seeParts(
     next.allIn === null
       ? 0
       : Math.max(0, (now - Math.max(next.changed, next.allIn)) / 1000);
-  return { seen: next, waited, perPart, steady };
+  return { seen: next, waited, perPart, steady, allIn: next.allIn !== null };
 }
 
 /**

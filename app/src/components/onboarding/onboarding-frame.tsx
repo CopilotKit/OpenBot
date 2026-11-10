@@ -106,7 +106,7 @@ export function OnboardingFrame({
       {/*
        * In OpenBot Desktop on macOS the window's buttons sit over the page's top-left corner, where
        * the one-column layout puts Back (a 1000px window is one column). The desktop marks the page
-       * (`data-desktop-titlebar`, macOS only), and draws them about 25–41px down, so the header then
+       * (`data-desktop-titlebar`, macOS only), and draws them about 21–37px down, so the header then
        * starts 48px down, below them, in one column and in two.
        */}
       <header className="sticky top-0 z-10 col-start-1 row-start-1 bg-background lg:col-start-1 pt-[env(safe-area-inset-top)] max-lg:in-data-[desktop-titlebar=overlay]:pt-12 lg:in-data-[desktop-titlebar=overlay]:pt-12 lg:static lg:bg-transparent lg:px-10 lg:pt-10">

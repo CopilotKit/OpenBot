@@ -934,6 +934,111 @@ pub fn download(
     done
 }
 
+/// Keeps an image from the kubelet's image garbage collection: containerd's CRI reports an image
+/// with this label as pinned, and the kubelet never removes a pinned image (containerd
+/// `pkg/cri/labels`, `PinnedImageLabelKey`; kubelet `image_gc_manager.go`).
+pub const PINNED: &str = "io.cri-containerd.pinned";
+
+/// The OpenBot release an image was downloaded ahead of, on the images `download_ahead` pinned.
+pub const READY_FOR: &str = "ai.copilotkit.openbot.ready-for";
+
+/**
+Download `images` into the stack's node ahead of an update, while the back end keeps running, and
+keep them there for it: OpenBot Desktop's background download of an announced release
+(`update_ready`).
+
+Unlike `download`, it never starts or stops the node. A node that is not running is
+`Done::Unavailable`, and the next try finds it running. Each image it downloads is labelled
+`PINNED`, because the kubelet removes images no container runs once the node's disk is 85% used,
+and these run nothing until the update; and `READY_FOR` the release, so a download for any other
+release takes the pin off again (`unpin_ready_for_other`).
+*/
+pub fn download_ahead(
+    node: &Node,
+    images: &CliImages,
+    release: &str,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    shown: &mut dyn FnMut(Download),
+) -> Result<Done, Stop> {
+    if node.running(limits) != Some(true) {
+        return Ok(Done::Unavailable);
+    }
+    let (done, planned) = download_planned(node, images, limits, cancelled, shown)?;
+    let ready_for = format!("{READY_FOR}={release}");
+    let pinned = format!("{PINNED}=pinned");
+    for reference in &planned {
+        let labelled = node
+            .exec(
+                &["ctr", "images", "label", reference, &pinned, &ready_for],
+                limits.call,
+                4096,
+            )
+            .is_some_and(|(ok, _)| ok);
+        if !labelled {
+            log::warn!("[local images] could not keep a downloaded image for the update");
+        }
+    }
+    Ok(done)
+}
+
+/**
+How many bytes of `images` the running node does not hold yet; `Some(0)` when it holds them all.
+None when the node is not running, or what the images are made of cannot be read.
+*/
+pub fn missing_bytes(node: &Node, images: &CliImages, limits: Limits) -> Option<u64> {
+    if node.running(limits) != Some(true) {
+        return None;
+    }
+    let planned = match plan(node, images, limits, &|| Ok(()), true).ok()? {
+        Planned::NothingToDo => return Some(0),
+        Planned::Unavailable => return None,
+        Planned::Images(planned) => planned,
+    };
+    let content = node.content(limits)?;
+    let progress = Progress::of(&planned);
+    Some(
+        progress
+            .blobs
+            .iter()
+            .map(|(blob, size)| size - content.held(blob, *size))
+            .sum(),
+    )
+}
+
+/**
+Take the pin off every image `download_ahead` kept for a release other than `keep`, so the kubelet
+may remove it again once nothing runs it: a release the app has since updated to, or one a newer
+release replaced before anybody installed it. How many it unpinned; none from a node that does not
+answer.
+*/
+pub fn unpin_ready_for_other(node: &Node, keep: Option<&str>, limits: Limits) -> usize {
+    let listed = |filter: &str| -> Option<HashSet<String>> {
+        let (ok, out) = node.exec(&["ctr", "images", "ls", "-q", filter], limits.call, 4 << 20)?;
+        ok.then(|| lines(&out).map(str::to_owned).collect())
+    };
+    let Some(mut ours) = listed(&format!("labels.\"{READY_FOR}\"")) else {
+        return 0;
+    };
+    if let Some(keep) = keep {
+        match listed(&format!("labels.\"{READY_FOR}\"=={keep}")) {
+            Some(kept) => ours.retain(|reference| !kept.contains(reference)),
+            None => return 0,
+        }
+    }
+    let cleared = (format!("{PINNED}="), format!("{READY_FOR}="));
+    ours.iter()
+        .filter(|reference| {
+            node.exec(
+                &["ctr", "images", "label", reference, &cleared.0, &cleared.1],
+                limits.call,
+                4096,
+            )
+            .is_some_and(|(ok, _)| ok)
+        })
+        .count()
+}
+
 fn download_into(
     node: &Node,
     images: &CliImages,
@@ -941,6 +1046,17 @@ fn download_into(
     cancelled: &dyn Fn() -> bool,
     shown: &mut dyn FnMut(Download),
 ) -> Result<Done, Stop> {
+    download_planned(node, images, limits, cancelled, shown).map(|(done, _)| done)
+}
+
+/// `download_into`, with the images it downloaded, by the references it pulled them as.
+fn download_planned(
+    node: &Node,
+    images: &CliImages,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    shown: &mut dyn FnMut(Download),
+) -> Result<(Done, Vec<String>), Stop> {
     let check = || {
         if cancelled() {
             Err(Stop::Cancelled)
@@ -952,12 +1068,12 @@ fn download_into(
     // there. A node where it cannot be written downloads from the registry, as before.
     node.apply_mirror(limits);
     let planned = match plan(node, images, limits, &check, true)? {
-        Planned::Unavailable => return Ok(Done::Unavailable),
-        Planned::NothingToDo => return Ok(Done::NothingToDo),
+        Planned::Unavailable => return Ok((Done::Unavailable, Vec::new())),
+        Planned::NothingToDo => return Ok((Done::NothingToDo, Vec::new())),
         Planned::Images(planned) => planned,
     };
     let Some(content) = node.content(limits) else {
-        return Ok(Done::Unavailable);
+        return Ok((Done::Unavailable, Vec::new()));
     };
     let mut progress = Progress::of(&planned);
     progress.observe(&content, shown);
@@ -975,7 +1091,13 @@ fn download_into(
     if let Some(content) = node.content(limits) {
         progress.observe(&content, shown);
     }
-    Ok(Done::Downloaded)
+    Ok((
+        Done::Downloaded,
+        planned
+            .into_iter()
+            .map(|(reference, _)| reference)
+            .collect(),
+    ))
 }
 
 /// Each image the CLI will pull, with the blobs it is made of for the node, by digest and size.
@@ -1902,6 +2024,20 @@ pub(crate) mod live {
 
         pub(crate) fn node(&self) -> Node<'static> {
             Node::for_stack(&engine, &self.stack)
+        }
+
+        /// The address of the network the node, the registry and the proxy share, on the engine's
+        /// bridge: the proxy answers on its port 5000.
+        pub(crate) fn bridge_address(&self) -> String {
+            docker(&[
+                "inspect",
+                "--format",
+                "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                &self.registry,
+            ])
+            .1
+            .trim()
+            .to_owned()
         }
 
         /// The node stopped, as Quit leaves a stack, or whether it is running.
