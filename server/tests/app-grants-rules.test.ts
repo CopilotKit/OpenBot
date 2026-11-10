@@ -101,6 +101,10 @@ describe("the check", () => {
     expect(grantSetWarning(app, [], ["Salesforce"])).toBe(
       "This gives the Bot no Gmail actions at all. The description names Salesforce, which is set on its own page.",
     );
+    // Two apps once read "names Slack, Salesforce, which is set on its own page".
+    expect(grantSetWarning(app, [], ["Slack", "Salesforce"])).toBe(
+      "This gives the Bot no Gmail actions at all. The description names Slack and Salesforce, which are each set on their own page.",
+    );
     expect(grantSetWarning(app, [])).toBe(
       "This gives the Bot no Gmail actions at all.",
     );

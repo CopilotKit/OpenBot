@@ -341,10 +341,16 @@ export function grantSetWarning(
   refs: readonly string[],
   otherApps: readonly string[] = [],
 ): string | null {
-  if (refs.length === 0)
-    return otherApps.length > 0
-      ? `This gives the Bot no ${app.title} actions at all. The description names ${otherApps.join(", ")}, which is set on its own page.`
-      : `This gives the Bot no ${app.title} actions at all.`;
+  if (refs.length === 0) {
+    const none = `This gives the Bot no ${app.title} actions at all.`;
+    if (otherApps.length === 0) return none;
+    const named = new Intl.ListFormat("en", { type: "conjunction" }).format(
+      otherApps,
+    );
+    return otherApps.length === 1
+      ? `${none} The description names ${named}, which is set on its own page.`
+      : `${none} The description names ${named}, which are each set on their own page.`;
+  }
   const chosen = new Set(refs);
   const destroys = app.tools.filter(
     (tool) => tool.destructive && chosen.has(tool.ref),
