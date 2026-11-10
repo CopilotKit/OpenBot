@@ -1846,7 +1846,7 @@ describe("bundled personal starter", () => {
     expect(await profiles.get(actor, "picked-harness")).toMatchObject({
       name: "Personal Assistant",
       title:
-        "Everyday life agent. Powered by a LangChain agent. Bring your own agent from any stack.",
+        "Everyday life agent. (powered by a LangChain agent; you can bring your own agent from any stack.)",
       endpoint: langchain,
     });
     await synchronizeTenantPackage(database, await loadStarter(tenantId, ""));
@@ -2329,7 +2329,7 @@ describe("bundled personal starter", () => {
     );
     expect(await profiles.get(actor, starter.id)).toMatchObject({
       title:
-        "Everyday life agent. Powered by a Claude Agent SDK agent. Bring your own agent from any stack.",
+        "Everyday life agent. (powered by a Claude Agent SDK agent; you can bring your own agent from any stack.)",
       endpoint: "https://agents.example/run",
     });
   });

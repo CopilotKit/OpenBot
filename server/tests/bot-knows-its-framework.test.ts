@@ -323,7 +323,7 @@ test("a subtitle stored under LangChain's earlier name is told to the Bot as Lan
   });
   if (bot?.type !== "remote_ag_ui") throw new Error("the Bot did not parse");
   expect(bot.standingMessage.content).toContain(
-    "Everyday life agent. Powered by a LangChain agent. Bring your own agent from any stack.",
+    "Everyday life agent. (powered by a LangChain agent; you can bring your own agent from any stack.)",
   );
   expect(bot.standingMessage.content).not.toContain("LangGraph");
 });

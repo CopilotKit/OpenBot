@@ -856,7 +856,7 @@ function catalogueNamesOf(harness: Harness): string[] {
  * an earlier "LangChain (LangGraph)" is read whole rather than as "LangChain" followed by text.
  */
 const POWERED_BY = new RegExp(
-  `Powered by (?:an? )?(?:${HARNESSES.filter(({ image }) => image !== null)
+  `[Pp]owered by (?:an? )?(?:${HARNESSES.filter(({ image }) => image !== null)
     .flatMap(catalogueNamesOf)
     .sort((a, b) => b.length - a.length)
     .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
@@ -873,14 +873,17 @@ const POWERED_BY = new RegExp(
 function attributionFollowing(title: string, harness: Harness | undefined) {
   if (!POWERED_BY.test(title)) return title;
   if (harness) {
-    // Said the way it was said: the starter's "Powered by a LangChain agent", or a plain name.
-    return title.replace(POWERED_BY, (said) =>
-      said.endsWith(" agent")
+    // Said the way it was said: the starter's "(powered by a LangChain agent; …)", or a plain name.
+    return title.replace(POWERED_BY, (said) => {
+      const named = said.endsWith(" agent")
         ? poweredByAgent(harness.name)
-        : `Powered by ${harness.name}`,
-    );
+        : `powered by ${harness.name}`;
+      return said.startsWith("P") ? `P${named.slice(1)}` : named;
+    });
   }
+  // The starter's whole "(powered by …; you can bring your own agent …)" goes with it.
   const rest = title
+    .replace(new RegExp(`\\s*\\(${POWERED_BY.source}[^)]*\\)`), "")
     .replace(new RegExp(`\\s*${POWERED_BY.source}\\.?`), "")
     .trim();
   return rest || title;
@@ -1176,7 +1179,7 @@ export async function synchronizeTenantPackage(
         .returning({ id: agentTable.id });
       /*
        * And what the subtitle says runs it, for a Bot that now runs on what the installer picked.
-       * The starter is seeded "Everyday life agent. Powered by a Claude Agent SDK agent.", and a
+       * The starter is seeded "Everyday life agent. (powered by a Claude Agent SDK agent; …)", and a
        * person may have rewritten the rest; either way it went on naming the harness it was moved
        * off. A connection the person set themselves is not moved above, so its subtitle is not
        * touched.

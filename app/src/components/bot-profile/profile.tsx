@@ -80,9 +80,9 @@ export function BotProfile({
       <div className="mt-6 flex items-center gap-3">
         <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={40} />
         <div className="min-w-0">
-          {/* Two lines, so a phone shows a whole subtitle like the starter's rather than half of it. */}
+          {/* Up to three lines, so a phone shows the whole of a subtitle like the starter's. */}
           {agent.title && (
-            <p className="line-clamp-2 text-pretty font-medium">
+            <p className="line-clamp-3 text-pretty font-medium">
               {agent.title}
             </p>
           )}

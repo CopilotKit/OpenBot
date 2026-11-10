@@ -23,12 +23,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
-- The Personal Assistant on a framework picked in setup is subtitled "Everyday life agent. Powered
-  by a LangChain agent. Bring your own agent from any stack." (with its own framework's name). An
-  existing install shows that too, where it kept "Powered by LangChain (LangGraph)" after an
-  upgrade, and any other Bot OpenBot subtitled under LangChain's earlier names reads "Powered by
+- The Personal Assistant on a framework picked in setup is subtitled "Everyday life agent. (powered
+  by a LangChain agent; you can bring your own agent from any stack.)" (with its own framework's
+  name). An existing install shows that too, where it kept "Powered by LangChain (LangGraph)" after
+  an upgrade, and any other Bot OpenBot subtitled under LangChain's earlier names reads "Powered by
   LangChain". Nothing stored changes, and words a person wrote stay theirs. A Bot's page shows a
-  long subtitle on two lines.
+  long subtitle on up to three lines.
 
 ## 1.0.0
 

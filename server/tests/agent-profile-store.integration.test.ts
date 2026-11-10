@@ -347,7 +347,7 @@ describe("agent profile store integration", () => {
 
     // Stored as written; read by the framework's current name.
     expect((await withoutManaged.get(owner, created.id))?.title).toBe(
-      "Everyday life agent. Powered by a LangChain agent. Bring your own agent from any stack.",
+      "Everyday life agent. (powered by a LangChain agent; you can bring your own agent from any stack.)",
     );
   });
 

@@ -119,10 +119,10 @@ test("gives every row a credential the type actually names", () => {
  */
 test("reads a subtitle OpenBot wrote under earlier names the way it writes it now", () => {
   const langchain =
-    "Everyday life agent. Powered by a LangChain agent. Bring your own agent from any stack.";
+    "Everyday life agent. (powered by a LangChain agent; you can bring your own agent from any stack.)";
   expect(starterSubtitle("LangChain")).toBe(langchain);
   expect(starterSubtitle("AWS Strands")).toBe(
-    "Everyday life agent. Powered by an AWS Strands agent. Bring your own agent from any stack.",
+    "Everyday life agent. (powered by an AWS Strands agent; you can bring your own agent from any stack.)",
   );
   for (const seeded of [
     "Everyday life. Powered by LangChain (LangGraph).",
