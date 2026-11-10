@@ -5,8 +5,9 @@ name: Downloads sync
 # runs attached, and its latest/ folder changes only when a stable release becomes Latest. It also
 # copies everything else the Desktop app downloads for that release, so the app can download it all
 # from there and use GitHub only when that fails: the container images its desktop-images.json names
-# (from ghcr.io, under v2/), its container-images.json and Mac updater archives, its source archive,
-# and the Podman and Compose installers it pins (under tools/), scripts/downloads-images.ts.
+# (from ghcr.io, under v2/), its container-images.json, desktop-images.json and Mac updater archives,
+# its source archive, and the Podman and Compose installers it pins (under tools/),
+# scripts/downloads-images.ts.
 #
 # Started by the signing run that makes a stable release Latest (scripts/release-make-latest.sh),
 # every six hours in case anything drifted or that start failed, and by hand. Each run compares

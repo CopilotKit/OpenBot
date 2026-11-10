@@ -213,6 +213,8 @@ pub enum Asked {
     Available {
         version: String,
         current: String,
+        /// How far it is from installing quickly (`Readiness`), when OpenBot has started on it.
+        ready: Option<Readiness>,
     },
     UpToDate {
         current: String,
@@ -250,6 +252,7 @@ pub fn ask(feed: Option<&Feed>, current: &Version, known: &Known) -> Result<Aske
     known.record(&answer);
     Ok(match answer? {
         Some(version) => Asked::Available {
+            ready: known.readiness(&version),
             version: version.to_string(),
             current: current_text,
         },
@@ -281,7 +284,9 @@ pub fn prompt(asked: &Result<Asked, String>) -> Prompt {
         buttons: None,
     };
     match asked {
-        Ok(Asked::Available { version, current }) => Prompt {
+        Ok(Asked::Available {
+            version, current, ..
+        }) => Prompt {
             title: format!("OpenBot {version} is available"),
             message: format!(
                 "You are running {current}. Updating downloads the new version and restarts OpenBot."
@@ -363,6 +368,20 @@ pub fn watch(
     }
 }
 
+/**
+How far the newer version is from installing in a few minutes: its images downloading in the
+background while this version runs, or all of them here (`update_ready`). Tagged `state` for the
+page.
+*/
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum Readiness {
+    /// `done` of `total` bytes have arrived.
+    Preparing { done: u64, total: u64 },
+    /// Everything it downloads before it starts is here.
+    Ready,
+}
+
 /// An update on its way in: how much of the archive has arrived, and whether it is restarting.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -372,11 +391,13 @@ pub struct Installing {
     pub restarting: bool,
 }
 
-/// What the shell knows: the last good answer from the feed, and an install under way.
+/// What the shell knows: the last good answer from the feed, an install under way, and how ready
+/// the newer version is.
 #[derive(Default)]
 pub struct Known {
     newer: Mutex<Option<Version>>,
     installing: Mutex<Option<Installing>>,
+    ready: Mutex<Option<(Version, Readiness)>>,
 }
 
 impl Known {
@@ -412,6 +433,31 @@ impl Known {
     pub fn end_install(&self) {
         *self.installing.lock().unwrap() = None;
     }
+
+    /// Whether an install is under way, from the click on Update and restart.
+    pub fn installing(&self) -> bool {
+        self.installing.lock().unwrap().is_some()
+    }
+
+    /// How ready `version` is now. Replaces what was said of any other version.
+    pub fn readying(&self, version: &Version, readiness: Readiness) {
+        *self.ready.lock().unwrap() = Some((version.clone(), readiness));
+    }
+
+    /// Nothing is being got ready, or what was is no longer there.
+    pub fn not_ready(&self) {
+        *self.ready.lock().unwrap() = None;
+    }
+
+    /// How ready `version` is, when it is the version being got ready.
+    pub fn readiness(&self, version: &Version) -> Option<Readiness> {
+        self.ready
+            .lock()
+            .unwrap()
+            .as_ref()
+            .filter(|(ready, _)| ready == version)
+            .map(|(_, readiness)| readiness.clone())
+    }
 }
 
 /// What a page shows.
@@ -426,6 +472,8 @@ pub struct Status {
     /// Whether this build updates itself (`Feed::of` finds it a feed). An internal or candidate
     /// build, or one without the updater, never does, and a window says so up front.
     pub updates_itself: bool,
+    /// How ready the offered version is to install (`Readiness`), when OpenBot has started on it.
+    pub ready: Option<Readiness>,
 }
 
 /// What to offer, given what the feed said and what this person closed.
@@ -452,6 +500,7 @@ pub fn status(
         to_offer(newer.as_ref(), config.and_then(dismissed).as_ref())
     };
     Status {
+        ready: version.as_ref().and_then(|v| known.readiness(v)),
         version: version.map(|v| v.to_string()),
         current: current.to_string(),
         installing,
@@ -889,6 +938,43 @@ mod tests {
         let _ = std::fs::remove_dir_all(&config);
     }
 
+    /// The page says how ready the offered version is, and only of that version: a newer one the
+    /// feed names since starts again from nothing.
+    #[test]
+    fn the_offer_says_how_ready_the_offered_version_is() {
+        let known = Known::default();
+        known.record(&Ok(Some(v("0.3.2"))));
+        assert_eq!(status(&known, &v("0.3.1"), None, true).ready, None);
+        known.readying(
+            &v("0.3.2"),
+            Readiness::Preparing {
+                done: 40,
+                total: 100,
+            },
+        );
+        let shown = status(&known, &v("0.3.1"), None, true);
+        assert_eq!(
+            shown.ready,
+            Some(Readiness::Preparing {
+                done: 40,
+                total: 100
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&shown).unwrap()["ready"],
+            serde_json::json!({"state": "preparing", "done": 40, "total": 100})
+        );
+        known.readying(&v("0.3.2"), Readiness::Ready);
+        assert_eq!(
+            serde_json::to_value(status(&known, &v("0.3.1"), None, true)).unwrap()["ready"],
+            serde_json::json!({"state": "ready"})
+        );
+        known.record(&Ok(Some(v("0.3.3"))));
+        assert_eq!(status(&known, &v("0.3.1"), None, true).ready, None);
+        known.not_ready();
+        assert_eq!(known.readiness(&v("0.3.2")), None);
+    }
+
     /// A one-shot HTTP server on 127.0.0.1 answering each request with the next of `answers`.
     fn serve(answers: Vec<(u16, String)>) -> (reqwest::Url, std::thread::JoinHandle<usize>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1015,7 +1101,8 @@ mod tests {
             ask(feed.as_ref(), &v("0.3.2"), &known),
             Ok(Asked::Available {
                 version: "0.3.3".into(),
-                current: "0.3.2".into()
+                current: "0.3.2".into(),
+                ready: None,
             })
         );
         server.join().unwrap();
@@ -1059,6 +1146,7 @@ mod tests {
                 "current": "0.3.2-internal.731.gabc1234",
                 "installing": null,
                 "updatesItself": false,
+                "ready": null,
             })
         );
         let release = status(&Known::default(), &v("0.3.2"), None, true);
@@ -1106,9 +1194,10 @@ mod tests {
         assert_eq!(
             as_json(Asked::Available {
                 version: "0.3.3".into(),
-                current: "0.3.2".into()
+                current: "0.3.2".into(),
+                ready: None,
             }),
-            serde_json::json!({"found": "available", "version": "0.3.3", "current": "0.3.2"})
+            serde_json::json!({"found": "available", "version": "0.3.3", "current": "0.3.2", "ready": null})
         );
         assert_eq!(
             as_json(Asked::UpToDate {
@@ -1129,7 +1218,8 @@ mod tests {
         assert_eq!(
             prompt(&Ok(Asked::Available {
                 version: "0.3.3".into(),
-                current: "0.3.2".into()
+                current: "0.3.2".into(),
+                ready: None,
             })),
             Prompt {
                 title: "OpenBot 0.3.3 is available".into(),

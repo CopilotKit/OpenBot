@@ -14,6 +14,7 @@ let checkFailure: unknown = null;
 let installFailure: unknown = null;
 let progress: AppUpdate["installing"] = null;
 let updatesItself = true;
+let ready: AppUpdate["ready"] = null;
 let installRelease: (() => void) | null = null;
 const calls: string[] = [];
 
@@ -29,6 +30,7 @@ async function handle(command: string) {
       current: "0.3.2",
       installing: progress,
       updatesItself,
+      ready,
     };
   }
   if (command === "install_app_update") {
@@ -57,6 +59,7 @@ afterEach(() => {
   installFailure = null;
   progress = null;
   updatesItself = true;
+  ready = null;
   installRelease?.();
   installRelease = null;
   calls.length = 0;
@@ -188,3 +191,27 @@ test("while an update downloads it says so", async () => {
     "OpenBot is downloading 0.3.3 and restarts when it's done.",
   );
 });
+
+test("a newer version says it is downloading in the background, then that it is ready to install", async () => {
+  checked = {
+    found: "available",
+    version: "0.3.3",
+    current: "0.3.2",
+    ready: { state: "preparing", done: 250, total: 1000 },
+  };
+  const view = await check();
+  expect((await view.findByRole("status")).textContent).toBe(
+    "OpenBot 0.3.3 is available and downloading in the background (25%). You are running 0.3.2.",
+  );
+  // Update and restart does not wait for it.
+  expect(view.getByRole("button", { name: "Update and restart" })).toBeTruthy();
+  // It goes on getting ready after the check, and the section asks again until it is.
+  ready = { state: "ready" };
+  await waitFor(
+    () =>
+      expect(view.getByRole("status").textContent).toBe(
+        "OpenBot 0.3.3 is ready to install. It takes a few minutes. You are running 0.3.2.",
+      ),
+    { timeout: 7_000 },
+  );
+}, 10_000);

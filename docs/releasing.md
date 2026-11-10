@@ -607,7 +607,7 @@ all from this address and go to GitHub only when it does not answer
 
 | Key | What | Cache-Control |
 |---|---|---|
-| `releases/<tag>/container-images.json`, `releases/<tag>/OpenBot-darwin-*.app.tar.gz` | the release's image pins and Mac updater archives (in `downloads-sync.sh`) | a year, immutable |
+| `releases/<tag>/container-images.json`, `releases/<tag>/desktop-images.json`, `releases/<tag>/OpenBot-darwin-*.app.tar.gz` | the release's image pins, the list of every image the app may pull for it (which an older app reads to get the release ready before its Update click) and the Mac updater archives (in `downloads-sync.sh`) | a year, immutable |
 | `releases/<tag>/<tag>.tar.gz` | the source archive a deployment is laid out from, as `github.com/CopilotKit/OpenBot/archive/refs/tags/<tag>.tar.gz` serves it | a year, immutable |
 | `tools/podman/v<version>/<file>`, `tools/compose/v<version>/<file>` | every Podman installer and Compose binary the release's `desktop/src-tauri/src/install.rs` pins, under the upstream file name, checked against those pins | a year, immutable |
 | `v2/` | `{}` (`application/json`), so a registry client's first request answers | five minutes |

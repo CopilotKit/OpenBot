@@ -186,6 +186,29 @@ fn token_url(challenge: &str) -> Option<reqwest::Url> {
     reqwest::Url::parse_with_params(realm?, &query).ok()
 }
 
+/// How an engine reaches `host`: plain HTTP for a registry on this computer's loopback, which Docker
+/// and Podman trust without TLS (Docker's default insecure registries are 127.0.0.0/8), and HTTPS
+/// for every other.
+fn scheme(host: &str) -> &'static str {
+    let name = host.rsplit_once(':').map_or(host, |(name, port)| {
+        if port.bytes().all(|b| b.is_ascii_digit()) {
+            name
+        } else {
+            host
+        }
+    });
+    let loopback = name == "localhost"
+        || name == "[::1]"
+        || name
+            .parse::<std::net::Ipv4Addr>()
+            .is_ok_and(|address| address.is_loopback());
+    if loopback {
+        "http"
+    } else {
+        "https"
+    }
+}
+
 /// The layers `image` downloads on an engine running `architecture`, from its registry. `None` when
 /// the registry could not be read or did not answer with a manifest this understands.
 pub fn image_layers(image: &str, architecture: &str) -> Option<Vec<Layer>> {
@@ -195,9 +218,10 @@ pub fn image_layers(image: &str, architecture: &str) -> Option<Vec<Layer>> {
         .build()
         .ok()?;
     let mut token: Option<String> = None;
+    let scheme = scheme(&reference.host);
     let mut fetch = |name: &str| -> Option<Vec<u8>> {
         let url = format!(
-            "https://{}/v2/{}/manifests/{name}",
+            "{scheme}://{}/v2/{}/manifests/{name}",
             reference.host, reference.repository
         );
         for _ in 0..2 {
@@ -298,6 +322,16 @@ mod tests {
                 reference: "0.16.0-rc.9".into(),
             })
         );
+    }
+
+    #[test]
+    fn a_registry_on_this_computers_loopback_is_read_over_plain_http_as_an_engine_reads_it() {
+        assert_eq!(scheme("127.0.0.1:5050"), "http");
+        assert_eq!(scheme("localhost:5000"), "http");
+        assert_eq!(scheme("[::1]:5000"), "http");
+        assert_eq!(scheme("ghcr.io"), "https");
+        assert_eq!(scheme("registry-1.docker.io"), "https");
+        assert_eq!(scheme("10.0.0.5:5000"), "https");
     }
 
     #[test]

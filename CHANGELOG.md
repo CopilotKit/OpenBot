@@ -10,6 +10,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **An update downloads its images before you click Update.** As soon as the update feed names a
+  newer OpenBot, OpenBot Desktop downloads the new version's images in the background while the
+  current one keeps running: OpenBot's own images for the Bots this installation runs, and, when
+  the back end changes, the back end's images into its node, kept there for the update. The click
+  then costs the stop, the backup, the migrations and the start, with nothing to download but the
+  app itself. The update offer, Settings › This computer and the setup window say "OpenBot 1.0.1
+  is available and downloading in the background (40%)", then "OpenBot 1.0.1 is ready to install.
+  It takes a few minutes." It downloads one image at a time, stops while OpenBot starts, stops or
+  updates, never stops or restarts anything that runs, and downloads nothing when the disk would
+  be left short (the log says why, and the update downloads them as before). Builds that do not
+  update themselves (candidates and internal builds) download nothing ahead.
+- **downloads.copilotkit.ai serves each release's `desktop-images.json`.** It answered 403, so the
+  list of a release's images could only come from GitHub.
 - **A back end update that was stopped partway no longer breaks every later Start.** Quitting
   while the back end updated could leave it half updated, and every Start after that failed with
   "Local update-quiesce failed (exit 1)". OpenBot now lets an update finish once it has begun

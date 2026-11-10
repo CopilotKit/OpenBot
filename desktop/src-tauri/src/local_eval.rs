@@ -1471,9 +1471,10 @@ fn engine_size(address: &crate::engine::Address) -> Option<(u64, u64)> {
 /**
 The engine's disk inside a container, the way the CLI measures it: `df -Pk /` in a container of an
 image the engine already has, so nothing is downloaded. An engine with no image that has a shell
-gives no answer, and disk is then not judged.
+gives no answer, and disk is then not judged. Also what `update_ready` measures before it downloads
+an update's images ahead of time.
 */
-fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
+pub fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
     let images = engine_output(
         address,
         &["image", "ls", "--quiet", "--no-trunc"],
@@ -2575,6 +2576,13 @@ fn engine_command(engine: Option<&CliEngine>) -> std::process::Command {
         crate::docker_config::owned(),
     );
     command
+}
+
+/// `engine_command` on the engine the app last named, for `update_ready`, which downloads into
+/// the back end's node as `local update` does.
+pub fn node_engine() -> impl Fn() -> std::process::Command + Send + Sync + 'static {
+    let engine = recorded_engine();
+    move || engine_command(engine.as_ref())
 }
 
 /// Only `INHERITED`, OpenBot's Docker configuration, the engines' directories on `PATH` and the
@@ -3910,6 +3918,13 @@ fn cli_images_of(cli: &PinnedCli) -> Option<crate::local_images::CliImages> {
         .read_to_end(&mut bytes)
         .ok()?;
     crate::local_images::cli_images(&String::from_utf8_lossy(&bytes))
+}
+
+/// What the CLI this app runs pulls when it updates a stack (`cli_images_of`), for `update_ready`,
+/// which downloads the next release's images by the same repositories. None without a CLI whose
+/// images can be read.
+pub fn bundled_cli_images() -> Option<crate::local_images::CliImages> {
+    cli_images_of(&installed().ok()?)
 }
 
 /**
