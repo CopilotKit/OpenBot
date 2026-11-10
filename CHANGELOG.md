@@ -152,6 +152,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   off. Every such call is still on the audit trail. Admins can set each kind to ask every time, or
   to be done by members themselves, in Admin → Approvals. A password changed on a website is still
   yours to do. This reverses #998's "always asks" rule.
+- **Coming back to a conversation while a Bot is part way through its lookups no longer loses
+  them.** A Bot that sent 20 lookups at once, opened again while 9 were still running, showed only
+  the 11 that had answered, and the next message told the Bot the other 9 had been "interrupted
+  before it could answer", so it said they had failed and could not say why. The conversation now
+  stays joined to the Bot's turn while it is still working, shows the rest of the answers and the
+  reply as they come, and holds anything you type until the turn is over. A message sent from a
+  conversation that still missed some answers takes them from the stored conversation first;
+  only a lookup that truly never answered is said to have no result.
 - **A Claude Agent SDK Bot keeps your request and its tool results through a long task.** A tool
   result over 50,000 characters (a page of email, an app's tool list, a file read from the Bot's
   computer) reached the Bot as a 2 KB preview and the path of a file it could not open, so it showed

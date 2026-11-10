@@ -63,7 +63,11 @@ import {
 import { offerItsOwnTools } from "@/lib/copilot/bot-offer";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
-import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
+import {
+  repairUnansweredToolCalls,
+  unansweredToolCalls,
+  withStoredAnswers,
+} from "@/lib/copilot/repair-history";
 import { releaseServerOwnedInterrupts } from "@/lib/copilot/server-owned-interrupts";
 import { followLastRun, stoppedReason } from "@/lib/copilot/stopped-turn";
 import {
@@ -98,6 +102,20 @@ import { newId } from "../../lib/new-id";
  * next message sent.
  */
 const JOIN_DEADLINE_MS = 1500;
+
+/**
+ * Whether the roster says a turn is running in this conversation now: one this tab started from a
+ * chat it has since left, or work the server runs with no browser attached.
+ */
+function rosterSaysWorking(channelId: string): boolean {
+  const row = queryClient
+    .getQueryData<{ pages: { channels: ChannelSummary[] }[] }>(
+      channelKeys.list(),
+    )
+    ?.pages.flatMap((page) => page.channels)
+    .find((channel) => channel.id === channelId);
+  return (row?.busy ?? false) || (row?.work?.length ?? 0) > 0;
+}
 
 /**
  * Backstop for a message typed before the runtime agent exists; it must not be discarded.
@@ -536,8 +554,15 @@ export function ChannelChat({
           ),
           deadline: afterMs(JOIN_DEADLINE_MS),
           detach: () => agent.detachActiveRun(),
-          // A Bot still answering keeps the join, which streams the rest of its reply in.
-          answering: lastRun.running,
+          /*
+           * A Bot still answering keeps the join, which streams the rest of its reply in. Heard from
+           * the replay, or from the roster when the replay is slower than the deadline: a step of
+           * 20 lookups replays its calls and the answers so far, and ended at the deadline, the 9
+           * still running never reached this screen, the composer sent the next message at once,
+           * and it went out saying those 9 had been interrupted. The gateway ends the join itself
+           * once the thread's run is over, so a roster that is late to clear cannot hold it open.
+           */
+          answering: () => lastRun.running() || rosterSaysWorking(channel.id),
           onAnswering: () => {
             if (current) setRestoring(false);
           },
@@ -603,7 +628,14 @@ export function ChannelChat({
     return () => {
       current = false;
     };
-  }, [copilotkit, agent, isReady, channel.threadId, runtimeAgentId]);
+  }, [
+    copilotkit,
+    agent,
+    isReady,
+    channel.id,
+    channel.threadId,
+    runtimeAgentId,
+  ]);
 
   /*
    * A turn nobody here streamed, surfaced while the channel is open.
@@ -961,6 +993,21 @@ export function ChannelChat({
       })
       .finally(() => clearTimeout(voiceHistoryTimer));
     const target = agentRef.current;
+    /*
+     * A call this screen holds no answer for is answered from the stored thread first, so the repair
+     * further down only ever explains a call nothing answered. Before this message is added, so each
+     * answer goes in beside its call rather than after the person's words. See `withStoredAnswers`.
+     */
+    if (unansweredToolCalls(target.messages).size > 0) {
+      const stored = await readThreadMessages(
+        channel.threadId,
+        runtimeAgentId,
+      ).catch(() => null);
+      if (stored?.availability === "ready") {
+        const answered = withStoredAnswers(target.messages, stored.messages);
+        if (answered !== target.messages) target.setMessages(answered);
+      }
+    }
     const existingMessageIds = new Set(
       target.messages.map((message) => message.id),
     );
