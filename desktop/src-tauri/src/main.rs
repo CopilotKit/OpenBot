@@ -7,6 +7,7 @@ use std::sync::Mutex;
 mod desktop_connection;
 mod desktop_host_access;
 mod desktop_page;
+mod desktop_stall;
 mod desktop_status;
 mod desktop_telemetry;
 mod intelligence_bridge;
@@ -602,6 +603,7 @@ fn report_line<R: tauri::Runtime>(
         log::error!("[step {step}] failed: {entry}");
     }
     forget_running_logged();
+    desktop_stall::row_done(app, step);
     if !ok {
         // The row's step, and a class from the step or, where the step says nothing, its words.
         // Only the two enums are recorded, never the words.
@@ -614,8 +616,8 @@ fn report_line<R: tauri::Runtime>(
             ),
         );
     }
-    let _ = app.emit(
-        "setup:progress",
+    emit_progress(
+        app,
         Progress {
             step: step.into(),
             ok,
@@ -627,6 +629,27 @@ fn report_line<R: tauri::Runtime>(
             asks: false,
         },
     );
+}
+
+/// A row's progress to the setup page, numbered: the page's heartbeat says back the highest number
+/// it has taken, so a page that stops taking them is noticed (`desktop_stall`).
+fn emit_progress<R: tauri::Runtime>(app: &tauri::AppHandle<R>, progress: Progress) {
+    #[derive(Serialize, Clone)]
+    struct Numbered {
+        seq: u64,
+        #[serde(flatten)]
+        progress: Progress,
+    }
+    let seq = desktop_stall::sent(app, &progress.step);
+    let _ = app.emit("setup:progress", Numbered { seq, progress });
+}
+
+/// The setup page's heartbeat, every few seconds while its setup, start or update screens show and
+/// as soon as a row's progress reaches it: the highest progress number it has taken, and whether it
+/// has just loaded. Off the main thread, and it waits on nothing.
+#[tauri::command]
+async fn setup_heartbeat(app: tauri::AppHandle, seen: u64, fresh: bool) {
+    desktop_stall::heartbeat(&app, seen, fresh);
 }
 
 /// The running step last written to the log, so a step that says the same thing on every poll
@@ -714,6 +737,7 @@ fn report_running_line<R: tauri::Runtime>(
         detail: _,
     } = line;
     setup_phase(step);
+    desktop_stall::row_running(app, step, &detail);
     {
         let mut logged = RUNNING_LOGGED
             .lock()
@@ -724,8 +748,8 @@ fn report_running_line<R: tauri::Runtime>(
             *logged = Some(now);
         }
     }
-    let _ = app.emit(
-        "setup:progress",
+    emit_progress(
+        app,
         Progress {
             step: step.into(),
             ok: true,
@@ -851,8 +875,8 @@ fn report_downloads<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     downloads: pull_metrics::Downloads,
 ) {
-    let _ = app.emit(
-        "setup:progress",
+    emit_progress(
+        app,
         Progress {
             step: "images".into(),
             ok: true,
@@ -3671,6 +3695,8 @@ The window only listens. Nothing here waits for it: with no window, or a page th
 the same cleanup runs in the same order and the exit follows.
 */
 fn quit_cleanup_shown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Vec<String> {
+    // A setup window that stopped answering and still has not: said before the flush below.
+    desktop_stall::at_quit(app);
     show_shutting_down(app);
     desktop_telemetry::shutdown(app);
     let shell = app.state::<Shell>();
@@ -9231,6 +9257,7 @@ fn main() {
             local_eval_download,
             local_eval_steps,
             local_eval_update_step,
+            setup_heartbeat,
             local_eval_terms,
             connect_copilotkit_apps,
             connect_local_eval,
@@ -9250,6 +9277,11 @@ fn main() {
         // no such setting, and Tauri has no configuration option for it either, so the page is
         // asked to refuse. Every navigation, because the window navigates to OpenBot and back.
         .on_page_load(|window, payload| {
+            // A new page in the main window is not the setup page until it sends a heartbeat.
+            if window.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started
+            {
+                desktop_stall::page_loaded(window);
+            }
             let _ = window
                 .eval("document.addEventListener('contextmenu', e => e.preventDefault(), true)");
             let page = window_page(window.app_handle(), payload.url());
@@ -9356,6 +9388,7 @@ fn main() {
             // The banner and the setup window's offer both read this, never the network.
             watch_for_app_updates(app.handle());
             desktop_telemetry::initialize(app.handle());
+            desktop_stall::initialize(app.handle());
             if let Some(root) = app
                 .path()
                 .app_config_dir()
