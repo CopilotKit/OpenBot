@@ -5,10 +5,12 @@ import type { Browser, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 
 /**
- * The microphone's notice never moves the message box. Home centres the box in the page, so a notice
- * drawn above it in the flow pushed the box down by half its height while it showed: 16px for
- * "OpenBot couldn't find a microphone. Connect one, then try again.", seen on Windows with no
- * microphone. In a conversation the box is pinned to the bottom and the notice grows upward.
+ * The microphone's notice never moves the message box and never lands on anything. Home centres the
+ * box in the page, so a notice drawn above it in the flow pushed the box down by half its height
+ * while it showed: 16px for "OpenBot couldn't find a microphone. Connect one, then try again.", seen
+ * on Windows with no microphone. Drawn over the space above the box instead, it sat on the starter
+ * tasks a new account sees there. In a conversation the box is pinned to the bottom and the notice
+ * grows upward.
  *
  * Rendered in a real Chromium, because where the box lands is the browser's layout. The composer is
  * the real component, bundled from the fixture beside this file, in the Desktop window (the desktop
@@ -17,7 +19,8 @@ import { compile } from "tailwindcss";
  *
  *   OPENBOT_APP_BROWSER=1 bun test app/tests/composer-dictation-notice-layout.test.tsx
  *
- * With OPENBOT_APP_SHOTS=<dir> it also saves Home before and after the notice, light and dark.
+ * With OPENBOT_APP_SHOTS=<dir> it also saves Home before and after the notice, with and without the
+ * starter tasks, light and dark.
  */
 const asked = process.env.OPENBOT_APP_BROWSER === "1";
 const shots = process.env.OPENBOT_APP_SHOTS;
@@ -109,7 +112,11 @@ async function style(page: Page) {
   await page.addStyleTag({ content: await stylesheet(classes) });
 }
 
-async function open(layout: "home" | "thread", theme: "light" | "dark") {
+async function open(
+  layout: "home" | "thread",
+  theme: "light" | "dark",
+  chips = false,
+) {
   const page = await browser.newPage({
     viewport: { width: 1000, height: 760 },
     userAgent: MAC,
@@ -126,13 +133,21 @@ async function open(layout: "home" | "thread", theme: "light" | "dark") {
       return route.fulfill({ contentType: "text/javascript", body: script });
     return route.fulfill({ status: 404 });
   });
-  await page.goto(`${ORIGIN}/?layout=${layout}&theme=${theme}`);
+  await page.goto(
+    `${ORIGIN}/?layout=${layout}&theme=${theme}${chips ? "&chips=1" : ""}`,
+  );
   await page
     .getByRole("button", { name: "Dictate a message" })
     .waitFor({ timeout: 8000 });
+  if (chips)
+    await page
+      .getByRole("region", { name: "Starter tasks" })
+      .waitFor({ timeout: 8000 });
   await style(page);
   return page;
 }
+
+type Rect = { top: number; bottom: number; left: number; right: number };
 
 /** Where the message box is, once the page has drawn. */
 function box(page: Page) {
@@ -146,44 +161,82 @@ function box(page: Page) {
   });
 }
 
+/**
+ * Everything on Home the notice could land on, and the notice itself: the greeting, the starter
+ * tasks' row, the box and the hint under it.
+ */
+function regions(page: Page) {
+  return page.evaluate(() => {
+    const rect = (element: Element | null | undefined) => {
+      if (!element) return null;
+      const { top, bottom, left, right } = element.getBoundingClientRect();
+      return { top, bottom, left, right };
+    };
+    const hint = [...document.querySelectorAll("p")].find((p) =>
+      p.textContent?.startsWith("OpenBot picks the right Bot"),
+    );
+    return {
+      notice: rect(document.querySelector('[role="alert"]')),
+      others: {
+        greeting: rect(document.querySelector("h1")),
+        tasks: rect(document.querySelector('[aria-label="Starter tasks"]')),
+        box: rect(document.querySelector('form[data-slot="composer"]')),
+        hint: rect(hint),
+      },
+    };
+  });
+}
+
+const overlaps = (a: Rect, b: Rect) =>
+  a.top < b.bottom && b.top < a.bottom && a.left < b.right && b.left < a.right;
+
 /** The notice shown: the microphone pressed, and the desktop app's answer drawn and styled. */
 async function showNotice(page: Page) {
   await page.getByRole("button", { name: "Dictate a message" }).click();
-  await page.getByText(NOTICE).waitFor({ timeout: 8000 });
+  await page.getByRole("alert").waitFor({ timeout: 8000 });
+  expect(await page.getByRole("alert").textContent()).toBe(NOTICE);
   await style(page);
 }
 
 describe.skipIf(!asked)("the microphone's notice", () => {
-  for (const theme of ["light", "dark"] as const) {
-    test(`on Home (${theme}) leaves the centred message box where it was`, async () => {
-      const page = await open("home", theme);
-      try {
-        const before = await box(page);
-        if (shots) {
-          mkdirSync(shots, { recursive: true });
-          await page.screenshot({
-            path: join(shots, `home-${theme}-idle.png`),
-          });
+  for (const chips of [false, true])
+    for (const theme of ["light", "dark"] as const) {
+      const name = `home${chips ? "-tasks" : ""}-${theme}`;
+      test(`on Home${chips ? " with the starter tasks" : ""} (${theme}) overlaps nothing and leaves the box where it was`, async () => {
+        const page = await open("home", theme, chips);
+        try {
+          const before = await box(page);
+          if (shots) {
+            mkdirSync(shots, { recursive: true });
+            await page.screenshot({ path: join(shots, `${name}-idle.png`) });
+          }
+          await showNotice(page);
+          const after = await box(page);
+          if (shots)
+            await page.screenshot({ path: join(shots, `${name}-notice.png`) });
+          expect(before).not.toBeNull();
+          expect(after).toEqual(before);
+          const { notice, others } = await regions(page);
+          expect(notice).not.toBeNull();
+          if (chips) expect(others.tasks).not.toBeNull();
+          const landed = Object.entries(others)
+            .filter(
+              (entry): entry is [string, Rect] =>
+                entry[1] !== null &&
+                notice !== null &&
+                overlaps(notice, entry[1]),
+            )
+            .map(([what]) => what);
+          expect(landed).toEqual([]);
+          // Between what is above it and the box: under the tasks (or the greeting), over the box.
+          const above = others.tasks ?? others.greeting;
+          expect(notice?.top ?? 0).toBeGreaterThanOrEqual(above?.bottom ?? 0);
+          expect(notice?.bottom ?? 0).toBeLessThanOrEqual(others.box?.top ?? 0);
+        } finally {
+          await page.close();
         }
-        await showNotice(page);
-        const after = await box(page);
-        if (shots)
-          await page.screenshot({
-            path: join(shots, `home-${theme}-notice.png`),
-          });
-        expect(before).not.toBeNull();
-        expect(after).toEqual(before);
-        // Drawn above the box and clear of it, not under it or over it.
-        const notice = await page.getByText(NOTICE).boundingBox();
-        expect(notice).not.toBeNull();
-        expect((notice?.y ?? 0) + (notice?.height ?? 0)).toBeLessThanOrEqual(
-          before?.top ?? 0,
-        );
-      } finally {
-        await page.close();
-      }
-    }, 60_000);
-  }
+      }, 60_000);
+    }
 
   test("in a conversation leaves the box pinned where it was", async () => {
     const page = await open("thread", "light");
