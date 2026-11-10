@@ -66,6 +66,12 @@ export const approvalTeamSettings = pgTable(
       .$type<Partial<Record<ActionKind, ActionKindPolicy>>>()
       .notNull()
       .default({}),
+    /**
+     * What the admin told auto-review, in their own words. Added to the reviewer's prompt in a section
+     * of its own, below the built-in safety requirements, which it never changes (approvals/policy.ts,
+     * `reviewPrompt`). Null is none. Read only by the gate and the admin's screen, never by members.
+     */
+    reviewerGuidance: text("reviewer_guidance"),
     updatedBy: text("updated_by").references(() => users.id, {
       onDelete: "set null",
     }),

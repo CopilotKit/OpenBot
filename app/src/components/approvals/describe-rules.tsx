@@ -289,7 +289,7 @@ function auditRowOf(change: BacktestChange): AuditEvent {
 }
 
 /** Where an action acted, by its tool: an app, a computer, a folder, another Bot. */
-function mediaOf(toolRef: string): ReplayRow["media"] {
+export function mediaOf(toolRef: string): ReplayRow["media"] {
   if (toolRef.startsWith("computer_"))
     return { icon: <IconDeviceDesktop />, label: "Computer action" };
   if (toolRef.startsWith("host/"))

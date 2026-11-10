@@ -574,6 +574,59 @@ function createPolicyStore(database: Database): ApprovalPolicyStore {
         .orderBy(desc(approvalRequests.createdAt))
         .limit(limit);
     },
+    async reviewerGuidance() {
+      // No team and no admin screen: the gate reads none, as it reads no team settings.
+      if (currentEdition() === "personal") return null;
+      const [row] = await database
+        .select({ guidance: approvalTeamSettings.reviewerGuidance })
+        .from(approvalTeamSettings)
+        .where(eq(approvalTeamSettings.id, TEAM))
+        .limit(1);
+      return row?.guidance?.trim() || null;
+    },
+    /*
+     * One save, one row on the trail, in the same transaction: the guidance either side and how it
+     * was read, so "who told the reviewer this, and in what words" has an answer for as long as the
+     * trail is kept. The table only holds the words in force now.
+     */
+    async setReviewerGuidance(by, change) {
+      const after = change.text?.trim() || null;
+      return database.transaction(async (tx) => {
+        const [current] = await tx
+          .select({ guidance: approvalTeamSettings.reviewerGuidance })
+          .from(approvalTeamSettings)
+          .where(eq(approvalTeamSettings.id, TEAM))
+          .limit(1);
+        const before = current?.guidance?.trim() || null;
+        await tx
+          .insert(approvalTeamSettings)
+          .values({ id: TEAM, reviewerGuidance: after, updatedBy: by })
+          .onConflictDoUpdate({
+            target: approvalTeamSettings.id,
+            set: {
+              reviewerGuidance: after,
+              updatedBy: by,
+              updatedAt: sql`now()`,
+            },
+          });
+        await recordAuditEvent(createAuditStore(tx as unknown as Database), {
+          eventType: "approval.guidance_changed",
+          targetType: "approval_settings",
+          targetId: TEAM,
+          actorUserId: by,
+          payload: {
+            ...(change.actor ? { actor: change.actor } : {}),
+            change: after === null ? "removed" : "saved",
+            before,
+            after,
+            ...(after !== null && change.reading
+              ? { reading: change.reading }
+              : {}),
+          },
+        });
+        return after;
+      });
+    },
     async updateRule(owner, id, input) {
       const [row] = await database
         .update(approvalRules)

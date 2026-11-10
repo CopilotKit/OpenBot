@@ -50,6 +50,7 @@ export function ConversationView({
   onStop,
   voiceCall,
   modelPicker,
+  routine,
 }: {
   messages: readonly Message[];
   threadId?: string;
@@ -128,6 +129,8 @@ export function ConversationView({
   voiceCall?: { active: boolean; supported: boolean; onStart(): void };
   /** The composer's model picker. See `Composer`. */
   modelPicker?: ReactNode;
+  /** The Bot and conversation for the composer's routine clock. See `Composer`. */
+  routine?: { agentId: string; channelId: string };
 }) {
   /*
    * THE QUEUE LIVES HERE BECAUSE BOTH HALVES OF IT DO.
@@ -521,6 +524,7 @@ export function ConversationView({
         )}
         <Composer
           modelPicker={modelPicker}
+          {...(routine ? { routine } : {})}
           agents={agents}
           autoFocus={autoFocus}
           {...(channelId ? { channelId } : {})}

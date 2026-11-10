@@ -22,6 +22,7 @@ import {
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
 import { GrantList } from "@/components/plugins/grant-list";
+import { RoutinesConnectionPage } from "@/components/routines/routines-connection-page";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -38,6 +39,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
@@ -156,6 +158,8 @@ function RouteComponent() {
   if (key === "github" || key === "slack") {
     return <IdentityConnectionPage linked={linked} provider={key} />;
   }
+  // Routines has nothing to connect or switch: its page says what it is and leads to the routines.
+  if (key === ALWAYS_ON_APP) return <RoutinesConnectionPage />;
   /*
    * The personal edition's app page is the whole app: turning it on, your account, its tools and
    * which Bots use them, because one person makes all of those decisions. A per-action

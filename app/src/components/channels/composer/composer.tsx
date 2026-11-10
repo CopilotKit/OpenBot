@@ -28,6 +28,7 @@ import {
 } from "react";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { IconWaveform } from "@/components/icons/waveform";
+import { RoutineComposerButton } from "@/components/routines/new-routine-button";
 import {
   attachmentUrl,
   classifyAttachment,
@@ -260,6 +261,12 @@ export type ComposerProps = {
    * that can sum this; a caller with no queue leaves it out and nothing changes.
    */
   queuedAttachmentCount?: number;
+  /**
+   * The Bot this box sends to and the conversation it is in, for the clock beside `+` that sets up
+   * a routine for them. Absent draws no clock: a box with no conversation yet has nowhere for a
+   * routine to post. Drawn by the compact layout, the one a conversation uses.
+   */
+  routine?: { agentId: string; channelId: string };
 };
 
 /**
@@ -354,6 +361,7 @@ export function Composer({
   droppedAttachments,
   // Nothing parked is the right answer for every caller without a queue, which is most of them.
   queuedAttachmentCount = 0,
+  routine,
 }: ComposerProps) {
   const [value, setValue] = useState<Segment[]>(
     initialValue ? [{ type: "text", text: initialValue }] : [],
@@ -1611,6 +1619,7 @@ export function Composer({
                     <IconPlus className="size-5" />
                   </Button>
                 )}
+                {routine ? <RoutineComposerButton {...routine} /> : null}
                 {modelPicker}
               </div>
               <div className="flex shrink-0 items-center gap-1">

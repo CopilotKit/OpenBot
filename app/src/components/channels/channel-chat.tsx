@@ -1398,6 +1398,12 @@ export function ChannelChat({
             // Remounted per conversation, so opening one puts the caret in its composer once.
             autoFocus
             threadId={channel.threadId}
+            // The clock beside `+`: a routine for the Bot this conversation talks to, posting here.
+            routine={
+              channel.active
+                ? { agentId: runtimeAgentId, channelId: channel.id }
+                : undefined
+            }
             voiceCall={
               call.available
                 ? {
