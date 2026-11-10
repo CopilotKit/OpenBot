@@ -249,6 +249,16 @@ backup taken before the upgrade instead. Three things change for an existing dep
 
 ### Conversations
 
+- **Talk to OpenBot without a transcription provider.** The message box shows a microphone on
+  every OpenBot, not only where `TRANSCRIPTION_PROVIDER` is set. Click it and your words appear in
+  the box as you speak; the microphone turns into Stop. Stop, or Enter, stops listening and keeps
+  the words in the box without sending them, and the next Enter sends. Typing while it listens
+  stops it too. In OpenBot Desktop the words come from your computer's own speech recognition, on
+  the device (Apple's Speech framework on a Mac, the Windows speech recognizer on Windows), and a
+  Mac asks once for the microphone and speech recognition. In a browser they come from the
+  browser's speech recognition, and a browser without one (Firefox) shows no microphone. Chrome's
+  speech recognition sends the audio to Google's speech service. With `TRANSCRIPTION_PROVIDER` set
+  nothing changes: OpenBot records and your server transcribes, as before.
 - **Rename a conversation you started.** Its menu in the sidebar has **Rename conversation…**.
   Everyone in the conversation sees the new name, and an empty name brings back the one OpenBot
   chose. Only the person who started a conversation can rename it.
