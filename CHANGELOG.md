@@ -8,6 +8,26 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+**Before upgrading.** Three migrations run at start, and the database moves to
+`0088_approval_reviewer_guidance`. `0086_channel_title` adds a nullable `title` column to
+`channels`, for a name a person gives a conversation. `0087_approval_conversation_grants` creates a
+new, empty `approval_conversation_grants` table, which records an action allowed for the rest of
+one conversation. It also adds a nullable `kind` column to `approval_rules` and an `action_kinds`
+column to `approval_team_settings` (`{}` on every existing row), and lets
+`approval_requests.decision` hold `allow_conversation` as well as its earlier values. `0088_approval_reviewer_guidance` adds a
+nullable `reviewer_guidance` column to `approval_team_settings`. No existing row is rewritten and
+nothing is dropped. A database that has run this release does not go back to 1.0.0: restore the
+backup taken before the upgrade instead. Three things change for an existing deployment:
+- Sending, deleting, sharing and posting offer **Allow for this conversation** and **Always allow
+  here** beside Allow once and Deny, and paying and account-setting changes ask with the same four
+  answers instead of being handed to you (below). In the team edition an admin can set each kind
+  to ask every time in Admin > Approvals.
+- A Personal Assistant whose instructions nobody changed takes the new ones at the next start
+  (below). One whose instructions were edited keeps them.
+- OpenBot Desktop's bundled CLI moves to `copilotkit@6bfaa0f`, and Start writes
+  `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` in `~/OpenBot/.env` as empty (below). The back end stays
+  on CopilotKit Intelligence 0.16.0-rc.10.
+
 ### OpenBot Desktop
 
 - **A first install on a Mac starts the first time, and a reinstall sets its back end up again.**
@@ -155,9 +175,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   The engine check before it (`docker info`, `docker image ls` and the container that measures
   free disk) now gives up on a command after 15 to 20 seconds, so an engine that stops answering
   no longer leaves the step on "Checking your CopilotKit account…" for good.
+- **A file dropped on a conversation attaches.** Dragging a file, such as a screenshot, onto a
+  conversation in OpenBot Desktop showed a plus cursor and attached nothing, because the window
+  took the drop for itself. The conversation now takes it, as it does in a browser. A drop the
+  window can't read says "Dropped file: couldn't be attached. Attach it with + instead."
 
 ### Conversations
 
+- **Rename a conversation you started.** Its menu in the sidebar has **Rename conversation…**.
+  Everyone in the conversation sees the new name, and an empty name brings back the one OpenBot
+  chose. Only the person who started a conversation can rename it.
 - **Allow a send, or anything else that asks, for the rest of a conversation.** Approving every
   message in a back-and-forth on Slack was tiring, and sending, deleting, sharing and posting
   offered only Allow once and Deny. Those cards now offer **Allow for this conversation** and
@@ -165,8 +192,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   answers instead of being handed to you. Allowed for the conversation, the same action by the
   same Bot runs again there without a card, and the line above the message box says so, with Turn
   off. Every such call is still on the audit trail. Admins can set each kind to ask every time, or
-  to be done by members themselves, in Admin → Approvals. A password changed on a website is still
-  yours to do. This reverses #998's "always asks" rule.
+  to be done by members themselves, in Admin > Approvals. A password changed on a website is still
+  yours to do.
 - **A Bot's lookups come back, even in a big batch.** A Bot that asks an app for many things at
   once now has at most 5 of them out at a time, and the rest wait their turn, so the app is not hit
   with a burst it answers with timeouts and rate limits. A lookup the Bot already made in the same
@@ -255,7 +282,84 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   and back every 2.4 seconds, where a quick band used to flicker across them. With reduced motion
   turned on they stay still.
 
+### Routines
+
+- **Routines in the sidebar, with New routine.** One Routines page lists every routine across your
+  Bots: the Bot, what it does, its schedule in words, its next run, how the last one went, and
+  whether it is on. **New routine** makes one without asking a Bot: the Bot, what to do, when
+  (every day, weekday, week, month or hour, at a time on your clock), where it posts, and a name.
+  The clock beside + in a conversation's message box opens it for that Bot and that conversation.
+  A schedule the form doesn't cover, such as every other Tuesday, can still be asked of a Bot.
+- **Routines and check-ins finish what they start.** A routine or check-in had chat's 8 steps. It
+  now has 24, plus 4 for each part of a routine written as a list, up to 48. A routine written as a
+  list shows the Bot its parts numbered, and the run carries on until each is closed as Done,
+  Blocked or Skipped, with a reason. A Bot that ends a step on a promise ("I'll fetch the rest now")
+  with no call after it is sent back to do it, at most twice in a row. On its last step a Bot is
+  told its tools are off, so it answers with what it has and says what it did not get to.
+
+### Admins write policy in plain English
+
+Each of these works the same way. An admin writes a sentence, the deployment's own model turns it
+into the setting, and the setting is checked. A second model call, which never sees the sentence,
+says what the setting does, and the change is replayed over what this OpenBot has recorded. Nothing
+is saved until the admin saves it. The save is on the audit trail with the sentence it was written
+from ("Written from: …"), and each draft is recorded too. With no model configured, the screen says
+a model key is needed.
+
+- **Boundaries.** Add rule and a rule's own page have **Describe the rule**: "Bots may not visit
+  social media sites" becomes a CEL rule, still editable, with what it does read back under it. A
+  rule is now checked before it is saved, and one that can't be read is refused with what is wrong
+  (`A rule can't check "mcp.sever". mcp has server, tool and effect.`). Rules already saved are not
+  checked again, so a broken one can still be removed. The preview runs as the rule is typed, and
+  replays app calls as well as computer actions, so a rule about an app, such as
+  `mcp.server == "salesforce" && mcp.effect == "write"`, no longer previews as changing nothing.
+  Every save of the boundaries is on Audit as "Boundaries saved", with the rules added and removed.
+  The shipped "Stay off social media" template also stopped dropbox.com and netflix.com; it now
+  stops only the sites it names.
+- **Team approval rules.** Admin > Approvals > Team rules has **Describe it in words**. A sentence
+  such as "Let the sales assistant update opportunities in Salesforce without asking" becomes rule
+  rows, each checked against this OpenBot's real apps, tools and Bots, and replayed over past
+  decisions: "Would have changed 4 decisions: removes 3 asks, of which 1 a person had denied; adds
+  1 ask." Every team rule save now records the rules before and after.
+- **A Bot's actions in one app.** On a Bot's page for an app (Admin > Plugins > the app > the Bot),
+  a sentence such as "Reads everything and writes drafts, but never sends or deletes" and **Choose
+  actions** pick the exact actions. The page shows which actions turn off and on, and how that
+  compares with what the Bot did recently. Nothing changes until **Save changes**, and the switches
+  still work one at a time.
+- **Guidance for auto-review.** Admin > Approvals > **Guidance for auto-review** takes guidance for
+  the AI reviewer, such as "Any change to a deal worth more than $100,000 needs a person to approve
+  it." Guidance that would switch safety off or let everything through is refused. It can be tested
+  first, by replaying the reviewer with it over up to the last 25 requests people allowed or denied
+  (one model call each, said before it runs), to see where it agrees with them. Built-in safety
+  still decides first.
+- **Network allowlist.** The Network policy dialog (Admin > Computers > Network) opens with
+  **Describe the allowlist**: "Only Salesforce and Google Workspace" becomes entries that include
+  the domains those vendors publish for allowlisting. Each entry is checked by the parser the
+  computer's network filter uses, and the list is replayed over recent page visits ("this list
+  would block 3 that are allowed today"). Only page visits are recorded, so connections made from
+  the shell or by a page itself are not counted. Fixed with it: saving a policy that held a domain
+  with a port, such as `intranet.example 8443`, dropped the port and allowed every port.
+- **Permissions.** Admin > Permissions has **Describe it in words**. "Contractors can't use their
+  own computer" becomes the organization, role and group switches it takes, with every member's
+  permissions before and after, and what anyone who loses one used it for in the last 30 days. The
+  switches are saved together, as one change.
+- **Ask the audit trail.** Audit has an Ask box. A question such as "Gmail changes by a routine last
+  week" becomes filters, by app, tool, effect, action and rule, shown over the trail's own rows.
+- **What would happen.** Admin > What happened > **What would happen** reads a question such as
+  "Could the Sales Bot send an email from Gmail when a routine runs it?" as one action, shown as
+  fields to correct. **Check** then runs OpenBot's own controls on it, with no model, in the order
+  they apply, and shows each one's verdict, which one decides, and a link to where it is set. Every
+  computer action and app call on Audit has **Why?**, which runs the same check on what the row
+  recorded and says when today's settings would decide it differently.
+- **Audit names the rule that stopped an action.** A blocked row reads "Stopped by: Bots may not
+  visit social media sites" when the rule has a name, with the rule under it cut to two lines and
+  **Show full rule** to read the rest. A long rule used to make one row hundreds of pixels tall.
+
 ### Smaller changes
+
+- A page a Bot's browser couldn't open, or that a boundary refused, is one line in the conversation,
+  such as "Blocked: Open x.com", where it was an empty grey box saying "This turn did not open a
+  page."
 
 - An interface a Bot draws in a card, such as the "Build a trip budget" starter task, has one frame
   in the conversation. It had a second border around the card, with a gap between the two.
@@ -285,7 +389,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   edition's Add is still the admin's act and reads "Added, not connected" until the admin connects
   their own account. GitHub on Connections no longer reads Connected off the GitHub sign-in alone
   while its tools are not connected.
-- **Settings → Learning says Waiting for your review only when a skill is waiting.** With
+- **Settings > Learning says Waiting for your review only when a skill is waiting.** With
   **Approve new skills automatically** on, the heading showed while Learning was in progress and
   after it finished, though nothing waited. The section is now **New skills** until a learned skill
   waits for approval, and the team edition's **Waiting for an admin** follows the same rule.
