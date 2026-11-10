@@ -1,0 +1,47 @@
+{
+  "about": "Real answers to the prompt in server/src/what-if.ts (parsePrompt), from OpenAI Chat Completions with response_format json_schema, asked of the OpenBot in tests/support/what-if-deployment.ts. Each string is the assistant message content exactly as the model returned it, recorded 2026-11-09. gpt-5.6-terra is the default model. gpt-4o-mini is an older, smaller model, and is where the check earns its keep: asked about reading an inbox it first named a page read with no page, and named Gmail list_emails once told what was wrong; asked about a command, it named the whole action and said it could not, twice.",
+  "routineEmail": {
+    "model": "gpt-5.6-terra",
+    "text": "Could the Sales Bot send an email from Gmail when a routine runs it?",
+    "writer": [
+      "{\"notes\":\"The question maps to the Sales Bot using Gmail's send_email tool, started by a scheduled routine. No person or group is named, so the Bot's owner would be used.\",\"understood\":\"yes\",\"unclear\":\"\",\"bot\":\"whatif-sales\",\"person\":\"\",\"group\":\"\",\"initiator\":\"routine\",\"surface\":\"app\",\"app\":\"whatif-gmail\",\"tool\":\"send_email\",\"intent\":\"\",\"host\":\"\",\"label\":\"\",\"command\":\"\",\"file\":\"\"}"
+    ]
+  },
+  "chatEmail": {
+    "model": "gpt-5.6-terra",
+    "text": "What happens if the Sales Bot sends an email while Sam is chatting with it?",
+    "writer": [
+      "{\"notes\":\"The Sales Bot would send an email through Gmail while Sam Lee is chatting with it.\",\"understood\":\"yes\",\"unclear\":\"\",\"bot\":\"whatif-sales\",\"person\":\"whatif-sam\",\"group\":\"\",\"initiator\":\"person\",\"surface\":\"app\",\"app\":\"whatif-gmail\",\"tool\":\"send_email\",\"intent\":\"\",\"host\":\"\",\"label\":\"\",\"command\":\"\",\"file\":\"\"}"
+    ]
+  },
+  "openLinkedIn": {
+    "model": "gpt-5.6-terra",
+    "text": "Could the Research Bot open linkedin.com?",
+    "writer": [
+      "{\"notes\":\"The question asks about the Research Bot navigating to linkedin.com in a browser.\",\"understood\":\"yes\",\"unclear\":\"\",\"bot\":\"whatif-research\",\"person\":\"\",\"group\":\"\",\"initiator\":\"\",\"surface\":\"computer\",\"app\":\"\",\"tool\":\"\",\"intent\":\"navigate\",\"host\":\"linkedin.com\",\"label\":\"\",\"command\":\"\",\"file\":\"\"}"
+    ]
+  },
+  "unclear": {
+    "model": "gpt-5.6-terra",
+    "text": "Who approved the last email the Sales Bot sent?",
+    "writer": [
+      "{\"notes\":\"This asks about an action that already happened, namely a prior email sent by the Sales Bot.\",\"understood\":\"no\",\"unclear\":\"Find it on the Audit page, where “Why did this happen?” explains a row.\",\"bot\":\"\",\"person\":\"\",\"group\":\"\",\"initiator\":\"\",\"surface\":\"\",\"app\":\"\",\"tool\":\"\",\"intent\":\"\",\"host\":\"\",\"label\":\"\",\"command\":\"\",\"file\":\"\"}"
+    ]
+  },
+  "fixedOnRetry": {
+    "model": "gpt-4o-mini",
+    "text": "Could Sam on the sales team have the Sales Bot read his inbox?",
+    "writer": [
+      "{\"notes\":\"The question asks if the Sales Bot can take the action of reading an inbox for Sam. Therefore, the action is 'read'.\",\"understood\":\"yes\",\"unclear\":\"\",\"bot\":\"whatif-sales\",\"person\":\"whatif-sam\",\"group\":\"\",\"initiator\":\"\",\"surface\":\"computer\",\"app\":\"\",\"tool\":\"\",\"intent\":\"read\",\"host\":\"\",\"label\":\"\",\"command\":\"\",\"file\":\"\"}",
+      "{\"notes\":\"The question asks if the Sales Bot can take the action of reading Sam's inbox, which requires the app for Gmail. Therefore, the action is 'read_email'.\",\"understood\":\"yes\",\"unclear\":\"\",\"bot\":\"whatif-sales\",\"person\":\"whatif-sam\",\"group\":\"\",\"initiator\":\"\",\"surface\":\"app\",\"app\":\"whatif-gmail\",\"tool\":\"list_emails\",\"intent\":\"read\",\"host\":\"\",\"label\":\"\",\"command\":\"\",\"file\":\"\"}"
+    ]
+  },
+  "failsTwice": {
+    "model": "gpt-4o-mini",
+    "text": "Could anyone in the contractors group get the Research Bot to run rm -rf on its computer overnight?",
+    "writer": [
+      "{\"notes\":\"The question asks if anyone in the contractors group can get the Research Bot to run a specific shell command on its computer overnight. This identifies the action as running a command on the computer initiated by a group member.\",\"understood\":\"no\",\"unclear\":\"There is no action that maps to running a shell command initiated by a group.\",\"bot\":\"whatif-research\",\"person\":\"\",\"group\":\"whatif-contractors\",\"initiator\":\"responsibility\",\"surface\":\"computer\",\"app\":\"\",\"tool\":\"\",\"intent\":\"run_command\",\"host\":\"\",\"label\":\"\",\"command\":\"rm -rf\",\"file\":\"\"}",
+      "{\"notes\":\"The question asks if anyone in the contractors group can get the Research Bot to run a specific shell command on its computer overnight. This identifies the action as running a command on the computer, but there is no action that maps to that scenario.\",\"understood\":\"no\",\"unclear\":\"There is no action that maps to running a shell command initiated by a group.\",\"bot\":\"whatif-research\",\"person\":\"\",\"group\":\"whatif-contractors\",\"initiator\":\"\",\"surface\":\"computer\",\"app\":\"\",\"tool\":\"\",\"intent\":\"run_command\",\"host\":\"\",\"label\":\"\",\"command\":\"rm -rf\",\"file\":\"\"}"
+    ]
+  }
+}

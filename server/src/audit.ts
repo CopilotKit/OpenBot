@@ -518,6 +518,20 @@ export const auditEventTypes = [
    * model's filters could not be used.
    */
   "audit.asked",
+  /**
+   * An admin asked what would happen if a Bot took an action, in plain English, and the deployment's
+   * model read it as one action (`what-if.ts`). Nothing changed. Target `governance`; payload
+   * `actor`, `question`, `outcome` (`parsed`, `unclear`, `not_valid`, `no_model` or `model_failed`),
+   * and `action` and `attempts` when it was read; `problems` when it couldn't be.
+   */
+  "what_if.asked",
+  /**
+   * An admin checked what OpenBot's controls decide about one action: one they confirmed from a
+   * question (`from: "question"`), or an audit row's (`from: "audit_row"`, with `eventId`, for "Why
+   * did this happen?"). Nothing changed. Target `governance`; payload `actor`, `action`, `outcome`
+   * and `decidedBy`, the control that settled it.
+   */
+  "what_if.checked",
   /*
    * Getting in, and being turned away.
    *
