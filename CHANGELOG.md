@@ -387,9 +387,9 @@ a model key is needed.
 
 ### Smaller changes
 
-- "Backend" is one word everywhere OpenBot shows it: OpenBot Desktop's setup and Status windows, the
-  app, the server's messages and the Recorder. Desktop's setup shows "Waiting for the backend" where
-  it showed "Waiting for the back end".
+- "Backend" is one word everywhere OpenBot shows it: OpenBot Desktop's Status window, tray and
+  messages, the app, the server's messages and the Recorder. Desktop's Status window heads its card
+  "Backend" where it said "Back end".
 
 - A page a Bot's browser couldn't open, or that a boundary refused, is one line in the conversation,
   such as "Blocked: Open x.com", where it was an empty grey box saying "This turn did not open a
