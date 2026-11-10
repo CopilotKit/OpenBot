@@ -71,6 +71,7 @@ const emit = (name, payload) => {
 };
 fake.emit = emit;
 const relaunch = location.hash === "#start";
+const signingIn = location.hash === "#signin";
 let finishSetUp;
 const setUp = new Promise((resolve) => (finishSetUp = resolve));
 const stack = {
@@ -121,7 +122,11 @@ export async function invoke(command) {
       emit("setup:progress", { step: "engine", ok: true, running: false, detail: "The software OpenBot runs on is ready." });
       return new Promise((resolve) => setTimeout(() => resolve(null), 50));
     case "sign_in_to_copilotkit":
-      return { signedIn: true };
+      return signingIn ? new Promise(() => {}) : { signedIn: true };
+    case "copilotkit_sign_in_page":
+      return signingIn
+        ? { url: "https://dashboard.copilotkit.ai/cli-auth/device?user_code=WXYZ-2345", userCode: "WXYZ-2345" }
+        : null;
     case "local_eval_terms":
       return { status: "required", accepted: true, version: "developer-edition-2026-10-01-web", url: "https://copilotkit.ai/legal/developer-edition", organizationName: "Acme" };
     case "set_up_local_eval":
@@ -294,6 +299,76 @@ describe.skipIf(!asked)("the window through a first run", () => {
         });
         if (height < 600) expect(card.scroll).toBeGreaterThan(card.client);
         expect(card.client).toBeLessThanOrEqual(height);
+      } finally {
+        await page.close();
+      }
+    }, 30_000);
+  }
+});
+
+/*
+ * Seen on Windows F (a 1016x839 window): "Connect your AI" was taller than the window and scrolled
+ * in its card, and the "Installing OpenBot in the background" row sat below the fold at y 822-839,
+ * seen only by scrolling. It is pinned to the bottom of the card's visible area now, and Continue
+ * still scrolls into view above it.
+ */
+describe.skipIf(!asked)("the background install's row", () => {
+  for (const [width, height] of [
+    [1016, 839],
+    [720, 560],
+  ] as const) {
+    test(`at ${width}x${height}, is in view on the Account and AI steps, and never covers Continue`, async () => {
+      const inView = async (page: Page) => {
+        const row = await page
+          .getByRole("listitem", {
+            name: "Installing OpenBot in the background",
+          })
+          .boundingBox();
+        expect(row).not.toBeNull();
+        expect(row?.y ?? -1).toBeGreaterThanOrEqual(0);
+        expect((row?.y ?? 0) + (row?.height ?? 0)).toBeLessThanOrEqual(height);
+        return row;
+      };
+      const account = await browser.newPage({ viewport: { width, height } });
+      try {
+        await open(account, "#signin");
+        await account
+          .getByRole("button", { name: "Install", exact: true })
+          .click();
+        await account
+          .getByRole("heading", { name: "Sign in to CopilotKit" })
+          .waitFor();
+        await account.waitForTimeout(600);
+        await inView(account);
+      } finally {
+        await account.close();
+      }
+      const page = await browser.newPage({ viewport: { width, height } });
+      try {
+        await open(page);
+        await page
+          .getByRole("button", { name: "Install", exact: true })
+          .click();
+        await page.getByRole("heading", { name: "Connect your AI" }).waitFor();
+        await page.getByText("Any OpenAI-compatible endpoint").click();
+        await page.getByLabel("Base URL", { exact: true }).waitFor();
+        await page.waitForTimeout(600);
+        await inView(page);
+        // Scrolled to its end, Continue is in view above the row, not under it.
+        await page.evaluate(() => {
+          const sheet = document.querySelector("main > .sheet") as HTMLElement;
+          sheet.scrollTop = sheet.scrollHeight;
+        });
+        await page.waitForTimeout(200);
+        const row = await inView(page);
+        const go = await page
+          .getByRole("button", { name: "Continue", exact: true })
+          .boundingBox();
+        expect(go).not.toBeNull();
+        expect((go?.y ?? 0) + (go?.height ?? 0)).toBeLessThanOrEqual(
+          row?.y ?? 0,
+        );
+        expect(go?.y ?? -1).toBeGreaterThanOrEqual(0);
       } finally {
         await page.close();
       }

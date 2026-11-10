@@ -177,7 +177,9 @@ main {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: clamp(32px, 12vh, 96px) 24px 32px;
+  /* A little room above the card, not a band: on Windows F, 95 px of it pushed the AI step's
+     background row below the fold. */
+  padding: clamp(16px, 3vh, 32px) 24px 24px;
 }
 
 /* The one focal surface per screen: a white card on the frame, as OpenBot draws its panels. */
@@ -1702,4 +1704,27 @@ main > .sheet {
 
 main > .sheet > * {
   flex-shrink: 0;
+}
+
+/*
+ * The background install's row stays in view: pinned to the bottom of the card's visible area
+ * while the step scrolls above it, and back in its own place once the step is scrolled to its end,
+ * so it never covers Continue. On Windows F the AI step was taller than the window and the row sat
+ * below the fold, where nobody saw it.
+ */
+main > .sheet > .behind-slot {
+  position: sticky;
+  bottom: -32px;
+  z-index: 1;
+  margin-bottom: -32px;
+  padding-bottom: 32px;
+  background: var(--card);
+}
+
+@media (max-width: 580px) {
+  main > .sheet > .behind-slot {
+    bottom: -24px;
+    margin-bottom: -24px;
+    padding-bottom: 24px;
+  }
 }
