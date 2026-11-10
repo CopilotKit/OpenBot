@@ -729,17 +729,8 @@ pub struct Plan {
     /// The engine to pull OpenBot's images into.
     pub images: Option<Address>,
     /// With no engine answering, OpenBot's images downloaded into the cache, to load once one
-    /// does (`early_images`), and the Compose that names them.
-    pub offline_images: Option<NamedBy>,
-}
-
-/// Which Compose names OpenBot's images when no engine answers: `config --images` reads files.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NamedBy {
-    /// OpenBot's own standalone Compose, downloaded with Podman's installer.
-    OwnCompose,
-    /// Docker Desktop's, which answers `compose config` while Docker Desktop is stopped.
-    Docker,
+    /// does (`early_images`).
+    pub offline_images: bool,
 }
 
 impl Plan {
@@ -755,7 +746,7 @@ impl Plan {
         self.machine_image.map_or(0, |image| image.size)
             + if self.podman { 80 * MB } else { 0 }
             + if self.compose { 35 * MB } else { 0 }
-            + if self.images.is_some() || self.offline_images.is_some() {
+            + if self.images.is_some() || self.offline_images {
                 1_200 * MB
             } else {
                 0
@@ -772,7 +763,8 @@ impl Plan {
 ///   Podman comes from its own packages);
 /// - the machine image when Install will create OpenBot's machine with a Podman that pulls the
 ///   pinned machine-os release;
-/// - OpenBot's images when an engine answers already.
+/// - OpenBot's images: into an engine that answers already, or into the cache to load once one
+///   does. Their list comes from OpenBot's own Compose, so that downloads too (`named_images`).
 pub fn plan(facts: &Facts) -> Plan {
     use crate::install::Choice;
     if facts.installed_before {
@@ -800,21 +792,21 @@ pub fn plan(facts: &Facts) -> Plan {
             }
             _ => false,
         };
-    // No engine answers: OpenBot's images download now, to load once one does. Docker Desktop
-    // stopped names them with its own Compose; anything else with the one OpenBot downloads.
-    let offline_images = (desktop && facts.answering.is_none())
-        .then_some(match facts.choice {
-            Choice::InstallPodman | Choice::UsePodman => Some(NamedBy::OwnCompose),
-            Choice::OpenDockerDesktop => Some(NamedBy::Docker),
-            _ => None,
-        })
-        .flatten();
+    // No engine answers: OpenBot's images download now, to load once one does.
+    let offline_images = desktop
+        && facts.answering.is_none()
+        && matches!(
+            facts.choice,
+            Choice::InstallPodman | Choice::UsePodman | Choice::OpenDockerDesktop
+        );
+    let images = facts.answering.clone();
     Plan {
         machine_image: facts.machine_image.filter(|_| creates_machine),
         podman: installs_podman,
-        compose: installs_podman || offline_images == Some(NamedBy::OwnCompose),
+        // Install's Compose for a new Podman, and the one that names OpenBot's images either way.
+        compose: installs_podman || images.is_some() || offline_images,
         deployment: true,
-        images: facts.answering.clone(),
+        images,
         offline_images,
     }
 }
@@ -963,7 +955,7 @@ fn jobs(root: &Path, plan: &Plan, cache: &Path, hooks: &Arc<Hooks>) -> Vec<Job> 
             }),
         });
     }
-    if let (true, Some(named_by)) = (plan.deployment, plan.offline_images) {
+    if plan.deployment && plan.offline_images {
         let root = root.to_path_buf();
         let cache = cache.to_path_buf();
         jobs.push(Job {
@@ -978,7 +970,7 @@ fn jobs(root: &Path, plan: &Plan, cache: &Path, hooks: &Arc<Hooks>) -> Vec<Job> 
                 if !ok {
                     return Err("the deployment did not download".into());
                 }
-                download_offline_images(&root, &cache, named_by)
+                download_offline_images(&root, &cache)
             }),
         });
         return jobs;
@@ -997,6 +989,7 @@ fn jobs(root: &Path, plan: &Plan, cache: &Path, hooks: &Arc<Hooks>) -> Vec<Job> 
             // Install waits for them from the start (`wait_for_images`).
             Some(engine) => {
                 let hooks = hooks.clone();
+                let cache = cache.to_path_buf();
                 jobs.push(Job {
                     key: "images",
                     size: None,
@@ -1009,7 +1002,7 @@ fn jobs(root: &Path, plan: &Plan, cache: &Path, hooks: &Arc<Hooks>) -> Vec<Job> 
                         if !ok {
                             return Err("the deployment did not download".into());
                         }
-                        pull_images(&engine, &root, &hooks)
+                        pull_images(&engine, &root, &cache, &hooks)
                     }),
                 });
             }
@@ -1152,36 +1145,54 @@ pub fn default_bot_images(engine: &Address, root: &Path) -> Result<Vec<String>, 
     )
 }
 
-/// OpenBot's images for the default Bot, named by the Compose `named_by` says, downloaded into the
-/// cache for Install to load once the engine answers (`early_images`).
-fn download_offline_images(root: &Path, cache: &Path, named_by: NamedBy) -> Result<(), String> {
-    let images = match named_by {
-        NamedBy::Docker => default_bot_images(&Address::new(Engine::Docker, None), root)?,
-        NamedBy::OwnCompose => {
-            let compose = crate::install::runnable_compose(cache, &())?;
-            let harness = crate::harness::HarnessChoice {
-                id: crate::harness::DEFAULT_HARNESS.into(),
-                agent_url: None,
-            };
-            let nowhere = root.join(".openbot-early-downloads-nowhere");
-            crate::preparation::installation_pull_set_by(
-                |settings| crate::stack::standalone_compose_command(&compose, &nowhere, settings),
-                &nowhere,
-                root,
-                Some(&harness),
-            )
-            .map_err(|problem| {
-                format!(
-                    "{}{}",
-                    problem.said,
-                    problem
-                        .detail
-                        .map(|detail| format!(" ({detail})"))
-                        .unwrap_or_default()
-                )
-            })?
-        }
+/**
+The images Install pulls for the default Bot, from the deployment laid out in `root`, named by
+OpenBot's own Compose: `compose` gives its path, waiting for its download when the first screen is
+still downloading it.
+
+Never the engine's Compose. On Windows D a person's Podman 5.8.9 answered with no Compose installed,
+and `podman compose` failed looking up a provider before OpenBot's own was in place, so the first
+screen said its downloads didn't finish. A Docker Desktop's Compose can be one too old to read the
+project (`engine_versions`). OpenBot's own is the pinned one Install uses, and `config --images`
+needs no engine.
+*/
+pub fn named_images(
+    root: &Path,
+    compose: impl FnOnce() -> Result<PathBuf, String>,
+) -> Result<Vec<String>, String> {
+    let compose = compose()?;
+    let harness = crate::harness::HarnessChoice {
+        id: crate::harness::DEFAULT_HARNESS.into(),
+        agent_url: None,
     };
+    let nowhere = root.join(".openbot-early-downloads-nowhere");
+    crate::preparation::installation_pull_set_by(
+        |settings| crate::stack::standalone_compose_command(&compose, &nowhere, settings),
+        &nowhere,
+        root,
+        Some(&harness),
+    )
+    .map_err(|problem| {
+        format!(
+            "{}{}",
+            problem.said,
+            problem
+                .detail
+                .map(|detail| format!(" ({detail})"))
+                .unwrap_or_default()
+        )
+    })
+}
+
+/// OpenBot's own Compose, from the cache, waiting for the first screen's download of it.
+fn own_compose(cache: &Path) -> impl FnOnce() -> Result<PathBuf, String> + '_ {
+    move || crate::install::runnable_compose(cache, &())
+}
+
+/// OpenBot's images for the default Bot, downloaded into the cache for Install to load once the
+/// engine answers (`early_images`).
+fn download_offline_images(root: &Path, cache: &Path) -> Result<(), String> {
+    let images = named_images(root, own_compose(cache))?;
     log::info!(
         "[early images] downloading {} before any engine answers",
         images.join(", ")
@@ -1208,8 +1219,8 @@ pub fn load_offline_images(engine: &Address, said: impl Fn(crate::pull_metrics::
 }
 
 /// OpenBot's images for the default Bot, pulled into `engine` with Install's own pull.
-fn pull_images(engine: &Address, root: &Path, hooks: &Hooks) -> Result<(), String> {
-    let images = default_bot_images(engine, root)?;
+fn pull_images(engine: &Address, root: &Path, cache: &Path, hooks: &Hooks) -> Result<(), String> {
+    let images = named_images(root, own_compose(cache))?;
     let present = {
         let engine = engine.clone();
         move |image: &str| crate::preparation::image_present(&engine, image).unwrap_or(false)
