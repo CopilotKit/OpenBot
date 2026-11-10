@@ -324,6 +324,26 @@ export const auditEventTypes = [
    */
   "app_access.owner_granted",
   "app_access.owner_revoked",
+  /**
+   * An admin described what one Bot may do in one app, and the deployment's model chose the app's
+   * actions for it (plugins/grant-translate.ts).
+   *
+   * Nothing changed: the set is a draft until the admin saves it, and the save is its own
+   * `plugin.grants_changed` row. This one answers "who asked for these actions, in what words, and
+   * what came back", including a set that never checked and a request no model was set up to answer.
+   * Target the app; payload `actor`, `bot`, `app`, `text` (the admin's words), `outcome` (`written`,
+   * `did_not_check`, `no_model` or `model_failed`), and when actions came back `grants`, `otherApps`,
+   * `summary`, `explanation`, `warning`, `checked`, `attempts` and, for a set that did not check,
+   * `error`.
+   */
+  "plugin.grants_translated",
+  /**
+   * A change to one Bot's actions on one app, saved together. Each action turned on or off also has
+   * its own `plugin_granted` / `plugin_revoked` row; this one says they were one decision, by whom,
+   * and, when the set was chosen from a description, the sentence. Target the app; payload `actor`,
+   * `app`, `bot`, `added` and `removed` (refs), and `authoring` (`{ source: "english", text }`).
+   */
+  "plugin.grants_changed",
   // Every action a Bot takes on its computer, allowed or refused. Both, always: a trail that records
   // only what was permitted cannot answer whether the Bot tried.
   "computer.action_allowed",
