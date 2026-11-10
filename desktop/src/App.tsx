@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckForUpdates } from "./CheckForUpdates";
 import { CopilotKitAccount } from "./CopilotKitAccount";
+import { EarlyDownloadsLine } from "./EarlyDownloads";
 import { useWindowFitsContent } from "./fitWindow";
 import { DEFAULT_HARNESS, type HarnessChoice } from "./harness";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
@@ -175,6 +176,16 @@ function Setup() {
   const [running, setRunning] = useState(false);
   const visibleSetupStep =
     checkingResume || blockerFailure || blocker || running ? null : step;
+  /*
+   * The first screen starts the big downloads, without a click: the person opened OpenBot's setup
+   * to install it. The native side downloads only what this computer's install will need, once per
+   * run of the app (`early_downloads.rs`).
+   */
+  const onFirstScreen = visibleSetupStep === "welcome";
+  useEffect(() => {
+    if (!onFirstScreen || !root.trim()) return;
+    invoke("start_early_downloads", { root: root.trim() }).catch(() => {});
+  }, [onFirstScreen, root]);
   const lastViewedStep = useRef<SetupStep | null>(null);
   useEffect(() => {
     if (visibleSetupStep === lastViewedStep.current) return;
@@ -812,6 +823,10 @@ function Setup() {
           {goAhead && <PodmanGoAhead asking={goAhead} quiet />}
           {/* Intelligence sets itself up alongside, once the install has Docker answering. */}
           <LocalStatus sequence={local} />
+          {/* The first screen's downloads, until a row of Install's own shows the one it waits on. */}
+          {!steps.some((row) => row.running && row.downloads) && (
+            <EarlyDownloadsLine />
+          )}
           {displayedFailure && <Failure problem={displayedFailure} />}
           {!busy && (
             <div className="row">
@@ -866,6 +881,8 @@ function Setup() {
           engine={engineNow(steps)}
           // Once signed in, the step explains the password prompt Install waits to raise.
           goAhead={goAhead}
+          // The downloads the first screen started, while they still run.
+          downloads={<EarlyDownloadsLine />}
           onDone={(acceptedVersion) => {
             if (acceptedVersion) local.acceptTerms(acceptedVersion);
             // Intelligence sets itself up once the install has Docker answering; see above. The

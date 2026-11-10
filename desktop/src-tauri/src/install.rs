@@ -47,8 +47,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex};
 use std::time::Duration;
 
-use sha2::{Digest, Sha256};
-
 use crate::engine::{self, Engine, StepLine};
 use crate::problem::Problem;
 
@@ -164,38 +162,58 @@ pub fn compose_download() -> Result<Download, Problem> {
 ///
 /// A file already there with the right digest is kept, so a retry after a failed install is not a
 /// second download. A file already there with the wrong one is replaced: that is a half-written
-/// download far more often than it is an attack, and either way it must not be run.
+/// download far more often than it is an attack, and either way it must not be run. The download
+/// itself is the early downloads' (`early_downloads::fetch`): from downloads.copilotkit.ai first,
+/// resumed where an earlier one stopped, and waited for when the first screen already started it.
 fn fetch_verified(download: &Download, into: &Path) -> Result<PathBuf, Problem> {
-    let path = into.join(download.file);
-    if let Ok(existing) = std::fs::read(&path) {
-        if digest_of(&existing) == download.sha256 {
-            return Ok(path);
-        }
-    }
-
-    let body = crate::deployment::get(&download.url).map_err(|error| {
+    fetch_pinned(download, into, &()).map_err(|error| {
         Problem::with(
             "OpenBot could not download the software it needs to run. Check the internet \
              connection and try again.",
             format!("{}: {error}", download.url),
         )
-    })?;
+    })
+}
 
-    let got = digest_of(&body);
-    if got != download.sha256 {
-        return Err(Problem::with(
-            "What OpenBot downloaded is not what it was expecting, so it has not been run. Try \
-             again.",
-            format!(
-                "{} from {}: expected sha256 {}, got {got}",
-                download.file, download.url, download.sha256
-            ),
-        ));
-    }
+fn fetch_pinned(
+    download: &Download,
+    into: &Path,
+    progress: &dyn crate::early_downloads::Progress,
+) -> Result<PathBuf, String> {
+    let pinned = crate::early_downloads::Pinned {
+        name: download.file.to_string(),
+        sha256: download.sha256.to_string(),
+        size: None,
+        sources: crate::deployment::mirrored(&download.url)
+            .into_iter()
+            .chain(std::iter::once(download.url.clone()))
+            .collect(),
+    };
+    crate::early_downloads::fetch(&pinned, into, progress)
+}
 
-    std::fs::create_dir_all(into).map_err(|error| unwritable(into, &error.to_string()))?;
-    std::fs::write(&path, &body).map_err(|error| unwritable(&path, &error.to_string()))?;
-    Ok(path)
+/// Podman's installer for this computer, into `into`, before Install needs it. Never installed here.
+pub fn fetch_podman_installer(
+    into: &Path,
+    progress: &dyn crate::early_downloads::Progress,
+) -> Result<PathBuf, String> {
+    fetch_pinned(
+        &podman_download().map_err(|problem| problem.said)?,
+        into,
+        progress,
+    )
+}
+
+/// Compose for this computer, into `into`, before Install places it.
+pub fn fetch_compose(
+    into: &Path,
+    progress: &dyn crate::early_downloads::Progress,
+) -> Result<PathBuf, String> {
+    fetch_pinned(
+        &compose_download().map_err(|problem| problem.said)?,
+        into,
+        progress,
+    )
 }
 
 /// One sentence for every "could not write here", because the person's fix is the same each time.
@@ -207,7 +225,9 @@ fn unwritable(path: &Path, error: &str) -> Problem {
     )
 }
 
+#[cfg(test)]
 fn digest_of(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     hasher
@@ -474,7 +494,7 @@ impl Found {
 
 /// What the install step does to have an engine answering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Choice {
+pub enum Choice {
     /// Docker answers now.
     UseDocker,
     /// Docker Desktop is installed and stopped, and opening it shows nothing that needs the person.
@@ -518,6 +538,11 @@ fn choose(found: Found, saved: Option<Engine>) -> Choice {
         }
         None => podman,
     }
+}
+
+/// What Install would do for an engine on this computer now. The early downloads fetch what it needs.
+pub fn choice_here(saved: Option<Engine>) -> Choice {
+    choose(Found::here(saved), saved)
 }
 
 fn install_engine_with(
@@ -1191,6 +1216,33 @@ mod tests {
             digest_of(b"abc"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    /// A Podman installer whose download was cut off, by a dropped connection or by quitting the app,
+    /// carries on from the bytes already on disk at the next try, and is checked whole before it is
+    /// kept. Before the early downloads, every try downloaded the whole file again into memory.
+    #[test]
+    fn a_download_cut_off_part_way_carries_on_from_where_it_stopped() {
+        use crate::early_downloads::tests::{file, ranged, whole, Server};
+        let (body, sha256) = file(400_000);
+        let served = body.clone();
+        let server = Server::start(move |request, index| match index {
+            0 => whole(&served, Some(150_000)),
+            _ => ranged(request, &served),
+        });
+        let dir = temp_root("install-resume");
+        let download = Download {
+            url: server.url("/podman-installer-macos-arm64.pkg"),
+            sha256: Box::leak(sha256.into_boxed_str()),
+            file: "podman-installer-macos-arm64.pkg",
+        };
+        let path = fetch_verified(&download, &dir).expect("the installer, carried on");
+        assert_eq!(std::fs::read(&path).unwrap(), body);
+        let seen = server.seen();
+        assert_eq!(seen.len(), 2, "{seen:?}");
+        assert_eq!(seen[1].range.as_deref(), Some("bytes=150000-"), "{seen:?}");
+        assert_eq!(server.sent(), body.len(), "nothing was downloaded twice");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

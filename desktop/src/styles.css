@@ -1406,6 +1406,12 @@ a:hover {
   flex: none;
 }
 
+/* The downloads the first screen started: their line, and its bar under it. */
+.early-downloads .downloads {
+  display: grid;
+  margin-top: 8px;
+}
+
 /* The Status window: one card per part, each with its memory and its actions. */
 .status-part {
   border: 1px solid var(--border);

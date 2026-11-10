@@ -18,8 +18,9 @@ mod zoom;
 mod test_support;
 
 use openbot_desktop_lib::{
-    acquire, app_update, deployment, deployment_release, docker_config, engine, env as openbot_env,
-    harness, host_access, install, local_eval, local_eval_state, logging, preparation,
+    acquire, app_update, deployment, deployment_release, docker_config, early_downloads, engine,
+    env as openbot_env, harness, host_access, install, local_eval, local_eval_state, logging,
+    preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
     telemetry, tray, troubleshooting, upgrade, windows as win,
@@ -543,6 +544,10 @@ fn forget_running_logged() {
         .unwrap_or_else(|held| held.into_inner()) = None;
 }
 
+/// Each running step's latest line, so a download added to its row keeps what the row says.
+static RUNNING_SAID: Mutex<std::collections::BTreeMap<String, engine::StepLine>> =
+    Mutex::new(std::collections::BTreeMap::new());
+
 fn report_running<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     step: &str,
@@ -559,6 +564,10 @@ fn report_running_line<R: tauri::Runtime>(
     line: engine::StepLine,
     download_bytes: Option<u64>,
 ) {
+    RUNNING_SAID
+        .lock()
+        .unwrap_or_else(|held| held.into_inner())
+        .insert(step.to_owned(), line.clone());
     let engine::StepLine {
         said: detail,
         elsewhere,
@@ -641,6 +650,34 @@ fn allow_podman_install() -> bool {
 
 /// Install's running image downloads: the step's sentence, the overall bytes as `downloadBytes`
 /// for anything that reads only that, and the per-image detail.
+/// A running step's download, on the row it is already showing: the engine machine image while
+/// Install waits for it. The row keeps its line; only the download is added.
+fn report_running_downloads<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    step: &str,
+    downloads: pull_metrics::Downloads,
+) {
+    let line = RUNNING_SAID
+        .lock()
+        .unwrap_or_else(|held| held.into_inner())
+        .get(step)
+        .cloned()
+        .unwrap_or_else(|| engine::StepLine::here(""));
+    let _ = app.emit(
+        "setup:progress",
+        Progress {
+            step: step.into(),
+            ok: true,
+            detail: line.said,
+            running: true,
+            download_bytes: (downloads.bytes > 0).then_some(downloads.bytes),
+            downloads: Some(downloads),
+            elsewhere: line.elsewhere,
+            asks: line.asks,
+        },
+    );
+}
+
 fn report_downloads<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     downloads: pull_metrics::Downloads,
@@ -1681,6 +1718,30 @@ async fn prepare_engine(app: tauri::AppHandle) -> Result<engine::EngineStatus, P
     Ok(engine::detect_saved(Some(ready?.engine)))
 }
 
+/// The first setup screen is showing: start the big downloads now, before Install is clicked, for
+/// the installation in `root`. Once per run of the app. See `early_downloads`.
+#[tauri::command]
+fn start_early_downloads(app: tauri::AppHandle, root: String) {
+    let telemetry_app = app.clone();
+    early_downloads::start(
+        stack::root_from(&root),
+        early_downloads::Hooks {
+            said: Box::new(move |summary| {
+                let _ = app.emit("setup:downloads", summary);
+            }),
+            pulled: Box::new(move |metrics| {
+                desktop_telemetry::pull_completed(&telemetry_app, metrics)
+            }),
+        },
+    );
+}
+
+/// Where the early downloads are now, for a window that opens after they started.
+#[tauri::command]
+fn early_downloads_now() -> early_downloads::Summary {
+    early_downloads::summary()
+}
+
 /// Complete all local software acquisition before either authentication screen is available.
 #[tauri::command]
 async fn prepare_installation(
@@ -1781,6 +1842,9 @@ async fn prepare_installation_inner(
             "Checking which local software to download.",
             None,
         );
+        // The first screen may have started pulling these already: wait for it, showing its
+        // download, and the pulls below find them there.
+        early_downloads::wait_for_images(|downloads| report_downloads(&handle, downloads.clone()));
         // Only what this installation runs: see `installation_pull_set`.
         let images = preparation::installation_pull_set(&address, &root, &root, harness.as_ref())?;
         // Several pulls run at once. Stop is checked before each pull starts; running pulls finish.
@@ -2017,7 +2081,24 @@ async fn engine_ready(
         },
         None,
     );
-    let created = acquire::create_machine(4, 6144, 60);
+    // The machine image the first screen started downloading: waited for with its download shown
+    // on this row, and the machine built from it. Without one, Podman pulls its own. On a blocking
+    // thread, as the deployment's download is: a blocking HTTP client must not be dropped here.
+    let progress_app = app.clone();
+    let image = tauri::async_runtime::spawn_blocking(move || {
+        early_downloads::machine_image_for_init(|downloads| {
+            report_running_downloads(&progress_app, "create-machine", downloads)
+        })
+    })
+    .await
+    .unwrap_or_else(|error| {
+        log::warn!("[early downloads] the machine image wait did not run: {error}");
+        None
+    });
+    let created = acquire::create_machine(4, 6144, 60, image.as_deref());
+    if created.ok && image.is_some() {
+        early_downloads::forget_machine_image();
+    }
     if cfg!(target_os = "windows") {
         bring_to_front(app, "the engine machine is prepared");
     }
@@ -2121,6 +2202,8 @@ async fn deployment_ready<R: tauri::Runtime>(
     let target = root.to_path_buf();
     let handle = app.clone();
     let version = tauri::async_runtime::spawn_blocking(move || {
+        // The first screen may be laying the same deployment out: one at a time.
+        let _laying_out = early_downloads::hold_deployment();
         let version = deployment_release::resolve_version(&target)?;
         if deployment::needs_fetch(&target, &version) {
             report_running(
@@ -8757,6 +8840,8 @@ fn main() {
         .plugin(outside_links_guard())
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
+            start_early_downloads,
+            early_downloads_now,
             record_setup_event,
             bring_setup_to_front,
             allow_podman_install,

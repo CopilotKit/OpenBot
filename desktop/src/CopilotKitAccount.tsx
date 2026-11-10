@@ -85,6 +85,7 @@ export function CopilotKitAccount({
   handOff = null,
   engine = null,
   goAhead = null,
+  downloads = null,
 }: {
   /** The installation folder the apps are connected for. */
   root: string;
@@ -105,6 +106,8 @@ export function CopilotKitAccount({
    * offers Continue.
    */
   goAhead?: string | null;
+  /** The downloads the first screen started, while they still run behind this step. */
+  downloads?: ReactNode;
   /** Signed in and agreed: the version accepted here, or null when nothing needed accepting. */
   onDone: (acceptedVersion: string | null) => void;
   /** A failure from setup itself, shown inside this card rather than under it. */
@@ -391,6 +394,7 @@ export function CopilotKitAccount({
       {seen.at === "failed" && (
         <p className="footnote inline-error">{seen.said}</p>
       )}
+      {downloads}
       {failure}
 
       <div className="row">

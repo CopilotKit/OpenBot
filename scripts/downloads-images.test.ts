@@ -268,6 +268,8 @@ test("a release's images are copied under the registry's paths, byte for byte an
   const pgvector = push(fake, "pgvector/pgvector", "pg17", "docker.io");
   const busybox = push(fake, "library/busybox", "1.37", "docker.io");
   const k3s = push(fake, "rancher/k3s", "v1.32.5-k3s1", "docker.io");
+  // quay.io's: the engine machine image the app downloads before Install, named by digest.
+  const machineOs = push(fake, "podman/machine-os", "6.1", "quay.io");
   const list = {
     openbot: "v0.3.4",
     intelligence: "0.16.0-rc.9",
@@ -277,7 +279,8 @@ test("a release's images are copied under the registry's paths, byte for byte an
       "ghcr.io/copilotkit/intelligence/app-api:0.16.0-rc.9",
       `ghcr.io/copilotkit/openbot-server@${server.digest}`,
       "pgvector/pgvector:pg17",
-      "quay.io/someone/else:1",
+      `quay.io/podman/machine-os@${machineOs.digest}`,
+      "mcr.microsoft.com/someone/else:1",
     ],
   };
   // Every image the release pins is copied, listed in desktop-images.json or not.
@@ -312,7 +315,7 @@ test("a release's images are copied under the registry's paths, byte for byte an
   // Each image's top manifest, every manifest its index names and the referrers of each are asked
   // for through the address before the run succeeds.
   expect(first.out).toContain(
-    `All 6 images for v0.3.4 answer through ${edge.url}, every manifest and referrers object included.`,
+    `All 7 images for v0.3.4 answer through ${edge.url}, every manifest and referrers object included.`,
   );
   expect(edge.requests).toContain(
     `GET v2/copilotkit/openbot-supervisor/manifests/${supervisor.digest}`,
@@ -349,6 +352,8 @@ test("a release's images are copied under the registry's paths, byte for byte an
     ...manifests("docker.io/library/busybox", busybox),
     "v2/docker.io/library/busybox/manifests/1.37",
     ...manifests("docker.io/rancher/k3s", k3s),
+    // quay.io's under quay.io/.
+    ...manifests("quay.io/podman/machine-os", machineOs),
     // Named only by container-images.json.
     ...manifests("copilotkit/openbot-supervisor", supervisor),
   ]) {
@@ -372,18 +377,18 @@ test("a release's images are copied under the registry's paths, byte for byte an
     cacheControl: TAG,
     sha256: true,
   });
-  // Six images, each an index and four manifests (three platforms and an attestation), and three
+  // Seven images, each an index and four manifests (three platforms and an attestation), and three
   // tags; a referrers object for each manifest.
   expect(
     Object.keys(bucket).filter((key) => key.includes("/manifests/")),
-  ).toHaveLength(33);
+  ).toHaveLength(38);
   expect(
     Object.keys(bucket).filter((key) => key.includes("/referrers/")),
-  ).toHaveLength(30);
+  ).toHaveLength(35);
   // A config and two layers for each of the four manifests, an image.
   expect(
     Object.keys(bucket).filter((key) => key.includes("/blobs/")),
-  ).toHaveLength(72);
+  ).toHaveLength(84);
   expect(bucket["v2/"]).toEqual({
     content: "{}",
     contentType: "application/json",
@@ -441,12 +446,12 @@ test("a release's images are copied under the registry's paths, byte for byte an
   expect(
     bucket["tools/compose/v5.5.1/docker-compose-darwin-aarch64"]?.content,
   ).toBe("compose arm64");
-  // Only ghcr.io and Docker Hub are copied.
+  // Only ghcr.io, Docker Hub and quay.io are copied.
   expect(
-    fake.calls().some((call) => call.startsWith("crane") && /quay/.test(call)),
+    fake.calls().some((call) => call.startsWith("crane") && /mcr/.test(call)),
   ).toBe(false);
   expect(first.out).toContain(
-    "quay.io/someone/else:1 is not on ghcr.io or Docker Hub; it is left to its own registry.",
+    "mcr.microsoft.com/someone/else:1 is not on ghcr.io, Docker Hub or quay.io; it is left to its own registry.",
   );
   // The tags and the ping are invalidated together, after the last upload, and every new object
   // fetched once through the address.
@@ -531,7 +536,7 @@ test("a release's images are copied under the registry's paths, byte for byte an
   const refused = await run(fake, env);
   expect(refused.code).toBe(1);
   expect(refused.out).toContain(
-    `::error::1 of the objects for the 6 images for v0.3.4 do not answer through ${edge.url}: ${edge.url}/${stale} (403)`,
+    `::error::1 of the objects for the 7 images for v0.3.4 do not answer through ${edge.url}: ${edge.url}/${stale} (403)`,
   );
   // The check alone, as a person runs it after a release: no AWS, no registry.
   const checked = (bucketless: Record<string, string>) =>
@@ -550,7 +555,7 @@ test("a release's images are copied under the registry's paths, byte for byte an
   const whole = await checked({});
   expect(whole.code).toBe(0);
   expect(whole.out).toContain(
-    `All 6 images for v0.3.4 answer through ${edge.url}, every manifest and referrers object included.`,
+    `All 7 images for v0.3.4 answer through ${edge.url}, every manifest and referrers object included.`,
   );
   expect(fake.calls().filter((call) => /^(aws|crane) /.test(call)).length).toBe(
     awsBefore,
