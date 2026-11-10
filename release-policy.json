@@ -1,12 +1,13 @@
 {
   "$schema": "./shared/release-policy.schema.json",
-  "version": "v1.0.1",
+  "version": "v1.0.2",
   "compatibility": {
     "launcherApi": 1,
     "configSchema": 1,
     "extensionApi": 1,
     "database": {
       "from": [
+        "0088_approval_reviewer_guidance",
         "0085_approval_rule_account",
         "0083_learning_skill_approvals",
         "0082_routine_goal",
@@ -19,6 +20,7 @@
   },
   "upgrade": {
     "fromVersions": [
+      "v1.0.1",
       "v1.0.0",
       "v0.3.4",
       "v0.3.3",
