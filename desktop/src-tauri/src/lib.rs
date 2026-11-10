@@ -41,6 +41,7 @@ pub mod saved_intent;
 pub mod shell_updates;
 pub mod speech;
 pub mod stack;
+pub mod stall;
 pub mod telemetry;
 pub mod tray;
 pub mod troubleshooting;

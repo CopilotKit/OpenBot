@@ -888,6 +888,22 @@ pub enum EventData {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cli_failure: Option<CliFailure>,
     },
+    /// A setup, start or update step running far past the time it typically takes (`stall`):
+    /// three times as long, and two minutes over at least. Said once per step. A step that then
+    /// finishes says nothing more; one that fails is a `setup_failed`.
+    SetupStalled {
+        part: StallPart,
+        step: StallStep,
+        typical_seconds: u64,
+        elapsed_seconds: u64,
+    },
+    /// The setup window stopped taking what the desktop sent it for over 30 seconds while it was
+    /// on screen (`stall::UiWatch`): for how long, and the part of setup under way, by the setup
+    /// rows' names. Said once, when the window answers again or at quit.
+    UiStalled {
+        step: FailingStep,
+        stalled_seconds: u64,
+    },
 }
 
 impl EventData {
@@ -904,7 +920,70 @@ impl EventData {
             Self::Activated => "oss.desktop.activated",
             Self::SetupAbandoned { .. } => "oss.desktop.setup_abandoned",
             Self::SignIn { .. } => "oss.desktop.sign_in",
+            Self::SetupStalled { .. } => "oss.desktop.setup_stalled",
+            Self::UiStalled { .. } => "oss.desktop.ui_stalled",
         }
+    }
+}
+
+/// Which journey a stalled step is part of: the back end's first setup (`local setup`), its update
+/// (`local update`), OpenBot's own start, or OpenBot updating itself.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StallPart {
+    Setup,
+    Update,
+    Start,
+    Release,
+}
+
+impl StallPart {
+    pub const ALL: [StallPart; 4] = [Self::Setup, Self::Update, Self::Start, Self::Release];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Setup => "setup",
+            Self::Update => "update",
+            Self::Start => "start",
+            Self::Release => "release",
+        }
+    }
+}
+
+/// A timed step of a journey, by name: one of the closed set `stall::step_names` lists, from the
+/// journeys' measured timings. Anything else is refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StallStep(&'static str);
+
+impl StallStep {
+    pub fn named(name: &str) -> Option<Self> {
+        crate::stall::step_names()
+            .iter()
+            .copied()
+            .find(|known| *known == name)
+            .map(Self)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl Serialize for StallStep {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for StallStep {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let name = String::deserialize(deserializer)?;
+        Self::named(&name).ok_or_else(|| serde::de::Error::custom("unknown stall step"))
     }
 }
 
@@ -1355,6 +1434,16 @@ pub fn schema_json() -> serde_json::Value {
                 "outcome": ["started", "completed", "failed", "cancelled", "restored"],
                 "duration_ms": "option_u64",
                 "cli_failure": CLI_FAILURES
+            },
+            "setup_stalled": {
+                "part": StallPart::ALL.map(StallPart::as_str),
+                "step": crate::stall::step_names(),
+                "typical_seconds": "u64",
+                "elapsed_seconds": "u64"
+            },
+            "ui_stalled": {
+                "step": FAILING_STEPS,
+                "stalled_seconds": "u64"
             }
         }
     })
@@ -1923,7 +2012,55 @@ mod tests {
                 duration_ms: Some(12),
                 cli_failure: Some(CliFailure::Cancelled),
             },
+            EventData::SetupStalled {
+                part: StallPart::Update,
+                step: StallStep::named("update_quiesce_wait").unwrap(),
+                typical_seconds: 31,
+                elapsed_seconds: 160,
+            },
+            EventData::UiStalled {
+                step: FailingStep::CreateMachine,
+                stalled_seconds: 42,
+            },
         ]
+    }
+
+    /// The two stall events carry closed values and numbers only: a step that is not one of the
+    /// journeys' timed steps, any text, or any other property is refused.
+    #[test]
+    fn stall_events_round_trip_and_refuse_anything_open() {
+        let stalled = serde_json::json!({
+            "kind": "setup_stalled",
+            "part": "setup",
+            "step": "dependencies_wait",
+            "typical_seconds": 27,
+            "elapsed_seconds": 148
+        });
+        let event = serde_json::from_value::<EventData>(stalled.clone()).unwrap();
+        assert_eq!(event.event_name(), "oss.desktop.setup_stalled");
+        assert_eq!(serde_json::to_value(event).unwrap(), stalled);
+        let window = serde_json::json!({
+            "kind": "ui_stalled",
+            "step": "create_machine",
+            "stalled_seconds": 42
+        });
+        let event = serde_json::from_value::<EventData>(window.clone()).unwrap();
+        assert_eq!(event.event_name(), "oss.desktop.ui_stalled");
+        assert_eq!(serde_json::to_value(event).unwrap(), window);
+        for (base, path, value) in [
+            (&stalled, "step", serde_json::json!("Waiting for databases")),
+            (&stalled, "step", serde_json::json!("image_download")),
+            (&stalled, "part", serde_json::json!("quit")),
+            (&stalled, "typical_seconds", serde_json::json!("27")),
+            (&stalled, "detail", serde_json::json!("/Users/someone")),
+            (&window, "step", serde_json::json!("the engine machine")),
+            (&window, "stalled_seconds", serde_json::json!(-1)),
+            (&window, "url", serde_json::json!("tauri://localhost")),
+        ] {
+            let mut open = base.clone();
+            open[path] = value;
+            assert!(serde_json::from_value::<EventData>(open).is_err(), "{path}");
+        }
     }
 
     fn assert_string_values_are_listed(value: &serde_json::Value, schema: &serde_json::Value) {

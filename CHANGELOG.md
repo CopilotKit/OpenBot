@@ -99,6 +99,15 @@ backup taken before the upgrade instead. Three things change for an existing dep
   Account step's sign-in sends when it starts and whether it completed, failed or was cancelled.
   The app version keeps a release candidate's label (`1.0.0-rc.5`, not `1.0.0`). Only closed values
   and numbers are sent, and nothing at all when usage data is off.
+- **Usage data also says when setup looks stuck, or its window stops answering.** A hang is not a
+  failure, so `setup_failed` never said it. A step of the back end's setup or update, OpenBot's own
+  start, or OpenBot updating itself that runs three times as long as it usually takes, and two
+  minutes over at least, now sends one `setup_stalled` with the step, its usual time and how long it
+  has run. A setup window that stops taking what OpenBot sends it for over 30 seconds while it is on
+  screen (as one did on Windows until a click or Alt+Tab) sends one `ui_stalled` with how long it
+  lasted, and the Desktop log says `[ui] the window stopped answering for 42s during
+  start_machine`. Minimised, hidden or covered windows never count. Step names and seconds only,
+  and nothing at all when usage data is off.
 - **Sign-in comes first, and macOS asks for your password only after OpenBot says why.** On a new
   Mac the Account step waited for Install to put Podman in before any browser sign-in opened, and
   the "osascript wants to make changes" password box came up by itself over it. The CopilotKit

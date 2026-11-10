@@ -3731,7 +3731,7 @@ fn run_attempt(
 ) -> Result<Report, Failure> {
     one_at_a_time(&attempt.0, limits, |remaining| {
         // Its turn: the CLI's log from here on is this call's (`Trail`).
-        let _trail = Trail::begin(id);
+        let _trail = Trail::begin(id, action.into());
         let cli = installed()?;
         run_with(
             &cli,
@@ -4146,7 +4146,7 @@ pub fn setup_installed(
     let attempt = Attempt::register(attempt);
     one_at_a_time(&attempt.0, Limits::for_setup(), |remaining| {
         // Its turn: the CLI's log from here on is this setup's (`Trail`).
-        let _trail = Trail::begin(id);
+        let _trail = Trail::begin(id, TrailKind::Setup);
         let cli = installed()?;
         let set_up = || {
             setup_with(
@@ -4650,9 +4650,30 @@ struct Trail(String);
 
 struct Followed {
     attempt: String,
+    kind: TrailKind,
     log: crate::local_update::StepLog,
     ended: Vec<String>,
     since: Instant,
+}
+
+/// Which CLI call a trail follows, for the journey its steps belong to (`stall`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrailKind {
+    /// `local setup`.
+    Setup,
+    /// `local update`.
+    Update,
+    /// Any other call: `local start`, `stop` or `status`.
+    Other,
+}
+
+impl From<Action> for TrailKind {
+    fn from(action: Action) -> Self {
+        match action {
+            Action::Update => TrailKind::Update,
+            Action::Status | Action::Start | Action::Stop => TrailKind::Other,
+        }
+    }
 }
 
 static TRAILS: std::sync::Mutex<Vec<Followed>> = std::sync::Mutex::new(Vec::new());
@@ -4664,12 +4685,13 @@ fn trails() -> std::sync::MutexGuard<'static, Vec<Followed>> {
 }
 
 impl Trail {
-    fn begin(attempt: &str) -> Self {
+    fn begin(attempt: &str, kind: TrailKind) -> Self {
         if let Some(path) = crate::local_update::cli_log() {
             let mut held = trails();
             held.retain(|followed| followed.attempt != attempt);
             held.push(Followed {
                 attempt: attempt.to_owned(),
+                kind,
                 log: crate::local_update::StepLog::at_end_of(path),
                 ended: Vec::new(),
                 since: Instant::now(),
@@ -4700,14 +4722,46 @@ pub fn steps(attempt: &str) -> Option<Steps> {
     let followed = held
         .iter_mut()
         .find(|followed| followed.attempt == attempt)?;
-    let ended = followed.log.poll();
-    if !ended.is_empty() {
-        followed.since = Instant::now();
-        followed.ended.extend(ended);
-    }
+    followed.catch_up();
     Some(Steps {
         ended: followed.ended.clone(),
         quiet_seconds: followed.since.elapsed().as_secs(),
+    })
+}
+
+impl Followed {
+    /// Read the steps logged since the last look.
+    fn catch_up(&mut self) {
+        let ended = self.log.poll();
+        if !ended.is_empty() {
+            self.since = Instant::now();
+            self.ended.extend(ended);
+        }
+    }
+}
+
+/// The setup or update running now, as `stall` times its steps: its attempt, the steps it has
+/// finished, and when the last of them ended (or the call began).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrailNow {
+    pub kind: TrailKind,
+    pub attempt: String,
+    pub ended: Vec<String>,
+    pub since: Instant,
+}
+
+/// The `local setup` or `local update` running now, if one is.
+pub fn trail_now() -> Option<TrailNow> {
+    let mut held = trails();
+    let followed = held
+        .iter_mut()
+        .find(|followed| followed.kind != TrailKind::Other)?;
+    followed.catch_up();
+    Some(TrailNow {
+        kind: followed.kind,
+        attempt: followed.attempt.clone(),
+        ended: followed.ended.clone(),
+        since: followed.since,
     })
 }
 
