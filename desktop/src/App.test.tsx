@@ -285,6 +285,68 @@ test("installation shows its active stage immediately, with its time so far", as
   );
 });
 
+/*
+ * The rest of OpenBot downloads alongside OpenBot's own download, once the software OpenBot runs on
+ * answers. On a live Windows run the Install step showed both at once, "Downloading OpenBot ·
+ * Step 2 of 4" and "Downloading the rest of OpenBot · Step 3 of 4", each with its spinner, which
+ * read as two steps at the same time. The step says one step at a time: the third once the
+ * second is done, with as much of its download as has come in meanwhile.
+ */
+test("the Install step shows one step in progress at a time while both downloads run", async () => {
+  setupRootConfiguration("/tmp/one-step", async () => emptyConfiguration());
+  const preparation = deferred<void>();
+  withLocalCli({
+    prepare_installation: () => preparation.promise,
+    set_up_local_eval: () => new Promise(() => {}),
+    local_eval_download: () => ({ done: 400_000_000, total: 1_600_000_000 }),
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByRole("heading", { name: "Installing OpenBot" });
+  await emitProgress({
+    step: "engine",
+    ok: true,
+    running: false,
+    detail: "The software OpenBot runs on is ready.",
+  });
+  await emitProgress({
+    step: "images",
+    ok: true,
+    running: true,
+    detail: "Downloading local software.",
+    downloads: {
+      done: 1,
+      total: 5,
+      bytes: 1_200_000_000,
+      size: 3_400_000_000,
+      bytesPerSecond: 9_000_000,
+    },
+  });
+  // The rest of OpenBot is downloading too, and the window has heard how far it has got.
+  await waitFor(() =>
+    expect(
+      invokeCalls.some((call) => call.command === "local_eval_download"),
+    ).toBe(true),
+  );
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
+  const inProgress = () =>
+    [...view.container.querySelectorAll(".step")]
+      .filter((row) => row.querySelector(".mark.active"))
+      .map(
+        (row) =>
+          `${row.getAttribute("aria-label")} | ${row.querySelector(".step-status")?.textContent?.replace(/ · [\dms ]+ elapsed$/, "")}`,
+      );
+  expect(inProgress()).toEqual(["Downloading OpenBot | Step 2 of 4"]);
+  expect(view.container.textContent).not.toContain("Step 3 of 4");
+  // Step 2 done: the third step is the one in progress, its download as far as it has got.
+  await act(async () => preparation.resolve());
+  await view.findByRole("heading", { name: "Connect your AI" });
+  expect(inProgress()).toEqual([
+    "Installing OpenBot in the background | Step 3 of 4",
+  ]);
+  expect(view.container.textContent).toContain("400.0 MB of 1.6 GB");
+});
+
 test("installation failure stops active indicators and retry begins fresh", async () => {
   const { view, preparation, retry } = await beginPendingInstallation();
   await emitProgress({

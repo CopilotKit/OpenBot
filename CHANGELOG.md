@@ -30,6 +30,15 @@ backup taken before the upgrade instead. Three things change for an existing dep
 
 ### OpenBot Desktop
 
+- **The Status window and the Install step say what's running in plain words.** The Status window,
+  opened from the menu bar or the system tray, said "Back end", "Container engine", "Podman" and
+  the build's commit and time. It now names each part by what it does: App, OpenBot's services, and
+  Software OpenBot runs on, with "App and Bots" for what was "Front end and Bots". It shows the
+  version on its own, and the engine, the build and Docker's container names stay in Copy
+  diagnostics and the logs. Settings > This computer lists its parts with the same names. On the
+  Install step, the rest of OpenBot downloads alongside OpenBot's own download, and both said they
+  were in progress at once ("Step 2 of 4" and "Step 3 of 4"). The step now shows one step at a
+  time: the rest of OpenBot is step 3, shown once step 2 is done, as far along as it got meanwhile.
 - **Setup says what it's doing in plain words, and what's installing behind every step.** The
   setup window said "Preparing the engine machine", "Installing Podman", "Waiting for the back end"
   and "Updating the back end to 0.16.0-rc.10", and a tester waiting on the first step couldn't tell

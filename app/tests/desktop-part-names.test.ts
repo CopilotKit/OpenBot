@@ -8,7 +8,7 @@ import { partLabel as statusWindowLabel } from "../../desktop/src/partNames";
  * each is. The two screens keep a copy each, so both are held to this one table.
  */
 const NAMES: [string, "bots" | "back-end", string][] = [
-  ["openbot-desktop-server-1", "bots", "Front end and Bots"],
+  ["openbot-desktop-server-1", "bots", "App and Bots"],
   ["openbot-desktop-worker-1", "bots", "Background jobs"],
   ["openbot-desktop-postgres-1", "bots", "Database"],
   ["openbot-desktop-migrate-1", "bots", "Database setup"],
@@ -28,10 +28,10 @@ const NAMES: [string, "bots" | "back-end", string][] = [
   ["k3d-local-e0cf90debea88453ad454b93-tools", "back-end", "Setup helper"],
 ];
 
-/** Containers the table doesn't know: each still says which side of OpenBot it's on. */
+/** Containers the table doesn't know: the card each is listed under says which side it's on. */
 const UNKNOWN: [string, "bots" | "back-end", string][] = [
   ["something-new-1", "bots", "OpenBot service"],
-  ["k3d-local-abc123-serverlb", "back-end", "Back-end service"],
+  ["k3d-local-abc123-serverlb", "back-end", "OpenBot service"],
 ];
 
 test.each([...NAMES, ...UNKNOWN])(
@@ -53,7 +53,9 @@ test("every container OpenBot and its back end run has its own name", () => {
 test("no name a person reads is Docker's or Intelligence's", () => {
   for (const [name, group] of [...NAMES, ...UNKNOWN]) {
     const label = partLabel(name, group);
-    expect(label).not.toMatch(/openbot-|k3d|cpki|Intelligence|Other part/);
+    expect(label).not.toMatch(
+      /openbot-|k3d|cpki|Intelligence|Other part|back[ -]?end|front[ -]?end/i,
+    );
     expect(label).not.toBe(name);
   }
 });
