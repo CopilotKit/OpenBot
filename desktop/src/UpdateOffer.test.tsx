@@ -92,6 +92,33 @@ test("a newer version is offered with both versions named", async () => {
   expect(view.container.textContent).toContain("You are running 0.3.1");
 });
 
+test("while the new version downloads in the background it says how far, then that it is ready", async () => {
+  offer = {
+    ...available(),
+    ready: { state: "preparing", done: 600, total: 1000 },
+  };
+  const view = render(<UpdateOffer />);
+  expect(
+    await view.findByRole("heading", { name: "OpenBot 0.3.2 is available" }),
+  ).toBeTruthy();
+  expect(view.container.textContent).toContain(
+    "You are running 0.3.1. OpenBot is downloading it in the background (60%). You can keep working.",
+  );
+  // Nothing waits for it.
+  expect(view.getByRole("button", { name: "Update and restart" })).toBeTruthy();
+  offer = { ...available(), ready: { state: "ready" } };
+  expect(
+    await view.findByRole(
+      "heading",
+      { name: "OpenBot 0.3.2 is ready to install" },
+      { timeout: 7_000 },
+    ),
+  ).toBeTruthy();
+  expect(view.container.textContent).toContain(
+    "You are running 0.3.1. Installing it takes a few minutes and restarts OpenBot.",
+  );
+}, 10_000);
+
 test("installing asks the shell, and shows the shell's progress until it restarts", async () => {
   offer = available();
   const view = render(<UpdateOffer />);

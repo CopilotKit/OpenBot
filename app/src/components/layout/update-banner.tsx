@@ -1,3 +1,4 @@
+import { updateOffered } from "@openbot/shared/desktop-updates";
 import { IconX } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,8 @@ import { queryClient } from "@/query-client";
 
 /**
  * A slim bar saying a newer OpenBot Desktop is out, with Update and restart, until this person
- * closes it.
+ * closes it. It says how ready the new version is: downloading in the background while this one
+ * keeps running, then ready to install in a few minutes. Update and restart works at any point.
  *
  * Only inside OpenBot Desktop. The desktop app reads its update feed and this asks the app, so a
  * browser on a self-hosted OpenBot draws nothing and asks nothing. Closing it lasts until a newer
@@ -37,7 +39,9 @@ export function UpdateBanner() {
       aria-label="OpenBot update"
       className="flex shrink-0 flex-wrap items-center gap-x-2 border-b border-border bg-muted/60 px-4 py-1.5 text-sm"
     >
-      <p className="text-foreground">OpenBot {version} is available.</p>
+      <p className="text-foreground">
+        {updateOffered(version, offer.data?.ready)}
+      </p>
       {busy ? (
         <p className="text-muted-foreground" role="status">
           {describe(progress)}
