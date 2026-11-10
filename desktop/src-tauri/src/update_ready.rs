@@ -92,6 +92,16 @@ pub fn read_list(body: &[u8], version: &Version) -> Result<Announced, String> {
     Ok(list)
 }
 
+/// A test feed's list (`app_update::TEST_FEED`): its folder's `desktop-images.json`, for whichever
+/// build it was made from. An internal build's names its commit's images, not a release tag.
+pub fn read_test_list(folder: &std::path::Path) -> Result<Announced, String> {
+    let file = folder.join(LIST);
+    let body = std::fs::read(&file)
+        .map_err(|error| format!("could not read {}: {error}", file.display()))?;
+    serde_json::from_slice(&body)
+        .map_err(|error| format!("{} is not readable: {error}", file.display()))
+}
+
 /// An image's registry and repository, as an engine reads its name.
 fn repository(image: &str) -> Option<(String, String)> {
     let reference = crate::registry::parse_reference(image)?;

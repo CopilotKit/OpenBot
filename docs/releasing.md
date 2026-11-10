@@ -213,6 +213,14 @@ start an OpenBot of your own (server and app), and run the binary with
 its own OpenBot. Give the run its own `HOME` as well, so nothing it does can reach an installed
 OpenBot in `~/OpenBot`. Release builds never read the variable.
 
+To try the background download of an update (`desktop/src-tauri/src/update_ready.rs`) on a test
+machine, start an **internal** build with `OPENBOT_TEST_UPDATE_FEED` set to a folder holding a
+`latest.json` (only its `version` is read) and the `desktop-images.json` of the build it names. The
+build reads that folder as its update feed: it logs `[update ready] using a test feed from <folder>`,
+offers the version, and downloads its images in the background. It installs nothing, since an
+internal build has no updater: install the next build by hand. A stable or candidate build never
+reads the variable.
+
 After it attaches `latest.json`, and marks the release Latest when it should (see below), the
 signing workflow fetches the GitHub address the way the app does, following redirects, and fails
 unless the answer is JSON whose `version` is the release version and which lists `darwin-aarch64`,

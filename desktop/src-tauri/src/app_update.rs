@@ -51,6 +51,57 @@ pub fn offered_against(version: &Version, pinned: bool) -> Option<Version> {
     (!pinned && version.pre.is_empty()).then(|| version.clone())
 }
 
+/**
+The variable that points an internal build at a test feed, so the background download of an update
+(`update_ready`) can be tried on a test machine before any release names one: a folder holding a
+`latest.json`, of which only `version` is read, and that version's `desktop-images.json`.
+
+Only an internal build reads it (`internal`). A stable or candidate build never does, whatever its
+environment says. It installs nothing: an internal build has no updater, so Update and restart
+refuses, and the next build is installed by hand.
+*/
+pub const TEST_FEED: &str = "OPENBOT_TEST_UPDATE_FEED";
+
+/// An internal build: `X.Y.Z-internal.<commits>.g<commit>`, or `X.Y.Z-rc.N.internal.…` when it was
+/// built after a candidate.
+pub fn internal(version: &Version) -> bool {
+    version
+        .pre
+        .as_str()
+        .split('.')
+        .any(|part| part == "internal")
+}
+
+/// The test feed folder `TEST_FEED` names, read through `var`, for an internal build only. None for
+/// a stable or candidate build, and when it is not set.
+pub fn test_feed(
+    version: &Version,
+    var: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> Option<std::path::PathBuf> {
+    if !internal(version) {
+        return None;
+    }
+    let folder = std::path::PathBuf::from(var(TEST_FEED)?);
+    (!folder.as_os_str().is_empty()).then_some(folder)
+}
+
+/// What a test feed in `folder` offers `current`: the version its `latest.json` names, when it is
+/// newer by its whole version, so a later internal build is newer than an earlier one.
+pub fn test_newer(current: &Version, folder: &Path) -> Result<Option<Version>, String> {
+    let file = folder.join("latest.json");
+    let text = std::fs::read(&file)
+        .map_err(|error| format!("could not read {}: {error}", file.display()))?;
+    let feed: Value = serde_json::from_slice(&text)
+        .map_err(|error| format!("{} is not JSON: {error}", file.display()))?;
+    let named = feed
+        .get("version")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("{} names no version", file.display()))?;
+    let version = Version::parse(named.strip_prefix('v').unwrap_or(named))
+        .map_err(|error| format!("{named:?} in {} is not a version: {error}", file.display()))?;
+    Ok((version > *current).then_some(version))
+}
+
 /// The feed's addresses, in the updater's order, from its `plugins.updater` block. `None` when the
 /// build has no updater, since nothing could install what a banner offered.
 ///
@@ -973,6 +1024,63 @@ mod tests {
         assert_eq!(status(&known, &v("0.3.1"), None, true).ready, None);
         known.not_ready();
         assert_eq!(known.readiness(&v("0.3.2")), None);
+    }
+
+    /// The test feed is for internal builds only: a stable or candidate build never reads it,
+    /// whatever its environment says, and an internal build reads it only when it is set.
+    #[test]
+    fn only_an_internal_build_reads_the_test_feed() {
+        let set = |name: &str| (name == TEST_FEED).then(|| "C:\\OpenBotTestFeed".into());
+        for build in ["1.0.1", "1.0.0", "1.0.1-rc.2", "1.0.1-beta.1"] {
+            assert_eq!(test_feed(&v(build), set), None, "{build}");
+        }
+        for build in [
+            "1.0.1-internal.731.gabc123456789",
+            "1.0.1-rc.2.internal.731.gabc123456789",
+        ] {
+            assert_eq!(
+                test_feed(&v(build), set),
+                Some(std::path::PathBuf::from("C:\\OpenBotTestFeed")),
+                "{build}"
+            );
+        }
+        let internal = v("1.0.1-internal.731.gabc123456789");
+        assert_eq!(test_feed(&internal, |_| None), None);
+        assert_eq!(test_feed(&internal, |_| Some("".into())), None);
+    }
+
+    /// A test feed offers the build its `latest.json` names when it is a later build, by the
+    /// commit count an internal version carries, and says what is wrong with one it cannot read.
+    #[test]
+    fn a_test_feed_offers_a_later_internal_build() {
+        let folder = crate::test_support::temp_root("app-update-test-feed");
+        std::fs::create_dir_all(&folder).unwrap();
+        let running = v("1.0.1-internal.731.gabc123456789");
+        assert!(test_newer(&running, &folder)
+            .unwrap_err()
+            .contains("could not read"));
+        std::fs::write(
+            folder.join("latest.json"),
+            r#"{"version": "1.0.1-internal.735.gdef123456789"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            test_newer(&running, &folder),
+            Ok(Some(v("1.0.1-internal.735.gdef123456789")))
+        );
+        assert_eq!(
+            test_newer(&v("1.0.1-internal.735.gdef123456789"), &folder),
+            Ok(None)
+        );
+        assert_eq!(
+            test_newer(&v("1.0.1-internal.740.g0123456789ab"), &folder),
+            Ok(None)
+        );
+        std::fs::write(folder.join("latest.json"), "{}").unwrap();
+        assert!(test_newer(&running, &folder)
+            .unwrap_err()
+            .contains("names no version"));
+        std::fs::remove_dir_all(folder).unwrap();
     }
 
     /// A one-shot HTTP server on 127.0.0.1 answering each request with the next of `answers`.
