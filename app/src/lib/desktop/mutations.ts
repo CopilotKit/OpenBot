@@ -112,8 +112,8 @@ export function intelligenceMutationOptions(queryClient: QueryClient) {
       if (report.outcome !== "completed")
         throw new Error(
           action === "start"
-            ? "The back end did not start."
-            : "The back end did not stop.",
+            ? "OpenBot's services didn't start. Try again."
+            : "OpenBot's services didn't stop. Try again.",
         );
     },
     onSettled: () => invalidateDesktop(queryClient),

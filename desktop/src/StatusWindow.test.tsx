@@ -214,10 +214,12 @@ test("diagnostics carry versions, places and memory, and nothing secret", () => 
 /**
  * Words a person reading the Status window doesn't know, and values only support needs: the
  * engine's name, the back end, Docker's container names, the build's commit and time, ports.
+ * Docker Desktop is named where the person opens it; Docker alone, as the engine's name, is not.
  * On a live Windows run the window said "Back end", "Container engine" and "Podman".
  */
 const TECHNICAL = [
   /Podman/i,
+  /\bDocker\b(?! Desktop)/,
   /\bengines?\b/i,
   /back[ -]?end/i,
   /front[ -]?end/i,

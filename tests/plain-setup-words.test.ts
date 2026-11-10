@@ -9,7 +9,8 @@ import ts from "typescript";
  * whether setup was stuck, and a failure read "The back end's disk is nearly full. Podman has…".
  * The log keeps the technical parts; the screen says what happened and what to do. The Status
  * window, opened from the tray or the menu, is held to the same: it said "Back end" and "Container
- * engine" on a live Windows run.
+ * engine" on a live Windows run. So is Settings > This computer in the app (`THIS_COMPUTER`), which
+ * shows the same parts inside OpenBot Desktop.
  *
  * Read are the sentences of the desktop window (string literals, template text and JSX text with a
  * space in them, so identifiers and command names are not) and the native side's sentences that
@@ -90,9 +91,18 @@ const ALLOWED: { file: string; word: RegExp; why: string }[] = [
   },
 ];
 
+/** Settings > This computer, and the names and messages it shows from the desktop app. */
+const THIS_COMPUTER = [
+  "app/src/routes/_authed/settings/this-computer.tsx",
+  "app/src/lib/desktop/part-names.ts",
+  "app/src/lib/desktop/mutations.ts",
+  "app/src/lib/desktop/queries.ts",
+];
+
 /**
- * What goes to support and never to the screen: the Status window's Copy diagnostics, which names
- * the engine, the back end's stack and Docker's containers for whoever is troubleshooting.
+ * What goes to support and never to the screen: Copy diagnostics, in the Status window and on This
+ * computer, which names the engine, the back end's stack and Docker's containers for whoever is
+ * troubleshooting.
  */
 const SUPPORT = /^diagnostics$/;
 
@@ -214,6 +224,7 @@ function sentences(): Said[] {
     ...[...files(join(REPO, "desktop/src"), /\.tsx?$/)].flatMap(
       windowSentences,
     ),
+    ...THIS_COMPUTER.map((path) => join(REPO, path)).flatMap(windowSentences),
     ...[...files(join(REPO, "desktop/src-tauri/src"), /\.rs$/)].flatMap(
       nativeSentences,
     ),
@@ -236,7 +247,7 @@ function technical(said: Said): string[] {
     );
 }
 
-test("what OpenBot Desktop says while it sets up, starts or updates, when that stops, and on its Status window, is plain words", () => {
+test("what OpenBot Desktop says while it sets up, starts or updates, when that stops, on its Status window and on This computer, is plain words", () => {
   expect(sentences().flatMap(technical)).toEqual([]);
 });
 
