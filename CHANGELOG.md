@@ -407,6 +407,13 @@ a model key is needed.
   mark.
 - The OpenBot version sits to the right of your name at the foot of the sidebar, where it was a
   line under it.
+- The Personal Assistant on a framework picked in setup reads "Everyday life agent. (powered by a
+  LangChain agent; you can bring your own agent from any stack.)" under its name (with its own
+  framework's name), on a new install and on an existing one that kept "Powered by LangChain
+  (LangGraph)" after an upgrade. Any other Bot OpenBot subtitled under LangChain's earlier names
+  reads "Powered by LangChain". Only what a person sees changes: nothing stored changes, a Bot is
+  told its subtitle as before, and words a person wrote stay theirs. A Bot's page shows a long
+  subtitle on up to three lines.
 
 ### Personal edition
 
@@ -423,16 +430,6 @@ a model key is needed.
   **Approve new skills automatically** on, the heading showed while Learning was in progress and
   after it finished, though nothing waited. The section is now **New skills** until a learned skill
   waits for approval, and the team edition's **Waiting for an admin** follows the same rule.
-
-### Smaller changes
-
-- The Personal Assistant on a framework picked in setup reads "Everyday life agent. (powered by a
-  LangChain agent; you can bring your own agent from any stack.)" under its name (with its own
-  framework's name), on a new install and on an existing one that kept "Powered by LangChain
-  (LangGraph)" after an upgrade. Any other Bot OpenBot subtitled under LangChain's earlier names
-  reads "Powered by LangChain". Only what a person sees changes: nothing stored changes, a Bot is
-  told its subtitle as before, and words a person wrote stay theirs. A Bot's page shows a long
-  subtitle on up to three lines.
 
 ## 1.0.0
 

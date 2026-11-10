@@ -4,7 +4,6 @@ import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { starterSubtitle } from "@openbot/shared/harnesses";
 import { and, eq, inArray } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { installEnterpriseControls } from "../src/admin/controls";
@@ -1749,20 +1748,10 @@ describe("bundled personal starter", () => {
       );
       expect(await profiles.get(actor, "picked-harness")).toMatchObject({
         name: "Personal Assistant",
-        title: starterSubtitle(
-          endpoint === claude ? "Claude Agent SDK" : "LangChain",
-        ),
+        title: `Everyday life. Powered by ${endpoint === claude ? "Claude Agent SDK" : "LangChain"}.`,
         roleDescription: declared?.roleDescription,
         instructions: declared?.configuration.systemPrompt,
       });
-      // Stored, and so told to the Bot, as it always was: only what a person sees reads the new wording.
-      const [stored] = await database
-        .select({ title: agentProfiles.title })
-        .from(agentProfiles)
-        .where(eq(agentProfiles.agentId, "picked-harness"));
-      expect(stored?.title).toBe(
-        `Everyday life. Powered by ${endpoint === claude ? "Claude Agent SDK" : "LangChain"}.`,
-      );
       expect(await attachedSkills("picked-harness")).toEqual([
         "bot-creator",
         "skill-creator",
@@ -1854,8 +1843,7 @@ describe("bundled personal starter", () => {
     expect(await ownedIds(pkg.id)).toEqual(["picked-harness"]);
     expect(await profiles.get(actor, "picked-harness")).toMatchObject({
       name: "Personal Assistant",
-      title:
-        "Everyday life agent. (powered by a LangChain agent; you can bring your own agent from any stack.)",
+      title: "Everyday life. Powered by LangChain.",
       endpoint: langchain,
     });
     await synchronizeTenantPackage(database, await loadStarter(tenantId, ""));
@@ -2395,8 +2383,7 @@ describe("bundled personal starter", () => {
       await loadStarter(tenantId, langchain),
     );
     expect(await profiles.get(actor, starter.id)).toMatchObject({
-      title:
-        "Everyday life agent. (powered by a Claude Agent SDK agent; you can bring your own agent from any stack.)",
+      title: "Everyday life. Powered by Claude Agent SDK.",
       endpoint: "https://agents.example/run",
     });
   });

@@ -1,7 +1,4 @@
-import {
-  declaredHarness,
-  withCurrentFrameworkNames,
-} from "@openbot/shared/harnesses";
+import { declaredHarness } from "@openbot/shared/harnesses";
 import { and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { capabilityRefusal } from "../admin/capabilities";
 import type { CredentialStore } from "../credentials";
@@ -258,8 +255,7 @@ function mapProfile(
   return {
     id: row.id,
     name: row.name,
-    // What OpenBot wrote under a framework's earlier name reads as its current one.
-    title: withCurrentFrameworkNames(row.title),
+    title: row.title,
     roleDescription: row.roleDescription,
     avatarSeed: row.avatarSeed,
     visibility: row.visibility,
