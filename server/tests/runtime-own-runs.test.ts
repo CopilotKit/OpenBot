@@ -267,10 +267,14 @@ async function personAsks(
       ),
     "the person's run to finish",
   );
-  // The runtime names a new conversation beside the person's run, so it is waited for too.
-  await until(() => named.has(threadId), "the conversation to be named");
+  // The runtime once named a new conversation beside the person's run, as a run of its own started
+  // as the thread was made. Long enough for one to reach the model or the endpoint, had it started.
+  await new Promise((resolve) => setTimeout(resolve, NAMING_WINDOW_MS));
   return { threadId, runId };
 }
+
+/** How long after a person's run a title run would have reached the model or the endpoint. */
+const NAMING_WINDOW_MS = 300;
 
 beforeAll(async () => {
   llm.on({ predicate: () => true }, async (request) => {
@@ -495,59 +499,45 @@ afterAll(async () => {
   }
 });
 
-test("naming a new conversation holds none of a built-in Bot's tools, so it starts no subagent even when the model asks for one, and the conversation is still named", async () => {
-  const { threadId } = await personAsks(BUILT_IN, "Plan the team offsite.");
+/*
+ * A NEW CONVERSATION'S FIRST MESSAGE IS ONE RUN. The runtime used to name a new thread by running
+ * the conversation's Bot again on a title prompt, beside the person's run. On a harness this
+ * deployment runs, that was a second run on the harness at the same moment, on every first message,
+ * and the person's answer came back garbled where the two overlapped. OpenBot names conversations
+ * itself (`channels/summary.ts`), so the runtime's naming is off: no title run reaches any Bot.
+ */
+test("a harness Bot's first message reaches the harness exactly once: no title run beside it", async () => {
+  const { threadId } = await personAsks(HARNESS, "Plan the team offsite.");
 
-  expect(subagentsStarted).toEqual([]);
-  expect(
-    modelRequests.filter((request) => isSubagent(request.messages)),
-  ).toEqual([]);
-  const naming = modelRequests.filter((request) => isNaming(request.messages));
-  expect(naming.length).toBeGreaterThan(0);
-  // Only the two state tools CopilotKit's own agent adds to every run: nothing of the Bot's.
-  for (const request of naming)
-    expect(
-      offered(request).filter(
-        (name) => !(RUNTIME_STATE_TOOLS as readonly string[]).includes(name),
-      ),
-    ).toEqual([]);
-  expect(named.get(threadId)).toBe("Offsite plan");
-});
-
-test("naming a new conversation never runs somebody's own agent: no title run reaches it, and the conversation is named on the deployment's model", async () => {
-  const { threadId } = await personAsks(REMOTE, "Plan the team offsite.");
-
-  // The person's one run, and nothing else: the runtime's title prompt never reaches the endpoint.
+  expect(remoteRequests).toHaveLength(1);
+  expect(remoteRequests[0]?.threadId).toBe(threadId);
   expect(remoteRequests.filter((input) => isNaming(input.messages))).toEqual(
     [],
   );
-  expect(remoteRequests).toHaveLength(1);
-  // Named on the deployment's model, holding none of the Bot's tools, so it starts no subagent.
-  const naming = modelRequests.filter((request) => isNaming(request.messages));
-  expect(naming.length).toBeGreaterThan(0);
-  for (const request of naming)
-    expect(
-      offered(request).filter(
-        (name) => !(RUNTIME_STATE_TOOLS as readonly string[]).includes(name),
-      ),
-    ).toEqual([]);
-  expect(subagentsStarted).toEqual([]);
-  expect(named.get(threadId)).toBe("Offsite plan");
+  expect(named.has(threadId)).toBe(false);
 });
 
-test("a harness this deployment runs still names its own conversations, holding none of its tools and no signed run", async () => {
-  namingAsks = false;
-  const { threadId } = await personAsks(HARNESS, "Plan the team offsite.");
+test("somebody's own agent gets the person's one run, and no title run on the deployment's model either", async () => {
+  const { threadId } = await personAsks(REMOTE, "Plan the team offsite.");
 
-  const naming = remoteRequests.filter((input) => isNaming(input.messages));
-  expect(naming).toHaveLength(1);
-  for (const input of naming) {
-    expect(input.tools.map((tool) => tool.name)).toEqual([]);
-    // Without the deployment's signed statement of the run, no callback of the Bot's is accepted.
-    expect(input.forwardedProps).toMatchObject({ openbotBotId: HARNESS });
-    expect(Object.hasOwn(input.forwardedProps, "openbotRun")).toBe(false);
-  }
-  expect(named.get(threadId)).toBe("Remote offsite");
+  expect(remoteRequests).toHaveLength(1);
+  expect(remoteRequests.filter((input) => isNaming(input.messages))).toEqual(
+    [],
+  );
+  expect(modelRequests.filter((request) => isNaming(request.messages))).toEqual(
+    [],
+  );
+  expect(named.has(threadId)).toBe(false);
+});
+
+test("a built-in Bot's first message asks the model once, with no title run, so nothing can start a subagent nobody asked for", async () => {
+  const { threadId } = await personAsks(BUILT_IN, "Plan the team offsite.");
+
+  expect(modelRequests.filter((request) => isNaming(request.messages))).toEqual(
+    [],
+  );
+  expect(subagentsStarted).toEqual([]);
+  expect(named.has(threadId)).toBe(false);
 });
 
 test("a turn sends the endpoint the component catalog once, as the guide, and not the browser's envelope as well", async () => {

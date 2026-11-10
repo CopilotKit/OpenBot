@@ -394,13 +394,12 @@ function runByThisDeployment(agent: RegisteredAgent): boolean {
 /**
  * Whether the runtime's own runs on this Bot are answered here rather than at its endpoint.
  *
- * The runtime names a new conversation by running the conversation's Bot on a title prompt, and
- * retries up to three times when the answer is not a short title. On an agent somebody registered
- * by its address, that was three runs nobody asked for: answered as if the person had said it,
- * spending their model and written into their agent's own history. So those runs are answered on
- * OpenBot's own runner instead, as the Bot (`onOpenBotRunner`) on the deployment's model, the way a
- * built-in Bot names its conversations and a check-in runs. A harness this deployment runs is its
- * own, and keeps naming on its own model.
+ * The runtime makes runs of its own on a Bot (a suggestion, and once a title for a new conversation,
+ * which `generateThreadNames: false` now turns off). On an agent somebody registered by its address,
+ * those were runs nobody asked for: answered as if the person had said it, spending their model and
+ * written into their agent's own history. So those runs are answered on OpenBot's own runner
+ * instead, as the Bot (`onOpenBotRunner`) on the deployment's model, the way a check-in runs. A
+ * harness this deployment runs is its own, and answers them itself.
  */
 function answersOwnRunsHere(
   agent: RegisteredAgent,
@@ -3150,6 +3149,16 @@ export function mountCopilotRuntime(
     // The subclass, not the base: a thread nobody has run yet reads as empty rather than as a 500.
     // See IntelligenceKnowingANewThread.
     intelligence: intelligenceClient,
+    /*
+     * NO TITLE RUNS. On a thread's first run the runtime would name it by running the same Bot again
+     * on a title prompt, beside the person's run. On a harness that was a second run on the
+     * harness at the same moment as the first, on every first message: two `run-model` lines and two
+     * POSTs, with the person's answer garbled where the two overlapped. OpenBot names its
+     * conversations itself, after the fact and on its own model (`channels/summary.ts`), and that is
+     * the title people see. The runtime's name only ever reached a Learning proposal's evidence,
+     * whose title is optional and now empty for a conversation.
+     */
+    generateThreadNames: false,
     licenseToken: intelligence.licenseToken,
     // Carried on the events the runtime already sends, so OpenBot's traffic is separable from any
     // other deployment's. Adds no events of its own.
