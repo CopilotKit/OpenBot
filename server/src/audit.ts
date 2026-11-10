@@ -683,8 +683,25 @@ export const auditEventTypes = [
   "enterprise.setting_changed",
   // Turning SSO-required on ended the sessions made before it.
   "auth.sessions_revoked",
+  /*
+   * A save carries the scope, the mode, the rules and who saved it, and `authoring`
+   * (`{ source: "english", text }`) when the list was written from a sentence in plain English.
+   */
   "network_policy.changed",
   "network_policy.removed",
+  /**
+   * An admin described the network allowlist in English and the deployment's model wrote it as
+   * entries (admin/network-translate.ts).
+   *
+   * Nothing changed: the list is a draft until the admin saves it, and the save is its own
+   * `network_policy.changed` row. This one answers "who asked for this list, in what words, and what
+   * came back", including a list that never parsed and a request no model was set up to answer.
+   * Target `network_policy`; payload `actor`, `text` (the admin's words), `outcome` (`written`,
+   * `did_not_parse`, `no_model` or `model_failed`), and when a list came back `mode`, `rules`,
+   * `summary`, `reachable`, `explanation`, `warning`, `parsed`, `attempts` and, for one that did not
+   * parse, `error`.
+   */
+  "network_policy.translated",
   /*
    * Somebody named in INITIAL_ADMIN_EMAILS signing in with a social provider while SSO is required.
    * Allowed, so a broken identity provider cannot lock the deployment out, and loud: it is the one

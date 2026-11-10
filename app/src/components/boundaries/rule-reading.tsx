@@ -12,6 +12,7 @@ export function ReadingStatus({
   passed,
   failed,
   heading,
+  points,
   explanation,
   warning,
   edited,
@@ -26,6 +27,11 @@ export function ReadingStatus({
   failed: string;
   /** Over the reading: "What this rule does". */
   heading: string;
+  /**
+   * The reading as a list, under the heading and before the explanation: the network allowlist's
+   * "what becomes reachable", one line each.
+   */
+  points?: readonly string[];
   explanation: string | null;
   warning: string | null;
   /**
@@ -51,6 +57,13 @@ export function ReadingStatus({
         {explanation ? (
           <div>
             <p className="font-medium">{heading}</p>
+            {points && points.length > 0 ? (
+              <ul className="mt-0.5 list-disc space-y-0.5 pl-5 text-muted-foreground">
+                {points.map((point) => (
+                  <li key={point}>{point}</li>
+                ))}
+              </ul>
+            ) : null}
             <p className="mt-0.5 text-muted-foreground">{explanation}</p>
           </div>
         ) : null}
