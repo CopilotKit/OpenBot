@@ -51,7 +51,7 @@ describe("where the pages a person manages live", () => {
       "/connections/browse/arcade",
     );
     expect(paths.pluginsLabel).toBe("Connections");
-    expect(managePaths("team").pluginsLabel).toBe("Plugins");
+    expect(managePaths("team").pluginsLabel).toBe("Apps");
     expect(href(paths.skills())).toBe("/settings/skills");
     expect(href(paths.newSkill())).toBe("/settings/skills/new");
     expect(href(paths.skill("triage"))).toBe("/settings/skills/triage");

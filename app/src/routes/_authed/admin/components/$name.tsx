@@ -524,7 +524,7 @@ function ComponentDetail({
             <DialogDescription>
               The data this component can fetch to draw itself. This is separate
               from Available to. With all of these off, it shows only what the
-              Bot passes it. Every read shows in Audit. Changes apply right
+              Bot passes it. Every read shows in Activity. Changes apply right
               away.
             </DialogDescription>
           </DialogHeader>

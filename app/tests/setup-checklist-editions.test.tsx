@@ -200,7 +200,7 @@ test("a team deployment's Setup keeps memory, its admin, and the Admin pages", a
       "People can connect more apps than the ones an admin adds.",
     ),
   ).toBeTruthy();
-  expect(linkTo(row("model"), "Credentials")).toBe("/admin/credentials");
+  expect(linkTo(row("model"), "Vault")).toBe("/admin/credentials");
   expect(linkTo(row("computer"), "Computers")).toBe("/admin/computers");
 });
 

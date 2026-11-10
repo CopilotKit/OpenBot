@@ -372,7 +372,7 @@ function modelRow(
     docsUrl: QUICK_START,
     page: personal
       ? { label: "Vault", path: "/settings/vault" }
-      : { label: "Credentials", path: "/admin/credentials" },
+      : { label: "Vault", path: "/admin/credentials" },
   };
   const readyDetail = `Lets ${product} answer you.`;
   if (model.source === null)

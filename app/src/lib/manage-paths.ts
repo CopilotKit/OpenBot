@@ -41,9 +41,8 @@ export function managePaths(edition: "team" | "personal") {
       computers: () => linkOptions({ to: "/settings/computer" }),
       /*
        * What the trail is called, on its page, in the sidebar and wherever another page sends a
-       * person to it. Activity here, where one person reads what their own Bots did; Audit under
-       * Admin, where an admin reviews everybody's Bots for policy. Two names, each kept the same
-       * everywhere in its edition, so a page never reads "Audit" under a sidebar entry "Activity".
+       * person to it. Activity in both editions, one of the eight (`lib/primitives.ts`), so a page
+       * never reads one name under a sidebar entry of another.
        */
       auditLabel: "Activity",
       audit: () => linkOptions({ to: "/settings/activity" }),
@@ -58,7 +57,7 @@ export function managePaths(edition: "team" | "personal") {
     };
   }
   return {
-    pluginsLabel: "Plugins",
+    pluginsLabel: "Apps",
     plugins: () => linkOptions({ to: "/admin/plugins" }),
     plugin: (key: string) =>
       linkOptions({ to: "/admin/plugins/$key", params: { key } }),
@@ -80,11 +79,11 @@ export function managePaths(edition: "team" | "personal") {
     newSkill: () => linkOptions({ to: "/admin/skills/new" }),
     skill: (slug: string) =>
       linkOptions({ to: "/admin/skills/$slug", params: { slug } }),
-    credentialsLabel: "Credentials",
+    credentialsLabel: "Vault",
     credentials: () => linkOptions({ to: "/admin/credentials" }),
     newCredential: () => linkOptions({ to: "/admin/credentials/new" }),
     computers: () => linkOptions({ to: "/admin/computers" }),
-    auditLabel: "Audit",
+    auditLabel: "Activity",
     audit: () => linkOptions({ to: "/admin/audit" }),
     deploymentName: "this deployment",
     edition: "team" as const,

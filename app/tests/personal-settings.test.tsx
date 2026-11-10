@@ -211,7 +211,7 @@ describe("the personal pages under Settings", () => {
       </QueryClientProvider>,
     );
     // The page's back button: an anchor drawn as a button.
-    const back = await view.findByRole("button", { name: /Plugin/ });
+    const back = await view.findByRole("button", { name: /App/ });
     expect(back.getAttribute("href")).toBe("/connections/notion");
   });
 });

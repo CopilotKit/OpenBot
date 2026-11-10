@@ -197,7 +197,9 @@ test("each Bot shows how often people started what it raised, and its breakdown 
 
 test("the switch turns check-ins off for the organization, and the limit saves only a whole number from 1 to 1440", async () => {
   const view = await draw();
-  const toggle = await view.findByRole("switch", { name: "Check-ins" });
+  const toggle = await view.findByRole("switch", {
+    name: "Check-ins for everybody",
+  });
   expect(toggle.getAttribute("aria-checked")).toBe("true");
   fireEvent.click(toggle);
   await waitFor(() =>

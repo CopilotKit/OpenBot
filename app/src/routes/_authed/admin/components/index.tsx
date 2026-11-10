@@ -26,7 +26,7 @@ function RouteComponent() {
 
   return (
     <PageShell
-      description="Choose which components each Bot can display. Published components are available to all Bots by default. Changes and blocked requests appear in Audit."
+      description="Choose which components each Bot can display. Published components are available to all Bots by default. Changes and blocked requests appear in Activity."
       title="UI components"
     >
       {/*

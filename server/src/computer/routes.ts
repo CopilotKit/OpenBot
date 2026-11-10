@@ -985,7 +985,7 @@ export function createComputerRoutes(
         return context.json(
           {
             error:
-              "The rule was saved, but Audit couldn't record the change. Save it again to record it.",
+              "The rule was saved, but Activity couldn't record the change. Save it again to record it.",
           },
           500,
         );
