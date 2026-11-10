@@ -447,7 +447,6 @@ function NetworkDialog({
               </Field>
               <AllowlistPreview candidate={candidate} />
               {initial.scopeKind === "organization" ? (
-                // Not a horizontal Field: its switch pushed the dialog 7px wide, with a scrollbar.
                 <div className="flex items-center justify-between gap-4">
                   <Label htmlFor="network-locked">
                     Lock so groups can't replace this policy

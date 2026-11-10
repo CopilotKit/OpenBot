@@ -239,16 +239,20 @@ test("a sentence becomes the list and its mode, read back independently, replaye
   // What the replay can't see, said beside it.
   expect(dialog.textContent).toContain("Only page visits are recorded.");
   // Text beside the host rows runs full width: a Field holding their horizontal separators
-  // balanced it into half-width lines, and a horizontal Field for Lock pushed the dialog wide.
+  // balanced it into half-width lines.
   const headline = view.getByText(/^Of the last 5 visits/);
   expect(
     headline
       .closest("[data-slot=field]")
       ?.querySelector("[data-orientation=horizontal]") ?? null,
   ).toBeNull();
+  // The body scrolls up and down only: Lock's switch, whose tap target reaches 12px past it, sat at
+  // the right edge and gave the dialog a sideways scrollbar.
   expect(
-    dialog.querySelector("[data-slot=field][data-orientation=horizontal]"),
-  ).toBeNull();
+    dialog
+      .querySelector("[data-slot=dialog-body]")
+      ?.classList.contains("overflow-x-hidden"),
+  ).toBe(true);
 
   fireEvent.click(view.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(saved).toHaveLength(1));
