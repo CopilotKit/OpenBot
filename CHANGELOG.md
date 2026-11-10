@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 1.0.1
+
 **Before upgrading.** Three migrations run at start, and the database moves to
 `0088_approval_reviewer_guidance`. `0086_channel_title` adds a nullable `title` column to
 `channels`, for a name a person gives a conversation. `0087_approval_conversation_grants` creates a
