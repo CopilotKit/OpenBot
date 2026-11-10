@@ -96,6 +96,48 @@ test("install progress is the bytes and the parts after them, and disappears aft
   expect(row.queryByRole("progressbar")).toBeNull();
 });
 
+// The rest of OpenBot downloads alongside step 2. Said as its own row at the same time, the Install
+// step read "Step 2 of 4" and "Step 3 of 4" in progress at once on a live Windows run.
+test("the rest of OpenBot is the Install list's third step, in progress only once the second is done", () => {
+  const rest = { bytes: 400_000_000, size: 1_600_000_000 };
+  const own = {
+    step: "images",
+    ok: true,
+    detail: "Downloading local software.",
+    downloads: { done: 1, total: 5, bytes: 1_200_000_000, size: 3_400_000_000 },
+  };
+  const said = (rows: ReturnType<typeof plainInstallSteps>) =>
+    rows.map(
+      (row) =>
+        `${row.step} | ${row.running ? `Step ${row.position?.at} of 4` : row.ok ? "Complete" : "Failed"}`,
+    );
+  expect(
+    said(plainInstallSteps([{ ...own, running: true }], true, null, rest)),
+  ).toEqual(["Downloading OpenBot | Step 2 of 4"]);
+  const done = plainInstallSteps(
+    [{ ...own, running: false }],
+    false,
+    null,
+    rest,
+  );
+  expect(said(done)).toEqual([
+    "Downloading OpenBot | Complete",
+    "Downloading the rest of OpenBot | Step 3 of 4",
+  ]);
+  expect(done[1]?.downloads).toEqual(rest);
+  // A failed install says its failure: nothing after it is in progress.
+  expect(
+    said(
+      plainInstallSteps(
+        [{ ...own, running: false, ok: false }],
+        false,
+        null,
+        rest,
+      ),
+    ),
+  ).toEqual(["Downloading OpenBot | Failed"]);
+});
+
 // Reported on 1.0.0-rc.1: a full bar read "1.1 GB of 1.1 GB · 1 of 5 parts left" while the
 // last image was still being unpacked, so a person took the step for done. On Windows F the same
 // line sat under a full bar with no time so far and no time left, its last bytes uncounted, and

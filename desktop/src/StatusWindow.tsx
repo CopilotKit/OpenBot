@@ -53,7 +53,12 @@ const READINESS_SAID: Record<LocalReadiness, string> = {
   unknown: "Running",
 };
 
-/** Everything a support person needs, and nothing secret: no keys, tokens or addresses with them. */
+/**
+ * Everything a support person needs, and nothing secret: no keys, tokens or addresses with them.
+ *
+ * This is where the technical names live: the engine, the back end's stack id, the build and
+ * Docker's own container names. The window itself says each in plain words.
+ */
 export function diagnostics(
   status: DesktopStatus,
   readiness: LocalReadiness | null,
@@ -83,6 +88,9 @@ export function diagnostics(
   ].join("\n");
 }
 
+/** What OpenBot runs on, Docker or Podman, in the words setup uses for it. */
+const ENGINE = "Software OpenBot runs on";
+
 type Busy =
   | "openbot-restart"
   | "openbot-stop"
@@ -90,12 +98,18 @@ type Busy =
   | "intelligence-stop"
   | "intelligence-start";
 
+/**
+ * The local Intelligence is "OpenBot's services" on this window, as on the Shutting down screen
+ * ("Stopping OpenBot's services"). Its parts say what they do (`partNames.ts`).
+ */
+const SERVICES = "OpenBot's services";
+
 const BUSY_SAID: Record<Busy, string> = {
   "openbot-restart": "Restarting OpenBot…",
   "openbot-stop": "Stopping OpenBot…",
-  "intelligence-restart": "Restarting the back end…",
-  "intelligence-stop": "Stopping the back end…",
-  "intelligence-start": "Starting the back end…",
+  "intelligence-restart": `Restarting ${SERVICES}…`,
+  "intelligence-stop": `Stopping ${SERVICES}…`,
+  "intelligence-start": `Starting ${SERVICES}…`,
 };
 
 /**
@@ -195,7 +209,8 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
       <div className="sheet status-sheet">
         <h1>Status</h1>
         <p className="lede">
-          What OpenBot is running on this computer, and how much memory it uses.
+          See what OpenBot is running on this computer and how much memory it
+          uses.
         </p>
 
         {!status ? (
@@ -254,9 +269,9 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
             </section>
 
             {status.intelligenceStack && (
-              <section className="status-part" aria-label="Back end">
+              <section className="status-part" aria-label={SERVICES}>
                 <div className="status-head">
-                  <h2>Back end</h2>
+                  <h2>{SERVICES}</h2>
                   <span className="status-state">
                     {intelligenceRunning
                       ? READINESS_SAID[readiness ?? "unknown"]
@@ -312,20 +327,27 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
                 </div>
                 {status.openbotRunning && (
                   <p className="footnote">
-                    OpenBot uses its back end while it runs. Stopping it frees
-                    memory until you start it again here.
+                    OpenBot needs these services while it runs. Stopping them
+                    frees memory until you start them again here.
                   </p>
                 )}
               </section>
             )}
 
-            <section className="status-part" aria-label="Container engine">
+            {/* Docker or Podman, said as setup says it. Which one is in Copy diagnostics. */}
+            <section className="status-part" aria-label={ENGINE}>
               <div className="status-head">
-                <h2>{status.engine === "podman" ? "Podman" : "Docker"}</h2>
+                <h2>{ENGINE}</h2>
                 <span className="status-state">
                   {status.engine ? "Running" : "Not running"}
                 </span>
               </div>
+              {!status.engine && (
+                <p className="footnote">
+                  OpenBot needs this to run. If you use Docker Desktop, open it
+                  and wait for it to start.
+                </p>
+              )}
             </section>
 
             {busy && <StatusLine>{BUSY_SAID[busy]}</StatusLine>}
@@ -334,17 +356,9 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
             <dl className="status-details">
               <dt>Installed in</dt>
               <dd>{status.root}</dd>
+              {/* The build it was made from is for support, in Copy diagnostics. */}
               <dt>Version</dt>
-              <dd>
-                {status.version} · {status.build}
-              </dd>
-              {/* Where the back end is, in words. Its stack id is for support, in Copy diagnostics. */}
-              {status.intelligenceStack && (
-                <>
-                  <dt>Back end</dt>
-                  <dd>On this computer</dd>
-                </>
-              )}
+              <dd>{status.version}</dd>
               {status.logFolder && (
                 <>
                   <dt>Logs</dt>
@@ -412,7 +426,9 @@ function PartList({ parts, group }: { parts: Part[]; group: PartGroup }) {
         <li key={part.name}>
           <span>{partLabel(part.name, group)}</span>
           <span>
-            {part.memoryBytes === null ? "—" : formatBytes(part.memoryBytes)}
+            {part.memoryBytes === null
+              ? "Not measured"
+              : formatBytes(part.memoryBytes)}
           </span>
         </li>
       ))}
