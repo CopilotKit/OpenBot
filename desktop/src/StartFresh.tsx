@@ -65,8 +65,8 @@ export function StartFresh({
         {containers.length > 0 && (
           <>
             <p>
-              It first removes these stopped containers from the previous
-              installation, which still use those volumes:
+              It first removes these stopped parts of the previous installation,
+              which still use that data:
             </p>
             <ul>
               {containers.map((container) => (

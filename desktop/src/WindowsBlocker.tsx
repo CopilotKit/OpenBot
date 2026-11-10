@@ -15,8 +15,12 @@ export type Blocker =
 /** What running a blocker's fix came to: Windows restarts before it counts, or it already does. */
 type Fixed = "restart-needed" | "done";
 
+/*
+ * Windows Subsystem for Linux is named here because it is the Windows feature the person turns on:
+ * Windows calls it that in every window it shows about it.
+ */
 const WHY_WSL =
-  "OpenBot runs its services in Linux containers. On Windows, those need Windows Subsystem for Linux (WSL 2).";
+  "OpenBot needs a Windows feature called Windows Subsystem for Linux (WSL 2) to run.";
 
 /**
  * What each blocker is called, why it matters, and how OpenBot clears it.
@@ -44,13 +48,13 @@ const SCREENS: Record<
   },
   "wsl-one": {
     title: "Switch Windows Subsystem for Linux to version 2",
-    why: "WSL is installed but set to version 1. OpenBot's containers need version 2.",
+    why: "WSL is installed but set to version 1. OpenBot needs version 2.",
     fix: { action: "Switch to WSL 2", asks: "This takes a few seconds." },
     administrator: "you",
   },
   "wsl-no-kernel": {
     title: "Finish installing Windows Subsystem for Linux",
-    why: "WSL is turned on, but its Linux kernel is missing, so nothing can run in it yet.",
+    why: "WSL is turned on, but part of it is missing, so OpenBot can't run yet.",
     fix: {
       action: "Finish setting up WSL",
       asks: "Windows will ask for permission, then needs one restart.",

@@ -96,7 +96,7 @@ test("an engine short of disk says how to raise it, and Try again checks again",
     <CopilotKitAccount root="/tmp/account-engine" onDone={() => {}} />,
   );
   await screen.findByText(
-    "Docker is out of disk space. OpenBot needs 40 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Try again.",
+    "Docker Desktop is out of disk space. OpenBot needs 40 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Try again.",
   );
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));
   await waitFor(() =>
@@ -137,11 +137,13 @@ test("an engine local setup doesn't run on is said at once, with how to switch",
   await screen.findByRole("heading", {
     name: "Switch to Docker Desktop or Podman",
   });
+  // OpenBot's own words: the CLI's names a rootful Podman, and goes to the log.
   expect(
     screen.getByText(
-      "Docker Desktop or rootful Podman is required on macOS. This machine runs OrbStack.",
+      "OpenBot can't run with the app this computer uses to run its software. It works with Docker Desktop or Podman.",
     ),
   ).toBeTruthy();
+  expect(screen.queryByText(/rootful/)).toBeNull();
   expect(screen.getByText("docker context use desktop-linux")).toBeTruthy();
   expect(
     screen.queryByText("Couldn’t check your CopilotKit account. Try again."),
@@ -312,7 +314,7 @@ test("a refused engine with no sentence from the CLI says so in OpenBot's words"
     <CopilotKitAccount root="/tmp/account-refused" onDone={() => {}} />,
   );
   await screen.findByText(
-    "OpenBot's back end can't run on the container engine this computer uses.",
+    "OpenBot can't run with the app this computer uses to run its software. It works with Docker Desktop or Podman.",
   );
   expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
 });

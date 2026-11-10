@@ -474,9 +474,10 @@ fn ready_responding_engine_after_compose_repair(
     let Some(address) = ready.address.clone().filter(|_| ready.responding) else {
         return Err(Problem::with(
             if install_missing_native {
-                "OpenBot installed the container software, but the engine is not answering. Try again."
+                "OpenBot installed the software it runs on, but it isn't answering yet. Try again."
             } else {
-                "OpenBot installed Compose, but the container engine is not answering. Try again."
+                "OpenBot installed a piece it needs, but the software it runs on isn't answering yet. \
+                 Try again."
             },
             ready.detail,
         ));
@@ -1914,7 +1915,7 @@ async fn engine_ready(
                 .await
                 .map_err(|error| {
                     Problem::with(
-                        "OpenBot could not start its container service.",
+                        "OpenBot couldn't start the software it runs on. Try again.",
                         error.to_string(),
                     )
                 })??;
@@ -2394,7 +2395,8 @@ fn intelligence_key_for_start(
     })?;
     if key.trim().is_empty() {
         return Err(Problem::plain(
-            "OpenBot's connection to its back end on this computer is no longer available. Set up the back end again.",
+            "OpenBot's connection to its services on this computer is missing. Start OpenBot to set \
+             it up again.",
         )
         .connection(openbot_desktop_lib::problem::Connection::Intelligence));
     }
@@ -2872,8 +2874,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         {
             stack::down(&found, &root).map_err(|error| {
                 Problem::with(
-                    "OpenBot could not restart its containers with their new network settings. \
-                     Try Start again.",
+                    "OpenBot couldn't restart with its new network settings. Try Start again.",
                     error,
                 )
             })?;
@@ -3172,7 +3173,12 @@ async fn start_stack_inner<R: tauri::Runtime>(
         .unwrap()
         .as_ref()
         .map(|owned| owned.address.clone())
-        .ok_or_else(|| Problem::plain("The local container runtime is unavailable."))?;
+        .ok_or_else(|| {
+            Problem::with(
+                "The software OpenBot runs on isn't running. Try Start again.",
+                "the local container runtime is unavailable",
+            )
+        })?;
     let broker = start_host_access(&app, &root, ports.server, address, host_token.clone())?;
     *shell.host_access.lock().unwrap() = Some(broker);
     preparation::record_launch(&root, requested_harness.as_ref())?;
@@ -4029,8 +4035,9 @@ notice records only that it happened.
 fn take_local_eval_stop_notice(root: &Path) -> Option<Problem> {
     std::fs::remove_file(root.join(LOCAL_EVAL_STOP_NOTICE_FILE)).ok()?;
     Some(Problem::with(
-        "When OpenBot last quit, it could not stop its back end.",
-        "It may still be running. Stopping OpenBot again asks it to stop.",
+        "When OpenBot last quit, some of its services didn't stop. They may still be running. \
+         Stopping OpenBot again asks them to stop.",
+        "the back end stack did not stop when OpenBot last quit",
     ))
 }
 
@@ -7917,7 +7924,7 @@ fn settle_menu_stop(shell: &Shell, fallback_root: &Path, stopped: Stopped) -> Op
         )
     } else {
         Problem::with(
-            "OpenBot stopped, but could not stop its back end.",
+            "OpenBot stopped, but some of its services didn't. They may still be running.",
             stopped.intelligence?,
         )
     };
@@ -13419,7 +13426,8 @@ mod tests {
         // Said in the window's words: the part of OpenBot that did not stop, not its product name.
         assert_eq!(
             problem.said,
-            "When OpenBot last quit, it could not stop its back end."
+            "When OpenBot last quit, some of its services didn't stop. They may still be running. \
+             Stopping OpenBot again asks them to stop."
         );
         assert!(!problem.said.contains("app processes"), "{problem:?}");
         assert_eq!(take_local_eval_stop_notice(&root), None, "shown once");
@@ -13462,7 +13470,7 @@ mod tests {
             .expect("an Intelligence failure is still said");
         assert_eq!(
             problem.said,
-            "OpenBot stopped, but could not stop its back end."
+            "OpenBot stopped, but some of its services didn't. They may still be running."
         );
         assert_eq!(problem.detail.as_deref(), Some(NO_CLI_LINE));
         assert!(!recovery_required(&shell, &root));

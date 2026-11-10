@@ -71,7 +71,7 @@ const POLL_DELAYS: number[] = [2_000, 4_000, 8_000, ...Array(12).fill(15_000)];
 const DOWNLOAD_EVERY_MS = 1_000;
 
 const unreadable: Problem = {
-  said: "OpenBot did not understand its back end's answer.",
+  said: "OpenBot got an answer it couldn't read. Retry. If it happens again, copy the logs below.",
 };
 
 type Phase = "setup" | "connect" | "wait" | "start";
@@ -108,7 +108,7 @@ function said(intelligence: LocalReport | LocalFailure): string {
 function connectionSaid(answered: LocalConnection): string {
   // A conflict has no reason of its own, so it is said in this window's words.
   if (answered.conflicted) {
-    return "Settings the back end wrote for OpenBot were changed since. OpenBot did not connect.";
+    return "Settings OpenBot saved were changed since, so it didn't connect. Retry, or repair the installation.";
   }
   return said({
     outcome: answered.outcome,

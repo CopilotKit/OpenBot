@@ -19,7 +19,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   show one row for the install running behind them: what it's doing, step N of 4, the time so far,
   and the time left while it downloads. That row has its own slot under the step's form, so the AI
   step's fields no longer jump when a download starts or ends, and the window no longer grows or
-  moves.
+  moves. When setup, a start or an update stops, the card says what happened and what to do in the
+  same plain words ("OpenBot has 30 GB of free disk. It needs 40 GB. Free up space on drive C:,
+  then Retry."), with the engine's own output under Technical details and in the logs you can
+  copy. Docker Desktop and Podman are named only where you act in them.
 - **Sign-in comes first, and macOS asks for your password only after OpenBot says why.** On a new
   Mac the Account step waited for Install to put Podman in before any browser sign-in opened, and
   the "osascript wants to make changes" password box came up by itself over it. The CopilotKit

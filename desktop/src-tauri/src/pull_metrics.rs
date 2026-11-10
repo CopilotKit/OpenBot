@@ -819,7 +819,11 @@ fn run_with_progress(
         bytes,
     });
     let output = output.map_err(|error| {
-        Problem::plain(format!("Could not pull the images OpenBot needs: {error}"))
+        Problem::with(
+            "OpenBot couldn't download what it needs. Check your internet connection, then try \
+             again.",
+            format!("could not pull the images OpenBot needs: {error}"),
+        )
     })?;
     if output.status.success() {
         return Ok(());
@@ -1371,7 +1375,7 @@ Executing external compose provider
             include_str!("../test-fixtures/image-pull-failures/compose-engine-not-running.txt");
         let problem = failed_pull(&crate::quiet::said(captured.as_bytes()));
         assert!(
-            problem.said.contains("Start Docker or Podman"),
+            problem.said.contains("can't reach the software it runs on"),
             "{problem:?}"
         );
         assert!(
