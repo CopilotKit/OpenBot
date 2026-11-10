@@ -2653,7 +2653,7 @@ resumed for `~/OpenBot`, and `local connect` wrote the home folder's `.env`, so 
 `~/OpenBot/.env` naming no stack it set up. With it, setup creates or resumes the stack the CLI
 records for OpenBot's folder, and connect writes OpenBot's `.env` (Intelligence
 `apps/cli/src/commands/local.ts`, in the CLI pinned since `desktop/intelligence-cli.json` named
-b157184).
+f5c45eb).
 */
 pub const APP_PATH: &str = "--app-path";
 

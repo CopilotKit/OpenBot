@@ -24,7 +24,7 @@ backup taken before the upgrade instead. Three things change for an existing dep
   to ask every time in Admin > Approvals.
 - A Personal Assistant whose instructions nobody changed takes the new ones at the next start
   (below). One whose instructions were edited keeps them.
-- OpenBot Desktop's bundled CLI moves to `copilotkit@b157184`, and Start writes
+- OpenBot Desktop's bundled CLI moves to `copilotkit@f5c45eb`, and Start writes
   `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` in `~/OpenBot/.env` as empty (below). The back end stays
   on CopilotKit Intelligence 0.16.0-rc.10.
 
@@ -215,8 +215,8 @@ backup taken before the upgrade instead. Three things change for an existing dep
   `~/OpenBot/.env`, and the other folder's back end and `.env` are left alone. OpenBot also counts
   a back end as its own, to stop with Stop and Quit, only when the CLI records it for `~/OpenBot`;
   one it was handed for another folder is never stopped.
-- **CopilotKit CLI `copilotkit@b157184`.** OpenBot Desktop's bundled CLI moves to the production
-  build of Intelligence `b1571844c`: `6bfaa0f5c`, which added `telemetry link`, with `--app-path`
+- **CopilotKit CLI `copilotkit@f5c45eb`.** OpenBot Desktop's bundled CLI moves to the production
+  build of Intelligence `f5c45ebc0`: `6bfaa0f5c`, which added `telemetry link`, with `--app-path`
   added to its `local` commands. It keeps Intelligence 0.16.0-rc.10 and CopilotKit v1.85.0
   templates.
 - **A Learning container left in `~/OpenBot/.env` by an earlier setup no longer fails every

@@ -17693,7 +17693,7 @@ fn main() {
                 }
             };
             println!(
-                r#"{{"version":1,"command":"local setup","status":"completed","stack":{},"learning":{{"configuration":"incomplete","verified":false}},"samples":null,"samplesError":null,"nextAction":{{"reason":"confirmation_required","summary":"The stack is ready. Review and approve this app connection separately.","instructions":["Run local connect to review the app settings that will change. Prior settings are saved privately before replacement.","Run npx --prefer-offline --yes https://pkg.pr.new/CopilotKit/Intelligence/copilotkit@b157184 local login --stack {id} to open the dashboard signed in."],"resumeCommand":"copilotkit local connect --approve-connection","url":null,"linkLabel":null,"linkFile":null,"caveats":[],"requiredEnvVars":[],"artifacts":[]}},"error":null,"diagnostics":[]}}"#,
+                r#"{{"version":1,"command":"local setup","status":"completed","stack":{},"learning":{{"configuration":"incomplete","verified":false}},"samples":null,"samplesError":null,"nextAction":{{"reason":"confirmation_required","summary":"The stack is ready. Review and approve this app connection separately.","instructions":["Run local connect to review the app settings that will change. Prior settings are saved privately before replacement.","Run npx --prefer-offline --yes https://pkg.pr.new/CopilotKit/Intelligence/copilotkit@f5c45eb local login --stack {id} to open the dashboard signed in."],"resumeCommand":"copilotkit local connect --approve-connection","url":null,"linkLabel":null,"linkFile":null,"caveats":[],"requiredEnvVars":[],"artifacts":[]}},"error":null,"diagnostics":[]}}"#,
                 described(&stacks, &id)
             );
         }
