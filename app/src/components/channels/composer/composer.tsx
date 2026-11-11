@@ -1647,18 +1647,9 @@ export function Composer({
                   >
                     <IconPlus className="size-5" />
                   </Button>
-                ) : (
-                  <Button
-                    aria-label="More message options unavailable"
-                    className="disabled:opacity-100"
-                    disabled
-                    size="icon"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <IconPlus className="size-5" />
-                  </Button>
-                )}
+                ) : null}
+                {/* No attachments and nothing else behind a plus, so no plus: a disabled one that
+                    explained nothing read as broken. */}
                 {routine ? <RoutineComposerButton {...routine} /> : null}
                 {modelPicker}
               </div>

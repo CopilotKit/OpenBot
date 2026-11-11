@@ -154,19 +154,19 @@ test("a composer with a channel offers a file picker behind the plus button", ()
  * silent drop is what says they are not; the text file is one that WOULD upload, so its absence
  * from `uploads` is what says nothing was sent.
  */
-test("a composer with no channel keeps the button that says so, and takes no files", async () => {
+test("a composer with no channel has no attach control, and takes no files", async () => {
   const view = render(<Composer compact onSubmit={() => {}} />);
   const { container, getByLabelText, queryByLabelText, rerender } = view;
   const form = () => container.querySelector("form") as HTMLFormElement;
 
-  // The old affordance, untouched: nothing to offer and it says so, rather than a live button
-  // that would open a picker with nowhere to upload to.
-  const placeholder = getByLabelText(
-    "More message options unavailable",
-  ) as HTMLButtonElement;
-  expect(placeholder.disabled).toBe(true);
+  // Nothing to attach to, and nothing else behind a plus, so there is no plus: not a live button
+  // that would open a picker with nowhere to upload to, and not a disabled one that explains nothing.
+  expect(queryByLabelText("More message options unavailable")).toBeNull();
   expect(queryByLabelText("Attach a file")).toBeNull();
+  expect(container.querySelector('[data-slot="composer-attach"]')).toBeNull();
   expect(container.querySelector('input[type="file"]')).toBeNull();
+  // The rest of the toolbar is still there.
+  expect(getByLabelText("Message")).toBeDefined();
 
   /*
    * THE DROP IS CAUGHT AND ANSWERED, WHICH INVERTS WHAT THESE TWO LINES USED TO PIN.
