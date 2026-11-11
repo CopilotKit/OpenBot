@@ -19,7 +19,7 @@ nullable `reviewer_guidance` column to `approval_team_settings`. `0089_goal_ends
 `ends_when_met` column to `responsibilities`, false on every existing goal, so existing goals behave
 as before. No existing row is rewritten and
 nothing is dropped. A database that has run this release does not go back to 1.0.0: restore the
-backup taken before the upgrade instead. Three things change for an existing deployment:
+backup taken before the upgrade instead. Four things change for an existing deployment:
 - Sending, deleting, sharing and posting offer **Allow for this conversation** and **Always allow
   here** beside Allow once and Deny, and paying and account-setting changes ask with the same four
   answers instead of being handed to you (below). In the team edition an admin can set each kind
@@ -29,6 +29,8 @@ backup taken before the upgrade instead. Three things change for an existing dep
 - OpenBot Desktop's bundled CLI moves to `copilotkit@6bfaa0f`, and Start writes
   `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` in `~/OpenBot/.env` as empty (below). The back end stays
   on CopilotKit Intelligence 0.16.0-rc.10.
+- Settings and Admin are grouped differently and several pages have new names (below). Old
+  addresses and bookmarks open the new pages.
 
 ### OpenBot Desktop
 
@@ -54,7 +56,7 @@ backup taken before the upgrade instead. Three things change for an existing dep
   OpenBot Desktop downloads what it runs in the background while you keep working: the parts for
   the Bots you use, and the back end's when it changes too, kept until you update. Clicking Update
   then stops OpenBot, backs it up, updates it and starts it again, with nothing big left to
-  download. The update offer, Settings › This computer and the setup window say the new version
+  download. The update offer, Settings › Computer and the setup window say the new version
   "is downloading in the background (40%).", then that it "is ready to install. It takes a few
   minutes." It downloads one part at a time, waits while OpenBot starts, stops or updates, never
   stops or restarts anything you are using, and downloads nothing when the disk is short of room
@@ -62,9 +64,9 @@ backup taken before the upgrade instead. Three things change for an existing dep
   which do not update themselves, download nothing ahead.
 - **downloads.copilotkit.ai serves each release's `desktop-images.json`.** It answered 403, so the
   list of a release's images could only come from GitHub.
-- **The Status window, Settings > This computer and the Install step say what's running in plain
-  words.** The Status window, opened from the menu bar or the system tray, and Settings > This
-  computer said "Back end", "Container engine", "Podman" or "Docker" and the build's commit and
+- **The Status window, Settings > Computer and the Install step say what's running in plain
+  words.** The Status window, opened from the menu bar or the system tray, and Settings > Computer
+  said "Back end", "Container engine", "Podman" or "Docker" and the build's commit and
   time. Both now name each part by what it does: App, OpenBot's services, and Software OpenBot runs
   on, with "App and Bots" for what was "Front end and Bots". They show the version on its own, and
   the engine, the build and Docker's container names stay in Copy diagnostics and the logs. A
@@ -404,6 +406,22 @@ backup taken before the upgrade instead. Three things change for an existing dep
   (every day, weekday, week, month or hour, at a time on your clock), where it posts, and a name.
   The clock beside + in a conversation's message box opens it for that Bot and that conversation.
   A schedule the form doesn't cover, such as every other Tuesday, can still be asked of a Bot.
+- **Pages are grouped by the eight things a Bot has, and some have new names.** A Bot has
+  Conversations, Routines, Memory, Skills, Apps, a Computer, Approvals and Activity
+  (`docs/how-openbot-works.md`), and a Bot's page, Settings and Admin now list them in that
+  order. What moved:
+  - **Vault**, under Settings, holds your saved logins and your keys. It replaces Saved logins,
+    Passwords and Credentials.
+  - **Settings > Skills** holds the skills you wrote, the skills learned from your recordings
+    and the ones waiting for your review. It replaces Capabilities > Skills and
+    Settings > Learning. Memory is **Settings > Memory**.
+  - **Settings > Computer** is one page. Browsers and This computer are sections of it.
+  - **Routines** is one list of routines, goals and check-ins, for one Bot and in Settings for
+    every Bot.
+  - In Admin, Plugins is now **Apps**, Audit is **Activity**, Credentials is **Vault**, and
+    Check-ins are under **Routines**.
+
+  Nothing was removed, and every old address opens the page that replaced it.
 - **One New routine screen for routines, goals and check-ins.** New routine no longer opens a menu
   of Routine, Goal and Check-in. One screen asks what to do, whether the Bot should act for you or
   only tell you, what starts it (a schedule, an event such as a GitHub issue opening, or now, once)
@@ -437,7 +455,7 @@ a model key is needed.
   checked again, so a broken one can still be removed. The preview runs as the rule is typed, and
   replays app calls as well as computer actions, so a rule about an app, such as
   `mcp.server == "salesforce" && mcp.effect == "write"`, no longer previews as changing nothing.
-  Every save of the boundaries is on Audit as "Boundaries saved", with the rules added and removed.
+  Every save of the boundaries is on Activity as "Boundaries saved", with the rules added and removed.
   The shipped "Stay off social media" template also stopped dropbox.com and netflix.com; it now
   stops only the sites it names.
 - **Team approval rules.** Admin > Approvals > Team rules has **Describe it in words**. A sentence
@@ -445,7 +463,7 @@ a model key is needed.
   rows, each checked against this OpenBot's real apps, tools and Bots, and replayed over past
   decisions: "Would have changed 4 decisions: removes 3 asks, of which 1 a person had denied; adds
   1 ask." Every team rule save now records the rules before and after.
-- **A Bot's actions in one app.** On a Bot's page for an app (Admin > Plugins > the app > the Bot),
+- **A Bot's actions in one app.** On a Bot's page for an app (Admin > Apps > the app > the Bot),
   a sentence such as "Reads everything and writes drafts, but never sends or deletes" and **Choose
   actions** pick the exact actions. The page shows which actions turn off and on, and how that
   compares with what the Bot did recently. Nothing changes until **Save changes**, and the switches
@@ -467,15 +485,15 @@ a model key is needed.
   own computer" becomes the organization, role and group switches it takes, with every member's
   permissions before and after, and what anyone who loses one used it for in the last 30 days. The
   switches are saved together, as one change.
-- **Ask the audit trail.** Audit has an Ask box. A question such as "Gmail changes by a routine last
+- **Ask the audit trail.** Activity has an Ask box. A question such as "Gmail changes by a routine last
   week" becomes filters, by app, tool, effect, action and rule, shown over the trail's own rows.
 - **What would happen.** Admin > What happened > **What would happen** reads a question such as
   "Could the Sales Bot send an email from Gmail when a routine runs it?" as one action, shown as
   fields to correct. **Check** then runs OpenBot's own controls on it, with no model, in the order
   they apply, and shows each one's verdict, which one decides, and a link to where it is set. Every
-  computer action and app call on Audit has **Why?**, which runs the same check on what the row
+  computer action and app call on Activity has **Why?**, which runs the same check on what the row
   recorded and says when today's settings would decide it differently.
-- **Audit names the rule that stopped an action.** A blocked row reads "Stopped by: Bots may not
+- **Activity names the rule that stopped an action.** A blocked row reads "Stopped by: Bots may not
   visit social media sites" when the rule has a name, with the rule under it cut to two lines and
   **Show full rule** to read the rest. A long rule used to make one row hundreds of pixels tall.
 
@@ -531,7 +549,7 @@ a model key is needed.
   edition's Add is still the admin's act and reads "Added, not connected" until the admin connects
   their own account. GitHub on Connections no longer reads Connected off the GitHub sign-in alone
   while its tools are not connected.
-- **Settings > Learning says Waiting for your review only when a skill is waiting.** With
+- **Settings > Skills says Waiting for your review only when a skill is waiting.** With
   **Approve new skills automatically** on, the heading showed while Learning was in progress and
   after it finished, though nothing waited. The section is now **New skills** until a learned skill
   waits for approval, and the team edition's **Waiting for an admin** follows the same rule.
