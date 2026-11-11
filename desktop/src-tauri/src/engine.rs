@@ -489,6 +489,10 @@ pub(crate) fn passed_over(
     if machine == crate::acquire::MACHINE {
         return None;
     }
+    // On Windows every machine but OpenBot's is passed over, so none is asked anything.
+    if os == "windows" {
+        return Some(machine.to_string());
+    }
     let facts = machine_behind(connection).ok()?;
     let usable = match os {
         "windows" => false,
@@ -765,6 +769,16 @@ pub fn rootless_socket() -> Option<PathBuf> {
     None
 }
 
+/**
+Whether OpenBot's Podman engine here is only ever its own machine, `acquire::MACHINE`: on Windows,
+where every machine of the person's is passed over (`passed_over_machine`). There nothing of
+theirs is asked or used: not Podman's default connection, which may be theirs, and not another
+running machine. On a Mac a rootful machine of theirs is used as before.
+*/
+pub fn own_machine_only(os: &str) -> bool {
+    os == "windows"
+}
+
 /// What is here, before anything is installed.
 pub fn detect() -> EngineStatus {
     detect_among(&[Engine::Docker, Engine::Podman])
@@ -785,6 +799,7 @@ pub fn detect_saved(saved: Option<Engine>) -> EngineStatus {
 fn detect_among(engines: &[Engine]) -> EngineStatus {
     detect_among_with(
         engines,
+        own_machine_only(std::env::consts::OS),
         Address::responds,
         passed_over_machine,
         || running_machine(crate::acquire::MACHINE),
@@ -798,6 +813,7 @@ fn detect_among(engines: &[Engine]) -> EngineStatus {
 /// engine is installed.
 fn detect_among_with(
     engines: &[Engine],
+    own_machine_only: bool,
     responds: impl Fn(&Address) -> bool,
     passed_over_machine: impl Fn(&Address) -> Option<String>,
     running_machine: impl FnOnce() -> Option<String>,
@@ -806,6 +822,11 @@ fn detect_among_with(
     // The person's machine answered first, and OpenBot uses its own machine instead.
     let mut passed_over = None;
     for &engine in engines {
+        // Podman's default connection may be the person's machine, and on Windows OpenBot runs only
+        // on its own: never asked, and OpenBot's machine is found by name below.
+        if own_machine_only && engine == Engine::Podman {
+            continue;
+        }
         let address = Address::new(engine, None);
         if responds(&address) {
             if let Some(theirs) = passed_over_machine(&address) {
@@ -1218,9 +1239,87 @@ fn main() {
             // OpenBot's own machine is used as it is, whatever its mode: its database is in it.
             assert_eq!(passed_over("openbot-root", os, |_| facts(rootful)), None);
             assert_eq!(passed_over("openbot", os, |_| facts(rootful)), None);
-            // A connection that is not a machine's is used as before.
-            assert_eq!(passed_over("remote-host", os, missing), None);
+            // A connection that is not a machine's is used as before on a Mac. On Windows OpenBot
+            // runs only on its own machine, so it is passed over too.
+            assert_eq!(
+                passed_over("remote-host", os, missing),
+                (os == "windows").then(|| "remote-host".to_string())
+            );
         }
+        // On Windows nothing of the person's is asked anything to decide it.
+        let never = |connection: &str| -> Result<crate::acquire::MachineFacts, String> {
+            panic!("{connection} was inspected")
+        };
+        assert_eq!(
+            passed_over("mine", "windows", never),
+            Some("mine".to_string())
+        );
+    }
+
+    fn listing(machines: &[(&str, bool)]) -> Vec<MachineListing> {
+        machines
+            .iter()
+            .map(|(name, running)| MachineListing {
+                name: name.to_string(),
+                running: *running,
+            })
+            .collect()
+    }
+
+    /// Box I, after OpenBot was uninstalled with its data: OpenBot's machine was gone, Podman had
+    /// made the person's rootless `mine` its default connection, and the engine check landed on it.
+    /// On Windows, Podman's default connection is never asked, and from the running machines only
+    /// OpenBot's is ever picked, without asking any other one anything. So there is no engine for
+    /// OpenBot until its own machine is made again, and the person's is never touched.
+    #[test]
+    fn on_windows_only_openbots_own_machine_is_ever_looked_at() {
+        let touched = std::cell::RefCell::new(Vec::<String>::new());
+        let detect = |machines: Vec<MachineListing>| {
+            detect_among_with(
+                &[Engine::Podman],
+                own_machine_only("windows"),
+                |address| {
+                    touched
+                        .borrow_mut()
+                        .push(format!("asked {:?}", address.connection));
+                    address.connection.as_deref() == Some("openbot-root")
+                },
+                |address| {
+                    touched
+                        .borrow_mut()
+                        .push(format!("passed over? {:?}", address.connection));
+                    None
+                },
+                || {
+                    usable_running_machine(&machines, crate::acquire::MACHINE, |name| {
+                        passed_over(name, "windows", |connection| {
+                            panic!("{connection} was inspected")
+                        })
+                        .is_some()
+                    })
+                    .map(|name| format!("{name}-root"))
+                },
+                |engine| engine == Engine::Podman,
+            )
+        };
+
+        // Only the person's machine, running and the default: no engine for OpenBot.
+        let gone = detect(listing(&[("mine", true)]));
+        assert!(!gone.responding, "{}", gone.detail);
+        assert_eq!(gone.address, None);
+        assert_eq!(gone.engine, Some(Engine::Podman));
+        assert!(touched.borrow().is_empty(), "{:?}", touched.borrow());
+
+        // OpenBot's machine made again and running beside theirs: it, and only it, is used.
+        let ours = detect(listing(&[("mine", true), ("openbot", true)]));
+        assert!(ours.responding);
+        assert_eq!(
+            ours.address.and_then(|address| address.connection),
+            Some("openbot-root".into())
+        );
+        assert_eq!(*touched.borrow(), ["asked Some(\"openbot-root\")"]);
+        assert!(own_machine_only("windows"));
+        assert!(!own_machine_only("macos"));
     }
 
     fn podman_default() -> Address {
@@ -1240,6 +1339,7 @@ fn main() {
 
         let waiting = detect_among_with(
             &[Engine::Docker, Engine::Podman],
+            false,
             answers,
             theirs,
             || None,
@@ -1253,6 +1353,7 @@ fn main() {
 
         let ours = detect_among_with(
             &[Engine::Docker, Engine::Podman],
+            false,
             answers,
             theirs,
             || Some("openbot-root".into()),
@@ -1272,6 +1373,7 @@ fn main() {
         let never_passed = |_: &Address| None;
         let docker = detect_among_with(
             &[Engine::Docker, Engine::Podman],
+            false,
             |address| address.engine == Engine::Docker,
             never_passed,
             || panic!("Docker answered"),
@@ -1282,6 +1384,7 @@ fn main() {
 
         let podman = detect_among_with(
             &[Engine::Docker, Engine::Podman],
+            false,
             |address| address.engine == Engine::Podman,
             never_passed,
             || panic!("the default connection answered"),

@@ -259,6 +259,24 @@ pub struct Report {
     pub shortfall: Option<Shortfall>,
 }
 
+impl Report {
+    /// The answer for a call made while the engine OpenBot runs on does not answer, without asking
+    /// the CLI: blocked, as the CLI says it (`docker_unavailable`), with nothing known.
+    pub fn engine_not_answering() -> Self {
+        Report {
+            outcome: Outcome::Blocked,
+            stack: None,
+            reason: Some(Reason::DockerUnavailable),
+            readiness: Readiness::Unknown,
+            licence: Licence::Unknown,
+            licence_expires_at: None,
+            update_to: None,
+            checks_passed: false,
+            shortfall: None,
+        }
+    }
+}
+
 /// Which of the engine's resources are below what local setup needs, and whether the engine is
 /// Podman, so the window names the right resource and the right settings.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -4589,6 +4607,29 @@ pub fn forget_arguments(stack: &StackId) -> [&str; 7] {
         stack.as_str(),
         "--json",
     ]
+}
+
+/// `local delete` for `stack` with the installed CLI, for the Windows uninstaller when the person
+/// deletes OpenBot's data (`uninstall`): the stack's cluster, its private folder and its record go, as
+/// when setup forgets one. Anything but a completed delete is a failure.
+pub fn delete_installed(stack: &StackId) -> Result<(), Failure> {
+    let cli = installed()?;
+    let (code, bytes) = execute(
+        &cli,
+        &forget_arguments(stack),
+        None,
+        Limits::for_action(Action::Stop),
+        &Cancel::default(),
+    )?;
+    let (outcome, _) = parse_envelope("local delete", code, &bytes)?;
+    if outcome != Outcome::Completed {
+        log::warn!(
+            "[uninstall] the CLI did not delete {}: {outcome:?}",
+            stack.as_str()
+        );
+        return Err(Failure::InvalidStatus);
+    }
+    Ok(())
 }
 
 /// Forget `stack` (`forget_arguments`). Anything but a completed delete leaves setup failed.

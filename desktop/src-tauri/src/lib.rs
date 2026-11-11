@@ -49,6 +49,7 @@ pub mod stall;
 pub mod telemetry;
 pub mod tray;
 pub mod troubleshooting;
+pub mod uninstall;
 pub mod update_ready;
 pub mod upgrade;
 pub mod usage_data;

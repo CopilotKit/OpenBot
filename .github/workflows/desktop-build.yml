@@ -199,6 +199,15 @@ jobs:
           binary=desktop/src-tauri/target/release/openbot-desktop
           if [ "$PLATFORM" = windows ]; then binary="$binary.exe"; fi
           bash desktop/scripts/check-build-label.sh "$binary"
+      # The installer just built, run on the runner as a person runs it: installed, installed again
+      # over itself, then uninstalled. Installing over OpenBot must run the old uninstaller silently
+      # and as an update, so it never offers to delete the person's data, and uninstalling must
+      # run the app headless to stop what OpenBot runs.
+      - name: Windows installer update regression
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        timeout-minutes: 30
+        run: ./desktop/scripts/test-windows-installer-update.ps1
       # Say what this installer is, on the run's page, so nobody has to unpack it to find out.
       - name: Summarize the build
         shell: bash
