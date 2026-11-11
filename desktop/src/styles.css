@@ -296,6 +296,12 @@ h2 {
   text-wrap: pretty;
 }
 
+/* A product's name in a lede: the heading's ink and weight, so it reads as a name. */
+.lede strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
 .lede.big {
   font-size: var(--text-lg);
   line-height: 26px;
@@ -306,6 +312,17 @@ h2 {
   line-height: 20px;
   color: var(--text-secondary);
   margin: 16px 0 0;
+}
+
+/* Where Cancel was, in a button's height, so the card keeps its size as Cancel goes. */
+.cannot-cancel {
+  margin: 0;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
 }
 
 /* Controls */
@@ -462,6 +479,24 @@ button.text-link:hover:not(:disabled) {
 
 .local-alert .row {
   margin-top: 12px;
+}
+
+/* Under its button, a line keeps the row's gap rather than touching the button. */
+.local-alert .row + .footnote {
+  margin-top: 12px;
+}
+
+/* What a choice would delete, said as the card's other lines are. */
+.local-alert details > p {
+  margin-top: 8px;
+}
+
+.local-alert details ul {
+  margin: 4px 0 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
 }
 
 /* Local Intelligence setting up behind the screen in front: one line. */
@@ -797,27 +832,6 @@ button.sign-in-with {
   height: 100%;
 }
 
-/*
- * CopilotKit's logotype, leading the screens that sign in to a CopilotKit account. 30px, so the
- * drawn logotype clears the brand's 28px minimum, with half its height kept clear below it.
- */
-.copilotkit-logo {
-  display: block;
-  align-self: flex-start;
-  margin: 0 0 16px;
-}
-
-.copilotkit-logo img {
-  display: block;
-  height: 30px;
-  width: auto;
-}
-
-/* Under a card's heading, the same half-height kept clear above it as below. */
-.local-needs .copilotkit-logo {
-  margin-top: 12px;
-}
-
 /* The app's tabs: a muted track with the active tab raised in the card colour. */
 .segmented {
   display: inline-flex;
@@ -1143,6 +1157,13 @@ a:hover {
  * One Start, start to finish (`StartJourney`): what is happening now, the time left and so far, and
  * one bar over every row that only moves forward. Drawn as the rows are, above them.
  */
+/*
+ * As tall as what it says: what is happening, one line of time, then the bar, in the card's own
+ * padding. What changes is said in place, so nothing in it or under it moves: the time line is one
+ * line whatever it says ("About 3 minutes left", "Taking longer than usual, still working", a
+ * download's bytes). A fixed 130 px card left an empty band under the bar in its usual one-line
+ * form. Docker Desktop's hand-off, three lines, holds its own height while it shows (`.handing-off`).
+ */
 .journey {
   margin: 4px 0 12px;
   padding: 12px 16px;
@@ -1165,6 +1186,10 @@ a:hover {
 
 .journey-said {
   font-weight: 500;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
 }
 
 /* The time left and so far, under what is happening: one quiet line, as a row's detail. */
@@ -1174,6 +1199,14 @@ a:hover {
   font-size: var(--text-sm);
   line-height: 20px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Another app's window wants the person: its three lines held while it shows, whatever it says. */
+.journey.handing-off .journey-said {
+  min-height: 66px;
 }
 
 .journey progress {
@@ -1219,6 +1252,11 @@ a:hover {
   min-height: 132px;
 }
 
+/* A row paused for room says what to free and offers Try again: it may be taller too. */
+.behind-slot:has(.step-action) {
+  height: auto;
+  min-height: 132px;
+}
 
 .behind-slot > .steps {
   margin-top: 0;
@@ -1273,6 +1311,13 @@ a:hover {
   display: none;
 }
 
+/* A paused row's Try again, under what its line says to do first (`Progress.onTryAgain`). */
+.step .step-action {
+  grid-column: 2 / -1;
+  justify-self: start;
+  margin-top: 4px;
+}
+
 .step .downloads {
   grid-column: 2 / -1;
   display: grid;
@@ -1292,6 +1337,20 @@ a:hover {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/*
+ * A plain line, with no download under it, may take up to three lines: the row is then 130 px of
+ * the 132 held, its badge on a line of its own included, so it still never moves anything. Cut at one line, "The Podman on this computer is
+ * too old for OpenBot, so OpenBot is updating it." read "...so OpenBot is u…"; cut at two, Docker
+ * Desktop's hand-off read "...OpenBot comes back when Docker is…". The longest line that reaches
+ * this row is three lines at 1016x839 and at 720x560 (`setupLayout.browser.test.ts`).
+ */
+.behind-slot .step:not(:has(> .downloads)) .detail {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  white-space: normal;
 }
 
 .downloads progress {
@@ -1375,6 +1434,25 @@ a:hover {
   }
 }
 
+/*
+ * The background row's name whole, with its step and time on a line of their own under it, as a
+ * narrow window sets every row. On Windows G the badge ("Step 3 of 4 · 4m 18s elapsed") cut the
+ * name to "Installing OpenBot in the backgr…". After the rules it changes. Its tallest forms still
+ * fill the 132 px held and no more: a download (name, badge, line, bar and bytes), or a plain line
+ * of three (`.behind-slot`).
+ */
+.behind-slot .step {
+  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-areas:
+    "mark label"
+    ". status"
+    ". detail";
+}
+
+.behind-slot .step-status {
+  justify-self: start;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -1454,6 +1532,20 @@ a:hover {
   margin-bottom: 28px;
 }
 
+/*
+ * The trademark sign on OpenBot's name, as open.bot sets it and as the app's `Trademark` does: a
+ * small superscript in the name's own colour, its top level with the capitals, that leaves the line
+ * where it was. Never under 8px, so it still reads beside the header's 16px name.
+ */
+.lockup .trademark {
+  vertical-align: 0.4em;
+  letter-spacing: 0;
+  margin-left: 0.1em;
+  font-size: max(0.45em, 8px);
+  font-weight: 500;
+  line-height: 0;
+}
+
 .lockup span {
   font-size: var(--text-lg);
   line-height: 22px;
@@ -1461,18 +1553,24 @@ a:hover {
   letter-spacing: -0.015em;
 }
 
-/* The lockup at the top of every setup step: smaller, as the app's sidebar header sets it. */
-.setup-header .lockup {
+/*
+ * The lockup at the top of every setup step, and on the sign-in a stopped setup asks for: smaller,
+ * as the app's sidebar header sets it.
+ */
+.setup-header .lockup,
+.local-needs .lockup {
   margin: 0;
   gap: 8px;
 }
 
-.setup-header .orb {
+.setup-header .orb,
+.local-needs .orb {
   width: 22px;
   height: 22px;
 }
 
-.setup-header .lockup span {
+.setup-header .lockup span,
+.local-needs .lockup span {
   font-size: var(--text-base);
   line-height: 20px;
   font-weight: 600;
@@ -1480,10 +1578,16 @@ a:hover {
 }
 
 /* "by CopilotKit" beside the name: the same size, quieter, so OpenBot still leads. */
-.setup-header .lockup span.lockup-by {
+.setup-header .lockup span.lockup-by,
+.local-needs .lockup span.lockup-by {
   font-weight: 400;
   color: var(--text-secondary);
   margin-left: -2px;
+}
+
+/* On the sign-in card, under its heading: the same space above it as below. */
+.local-needs .lockup {
+  margin: 12px 0;
 }
 
 /* The developer half of a failure: present, and never the headline. */
@@ -1749,6 +1853,17 @@ main > .sheet {
   overflow-y: auto;
 }
 
+/*
+ * A step with a pinned foot keeps its scrollbar's room whether the scrollbar shows or not, and
+ * gives it back from its right padding (`--gutter`, which `StepFooter` measures), so what is in it
+ * is as wide either way. On Windows G the background row moved about 15 px sideways as the card's
+ * scrollbar went when a provider was chosen.
+ */
+main > .sheet:has(> .step-footer) {
+  scrollbar-gutter: stable;
+  padding-right: calc(32px - var(--gutter, 0px));
+}
+
 main > .sheet > * {
   flex-shrink: 0;
 }
@@ -1769,6 +1884,26 @@ main > .sheet > .step-footer {
 }
 
 /* Its actions' gap above them is inside it, so what scrolls under it does not show through. */
+/*
+ * While the step goes on under the foot, what is under it fades into the foot, so it plainly goes
+ * on below (`StepFooter`). On Windows G the AI step's last provider sat under the foot with a
+ * sliver of its edge showing, and nothing said the list went on.
+ */
+main > .sheet > .step-footer.more-below::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 56px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--card) 0%, transparent),
+    var(--card)
+  );
+  pointer-events: none;
+}
+
 main > .sheet > .step-footer > .row:first-child {
   margin-top: 0;
   padding-top: 24px;
@@ -1787,9 +1922,54 @@ main > .sheet > .step-footer > .row:first-child:empty:has(+ .behind-slot) {
 }
 
 @media (max-width: 580px) {
+  main > .sheet:has(> .step-footer) {
+    padding-right: calc(24px - var(--gutter, 0px));
+  }
+
   main > .sheet > .step-footer {
     bottom: -24px;
     margin-bottom: -24px;
     padding-bottom: 24px;
   }
+}
+
+/*
+ * Usage data, at the foot of the last screen of setup: a small checkbox and a line or two beside
+ * it, in the footnote's size and colour. No card: it is a choice, not a step.
+ */
+.usage-choice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  align-items: start;
+  margin-top: 20px;
+  font-size: var(--text-xs);
+  line-height: 16px;
+  color: var(--text-secondary);
+}
+
+.usage-choice p {
+  margin: 0;
+  text-wrap: pretty;
+}
+
+/* The app's `Checkbox`: 14px, its primary fill when checked. */
+.usage-choice input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  margin: 1px 0 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.usage-choice input[type="checkbox"]:disabled {
+  cursor: default;
+}
+
+.usage-choice label {
+  cursor: pointer;
+}
+
+.usage-choice .usage-choice-failed {
+  grid-column: 2;
 }

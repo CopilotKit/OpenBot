@@ -113,7 +113,7 @@ async function routineRunning(goalId: string) {
     ownerUserId: ownerId,
     agentId: botId,
     channelId,
-    instruction: "Check the latest release",
+    instruction: `Run the goal ${goalId} with run_goal.`,
     cron: "0 9 * * *",
     timezone: "UTC",
     nextRunAt: new Date(Date.now() + 3_600_000),

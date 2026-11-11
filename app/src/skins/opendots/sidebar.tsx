@@ -22,6 +22,7 @@ import {
 } from "@/components/app-sidebar/app-sidebar";
 import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
+import { BrandName } from "@/components/edition/brand-name";
 import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import { OpenBotVersion } from "@/components/layout/openbot-version";
 import { Button } from "@/components/ui/button";
@@ -130,7 +131,9 @@ function Wordmark({ onNavigate }: { onNavigate: () => void }) {
       onClick={onNavigate}
       to="/"
     >
-      <span className="truncate">{productName}</span>
+      <span className="truncate">
+        <BrandName>{productName}</BrandName>
+      </span>
     </Link>
   );
 }
@@ -577,6 +580,7 @@ function WorkspaceLinks({
           onClick={onNavigate}
         >
           <item.icon />
+          {/* The label alone, no trademark sign: "OpenBot for Business" only just fits this rail. */}
           <span className="min-w-0 flex-1 truncate">{item.label}</span>
         </NavigationTarget>
       ))}

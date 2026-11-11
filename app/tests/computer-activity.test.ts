@@ -404,11 +404,23 @@ describe("reading a conversation's computer calls", () => {
           JSON.stringify({ ok: true, path: "a.md", text: "hi", bytes: 2 }),
         ),
         call("read", "computer_read_file", { path: "a.md" }),
+        call("search", "web_search", { query: "example" }),
+        answer("search", JSON.stringify({ ok: true, results: [] })),
         call("look", "computer_navigate", { url: "https://example.com" }),
         answer("look", JSON.stringify({ ok: true, title: "Example" })),
       ]),
     ).toEqual([
       { id: "read", did: { kind: "read_file", subject: "a.md", output: "hi" } },
+      // A page opened is the computer's too, and listed with its title.
+      {
+        id: "look",
+        did: {
+          kind: "browser",
+          step: "computer_navigate",
+          subject: "https://example.com",
+          output: "Example",
+        },
+      },
     ]);
   });
 });

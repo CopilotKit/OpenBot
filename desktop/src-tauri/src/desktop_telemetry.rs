@@ -792,6 +792,8 @@ pub fn cli_reason(reason: local_eval::Reason) -> telemetry::CliReason {
         R::BrowserOpenFailed => T::BrowserOpenFailed,
         R::ResourcesShort => T::ResourcesShort,
         R::Unrecognized => T::Unrecognized,
+        // OpenBot's own reading of a failure the CLI reported as this.
+        R::StackLost => T::LocalCommandFailed,
     }
 }
 
@@ -1850,6 +1852,8 @@ mod tests {
                 disk: false,
                 wsl: false,
                 drive: None,
+                disk_gb: None,
+                free_on_drive: false,
                 measured: local_eval::EngineMeasure {
                     cpus: 4,
                     memory_bytes: 2 * 1024 * 1024 * 1024,

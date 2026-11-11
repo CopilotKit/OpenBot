@@ -57,6 +57,7 @@ const goal = (id: string, agentId: string, title: string) => ({
   progress: "",
   lastResult: null,
   subscriptions: [],
+  recurring: false,
   endsWhenMet: false,
   updatedAt: "2026-10-09T10:00:00Z",
 });
@@ -278,6 +279,67 @@ test("a goal's row claims no start when routines couldn't be read", async () => 
     "a, button",
   ) as HTMLElement;
   await view.findByText("Couldn't load your routines. Reload the page.");
+  expect(row.textContent).not.toContain("When you ask");
+});
+
+/** The row of the goal titled `title`, once its starts are on it. */
+async function goalRow(
+  view: ReturnType<typeof draw>,
+  title: string,
+  starts: RegExp,
+) {
+  // A link to the goal's page.
+  const row = (await view.findByText(title)).closest("a") as HTMLElement;
+  await waitFor(() => expect(row.textContent).toMatch(starts));
+  return row;
+}
+
+test("a goal that repeats never says until when, and one that can end does", async () => {
+  serving({
+    goals: [
+      { ...goal("g1", "expenses", "Recurring"), recurring: true },
+      {
+        ...goal("g2", "expenses", "On events"),
+        subscriptions: [{ source: "github", eventType: "issues.opened" }],
+      },
+      goal("g3", "expenses", "On a schedule"),
+      goal("g4", "expenses", "Switched off"),
+      {
+        ...goal("g5", "expenses", "Ends when met"),
+        endsWhenMet: true,
+      },
+      goal("g6", "expenses", "Once"),
+    ] as unknown as ReturnType<typeof goal>[],
+    routines: [
+      routine("r3", "expenses", { goalId: "g3" }),
+      routine("r4", "expenses", { goalId: "g4", enabled: false }),
+      routine("r5", "expenses", { goalId: "g5" }),
+    ],
+  });
+  const view = draw();
+  const until = "Until: The receipts match the bank.";
+  for (const [title, starts] of [
+    ["Recurring", /When you ask/],
+    ["On events", /When a GitHub issue opens/],
+    ["On a schedule", /Weekdays at 09:00/],
+  ] as const)
+    expect((await goalRow(view, title, starts)).textContent).not.toContain(
+      until,
+    );
+  for (const [title, starts] of [
+    ["Switched off", /Schedule off/],
+    ["Ends when met", /Weekdays at 09:00/],
+    ["Once", /When you ask/],
+  ] as const)
+    expect((await goalRow(view, title, starts)).textContent).toContain(until);
+});
+
+test("a goal whose only schedule is off says so, not that it runs when you ask", async () => {
+  serving({
+    routines: [routine("r1", "expenses", { goalId: "g1", enabled: false })],
+  });
+  const view = draw();
+  const row = await goalRow(view, "Reconcile receipts", /Schedule off/);
   expect(row.textContent).not.toContain("When you ask");
 });
 

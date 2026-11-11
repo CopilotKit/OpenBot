@@ -401,6 +401,16 @@ function RouteComponent() {
     providers.isPending ||
     // Which rows there are depends on the edition, so the team list never flashes before the personal one.
     capabilities.isPending;
+  /*
+   * Whether the apps are on screen at all: loaded, read without error, and something matches the
+   * search. A search that matches nothing says so once, with no section or directory tile under it.
+   */
+  const showingApps =
+    !loading &&
+    !plugins.error &&
+    !connections.error &&
+    rows.length > 0 &&
+    matching.length > 0;
 
   return (
     <PageShell
@@ -449,8 +459,10 @@ function RouteComponent() {
         </p>
       ) : null}
       {/*
-       * One section, so it carries no heading of its own: "Your connections" under "Connections"
-       * said the same thing twice, 48px apart, and the description now sits under the page title.
+       * The first section has no heading of its own: in the team edition it is the page's one list,
+       * and "Your connections" under "Connections" said the same thing twice. It holds the search,
+       * which filters every section under it. In the personal edition Your apps and Add an app
+       * follow as sections of their own.
        */}
       <PageSection>
         {/*
@@ -535,33 +547,12 @@ function RouteComponent() {
               />
             </InputGroup>
             {matching.length === 0 ? (
-              <p className="mt-4 text-sm text-muted-foreground" role="status">
+              <PageEmpty icon={IconSearch} title="No matches">
                 Nothing matches “{search.trim()}”.
-              </p>
-            ) : null}
-            {personal ? (
-              <>
-                {yourApps.length > 0 ? (
-                  <PageSection className="mt-8" title="Your apps">
-                    <ConnectionGrid connectApp={connectApp} rows={yourApps} />
-                  </PageSection>
-                ) : null}
-                {toAdd.length > 0 || browse ? (
-                  <PageSection className="mt-8" title="Add an app">
-                    <ConnectionGrid connectApp={connectApp} rows={toAdd}>
-                      {browse ? (
-                        <BrowseTile
-                          browse={browse}
-                          link={paths.brokerDirectory(provider)}
-                        />
-                      ) : null}
-                    </ConnectionGrid>
-                  </PageSection>
-                ) : null}
-              </>
-            ) : matching.length > 0 ? (
+              </PageEmpty>
+            ) : personal ? null : (
               <ConnectionGrid connectApp={connectApp} rows={matching} />
-            ) : null}
+            )}
           </>
         )}
         {links.error || providers.error ? (
@@ -571,6 +562,23 @@ function RouteComponent() {
           </p>
         ) : null}
       </PageSection>
+      {showingApps && personal && yourApps.length > 0 ? (
+        <PageSection title="Your apps">
+          <ConnectionGrid connectApp={connectApp} rows={yourApps} />
+        </PageSection>
+      ) : null}
+      {showingApps && personal && (toAdd.length > 0 || browse) ? (
+        <PageSection title="Add an app">
+          <ConnectionGrid connectApp={connectApp} rows={toAdd}>
+            {browse ? (
+              <BrowseTile
+                browse={browse}
+                link={paths.brokerDirectory(provider)}
+              />
+            ) : null}
+          </ConnectionGrid>
+        </PageSection>
+      ) : null}
       {/*
        * The rest of what a Bot signs in with. Saved logins and keys live in the Vault, under
        * Settings; this row is a way in from beside the apps that use them.

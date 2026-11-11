@@ -6,6 +6,8 @@ A person can also ask at any time, and every place reads the same feed: **Check 
 
 The app update itself replaces only the app, on a Mac and on Windows alike. On a Mac the new `OpenBot.app` is put in place of the old one, then OpenBot is stopped and the app restarts. On Windows OpenBot is stopped first, then the installer runs in update mode, which never runs the uninstaller, and starts the new version. Either way the installation, its `.env`, keys and database volumes, and the app's own settings and data stay as they are, and the restarted app's Start is what moves the installation forward. See [Windows updates](releasing.md#windows-updates).
 
+The images are usually there before the click. As soon as the feed names a newer release, the app downloads that release's images in the background while this version keeps running: OpenBot's into its container engine and the back end's into the local Intelligence node, only images the installation runs. It does the same for an installation behind the app's own release, as soon as its engine answers. It only adds images, pulls one at a time, gives way to anything the person starts, and downloads nothing when the engine or the computer's drive is short of room, in which case the upgrade pulls them as before (`desktop/src-tauri/src/update_ready.rs`).
+
 ## The upgrade
 
 The app's own release is the tag it was released as, or, for an internal or candidate build, the release it was pinned to. One rule for every build: when the installed version (`.openbot-deployment`) is not that release, Start (`desktop/src-tauri/src/upgrade.rs`):
@@ -23,6 +25,8 @@ The restore works whoever is connected. The database is published on the host's 
 An installation an earlier app left running (an installer that closed the app without its Quit, a crash, a force quit) is not shown as it is when it is behind the app's release: the window stays on setup, and Start upgrades it as above. One on the app's release, or newer, is shown at launch, and from then on it is the app's own, as one Start raised is: the menus say it is running, local folder access and the watcher for refused connections run for it, and Stop, Restart and Quit take it down. Both of those answer to the server with the per-run token Start minted and kept only in memory, so for a deployment shown at launch the app reads that token back from the `server` container's environment (`stack::server_host_token`).
 
 A deployment newer than the app is never moved back: its database is already migrated past what the app's release knows. It keeps running, and the app's own update offer catches the app up. Releases before v0.3.0 ran the server on the host; Install lays those out again at the latest release.
+
+Start also brings the local Intelligence up to date. When it runs a release older than the one the app's bundled CLI installs, or an earlier update of it did not finish, the window runs the CLI's `local update` once, before it starts OpenBot on that stack. The CLI keeps the stack's data and app connections and leaves the stack as it was if the update fails, and a stack is never moved back (`local_eval::update_due`).
 
 `.env`, keys, credentials, profiles, volumes, override files and everything else the installation keeps for itself are never touched.
 
@@ -46,7 +50,7 @@ Otherwise from the build's compiled defaults: distribution ID and repository `Co
 
 ## Native application delivery
 
-Distributors can opt into the `shell-updater` Cargo feature without upgrading the existing Tauri dependency: the updater is pinned to compatible `2.10.1`. The feature only supplies the updater's configuration from compiled trust (below); checking, the offer, the signed download and the restart are the same `app_update` path as every signed build's. No updater JavaScript plugin permissions are exposed.
+Distributors can opt into the `shell-updater` Cargo feature. Every build already depends on the updater plugin (`tauri-plugin-updater` 2 in `desktop/src-tauri/Cargo.toml`). The feature only supplies the updater's configuration from compiled trust (below); checking, the offer, the signed download and the restart are the same `app_update` path as every signed build's. No updater JavaScript plugin permissions are exposed.
 
 Registering the updater plugin makes Tauri read `plugins.updater` from the app configuration, and that block requires a `pubkey`; with none, a feature build panicked at launch. The plugin is registered in one place, `main`'s setup, and only once its configuration exists: a `plugins.updater` block in `tauri.conf.json` is used as written; otherwise the build's compiled trust supplies `pubkey` and `endpoints`; with neither, the plugin is not registered and the build is offered no updates.
 

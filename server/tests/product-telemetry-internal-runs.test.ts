@@ -11,18 +11,18 @@ import { testEnvironment } from "./support/environment";
 /**
  * Only work somebody asked for is counted as an OpenBot run.
  *
- * The CopilotKit runtime names a new conversation itself: it builds the conversation's Bot again and
- * runs it in-process on a title prompt. That run goes through the same agent, so the product
- * middleware sees it, and it carries no context of OpenBot's because nobody asked for it. It used to
- * be counted as a run with an unknown trigger and no root task, once per new conversation.
+ * The CopilotKit runtime used to name a new conversation itself: it built the conversation's Bot again
+ * and ran it on a title prompt. That run went through the same agent, so the product middleware saw
+ * it, and it was counted as a run with an unknown trigger and no root task, once per new
+ * conversation. The runtime's naming is now off (`generateThreadNames: false` in copilot.ts), so a
+ * new conversation's first message is the person's run and nothing else.
  *
  * Driven through the real path: the handler `mountCopilotRuntime` returns, a Bot built from a stored
- * row, and the runtime's own thread naming. The Intelligence platform underneath is the fake, REST
- * and the runner's Phoenix channel, on 127.0.0.1; the Bot's endpoint stands in for its model.
+ * row. The Intelligence platform underneath is the fake, REST and the runner's Phoenix channel, on
+ * 127.0.0.1; the Bot's endpoint stands in for its model.
  *
- * The Bot is a harness this deployment runs, holding its token: the one kind of remote Bot the
- * runtime still names a conversation on. Somebody's own agent is never run for it at all
- * (runtime-own-runs.test.ts).
+ * The Bot is a harness this deployment runs, holding its token: the kind of remote Bot the runtime
+ * used to name a conversation on (runtime-own-runs.test.ts).
  */
 
 const MANAGED_AGENT_TOKEN = "deployment-token";
@@ -152,7 +152,7 @@ async function until(done: () => boolean, what: string) {
   }
 }
 
-test("naming a new conversation is not counted as an OpenBot run", async () => {
+test("a new conversation's first message is counted once, as the person's run, and nothing else runs", async () => {
   const productTelemetry = await createProductTelemetry({
     privacyKey: "synthetic-privacy-key",
     deploymentId: "dep_fixture_01",
@@ -218,12 +218,13 @@ test("naming a new conversation is not counted as an OpenBot run", async () => {
       ),
     "the person's run to finish",
   );
-  await until(() => named.length > 0, "the conversation to be named");
+  // Long enough for a title run, had the runtime started one as the thread was made.
+  await Bun.sleep(300);
   await productTelemetry.flush();
 
-  // Both ran on the Bot: the person's run, and the runtime's own run that named the conversation.
-  expect(seen).toHaveLength(2);
-  expect(named).toEqual(["Standup notes"]);
+  // Only the person's run reached the Bot: the runtime no longer names the conversation itself.
+  expect(seen).toHaveLength(1);
+  expect(named).toEqual([]);
   // Only the person's run is an OpenBot run.
   const runs = sent
     .filter((event) => /run_(accepted|terminal)$/.test(event.event))

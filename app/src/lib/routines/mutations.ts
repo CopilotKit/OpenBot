@@ -4,6 +4,8 @@ import { ClientError, client } from "@/lib/client";
 import { createProactiveSetting, proactiveKeys } from "@/lib/proactive";
 import {
   createResponsibility,
+  deleteResponsibility,
+  GOAL_ACTION_FALLBACK,
   responsibilityAction,
   responsibilityKeys,
 } from "@/lib/responsibilities";
@@ -112,8 +114,16 @@ async function withConversation<T>(
  *
  * A routine is one write, a check-in is one write, and a goal is up to three: the goal, the routine
  * that runs it on a schedule, and a first run. The conversation is started once and every write
- * uses it. A goal that was saved keeps its conversation even when its schedule is refused: the goal
- * is paused instead, so nothing the person made disappears.
+ * uses it.
+ *
+ * A goal whose schedule is refused is deleted again, with the conversation started for it, and the
+ * refusal is rethrown: the form stays as it was, saying what the server said, and Create can be
+ * pressed again. Only if that delete fails is the goal kept, paused, with its conversation, and the
+ * form locked (`SavedButRefused`).
+ *
+ * FOUND IN REVIEW: a refused schedule used to keep the goal, paused, and lock the form. A person who
+ * fixed what was refused could not press Create again, and the paused goal stayed on the Routines
+ * list with no way to delete it.
  */
 export function createFromPlanMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
@@ -153,7 +163,6 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
         input.title,
         async (channelId, saved) => {
           const goal = await createResponsibility({ ...input, channelId });
-          saved();
           const { id } = goal;
 
           if (schedule) {
@@ -180,10 +189,20 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
                 error instanceof ClientError &&
                 error.status >= 400 &&
                 error.status < 500;
-              if (!refused)
+              if (!refused) {
+                saved();
                 throw new SavedButRefused(
                   "It's saved on the Routines page, but its schedule may not have been set. Open it there to check.",
                 );
+              }
+              // Nothing was made but the goal: take it back. `withConversation` then takes back the
+              // conversation started for it, since `saved` was not called.
+              const removed = await deleteResponsibility(id).then(
+                () => true,
+                () => false,
+              );
+              if (removed) throw error;
+              saved();
               const refusal = error.message;
               const paused = await responsibilityAction(id, "pause").then(
                 () => true,
@@ -191,11 +210,13 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
               );
               throw new SavedButRefused(
                 paused
-                  ? `It's saved but paused, on the Routines page. Its schedule was refused: ${refusal}`
-                  : `It's saved on the Routines page, but it won't run on its own. Its schedule was refused: ${refusal}`,
+                  ? `It's saved but paused, on the Routines page. Its schedule was refused. ${refusal}`
+                  : `It's saved on the Routines page, but it won't run on its own. Its schedule was refused. ${refusal}`,
               );
             }
           }
+          // Nothing after this is undone: the goal and its conversation are kept.
+          saved();
 
           if (runNow) {
             try {
@@ -203,15 +224,20 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
             } catch (error) {
               const message =
                 error instanceof Error ? error.message : String(error);
+              // The fallback only says it didn't start, which this sentence already says.
               throw new SavedButRefused(
-                `It's saved on the Routines page, but it didn't start: ${message}`,
+                `It's saved on the Routines page, but it didn't start. ${
+                  message === GOAL_ACTION_FALLBACK.run
+                    ? "Open it there to run it."
+                    : message
+                }`,
               );
             }
           }
         },
       );
     },
-    // onSettled, not onSuccess: a goal paused after a refusal still has to show on the list.
+    // onSettled, not onSuccess: a goal kept, paused, after a refusal still has to show on the list.
     onSettled: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: routineKeys.all }),

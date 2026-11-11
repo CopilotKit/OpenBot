@@ -37,7 +37,16 @@ THE DISK IS CHECKED FIRST. The back end's CLI wants 40 GiB free (`local_eval::MI
 and on a Mac or Windows that space is taken from this computer's disk as the engine's virtual disk
 grows. k3s's own line (evicting under 5% free) is measured inside that virtual disk, not here. With
 less free than the back end needs and the downloads together, nothing starts, the window says so with
-both numbers, and the check runs again every few seconds until there is room.
+the numbers, and the check runs again every few seconds until there is room. The window says the
+back end's 40 GiB and the downloads apart, in the same GB the account step's check says its 40 in,
+so the two screens never give two figures for one need: Windows F was told "about 44 GB" here and
+"40 GB" on the next screen. Install waits for room as well (`measured`).
+
+THEY HOLD WHILE THE DISK IS SHORT. When the account step's check finds too little free disk and asks
+the person to free some (`local_eval::engine_size_terms`), every download here and Install's image
+pulls hold until there is room (`wait_for_room`), and carry on by themselves once there is: on
+Windows F free space fell from 15.0 to 11.0 GB while the person was asked to free some. A pull that
+is already running finishes, as it does when setup is stopped.
 */
 
 use std::collections::BTreeMap;
@@ -327,6 +336,8 @@ impl Resumed {
 enum Failed {
     ForNow(String),
     ForGood(String),
+    /// Stopped to hold for room (`wait_for_room`), with what it had kept: it carries on from there.
+    Held,
 }
 
 /// `source` into `partial`, carrying on from what is there, with an attempt more than `waits`.
@@ -343,6 +354,8 @@ fn download_resuming(
         let result = attempt(source, partial, pinned, progress);
         match result {
             Ok(()) => return Ok(()),
+            // Not an attempt that failed: the next one asks for the rest.
+            Err(Failed::Held) => wait_for_room(&|| {}, &|| true),
             Err(Failed::ForGood(error)) => return Err(error),
             Err(Failed::ForNow(error)) => match waits.get(attempts - 1) {
                 Some(wait) => {
@@ -459,6 +472,17 @@ fn attempt(
 
     let mut buffer = vec![0u8; 256 * 1024];
     loop {
+        if held_for_room() {
+            have.file.flush().map_err(|error| {
+                Failed::ForGood(format!("could not write the download: {error}"))
+            })?;
+            log::info!(
+                "[download] {} holds for room after {} bytes",
+                pinned.name,
+                have.bytes
+            );
+            return Err(Failed::Held);
+        }
         let read = match response.read(&mut buffer) {
             Ok(0) => break,
             Ok(read) => read,
@@ -547,11 +571,18 @@ pub struct Summary {
     pub size: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bytes_per_second: Option<u64>,
-    /// Free on this computer's disk, and what setup needs, when the disk is short.
+    /// When the disk is short: free on this computer's disk, what OpenBot needs free to run (the
+    /// back end's 40 GiB, the figure the account step's check says too), and what the downloads
+    /// add to the disk on top of it (`Needed`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub free: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub needed: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download: Option<u64>,
+    /// Downloading, and holding until there is room (`wait_for_room`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub paused: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
@@ -588,7 +619,9 @@ struct Table {
     /// What OpenBot's image pulls report: Install shows the same while it waits for them.
     images: Option<crate::pull_metrics::Downloads>,
     free: Option<u64>,
-    needed: Option<u64>,
+    needed: Option<Needed>,
+    /// The account step found the disk short: downloads hold until there is room.
+    held: bool,
     speed: Speed,
 }
 
@@ -638,9 +671,18 @@ impl Table {
             state: self.state,
             bytes,
             size,
-            bytes_per_second: bytes_per_second.filter(|_| self.state == State::Downloading),
+            bytes_per_second: bytes_per_second
+                .filter(|_| self.state == State::Downloading && !self.held),
             free: self.free.filter(|_| self.state == State::Short),
-            needed: self.needed.filter(|_| self.state == State::Short),
+            needed: self
+                .needed
+                .filter(|_| self.state == State::Short)
+                .map(|needed| needed.back_end),
+            download: self
+                .needed
+                .filter(|_| self.state == State::Short)
+                .map(|needed| needed.downloads),
+            paused: self.held && self.state == State::Downloading,
         }
     }
 
@@ -660,6 +702,98 @@ impl Table {
 /// Where the early downloads are now.
 pub fn summary() -> Summary {
     table().summary(Instant::now())
+}
+
+/// Where the early downloads are once they have looked at the free disk, waiting up to `limit` for
+/// that, for Install: an Install clicked in the seconds before they have is not let through on a
+/// disk too full for OpenBot. At once when they were never started.
+pub fn measured(limit: Duration) -> Summary {
+    let since = Instant::now();
+    while STARTED.load(std::sync::atomic::Ordering::SeqCst)
+        && table().state == State::Idle
+        && since.elapsed() < limit
+    {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    summary()
+}
+
+// ---------------------------------------------------------------------------------------------
+// Holding for room.
+// ---------------------------------------------------------------------------------------------
+
+/// The account step found too little free disk and asks the person to free some: every download
+/// holds until there is room, so it does not fill the disk meanwhile.
+pub fn hold_for_room() {
+    let mut table = table();
+    if !table.held {
+        table.held = true;
+        log::warn!("[early downloads] the disk is short: downloads hold until there is room");
+    }
+}
+
+/// A check found room: the downloads carry on.
+pub fn room_again() {
+    let mut table = table();
+    if table.held {
+        table.held = false;
+        log::info!("[early downloads] there is room again: downloads carry on");
+    }
+}
+
+/// Downloads hold until there is room (`hold_for_room`).
+pub fn held_for_room() -> bool {
+    table().held
+}
+
+/// While downloads hold, wait for room: the free disk the account step's check counts, against the
+/// same 40 GiB, looked at every few seconds. `on_hold` is called once when this waits at all, and
+/// it stops waiting once `wanted` says the download is no longer wanted. A disk that is not
+/// measured is not judged, as the account step does not judge it.
+pub fn wait_for_room(on_hold: &dyn Fn(), wanted: &dyn Fn() -> bool) {
+    // One look at a time: several downloads hold at once, and each look starts a container.
+    static LOOKING: Mutex<()> = Mutex::new(());
+    let mut told = false;
+    while held_for_room() && wanted() {
+        if !told {
+            told = true;
+            on_hold();
+        }
+        let _one = hold(&LOOKING);
+        if !held_for_room() {
+            break;
+        }
+        match free_for_room() {
+            Some(free) if free < crate::local_eval::MIN_ENGINE_FREE_DISK_BYTES => {
+                std::thread::sleep(ROOM_RECHECK);
+            }
+            _ => room_again(),
+        }
+    }
+}
+
+/// How long between two looks at the free disk while downloads hold.
+#[cfg(not(test))]
+const ROOM_RECHECK: Duration = DISK_RECHECK;
+#[cfg(test)]
+const ROOM_RECHECK: Duration = Duration::from_millis(20);
+
+/// What a test says the free disk is, while downloads hold.
+#[cfg(test)]
+#[allow(clippy::type_complexity)]
+pub(crate) static FREE_FOR_TESTS: Mutex<Option<Box<dyn Fn() -> Option<u64> + Send>>> =
+    Mutex::new(None);
+
+fn free_for_room() -> Option<u64> {
+    #[cfg(test)]
+    if let Some(free) = FREE_FOR_TESTS
+        .lock()
+        .unwrap_or_else(|held| held.into_inner())
+        .as_ref()
+    {
+        return free();
+    }
+    crate::local_eval::engine_free_disk()
 }
 
 /// One download's progress, into the table.
@@ -729,17 +863,8 @@ pub struct Plan {
     /// The engine to pull OpenBot's images into.
     pub images: Option<Address>,
     /// With no engine answering, OpenBot's images downloaded into the cache, to load once one
-    /// does (`early_images`), and the Compose that names them.
-    pub offline_images: Option<NamedBy>,
-}
-
-/// Which Compose names OpenBot's images when no engine answers: `config --images` reads files.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NamedBy {
-    /// OpenBot's own standalone Compose, downloaded with Podman's installer.
-    OwnCompose,
-    /// Docker Desktop's, which answers `compose config` while Docker Desktop is stopped.
-    Docker,
+    /// does (`early_images`).
+    pub offline_images: bool,
 }
 
 impl Plan {
@@ -755,7 +880,7 @@ impl Plan {
         self.machine_image.map_or(0, |image| image.size)
             + if self.podman { 80 * MB } else { 0 }
             + if self.compose { 35 * MB } else { 0 }
-            + if self.images.is_some() || self.offline_images.is_some() {
+            + if self.images.is_some() || self.offline_images {
                 1_200 * MB
             } else {
                 0
@@ -772,7 +897,8 @@ impl Plan {
 ///   Podman comes from its own packages);
 /// - the machine image when Install will create OpenBot's machine with a Podman that pulls the
 ///   pinned machine-os release;
-/// - OpenBot's images when an engine answers already.
+/// - OpenBot's images: into an engine that answers already, or into the cache to load once one
+///   does. Their list comes from OpenBot's own Compose, so that downloads too (`named_images`).
 pub fn plan(facts: &Facts) -> Plan {
     use crate::install::Choice;
     if facts.installed_before {
@@ -800,21 +926,21 @@ pub fn plan(facts: &Facts) -> Plan {
             }
             _ => false,
         };
-    // No engine answers: OpenBot's images download now, to load once one does. Docker Desktop
-    // stopped names them with its own Compose; anything else with the one OpenBot downloads.
-    let offline_images = (desktop && facts.answering.is_none())
-        .then_some(match facts.choice {
-            Choice::InstallPodman | Choice::UsePodman => Some(NamedBy::OwnCompose),
-            Choice::OpenDockerDesktop => Some(NamedBy::Docker),
-            _ => None,
-        })
-        .flatten();
+    // No engine answers: OpenBot's images download now, to load once one does.
+    let offline_images = desktop
+        && facts.answering.is_none()
+        && matches!(
+            facts.choice,
+            Choice::InstallPodman | Choice::UsePodman | Choice::OpenDockerDesktop
+        );
+    let images = facts.answering.clone();
     Plan {
         machine_image: facts.machine_image.filter(|_| creates_machine),
         podman: installs_podman,
-        compose: installs_podman || offline_images == Some(NamedBy::OwnCompose),
+        // Install's Compose for a new Podman, and the one that names OpenBot's images either way.
+        compose: installs_podman || images.is_some() || offline_images,
         deployment: true,
-        images: facts.answering.clone(),
+        images,
         offline_images,
     }
 }
@@ -878,10 +1004,12 @@ fn images_lock() -> &'static Mutex<()> {
     &IMAGES
 }
 
+/// The early downloads were started in this run of the app (`start`).
+static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Start the early downloads for the installation in `root`, once per run of the app. Answers at
 /// once; the downloads run on threads of their own and say where they are through `hooks`.
 pub fn start(root: PathBuf, hooks: Hooks) {
-    static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     if STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
         return;
     }
@@ -905,9 +1033,27 @@ pub fn start(root: PathBuf, hooks: Hooks) {
 /// How long between two looks at the free disk, while it is short.
 const DISK_RECHECK: Duration = Duration::from_secs(10);
 
+/// The free disk OpenBot needs before the downloads start, as two figures the window says apart.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Needed {
+    /// What the back end needs free to run: the 40 GiB the account step's check also asks for.
+    pub back_end: u64,
+    /// What the downloads add to the disk before that (`Plan::disk_bytes`).
+    pub downloads: u64,
+}
+
+impl Needed {
+    pub fn total(&self) -> u64 {
+        self.back_end + self.downloads
+    }
+}
+
 /// The free disk OpenBot needs for `plan`: the back end's 40 GiB, and the downloads themselves.
-pub fn needed_for(plan: &Plan) -> u64 {
-    crate::local_eval::MIN_ENGINE_FREE_DISK_BYTES + plan.disk_bytes()
+pub fn needed_for(plan: &Plan) -> Needed {
+    Needed {
+        back_end: crate::local_eval::MIN_ENGINE_FREE_DISK_BYTES,
+        downloads: plan.disk_bytes(),
+    }
 }
 
 /// One early download: its row in the table, its size when it is known, and the work.
@@ -963,7 +1109,7 @@ fn jobs(root: &Path, plan: &Plan, cache: &Path, hooks: &Arc<Hooks>) -> Vec<Job> 
             }),
         });
     }
-    if let (true, Some(named_by)) = (plan.deployment, plan.offline_images) {
+    if plan.deployment && plan.offline_images {
         let root = root.to_path_buf();
         let cache = cache.to_path_buf();
         jobs.push(Job {
@@ -978,7 +1124,7 @@ fn jobs(root: &Path, plan: &Plan, cache: &Path, hooks: &Arc<Hooks>) -> Vec<Job> 
                 if !ok {
                     return Err("the deployment did not download".into());
                 }
-                download_offline_images(&root, &cache, named_by)
+                download_offline_images(&root, &cache)
             }),
         });
         return jobs;
@@ -997,6 +1143,7 @@ fn jobs(root: &Path, plan: &Plan, cache: &Path, hooks: &Arc<Hooks>) -> Vec<Job> 
             // Install waits for them from the start (`wait_for_images`).
             Some(engine) => {
                 let hooks = hooks.clone();
+                let cache = cache.to_path_buf();
                 jobs.push(Job {
                     key: "images",
                     size: None,
@@ -1009,7 +1156,7 @@ fn jobs(root: &Path, plan: &Plan, cache: &Path, hooks: &Arc<Hooks>) -> Vec<Job> 
                         if !ok {
                             return Err("the deployment did not download".into());
                         }
-                        pull_images(&engine, &root, &hooks)
+                        pull_images(&engine, &root, &cache, &hooks)
                     }),
                 });
             }
@@ -1019,11 +1166,11 @@ fn jobs(root: &Path, plan: &Plan, cache: &Path, hooks: &Arc<Hooks>) -> Vec<Job> 
 }
 
 /// Run `jobs` once `free` says there is `needed` free, all at once, saying where they are through
-/// `said` while they run. With less free, nothing starts: the window is told both numbers, and
+/// `said` while they run. With less free, nothing starts: the window is told the numbers, and
 /// `free` is asked again every `recheck`.
 pub fn run(
     jobs: Vec<Job>,
-    needed: u64,
+    needed: Needed,
     free: impl Fn() -> Option<u64>,
     said: &(dyn Fn(Summary) + Sync),
     recheck: Duration,
@@ -1035,7 +1182,7 @@ pub fn run(
     }
     loop {
         match free() {
-            Some(free) if free < needed => {
+            Some(free) if free < needed.total() => {
                 {
                     let mut table = table();
                     table.state = State::Short;
@@ -1043,7 +1190,10 @@ pub fn run(
                     table.needed = Some(needed);
                 }
                 log::warn!(
-                    "[early downloads] {free} bytes free, {needed} needed: waiting for space"
+                    "[early downloads] {free} bytes free, {} needed ({} to run and {} to download): waiting for space",
+                    needed.total(),
+                    needed.back_end,
+                    needed.downloads
                 );
                 said(summary());
                 std::thread::sleep(recheck);
@@ -1152,36 +1302,54 @@ pub fn default_bot_images(engine: &Address, root: &Path) -> Result<Vec<String>, 
     )
 }
 
-/// OpenBot's images for the default Bot, named by the Compose `named_by` says, downloaded into the
-/// cache for Install to load once the engine answers (`early_images`).
-fn download_offline_images(root: &Path, cache: &Path, named_by: NamedBy) -> Result<(), String> {
-    let images = match named_by {
-        NamedBy::Docker => default_bot_images(&Address::new(Engine::Docker, None), root)?,
-        NamedBy::OwnCompose => {
-            let compose = crate::install::runnable_compose(cache, &())?;
-            let harness = crate::harness::HarnessChoice {
-                id: crate::harness::DEFAULT_HARNESS.into(),
-                agent_url: None,
-            };
-            let nowhere = root.join(".openbot-early-downloads-nowhere");
-            crate::preparation::installation_pull_set_by(
-                |settings| crate::stack::standalone_compose_command(&compose, &nowhere, settings),
-                &nowhere,
-                root,
-                Some(&harness),
-            )
-            .map_err(|problem| {
-                format!(
-                    "{}{}",
-                    problem.said,
-                    problem
-                        .detail
-                        .map(|detail| format!(" ({detail})"))
-                        .unwrap_or_default()
-                )
-            })?
-        }
+/**
+The images Install pulls for the default Bot, from the deployment laid out in `root`, named by
+OpenBot's own Compose: `compose` gives its path, waiting for its download when the first screen is
+still downloading it.
+
+Never the engine's Compose. On Windows D a person's Podman 5.8.9 answered with no Compose installed,
+and `podman compose` failed looking up a provider before OpenBot's own was in place, so the first
+screen said its downloads didn't finish. A Docker Desktop's Compose can be one too old to read the
+project (`engine_versions`). OpenBot's own is the pinned one Install uses, and `config --images`
+needs no engine.
+*/
+pub fn named_images(
+    root: &Path,
+    compose: impl FnOnce() -> Result<PathBuf, String>,
+) -> Result<Vec<String>, String> {
+    let compose = compose()?;
+    let harness = crate::harness::HarnessChoice {
+        id: crate::harness::DEFAULT_HARNESS.into(),
+        agent_url: None,
     };
+    let nowhere = root.join(".openbot-early-downloads-nowhere");
+    crate::preparation::installation_pull_set_by(
+        |settings| crate::stack::standalone_compose_command(&compose, &nowhere, settings),
+        &nowhere,
+        root,
+        Some(&harness),
+    )
+    .map_err(|problem| {
+        format!(
+            "{}{}",
+            problem.said,
+            problem
+                .detail
+                .map(|detail| format!(" ({detail})"))
+                .unwrap_or_default()
+        )
+    })
+}
+
+/// OpenBot's own Compose, from the cache, waiting for the first screen's download of it.
+fn own_compose(cache: &Path) -> impl FnOnce() -> Result<PathBuf, String> + '_ {
+    move || crate::install::runnable_compose(cache, &())
+}
+
+/// OpenBot's images for the default Bot, downloaded into the cache for Install to load once the
+/// engine answers (`early_images`).
+fn download_offline_images(root: &Path, cache: &Path) -> Result<(), String> {
+    let images = named_images(root, own_compose(cache))?;
     log::info!(
         "[early images] downloading {} before any engine answers",
         images.join(", ")
@@ -1208,8 +1376,8 @@ pub fn load_offline_images(engine: &Address, said: impl Fn(crate::pull_metrics::
 }
 
 /// OpenBot's images for the default Bot, pulled into `engine` with Install's own pull.
-fn pull_images(engine: &Address, root: &Path, hooks: &Hooks) -> Result<(), String> {
-    let images = default_bot_images(engine, root)?;
+fn pull_images(engine: &Address, root: &Path, cache: &Path, hooks: &Hooks) -> Result<(), String> {
+    let images = named_images(root, own_compose(cache))?;
     let present = {
         let engine = engine.clone();
         move |image: &str| crate::preparation::image_present(&engine, image).unwrap_or(false)
@@ -1220,6 +1388,7 @@ fn pull_images(engine: &Address, root: &Path, hooks: &Hooks) -> Result<(), Strin
         crate::pull_metrics::IMAGE_PULLS_AT_ONCE,
         sizes,
         |_, image, on_layer| {
+            wait_for_room(&|| {}, &|| true);
             crate::pull_metrics::pull_image(engine, image, on_layer, |metrics| {
                 (hooks.pulled)(metrics)
             })
@@ -1237,13 +1406,26 @@ fn pull_images(engine: &Address, root: &Path, hooks: &Hooks) -> Result<(), Strin
 }
 
 /// Wait for OpenBot's images to finish pulling early, if they are, saying where they are while it
-/// waits. Install's own pull then finds them there.
-pub fn wait_for_images(said: impl Fn(&crate::pull_metrics::Downloads)) {
+/// waits, or `holding` once while they hold for room. Install's own pull then finds them there.
+pub fn wait_for_images(said: impl Fn(&crate::pull_metrics::Downloads), holding: impl Fn()) {
     let lock = images_lock();
     let mut pacer = crate::pull_metrics::Pacer::default();
+    let mut told = false;
     loop {
         if let Ok(_done) = lock.try_lock() {
             return;
+        }
+        if held_for_room() {
+            if !told {
+                told = true;
+                holding();
+            }
+            std::thread::sleep(Duration::from_millis(250));
+            continue;
+        }
+        if told {
+            told = false;
+            pacer = crate::pull_metrics::Pacer::default();
         }
         // The early pull's own report, or the bytes of images downloading for an engine to come.
         let images = {

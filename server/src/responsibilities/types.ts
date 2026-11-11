@@ -46,11 +46,15 @@ const goalFields = {
    */
   endsWhenMet: z.boolean(),
 };
+/** Shown to the person, and to the model as a refusal: "repeat" is `recurring`. */
 export const RECURS_AND_ENDS =
-  "A goal that recurs has no outcome that ends it.";
-/** A run may complete a goal that ends when met by checking its success criteria, so it needs some. */
+  "A goal can't both repeat and end when it's met. Turn one of them off.";
+/**
+ * A run may complete a goal that ends when met by checking its success criteria, so it needs some.
+ * Shown to the person, who knows them as Done when, and to the model, which knows `successCriteria`.
+ */
 export const ENDS_WITHOUT_OUTCOME =
-  "A goal that ends when met needs to say what done looks like.";
+  "A goal that ends when it's met needs a Done when, its success criteria. Add one, or let it keep going.";
 export const responsibilityInputSchema = z
   .object({
     agentId: text(128),
@@ -197,8 +201,9 @@ export type RoutineGoalLink = {
  * Activity, and by the routine store when it names an untitled routine for its goal.
  *
  * BY THE GOAL IT RECORDS. A routine made for a goal records its id, and runs that goal and no other,
- * whatever its instruction quotes; completing that goal switches it off. An older routine can name
- * several goals, and stays on while one of them is not completed (`switchOffRoutinesOf`).
+ * whatever its instruction quotes; completing that goal switches it off, or, when its instruction
+ * doesn't name the goal (`instructionNamesGoal`), unlinks it and leaves it on. An older routine can
+ * name several goals, and stays on while one of them is not completed (`switchOffRoutinesOf`).
  *
  * FOUND BEFORE 0.3.3: the rule was "the instruction contains the goal's title anywhere", so a goal
  * titled "Email" was run by any routine that mentioned email. Its runs could then never complete it,
@@ -213,10 +218,22 @@ export function routineRunsGoal(
 ): boolean {
   if (routine.goalId) return routine.goalId === goal.id;
   if (!routine.goalByTitle) return false;
+  return instructionNamesGoal(routine.instruction, goal);
+}
+
+/**
+ * Whether a routine's instruction names this goal: by its id, or by its whole title between quotes
+ * (`TITLE_QUOTES`). What the page writes (`Run the goal "Title" (id) with run_goal.`) and what a Bot
+ * writes (`Run the goal "Title"`) both do; a word of the title inside a sentence does not.
+ */
+export function instructionNamesGoal(
+  instruction: string,
+  goal: { id: string; title: string },
+): boolean {
   return (
-    routine.instruction.includes(goal.id) ||
+    instruction.includes(goal.id) ||
     TITLE_QUOTES.some(([open, close]) =>
-      routine.instruction.includes(`${open}${goal.title}${close}`),
+      instruction.includes(`${open}${goal.title}${close}`),
     )
   );
 }
@@ -308,6 +325,11 @@ export type ResponsibilityStore = {
     id: string,
     status: ResponsibilityStatus,
   ): Promise<Responsibility>;
+  /**
+   * Delete this goal and the routines that record it (`goal_id`): they exist to run it. Its runs and
+   * triggers go with it. Not found for another person's goal.
+   */
+  delete(ownerUserId: string, id: string): Promise<void>;
   recordProgress(
     ownerUserId: string,
     id: string,

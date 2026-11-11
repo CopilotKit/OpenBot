@@ -5,6 +5,15 @@ import { shownSubtitle } from "@/lib/agents/subtitle";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 /**
+ * Room for the orb's halo inside the transcript's scroller, which cuts whatever reaches past its
+ * edge. The halo (the pattern and the orb's glow) reaches 40px past the orb, and the column gives it
+ * only its 16px gutter until the pane is wide enough to centre the 768px column with 24px either
+ * side (52rem, with room for a scrollbar). Below that the intro steps in by the 24px it lacks.
+ * Reported on 1.0.1 at the desktop's default window: the halo was cut flat at the pane's edge.
+ */
+const HALO_ROOM = "@max-[52rem]:ps-6";
+
+/**
  * The top of a conversation with one Bot: its orb, its name, what it does, and who can see it.
  *
  * Drawn from the Bot's profile, with visibility shown only in the team edition.
@@ -34,7 +43,7 @@ export function ConversationIntro({
     .filter((part): part is string => Boolean(part?.trim()))
     .join(" · ");
   return (
-    <div className="flex items-center gap-5 pt-4 pb-2">
+    <div className={`flex items-center gap-5 pt-4 pb-2 ${HALO_ROOM}`}>
       <div className="relative isolate grid shrink-0 place-items-center">
         <div aria-hidden className="orb-pattern" />
         <BotOrb
@@ -81,7 +90,10 @@ export function ConversationIntroPlaceholder() {
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   return (
-    <div aria-hidden className="flex items-center gap-5 pt-4 pb-2">
+    <div
+      aria-hidden
+      className={`flex items-center gap-5 pt-4 pb-2 ${HALO_ROOM}`}
+    >
       <div className="relative isolate grid shrink-0 place-items-center">
         <div className="orb-pattern" />
         <Skeleton className="size-24 rounded-full" />

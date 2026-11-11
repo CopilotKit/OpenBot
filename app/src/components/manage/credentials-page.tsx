@@ -14,6 +14,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
@@ -94,6 +95,9 @@ export function CredentialsList() {
       {credentials.data.map((credential, index) => (
         <StaggerItem index={index} key={credential.id}>
           <Item size="sm">
+            <ItemMedia variant="icon">
+              <IconKey />
+            </ItemMedia>
             <ItemContent>
               <ItemTitle>{credential.provider}</ItemTitle>
               <ItemDescription>

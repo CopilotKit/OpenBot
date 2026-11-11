@@ -301,7 +301,10 @@ test("in the personal edition the menu opens OpenBot for Business instead of Adm
   await user.click(entry);
   const dialog = await view.findByRole("dialog");
   expect(
-    within(dialog).getByText("OpenBot for Business", { selector: "h2" }),
+    within(dialog).getByRole("heading", {
+      level: 2,
+      name: "OpenBot for Business",
+    }),
   ).toBeTruthy();
 });
 

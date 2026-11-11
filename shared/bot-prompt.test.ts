@@ -180,6 +180,14 @@ describe("how a Bot asks, and how an unattended run ends", () => {
     );
     expect(said).toContain("a few at a time");
     expect(said).toContain("read every result before the next batch");
+    // Anthropic's sentence for parallel tool use, and a component drawn only from what was read.
+    expect(said).toContain(
+      "only batch tool calls that are independent of each other.",
+    );
+    expect(said).toContain(
+      "draw a component only from results you have already read",
+    );
+    expect(said).toContain("never in the same step");
     expect(said).toContain(
       "take it in the same reply instead of saying you will",
     );

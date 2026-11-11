@@ -41,7 +41,8 @@ export type ReadinessAction =
   | "restart-intelligence"
   | "restart-openbot"
   | "sign-in"
-  | "repair";
+  | "repair"
+  | "start-fresh";
 
 export type ReadinessRow = {
   state: ReadinessState;
@@ -116,7 +117,7 @@ function listed(words: string[]): string {
 const resourceName: Record<Resource, string> = {
   cpu: "CPUs",
   memory: "memory",
-  disk: "disk space",
+  disk: "free disk space",
 };
 const limitName: Record<Resource, string> = {
   cpu: "CPU",
@@ -132,7 +133,8 @@ const podmanFlag: Record<Resource, string> = {
 
 /**
  * Which resource is short and where to raise it. `needs` is what OpenBot needs of each: free, at
- * Start, as the CLI measures it, or in total, before it. Disk alone is "out of disk space".
+ * Start, as the CLI measures it, or in total, before it. A disk that is short is never "out of disk
+ * space": Windows F was told so with 13 GB free.
  */
 function shortfallSaid(
   shortfall: Shortfall,
@@ -157,6 +159,18 @@ function shortfallSaid(
       : "Raise them in Docker Desktop > Settings > Resources";
     return `${shortfall.podman ? "This computer doesn't give OpenBot" : "Docker Desktop doesn't give OpenBot"} enough CPUs, memory or disk space. ${fix}, then ${then}.`;
   }
+  // The drive under OpenBot's machine ran short, on Windows: said as the person sees it in File
+  // Explorer, and as the first screen says it. "OpenBot has 13.2 GB of free disk" read badly.
+  if (
+    short.length === 1 &&
+    shortfall.disk &&
+    shortfall.freeOnDrive &&
+    shortfall.drive &&
+    shortfall.diskGb &&
+    !shortfall.nearlyFull
+  ) {
+    return `This computer has ${shortfall.diskGb} GB of free space on drive ${shortfall.drive}, and OpenBot needs ${needed.disk}. Free up some space, then ${then}.`;
+  }
   const fix = shortfall.podman
     ? podmanFix(short, shortfall)
     : `Raise the ${short.length === 1 ? `${limitName[short[0]]} limit` : "limits"} in Docker Desktop > Settings > Resources${shortfall.disk ? ", or free space in Docker" : ""}`;
@@ -175,7 +189,7 @@ function shortfallSaid(
   const measured: Record<Resource, string | undefined> = {
     cpu: shortfall.cpus && `${shortfall.cpus} free CPUs`,
     memory: shortfall.memoryGb && `${shortfall.memoryGb} GB of free memory`,
-    disk: shortfall.diskGb && `${shortfall.diskGb} GB of free disk`,
+    disk: shortfall.diskGb && `${shortfall.diskGb} GB of free disk space`,
   };
   const has = short.map((resource) => measured[resource]);
   // After "OpenBot is nearly out of disk space.", OpenBot's own machine is "it".
@@ -186,9 +200,7 @@ function shortfallSaid(
           ? needed[short[0]]
           : listed(short.map((resource) => neededFully[resource]))
       }.`
-    : short.length === 1 && short[0] === "disk"
-      ? `${engine} is out of disk space. ${needsWho} ${needs.disk}.`
-      : `${engine} doesn't have enough ${listed(short.map((resource) => resourceName[resource]))}. ${needsWho} ${listed(short.map((resource) => needs[resource]))}.`;
+    : `${engine} doesn't have enough ${listed(short.map((resource) => resourceName[resource]))}. ${needsWho} ${listed(short.map((resource) => needs[resource]))}.`;
   const full = shortfall.nearlyFull
     ? "OpenBot is nearly out of disk space. "
     : "";
@@ -226,7 +238,7 @@ const needed: Record<Resource, string> = {
 const neededFully: Record<Resource, string> = {
   cpu: "4 free CPUs",
   memory: "4 GB of free memory",
-  disk: "40 GB of free disk",
+  disk: "40 GB of free disk space",
 };
 
 /**
@@ -256,7 +268,7 @@ export function engineTooSmallSaid(shortfall: Shortfall): string {
 
 // Compiler-enforced: a new upstream reason or failure breaks the build here.
 const reasonRows: Record<LocalReason, ReadinessRow> = {
-  "authentication-required": blocked("Sign in to CopilotKit.", "sign-in"),
+  "authentication-required": blocked("Sign in to OpenBot.", "sign-in"),
   // Acceptance is an explicit step of its own; retrying start cannot satisfy it.
   "eula-acceptance-required": blocked(
     "The license agreement hasn't been accepted yet.",
@@ -304,6 +316,12 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
       disk: false,
     }),
     "retry",
+  ),
+  // Box I: OpenBot's machine was made again, and the backend and its data went with the old one.
+  // Honest about what is gone, and the one way on.
+  "stack-lost": blocked(
+    "OpenBot's saved data on this computer is gone, with your Bots and conversations. Start fresh to set OpenBot up again. Your sign-in and AI connection stay.",
+    "start-fresh",
   ),
   unrecognized: couldNotStart,
 };

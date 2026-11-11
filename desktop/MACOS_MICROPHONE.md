@@ -35,7 +35,9 @@ providers:
 2. Start dictation and approve OpenBot's macOS microphone prompt. Speak a short
    phrase, stop, and verify the transcription. If permission was already denied,
    enable OpenBot under System Settings → Privacy & Security → Microphone and
-   reopen the app.
+   reopen the app. Without a transcription provider, dictation uses the same
+   on-device recognizer as narration (step 5), so macOS asks for speech
+   recognition before the microphone (`app/src/lib/dictation/live.ts`).
 3. Start and stop an OpenAI voice conversation, then a Grok voice conversation.
    Verify each receives spoken input and releases the microphone after stopping.
 4. Repeat with microphone permission denied and verify that the UI reports the

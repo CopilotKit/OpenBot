@@ -13,7 +13,7 @@ the approval rules and the audit trail are the same here and are not repeated.
 
 Some things on this page are stated as **unproven**, and the last section lists them. What is
 marked _measured_ was observed by hand against a live Arcade project during development, in two
-rounds, and **nothing in CI dials Arcade** — the vendor's behaviour can change without any check
+rounds, and **nothing in CI dials Arcade** — the vendor's behavior can change without any check
 here noticing:
 
 - **Before this page was first written (2026-10-12)**, with a throwaway script that is not in this
@@ -66,7 +66,7 @@ Four refusals protect this, and all four are deliberate:
 
 - **A named provider whose key is not set stops the server at startup.** An operator sees: _OPENBOT_BROKER_PROVIDER=arcade names a provider whose ARCADE_API_KEY is not set to a key. Set ARCADE_API_KEY to this deployment's key, or change or unset OPENBOT_BROKER_PROVIDER._ It does not fall back to a deployment with no broker, because that would send somebody looking for a broken vendor instead of at their own environment. A key that is empty or all whitespace — `ARCADE_API_KEY=` with nothing after it — is no key: that provider counts as unconfigured, and no client is ever built on an empty credential.
 - **Both keys set with the variable unset stops the server at startup.** An operator sees: _COMPOSIO_API_KEY and ARCADE_API_KEY are both set and OPENBOT_BROKER_PROVIDER is unset, so no provider is active and nothing brokered would work. Set OPENBOT_BROKER_PROVIDER to composio or arcade to say which vendor is live, or unset the key of the vendor this deployment is not using._ Nobody wants that state on purpose — the deployment would hold two vendor keys and broker nothing — and wiring no broker silently would surface much later and far away, as brokered features that simply do not work. "Both set" counts only keys that hold something: two blank keys are no keys, and are reported as such rather than as two configured vendors.
-- **Activating a provider is refused while the other one still holds connections.** It is keyed on connection rows, not on keys. The message names the provider being activated and how many connections still belong to the other. Switching by editing the environment would leave accounts nobody can revoke. **There is no one-step migration**; what ends the old provider's connections today is keeping it active — both keys set, `OPENBOT_BROKER_PROVIDER` naming the old provider — and using the ordinary ways a connection ends, each of which revokes at the vendor and deletes the row: each person disconnects their own on `/settings/connected-accounts`, an administrator disconnects a Shared app's account, an administrator removes an app (which ends every account connected to it), or a person is offboarded. When the old provider holds no connections, name the new one and restart.
+- **Activating a provider is refused while the other one still holds connections.** It is keyed on connection rows, not on keys. The message names the provider being activated and how many connections still belong to the other. Switching by editing the environment would leave accounts nobody can revoke. **There is no one-step migration**; what ends the old provider's connections today is keeping it active (both keys set, `OPENBOT_BROKER_PROVIDER` naming the old provider) and using the ordinary ways a connection ends, each of which revokes at the vendor and deletes the row: each person disconnects their own on `/connections`, an administrator disconnects a Shared app's account, an administrator removes an app (which ends every account connected to it), or a person is offboarded. When the old provider holds no connections, name the new one and restart.
 - **Holding connections at BOTH providers while nothing is active stops the server at startup.** It is the refusal above seen from the other side: with no provider named there is nothing to read one vendor's rows as, and reading them as the other's is the failure this whole section exists to prevent. The message names both vendors and says plainly that **nothing in the deployment can get past this**: with rows at both, activating either provider is refused by the rule above. The only way out is by hand — end one vendor's accounts in that vendor's own dashboard, delete its rows from `brokered_connections`, then name the other provider. The refusal at activation exists so that this state is never reached.
 
 ## Setting up the Arcade project
@@ -90,7 +90,7 @@ configuration.
 This was confirmed the hard way, and the reason matters because it is not a preference. A consent
 link was minted for an arbitrary `user_id` against Arcade's default Google provider. It **failed at
 verification** with _"the authorization process was not completed"_. The same consent minted for an
-Arcade project member's own identity **completed**. Arcade's built-in verifier has to recognise the
+Arcade project member's own identity **completed**. Arcade's built-in verifier has to recognize the
 end user as a member of the project, so it can only serve a `user_id` that is one. Per-person
 connections in OpenBot are arbitrary ids by definition — nobody is made a member of your Arcade
 project in order to connect their mailbox — so a default provider cannot serve them at all.
@@ -174,7 +174,10 @@ worth reading before pressing **Add**.
 **Connect works as it does on Composio.** It asks Arcade for one consent covering every scope the
 app's actions publish (the `auth.authorize` call, with the app's own authorization requirement read
 off its listing), and the consent comes back through the verifier above, which records the
-connection and lands the person on the app's page, as Composio's Connect does. Actions name the
+connection and lands the person on the app's page under Connections. That is where it lands
+whichever page Connect was pressed on: an administrator who started from the app's page under
+Plugins, or a sign-in started in OpenBot Desktop, ends in the browser on the app's page under
+Connections. Actions name the
 same requirement when they name the same auth provider instance, its `id` (or the same
 `provider_id` where none names an `id`): the live catalogue publishes one instance with and without
 its `provider_id` (`SquareupApi`) and two instances with neither (`XeroApi`). An app whose actions
@@ -199,7 +202,9 @@ Disconnect: one press asks for the whole app over the connection that stands, wi
 first.
 
 A single-user deployment is filed at Arcade under its own name, not under `dev-local-user`; see
-[Configuration](../configuration.md#authentication).
+[Configuration](../configuration.md#authentication). Arcade keeps one account per user id and auth
+provider, so a person's second account at an app (**Connect another account**) is filed there
+under a further id of theirs, `<their id>~<suffix>`, with a random suffix minted when they press it.
 
 ### Toolkits are curated or they are wrappers, and the difference was measured
 
@@ -215,11 +220,11 @@ what OpenBot asks before running it depends on that classification. Arcade publi
 
 Curated toolkits classify every tool. Generated API wrappers classify none. An action that is not
 classified is recorded as an **unclassified write** (`unclassified` on `mcp_tools`), because an
-unlabelled action is not claiming to be safe. It asks first wherever a change asks (**Ask before
-making changes**, an approval rule), and a check-in, a task's unasked read or a memory source never
+unlabelled action is not claiming to be safe. It asks first wherever a change asks (**Extra
+vigilant**, or an approval rule), and a check-in, a task's unasked read or a memory source never
 calls it. It is not marked destructive, because Arcade never said it destroys anything: that marker
-is what makes a call always ask (see [Approvals](../approvals.md)) and what a Bot's page draws as
-"destroys things", and it stays for the actions Arcade flags, such as `Attio.RemoveFromList`. A
+is what makes a call ask as deleting does (see [Approvals](../approvals.md)) and what a Bot's page
+draws as "destroys things", and it stays for the actions Arcade flags, such as `Attio.RemoveFromList`. A
 Composio action with no label is recorded the same way. An administrator enabling an unclassified
 toolkit is warned **before** finishing. Where a curated toolkit exists for the app, enable that one.
 

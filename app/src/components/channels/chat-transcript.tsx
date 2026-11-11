@@ -76,6 +76,7 @@ import { readFiring } from "@/lib/channels/routine-firing";
 import type { CardPlace } from "@/lib/copilot/carry-on";
 import { foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { ToolPlaceContext } from "@/lib/copilot/tool-place";
+import { useComponentTest } from "@/lib/copilot/tool-steps";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   type FolderNames,
@@ -2044,6 +2045,8 @@ export function ChatTranscript({
   working,
 }: ChatTranscriptProps) {
   const isDrawn = useDrawnTool();
+  // Which calls draw a component, so one asked for too early is left out. See `shared/tool-steps.ts`.
+  const isComponent = useComponentTest();
   /**
    * The transcript's column, shared by the restoring state and the scroller. 768px, wider than the
    * composer's 672px, which is the reading width ChatGPT and Claude.ai give an answer.
@@ -2061,7 +2064,9 @@ export function ChatTranscript({
    */
   /* Which row each tool step was drawn in, so a row keeps its key; see `groupToolSteps`. */
   const rowIdsRef = useRef(new Map<string, string>());
-  const visible = dropRepeatedAppCards(toVisibleChatItems(messages));
+  const visible = dropRepeatedAppCards(
+    toVisibleChatItems(messages, isComponent),
+  );
   const items = groupToolSteps(visible, isDrawn, rowIdsRef.current);
   /*
    * The folders this conversation's "Check your folders" steps named, for its other folder steps.

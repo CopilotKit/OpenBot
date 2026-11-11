@@ -72,12 +72,32 @@ const ALLOWED: { file: string; word: RegExp; why: string }[] = [
   {
     file: "desktop/src-tauri/src/install.rs",
     word: /Podman/,
-    why: "the person installs Podman Desktop or the podman package, or asks IT to allow it",
+    why: "the person installs Podman Desktop or the podman package, or asks IT to allow it, or sees the Podman they installed being updated",
   },
   {
     file: "desktop/src-tauri/src/engine_versions.rs",
     word: /Podman/,
-    why: "the person updates or removes a Podman they installed, which OpenBot can't update for them",
+    why: "the person updates or removes a Podman they installed, which OpenBot can't update for them, or is told the Podman OpenBot updated isn't answering",
+  },
+  {
+    file: "desktop/src-tauri/src/own_machine.rs",
+    word: /Podman/,
+    why: "the person's own Podman, which OpenBot pauses on a Mac only once they say yes, and starts again on Quit",
+  },
+  {
+    file: "desktop/src/PodmanGoAhead.tsx",
+    word: /Podman/,
+    why: "the person says yes to pausing their own Podman",
+  },
+  {
+    file: "desktop/src/SetupProgress.tsx",
+    word: /Podman/,
+    why: "the rows for pausing the person's own Podman and starting it again",
+  },
+  {
+    file: "desktop/src/ShuttingDown.tsx",
+    word: /Podman/,
+    why: "Quit starts the person's own Podman again",
   },
   {
     file: "desktop/src-tauri/src/acquire.rs",
@@ -88,6 +108,11 @@ const ALLOWED: { file: string; word: RegExp; why: string }[] = [
     file: "desktop/src/ProviderPicker.tsx",
     word: /\bcontainers?\b/i,
     why: "an advanced field for a model the person hosts: the address OpenBot's containers use",
+  },
+  {
+    file: "desktop/src/Welcome.tsx",
+    word: /\bbackend\b/i,
+    why: "the first screen says OpenBot's backend runs on this computer too, which is what self-contained means",
   },
   {
     file: "desktop/src/localEvalCli.ts",
@@ -254,6 +279,27 @@ function technical(said: Said): string[] {
 
 test("what OpenBot Desktop says while it sets up, starts or updates, when that stops, on its Status window and on This computer, is plain words", () => {
   expect(sentences().flatMap(technical)).toEqual([]);
+});
+
+/**
+ * The company alone. Product copy says OpenBot, and OpenBot by CopilotKit where the company has to
+ * be named (see .claude/skills/openbot-copy). An address is not read: `github.com/CopilotKit/...`.
+ */
+const COMPANY_ALONE = /(?<!OpenBot\s+by\s+)(?<![\w/.-])CopilotKit(?![\w/-])/;
+
+/** "by CopilotKit" in the lockup, where it follows OpenBot's name on screen (`Lockup`). */
+const BESIDE_THE_NAME = (said: Said) =>
+  said.file === "desktop/src/Sections.tsx" && said.text === "by CopilotKit";
+
+test("OpenBot Desktop and This computer say OpenBot, or OpenBot by CopilotKit, never CopilotKit alone", () => {
+  const all = sentences();
+  expect(
+    all
+      .filter((said) => COMPANY_ALONE.test(said.text) && !BESIDE_THE_NAME(said))
+      .map((said) => `${said.file}:${said.line}  ${said.text}`),
+  ).toEqual([]);
+  // The lockup is read, so the exception above still has something to excuse.
+  expect(all.some(BESIDE_THE_NAME)).toBe(true);
 });
 
 test("every word kept for the person to act in is still needed", () => {

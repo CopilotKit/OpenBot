@@ -7,7 +7,6 @@ import {
   IconMessageOff,
   IconPlayerPlay,
   IconRobot,
-  IconTrash,
   IconWorld,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -20,6 +19,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { routinesOf } from "@/components/routines/new-routine-page";
+import { DeleteRow } from "@/components/routines/delete-row";
 import { RoutineDetailMissing } from "@/components/routines/routine-detail-missing";
 import { Button } from "@/components/ui/button";
 import {
@@ -269,8 +269,8 @@ export function RoutineRoutePage({
 
 /**
  * Everything about one scheduled routine: switched, run, read back and deleted, each the same write
- * it always was. The switch takes effect when switched, Run now does real work, and Delete asks
- * first, then returns to the list.
+ * it always was. The switch takes effect when switched, Run now does real work, and Delete, the last
+ * row of the actions, asks first, then returns to the list.
  */
 export function RoutinePage({
   routine,
@@ -445,6 +445,16 @@ export function RoutinePage({
               </Item>
             </>
           ) : null}
+          <Separator />
+          <DeleteRow
+            description="It stops for good."
+            label={`Delete the routine scheduled ${routine.schedule}`}
+            onClick={() => {
+              remove.reset();
+              setConfirming(true);
+            }}
+            title="Delete routine"
+          />
         </PageRows>
         {setEnabled.error || runNow.error ? (
           <p className="mt-3 text-destructive text-sm" role="alert">
@@ -488,23 +498,6 @@ export function RoutinePage({
       </PageSection>
 
       <RoutineRuns routine={routine} />
-
-      <div className="mt-12">
-        <Button
-          aria-label={`Delete the routine scheduled ${routine.schedule}`}
-          className="text-destructive hover:text-destructive"
-          onClick={() => {
-            remove.reset();
-            setConfirming(true);
-          }}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          <IconTrash />
-          Delete routine
-        </Button>
-      </div>
 
       {/* It names the schedule, the words a person reads first on the row. */}
       <Dialog onOpenChange={setConfirming} open={confirming}>

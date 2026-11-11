@@ -3,7 +3,6 @@ import {
   IconPlayerPlay,
   IconRadar,
   IconRepeat,
-  IconTrash,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { type LinkProps, useNavigate } from "@tanstack/react-router";
@@ -14,6 +13,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { routinesOf } from "@/components/routines/new-routine-page";
+import { DeleteRow } from "@/components/routines/delete-row";
 import { RoutineDetailMissing } from "@/components/routines/routine-detail-missing";
 import { Button } from "@/components/ui/button";
 import {
@@ -104,7 +104,8 @@ export function CheckInRoutePage({
 
 /**
  * Everything about one check-in: whether it is on, running it now, how often it looks, and removing
- * it. Each takes effect at once, as it did in the dialog; Remove asks first, then returns to the list.
+ * it. Each takes effect at once, as it did in the dialog; Remove, the last row, asks first, then
+ * returns to the list.
  */
 export function CheckInPage({
   setting,
@@ -264,6 +265,15 @@ export function CheckInPage({
               </Select>
             </ItemActions>
           </Item>
+          <Separator />
+          <DeleteRow
+            description={`${botName} stops looking at this for good.`}
+            onClick={() => {
+              change.reset();
+              setConfirming(true);
+            }}
+            title="Remove check-in"
+          />
         </PageRows>
         {change.error && !confirming ? (
           <p className="mt-3 text-destructive text-sm" role="alert">
@@ -271,22 +281,6 @@ export function CheckInPage({
           </p>
         ) : null}
       </PageSection>
-
-      <div className="mt-12">
-        <Button
-          className="text-destructive hover:text-destructive"
-          onClick={() => {
-            change.reset();
-            setConfirming(true);
-          }}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          <IconTrash />
-          Remove check-in
-        </Button>
-      </div>
 
       <Dialog onOpenChange={setConfirming} open={confirming}>
         <DialogContent>

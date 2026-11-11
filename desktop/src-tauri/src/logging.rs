@@ -94,6 +94,67 @@ pub fn builder(
     })
 }
 
+/**
+The same log for a run with no app around it (the Windows uninstaller's stop, `uninstall`): its
+lines are written as the plugin writes the app's, with the same levels and scrubbing, at the end of
+the current file in `folder`. Nothing rotates it here; the app does when it next starts. Answers
+whether this process now logs there.
+*/
+pub fn append_without_app(folder: &Path) -> bool {
+    struct Appending {
+        file: std::sync::Mutex<std::fs::File>,
+        home: Option<String>,
+    }
+    impl log::Log for Appending {
+        fn enabled(&self, metadata: &log::Metadata) -> bool {
+            let own = OWN_CRATES.iter().any(|own| {
+                metadata.target() == *own || metadata.target().starts_with(&format!("{own}::"))
+            });
+            metadata.level()
+                <= if own {
+                    log::Level::Info
+                } else {
+                    log::Level::Warn
+                }
+        }
+        fn log(&self, record: &log::Record) {
+            if !self.enabled(record.metadata()) {
+                return;
+            }
+            let entry = line(
+                &timestamp(),
+                record.level(),
+                record.target(),
+                &record.args().to_string(),
+                self.home.as_deref(),
+            );
+            if let Ok(mut file) = self.file.lock() {
+                use std::io::Write;
+                let _ = writeln!(file, "{entry}");
+            }
+        }
+        fn flush(&self) {}
+    }
+    let opened = std::fs::create_dir_all(folder).and_then(|()| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(folder.join(format!("{FILE_NAME}.log")))
+    });
+    let Ok(file) = opened else {
+        return false;
+    };
+    let logger = Appending {
+        file: std::sync::Mutex::new(file),
+        home: home_folder(),
+    };
+    if log::set_boxed_logger(Box::new(logger)).is_err() {
+        return false;
+    }
+    log::set_max_level(log::LevelFilter::Info);
+    true
+}
+
 /// The folder the log file is written to, as the plugin resolves it.
 pub fn folder<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<PathBuf> {
     use tauri::Manager;
@@ -149,6 +210,93 @@ pub fn timed<T, E: Failure>(what: &str, run: impl FnOnce() -> Result<T, E>) -> R
     let result = run();
     outcome(what, started, &result);
     result
+}
+
+/**
+What a Start phase waits on, as the log says it: the first answer and every change of it, the same
+answer again once a minute, and why the wait ended, with how long it ran and the last answer.
+
+A Start on Windows waited five minutes for OpenBot's services and then said "OpenBot didn't get
+ready in time", and the log had nothing in between: not what was asked, not what it answered, not
+why it stopped. Support had nothing to go on. Every wait writes these lines now.
+
+Pure, so the rule is tested with the answers the real waits give; the waits pass its lines to
+`log::info!`.
+*/
+pub struct WaitLog {
+    what: String,
+    started: std::time::Instant,
+    checks: u32,
+    last: Option<String>,
+    logged: Option<std::time::Instant>,
+    checked: std::time::Instant,
+}
+
+/// How often an answer that has not changed is said again, so a long wait is never silent.
+pub const SAID_AGAIN_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
+
+impl WaitLog {
+    /// A wait on `what`: the thing asked and where, such as "GET /health on port 64770".
+    pub fn new(what: impl Into<String>, now: std::time::Instant) -> Self {
+        Self {
+            what: what.into(),
+            started: now,
+            checks: 0,
+            last: None,
+            logged: None,
+            checked: now,
+        }
+    }
+
+    /// How long since the last answer, so a wait nobody ended (a Start that was stopped) is not
+    /// carried on by the next one.
+    pub fn quiet_for(&self, now: std::time::Instant) -> std::time::Duration {
+        now.duration_since(self.checked)
+    }
+
+    /// The line for one answer, when there is one to write: a new answer always, the same one once
+    /// `SAID_AGAIN_EVERY` has passed since it was last written.
+    pub fn answered(&mut self, now: std::time::Instant, answer: &str) -> Option<String> {
+        self.checks += 1;
+        self.checked = now;
+        let changed = self.last.as_deref() != Some(answer);
+        let due = self
+            .logged
+            .is_none_or(|at| now.duration_since(at) >= SAID_AGAIN_EVERY);
+        if !changed && !due {
+            return None;
+        }
+        self.last = Some(answer.to_string());
+        self.logged = Some(now);
+        Some(format!(
+            "[wait] {}: {}{answer} ({} in, check {})",
+            self.what,
+            if changed { "" } else { "still " },
+            took(now.duration_since(self.started)),
+            self.checks
+        ))
+    }
+
+    /// Why the wait ended, after how long and how many checks, and what the last one answered.
+    pub fn ended(&self, now: std::time::Instant, why: &str) -> String {
+        format!(
+            "[wait] {}: {why} after {} and {} checks; last answer: {}",
+            self.what,
+            took(now.duration_since(self.started)),
+            self.checks,
+            self.last.as_deref().unwrap_or("none")
+        )
+    }
+}
+
+/// `4.2s`, or `5m 02s` from a minute on.
+fn took(elapsed: std::time::Duration) -> String {
+    let seconds = elapsed.as_secs();
+    if seconds < 60 {
+        format!("{:.1}s", elapsed.as_secs_f32())
+    } else {
+        format!("{}m {:02}s", seconds / 60, seconds % 60)
+    }
 }
 
 /// `2026-11-07T14:03:12.345Z`. UTC, so a line means the same moment wherever it is read; the
@@ -416,6 +564,46 @@ pub fn redact(text: &str) -> Cow<'_, str> {
 
 #[cfg(test)]
 mod tests {
+    /// A five-minute wait, as Start's for OpenBot's services ran on Windows: the first answer,
+    /// nothing for the same one a second later, the same one again after a minute, a change, and
+    /// why it gave up, with how long and the last answer.
+    #[test]
+    fn a_wait_says_each_answer_once_again_each_minute_and_why_it_ended() {
+        let start = std::time::Instant::now();
+        let at = |seconds: u64| start + std::time::Duration::from_secs(seconds);
+        let mut wait = WaitLog::new(
+            "OpenBot's services, GET /health on port 64770 (API) and port 64771 (app)",
+            start,
+        );
+        let refused = "API not answering (http://127.0.0.1:64770/health: Connection refused (os \
+                       error 61), http://[::1]:64770/health: Connection refused (os error 61)); app \
+                       not asked until the API answers";
+        assert_eq!(
+            wait.answered(at(1), refused).unwrap(),
+            format!(
+                "[wait] OpenBot's services, GET /health on port 64770 (API) and port 64771 \
+                 (app): {refused} (1.0s in, check 1)"
+            )
+        );
+        assert_eq!(wait.answered(at(2), refused), None);
+        assert!(wait
+            .answered(at(62), refused)
+            .unwrap()
+            .ends_with(&format!("still {refused} (1m 02s in, check 3)")));
+        let unavailable = "API not answering (http://127.0.0.1:64770/health answered 503 Service \
+                           Unavailable); app not asked until the API answers";
+        assert!(wait.answered(at(70), unavailable).is_some());
+        assert_eq!(
+            wait.ended(at(302), "gave up: the API is not answering on port 64770."),
+            format!(
+                "[wait] OpenBot's services, GET /health on port 64770 (API) and port 64771 \
+                 (app): gave up: the API is not answering on port 64770. after 5m 02s and 4 \
+                 checks; last answer: {unavailable}"
+            )
+        );
+        assert_eq!(wait.quiet_for(at(80)), std::time::Duration::from_secs(10));
+    }
+
     use super::*;
     use crate::test_support::temp_root;
 

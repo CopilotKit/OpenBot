@@ -11,7 +11,7 @@ import {
   IconWebhook,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link, type LinkProps } from "@tanstack/react-router";
+import { Link, type LinkProps, useNavigate } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
 import { Streamdown } from "streamdown";
 import { LoadingRows } from "@/components/layout/loading-rows";
@@ -21,10 +21,20 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { DeleteRow } from "@/components/routines/delete-row";
 import { GoalSchedules } from "@/components/routines/goal-schedules";
 import { routinesOf } from "@/components/routines/new-routine-page";
 import { RoutineDetailMissing } from "@/components/routines/routine-detail-missing";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Field,
   FieldError,
@@ -46,6 +56,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { markdownComponents } from "@/lib/markdown";
 import {
+  deleteResponsibilityMutationOptions,
   type ResponsibilityRecord,
   responsibilitiesQueryOptions,
   responsibilityActionMutationOptions,
@@ -81,16 +92,17 @@ export const STATUS: Record<
  *
  * The starts are the Routines list's own (`goalStarts`): the schedule of each enabled routine, then
  * its events, then its enabled triggers. A schedule that is switched off starts nothing, so a goal
- * with only that reads "Runs when asked", as it does on the list.
+ * with only that reads "Schedule off", as it does on the list.
  *
  * `triggers` is undefined until they load, and then nothing is said about what starts it rather than
  * "Runs when asked", which would be a claim about triggers nobody has read yet. An enabled schedule
- * is already known, so it is named at once.
+ * is already known, so it is named at once. `routines` is undefined when they could not be read, and
+ * then it is not "Runs when asked" either: schedules may run it that nobody could list.
  */
 export function summaryFor(
   goal: ResponsibilityRecord,
   triggers: TriggerRecord[] | undefined,
-  routines: readonly RoutineRecord[] = [],
+  routines: readonly RoutineRecord[] | undefined,
 ): string {
   const status = STATUS[goal.status].label;
   if (goal.status === "completed") return status;
@@ -138,9 +150,13 @@ export function GoalRoutePage({
         back={back}
         goal={goal}
         key={goal.id}
-        routines={(routines.data?.routines ?? []).filter(
-          (routine) => routine.goalId === goal.id,
-        )}
+        routines={
+          routines.error
+            ? undefined
+            : (routines.data?.routines ?? []).filter(
+                (routine) => routine.goalId === goal.id,
+              )
+        }
       />
     );
 
@@ -155,18 +171,33 @@ export function GoalRoutePage({
 }
 
 /**
+ * What deleting a goal takes with it. The server deletes the routines that run it too; when they
+ * couldn't be read, the sentence says so without claiming there are none.
+ */
+function deleteWords(routines: readonly RoutineRecord[] | undefined): string {
+  if (routines === undefined)
+    return "It stops for good, with its runs and any schedules that run it.";
+  return routines.length > 0
+    ? "It stops for good, with its schedules and its runs."
+    : "It stops for good, with its runs.";
+}
+
+/**
  * Everything about one goal: what can be done to it now (pause, run, complete — each immediate),
  * its wording (a draft, saved by its own button), where it stands, what starts it (its schedules,
  * events and triggers), and its runs.
  */
 export function GoalPage({
   goal,
-  routines = [],
+  routines,
   back,
 }: {
   goal: ResponsibilityRecord;
-  /** The routines that run it: on the Routines list they are its starts, changed here. */
-  routines?: readonly RoutineRecord[];
+  /**
+   * The routines that run it: on the Routines list they are its starts, changed here. Undefined when
+   * the routines could not be read, so what starts it and what a delete takes with it are not known.
+   */
+  routines: readonly RoutineRecord[] | undefined;
   /** The Routines list it came from. */
   back: LinkProps;
 }) {
@@ -178,11 +209,14 @@ export function GoalPage({
   const triggers = useQuery(triggersQueryOptions(goal.id));
   const action = useMutation(responsibilityActionMutationOptions(queryClient));
   const edit = useMutation(updateResponsibilityMutationOptions(queryClient));
+  const remove = useMutation(deleteResponsibilityMutationOptions(queryClient));
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const navigate = useNavigate();
   const changed =
     title !== goal.title ||
     instruction !== goal.instruction ||
     successCriteria !== goal.successCriteria;
-  const starters = routines.some((routine) => routine.enabled)
+  const starters = (routines ?? []).some((routine) => routine.enabled)
     ? "schedules, events and triggers"
     : "events and triggers";
   const standing = [
@@ -318,6 +352,16 @@ export function GoalPage({
               <IconChevronRight className="size-4 text-muted-foreground" />
             </ItemActions>
           </Item>
+          <Separator />
+          <DeleteRow
+            description={deleteWords(routines)}
+            label={`Delete the goal ${goal.title}`}
+            onClick={() => {
+              remove.reset();
+              setConfirmingDelete(true);
+            }}
+            title="Delete goal"
+          />
         </PageRows>
         {action.error ? (
           <p className="mt-3 text-destructive text-sm" role="alert">
@@ -447,7 +491,10 @@ export function GoalPage({
         </PageSection>
       ) : null}
 
-      <GoalSchedules paused={goal.status === "paused"} routines={routines} />
+      <GoalSchedules
+        paused={goal.status === "paused"}
+        routines={routines ?? []}
+      />
 
       {goal.subscriptions.length > 0 ? (
         <PageSection title="Events">
@@ -477,6 +524,45 @@ export function GoalPage({
 
       <Triggers goal={goal} />
       <Runs channelId={goal.channelId} goalId={goal.id} />
+
+      <Dialog onOpenChange={setConfirmingDelete} open={confirmingDelete}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete "{goal.title}"?</DialogTitle>
+            <DialogDescription>
+              {deleteWords(routines)} You can't undo this.
+            </DialogDescription>
+          </DialogHeader>
+          {remove.error ? (
+            <DialogBody className="mt-4">
+              <p className="text-destructive text-sm" role="alert">
+                {remove.error.message}
+              </p>
+            </DialogBody>
+          ) : null}
+          <DialogFooter className="mt-4">
+            <Button
+              onClick={() => setConfirmingDelete(false)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={remove.isPending}
+              onClick={() =>
+                remove.mutate(goal.id, { onSuccess: () => navigate(back) })
+              }
+              size="sm"
+              type="button"
+              variant="destructive"
+            >
+              {remove.isPending ? "Deleting…" : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }

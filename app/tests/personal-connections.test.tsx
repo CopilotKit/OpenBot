@@ -356,6 +356,70 @@ test("with a broker set up, the last tile browses its directory of more apps", a
   expect(browse.getAttribute("href")).toBe("/connections/browse/composio");
 });
 
+/** The section a heading titles. */
+const sectionOf = (heading: HTMLElement) =>
+  heading.closest("section") as HTMLElement;
+
+test("Your apps and Add an app are sections of the page itself, spaced as every section is", async () => {
+  connected = ["notion"];
+  const { view } = draw("personal");
+  const yours = sectionOf(
+    await view.findByRole("heading", { name: "Your apps" }),
+  );
+  const add = sectionOf(view.getByRole("heading", { name: "Add an app" }));
+  for (const section of [yours, add]) {
+    // Not a section inside another, and no spacing of its own.
+    expect(section.parentElement?.closest("section")).toBeNull();
+    expect(section.className.split(/\s+/)).toEqual(["mt-12"]);
+  }
+  // The search is at the top of the page's first section, above them both.
+  const search = view.getByRole("textbox", { name: "Search connections" });
+  const first = sectionOf(search);
+  expect(first.parentElement?.closest("section")).toBeNull();
+  expect(first.parentElement?.querySelector("section")).toBe(first);
+  expect(
+    first.compareDocumentPosition(yours) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
+test("a search that matches nothing says No matches, with no sections and no directory tile under it", async () => {
+  composio = true;
+  connected = ["notion"];
+  const { view, user } = draw("personal");
+  await view.findByTestId("account-browse");
+  await user.type(
+    view.getByRole("textbox", { name: "Search connections" }),
+    "zzzz",
+  );
+  expect(await view.findByText("No matches")).toBeTruthy();
+  expect(view.getByText("Nothing matches “zzzz”.")).toBeTruthy();
+  expect(
+    view.container.querySelector(".tabler-icon-search:not([aria-hidden])"),
+  ).not.toBeNull();
+  expect(view.queryByTestId("account-browse")).toBeNull();
+  expect(view.queryByRole("heading", { name: "Your apps" })).toBeNull();
+  expect(view.queryByRole("heading", { name: "Add an app" })).toBeNull();
+
+  // Cleared, everything is back.
+  await user.type(
+    view.getByRole("textbox", { name: "Search connections" }),
+    "{Backspace>4/}",
+  );
+  expect(await view.findByTestId("account-browse")).toBeTruthy();
+  expect(view.queryByText("No matches")).toBeNull();
+});
+
+test("in the team edition, a search that matches nothing says No matches", async () => {
+  const { view, user } = draw("team");
+  await view.findByTestId("account-notion");
+  await user.type(
+    view.getByRole("textbox", { name: "Search connections" }),
+    "zzzz",
+  );
+  expect(await view.findByText("No matches")).toBeTruthy();
+  expect(view.queryByTestId("account-notion")).toBeNull();
+});
+
 describe("an app under Connections in the personal edition", () => {
   test("Routines is every Bot's, with no switch, and leads to the Routines page", async () => {
     servers = [server("notion"), server("routines")];

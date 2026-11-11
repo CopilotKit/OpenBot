@@ -43,7 +43,7 @@ credential is otherwise good is most often this API not being enabled on the pro
 
 ### 3. Create an OAuth client
 
-Type **Web application**. Under **Authorised redirect URIs**, add this deployment's callback:
+Type **Web application**. Under **Authorized redirect URIs**, add this deployment's callback:
 
 ```
 <OPENBOT_PUBLIC_URL>/api/plugins/oauth/callback
@@ -159,11 +159,12 @@ failure carrying its own reason; the second is a request that ran past the conne
 are worth retrying, and a persistent one is about the path between this deployment and Google rather
 than about the account.
 
-### "You have not connected your Google Drive account."
+### "You have not connected your Google Drive account. Connect it and ask again."
 
 The Bot was asked to read as somebody with no connection stored. Connect at
-`/connections/google-drive`. There is no fallback to a deployment-wide credential —
-by design, since a fallback would answer with somebody else's access.
+`/connections/google-drive`, or with **Connect** on the card the conversation shows. There is no
+fallback to a deployment-wide credential, by design, since a fallback would answer with somebody
+else's access.
 
 ### The connection worked and stopped about an hour later
 

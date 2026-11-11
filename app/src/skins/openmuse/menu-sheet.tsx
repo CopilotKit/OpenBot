@@ -21,12 +21,13 @@ import {
 import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
+import { BrandName } from "@/components/edition/brand-name";
 import { navigationRender } from "@/components/edition/team-features-dialog";
 import { Item, ItemContent, ItemTitle } from "@/components/ui/item";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
-import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { untitledLine } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import {
@@ -176,7 +177,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
               key={item.id}
               render={navigationRender(item, { onClick: onClose })}
               tint={item.section === "account" ? "plain" : "sky"}
-              title={item.label}
+              title={<BrandName>{item.label}</BrandName>}
             />
           ))}
         </div>

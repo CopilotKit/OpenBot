@@ -72,6 +72,7 @@ const goal: ResponsibilityRecord = {
   progress: "",
   lastResult: null,
   subscriptions: [],
+  recurring: false,
   endsWhenMet: false,
   updatedAt: "2026-11-10T10:00:00Z",
 };
@@ -87,7 +88,9 @@ function renderPage(record: ResponsibilityRecord) {
       createRoute({
         getParentRoute: () => root,
         path: "/",
-        component: () => <GoalPage back={{ to: "/" }} goal={record} />,
+        component: () => (
+          <GoalPage back={{ to: "/" }} goal={record} routines={[]} />
+        ),
       }),
     ]),
   });

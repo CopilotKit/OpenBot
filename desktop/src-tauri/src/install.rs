@@ -731,15 +731,24 @@ pub fn place_newer_compose(into: &Path) -> Result<String, Problem> {
 Update a Podman that is too old to run OpenBot, by running OpenBot's own pinned installer over it.
 
 The same installer, the same digest check and the same prompt as a first install (`install_podman`):
-the package on a Mac, the MSI on Windows. Both upgrade in place. Neither touches Podman's machines,
-which live in the person's own folders, so OpenBot's machine and every container, image and volume
-in it are there afterwards. Podman 6 reads the machines Podman 5 made on macOS and Windows (only
+the package on a Mac, the MSI on Windows. Both upgrade in place. Neither removes Podman's machines,
+which live in the person's own folders, so every machine and every container, image and volume in
+it are there afterwards. Podman 6 reads the machines Podman 5 made on macOS and Windows (only
 machines on Linux had to be made again, and Linux is not updated here).
 
-On Windows OpenBot's own machine is stopped first: its helpers (`gvproxy`, `win-sshproxy`) run from
-Podman's folder, and an installer that finds them running asks for a restart. It is started again
-once the new Podman is in place, because Start runs Compose on it next. Nobody else's machine is
-stopped.
+EVERY MACHINE THAT WAS RUNNING IS RUNNING AFTERWARDS, WITH ITS API ANSWERING: the person's own as
+much as OpenBot's. OpenBot runs on its own machine beside the person's `podman-machine-default` on
+Windows (see `own_machine`), and the MSI stops the helpers of every machine it finds running. On a live Windows run the 6.1.1 MSI over
+5.8.9 left the person's machine up and its `win-sshproxy` gone, and with it the Docker API every
+pull uses (see `acquire`). Only OpenBot's own machine used to be stopped and started.
+
+So the machines running are listed first. On Windows they are stopped before the MSI, because their
+helpers (`gvproxy`, `win-sshproxy`) run from Podman's folder. Afterwards each one whose API does not
+answer is stopped and started (`bring_back`), with the containers that were running in it. On a Mac
+the package does not stop them: its `preinstall` removes `/opt/podman` and its `postinstall` installs
+`podman-mac-helper`, and a running `vfkit` or `gvproxy` keeps running from the file it opened. A Mac
+machine is restarted only if its API does not answer afterwards. A machine is started again even when
+the installer failed, so one OpenBot stopped is never left stopped.
 */
 pub fn update_podman(
     cache: &Path,
@@ -747,35 +756,188 @@ pub fn update_podman(
     back: &dyn Fn(),
     cancelled: &dyn Fn() -> bool,
 ) -> Result<(), Problem> {
-    progress(
-        StepLine::here("Updating the software OpenBot runs on.").logged(format!(
-            "Podman is older than {}; installing Podman {PODMAN} over it.",
-            crate::engine_versions::PODMAN
-        )),
-    );
     let into = crate::acquire::download_dir(cache);
-    let stopped = cfg!(target_os = "windows")
-        && crate::acquire::machine_exists().unwrap_or(false)
-        && engine::tool(Engine::Podman)
-            .args(["machine", "stop", crate::acquire::MACHINE])
-            .output()
-            .is_ok_and(|output| output.status.success());
-    install_podman(&into, progress, back, cancelled)?;
-    if engine::program(Engine::Podman).is_none() {
-        return Err(Problem::with(
-            "OpenBot updated the software it runs on, but can't find it afterwards. Start \
-             OpenBot again.",
-            format!("the Podman {PODMAN} installer reported success; podman is not found"),
-        ));
+    update_podman_with(
+        &mut ThisComputer::default(),
+        cfg!(target_os = "windows"),
+        progress,
+        &mut |progress| {
+            install_podman(&into, progress, back, cancelled)?;
+            if engine::program(Engine::Podman).is_none() {
+                return Err(Problem::with(
+                    "OpenBot updated the software it runs on, but can't find it afterwards. \
+                     Start OpenBot again.",
+                    format!("the Podman {PODMAN} installer reported success; podman is not found"),
+                ));
+            }
+            Ok(())
+        },
+    )
+}
+
+/// The row's line while Podman updates: why it is updating, since it is the person's own Podman.
+pub fn podman_updating() -> StepLine {
+    StepLine::here("The Podman on this computer is too old for OpenBot, so OpenBot is updating it.")
+        .updating()
+}
+
+/// A line the installer says, as the update says it. Work OpenBot does by itself says why it is
+/// updating. A system prompt that is coming says why, then the prompt, so it is explained before it
+/// comes up. A wait for the person's go-ahead is said as it is. The log keeps the installer's words.
+fn while_updating(line: StepLine) -> StepLine {
+    if line.asks {
+        return line;
     }
-    if stopped {
-        progress(engine::starting_machine_line());
-        let started = crate::acquire::start_machine();
-        if !started.ok {
-            return Err(started.problem());
+    let why = podman_updating().said;
+    // The installer's prompt, said short after why: "...so OpenBot is updating it. Your Mac will
+    // ask for your password." The whole of both did not fit the background row.
+    let said = if line.elsewhere {
+        format!(
+            "{why} {}",
+            line.said
+                .split_once(" so OpenBot")
+                .map_or(line.said.clone(), |(prompt, _)| format!("{prompt}."))
+        )
+    } else {
+        why
+    };
+    let detail = line.detail.clone().unwrap_or_else(|| line.said.clone());
+    StepLine {
+        said,
+        detail: Some(detail),
+        updating: true,
+        ..line
+    }
+}
+
+/// The Podman machines on this computer, as an update needs them, so the sequence can be tested
+/// without one.
+pub trait Machines {
+    /// The machines running now, by name.
+    fn running(&mut self) -> Result<Vec<String>, String>;
+    /// Stop one, remembering the containers running in it.
+    fn stop(&mut self, name: &str) -> Result<(), String>;
+    /// Start one, and the containers `stop` found running in it.
+    fn start(&mut self, name: &str) -> Result<(), String>;
+    /// It is running and its Docker API answers, or why not.
+    fn answers(&mut self, name: &str) -> Result<(), String>;
+}
+
+/// `Machines` on this computer.
+#[derive(Default)]
+struct ThisComputer {
+    containers: std::collections::HashMap<String, crate::acquire::Containers>,
+}
+
+impl Machines for ThisComputer {
+    fn running(&mut self) -> Result<Vec<String>, String> {
+        crate::acquire::running_machines()
+    }
+
+    fn stop(&mut self, name: &str) -> Result<(), String> {
+        // Asked before the stop, and only the first time: a second stop finds nothing running.
+        let running = crate::acquire::running_containers(name);
+        if !running.is_empty() {
+            self.containers.entry(name.to_string()).or_insert(running);
+        }
+        crate::acquire::stop_machine_named(name)
+    }
+
+    fn start(&mut self, name: &str) -> Result<(), String> {
+        let containers = self.containers.remove(name).unwrap_or_default();
+        crate::acquire::start_machine_named(name, &containers)
+    }
+
+    fn answers(&mut self, name: &str) -> Result<(), String> {
+        crate::acquire::machine_api_answers(name)
+    }
+}
+
+/// Running the installer, saying its lines on the row as it goes.
+type Installer<'a> = dyn FnMut(&mut dyn FnMut(StepLine)) -> Result<(), Problem> + 'a;
+
+fn update_podman_with(
+    machines: &mut dyn Machines,
+    stop_first: bool,
+    progress: &mut dyn FnMut(StepLine),
+    install: &mut Installer<'_>,
+) -> Result<(), Problem> {
+    progress(podman_updating().logged(format!(
+        "Podman is older than {}; installing Podman {PODMAN} over it.",
+        crate::engine_versions::PODMAN
+    )));
+    let running = machines.running().unwrap_or_else(|error| {
+        log::warn!(
+            "[engine] could not list the machines running before the Podman update: {error}"
+        );
+        Vec::new()
+    });
+    log::info!(
+        "[engine] machines running before the Podman update: {}",
+        if running.is_empty() {
+            "none".to_string()
+        } else {
+            running.join(", ")
+        }
+    );
+    if stop_first {
+        for name in &running {
+            progress(podman_updating().logged(format!(
+                "Stopping {name} before the installer replaces Podman's files (podman machine stop)."
+            )));
+            if let Err(error) = machines.stop(name) {
+                log::warn!("[engine] could not stop {name} before the Podman update: {error}");
+            }
         }
     }
-    Ok(())
+    let installed = install(&mut |line| progress(while_updating(line)));
+    let brought_back = bring_back(machines, &running, progress);
+    if let (Err(_), Err(problem)) = (&installed, &brought_back) {
+        log::warn!(
+            "[engine] after a failed Podman update: {}",
+            problem.detail.as_deref().unwrap_or(&problem.said)
+        );
+    }
+    installed?;
+    brought_back
+}
+
+/// Every machine in `running` running again with its API answering: one that answers is left as it
+/// is, and any other is stopped and started.
+fn bring_back(
+    machines: &mut dyn Machines,
+    running: &[String],
+    progress: &mut dyn FnMut(StepLine),
+) -> Result<(), Problem> {
+    let mut failed = Vec::new();
+    for name in running {
+        match machines.answers(name) {
+            Ok(()) => {
+                log::info!("[engine] {name} answers after the Podman update");
+                continue;
+            }
+            Err(why) => log::info!(
+                "[engine] {name} does not answer after the Podman update ({why}); stopping and \
+                 starting it"
+            ),
+        }
+        progress(podman_updating().logged(format!(
+            "Starting {name} again (podman machine stop, then start), so its API answers."
+        )));
+        if let Err(error) = machines.stop(name) {
+            log::info!("[engine] podman machine stop {name}: {error}");
+        }
+        if let Err(error) = machines.start(name) {
+            failed.push(format!("podman machine start {name}: {error}"));
+        }
+    }
+    if failed.is_empty() {
+        return Ok(());
+    }
+    Err(Problem::with(
+        "OpenBot updated Podman, but couldn't start it again. Try again.",
+        failed.join("; "),
+    ))
 }
 
 /// The filename Podman looks a provider up by.
@@ -1953,5 +2115,289 @@ esac
         );
         assert!(waited.is_err());
         assert!(!gate.give());
+    }
+
+    /*
+     * The person's own Podman machine through a Podman update, on a fake that does what the real
+     * platform did on a live Windows run (Podman 5.8.9 with `podman-machine-default` running, the
+     * person's container and volume in it, updated to 6.1.1 by OpenBot's MSI):
+     *
+     * - `podman machine list --format json` lists it by its name with "Running": true (the
+     *   listing below is the shape Podman 6.1.1 prints on a Mac, `Running` and all).
+     * - The MSI leaves a machine it finds running up and its Docker API gone: `win-sshproxy` was
+     *   stopped and nothing started it again. Pulls then failed at "failed to connect to the docker
+     *   API at npipe:////./pipe/podman-machine-default ... The system cannot find the file
+     *   specified."
+     * - `podman machine stop` stops it and its API; `podman machine start` starts both.
+     */
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct Machine {
+        running: bool,
+        api: bool,
+    }
+
+    #[derive(Default)]
+    struct Computer {
+        machines: Vec<(&'static str, Machine)>,
+        done: Vec<String>,
+    }
+
+    impl Computer {
+        fn machine(&mut self, name: &str) -> &mut Machine {
+            &mut self
+                .machines
+                .iter_mut()
+                .find(|(named, _)| *named == name)
+                .expect("a machine Podman lists")
+                .1
+        }
+    }
+
+    /// The machines, shared with the installer, which acts on them between what the update does
+    /// before it and after it.
+    #[derive(Clone, Default)]
+    struct FakeMachines(std::rc::Rc<std::cell::RefCell<Computer>>);
+
+    impl FakeMachines {
+        fn running_default() -> Self {
+            let fake = Self::default();
+            fake.0.borrow_mut().machines.push((
+                "podman-machine-default",
+                Machine {
+                    running: true,
+                    api: true,
+                },
+            ));
+            fake
+        }
+
+        fn machine(&self, name: &str) -> Machine {
+            *self.0.borrow_mut().machine(name)
+        }
+
+        fn set(&self, name: &str, machine: Machine) {
+            *self.0.borrow_mut().machine(name) = machine;
+        }
+
+        fn done(&self) -> Vec<String> {
+            self.0.borrow().done.clone()
+        }
+
+        /// What the MSI did to every machine it found running.
+        fn installer_ran(&self) {
+            let mut computer = self.0.borrow_mut();
+            computer.done.push("install".into());
+            for (_, machine) in &mut computer.machines {
+                if machine.running {
+                    machine.api = false;
+                }
+            }
+        }
+    }
+
+    impl Machines for FakeMachines {
+        fn running(&mut self) -> Result<Vec<String>, String> {
+            // Read from Podman's own listing, as `acquire::running_machines` does.
+            let listing = serde_json::Value::Array(
+                self.0
+                    .borrow()
+                    .machines
+                    .iter()
+                    .map(|(name, machine)| {
+                        serde_json::json!({
+                            "Name": name,
+                            "Default": true,
+                            "Running": machine.running,
+                            "Starting": false,
+                            "VMType": "wsl",
+                        })
+                    })
+                    .collect(),
+            )
+            .to_string();
+            crate::acquire::running_in(&listing)
+        }
+        fn stop(&mut self, name: &str) -> Result<(), String> {
+            self.0.borrow_mut().done.push(format!("stop {name}"));
+            self.set(
+                name,
+                Machine {
+                    running: false,
+                    api: false,
+                },
+            );
+            Ok(())
+        }
+        fn start(&mut self, name: &str) -> Result<(), String> {
+            self.0.borrow_mut().done.push(format!("start {name}"));
+            self.set(
+                name,
+                Machine {
+                    running: true,
+                    api: true,
+                },
+            );
+            Ok(())
+        }
+        fn answers(&mut self, name: &str) -> Result<(), String> {
+            self.0.borrow_mut().done.push(format!("answers {name}"));
+            match self.machine(name) {
+                Machine { running: false, .. } => Err(format!("{name} is stopped")),
+                Machine { api: false, .. } => Err(format!(
+                    "npipe:////./pipe/{name}: The system cannot find the file specified. (os error 2)"
+                )),
+                _ => Ok(()),
+            }
+        }
+    }
+
+    /// `update_podman_with` on `machines`, with an installer that says what the Windows one says
+    /// and does what the MSI did; `fails` makes it stop with an error after that.
+    fn update(
+        machines: &FakeMachines,
+        windows: bool,
+        fails: bool,
+    ) -> (Result<(), Problem>, Vec<StepLine>) {
+        let mut said = Vec::new();
+        let installer = machines.clone();
+        let result = update_podman_with(
+            &mut machines.clone(),
+            windows,
+            &mut |line| said.push(line),
+            &mut |progress| {
+                progress(podman_install_said("windows"));
+                installer.installer_ran();
+                if fails {
+                    return Err(Problem::with(
+                        "Installing the software OpenBot needs did not finish. Try again.",
+                        "msiexec /i stopped with exit code 1603",
+                    ));
+                }
+                Ok(())
+            },
+        );
+        (result, said)
+    }
+
+    /// On Windows the person's own running machine is stopped before the MSI and started after
+    /// it, so its API answers when the update is done. Only OpenBot's own machine used to be.
+    #[test]
+    fn a_persons_own_running_machine_survives_the_podman_update_with_its_api_answering() {
+        let machines = FakeMachines::running_default();
+        let (result, said) = update(&machines, true, false);
+        result.unwrap();
+        assert_eq!(
+            machines.done(),
+            [
+                "stop podman-machine-default",
+                "install",
+                "answers podman-machine-default",
+                "stop podman-machine-default",
+                "start podman-machine-default",
+            ]
+        );
+        assert_eq!(
+            machines.machine("podman-machine-default"),
+            Machine {
+                running: true,
+                api: true
+            }
+        );
+        // The row says why, the whole time: what the installer says goes to the log.
+        let why = "The Podman on this computer is too old for OpenBot, so OpenBot is updating it.";
+        assert!(!said.is_empty());
+        assert!(said.iter().all(|line| line.said == why), "{said:?}");
+        assert!(said
+            .iter()
+            .any(|line| line.detail.as_deref() == Some("Installing Podman.")));
+    }
+
+    /// During an update the Mac's password prompt is said after why, short enough for the row:
+    /// "...so OpenBot is updating it. Your Mac will ask for your password." The installer's own
+    /// words go to the log, and the line stays one about the engine being updated.
+    #[test]
+    fn the_password_prompt_during_an_update_says_why_first_and_fits() {
+        let line = while_updating(podman_install_said("macos"));
+        assert_eq!(
+            line.said,
+            "The Podman on this computer is too old for OpenBot, so OpenBot is updating it. Your \
+             Mac will ask for your password."
+        );
+        assert!(line.elsewhere && line.updating);
+        assert_eq!(
+            line.detail.as_deref(),
+            Some("Installing Podman's package; macOS asks for the password.")
+        );
+        // A go-ahead the person gives in OpenBot's own window is said as it is.
+        assert_eq!(while_updating(podman_declined()), podman_declined());
+    }
+
+    /// A machine the installer took the API from is stopped and started even when it was not
+    /// stopped first: a Mac, where it is not, or a stop that failed.
+    #[test]
+    fn a_machine_whose_api_the_installer_took_is_stopped_and_started_after_it() {
+        let machines = FakeMachines::running_default();
+        let (result, _) = update(&machines, false, false);
+        result.unwrap();
+        assert_eq!(
+            machines.done(),
+            [
+                "install",
+                "answers podman-machine-default",
+                "stop podman-machine-default",
+                "start podman-machine-default",
+            ]
+        );
+        assert!(machines.machine("podman-machine-default").api);
+    }
+
+    /// A stopped machine stays stopped: only what was running is started again.
+    #[test]
+    fn a_stopped_machine_is_left_stopped() {
+        let machines = FakeMachines::running_default();
+        machines.set(
+            "podman-machine-default",
+            Machine {
+                running: false,
+                api: false,
+            },
+        );
+        let (result, _) = update(&machines, true, false);
+        result.unwrap();
+        assert_eq!(machines.done(), ["install"]);
+    }
+
+    /// An installer that failed still leaves the machine it stopped running again, and its failure
+    /// is the one said.
+    #[test]
+    fn a_failed_update_still_starts_the_machine_it_stopped() {
+        let machines = FakeMachines::running_default();
+        let (result, _) = update(&machines, true, true);
+        assert_eq!(
+            result.unwrap_err().detail.as_deref(),
+            Some("msiexec /i stopped with exit code 1603")
+        );
+        assert_eq!(
+            machines.machine("podman-machine-default"),
+            Machine {
+                running: true,
+                api: true
+            }
+        );
+    }
+
+    /// The live run's listing, read: `Running` decides, by name.
+    #[test]
+    fn the_running_machines_are_read_from_podmans_listing() {
+        let listing = r#"[
+            {"Name": "openbot-s1", "Default": true, "Running": false, "Starting": false, "VMType": "applehv"},
+            {"Name": "podman-machine-default", "Default": false, "Running": true, "Starting": false, "VMType": "wsl"},
+            {"Name": "openbot", "Default": false, "Running": true, "Starting": false, "VMType": "wsl"}
+        ]"#;
+        assert_eq!(
+            crate::acquire::running_in(listing).unwrap(),
+            ["podman-machine-default", "openbot"]
+        );
+        assert!(crate::acquire::running_in("not json").is_err());
     }
 }

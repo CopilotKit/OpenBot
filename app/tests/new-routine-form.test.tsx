@@ -59,10 +59,13 @@ let proactiveAnswer: unknown;
 function serving({
   proactive = { allowed: true, settings: [] } as unknown,
   routines = () => Response.json({ routine: { id: "r1" } }, { status: 201 }),
+  goalDeletes = true,
 }: {
   proactive?: unknown;
   /** How `POST /api/routines` answers. */
   routines?: () => Response | Promise<Response>;
+  /** Whether `DELETE /api/responsibilities/g1` succeeds. When it fails, a refused schedule keeps the goal. */
+  goalDeletes?: boolean;
 } = {}) {
   recorded.length = 0;
   proactiveAnswer = proactive;
@@ -78,6 +81,12 @@ function serving({
       if (method === "POST" && url === "/api/channels")
         return Response.json({ channel: { id: "new-conversation" } });
       if (method === "POST" && url === "/api/routines") return routines();
+      if (
+        method === "DELETE" &&
+        url === "/api/responsibilities/g1" &&
+        !goalDeletes
+      )
+        return Response.json({ error: "Unavailable" }, { status: 503 });
       if (method === "POST" && url === "/api/responsibilities")
         return Response.json({ responsibility: { id: "g1", title: "Goal" } });
       return Response.json({ ok: true });
@@ -466,7 +475,10 @@ test("switching back to Act for you brings Starts back", async () => {
   expect(view.queryByLabelText("How often")).toBeNull();
 });
 
-/** A check-in the Bot already has, as `GET /api/proactive/settings` sends it: no Name, no link. */
+/**
+ * A Bot's default check-in, as `GET /api/proactive/settings` sends it: no Name, no link. OpenBot
+ * seeds one for a Bot (`server/src/memory/defaults.ts`).
+ */
 const unnamedCheckIn = {
   id: "s1",
   agentId: "bot-1",
@@ -483,8 +495,33 @@ const unnamedCheckIn = {
   lastRun: null,
 };
 
-test("Only tell you does not take over a check-in the Bot already has", async () => {
+/** A check-in the Bot already has on what the tests below type: "Watch my inbox". */
+const watchingInbox = { ...unnamedCheckIn, subject: "Watch my inbox" };
+
+test("an unnamed Only tell you is made beside the Bot's default check-in, named for what it does", async () => {
   serving({ proactive: { allowed: true, settings: [unnamedCheckIn] } });
+  const view = draw();
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByLabelText("What to do"),
+    "Watch   my inbox\nfor invoices",
+  );
+  await choose(view, user, "It should", "Only tell you");
+  await user.click(await view.findByRole("button", { name: "Create routine" }));
+  await waitFor(() => expect(writes()).not.toHaveLength(0));
+  await settleReactWork();
+  expect(view.queryByText(/This Bot already checks in on this/)).toBeNull();
+  expect(writes().map(([method, path]) => `${method} ${path}`)).toEqual([
+    "POST /api/proactive/settings",
+  ]);
+  expect(writes()[0][2]).toMatchObject({
+    focus: "Watch   my inbox\nfor invoices",
+    subject: "Watch my inbox for invoices",
+  });
+});
+
+test("Only tell you does not take over a check-in the Bot already has", async () => {
+  serving({ proactive: { allowed: true, settings: [watchingInbox] } });
   const view = draw();
   const user = userEvent.setup({ document });
   await user.type(await view.findByLabelText("What to do"), "Watch my inbox");
@@ -512,7 +549,7 @@ test("Only tell you does not take over a check-in the Bot already has", async ()
 });
 
 test("a named Only tell you is made beside it", async () => {
-  serving({ proactive: { allowed: true, settings: [unnamedCheckIn] } });
+  serving({ proactive: { allowed: true, settings: [watchingInbox] } });
   const view = draw();
   const user = userEvent.setup({ document });
   await user.type(await view.findByLabelText("What to do"), "Watch my inbox");
@@ -528,7 +565,7 @@ test("a named Only tell you is made beside it", async () => {
 });
 
 test("acting instead lets that Name through", async () => {
-  serving({ proactive: { allowed: true, settings: [unnamedCheckIn] } });
+  serving({ proactive: { allowed: true, settings: [watchingInbox] } });
   const view = draw();
   const user = userEvent.setup({ document });
   await user.type(await view.findByLabelText("What to do"), "Watch my inbox");
@@ -548,14 +585,14 @@ test("acting instead lets that Name through", async () => {
 });
 
 test("a stale Name error goes once check-ins are off", async () => {
-  serving({ proactive: { allowed: true, settings: [unnamedCheckIn] } });
+  serving({ proactive: { allowed: true, settings: [watchingInbox] } });
   const view = draw();
   const user = userEvent.setup({ document });
   await user.type(await view.findByLabelText("What to do"), "Watch my inbox");
   await choose(view, user, "It should", "Only tell you");
   await user.click(await view.findByRole("button", { name: "Create routine" }));
   await view.findByText(/This Bot already checks in on this/);
-  await checkInsTurnOff([unnamedCheckIn]);
+  await checkInsTurnOff([watchingInbox]);
   // No check-in can be made now, so Name has nothing to clash with.
   await waitFor(() =>
     expect(view.queryByText(/This Bot already checks in on this/)).toBeNull(),
@@ -587,6 +624,7 @@ test("after a partial save, Create routine gives way to Go to Routines", async (
         { error: "You have 20 routines switched on." },
         { status: 400 },
       ),
+    goalDeletes: false,
   });
   const view = draw();
   const user = userEvent.setup({ document });
@@ -601,7 +639,7 @@ test("after a partial save, Create routine gives way to Go to Routines", async (
   await user.click(await view.findByRole("button", { name: "Create routine" }));
   expect(
     await view.findByText(
-      "It's saved but paused, on the Routines page. Its schedule was refused: You have 20 routines switched on.",
+      "It's saved but paused, on the Routines page. Its schedule was refused. You have 20 routines switched on.",
     ),
   ).toBeTruthy();
   await settleReactWork();
@@ -610,6 +648,80 @@ test("after a partial save, Create routine gives way to Go to Routines", async (
   const goTo = view.getByRole("button", { name: "Go to Routines" });
   expect(goTo.tagName).toBe("A");
   expect(goTo.getAttribute("href")).toBe("/bots/bot-1/routines");
+});
+
+test("a refused schedule takes the goal back, says why, and Create works again", async () => {
+  let refuse = true;
+  serving({
+    routines: () =>
+      refuse
+        ? Response.json(
+            { error: "You have 20 routines switched on." },
+            { status: 400 },
+          )
+        : Response.json({ routine: { id: "r1" } }, { status: 201 }),
+  });
+  const view = draw();
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByLabelText("What to do"),
+    "Write the quarterly report",
+  );
+  await user.type(
+    await view.findByLabelText("Done when (optional)"),
+    "The report has a source link.",
+  );
+  await user.click(await view.findByRole("button", { name: "Create routine" }));
+  expect(
+    await view.findByText("You have 20 routines switched on."),
+  ).toBeTruthy();
+  await settleReactWork();
+  expect(writes().map(([method, path]) => `${method} ${path}`)).toEqual([
+    "POST /api/responsibilities",
+    "POST /api/routines",
+    "DELETE /api/responsibilities/g1",
+  ]);
+  // Nothing was kept, so nothing is locked: no Go to Routines, and Create is there to press again.
+  expect(view.queryByRole("button", { name: "Go to Routines" })).toBeNull();
+  refuse = false;
+  await user.click(view.getByRole("button", { name: "Create routine" }));
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe("/bots/bot-1/routines"),
+  );
+});
+
+test("the Routines back link waits while the routine is being created", async () => {
+  let answer: (response: Response) => void = () => {};
+  serving({
+    routines: () =>
+      new Promise<Response>((resolve) => {
+        answer = resolve;
+      }),
+  });
+  const view = draw();
+  const user = userEvent.setup({ document });
+  expect(
+    (await view.findByRole("button", { name: "Routines" })).getAttribute(
+      "href",
+    ),
+  ).toBe("/bots/bot-1/routines");
+  await user.type(
+    await view.findByLabelText("What to do"),
+    "Send me a summary of yesterday's new leads",
+  );
+  await user.click(await view.findByRole("button", { name: "Create routine" }));
+  await waitFor(() =>
+    expect(
+      writes().some(
+        ([method, path]) => method === "POST" && path === "/api/routines",
+      ),
+    ).toBe(true),
+  );
+  const back = view.getByRole("button", { name: "Routines" });
+  expect(back.hasAttribute("disabled")).toBe(true);
+  expect(back.hasAttribute("href")).toBe(false);
+  answer(Response.json({ routine: { id: "r1" } }, { status: 201 }));
+  await settleReactWork();
 });
 
 test("Cancel waits while the routine is being created", async () => {
@@ -648,6 +760,7 @@ test("after a partial save, a submit does not make a second goal", async () => {
         { error: "You have 20 routines switched on." },
         { status: 400 },
       ),
+    goalDeletes: false,
   });
   const view = draw();
   const user = userEvent.setup({ document });
@@ -716,6 +829,7 @@ test("after a partial save, Go to Routines points at the chosen Bot", async () =
         { error: "You have 20 routines switched on." },
         { status: 400 },
       ),
+    goalDeletes: false,
   });
   const view = draw();
   const user = userEvent.setup({ document });
@@ -747,6 +861,7 @@ test("from the Routines page, Go to Routines points at it", async () => {
         { error: "You have 20 routines switched on." },
         { status: 400 },
       ),
+    goalDeletes: false,
   });
   const view = draw({ preset: false });
   const user = userEvent.setup({ document });
@@ -788,7 +903,7 @@ const refusedSchedule = () =>
   );
 
 test("after a partial save, every field is disabled", async () => {
-  serving({ routines: refusedSchedule });
+  serving({ routines: refusedSchedule, goalDeletes: false });
   const view = draw();
   const user = userEvent.setup({ document });
   await partialSave(view, user);
@@ -811,7 +926,7 @@ test("after a partial save, every field is disabled", async () => {
 });
 
 test("after a partial save, Go to Routines stays on the Bot it was saved for", async () => {
-  serving({ routines: refusedSchedule });
+  serving({ routines: refusedSchedule, goalDeletes: false });
   const view = draw();
   const user = userEvent.setup({ document });
   await user.type(
@@ -839,7 +954,7 @@ test("after a partial save, Go to Routines stays on the Bot it was saved for", a
 });
 
 test("after a partial save, Go to Routines is the only way out in the body", async () => {
-  serving({ routines: refusedSchedule });
+  serving({ routines: refusedSchedule, goalDeletes: false });
   const view = draw();
   const user = userEvent.setup({ document });
   await partialSave(view, user);
@@ -1065,7 +1180,7 @@ test("Done when follows It should: Only tell you does not measure it", async () 
 });
 
 test("Name follows Bot: another Bot has no such check-in", async () => {
-  serving({ proactive: { allowed: true, settings: [unnamedCheckIn] } });
+  serving({ proactive: { allowed: true, settings: [watchingInbox] } });
   const view = draw();
   const user = userEvent.setup({ document });
   await user.type(await view.findByLabelText("What to do"), "Watch my inbox");
@@ -1198,8 +1313,8 @@ test("a Name that still clashes keeps its message when the Bot or It should chan
     proactive: {
       allowed: true,
       settings: [
-        unnamedCheckIn,
-        { ...unnamedCheckIn, id: "s2", agentId: "bot-2" },
+        watchingInbox,
+        { ...watchingInbox, id: "s2", agentId: "bot-2" },
       ],
     },
   });
@@ -1244,15 +1359,15 @@ test("It should follows check-ins: turned back on, Only tell you can go on", asy
 });
 
 test("Name follows check-ins: turned back on, the clash is back", async () => {
-  serving({ proactive: { allowed: true, settings: [unnamedCheckIn] } });
+  serving({ proactive: { allowed: true, settings: [watchingInbox] } });
   const view = draw();
   const user = userEvent.setup({ document });
   await user.type(await view.findByLabelText("What to do"), "Watch my inbox");
   await choose(view, user, "It should", "Only tell you");
   await refuse(view, user, SAME_CHECK_IN_TEXT);
-  await checkInsTurnOff([unnamedCheckIn]);
+  await checkInsTurnOff([watchingInbox]);
   await waitFor(() => expect(view.queryByText(SAME_CHECK_IN_TEXT)).toBeNull());
-  await checkInsTurnOn([unnamedCheckIn]);
+  await checkInsTurnOn([watchingInbox]);
   expect(await view.findByText(SAME_CHECK_IN_TEXT)).toBeTruthy();
   await waitFor(async () =>
     expect((await createButton(view)).disabled).toBe(true),

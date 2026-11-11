@@ -167,7 +167,7 @@ jobs:
       # generated app config, which `bun test` alone doesn't write (the test script's pretest does).
       - run: |
           bun run generate:app-config
-          bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx
+          bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx
         env:
           OPENBOT_APP_BROWSER: '1'
       # The desktop setup window's, for the same reason: the AI step's form holding still while the
@@ -515,9 +515,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # No cached Bun on Windows. The cache keeps bun.exe at a path relative to the workspace, so
+      # one saved by a job whose workspace was on C: restores to D:\Users\... on a runner whose
+      # workspace is on D:, and setup-bun then fails on C:\Users\runneradmin\.bun\bin\bun.exe
+      # ("Unable to locate executable file") instead of downloading Bun.
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
+          no-cache: ${{ runner.os == 'Windows' }}
       - run: bun install --frozen-lockfile
       - run: bun test app/tests/build-cache.test.ts
 

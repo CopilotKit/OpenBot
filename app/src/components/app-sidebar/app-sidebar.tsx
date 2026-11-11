@@ -4,6 +4,7 @@ import { Link, type LinkOptions, useParams } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type * as React from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { BrandName } from "@/components/edition/brand-name";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,13 +42,22 @@ import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { useBeforeCommandNavigate } from "@/components/navigation/command-menu";
-import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
+import {
+  isNavigationLink,
+  type NavigationLink,
+  useNavigationItems,
+} from "@/lib/navigation";
 import { relativeTimeShort } from "@/lib/relative-time";
 import {
   type MessageListEmphasis,
   useMessageListEmphasis,
 } from "@/lib/settings/message-list";
 import { BotsNavBadge } from "../bot-profile/attention";
+import {
+  RecordingDot,
+  recordingTooltip,
+  useLiveRecording,
+} from "../browser/browser-nav-item";
 import { navigationRender } from "../edition/team-features-dialog";
 import { OpenBotVersion } from "../layout/openbot-version";
 import { Button } from "../ui/button";
@@ -332,6 +342,55 @@ function SearchResults({
   );
 }
 
+/** One of the main menu's own destinations, in the sidebar's footer, with what goes at the end of its row. */
+function PrimaryNavItem({
+  item,
+  tooltip,
+  children,
+}: {
+  item: NavigationLink;
+  tooltip?: React.ComponentProps<typeof SidebarMenuButton>["tooltip"];
+  children?: React.ReactNode;
+}) {
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        className="hover:bg-foreground/5 h-10"
+        render={(props) => (
+          <Link
+            {...props}
+            to={item.to}
+            activeProps={{ className: "bg-foreground/5" }}
+          />
+        )}
+        tooltip={tooltip}
+      >
+        <div className="size-[28px] flex items-center justify-center">
+          <item.icon />
+        </div>
+        <span className="text-sm">{item.label}</span>
+        {children}
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
+/**
+ * The Skills entry. While any of the person's Recorders records, it carries a red dot named for the recording, and a
+ * tooltip saying the same, as the Teach a Bot entry once did. Nothing extra otherwise.
+ */
+function SkillsNavItem({ item }: { item: NavigationLink }) {
+  const recording = useLiveRecording();
+  return (
+    <PrimaryNavItem
+      item={item}
+      tooltip={recordingTooltip(recording, item.label)}
+    >
+      {recording ? <RecordingDot {...recording} /> : null}
+    </PrimaryNavItem>
+  );
+}
+
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const emphasis = useMessageListEmphasis();
   const { data: currentUser } = useQuery(currentUserQueryOptions());
@@ -383,7 +442,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               className="font-semibold text-[14px] tracking-tighter h-full leading-tight hover:bg-foreground/5 hover:text-sidebar-foreground active:bg-foreground/5 active:text-sidebar-foreground"
               render={(props) => (
                 <Link {...appLinkOptions} {...props}>
-                  {appConfig.brand.productName}
+                  <BrandName>{appConfig.brand.productName}</BrandName>
                 </Link>
               )}
             />
@@ -496,27 +555,17 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           {navigation
             .filter(isNavigationLink)
             .filter((item) => item.section === "primary")
-            .map((item) => (
-              <SidebarMenuItem key={item.id}>
-                <SidebarMenuButton
-                  className="hover:bg-foreground/5 h-10"
-                  render={(props) => (
-                    <Link
-                      {...props}
-                      to={item.to}
-                      activeProps={{ className: "bg-foreground/5" }}
-                    />
-                  )}
-                >
-                  <div className="size-[28px] flex items-center justify-center">
-                    <item.icon />
-                  </div>
-                  <span className="text-sm">{item.label}</span>
+            .map((item) =>
+              // Skills says when a recording is live: teaching a Bot a task is how a skill is recorded.
+              item.id === "skills" ? (
+                <SkillsNavItem item={item} key={item.id} />
+              ) : (
+                <PrimaryNavItem item={item} key={item.id}>
                   {/* What waits on you across every Bot; Bots lists them first. */}
                   {item.id === "bots" ? <BotsNavBadge /> : null}
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
+                </PrimaryNavItem>
+              ),
+            )}
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -556,7 +605,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                       )}
                     >
                       <item.icon />
-                      {item.label}
+                      <BrandName>{item.label}</BrandName>
                     </DropdownMenuItem>
                   ))}
                 {signOutOffered ? (

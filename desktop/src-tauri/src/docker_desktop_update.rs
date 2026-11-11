@@ -47,16 +47,19 @@ use crate::problem::Problem;
 /// Docker Desktop checked here, 4.27.2 and 4.98.0 among them.
 pub const TEAM_ID: &str = "9BNSXJN65R";
 
+/// Why Docker Desktop is updating, said first on every line while it does: it is the person's own
+/// app, and they see it close and come back.
+pub const UPDATING_WHY: &str =
+    "The Docker Desktop on this computer is too old for OpenBot, so OpenBot is updating it.";
+
 /// What a person reads while Docker updates. `minutes` is the estimate, when there is one.
 pub fn updating_line(minutes: Option<u64>) -> StepLine {
     let said = match minutes {
-        Some(0 | 1) => "Updating Docker so OpenBot can run. About a minute left.".to_string(),
-        Some(minutes) => {
-            format!("Updating Docker so OpenBot can run. About {minutes} minutes left.")
-        }
-        None => "Updating Docker so OpenBot can run.".to_string(),
+        Some(0 | 1) => format!("{UPDATING_WHY} About a minute left."),
+        Some(minutes) => format!("{UPDATING_WHY} About {minutes} minutes left."),
+        None => UPDATING_WHY.to_string(),
     };
-    StepLine::here(said)
+    StepLine::here(said).updating()
 }
 
 /// How long installing takes once the download is done, for the estimate. Docker says the Mac
@@ -215,10 +218,56 @@ pub fn signed_by_docker_on_mac(codesign_dv: &str) -> bool {
         .any(|line| line.trim() == format!("TeamIdentifier={TEAM_ID}"))
 }
 
+/*
+ * A PATH GOES INTO POWERSHELL IN AN ENVIRONMENT VARIABLE, NEVER AFTER `-Command`.
+ *
+ * PowerShell joins every argument after `-Command` into the command text, so `$args` is empty and
+ * the path becomes code. Docker's installer is downloaded to "...\245422\Docker Desktop
+ * Installer.exe": on a live Windows run (Docker Desktop 4.31.1, updating to 4.98.0) the signature
+ * check exited 1 on a parse error at that path, with nothing on stdout, and every update stopped
+ * with "could not be checked". The same query reading the path from the environment answered
+ * "Valid|CN=Docker Inc, O=Docker Inc, ...". A variable is read as it is, spaces and quotes included.
+ */
+
+/// The environment variable the signature check reads the installer's path from.
+pub const VERIFY_PATH: &str = "OPENBOT_VERIFY_PATH";
+
+/// The environment variable the all-users install reads the installer's path from.
+pub const INSTALLER_PATH: &str = "OPENBOT_INSTALLER_PATH";
+
 /// What PowerShell is asked about the installer's Authenticode signature: its status, and the
-/// subject of the certificate that signed it, as `<status>|<subject>`.
-pub const AUTHENTICODE_QUERY: &str = "$s = Get-AuthenticodeSignature -LiteralPath $args[0]; \
-                                      '{0}|{1}' -f $s.Status, $s.SignerCertificate.Subject";
+/// subject of the certificate that signed it, as `<status>|<subject>`. The path is `VERIFY_PATH`.
+pub const AUTHENTICODE_QUERY: &str =
+    "$s = Get-AuthenticodeSignature -LiteralPath $env:OPENBOT_VERIFY_PATH; \
+     '{0}|{1}' -f $s.Status, $s.SignerCertificate.Subject";
+
+/// Windows PowerShell running `script`, with `path` in the environment variable `variable`.
+///
+/// `PSModulePath` is left for Windows PowerShell to build: a PowerShell 7 parent passes its own
+/// down, whose modules Windows PowerShell cannot load (as `provider_oauth` found).
+pub fn powershell_with_path(script: &str, variable: &str, path: &Path) -> std::process::Command {
+    let mut command = crate::quiet::command("powershell");
+    command
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env(variable, path)
+        .env_remove("PSModulePath");
+    command
+}
+
+/// The all-users install: Windows' approval prompt, then Docker's installer as an administrator,
+/// waited for, its exit code PowerShell's. The installer's path is `INSTALLER_PATH`.
+pub fn elevated_install(installer: &Path, arguments: &[String]) -> std::process::Command {
+    let quoted: Vec<String> = arguments
+        .iter()
+        .map(|argument| format!("'{}'", argument.replace('\'', "''")))
+        .collect();
+    let script = format!(
+        "$p = Start-Process -FilePath $env:{INSTALLER_PATH} -ArgumentList {} -Verb RunAs -Wait \
+         -PassThru; exit $p.ExitCode",
+        quoted.join(",")
+    );
+    powershell_with_path(&script, INSTALLER_PATH, installer)
+}
 
 /// Whether the answer to `AUTHENTICODE_QUERY` is a valid signature by Docker Inc.
 pub fn signed_by_docker_on_windows(answer: &str) -> bool {
@@ -551,24 +600,31 @@ pub fn verify_mac(dmg: &Path) -> Result<Mounted, Problem> {
     Ok(mounted)
 }
 
+/// The answer to `AUTHENTICODE_QUERY` about the file at `path`, or what PowerShell said instead.
+pub fn authenticode(path: &Path) -> Result<String, String> {
+    let output = powershell_with_path(AUTHENTICODE_QUERY, VERIFY_PATH, path)
+        .output()
+        .map_err(|error| format!("Get-AuthenticodeSignature: {error}"))?;
+    let answer = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !output.status.success() {
+        return Err(format!(
+            "Get-AuthenticodeSignature exited with {}: {}{}",
+            output.status,
+            answer,
+            crate::quiet::said(&output.stderr)
+        ));
+    }
+    Ok(answer)
+}
+
 /// Check the Windows installer's Authenticode signature: valid, and Docker Inc's.
 pub fn verify_windows(installer: &Path) -> Result<(), Problem> {
-    let output = crate::quiet::command("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            AUTHENTICODE_QUERY,
-        ])
-        .arg(installer)
-        .output()
-        .map_err(|error| not_verified(format!("Get-AuthenticodeSignature: {error}")))?;
-    let answer = String::from_utf8_lossy(&output.stdout);
-    if !output.status.success() || !signed_by_docker_on_windows(&answer) {
+    let answer = authenticode(installer)
+        .map_err(|error| not_verified(format!("{}: {error}", installer.display())))?;
+    if !signed_by_docker_on_windows(&answer) {
         return Err(not_verified(format!(
-            "{} is not validly signed by Docker Inc: {}",
-            installer.display(),
-            answer.trim()
+            "{} is not validly signed by Docker Inc: {answer}",
+            installer.display()
         )));
     }
     Ok(())
@@ -726,20 +782,7 @@ fn run_installer(installer: &Path, per_user: bool) -> Installed {
     let output = if per_user {
         crate::quiet::command(installer).args(&arguments).output()
     } else {
-        // Windows' approval prompt, then Docker's installer as an administrator, waited for.
-        let quoted: Vec<String> = arguments
-            .iter()
-            .map(|argument| format!("'{}'", argument.replace('\'', "''")))
-            .collect();
-        let script = format!(
-            "$p = Start-Process -FilePath $args[0] -ArgumentList {} -Verb RunAs -Wait -PassThru; \
-             exit $p.ExitCode",
-            quoted.join(",")
-        );
-        crate::quiet::command("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-            .arg(installer)
-            .output()
+        elevated_install(installer, &arguments).output()
     };
     match output {
         Ok(output) if output.status.success() => Installed::Done,
@@ -790,12 +833,82 @@ pub fn update(
             plan.release.version
         )),
     );
-    apply(&plan, progress, back, cancelled)?;
+    keeping_containers(
+        running_containers,
+        || apply(&plan, progress, back, cancelled),
+        start_again,
+    )?;
     // Over half a gigabyte, and nothing reads it again.
     if let Some(folder) = plan.installer.parent() {
         let _ = std::fs::remove_dir_all(folder);
     }
     Ok(())
+}
+
+/**
+The update, with the containers running before it running after it.
+
+Quitting Docker Desktop stops every container in it, the person's own included, as Docker's own
+updater does: on a Windows tester's computer their `my-web` came back "Exited (255)" after the
+update. So the containers running now are recorded before Docker Desktop is quit, and started again
+once the new one answers, as a Podman machine's are (`acquire::start_machine_named`). A failed update
+starts nothing: Docker may not be running to start them in.
+*/
+fn keeping_containers(
+    running: impl FnOnce() -> Vec<String>,
+    update: impl FnOnce() -> Result<(), Problem>,
+    start: impl FnOnce(&[String]),
+) -> Result<(), Problem> {
+    let ids = running();
+    log::info!(
+        "[docker update] {} container(s) running before the update",
+        ids.len()
+    );
+    update()?;
+    if !ids.is_empty() {
+        start(&ids);
+    }
+    Ok(())
+}
+
+/// The containers running in Docker now, by id.
+fn running_containers() -> Vec<String> {
+    Address::new(Engine::Docker, None)
+        .command()
+        .args(["ps", "--quiet", "--no-trunc"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Start `ids` again in the updated Docker Desktop. One that will not start is the log's: Docker
+/// and OpenBot are what setup needs, and the person's container is still there to start.
+fn start_again(ids: &[String]) {
+    let started = Address::new(Engine::Docker, None)
+        .command()
+        .arg("start")
+        .args(ids)
+        .output();
+    match started {
+        Ok(output) if output.status.success() => log::info!(
+            "[docker update] started {} container(s) again after the update",
+            ids.len()
+        ),
+        Ok(output) => log::warn!(
+            "[docker update] could not start containers again: {}",
+            crate::quiet::said(&output.stderr)
+        ),
+        Err(error) => log::warn!("[docker update] could not start containers again: {error}"),
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -809,9 +922,10 @@ fn apply(
     quit(progress, cancelled)?;
     loop {
         progress(
-            StepLine::elsewhere(
-                "Your Mac will ask for your password so OpenBot can update Docker.",
-            )
+            StepLine::elsewhere(format!(
+                "{UPDATING_WHY} Your Mac will ask for your password."
+            ))
+            .updating()
             .logged("Installing Docker Desktop; macOS asks for the password."),
         );
         std::thread::sleep(crate::install::BEFORE_PROMPT);
@@ -854,8 +968,11 @@ fn apply(
             updating_line(Some(INSTALL_ALLOWANCE.as_secs() / 60))
                 .logged("Installing Docker Desktop for this account.")
         } else {
-            StepLine::elsewhere("Windows will ask for your approval so OpenBot can update Docker.")
-                .logged("Installing Docker Desktop for all users; Windows asks for approval.")
+            StepLine::elsewhere(format!(
+                "{UPDATING_WHY} Windows will ask for your approval."
+            ))
+            .updating()
+            .logged("Installing Docker Desktop for all users; Windows asks for approval.")
         });
         let installed = run_installer(&plan.installer, per_user);
         back();
@@ -1171,11 +1288,13 @@ Internal requirements count=1 size=180
         assert_eq!(minutes_left(10, None, Duration::from_secs(60)), None);
         assert_eq!(
             updating_line(Some(5)).said,
-            "Updating Docker so OpenBot can run. About 5 minutes left."
+            "The Docker Desktop on this computer is too old for OpenBot, so OpenBot is updating \
+             it. About 5 minutes left."
         );
         assert_eq!(
             updating_line(Some(1)).said,
-            "Updating Docker so OpenBot can run. About a minute left."
+            "The Docker Desktop on this computer is too old for OpenBot, so OpenBot is updating \
+             it. About a minute left."
         );
     }
 
@@ -1190,5 +1309,121 @@ Internal requirements count=1 size=180
             Some("https://desktop.docker.com/win/main/amd64/appcast.xml")
         );
         assert_eq!(appcast_url("linux", "x86_64"), None);
+    }
+
+    /// The path is in the environment, not after `-Command`, for the check and for the install.
+    #[test]
+    fn a_path_reaches_powershell_in_the_environment_not_after_the_command() {
+        let installer = Path::new(
+            r"C:\Users\Administrator\OpenBot\openbot-engine\docker-desktop\245422\Docker Desktop Installer.exe",
+        );
+        let shape = |command: &std::process::Command, variable: &str| {
+            let args: Vec<String> = command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect();
+            assert_eq!(args.len(), 4, "{args:?}");
+            assert_eq!(&args[..3], ["-NoProfile", "-NonInteractive", "-Command"]);
+            assert!(args[3].contains(&format!("$env:{variable}")), "{}", args[3]);
+            assert!(!args[3].contains("$args"), "{}", args[3]);
+            let envs: Vec<_> = command.get_envs().collect();
+            assert!(envs.contains(&(std::ffi::OsStr::new(variable), Some(installer.as_os_str()))));
+            assert!(envs.contains(&(std::ffi::OsStr::new("PSModulePath"), None)));
+        };
+        shape(
+            &powershell_with_path(AUTHENTICODE_QUERY, VERIFY_PATH, installer),
+            VERIFY_PATH,
+        );
+        let install = elevated_install(installer, &install_arguments("windows", false, None));
+        shape(&install, INSTALLER_PATH);
+        let script = install
+            .get_args()
+            .nth(3)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(
+            script.contains("-ArgumentList 'install','--quiet' -Verb RunAs"),
+            "{script}"
+        );
+    }
+
+    /*
+     * The real call, on Windows. Docker's installer is downloaded to
+     * "...\docker-desktop\245422\Docker Desktop Installer.exe", and on a live Windows run the check
+     * stopped every update there: the path passed after `-Command` became part of the command text, a
+     * parse error, and the answer was empty. A signed Windows file stands in for the installer, in
+     * a folder whose name has spaces and a quote.
+     */
+    #[test]
+    #[cfg(windows)]
+    fn the_signature_check_reads_a_path_with_spaces_and_quotes() {
+        let folder = std::env::temp_dir().join(format!(
+            "openbot sig check {} it's here",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&folder).unwrap();
+        let signed = folder.join("Signed Installer.exe");
+        let system = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+        std::fs::copy(&system, &signed).unwrap();
+        let answer = authenticode(&signed);
+        let _ = std::fs::remove_dir_all(&folder);
+        let answer = answer.unwrap();
+        let (status, subject) = answer
+            .split_once('|')
+            .unwrap_or_else(|| panic!("not <status>|<subject>: {answer}"));
+        assert_eq!(status, "Valid", "{answer}");
+        assert!(subject.contains("O=Microsoft Corporation"), "{answer}");
+        // A Microsoft signature is not Docker's.
+        assert!(!signed_by_docker_on_windows(&answer));
+    }
+
+    /// The person's containers running before Docker Desktop is updated are started again after
+    /// it, and only once the update is done: a Windows tester's came back "Exited (255)".
+    #[test]
+    fn the_containers_running_before_the_update_are_started_after_it() {
+        let ids = || {
+            vec![
+                "af06cb230bc4188cc297c3f25afaa2b63f61d3010ed9c0412ef7b461f8729937".to_string(),
+                "8b48835f981b".to_string(),
+            ]
+        };
+        let order = std::cell::RefCell::new(Vec::new());
+        keeping_containers(
+            || {
+                order.borrow_mut().push("recorded".to_string());
+                ids()
+            },
+            || {
+                order.borrow_mut().push("updated".to_string());
+                Ok(())
+            },
+            |started| {
+                order
+                    .borrow_mut()
+                    .push(format!("started {}", started.len()))
+            },
+        )
+        .unwrap();
+        assert_eq!(*order.borrow(), ["recorded", "updated", "started 2"]);
+
+        // A failed update starts nothing and is the failure.
+        let started = std::cell::Cell::new(false);
+        let failed = keeping_containers(
+            ids,
+            || {
+                Err(Problem::with(
+                    "Docker's installer stopped before it finished.",
+                    "1603",
+                ))
+            },
+            |_| started.set(true),
+        );
+        assert!(failed.is_err());
+        assert!(!started.get());
+
+        // Nothing running, nothing started.
+        keeping_containers(Vec::new, || Ok(()), |_| panic!("nothing to start")).unwrap();
     }
 }

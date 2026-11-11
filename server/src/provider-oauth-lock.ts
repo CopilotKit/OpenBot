@@ -127,6 +127,14 @@ try { [Console]::Out.WriteLine('locked'); [Console]::Out.Flush(); [Console]::In.
 finally { $file.Dispose() }
 `;
 
+// How long the helper has to answer before it is stopped. The script gives up by
+// itself 5 seconds after its first try at the lock, so this only catches a helper
+// that hangs. Before that first try, Windows PowerShell starts and compiles the
+// type above with csc.exe: under a second on an idle machine, and more than 15
+// seconds on a busy one, where a 15-second stop reported the store busy while
+// nobody held the lock.
+const WINDOWS_LOCK_HELPER_ANSWER_MS = 60_000;
+
 async function windowsLock(path: string): Promise<() => Promise<void>> {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -150,7 +158,7 @@ async function windowsLock(path: string): Promise<() => Promise<void>> {
     },
   );
   const reader = child.stdout.getReader();
-  const timeout = setTimeout(() => child.kill(), 15_000);
+  const timeout = setTimeout(() => child.kill(), WINDOWS_LOCK_HELPER_ANSWER_MS);
   try {
     let message = "";
     while (!message.includes("\n")) {

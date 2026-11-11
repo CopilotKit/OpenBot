@@ -71,7 +71,7 @@ server:
     annotations: {}
     # WHO MAY REACH IT, when the type is LoadBalancer. Empty means everybody, which is what a cloud
     # load balancer does by default and almost never what somebody wants for an internal tool. Narrow
-    # it to the addresses your people come from. Not every cloud honours this on every load balancer
+    # it to the addresses your people come from. Not every cloud honors this on every load balancer
     # type, so treat it as one layer rather than the only one.
     loadBalancerSourceRanges: []
 
@@ -611,7 +611,6 @@ database:
   existingSecret: ""
   existingSecretKey: "database-url"
 
-# The bundled database. Off by default in favour of a managed one.
 # The bundled database.
 #
 # NOT PRODUCTION-GRADE, AND OFF FOR THAT REASON. A database on a pod is a database that goes away
@@ -635,8 +634,12 @@ postgresql:
     # nothing else can reach it.
     #
     # A MANAGED DATABASE IS NOT THIS. On RDS, Cloud SQL or Azure there is no superuser to hand out,
-    # so create the extension once as the administrative role and grant the migrating role ownership
-    # of it. `CREATE EXTENSION IF NOT EXISTS` then passes for an ordinary user.
+    # and the migrating role has to OWN the extension, because migration 0010 drops it and Postgres
+    # has no way to hand an extension's ownership over afterwards. Either let the migrating role
+    # create it (grant it the provider's extension role), or have the administrative role run
+    # `SET ROLE <migrating role>; CREATE EXTENSION IF NOT EXISTS vector; RESET ROLE;`. Creating it as
+    # the administrative role alone fails the upgrade with "must be owner of extension vector". The
+    # chart README covers both.
     username: postgres
     database: openbot
     # OPTIONAL. Left empty, this chart generates one into the Secret below, once, reads it back on
@@ -718,12 +721,12 @@ secrets:
   # no mode where this runs with Intelligence missing. The bundled Intelligence needs none: the chart
   # creates a project and its key there itself (see `intelligence` below).
   intelligenceApiKey: ""
-  # The CopilotKit licence. REQUIRED with the bundled Intelligence, which is self-hosted and needs it
+  # The CopilotKit license. REQUIRED with the bundled Intelligence, which is self-hosted and needs it
   # on its own deployment: given here once, it reaches both, OpenBot's server as
   # COPILOTKIT_LICENSE_TOKEN and Intelligence through `intelligence.appApi.licenseSecret`. From a
   # Secret of your own or a store, see `intelligence.appApi.licenseSecret` below.
   #
-  # Optional with managed Intelligence, which issues no licence token.
+  # Optional with managed Intelligence, which issues no license token.
   licenseToken: ""
   # Optional. One key for the whole deployment, for Composio, the broker holding people's accounts for
   # a few hundred apps (docs/plugins/composio.md). Passed to the server alone as COMPOSIO_API_KEY.
@@ -731,7 +734,7 @@ secrets:
   composioApiKey: ""
   # Sent to `config.managedAgent.url` on every call. Required when that url is set.
   managedAgentToken: ""
-  # Optional. What the routines CronJob presents to the API server to be recognised as the worker
+  # Optional. What the routines CronJob presents to the API server to be recognized as the worker
   # rather than as an unauthenticated caller. Empty, the chart generates one and keeps it (see
   # `routines` above). Set it when something outside this chart fires routines too, or when the chart
   # is rendered by a tool that cannot read the cluster (Argo CD's `helm template`), where a generated
@@ -850,11 +853,11 @@ commonAnnotations: {}
 #     Intelligence and the OpenBot server, so nobody signs in to make one;
 #   - generates every credential Intelligence needs (database and Redis passwords, session and
 #     gateway secrets) as Secrets kept across upgrades and uninstalls, never as values;
-#   - hands it the licence given once in `secrets.licenseToken`.
+#   - hands it the license given once in `secrets.licenseToken`.
 #
 # Everything under this key except `enabled` is the Intelligence chart's own values, passed to it
 # unchanged: its README (`helm show readme oci://ghcr.io/copilotkit/charts/intelligence --version
-# 0.16.0-rc.10`) documents every one, and anything it documents can be set here.
+# 0.16.0-rc.11`) documents every one, and anything it documents can be set here.
 #
 # THE SECRET NAMES BELOW ARE FIXED, NOT DERIVED FROM THE RELEASE, because the Intelligence chart takes
 # them as plain names. This chart creates each one under exactly the name written here, so changing a
@@ -889,7 +892,7 @@ intelligence:
   learning:
     enabled: true
     # Self-hosted Intelligence admits an organization to Learning through a rollout list or this
-    # switch, and only then reads the licence. This Intelligence has one organization, OpenBot's.
+    # switch, and only then reads the license. This Intelligence has one organization, OpenBot's.
     globalEnabled: true
     # Runs Learning by itself: first after 15 finished conversations, then after every 15 more
     # (Intelligence's own thresholds, `automation.firstRunThreshold` and `subsequentRunThreshold`).
@@ -916,7 +919,7 @@ intelligence:
       # so it reaches the agent as LEARNING_AGENT_MODEL from the Secret instead (`env` below). A model
       # here as well would set that variable twice, which the chart refuses: use
       # `config.learning.model`. Empty also makes Intelligence's `APP_API_LEARNING_MODEL_CONFIGURED`
-      # false, which Intelligence reads only under a local evaluation licence, and that licence starts
+      # false, which Intelligence reads only under a local evaluation license, and that license starts
       # only on the CopilotKit CLI's own local install, never under this chart.
       model: ""
       # Generated by this chart: `learning-agent-token`, `learning-agent-model`, and `openai-api-key`
@@ -1044,8 +1047,8 @@ intelligence:
             name: OpenBot
 
   appApi:
-    # The licence. This chart writes `secrets.licenseToken` into the Secret named here. With the
-    # licence in a Secret of your own instead (`secrets.existingSecret`), name that Secret here and
+    # The license. This chart writes `secrets.licenseToken` into the Secret named here. With the
+    # license in a Secret of your own instead (`secrets.existingSecret`), name that Secret here and
     # the key that holds it, and both sides read the one Secret.
     licenseSecret:
       existingSecret: openbot-intel-license
@@ -1054,6 +1057,6 @@ intelligence:
   # TRAJECTORIES: the sessions the Recorder captures, and Learning's second source beside
   # conversations. One switch in Intelligence's chart turns them on in its API, its gateway and
   # Learning together; the gateway's token for asking the API about them is generated by
-  # Intelligence's own chart. Any valid licence allows them.
+  # Intelligence's own chart. Any valid license allows them.
   trajectories:
     enabled: true

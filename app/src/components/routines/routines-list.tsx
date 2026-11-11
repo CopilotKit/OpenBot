@@ -37,7 +37,7 @@ import {
   responsibilitiesQueryOptions,
   triggersQueryOptions,
 } from "@/lib/responsibilities";
-import { goalStarts, mergeRoutines } from "@/lib/routines/merged";
+import { goalCanEnd, goalStarts, mergeRoutines } from "@/lib/routines/merged";
 import {
   nothingIsFiring,
   type RoutineRecord,
@@ -148,7 +148,22 @@ function GoalItem({
   /** The Bot whose own list this is, so the goal's back link returns to it. */
   agentId?: string;
 }) {
-  const triggers = useQuery(triggersQueryOptions(goal.id));
+  /*
+   * Its triggers, read only where the row uses them: an active goal's starts, and whether a goal
+   * with an outcome can end, which they decide only once nothing else already makes it repeat.
+   *
+   * FOUND IN REVIEW: every goal row read its triggers, paused and completed ones too, so a list of
+   * sixty goals sent sixty requests on every load, most of them for nothing the row said.
+   */
+  const triggersDecide =
+    goal.status === "active" ||
+    (Boolean(goal.successCriteria) &&
+      goalCanEnd(goal, routines, undefined) &&
+      !goal.endsWhenMet);
+  const triggers = useQuery({
+    ...triggersQueryOptions(goal.id),
+    enabled: triggersDecide,
+  });
   const Icon = STATUS[goal.status].icon;
   const starts =
     goal.status === "active"
@@ -194,7 +209,8 @@ function GoalItem({
           </span>
         </ItemTitle>
         <ItemDescription>{line}</ItemDescription>
-        {goal.successCriteria ? (
+        {/* Until only on a goal that can end: one that repeats never reaches it. */}
+        {goal.successCriteria && goalCanEnd(goal, routines, triggers.data) ? (
           <ItemDescription className="line-clamp-1">
             Until: {goal.successCriteria}
           </ItemDescription>

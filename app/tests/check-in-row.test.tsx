@@ -276,7 +276,7 @@ test("Remove asks first, and only then removes the check-in", async () => {
   const view = page();
   const user = userEvent.setup({ document });
   await user.click(
-    await view.findByRole("button", { name: "Remove check-in" }),
+    await view.findByRole("button", { name: /^Remove check-in/ }),
   );
   const confirm = await view.findByRole("dialog", {
     name: "Remove this check-in?",

@@ -38,6 +38,7 @@ const goal: ResponsibilityRecord = {
   progress: "",
   lastResult: null,
   subscriptions: [],
+  recurring: false,
   endsWhenMet: false,
   updatedAt: "2026-11-10T10:00:00Z",
 };

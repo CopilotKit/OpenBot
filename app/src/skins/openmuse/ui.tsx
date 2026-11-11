@@ -1,5 +1,6 @@
 import { IconChevronRight, type IconProps, IconX } from "@tabler/icons-react";
 import * as React from "react";
+import { BrandName } from "@/components/edition/brand-name";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
@@ -322,7 +323,7 @@ export function MuseSheet({
         <div className="flex shrink-0 items-center justify-between gap-4 border-border border-b p-5 min-[600px]:p-6">
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <DialogTitle className={cn(museText.title, "font-semibold")}>
-              {title}
+              <BrandName>{title}</BrandName>
             </DialogTitle>
             {subtitle ? (
               <DialogDescription className={museText.muted}>

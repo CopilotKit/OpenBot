@@ -7,6 +7,7 @@ import { ThisComputerSections } from "@/components/settings/this-computer-sectio
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { desktopShell } from "@/lib/desktop/shell";
 import { editionOf } from "@/lib/edition-guard";
+import { useScrollToSection } from "@/lib/settings/computer-sections";
 
 /**
  * Settings → Computer: where your Bots browse, run commands and keep files, for every Bot. It was
@@ -18,6 +19,8 @@ import { editionOf } from "@/lib/edition-guard";
  *    under Admin.
  * 2. This computer: what OpenBot runs here, with Restart and Stop. Only inside OpenBot Desktop.
  * 3. The browsers signed in to the Recorder as you.
+ *
+ * An address may name a section in its hash (`COMPUTER_SECTION`), and the page opens there.
  *
  * A Bot's own part of this (its folders, its browser) is on its Computer page.
  */
@@ -33,12 +36,16 @@ function ComputerPage() {
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const desktop = desktopShell() !== null;
+  // Desktop's Status and the extension's popup open this page at their section.
+  useScrollToSection();
   return (
     <PageShell
       description={
         personal
-          ? "Your Bots share one computer, where each keeps its own browser signed in. Choose folders they can read here, and connect the browsers you teach them in."
-          : "Connect the browsers you teach your Bots in, and see what OpenBot runs on this computer."
+          ? "Your Bots share one computer, where each keeps its own browser signed in. A command one Bot runs can still read another Bot's files. Choose folders they can read here, and connect the browsers you teach them in."
+          : desktop
+            ? "Connect the browsers you teach your Bots in, and see what OpenBot runs on this computer."
+            : "Connect the browsers you teach your Bots in."
       }
       title="Computer"
     >

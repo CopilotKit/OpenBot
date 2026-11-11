@@ -28,6 +28,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { untitledLine } from "@/lib/channels/label";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   type ChannelSummary,
   channelListQueryOptions,
@@ -59,7 +60,7 @@ import {
   createFromPlanMutationOptions,
   SavedButRefused,
 } from "@/lib/routines/mutations";
-import { planRoutine } from "@/lib/routines/plan";
+import { checkInSubject, planRoutine } from "@/lib/routines/plan";
 import { openingOf } from "@/lib/voice/cut";
 import { queryClient } from "@/query-client";
 
@@ -85,10 +86,10 @@ const SAME_CHECK_IN =
   "This Bot already checks in on this. Give this one a different name, or change that one on its row.";
 
 /**
- * Whether an Only tell you named `title` is a check-in this Bot already has. The server counts a
- * check-in with no link and the same subject, in any case, as the same one, and updates that one
- * in place (`proactiveStore.create`): it would keep posting in its own conversation, and the one
- * picked here would stay empty.
+ * Whether an Only tell you called `title` (`checkInSubject`: its Name, else its instruction) is a
+ * check-in this Bot already has. The server counts a check-in with no link and the same subject, in
+ * any case, as the same one, and updates that one in place (`proactiveStore.create`): it would keep
+ * posting in its own conversation, and the one picked here would stay empty.
  */
 function sameCheckIn(
   settings: ProactiveSetting[] | undefined,
@@ -135,7 +136,7 @@ function brokenRules(
   // Only a check-in can clash: not acting, and not a tell held because check-ins are off.
   else if (
     values.does === "tell" &&
-    sameCheckIn(checkIns, values.agentId, values.title)
+    sameCheckIn(checkIns, values.agentId, checkInSubject(values))
   )
     add("title", SAME_CHECK_IN);
   return messages;
@@ -221,6 +222,14 @@ export function NewRoutinePage({
   const allowed = useQuery(proactiveAllowedQueryOptions()).data === true;
   // The same request as `allowed`: both read one key.
   const checkIns = useQuery(proactiveSettingsQueryOptions());
+  // FOUND IN REVIEW: Slack was offered as a source in every edition. The personal edition has no
+  // Slack (Connections leaves it out), so a goal woken by a Slack event there never ran, while its
+  // row named the event as if it would.
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  const eventSources = personal
+    ? EVENT_SOURCES.filter((source) => source !== "slack")
+    : EVENT_SOURCES;
   const timeZone = browserTimeZone();
   // A write was saved, or its answer was lost. Lock the form to prevent duplicate work.
   const saved = createFromPlan.error instanceof SavedButRefused;
@@ -263,7 +272,7 @@ export function NewRoutinePage({
         // The alert under the form says what happened, from `createFromPlan.error`.
         return;
       }
-      // The person may have left by the back link while this ran; then there is nowhere to send them.
+      // The person may have left, by the sidebar, while this ran; then there is nowhere to send them.
       if (open.current) await navigate(after(value.agentId));
     },
   });
@@ -301,7 +310,12 @@ export function NewRoutinePage({
 
   return (
     <PageShell
-      backButton={{ label: "Routines", linkProps: back }}
+      // Not a link while the writes are on their way, as Cancel isn't: leaving would hide their answer.
+      backButton={{
+        label: "Routines",
+        linkProps: back,
+        disabled: createFromPlan.isPending,
+      }}
       description="Pick a Bot, say what it should do, and choose when it starts."
       title="New routine"
     >
@@ -764,7 +778,7 @@ export function NewRoutinePage({
                                           </SelectTrigger>
                                           <SelectContent>
                                             <SelectGroup>
-                                              {EVENT_SOURCES.map((source) => (
+                                              {eventSources.map((source) => (
                                                 <SelectItem
                                                   key={source}
                                                   value={source}

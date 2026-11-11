@@ -17,6 +17,7 @@ import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
 import { waitingOnYou } from "@/components/bot-profile/attention";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
+import { BrandName } from "@/components/edition/brand-name";
 import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import {
   ContextMenu,
@@ -33,8 +34,8 @@ import {
 } from "@/components/ui/sheet";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
-import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
 import { untitledLine } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
@@ -135,7 +136,7 @@ export function MenuSheet({
       >
         <SheetHeader className="px-5 pt-5 pb-3">
           <SheetTitle className="openduet-type-display font-semibold text-openduet-ink">
-            {appConfig.brand.productName}
+            <BrandName>{appConfig.brand.productName}</BrandName>
           </SheetTitle>
           <SheetDescription className="openduet-type-sub truncate text-openduet-ink-2">
             {user?.name || user?.email}

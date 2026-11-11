@@ -48,6 +48,7 @@ import {
   intelligenceReadinessQueryOptions,
   totalMemory,
 } from "@/lib/desktop/queries";
+import { COMPUTER_SECTION } from "@/lib/settings/computer-sections";
 import { queryClient } from "@/query-client";
 
 const READINESS: Record<IntelligenceReadiness, string> = {
@@ -115,7 +116,7 @@ function OpenBotSection({
   const memory = totalMemory([...status.processes, ...status.containers]);
   const busy = restart.isPending || stop.isPending;
   return (
-    <PageSection title="App">
+    <PageSection id={COMPUTER_SECTION.thisComputer} title="App">
       <PageRows>
         <Item size="sm">
           <RowMark>

@@ -1,4 +1,5 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
+import { COMPUTER_SECTION } from "@/lib/settings/computer-sections";
 
 /**
  * What OpenBot runs on this computer is a section of Settings → Computer now.
@@ -8,6 +9,10 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
  */
 export const Route = createFileRoute("/_authed/settings/this-computer")({
   beforeLoad: () => {
-    throw redirect({ to: "/settings/computer", replace: true });
+    throw redirect({
+      to: "/settings/computer",
+      hash: COMPUTER_SECTION.thisComputer,
+      replace: true,
+    });
   },
 });

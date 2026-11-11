@@ -21,9 +21,15 @@ export type EarlyDownloads = {
   /** Every download together, once each one's size is known. */
   size?: number;
   bytesPerSecond?: number;
-  /** Free on this computer's disk, and what setup needs, when the disk is short. */
+  /**
+   * When the disk is short: free on this computer's disk, what OpenBot needs free to run (the 40
+   * the account step's check asks for too), and what the downloads add on top of it.
+   */
   free?: number;
   needed?: number;
+  download?: number;
+  /** Downloading, and paused until there is enough free space (`wait_for_room`). */
+  paused?: boolean;
 };
 
 /** Where the early downloads are, as the native side last said. */
@@ -48,13 +54,28 @@ export function useEarlyDownloads(): EarlyDownloads | null {
   return downloads;
 }
 
-const GB = 1_000_000_000;
+/**
+ * Where the early downloads are once they have looked at the free disk, for Install. Nothing when
+ * they can't say: Install is never held back on a question with no answer.
+ */
+export function earlyDownloadsMeasured(): Promise<EarlyDownloads | null> {
+  return invoke<EarlyDownloads | null>("early_downloads_measured").catch(
+    () => null,
+  );
+}
+
+/**
+ * A GB as Windows counts it on its drives, and as the account step's check says its "40 GB": 2^30
+ * bytes. Windows F showed 15.0 GB free in File Explorer while this line said 16 GB.
+ */
+const GB = 1024 ** 3;
 
 /** The early downloads as a download the setup rows can show, while they run; null otherwise. */
 export function earlyDownload(
   downloads: EarlyDownloads | null,
 ): Downloads | null {
-  if (downloads?.state !== "downloading") return null;
+  // Paused for space: no bar that stopped, and no time left that runs out.
+  if (downloads?.state !== "downloading" || downloads.paused) return null;
   return {
     bytes: downloads.bytes,
     size: downloads.size,
@@ -62,26 +83,39 @@ export function earlyDownload(
   };
 }
 
-function gigabytes(bytes: number): string {
-  return `${Math.max(1, Math.round(bytes / GB))} GB`;
+/** "15 GB", never broken between the figure and its unit: at 1000 px it wrapped "about 2 / GB". */
+function gigabytes(bytes: number, round = Math.round): string {
+  return `${Math.max(1, round(bytes / GB))}\u00a0GB`;
 }
+
+/** The download's own part of what OpenBot needs, said apart, and rounded up so it is enough. */
+function downloadSaid(download: number | undefined): string {
+  return download
+    ? ` plus about ${gigabytes(download, Math.ceil)} for its download`
+    : "";
+}
+
+/** Said while the downloads are paused for space, here and on Install's own row. */
+export const PAUSED_FOR_SPACE =
+  "The download is paused until there's enough free space. It carries on by itself.";
 
 /**
  * The line for `downloads`, or null when there is nothing to say. In the words of the background
  * install's row: "Downloading OpenBot. About 3 minutes left.", the time left as that row works it
  * out (`left`, in seconds; null while it is not known, `slow` when it is taking longer than usual).
- * The first screen also says when everything is downloaded, or when something will download at
- * Install instead; later screens say only what is still going on, since Install's own rows take
- * over from there.
+ * The first screen also says when something will download at Install instead; later screens say only
+ * what is still going on, since Install's own rows take over from there. Nobody says when
+ * everything is downloaded: Install is the next step either way.
  */
 export function earlyDownloadsSaid(
   downloads: EarlyDownloads,
   firstScreen: boolean,
   time: { left: number | null; slow: boolean } | null = null,
 ): string | null {
-  const { state, free, needed } = downloads;
+  const { state, free, needed, download } = downloads;
   switch (state) {
     case "downloading": {
+      if (downloads.paused) return PAUSED_FOR_SPACE;
       if (time?.slow) return `Downloading OpenBot. ${leftSaid(null)}.`;
       return time?.left != null
         ? `Downloading OpenBot. ${leftSaid(time.left)}.`
@@ -89,10 +123,10 @@ export function earlyDownloadsSaid(
     }
     case "short":
       return free != null && needed != null
-        ? `This computer has ${gigabytes(free)} of free space, and OpenBot needs about ${gigabytes(needed)}. Free up some space and the download starts by itself.`
+        ? `This computer has ${gigabytes(free)} of free space, and OpenBot needs ${gigabytes(needed)}${downloadSaid(download)}. Free up some space and the download starts by itself.`
         : null;
     case "done":
-      return firstScreen ? "OpenBot is downloaded and ready to install." : null;
+      return null;
     case "failed":
       return firstScreen
         ? "Some downloads didn’t finish. Install tries them again."
