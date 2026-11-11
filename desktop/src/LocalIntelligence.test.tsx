@@ -126,6 +126,7 @@ type Props = {
   status?: boolean;
   onStart?: (startable: Startable) => Promise<StartOutcome>;
   pollDelays?: number[];
+  roomEveryMs?: number;
 };
 
 /** The window's part: it holds the sequence, and a screen shows it. */
@@ -136,6 +137,7 @@ function Holder(props: Props) {
     connected: props.connected ?? false,
     onStart: props.onStart ?? (async () => "started"),
     pollDelays: props.pollDelays ?? [0, 0, 0],
+    roomEveryMs: props.roomEveryMs,
   });
   // biome-ignore lint/correctness/useExhaustiveDependencies: once, on arrival.
   useEffect(() => {
@@ -913,6 +915,98 @@ test("a setup refused for a full Docker disk says so, with Retry", async () => {
     "Docker Desktop has 0 GB of free disk space. OpenBot needs 40 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   expect(setup).not.toContain("partway through");
+});
+
+/**
+ * Windows G, on Docker Desktop with C: at 15 GB free: the native side did not start the setup on a
+ * drive that short (`local_eval::checked_call`). Its report, as `local_eval.rs` gives it for G.
+ */
+const notStartedOnC = report({
+  outcome: "blocked",
+  stack: null,
+  reason: "resources-short",
+  shortfall: {
+    podman: false,
+    cpu: false,
+    memory: false,
+    disk: true,
+    diskGb: "13.9",
+    drive: "C:",
+    freeOnDrive: true,
+  },
+});
+const shortOnC = notStartedOnC.shortfall;
+const ACCOUNT_STEP_SAYS =
+  "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.";
+
+/**
+ * On Windows G that setup was a red "Setup stopped" card with Retry and the troubleshooting logs,
+ * and with the space freed it still said 13.9 GB 50 seconds later, until Retry. A drive short of
+ * room is not an error: the setup is paused, says so in the account step's words with Try again,
+ * looks again by itself, and carries on once there is room.
+ */
+test("a setup paused for room on its drive says so calmly and carries on by itself", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [notStartedOnC, report()],
+    // Still short at the first look; room at the second.
+    local_eval_room: [shortOnC, null],
+    local_eval_download: [null],
+    connect_local_eval: [connection()],
+    run_local_eval: [ready],
+  });
+  const started: Startable[] = [];
+  const screen = view({
+    roomEveryMs: 300,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  const setup = await screen.findByRole("listitem", { name: SETUP });
+  await waitFor(() => expect(setup.textContent).toContain(ACCOUNT_STEP_SAYS));
+  expect(within(setup).getByText("Step 1 of 4 · Paused")).toBeTruthy();
+  expect(setup.textContent).not.toContain("elapsed");
+  expect(setup.querySelector(".step-spinner")).toBeNull();
+  expect(within(setup).getByRole("button", { name: "Try again" })).toBeTruthy();
+  // Not an error: no stop, no Retry, no logs.
+  expect(screen.queryByText("Setup stopped")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Copy logs" })).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+  // Room: it sets up again by itself, and goes on to start.
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(
+    commands().filter((call) => call === "set_up_local_eval"),
+  ).toHaveLength(2);
+  expect(
+    invokeCalls.filter((call) => call.command === "local_eval_room"),
+  ).toHaveLength(2);
+});
+
+/** Try again looks at once, rather than at the next look. */
+test("Try again on a setup paused for room looks again at once", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [notStartedOnC, report()],
+    local_eval_room: [null],
+    local_eval_download: [null],
+    connect_local_eval: [connection()],
+    run_local_eval: [ready],
+  });
+  const started: Startable[] = [];
+  const screen = view({
+    roomEveryMs: 60_000,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Try again" }),
+  );
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(
+    commands().filter((call) => call === "set_up_local_eval"),
+  ).toHaveLength(2);
 });
 
 test("a sign-in that does not finish says so and can be tried again", async () => {
