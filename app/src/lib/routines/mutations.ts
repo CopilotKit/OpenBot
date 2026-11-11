@@ -1,6 +1,6 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { channelKeys } from "@/lib/channels/queries";
-import { client } from "@/lib/client";
+import { ClientError, client } from "@/lib/client";
 import { createProactiveSetting, proactiveKeys } from "@/lib/proactive";
 import {
   createResponsibility,
@@ -37,7 +37,7 @@ export type RoutineInput = {
   channelId: string;
 };
 
-/** The goal exists but its routine or first run did not happen: the screen must not offer to create it again. */
+/** The goal exists but its routine or first run did not happen, or may not have: the screen must not offer to create it again. */
 export class SavedButRefused extends Error {}
 
 /**
@@ -159,8 +159,20 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
                 fallback: "Couldn't set up that routine. Try again.",
               });
             } catch (error) {
-              const refusal =
-                error instanceof Error ? error.message : String(error);
+              /*
+               * Only a 4xx is the server saying no. A 5xx, a timeout or a dropped connection
+               * says nothing about whether the routine was saved, and pausing the goal then
+               * would leave a live routine firing into a paused goal.
+               */
+              const refused =
+                error instanceof ClientError &&
+                error.status >= 400 &&
+                error.status < 500;
+              if (!refused)
+                throw new SavedButRefused(
+                  "It's saved on the Routines page, but its schedule may not have been set. Open it there to check.",
+                );
+              const refusal = error.message;
               const paused = await responsibilityAction(id, "pause").then(
                 () => true,
                 () => false,

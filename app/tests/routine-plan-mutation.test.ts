@@ -231,6 +231,44 @@ test("a failed pause still says the goal was saved", async () => {
   );
 });
 
+test("a schedule whose answer was lost leaves the goal running and says to check", async () => {
+  const calls = stub({
+    "POST /api/routines": { status: 500, body: {} },
+  });
+  const { error } = await run(
+    goalPlan(NEW_CONVERSATION, { schedule: true, runNow: true }),
+  );
+  const requests = methodsAndPaths(calls);
+  expect(requests).not.toContain("POST /api/responsibilities/g1/pause");
+  expect(requests).not.toContain("POST /api/responsibilities/g1/run");
+  expect(requests.some((l) => l.startsWith("DELETE"))).toBe(false);
+  expect(error).toBeInstanceOf(SavedButRefused);
+  expect(error?.message).toBe(
+    "It's saved on the Routines page, but its schedule may not have been set. Open it there to check.",
+  );
+});
+
+test("a schedule request that never reached the server is not a refusal either", async () => {
+  const calls = stub();
+  const answered = globalThis.fetch;
+  globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+    if (init?.method === "POST" && String(url) === "/api/routines")
+      throw new TypeError("Failed to fetch");
+    return answered(url as never, init);
+  }) as unknown as typeof fetch;
+  const { error } = await run(
+    goalPlan(NEW_CONVERSATION, { schedule: true, runNow: true }),
+  );
+  const requests = methodsAndPaths(calls);
+  expect(requests).not.toContain("POST /api/responsibilities/g1/pause");
+  expect(requests).not.toContain("POST /api/responsibilities/g1/run");
+  expect(requests.some((l) => l.startsWith("DELETE"))).toBe(false);
+  expect(error).toBeInstanceOf(SavedButRefused);
+  expect(error?.message).toBe(
+    "It's saved on the Routines page, but its schedule may not have been set. Open it there to check.",
+  );
+});
+
 test("a refused routine takes the new conversation back", async () => {
   const calls = stub({
     "POST /api/routines": { status: 400, body: { error: "x" } },
