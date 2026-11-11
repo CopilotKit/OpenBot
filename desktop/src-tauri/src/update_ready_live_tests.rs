@@ -469,10 +469,11 @@ fn an_installation_behind_gets_its_release_ready_before_the_update() {
     };
     let from = installation.lab.requests().len();
 
-    // Room for the back end's setup, not for the download beside it: nothing downloads.
+    // Room for the back end's setup, not for the download beside it: nothing downloads. Well
+    // above the kubelet's 15% line, so it is the back end's 40 GiB that stops it.
     let outcome = behind(&|| {
         Some(Disk {
-            size: 400 * GIB,
+            size: 100 * GIB,
             free: 40 * GIB + 1_000_000,
         })
     });
