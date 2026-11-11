@@ -3572,6 +3572,10 @@ test("the next Start after Quit tries the update again, and never asks the CLI t
   expect(localActions()).toEqual(["status", "update", "status"]);
 });
 
+/**
+ * With the update on record the CLI refuses `local start`, so the update is tried again, once.
+ * When it stops again the check still fails, and that is not the release the stack had running.
+ */
 test("a backend whose check fails is still not healthy, with an update on record or not", async () => {
   withUnfinishedUpdate("/tmp/local-eval-update-check-fails", [
     pinnedCli.apiCheckFails,
@@ -3585,7 +3589,7 @@ test("a backend whose check fails is still not healthy, with an update on record
   ).toBeTruthy();
   expect(view.getByRole("button", { name: "Retry" })).toBeTruthy();
   expect(view.queryByText(KEPT_RELEASE)).toBeNull();
-  expect(localActions()).toEqual(["status"]);
+  expect(localActions()).toEqual(["status", "update", "status"]);
   expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
     false,
   );

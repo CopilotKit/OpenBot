@@ -599,6 +599,8 @@ export function useLocalSequence({
     let updatedIntelligence = false;
     // The update ran on a stack found stopped. It starts the cluster itself, so the release the
     // stack had comes back up after a failed one, and is waited on like a stack that is starting.
+    // Not one found degraded: its cluster was already up, and nothing on it comes back by itself
+    // after the update fails again, so waiting would only run out the clock.
     let woken = false;
     // The release an update that just failed was moving to, until the next answer says where.
     let failedTo: string | null = null;
@@ -627,16 +629,24 @@ export function useLocalSequence({
        * usual, and the update runs on the next answer, when it reports ready.
        *
        * AN UPDATE THAT DID NOT FINISH is tried again the same way, on a stack ready on the release
-       * it had. On a stopped one too: there the CLI refuses `start` while the update is on record,
-       * and `local update` is the only call that starts the stack.
+       * it had. On a stopped or degraded one too: the CLI refuses `start` while the update is on
+       * record, so `local update` is the only call that gets the stack going again. On a stopped
+       * stack it starts the cluster itself. A degraded one is what an update leaves when it fails
+       * after pausing the services (`update-quiesce`): running, its checks failing, and nothing but
+       * the update will bring them back. Found in a dogfooding report, rc.10 to rc.11 stopped at
+       * `dependencies-install`, where every Retry asked for status once and gave up. A stack still
+       * on the release it had (`kept`) is one of these degraded ones.
+       *
+       * Once per wait (`updatedIntelligence`), so an update that keeps failing stops at its row
+       * rather than looping; Retry is the next attempt.
        */
       if (
         found.updateTo &&
         found.stack &&
         !updatedIntelligence &&
         (found.readiness === "ready" ||
-          kept !== null ||
-          (found.readiness === "stopped" && unfinished !== null))
+          (unfinished !== null &&
+            (found.readiness === "stopped" || found.readiness === "degraded")))
       ) {
         updatedIntelligence = true;
         woken = found.readiness === "stopped";
