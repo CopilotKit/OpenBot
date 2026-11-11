@@ -14,7 +14,7 @@ OpenBot ships three public-web research providers in the plugin catalogue: **Par
 ## Enable research
 
 1. As an administrator, open Plugins and add a provider from the catalogue. For the keyed entries, enter the provider's API key; it is stored in the server-side credential vault.
-2. Grant that provider's search and fetch tools to the Bots that should research the public web. For the shipped fintech package, select **Research Desk**.
+2. Grant that provider's search and fetch tools to the Bots that should research the public web. The fintech package's **Research Desk** is written for this; it ships in `examples/fintech/catalog/` and is loaded only once its file is copied into `examples/fintech/agents/`.
 3. Ask the Bot to research a topic. It searches, reads selected sources and cites their URLs. Run `/research-public-web` to select the example skill explicitly if your deployment has many tools.
 
 For production or higher limits, use a keyed entry and remove the grants on the free one. If a Bot holds a vendor's free and keyed entries, it is told about the keyed one.
