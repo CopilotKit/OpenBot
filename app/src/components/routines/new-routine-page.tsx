@@ -1,6 +1,7 @@
 import { useForm, useSelector } from "@tanstack/react-form";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { Link, linkOptions, useNavigate } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { PageCard, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
@@ -233,6 +234,15 @@ export function NewRoutinePage({
       presetChannelId && presetAgentId ? presetChannelId : NEW_CONVERSATION,
   };
 
+  // Whether this page is still open, read after the create's requests come back.
+  const open = useRef(true);
+  useEffect(() => {
+    open.current = true;
+    return () => {
+      open.current = false;
+    };
+  }, []);
+
   const form = useForm({
     defaultValues,
     onSubmit: async ({ value }) => {
@@ -247,7 +257,8 @@ export function NewRoutinePage({
         // The alert under the form says what happened, from `createFromPlan.error`.
         return;
       }
-      await navigate(after(value.agentId));
+      // The person may have left by the back link while this ran; then there is nowhere to send them.
+      if (open.current) await navigate(after(value.agentId));
     },
   });
 
@@ -315,12 +326,19 @@ export function NewRoutinePage({
                 </Button>
               ) : (
                 <>
-                  <Button
-                    render={(props) => <Link {...props} {...back} />}
-                    variant="outline"
-                  >
-                    Cancel
-                  </Button>
+                  {createFromPlan.isPending ? (
+                    // Not a link while the writes are on their way: leaving now would hide what they answer.
+                    <Button disabled variant="outline">
+                      Cancel
+                    </Button>
+                  ) : (
+                    <Button
+                      render={(props) => <Link {...props} {...back} />}
+                      variant="outline"
+                    >
+                      Cancel
+                    </Button>
+                  )}
                   <form.Subscribe selector={(state) => state.isSubmitting}>
                     {(isSubmitting) => (
                       <Button

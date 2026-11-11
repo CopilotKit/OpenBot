@@ -62,7 +62,7 @@ function serving({
 }: {
   proactive?: unknown;
   /** How `POST /api/routines` answers. */
-  routines?: () => Response;
+  routines?: () => Response | Promise<Response>;
 } = {}) {
   recorded.length = 0;
   proactiveAnswer = proactive;
@@ -608,6 +608,35 @@ test("after a partial save, Create routine gives way to Go to Routines", async (
   const goTo = view.getByRole("button", { name: "Go to Routines" });
   expect(goTo.tagName).toBe("A");
   expect(goTo.getAttribute("href")).toBe("/bots/bot-1/routines");
+});
+
+test("Cancel waits while the routine is being created", async () => {
+  let answer: (response: Response) => void = () => {};
+  serving({
+    routines: () =>
+      new Promise<Response>((resolve) => {
+        answer = resolve;
+      }),
+  });
+  const view = draw();
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByLabelText("What to do"),
+    "Send me a summary of yesterday's new leads",
+  );
+  await user.click(await view.findByRole("button", { name: "Create routine" }));
+  await waitFor(() =>
+    expect(
+      writes().some(
+        ([method, path]) => method === "POST" && path === "/api/routines",
+      ),
+    ).toBe(true),
+  );
+  expect(
+    view.getByRole("button", { name: "Cancel" }).hasAttribute("disabled"),
+  ).toBe(true);
+  answer(Response.json({ routine: { id: "r1" } }, { status: 201 }));
+  await settleReactWork();
 });
 
 test("after a partial save, a submit does not make a second goal", async () => {
