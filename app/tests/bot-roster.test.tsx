@@ -143,13 +143,13 @@ test("a row opens the Bot's own page", async () => {
   expect(row?.getAttribute("href")).toBe("/bots/mine");
 });
 
-test("with every Bot of yours pinned, Yours says so instead of claiming none", async () => {
+test("with every Bot of yours pinned, there is no empty Yours, only the way to make another", async () => {
   serving([bot({ id: "favourite", name: "Favourite", pinned: true })], []);
   const view = draw();
-  expect(await view.findByText("Your Bots are all pinned above.")).toBeTruthy();
-  expect(
-    view.queryByText("You don't have any Bots yet. Create one with New Bot."),
-  ).toBeNull();
+  expect(await view.findByText("Favourite")).toBeTruthy();
+  expect(view.queryByRole("heading", { name: "Yours" })).toBeNull();
+  expect(view.queryByText("All pinned")).toBeNull();
+  expect(view.getByText(/^Create a Bot for a specific job\./)).toBeTruthy();
 });
 
 test("a hidden Bot is under Hidden, folded until asked for, and its row opens its page", async () => {
@@ -297,4 +297,90 @@ test("while the roster loads it draws rows' shape, and never says there are no B
   release();
   expect(await view.findByText("Mine")).toBeTruthy();
   expect(view.queryByRole("status", { name: "Loading your Bots" })).toBeNull();
+});
+
+const headings = (view: ReturnType<typeof draw>) =>
+  [...view.container.querySelectorAll("h2")].map(
+    (heading) => heading.textContent,
+  );
+
+test("personal, with only the included assistant: the assistant comes first and nothing says No Bots yet", async () => {
+  queryClient.setQueryData(deploymentKeys.capabilities(), {
+    edition: "personal",
+  });
+  serving(
+    [
+      bot({
+        id: "assistant",
+        name: "Personal Assistant",
+        mine: false,
+        systemOwned: true,
+      }),
+    ],
+    [],
+  );
+  const view = draw();
+  const assistant = await view.findByText("Personal Assistant");
+  expect(headings(view)).toEqual(["Included with OpenBot"]);
+  expect(view.queryByText("No Bots yet")).toBeNull();
+  // The way to make one comes after the Bot that is already there.
+  const prompt = view.getByText(/^Create a Bot for a specific job\./);
+  expect(
+    assistant.compareDocumentPosition(prompt) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(view.getByRole("link", { name: "New Bot" }).getAttribute("href")).toBe(
+    "/bots?new=true",
+  );
+});
+
+test("owned and included Bots: Yours, then Included with OpenBot, and no creation prompt", async () => {
+  queryClient.setQueryData(deploymentKeys.capabilities(), {
+    edition: "personal",
+  });
+  serving(
+    [
+      bot({ id: "mine", name: "Mine" }),
+      bot({
+        id: "assistant",
+        name: "Assistant",
+        mine: false,
+        systemOwned: true,
+      }),
+    ],
+    [],
+  );
+  const view = draw();
+  await view.findByText("Assistant");
+  expect(headings(view)).toEqual(["Yours", "Included with OpenBot"]);
+  expect(view.queryByText(/^Create a Bot for a specific job\./)).toBeNull();
+});
+
+test("a team member with only shared Bots sees them, with no empty Yours above", async () => {
+  serving([bot({ id: "theirs", name: "Theirs", mine: false })], []);
+  const view = draw();
+  await view.findByText("Theirs");
+  expect(headings(view)).toEqual(["Shared with you"]);
+  expect(view.queryByText("No Bots yet")).toBeNull();
+  expect(view.getByText(/^Create a Bot for a specific job\./)).toBeTruthy();
+});
+
+test("with no Bots anywhere there is one empty state, with New Bot", async () => {
+  serving([], []);
+  const view = draw();
+  expect(await view.findByText("No Bots yet")).toBeTruthy();
+  expect(headings(view)).toEqual([]);
+  expect(view.getAllByText(/Create a Bot for a specific job\./)).toHaveLength(
+    1,
+  );
+  expect(view.getByRole("button", { name: "New Bot" })).toBeTruthy();
+  expect(view.queryByText("Nothing shared yet")).toBeNull();
+});
+
+test("with every Bot hidden it doesn't claim there are none", async () => {
+  serving([], [bot({ id: "tucked", name: "Tucked", hidden: true })]);
+  const view = draw();
+  expect(await view.findByText("No Bots on your list")).toBeTruthy();
+  expect(view.queryByText("No Bots yet")).toBeNull();
+  expect(view.getByText("Hidden")).toBeTruthy();
 });
