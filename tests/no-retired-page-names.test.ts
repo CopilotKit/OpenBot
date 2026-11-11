@@ -14,7 +14,10 @@ import { RETIRED_PAGE_NAMES } from "../app/src/lib/primitives";
  * - the text of an `ItemTitle`, which is how a settings row is titled;
  * - in the files that list where a person can go (the main menu, the Settings and Admin sidebars, a
  *   Bot's settings rows, `managePaths` and anything under `skins/`), every `title`, `label` and
- *   `…Label` property whose value is a string.
+ *   `…Label` property whose value is a string, and the `title` and `label` attribute of every
+ *   element.
+ *
+ * A title given as `{"…"}` or through a `const` in the same file is read as well.
  *
  * Only whole titles are compared, case aside. "Automatic learning" passes where "Learning" fails,
  * and sentences are never read: "goal" and "check-in" remain ordinary words.
@@ -55,14 +58,21 @@ function* files(directory: string): Generator<string> {
 }
 
 /** Every string an expression can evaluate to: literals, both arms of a ternary, `a ?? "b"`. */
-function strings(node: ts.Node): ts.StringLiteralLike[] {
+function strings(
+  node: ts.Node,
+  constants: ReadonlyMap<string, ts.StringLiteralLike> = new Map(),
+): ts.StringLiteralLike[] {
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
     return [node];
+  if (ts.isIdentifier(node)) {
+    const bound = constants.get(node.text);
+    return bound ? [bound] : [];
+  }
   const found: ts.StringLiteralLike[] = [];
   node.forEachChild((child) => {
     // A call's arguments are not what the attribute evaluates to.
     if (ts.isCallExpression(node) && child !== node.expression) return;
-    found.push(...strings(child));
+    found.push(...strings(child, constants));
   });
   return found;
 }
@@ -87,6 +97,20 @@ function retiredTitles(path: string, listsDestinations: boolean) {
     true,
     path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
+  /** `const NAME = "text"` at the top of this file, so a title passed by name is read too. */
+  const constants = new Map<string, ts.StringLiteralLike>();
+  for (const statement of file.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      const value = declaration.initializer;
+      if (
+        ts.isIdentifier(declaration.name) &&
+        value &&
+        (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value))
+      )
+        constants.set(declaration.name.text, value);
+    }
+  }
   const found: string[] = [];
   const check = (title: string, at: ts.Node) => {
     const entry = RETIRED.get(title.trim().toLowerCase());
@@ -97,32 +121,38 @@ function retiredTitles(path: string, listsDestinations: boolean) {
     );
   };
   const visit = (node: ts.Node) => {
-    if (
-      (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
-      PAGE_TITLED.has(tagName(node))
-    ) {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      const pageTitled = PAGE_TITLED.has(tagName(node));
       for (const attribute of node.attributes.properties) {
+        if (!ts.isJsxAttribute(attribute) || !attribute.initializer) continue;
+        const name = attribute.name.getText();
+        // A page's title everywhere; in a file that lists destinations, any row's title or label.
         if (
-          ts.isJsxAttribute(attribute) &&
-          attribute.name.getText() === "title" &&
-          attribute.initializer
-        ) {
-          for (const literal of strings(attribute.initializer))
+          (pageTitled && name === "title") ||
+          (listsDestinations && (name === "title" || name === "label"))
+        )
+          for (const literal of strings(attribute.initializer, constants))
             check(literal.text, literal);
-        }
       }
     }
     if (ts.isJsxElement(node) && tagName(node.openingElement) === "ItemTitle") {
       const said = node.children
-        .filter(ts.isJsxText)
-        .map((child) => child.text)
+        .map((child) =>
+          ts.isJsxText(child)
+            ? child.text
+            : ts.isJsxExpression(child) && child.expression
+              ? strings(child.expression, constants)
+                  .map((literal) => literal.text)
+                  .join("")
+              : "",
+        )
         .join("");
       if (said.trim()) check(said, node);
     }
     if (listsDestinations && ts.isPropertyAssignment(node)) {
       const name = propertyName(node);
       if (name && /^(title|label|\w+Label)$/.test(name)) {
-        for (const literal of strings(node.initializer))
+        for (const literal of strings(node.initializer, constants))
           check(literal.text, literal);
       }
     }
@@ -143,11 +173,7 @@ function scan(): string[] {
 }
 
 test("no page, menu entry or settings row is titled with a retired name", () => {
-  const found = scan().filter(
-    // The list of retired names is not a title.
-    (hit) => !hit.startsWith("app/src/lib/primitives.ts:"),
-  );
-  expect(found).toEqual([]);
+  expect(scan()).toEqual([]);
 });
 
 test("the scan finds what it is for", () => {
@@ -161,5 +187,8 @@ test("the scan finds what it is for", () => {
     '"Goals" (now: Routines)',
     '"What it can do" (now: Skills, Apps, Approvals)',
     '"Saved logins" (now: Vault)',
+    '"Keys" (now: Vault)',
+    '"Passwords" (now: Vault)',
+    '"Approval rules" (now: Approvals)',
   ]);
 });
