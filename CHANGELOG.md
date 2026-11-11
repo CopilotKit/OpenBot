@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 1.0.2
+
 **Before upgrading.** No migrations run in this release: the database stays at
 `0088_approval_reviewer_guidance`, and a 1.0.1 database is used as it is. Upgrading from 1.0.0 or
 0.3.x runs the migrations listed under 1.0.1, and a database that has run them does not go back:
