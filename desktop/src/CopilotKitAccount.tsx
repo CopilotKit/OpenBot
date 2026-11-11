@@ -47,13 +47,18 @@ type Seen =
 const COULD_NOT_CHECK = "Couldn’t check your OpenBot account. Try again.";
 
 /**
- * The signed-out step's footnote, in Atai's words (2026-11-10). One string so a change of wording
- * is one line. "Traffic data" is being checked with Atai: setup and usage telemetry go to
- * CopilotKit by default (desktop_telemetry.rs, server/src/telemetry/product.ts). A privacy line
- * names the company as OpenBot by CopilotKit, never CopilotKit alone.
+ * The signed-out step's footnote: what signing in does, and where OpenBot keeps what you make.
+ * One string so a change of wording is one line.
+ *
+ * Every part is what the code does. Signing in gets the license key (`onboard local-terms`, then
+ * `local setup`) and sets up apps (`connect_copilotkit_apps`). It also links usage data to the
+ * account (`telemetry link`), which Finishing setup's checkbox turns off, so the line never says
+ * "only". Conversations and files are kept in OpenBot's database and Bot computers on this
+ * computer. It never says they stay here: a conversation goes to the AI provider the person
+ * chose, and connected apps get what a Bot sends them.
  */
 const WHAT_SIGNING_IN_SENDS =
-  "Your conversations and files stay on this computer. Signing in gets your free local license key and does NOT send traffic data to OpenBot by CopilotKit.";
+  "Signing in gets your free license key and sets up your apps. OpenBot keeps your conversations and files on this computer.";
 /**
  * The signed-out step's lede. The first screen says this OpenBot is self-contained, so this one says
  * only what the step is for: the license key, and that signing in gets it.
@@ -473,10 +478,9 @@ export function CopilotKitAccount({
         !refused &&
         !waitingForEngine &&
         !checkingAccount && (
-          // What signing in sends, in Atai's words. Never "only gets the license key": once
-          // signed in, this step also sets up apps. Nothing broader, such as "no data leaves this
-          // computer": setup and usage telemetry, the AI provider and connected apps all reach the
-          // network.
+          // What signing in does. Never "only gets the license key": once signed in, this step
+          // also sets up apps. Nothing broader, such as "no data leaves this computer": setup and
+          // usage telemetry, the AI provider and connected apps all reach the network.
           <p className="footnote">{WHAT_SIGNING_IN_SENDS}</p>
         )}
 

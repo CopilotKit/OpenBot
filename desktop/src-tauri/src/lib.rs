@@ -26,6 +26,7 @@ pub mod local_update;
 pub mod logging;
 #[cfg(target_os = "macos")]
 pub mod native_alert;
+pub mod netavark_rules;
 pub mod own_machine;
 pub mod paths;
 pub mod plan;

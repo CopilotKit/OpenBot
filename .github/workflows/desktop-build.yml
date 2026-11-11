@@ -287,6 +287,13 @@ jobs:
         if: matrix.platform == 'linux'
         run: cargo test --locked --lib update_ready::live -- --ignored --test-threads=1
         working-directory: desktop/src-tauri
+      # OpenBot's machine on Windows shares one network namespace with every WSL distro, so a
+      # stopped machine's port rules outlive it. Reproduced on real netavark, both generations
+      # Podman runs on WSL, in a privileged lab on the runner's Docker, then cleared.
+      - name: Stale port rule regression tests
+        if: matrix.platform == 'linux'
+        run: cargo test --locked --lib netavark_rules::live -- --ignored --test-threads=1
+        working-directory: desktop/src-tauri
       # The binary run as the Recorder's browsers run it: the native messaging host Chrome starts, and
       # the install that writes its manifests. The host name and extension id come from
       # shared/recorder-extension.json, which the Rust reads at compile time.
