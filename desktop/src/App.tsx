@@ -53,6 +53,7 @@ import {
   recordSetupEvent,
   type SetupStep,
 } from "./telemetry";
+import { UsageDataChoice } from "./UsageDataChoice";
 import { Welcome } from "./Welcome";
 import { type Blocker, WindowsBlocker, WindowsRestart } from "./WindowsBlocker";
 
@@ -1233,6 +1234,8 @@ function Setup() {
           {goAhead && <PodmanGoAhead asking={goAhead} />}
           {pauseCard}
           {updatingLine}
+          {/* The last thing setup asks, while OpenBot finishes: whether to share usage analytics. */}
+          {!returningToInstallation && <UsageDataChoice />}
           {/* Leftover data is a choice, offered above, not a failure to report here. */}
           {displayedFailure && leftoverVolumes.length === 0 && (
             <Failure problem={displayedFailure} />

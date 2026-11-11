@@ -296,6 +296,12 @@ h2 {
   text-wrap: pretty;
 }
 
+/* A product's name in a lede: the heading's ink and weight, so it reads as a name. */
+.lede strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
 .lede.big {
   font-size: var(--text-lg);
   line-height: 26px;
@@ -1911,5 +1917,104 @@ main > .sheet > .step-footer > .row:first-child:empty:has(+ .behind-slot) {
     bottom: -24px;
     margin-bottom: -24px;
     padding-bottom: 24px;
+  }
+}
+
+/*
+ * Share usage analytics, on the last screen of setup: the app's Settings row (a title, a line under
+ * it, and the switch at its end), in a bordered row as the app draws one.
+ */
+.usage-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-top: 20px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+
+.usage-choice-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.usage-choice-title {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.usage-choice-detail {
+  margin: 2px 0 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+  text-wrap: pretty;
+}
+
+.usage-choice-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 1px;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+
+/* The app's `Switch`: 32 by 18.4px, the primary fill when on, the input colour when off. */
+button.switch,
+button.switch:hover:not(:disabled) {
+  position: relative;
+  flex: none;
+  min-height: 0;
+  width: 32px;
+  height: 18.4px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--input);
+  justify-content: flex-start;
+}
+
+button.switch[aria-checked="true"],
+button.switch[aria-checked="true"]:hover:not(:disabled) {
+  background: var(--primary);
+}
+
+button.switch:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent);
+}
+
+button.switch:active:not(:disabled) {
+  transform: none;
+}
+
+.switch-thumb {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--card);
+  transition: transform 150ms ease-out;
+}
+
+button.switch[aria-checked="true"] .switch-thumb {
+  transform: translateX(calc(100% - 2px));
+  background: var(--primary-foreground);
+}
+
+@media (prefers-color-scheme: dark) {
+  button.switch:not([aria-checked="true"]),
+  button.switch:not([aria-checked="true"]):hover:not(:disabled) {
+    background: color-mix(in srgb, var(--input) 80%, transparent);
+  }
+
+  button.switch:not([aria-checked="true"]) .switch-thumb {
+    background: var(--foreground);
   }
 }
