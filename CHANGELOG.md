@@ -403,6 +403,9 @@ every deployment:
   the name beside the logo in the sidebar and in each skin, the onboarding header, the OpenBot for
   Business title and menu entry, and the OpenBot Desktop setup window. Mentions in sentences stay
   plain, a deployment with its own product name shows none, and screen readers read the name once.
+- In the personal edition, a Bot's Apps page with no app connected says "Connect one on
+  Connections." and links there. It said to turn one on under Your apps or ask an admin, and the
+  personal edition has neither.
 
 ## 1.0.1
 

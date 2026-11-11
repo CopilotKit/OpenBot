@@ -665,10 +665,10 @@ zero or more: a deployment that typed `two` and silently got the default would b
 cap.
 
 Which Bots may address which is a grant, not a variable, and no Bot may address any other until one
-is made. It is made on the Bot's own page: open it from **Bots**, choose **Skills and access**, and switch on each Bot under
-**Bots it may ask**. The pair is directional: that list is who this Bot may ask, not who may ask it,
-so letting them ask each other is two switches. Only an administrator may change it; anyone who can
-see the Bot can read it.
+is made. It is made on the Bot's own page: open it from **Bots**, choose **Setup**, and switch on
+each Bot under **Bots it can ask**. The pair is directional: that list is who this Bot may ask, not
+who may ask it, so letting them ask each other is two switches. Only an administrator may change it;
+anyone who can see the Bot can read it. The personal edition does not show this section.
 
 With both caps above at zero the screen says the capability is switched off, because a grant made
 then is a row nothing will read.
