@@ -30,6 +30,7 @@ pub mod netavark_rules;
 pub mod own_machine;
 pub mod paths;
 pub mod plan;
+pub mod podman_default;
 pub mod preparation;
 pub mod problem;
 pub mod provider;
