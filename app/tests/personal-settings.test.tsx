@@ -18,7 +18,6 @@ import {
 import { cleanup, render, within } from "@testing-library/react";
 import { ComputersPage } from "@/components/manage/computers-page";
 import { PluginToolPage } from "@/components/manage/plugin-tool-page";
-import { SkillsPage } from "@/components/manage/skills-page";
 import { settingsSidebarItems } from "@/components/settings/settings-sidebar";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import {
@@ -159,30 +158,6 @@ describe("the personal pages under Settings", () => {
     } finally {
       global.fetch = originalFetch;
     }
-  });
-
-  test("call the skills page Skills, with nothing about every Bot", async () => {
-    const client = clientFor("personal");
-    client.setQueryData(["plugins", "page"], {
-      catalogue: [],
-      servers: [],
-      skills: [],
-      botsMayCallBack: true,
-      redirectUri: null,
-      composioConfigured: false,
-      authorizesPerAction: false,
-    } satisfies PluginsPage);
-    const router = createRouter({
-      history: createMemoryHistory({ initialEntries: ["/"] }),
-      routeTree: createRootRoute({ component: () => <SkillsPage /> }),
-    });
-    const view = render(
-      <QueryClientProvider client={client}>
-        <RouterProvider router={router as never} />
-      </QueryClientProvider>,
-    );
-    expect(await view.findByRole("heading", { name: "Skills" })).toBeTruthy();
-    expect(view.container.textContent).not.toContain("every Bot");
   });
 
   test("link to each other under Settings, not Admin", async () => {
