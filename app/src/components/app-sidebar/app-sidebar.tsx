@@ -44,7 +44,6 @@ import {
   useMessageListEmphasis,
 } from "@/lib/settings/message-list";
 import { BotsNavBadge } from "../bot-profile/attention";
-import { BrowserNavItem } from "../browser/browser-nav-item";
 import { navigationRender } from "../edition/team-features-dialog";
 import { OpenBotVersion } from "../layout/openbot-version";
 import { Button } from "../ui/button";
@@ -361,8 +360,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 </SidebarMenuButton>
               </SidebarMenuItem>
             ))}
-          {/* Your own browser, with the Recorder in it. Drawn only where OpenBot can run one for you. */}
-          <BrowserNavItem />
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger

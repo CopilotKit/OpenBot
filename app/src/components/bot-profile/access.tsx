@@ -279,7 +279,7 @@ function YourSkills({ agentId }: { agentId: string }) {
         <PageEmpty
           action={
             <Button
-              render={(props) => <Link {...props} to="/settings/skills" />}
+              render={(props) => <Link {...props} to="/skills" />}
               size="sm"
               variant="outline"
             >
@@ -402,7 +402,7 @@ function Granted({
       {count === 0 && kind === "skills" ? (
         <PageEmpty icon={IconBox} title="No skills yet">
           {mine
-            ? "Turn one on under Your skills, or write one in Settings."
+            ? "Turn one on under Your skills, or write one on the Skills page."
             : "The Bot's owner or an admin gives it skills."}
         </PageEmpty>
       ) : count === 0 ? (

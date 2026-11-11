@@ -101,7 +101,7 @@ test("Connections > Routines says what Routines is and leads to the Routines pag
     ),
   ).toBeTruthy();
   const row = await view.findByRole("link", { name: /Your routines/ });
-  expect(row.getAttribute("href")).toBe("/settings/routines");
+  expect(row.getAttribute("href")).toBe("/routines");
   expect(await within(row).findByText("2 routines, 1 on.")).toBeTruthy();
   expect(
     view.getByRole("button", { name: "New routine" }).getAttribute("href"),

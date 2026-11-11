@@ -99,10 +99,10 @@ describe("the Settings sidebar", () => {
     }
   });
 
-  test("Skills is in both editions' settings, and Learning opens it", () => {
+  test("Skills is in neither edition's settings, and Learning opens the Skills page", () => {
     for (const edition of ["personal", "team"] as const) {
       const titles = settingsSidebarItems(edition).map((item) => item.title);
-      expect(titles).toContain("Skills");
+      expect(titles).not.toContain("Skills");
       expect(titles).not.toContain("Learning");
     }
     let thrown: unknown;
@@ -112,7 +112,7 @@ describe("the Settings sidebar", () => {
       thrown = error;
     }
     expect((thrown as { options?: { to?: string } }).options?.to).toBe(
-      "/settings/skills",
+      "/skills",
     );
   });
 

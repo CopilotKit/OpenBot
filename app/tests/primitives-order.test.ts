@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { ADMIN_SECTIONS } from "@/components/admin/admin-sections";
 import { SETTINGS_SIDEBAR_ITEMS } from "@/components/settings/settings-sidebar";
+import { NAVIGATION } from "@/lib/navigation";
 import { PRIMITIVES } from "@/lib/primitives";
 
 /**
@@ -26,7 +27,14 @@ function inOrder(positions: readonly number[]): boolean {
 
 test.each([
   ["Admin's groups", ADMIN_SECTIONS.map((section) => section.title)],
-  ["the Settings sidebar", SETTINGS_SIDEBAR_ITEMS.map((item) => item.title)],
+  // Every Bot's: Routines, Memory and Skills in the main menu, then the rest in Settings.
+  [
+    "the main menu, then the Settings sidebar",
+    [
+      ...NAVIGATION.map((item) => item.label),
+      ...SETTINGS_SIDEBAR_ITEMS.map((item) => item.title),
+    ],
+  ],
 ])("%s list the eight in their one order", (_name, titles) => {
   const found = positions(titles);
   // A list that names none of them would pass an order check by saying nothing.

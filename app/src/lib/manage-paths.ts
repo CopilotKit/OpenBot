@@ -30,10 +30,10 @@ export function managePaths(edition: "team" | "personal") {
         directory === "composio"
           ? linkOptions({ to: "/connections/browse/composio" })
           : linkOptions({ to: "/connections/browse/arcade" }),
-      skills: () => linkOptions({ to: "/settings/skills" }),
-      newSkill: () => linkOptions({ to: "/settings/skills/new" }),
+      skills: () => linkOptions({ to: "/skills" }),
+      newSkill: () => linkOptions({ to: "/skills/new" }),
       skill: (slug: string) =>
-        linkOptions({ to: "/settings/skills/$slug", params: { slug } }),
+        linkOptions({ to: "/skills/$slug", params: { slug } }),
       // The Keys section of the Vault, under Settings, and linked from Connections.
       credentialsLabel: "Vault",
       credentials: () => linkOptions({ to: "/settings/vault" }),
@@ -110,7 +110,7 @@ export function personalAppsAddress(rest: string): string {
 
 /** Each other Admin page the personal edition keeps, and where it is now. */
 const MOVED: readonly (readonly [admin: string, settings: string])[] = [
-  ["/admin/skills", "/settings/skills"],
+  ["/admin/skills", "/skills"],
   ["/admin/credentials", "/settings/vault"],
   ["/admin/computers", "/settings/computer"],
   ["/admin/audit", "/settings/activity"],
@@ -118,7 +118,7 @@ const MOVED: readonly (readonly [admin: string, settings: string])[] = [
 
 /**
  * Where an old Admin address goes in the personal edition: an app's page under Connections, the
- * same page under Settings with whatever followed it (`/admin/credentials/new` keeps `/new`), or
+ * same page under Settings or Skills with whatever followed it (`/admin/credentials/new` keeps `/new`), or
  * Settings itself for a page the personal edition does not have.
  */
 export function personalAdminRedirect(pathname: string): string {

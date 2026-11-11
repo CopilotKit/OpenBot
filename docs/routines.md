@@ -8,7 +8,7 @@ the same way any other message from that Bot does.
 ## One list
 
 Routines, goals and check-ins are one list, on each Bot's Routines page (`/bots/<id>/routines`) and,
-for every Bot at once, in Settings → Routines (`/settings/routines`). A goal is a routine with an
+for every Bot at once, on Routines in the main menu (`/routines`). A goal is a routine with an
 outcome to reach. A check-in is a routine that only tells you. They stay three stores on the server
 (routines, goals in `responsibilities`, check-ins in `proactive` settings), and the page reads all
 three and draws them together (`app/src/lib/routines/merged.ts`).
@@ -22,18 +22,18 @@ Every row is the same sentence in four parts:
 - **Until**: until you stop it, or, for a goal, the outcome that completes it.
 
 A routine that runs a goal is not a row of its own: it is one of that goal's starts, so the goal's
-row carries it. Rows that are working (on, active, not paused) come first. Settings → Routines also
+row carries it. Rows that are working (on, active, not paused) come first. The every-Bot list also
 holds the switch for check-ins from all your Bots. In the team edition an admin turns check-ins on
 or off for everybody, and limits them, in Admin → Routines.
 
-Old addresses redirect here: `/routines` and `/responsibilities` to Settings → Routines, and
+Old addresses redirect here: `/responsibilities` to Routines, and
 `/bots/<id>/responsibilities` to the Bot's Routines page.
 
 ## Creating one
 
 Two ways, and either way a routine or a goal is written by the same store calls.
 
-- **New routine.** Settings → Routines and a Bot's Routines page both have **New routine**, which
+- **New routine.** Routines and a Bot's Routines page both have **New routine**, which
   opens one screen (`/routines/new`). It asks, in order: **Bot**, **What to do**, **It should** (Act
   for you or Only tell you), **Starts** (On a schedule, When something happens, or Now, once), **Done
   when** (optional), **Posts in**, and **Name**. It does not ask whether you want a routine, a goal

@@ -408,16 +408,18 @@ backup taken before the upgrade instead. Four things change for an existing depl
   A schedule the form doesn't cover, such as every other Tuesday, can still be asked of a Bot.
 - **Pages are grouped by the eight things a Bot has, and some have new names.** A Bot has
   Conversations, Routines, Memory, Skills, Apps, a Computer, Approvals and Activity
-  (`docs/how-openbot-works.md`), and a Bot's page, Settings and Admin now list them in that
-  order. What moved:
+  (`docs/how-openbot-works.md`), and a Bot's page, the main menu and Settings, and Admin now
+  list them in that order. What moved:
   - **Vault**, under Settings, holds your saved logins and your keys. It replaces Saved logins,
     Passwords and Credentials.
-  - **Settings > Skills** holds the skills you wrote, the skills learned from your recordings
-    and the ones waiting for your review. It replaces Capabilities > Skills and
-    Settings > Learning. Memory is **Settings > Memory**.
+  - **Routines**, **Memory** and **Skills** are in the main menu beside Bots and Connections,
+    because they are things you make and come back to. Settings keeps what you set once:
+    Computer, Approvals and Activity. Teach a Bot is no longer in the main menu: open it from the
+    Skills page.
+  - **Skills** holds the skills you wrote, the skills learned from your recordings and the
+    ones waiting for your review. It replaces Capabilities > Skills and Settings > Learning.
   - **Settings > Computer** is one page. Browsers and This computer are sections of it.
-  - **Routines** is one list of routines, goals and check-ins, for one Bot and in Settings for
-    every Bot.
+  - **Routines** is one list of routines, goals and check-ins, for one Bot and for every Bot.
   - In Admin, Plugins is now **Apps**, Audit is **Activity**, Credentials is **Vault**, and
     Check-ins are under **Routines**.
 
@@ -549,7 +551,7 @@ a model key is needed.
   edition's Add is still the admin's act and reads "Added, not connected" until the admin connects
   their own account. GitHub on Connections no longer reads Connected off the GitHub sign-in alone
   while its tools are not connected.
-- **Settings > Skills says Waiting for your review only when a skill is waiting.** With
+- **Skills says Waiting for your review only when a skill is waiting.** With
   **Approve new skills automatically** on, the heading showed while Learning was in progress and
   after it finished, though nothing waited. The section is now **New skills** until a learned skill
   waits for approval, and the team edition's **Waiting for an admin** follows the same rule.

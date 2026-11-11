@@ -21,10 +21,7 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import {
-  deploymentCapabilitiesQueryOptions,
-  offersMemory,
-} from "@/lib/deployment/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { managePaths } from "@/lib/manage-paths";
 import { primitive, VAULT } from "@/lib/primitives";
 import { mayOpenSetup, setupChecklistQueryOptions } from "@/lib/setup/queries";
@@ -50,8 +47,6 @@ type SettingsSidebarItem = {
    * everywhere else, so an entry stays lit on the pages beneath it.
    */
   exact?: boolean;
-  /** Shown only where OpenBot offers memory (see `offersMemory`). */
-  memoryOnly?: boolean;
   /** Shown only in the personal edition. */
   personalOnly?: boolean;
   icon: React.ComponentType<{ className?: string }>;
@@ -64,13 +59,14 @@ type SettingsSidebarItem = {
  * Settings, for every Bot at once (`docs/how-openbot-works.md`), in three groups:
  *
  * - You: your account, where updates reach you, and your Vault.
- * - Every Bot: the things a Bot has, set for all of them, in the fixed order of `lib/primitives.ts`.
- *   Conversations is not here: it is where work happens, not something to set. Apps are on
- *   Connections, in the main menu.
+ * - Every Bot: what is set once for all of them, in the fixed order of `lib/primitives.ts`.
+ *   Conversations is not here: it is where work happens, not something to set. Routines, Memory,
+ *   Skills and Apps (Connections) are things you make and come back to, so they are in the main
+ *   menu (`lib/navigation.ts`).
  * - OpenBot: what OpenBot itself has and needs, and the gallery of what a Bot can draw.
  *
- * An entry with nothing to set in this edition is left out: Memory where OpenBot offers none, and
- * Activity in the team edition, where the trail is an admin's (Admin → Activity).
+ * An entry with nothing to set in this edition is left out: Activity in the team edition, where the
+ * trail is an admin's (Admin → Activity).
  */
 export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
   {
@@ -94,27 +90,6 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
     title: VAULT.label,
     icon: VAULT.icon,
     linkOptions: { to: "/settings/vault" },
-  },
-  {
-    /* Every Bot's routines, goals and check-ins in one list, and the switch for all check-ins. */
-    group: "every-bot",
-    title: primitive("routines").label,
-    icon: primitive("routines").icon,
-    linkOptions: { to: "/settings/routines" },
-  },
-  {
-    group: "every-bot",
-    title: primitive("memory").label,
-    icon: primitive("memory").icon,
-    memoryOnly: true,
-    linkOptions: { to: "/settings/memory" },
-  },
-  {
-    /* The skills that are yours, written, taught or learned, and what waits for your review. */
-    group: "every-bot",
-    title: primitive("skills").label,
-    icon: primitive("skills").icon,
-    linkOptions: { to: "/settings/skills" },
   },
   {
     /* The computer Bots work on, folders, what OpenBot runs here, and your Recorder browsers. */
@@ -159,9 +134,7 @@ export function settingsSidebarItems(
   edition: "team" | "personal",
 ): SettingsSidebarItem[] {
   return SETTINGS_SIDEBAR_ITEMS.filter(
-    (item) =>
-      (!item.personalOnly || edition === "personal") &&
-      (!item.memoryOnly || offersMemory({ edition })),
+    (item) => !item.personalOnly || edition === "personal",
   );
 }
 

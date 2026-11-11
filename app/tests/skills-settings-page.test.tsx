@@ -22,7 +22,7 @@ import { Route as LearningRoute } from "@/routes/_authed/settings/learning";
 import { settleReactWork } from "./settle-react-work";
 
 /**
- * Settings → Skills: the one page for "what does it know how to do?". The skills you wrote and the
+ * Skills: the one page for "what does it know how to do?". The skills you wrote and the
  * ones your Bots learned are one list, each marked with how it was made.
  */
 
@@ -115,13 +115,13 @@ function draw(
   client.setQueryData(browserKeys.state, { available: browser });
   const root = createRootRoute();
   const page = createRoute({
-    path: "/settings/skills",
+    path: "/skills",
     getParentRoute: () => root,
     component: () => <SkillsSettingsPage creating={false} />,
   });
   const router = createRouter({
     routeTree: root.addChildren([page]),
-    history: createMemoryHistory({ initialEntries: ["/settings/skills"] }),
+    history: createMemoryHistory({ initialEntries: ["/skills"] }),
   });
   return render(
     <QueryClientProvider client={client}>
@@ -157,7 +157,7 @@ test("in the personal edition, the skills written for every Bot are yours too, a
   const everyBot = within(yours).getByText("Onboarding");
   expect(everyBot.textContent).toContain("Written");
   expect(everyBot.closest("a")?.getAttribute("href")).toBe(
-    "/settings/skills/onboarding",
+    "/skills/onboarding",
   );
   expect(view.queryByRole("heading", { name: "Workspace skills" })).toBeNull();
 });
@@ -166,7 +166,7 @@ test("New skill opens the side panel, and Teach a Bot is a row where a browser c
   const view = draw("team", { browser: true });
   await view.findByRole("heading", { name: "Skills" });
   expect(view.getByText("New skill").closest("a")?.getAttribute("href")).toBe(
-    "/settings/skills?new=true",
+    "/skills?new=true",
   );
   const teach = section(view, "Teach a Bot");
   expect(
@@ -178,7 +178,7 @@ test("in the personal edition, New skill opens the form whose skill has a switch
   const view = draw("personal");
   await view.findByRole("heading", { name: "Skills" });
   expect(view.getByText("New skill").closest("a")?.getAttribute("href")).toBe(
-    "/settings/skills/new",
+    "/skills/new",
   );
 });
 
@@ -239,19 +239,17 @@ function redirectOf(
   return undefined;
 }
 
-test("Capabilities and Learning open Settings → Skills and Settings → Memory", () => {
-  expect(redirectOf(CapabilitiesRoute as never)?.to).toBe("/settings/skills");
-  expect(redirectOf(LearningRoute as never)?.to).toBe("/settings/skills");
-  expect(redirectOf(CapabilitiesMemoryRoute as never)?.to).toBe(
-    "/settings/memory",
-  );
+test("Capabilities and Learning open Skills and Memory", () => {
+  expect(redirectOf(CapabilitiesRoute as never)?.to).toBe("/skills");
+  expect(redirectOf(LearningRoute as never)?.to).toBe("/skills");
+  expect(redirectOf(CapabilitiesMemoryRoute as never)?.to).toBe("/memory");
   // The side panel's state travels with the old address.
   expect(
     redirectOf(CapabilitiesSkillsRoute as never, {
       search: { edit: "weekly-report" },
     }),
   ).toMatchObject({
-    to: "/settings/skills",
+    to: "/skills",
     search: { edit: "weekly-report" },
   });
 });

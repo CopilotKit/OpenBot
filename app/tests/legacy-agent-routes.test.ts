@@ -28,9 +28,8 @@ test("creating wins over opening, as it did on /agents", () => {
 test("pages that left the sidebar send people to where their contents went", () => {
   expect(LEGACY_PAGES).toEqual({
     "/approvals": "/settings/approvals",
-    "/memory": "/settings/memory",
     "/reachability": "/settings/notifications",
-    "/responsibilities": "/settings/routines",
+    "/responsibilities": "/routines",
     "/group/new": "/channel/new",
   });
 });

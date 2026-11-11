@@ -332,7 +332,7 @@ describe("an app under Connections in the personal edition", () => {
       (await view.findByRole("link", { name: /Your routines/ })).getAttribute(
         "href",
       ),
-    ).toBe("/settings/routines");
+    ).toBe("/routines");
     expect(view.queryByRole("switch")).toBeNull();
     expect(view.queryByText("Turned on")).toBeNull();
   });

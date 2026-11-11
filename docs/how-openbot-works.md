@@ -115,8 +115,9 @@ place to look for a secret, to change it and to remove it.
 
 Each primitive can be set in two places, and nowhere else:
 
-- **Every Bot**: your default. An app you connect, a skill you write, a rule you set. These are in
-  Settings, and apps are on Connections.
+- **Every Bot**: your default. An app you connect, a skill you write, a rule you set. What you make
+  and come back to (Routines, Memory, Skills, and apps on Connections) is in the main menu beside
+  Bots. What you set once (Computer, Approvals, Activity) is in Settings.
 - **This Bot**: what one Bot has that the others don't, or what it is kept from. These are on the
   Bot's page.
 
@@ -144,10 +145,10 @@ is something to set there:
 | Primitive | Holds | Every Bot | This Bot | No longer a separate name |
 | --- | --- | --- | --- | --- |
 | Conversations | One Bot or several, messages, voice, files and results | The sidebar | The Bot's page | channel, group, chat |
-| Routines | One list. Each has what, starts, does and until | Settings → Routines | Routines | Goals, Check-ins, responsibilities, triggers |
-| Memory | Facts about you, facts a Bot learned, which apps it learns from | Settings → Memory | Memory | Capabilities |
-| Skills | Skills you wrote, skills you taught, skills OpenBot proposed and their review | Settings → Skills | Skills | Learning, What it can do, Skills and access |
-| Apps | Connected accounts and their tools | Connections | Apps | plugins, connected accounts |
+| Routines | One list. Each has what, starts, does and until | Routines, in the main menu | Routines | Goals, Check-ins, responsibilities, triggers |
+| Memory | Facts about you, facts a Bot learned, which apps it learns from | Memory, in the main menu | Memory | Capabilities |
+| Skills | Skills you wrote, skills you taught, skills OpenBot proposed and their review | Skills, in the main menu | Skills | Learning, What it can do, Skills and access |
+| Apps | Connected accounts and their tools | Connections, in the main menu | Apps | plugins, connected accounts |
 | Computer | Browser, files, commands, folders on your machine | Settings → Computer | Computer | Browsers, This computer |
 | Approvals | What always asks, your rules, auto-review | Settings → Approvals | Approvals | Approval rules, "Ask before making changes" |
 | Activity | Everything allowed, refused and failed | Settings → Activity, or Admin → Activity for a team | The Bot's page | Audit |

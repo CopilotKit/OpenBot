@@ -13,7 +13,7 @@ import { RoutinesList } from "@/components/routines/routines-list";
 import { mergeRoutines } from "@/lib/routines/merged";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import { Route as BotGoalsRoute } from "@/routes/_authed/_app/bots.$agentId.responsibilities";
-import { Route as RoutinesRoute } from "@/routes/_authed/_app/routines";
+import { Route as ResponsibilitiesRoute } from "@/routes/_authed/_app/responsibilities";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -291,7 +291,7 @@ function redirectOf(route: { options: { beforeLoad?: unknown } }, input = {}) {
 }
 
 test("the old Routines and Goals addresses open the Routines lists", () => {
-  expect(redirectOf(RoutinesRoute as never)?.to).toBe("/settings/routines");
+  expect(redirectOf(ResponsibilitiesRoute as never)?.to).toBe("/routines");
   expect(
     redirectOf(BotGoalsRoute as never, { params: { agentId: "expenses" } }),
   ).toMatchObject({

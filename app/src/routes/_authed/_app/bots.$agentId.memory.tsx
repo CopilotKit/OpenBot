@@ -31,14 +31,11 @@ function MemoryPage() {
       {(agent) => (
         <>
           <p className="mt-6 text-muted-foreground text-sm">
-            What your Bots remember about you is under{" "}
-            <Link
-              className="underline underline-offset-4"
-              to="/settings/memory"
-            >
-              Memory in Settings
-            </Link>
-            .
+            What your Bots remember about you is on the{" "}
+            <Link className="underline underline-offset-4" to="/memory">
+              Memory
+            </Link>{" "}
+            page.
           </p>
           <MemorySources agentId={agent.id} />
         </>

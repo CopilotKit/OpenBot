@@ -93,7 +93,7 @@ function BotsPage() {
 
 /**
  * Learns, the pair of Memory and Skills, beneath the Bots themselves: what every Bot knows about you
- * and how to do things. Both are set for every Bot in Settings. No Memory row where OpenBot doesn't
+ * and how to do things. Both have their own page in the main menu. No Memory row where OpenBot doesn't
  * offer memory (see `offersMemory`).
  */
 function WhatYourBotsLearn() {
@@ -103,7 +103,7 @@ function WhatYourBotsLearn() {
       <PageRows>
         {memory ? (
           <>
-            <Item render={<Link to="/settings/memory" />} size="sm">
+            <Item render={<Link to="/memory" />} size="sm">
               <ItemMedia variant="icon">
                 <IconBrain />
               </ItemMedia>
@@ -120,7 +120,7 @@ function WhatYourBotsLearn() {
             <Separator />
           </>
         ) : null}
-        <Item render={<Link to="/settings/skills" />} size="sm">
+        <Item render={<Link to="/skills" />} size="sm">
           <ItemMedia variant="icon">
             <IconBook />
           </ItemMedia>

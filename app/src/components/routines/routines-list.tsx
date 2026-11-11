@@ -515,7 +515,7 @@ const EMPTY_BODY =
  * same four-part sentence (`lib/routines/merged.ts`). Built from the three reads each kind already
  * has, so each row opens and changes its own record the way it always did.
  *
- * Scoped by `agentId` on a Bot's Routines page, unscoped in Settings → Routines. One query per kind
+ * Scoped by `agentId` on a Bot's Routines page, unscoped on Routines. One query per kind
  * either way: each is owner-scoped and small, so the scope is a filter here.
  */
 export function RoutinesList({

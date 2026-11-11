@@ -1,19 +1,25 @@
 import { expect, test } from "bun:test";
-import { Route as SkillsRoute } from "@/routes/_authed/_app/skills";
+import { Route as SkillPageRoute } from "@/routes/_authed/settings/_personal/skills_.$slug";
+import { Route as NewSkillRoute } from "@/routes/_authed/settings/_personal/skills_.new";
 import { Route as BrowsersRoute } from "@/routes/_authed/settings/browsers";
+import { Route as SettingsSkillsRoute } from "@/routes/_authed/settings/skills";
 import { Route as ThisComputerRoute } from "@/routes/_authed/settings/this-computer";
 
 /**
  * Addresses that are no longer pages but still have to lead somewhere: OpenBot Desktop opens
- * `/settings/this-computer`, the browser extension opens `/settings/browsers`, and a skill proposed
- * in a conversation links to `/skills`, in messages that stay in people's history.
+ * `/settings/this-computer`, the browser extension opens `/settings/browsers`, and the skills pages
+ * were under Settings before they had their own place in the main menu.
  */
 
 function redirectOf(route: { options: { beforeLoad?: unknown } }, input = {}) {
   try {
     (route.options.beforeLoad as (input: unknown) => void)(input);
   } catch (thrown) {
-    return (thrown as { options?: { to?: string; search?: unknown } }).options;
+    return (
+      thrown as {
+        options?: { to?: string; search?: unknown; params?: unknown };
+      }
+    ).options;
   }
   return undefined;
 }
@@ -25,17 +31,29 @@ test.each([
   expect(redirectOf(route as never)?.to).toBe("/settings/computer");
 });
 
-test("/skills opens Settings → Skills and keeps which panel was open", () => {
-  expect(redirectOf(SkillsRoute as never, { search: {} })?.to).toBe(
-    "/settings/skills",
+test("/settings/skills opens Skills and keeps which panel was open", () => {
+  expect(redirectOf(SettingsSkillsRoute as never, { search: {} })?.to).toBe(
+    "/skills",
   );
   expect(
-    redirectOf(SkillsRoute as never, { search: { edit: "weekly-report" } }),
+    redirectOf(SettingsSkillsRoute as never, {
+      search: { edit: "weekly-report" },
+    }),
   ).toMatchObject({
-    to: "/settings/skills",
+    to: "/skills",
     search: { edit: "weekly-report" },
   });
   expect(
-    redirectOf(SkillsRoute as never, { search: { new: true } }),
-  ).toMatchObject({ to: "/settings/skills", search: { new: true } });
+    redirectOf(SettingsSkillsRoute as never, { search: { new: true } }),
+  ).toMatchObject({ to: "/skills", search: { new: true } });
+});
+
+test("the personal edition's skill pages under Settings open the same pages under Skills", () => {
+  expect(redirectOf(NewSkillRoute as never)?.to).toBe("/skills/new");
+  expect(
+    redirectOf(SkillPageRoute as never, { params: { slug: "weekly-report" } }),
+  ).toMatchObject({
+    to: "/skills/$slug",
+    params: { slug: "weekly-report" },
+  });
 });

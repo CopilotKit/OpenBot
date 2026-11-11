@@ -56,12 +56,12 @@ import { NewSkill } from "./new-skill";
 type Skill = PluginsPage["skills"][number];
 
 /**
- * Settings → Skills: the one page, for every Bot, that answers "what does it know how to do?". It
- * was Capabilities → Skills, the personal edition's Settings → Skills, and Settings → Learning.
+ * Skills: the one page, for every Bot, that answers "what does it know how to do?", in the main
+ * menu. It was Capabilities → Skills, Settings → Skills, and Settings → Learning.
  *
  * 1. Your skills: one list of the skills that are yours, each marked with how it was made. Skills
  *    you wrote open the side panel; in the personal edition the skills written for every Bot open
- *    their own page with a switch per Bot (`/settings/skills/$slug`); learned ones open their dialog
+ *    their own page with a switch per Bot (`/skills/$slug`); learned ones open their dialog
  *    and keep the team edition's sharing switches (`LearningSharing`).
  * 2. Workspace skills, team edition only: the admin's, read-only.
  * 3. Waiting for your review: what OpenBot proposes, with Learn now and automatic approval.
@@ -141,7 +141,7 @@ export function SkillsSettingsPage({
               <DropdownMenuItem
                 onClick={() =>
                   navigate({
-                    to: "/settings/skills",
+                    to: "/skills",
                     search: { edit: skill.slug },
                   })
                 }
@@ -211,7 +211,7 @@ export function SkillsSettingsPage({
           <EditSkill slug={editing} />
         ) : null
       }
-      onClose={() => navigate({ to: "/settings/skills", search: {} })}
+      onClose={() => navigate({ to: "/skills", search: {} })}
       open={showCreate || showEdit}
     >
       <PageShell
@@ -240,11 +240,7 @@ export function SkillsSettingsPage({
                 personal ? (
                   <Link {...props} {...paths.newSkill()} />
                 ) : (
-                  <Link
-                    {...props}
-                    search={{ new: true }}
-                    to="/settings/skills"
-                  />
+                  <Link {...props} search={{ new: true }} to="/skills" />
                 )
               }
               size="sm"
@@ -290,7 +286,7 @@ export function SkillsSettingsPage({
 
         <LearningReview />
 
-        {/* Only where OpenBot can run a browser for this person, as the sidebar's own link. */}
+        {/* Only where OpenBot can run a browser for this person. */}
         {browser.data?.available ? (
           <PageSection title={TEACH_A_BOT}>
             <PageRows>

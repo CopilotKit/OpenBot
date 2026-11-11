@@ -54,7 +54,7 @@ describe("an old Admin address in the personal edition", () => {
     ["/admin/plugins/notion/tools/search", "/connections/notion/tools/search"],
     ["/admin/plugins/notion/bots/bot-1", "/connections/notion/bots/bot-1"],
     ["/admin/plugins/composio", "/connections/browse/composio"],
-    ["/admin/skills", "/settings/skills"],
+    ["/admin/skills", "/skills"],
     ["/admin/credentials", "/settings/vault"],
     ["/admin/credentials/new", "/settings/vault/new"],
     ["/admin/computers", "/settings/computer"],

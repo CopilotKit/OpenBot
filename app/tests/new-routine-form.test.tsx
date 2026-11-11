@@ -731,16 +731,14 @@ test("after a partial save, Go to Routines points at the chosen Bot", async () =
   expect(goTo.getAttribute("href")).toBe("/bots/bot-2/routines");
 });
 
-test("saving from Settings stays on Settings whichever Bot was picked", async () => {
+test("saving from the Routines page stays there whichever Bot was picked", async () => {
   serving();
   const view = draw({ preset: false });
   await saveForBotTwo(view);
-  await waitFor(() =>
-    expect(router.state.location.pathname).toBe("/settings/routines"),
-  );
+  await waitFor(() => expect(router.state.location.pathname).toBe("/routines"));
 });
 
-test("from Settings, Go to Routines points at Settings", async () => {
+test("from the Routines page, Go to Routines points at it", async () => {
   serving({
     routines: () =>
       Response.json(
@@ -761,7 +759,7 @@ test("from Settings, Go to Routines points at Settings", async () => {
   await choose(view, user, "Bot", "Bot Two");
   await user.click(await view.findByRole("button", { name: "Create routine" }));
   const goTo = await view.findByRole("button", { name: "Go to Routines" });
-  expect(goTo.getAttribute("href")).toBe("/settings/routines");
+  expect(goTo.getAttribute("href")).toBe("/routines");
 });
 
 /** Saves a goal whose schedule is refused, and returns the Go to Routines link that replaces Create routine. */

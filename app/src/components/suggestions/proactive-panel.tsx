@@ -201,10 +201,7 @@ export function ProactiveResearchSettings({
           {blocked === "Off for all your Bots" ? (
             <>
               You turned off check-ins for all your Bots in{" "}
-              <Link
-                className="underline underline-offset-4"
-                to="/settings/routines"
-              >
+              <Link className="underline underline-offset-4" to="/routines">
                 Routines
               </Link>
               .

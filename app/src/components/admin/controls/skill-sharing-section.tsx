@@ -28,7 +28,7 @@ export function SkillSharingSection() {
               <ItemTitle>Skill sharing</ItemTitle>
               <ItemDescription className="line-clamp-none">
                 {data.settings.skillSharing
-                  ? "People may open their Skills to every Bot in Settings, Skills."
+                  ? "People may open their skills to every Bot on the Skills page."
                   : "Off. Each person's Skills reach only the Bots they use, even Skills they opened before."}
               </ItemDescription>
             </ItemContent>

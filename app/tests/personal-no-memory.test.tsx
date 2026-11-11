@@ -25,7 +25,7 @@ import { Route as BotAccessRoute } from "@/routes/_authed/_app/bots.$agentId.acc
 import { Route as BotMemoryRoute } from "@/routes/_authed/_app/bots.$agentId.memory";
 import { Route as BotsRoute } from "@/routes/_authed/_app/bots.index";
 import { Route as CapabilitiesMemoryRoute } from "@/routes/_authed/_app/capabilities.memory";
-import { Route as LegacyMemoryRoute } from "@/routes/_authed/_app/memory";
+import { Route as MemoryRoute } from "@/routes/_authed/_app/memory";
 import { Route as SettingsMemoryRoute } from "@/routes/_authed/settings/memory";
 import { settleReactWork } from "./settle-react-work";
 
@@ -110,8 +110,8 @@ describe("an address that opened memory", () => {
         page("/bots/$agentId/routines", "Routines"),
         page("/bots/$agentId/memory", "Bot memory", BotMemoryRoute),
         page("/capabilities/memory", "Old memory", CapabilitiesMemoryRoute),
-        page("/memory", "Older memory", LegacyMemoryRoute),
-        page("/settings/memory", "Memory", SettingsMemoryRoute),
+        page("/settings/memory", "Older memory", SettingsMemoryRoute),
+        page("/memory", "Memory", MemoryRoute),
       ]),
     });
     const view = render(
@@ -138,10 +138,10 @@ describe("an address that opened memory", () => {
     expect(await view.findByText("Routines")).toBeTruthy();
   });
 
-  test("still opens memory in the team edition, in Settings", async () => {
+  test("still opens memory in the team edition, on its own page", async () => {
     for (const at of ["/capabilities/memory", "/memory", "/settings/memory"]) {
       const { view, path } = await land("team", at);
-      await waitFor(() => expect(path()).toBe("/settings/memory"));
+      await waitFor(() => expect(path()).toBe("/memory"));
       expect(await view.findByText("Memory")).toBeTruthy();
       cleanup();
     }
@@ -190,12 +190,10 @@ describe("the Bots page", () => {
       );
       expect(await view.findByText("What your Bots learn")).toBeTruthy();
       expect(view.getByText("Skills").closest("a")?.getAttribute("href")).toBe(
-        "/settings/skills",
+        "/skills",
       );
       expect(view.queryByText("Memory")).toBeNull();
-      expect(
-        view.container.querySelector('a[href="/settings/memory"]'),
-      ).toBeNull();
+      expect(view.container.querySelector('a[href="/memory"]')).toBeNull();
     } finally {
       search.mockRestore();
     }

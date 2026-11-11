@@ -452,8 +452,10 @@ describe("OpenDots frame", () => {
     async (_who, signedIn) => {
       actor = signedIn;
       const { view } = draw("/");
-      // Routines is OpenDots' own rail button, to its own screen; the shared list has none.
-      const expected = navigationFor(signedIn.role).filter(isNavigationLink);
+      // Routines and Memories are OpenDots' own screens, so the shared list's are left out.
+      const expected = navigationFor(signedIn.role)
+        .filter(isNavigationLink)
+        .filter((item) => item.id !== "routines" && item.id !== "memory");
       const rail = await view.findByRole("navigation", {
         name: "Workspace navigation",
       });

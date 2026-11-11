@@ -339,15 +339,16 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 
 A Bot has eight things, always listed in this order: Conversations, Routines, Memory, Skills, Apps,
 Computer, Approvals and Activity. [How OpenBot works](docs/how-openbot-works.md) explains each one.
-Each is set in at most three places: for one Bot on its page, for every Bot in Settings, and, in
-the team edition, for everyone in Admin.
+Each is set in at most three places: for one Bot on its page, for every Bot in the main menu
+(Routines, Memory, Skills, Connections) or Settings (the rest), and, in the team edition, for
+everyone in Admin.
 
 | | One Bot | Every Bot | Everyone (Admin) |
 | --- | --- | --- | --- |
 | Conversations | `/channel/:id`, `/bot?agent=<id>` | `/`, `/channel/new` | |
-| Routines | `/bots/:id/routines` | `/settings/routines` | `/admin/proactive` |
-| Memory | `/bots/:id/memory` | `/settings/memory` | |
-| Skills | `/bots/:id/skills` | `/settings/skills` | `/admin/skills`, `/admin/learning` |
+| Routines | `/bots/:id/routines` | `/routines` | `/admin/proactive` |
+| Memory | `/bots/:id/memory` | `/memory` | |
+| Skills | `/bots/:id/skills` | `/skills` | `/admin/skills`, `/admin/learning` |
 | Apps | `/bots/:id/apps` | `/connections` | `/admin/plugins`, `/admin/components`, `/admin/playground` |
 | Computer | `/bots/:id/computer` | `/settings/computer` | `/admin/computers` |
 | Approvals | `/bots/:id/approvals` | `/settings/approvals` | `/admin/approvals`, `/admin/boundaries`, `/admin/what-if` |

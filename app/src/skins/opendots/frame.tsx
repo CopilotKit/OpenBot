@@ -165,8 +165,11 @@ function Rail({
   /** Whether the rail carries the Bots badge: at desktop width, where the rail is on screen. */
   showBadge: boolean;
 }) {
-  // OpenDots draws Routines itself, as its own screen just above. The shared list has no Routines.
-  const navigation = useNavigationItems();
+  // OpenDots draws Routines itself, as its own screen just above, and Memories in its sidebar. The
+  // shared list's Routines and Memory are left out.
+  const navigation = useNavigationItems().filter(
+    (item) => item.id !== "routines" && item.id !== "memory",
+  );
   return (
     <nav
       aria-label="Workspace navigation"

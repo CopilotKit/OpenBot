@@ -182,7 +182,7 @@ const EVENT_SOURCE_LABEL: Record<RoutineEventSource, string> = {
 function routinesOf(agentId: string | undefined) {
   return agentId
     ? linkOptions({ to: "/bots/$agentId/routines", params: { agentId } })
-    : linkOptions({ to: "/settings/routines" });
+    : linkOptions({ to: "/routines" });
 }
 
 /**

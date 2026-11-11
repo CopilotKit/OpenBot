@@ -109,17 +109,13 @@ export function parsePlace(
   if (path === "/bots" || path === "/agents") {
     return { section: "bots", label: "All Bots", ownsWatch: false };
   }
-  if (
-    path === "/s/routines" ||
-    path === "/routines" ||
-    path === "/settings/routines"
-  ) {
+  if (path === "/s/routines" || path === "/routines") {
     return { section: "routines", label: "Routines", ownsWatch: false };
   }
-  if (path === "/s/memories" || path === "/settings/memory") {
+  if (path === "/s/memories" || path === "/memory") {
     return { section: "memories", label: "Memories", ownsWatch: false };
   }
-  if (path.startsWith("/settings/skills")) {
+  if (path === "/skills" || path.startsWith("/skills/")) {
     return { section: "skills", label: "Skills", ownsWatch: false };
   }
   if (path.startsWith("/connections")) {

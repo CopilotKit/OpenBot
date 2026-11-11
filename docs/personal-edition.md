@@ -206,16 +206,18 @@ in this order: **Routines** (its routines, goals and check-ins in one list), **S
 who it hands work to). There is no Memory row, because the personal edition does not offer memory
 yet.
 
-**Settings** is in three groups: **You** (General, Notifications and Vault), **Every Bot** (Routines,
-Skills, Computer, Approvals and Activity) and **OpenBot** (Setup and the Components gallery).
+The main menu has **Bots**, **Routines**, **Skills** and **Connections**. **Teach a Bot** opens from
+the Skills page. **Settings** is in three
+groups: **You** (General, Notifications and Vault), **Every Bot** (Computer, Approvals and
+Activity) and **OpenBot** (Setup and the Components gallery).
 Settings → Computer is the computer your Bots share with its Reset, the folders on this computer
 they may read, what OpenBot runs here (inside OpenBot Desktop), and the browsers signed in to the
 Recorder. Activity is the trail of everything your Bots did. Where Admin was, **OpenBot for Business** opens a list of what the team edition adds. An old
-`/admin/...`, `/settings/plugins/...`, `/capabilities/...` or `/settings/learning` address opens the
+`/admin/...`, `/settings/plugins/...`, `/capabilities/...`, `/settings/skills/...` or `/settings/learning` address opens the
 same page where it is now. There is no Sharing, Visibility, Isolated, or Reaching you, which are
 all about other people, other computers or Slack and Teams.
 
-**Settings → Skills** lists **Your skills**: the skills you wrote and the skills learned from your
+**Skills** lists **Your skills**: the skills you wrote and the skills learned from your
 recordings and conversations, each marked with where it came from, and a row opens one. The skills
 OpenBot learns wait for your review under **Waiting for your review**, where you approve or reject
 them yourself, and **Learn now** starts a run on demand. A skill from your recordings reaches every Bot. A skill from
@@ -223,8 +225,8 @@ conversations reaches the Bots that share its Learning container, which is every
 has a container of its own. There is no one to share with, so **Ask to share** is not offered here.
 
 **Approve new skills automatically** is on from the start, so you don't have to review each one. It
-approves what OpenBot proposes from your recordings and conversations. It runs when Settings → Skills opens,
-every 15 minutes, and when you switch it on. Turn it off in Settings → Skills to review each skill
+approves what OpenBot proposes from your recordings and conversations. It runs when Skills opens,
+every 15 minutes, and when you switch it on. Turn it off on Skills to review each skill
 yourself. **Your recordings** on Teach a Bot lists what you have recorded, which needs Intelligence
 0.16 with recordings switched on. Recordings can't be deleted from OpenBot.
 
