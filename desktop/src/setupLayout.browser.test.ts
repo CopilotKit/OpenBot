@@ -1282,7 +1282,8 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
 
   /*
    * Seen on Windows G: the card grew from one line to Docker Desktop's three-line hand-off and back,
-   * and the rows under it moved each time. It holds one height now.
+   * and the rows under it moved each time. It holds one height now, with what it says and its bar
+   * at the top as a row's are, and the spare height at the bottom.
    */
   test("the card holds one height as what it says comes and goes, and the rows under it stay", async () => {
     const page = await browser.newPage({
@@ -1295,20 +1296,36 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
           const card = document
             .querySelector(".journey")
             ?.getBoundingClientRect();
+          const words = document
+            .querySelector(".journey-said")
+            ?.getBoundingClientRect();
+          const time = document
+            .querySelector(".journey-time")
+            ?.getBoundingClientRect();
           const bar = document
             .querySelector(".journey progress")
             ?.getBoundingClientRect();
           const said = document.querySelector(".journey-said") as HTMLElement;
           return {
             card: card?.height,
-            bar: bar?.top,
             row: document
               .querySelector('[aria-label="Setting up OpenBot"]')
               ?.getBoundingClientRect().top,
             cut: said.scrollHeight > said.clientHeight + 1,
+            // At the top, in the card's own padding, and the bar right under the words.
+            top: Math.round((words?.top ?? 0) - (card?.top ?? 0)),
+            under: Math.round((bar?.top ?? 0) - (time?.bottom ?? 0)),
+            spare: (card?.bottom ?? 0) - (bar?.bottom ?? 0) >= 13,
           };
         });
       const plain = await measure();
+      expect(plain).toMatchObject({
+        card: 130,
+        top: 13,
+        under: 10,
+        spare: true,
+        cut: false,
+      });
       const handOff =
         "Docker Desktop is starting in its own window. If it asks you to accept its terms or sign in, do that there. OpenBot comes back when Docker is ready.";
       await emitProgress(page, {

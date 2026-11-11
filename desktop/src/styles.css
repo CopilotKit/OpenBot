@@ -1151,6 +1151,13 @@ a:hover {
  * One Start, start to finish (`StartJourney`): what is happening now, the time left and so far, and
  * one bar over every row that only moves forward. Drawn as the rows are, above them.
  */
+/*
+ * ONE height, whatever it says: its tallest form's, three lines of what is happening (Docker
+ * Desktop's hand-off) and one of the time, or one and two, then the bar. On Windows G the card
+ * grew from 86 to 130 px as the hand-off came, shrank as it went, and moved the rows under it each
+ * time. What it says and its bar sit at the top, as a row's do, and the spare height is at the
+ * bottom.
+ */
 .journey {
   margin: 4px 0 12px;
   padding: 12px 16px;
@@ -1159,22 +1166,17 @@ a:hover {
   background: var(--card);
   display: grid;
   gap: 10px;
+  align-content: start;
+  height: 130px;
 }
 
-/*
- * ONE height, whatever it says: its tallest form's, three lines of what is happening (Docker
- * Desktop's hand-off) and one of the time, or one and two. On Windows G the card grew from 86 to
- * 130 px as the hand-off came, shrank as it went, and moved the rows under it each time. What it
- * says sits in the middle of that height, and the bar under it never moves.
- */
 .journey-head {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);
   column-gap: 12px;
   row-gap: 2px;
   align-items: center;
-  align-content: center;
-  height: 88px;
+  max-height: 88px;
   overflow: hidden;
   font-size: var(--text-base);
   line-height: 22px;
