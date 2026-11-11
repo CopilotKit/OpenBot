@@ -1,0 +1,105 @@
+[
+  {
+    "Names": ["k3d-local-7d9f2c039cde5c227de1269f-server-0"],
+    "State": "running",
+    "Ports": [
+      {
+        "host_ip": "127.0.0.1",
+        "container_port": 8082,
+        "host_port": 49897,
+        "range": 1,
+        "protocol": "tcp"
+      },
+      {
+        "host_ip": "127.0.0.1",
+        "container_port": 8080,
+        "host_port": 49898,
+        "range": 1,
+        "protocol": "tcp"
+      },
+      {
+        "host_ip": "127.0.0.1",
+        "container_port": 4401,
+        "host_port": 49899,
+        "range": 1,
+        "protocol": "tcp"
+      },
+      {
+        "host_ip": "127.0.0.1",
+        "container_port": 6443,
+        "host_port": 49901,
+        "range": 1,
+        "protocol": "tcp"
+      }
+    ]
+  },
+  {
+    "Names": ["openbot-desktop-agent-harness-1"],
+    "State": "running",
+    "Ports": [
+      {
+        "host_ip": "127.0.0.1",
+        "container_port": 4206,
+        "host_port": 4206,
+        "range": 1,
+        "protocol": "tcp"
+      }
+    ]
+  },
+  {
+    "Names": ["openbot-desktop-postgres-1"],
+    "State": "running",
+    "Ports": [
+      {
+        "host_ip": "127.0.0.1",
+        "container_port": 5432,
+        "host_port": 5432,
+        "range": 1,
+        "protocol": "tcp"
+      }
+    ]
+  },
+  {
+    "Names": ["openbot-desktop-agent-computer-1"],
+    "State": "running",
+    "Ports": [
+      {
+        "host_ip": "127.0.0.1",
+        "container_port": 4100,
+        "host_port": 4100,
+        "range": 1,
+        "protocol": "tcp"
+      }
+    ]
+  },
+  {
+    "Names": ["openbot-desktop-migrate-1"],
+    "State": "exited",
+    "Ports": null
+  },
+  {
+    "Names": ["openbot-desktop-worker-1"],
+    "State": "running",
+    "Ports": null
+  },
+  {
+    "Names": ["openbot-desktop-server-1"],
+    "State": "running",
+    "Ports": [
+      {
+        "host_ip": "127.0.0.1",
+        "container_port": 3001,
+        "host_port": 3010,
+        "range": 1,
+        "protocol": "tcp"
+      },
+      {
+        "host_ip": "127.0.0.1",
+        "container_port": 3001,
+        "host_port": 3001,
+        "range": 1,
+        "protocol": "tcp"
+      }
+    ]
+  }
+]
