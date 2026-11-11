@@ -165,9 +165,10 @@ function Rail({
   /** Whether the rail carries the Bots badge: at desktop width, where the rail is on screen. */
   showBadge: boolean;
 }) {
-  // OpenDots draws Routines itself, as its own screen just above, so not a second time from the list.
+  // OpenDots draws Routines itself, as its own screen just above, and Memories in its sidebar. The
+  // shared list's Routines and Memory are left out.
   const navigation = useNavigationItems().filter(
-    (item) => item.id !== "routines",
+    (item) => item.id !== "routines" && item.id !== "memory",
   );
   return (
     <nav

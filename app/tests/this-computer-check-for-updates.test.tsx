@@ -22,6 +22,7 @@ import { DOESNT_UPDATE_ITSELF } from "@openbot/shared/desktop-updates";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ComponentType } from "react";
+import { ThisComputerSections } from "@/components/settings/this-computer-sections";
 import {
   type DesktopAppUpdate,
   type DesktopAppUpdateCheck,
@@ -29,7 +30,6 @@ import {
   desktopKeys,
 } from "@/lib/desktop/queries";
 import { queryClient } from "@/query-client";
-import { Route as ThisComputerRoute } from "@/routes/_authed/settings/this-computer";
 
 const STATUS: DesktopStatus = {
   openbotRunning: true,
@@ -102,7 +102,7 @@ afterAll(async () => {
 });
 
 function renderPage() {
-  const Page = ThisComputerRoute.options.component as ComponentType;
+  const Page: ComponentType = ThisComputerSections;
   return render(
     <QueryClientProvider client={queryClient}>
       <Page />

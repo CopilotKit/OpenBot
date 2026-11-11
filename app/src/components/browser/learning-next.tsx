@@ -29,7 +29,7 @@ import { queryClient } from "@/query-client";
 import type { Stopped } from "./recording";
 
 /** Where the skills learned from recordings are reviewed and listed. */
-export const YOUR_SKILLS = "/settings/learning";
+export const YOUR_SKILLS = "/skills";
 
 /** How much earlier than the recording's stop a run may be dated and still be after it: the two clocks can differ. */
 const CLOCK_SLACK_MS = 60_000;
@@ -78,7 +78,7 @@ export function savedToLearning(stopped: Stopped | undefined): boolean {
 /**
  * What Learning has made of the recording Stop just saved, read from the person's own review (their runs, and whether
  * they or an admin approve) and the skills proposed from that recording since it stopped. Learn now starts the same
- * run as Settings, Learning on each of the person's recording spaces.
+ * run as Skills on each of the person's recording spaces.
  *
  * While nothing has come of it yet the review is read again, every 10 seconds during a run and every 30 otherwise, so
  * an automatic run is seen too. Once a skill from it is there, the page tells the person, and the browser does too
@@ -241,7 +241,7 @@ function useSkillNotice(title: string, next: LearningNext) {
           body:
             next.kind === "learned"
               ? "Open Teach a Bot to try it."
-              : "Review it in Settings, Learning.",
+              : "Review it on the Skills page.",
           tag: `openbot-learned-${skill}`,
         },
       );
@@ -268,7 +268,7 @@ export function learningNextWords(
     return canReview
       ? {
           heading: "Your new skill is ready to review",
-          sentence: `Learning made a skill from “${title}”. Approve it in Settings, Learning, then ask any Bot to do it.`,
+          sentence: `Learning made a skill from “${title}”. Approve it on the Skills page, then ask any Bot to do it.`,
         }
       : {
           heading: "Your new skill is waiting for an admin",
@@ -289,8 +289,8 @@ export function learningNextWords(
   return {
     heading: `Saved “${title}”`,
     sentence: autoApprove
-      ? "OpenBot learns a skill from it, and you'll find it in Settings, Learning. Once it's learned, ask any Bot to do it."
-      : "OpenBot learns a skill from it, and you'll see it in Settings, Learning to review. Once you approve it, ask any Bot to do it.",
+      ? "OpenBot learns a skill from it, and you'll find it on the Skills page. Once it's learned, ask any Bot to do it."
+      : "OpenBot learns a skill from it, and you'll see it on the Skills page to review. Once you approve it, ask any Bot to do it.",
   };
 }
 

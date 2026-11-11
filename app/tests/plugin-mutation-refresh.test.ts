@@ -189,7 +189,7 @@ const REFUSALS: {
     route: "POST /api/plugins/composio/apps",
     status: 409,
     message:
-      "The app was added, but its tools could not be read just now. Press Refresh on the Plugins page.",
+      "The app was added, but its tools could not be read just now. Press Refresh on the Apps page.",
     factory: enableComposioAppMutationOptions,
     variables: { slug: "linear" },
   },
@@ -263,7 +263,7 @@ const REFUSALS: {
     route: "POST /api/plugins/servers/:id/connect",
     status: 400,
     message:
-      "What you entered for gmail did not work, and Composio would not take the account back either. Disconnect it on the Plugins page and try again.",
+      "What you entered for gmail did not work, and Composio would not take the account back either. Disconnect it on the Apps page and try again.",
     factory: connectBrokeredWithFieldsMutationOptions,
     variables: {
       serverId: "gmail",

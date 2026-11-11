@@ -484,6 +484,13 @@ function Count({ value }: { value: number | undefined }) {
   );
 }
 
+/** The shared list's entries OpenDots draws its own way: Bots as its list, Routines and Memory as its screens. */
+const OPENDOTS_OWN: ReadonlySet<string> = new Set([
+  "bots",
+  "routines",
+  "memory",
+]);
+
 function WorkspaceLinks({
   place,
   onNavigate,
@@ -511,9 +518,9 @@ function WorkspaceLinks({
    * is no rail. Bots is the row under the list of Bots above.
    */
   const drawerOnly = "md:hidden";
-  // Routines is OpenDots' own row above, so the shared list's entry is not drawn twice.
+  // Routines and Memories are OpenDots' own rows above, so the shared list's are left out.
   const navigation = useNavigationItems().filter(
-    (item) => item.id !== "bots" && item.id !== "routines",
+    (item) => !OPENDOTS_OWN.has(item.id),
   );
   return (
     <nav

@@ -33,7 +33,7 @@ describe("where the pages a person manages live", () => {
     expect(href(paths.audit())).toBe("/admin/audit");
   });
 
-  test("in the personal edition, apps under Connections and the rest under Settings", () => {
+  test("in the personal edition, apps under Connections, skills under Skills and the rest under Settings", () => {
     const paths = managePaths("personal");
     expect(href(paths.plugins())).toBe("/connections");
     expect(href(paths.plugin("notion"))).toBe("/connections/notion");
@@ -51,12 +51,12 @@ describe("where the pages a person manages live", () => {
       "/connections/browse/arcade",
     );
     expect(paths.pluginsLabel).toBe("Connections");
-    expect(managePaths("team").pluginsLabel).toBe("Plugins");
-    expect(href(paths.skills())).toBe("/settings/skills");
-    expect(href(paths.newSkill())).toBe("/settings/skills/new");
-    expect(href(paths.skill("triage"))).toBe("/settings/skills/triage");
-    expect(href(paths.credentials())).toBe("/settings/credentials");
-    expect(href(paths.newCredential())).toBe("/settings/credentials/new");
+    expect(managePaths("team").pluginsLabel).toBe("Apps");
+    expect(href(paths.skills())).toBe("/skills");
+    expect(href(paths.newSkill())).toBe("/skills/new");
+    expect(href(paths.skill("triage"))).toBe("/skills/triage");
+    expect(href(paths.credentials())).toBe("/settings/vault");
+    expect(href(paths.newCredential())).toBe("/settings/vault/new");
     expect(href(paths.computers())).toBe("/settings/computer");
     expect(href(paths.audit())).toBe("/settings/activity");
   });

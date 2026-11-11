@@ -8,11 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** No migrations run in this release: the database stays at
-`0088_approval_reviewer_guidance`, and a 1.0.1 database is used as it is. Upgrading from 1.0.0 or
-0.3.x runs the migrations listed under 1.0.1, and a database that has run them does not go back:
-restore the backup taken before the upgrade instead. Three things change for an existing OpenBot
-Desktop installation:
+**Before upgrading.** One migration runs at start, and the database moves from
+`0088_approval_reviewer_guidance` to `0089_goal_ends_when_met`. It adds an `ends_when_met` column to
+`responsibilities`, false on every existing goal, so existing goals behave as before. No existing
+row is rewritten and nothing is dropped. Upgrading from 1.0.0 or 0.3.x also runs the migrations
+listed under 1.0.1. A database that has run them does not go back: restore the backup taken before
+the upgrade instead. Three things change for an existing OpenBot Desktop installation, and one for
+every deployment:
 - On Windows OpenBot now always runs in a Podman machine of its own, `openbot`, beside any of
   yours, and on a Mac it does when yours is rootless, after asking to pause it (below). An
   installation that ran in a machine of yours starts fresh in `openbot`, and its earlier data stays
@@ -22,6 +24,8 @@ Desktop installation:
   running are started again afterwards.
 - OpenBot Desktop's back end and the Helm chart move to CopilotKit Intelligence 0.16.0-rc.11, and
   the bundled CLI to `copilotkit@7bd073b` (below).
+- Settings and Admin are grouped differently and several pages have new names (below). Old
+  addresses and bookmarks open the new pages.
 
 ### OpenBot Desktop
 
@@ -125,7 +129,7 @@ Desktop installation:
   OpenBot Desktop downloads what it runs in the background while you keep working: the parts for
   the Bots you use, and the back end's when it changes too, kept until you update. Clicking Update
   then stops OpenBot, backs it up, updates it and starts it again, with nothing big left to
-  download. The update offer, Settings › This computer and the setup window say the new version
+  download. The update offer, Settings › Computer and the setup window say the new version
   "is downloading in the background (40%).", then that it "is ready to install. It takes a few
   minutes." It downloads one part at a time, waits while OpenBot starts, stops or updates, never
   stops or restarts anything you are using, and downloads nothing when the disk is short of room
@@ -133,9 +137,9 @@ Desktop installation:
   which do not update themselves, download nothing ahead.
 - **downloads.copilotkit.ai serves each release's `desktop-images.json`.** It answered 403, so the
   list of a release's images could only come from GitHub.
-- **The Status window, Settings > This computer and the Install step say what's running in plain
-  words.** The Status window, opened from the menu bar or the system tray, and Settings > This
-  computer said "Back end", "Container engine", "Podman" or "Docker" and the build's commit and
+- **The Status window, Settings > Computer and the Install step say what's running in plain
+  words.** The Status window, opened from the menu bar or the system tray, and Settings > Computer
+  said "Back end", "Container engine", "Podman" or "Docker" and the build's commit and
   time. Both now name each part by what it does: App, OpenBot's services, and Software OpenBot runs
   on, with "App and Bots" for what was "Front end and Bots". They show the version on its own, and
   the engine, the build and Docker's container names stay in Copy diagnostics and the logs. A
@@ -216,6 +220,40 @@ Desktop installation:
   `127.0.0.1`, and CopilotKit v1.85.0 templates. The back end now streams an answer whole to a
   conversation that starts following it mid-reply: before, it could send the reply's pieces out of
   order, so the answer drew with words missing and a step's browser actions never ran.
+
+### Pages and routines
+
+- **Pages are grouped by the eight things a Bot has, and some have new names.** A Bot has
+  Conversations, Routines, Memory, Skills, Apps, a Computer, Approvals and Activity
+  (`docs/how-openbot-works.md`), and a Bot's page, the main menu and Settings, and Admin now
+  list them in that order. What moved:
+  - **Vault**, under Settings, holds your saved logins and your keys. It replaces Saved logins,
+    Passwords and Credentials.
+  - **Routines**, **Memory** and **Skills** are in the main menu beside Bots and Connections,
+    because they are things you make and come back to. Settings keeps what you set once:
+    Computer, Approvals and Activity. Teach a Bot is no longer in the main menu: open it from the
+    Skills page.
+  - **Connections has two sections.** **Your apps** lists what your Bots use. **Add an app** lists
+    everything else, the apps that need a key included, and ends with Browse apps. The count and
+    **Show apps that need setup** are gone, and so is Routines, which every Bot already has.
+  - **Skills** holds the skills you wrote, the skills learned from your recordings and the
+    ones waiting for your review. It replaces Capabilities > Skills and Settings > Learning.
+  - **Settings > Computer** is one page. Browsers and This computer are sections of it.
+  - **Routines** is one list of routines, goals and check-ins, for one Bot and for every Bot.
+  - In Admin, Plugins is now **Apps**, Audit is **Activity**, Credentials is **Vault**, and
+    Check-ins are under **Routines**.
+
+  Nothing was removed, and every old address opens the page that replaced it.
+- **One New routine screen for routines, goals and check-ins.** New routine no longer opens a menu
+  of Routine, Goal and Check-in. One screen asks what to do, whether the Bot should act for you or
+  only tell you, what starts it (a schedule, an event such as a GitHub issue opening, or now, once)
+  and, optionally, when it is done. From those answers it makes a routine, a goal, or a check-in:
+  a schedule with nothing in Done when makes a routine; a schedule or an event with Done when makes
+  a goal that ends once that is met, shown as one Goal row with its schedule under Starts; Only
+  tell you makes a check-in. A goal can now be saved with no outcome.
+- **A goal can end when its outcome is met.** A goal made with an outcome, on a schedule or an
+  event, is completed by the run that meets it, and completing a goal switches off the routines
+  that run it. A goal that repeats with no outcome is still ended only by you.
 
 ### Conversations
 

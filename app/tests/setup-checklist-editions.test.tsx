@@ -32,7 +32,7 @@ import { settleReactWork } from "./settle-react-work";
  * The personal edition has no memory (#1233) and no admin. On Windows its Setup still said the back
  * end "Keeps your conversations and what OpenBot remembers", that people "can connect more apps
  * than the ones an admin adds", and linked the Admin pages by their Admin names, Credentials and
- * Computers, where its Settings call them Keys and Computer. A team deployment keeps its words.
+ * Computers, where its Settings call them Vault and Computer. A team deployment keeps its words.
  */
 
 beforeAll(() => GlobalRegistrator.register({ url: "http://127.0.0.1:3010/" }));
@@ -163,7 +163,7 @@ test("the personal edition's Setup speaks of no memory and no admin", async () =
     ),
   ).toBeTruthy();
   // The pages it links are the ones its Settings sidebar names.
-  expect(linkTo(row("model"), "Keys")).toBe("/settings/credentials");
+  expect(linkTo(row("model"), "Vault")).toBe("/settings/vault");
   expect(linkTo(row("computer"), "Computer")).toBe("/settings/computer");
   expect(view.container.textContent).not.toMatch(/remember|memory|admin/i);
   expect(view.container.innerHTML).not.toContain("/admin/");
@@ -200,7 +200,7 @@ test("a team deployment's Setup keeps memory, its admin, and the Admin pages", a
       "People can connect more apps than the ones an admin adds.",
     ),
   ).toBeTruthy();
-  expect(linkTo(row("model"), "Credentials")).toBe("/admin/credentials");
+  expect(linkTo(row("model"), "Vault")).toBe("/admin/credentials");
   expect(linkTo(row("computer"), "Computers")).toBe("/admin/computers");
 });
 

@@ -92,7 +92,7 @@ const ADMIN: Checklist = {
         kind: "env",
         names: ["OPENAI_API_KEY"],
         docsUrl: "https://github.com/CopilotKit/openbot#quick-start",
-        page: { label: "Credentials", path: "/admin/credentials" },
+        page: { label: "Vault", path: "/admin/credentials" },
       },
     }),
     ROW({
@@ -207,10 +207,8 @@ test("an admin is shown the variable to set, the page, and the guide", async () 
   );
   expect(guide.getAttribute("target")).toBe("_blank");
 
-  fireEvent.click(model.getByRole("link", { name: "Credentials" }));
-  expect(view.opened).toEqual([
-    { label: "Credentials", path: "/admin/credentials" },
-  ]);
+  fireEvent.click(model.getByRole("link", { name: "Vault" }));
+  expect(view.opened).toEqual([{ label: "Vault", path: "/admin/credentials" }]);
 
   expect(rowOf(view, "chat").getByText("OPENTAG_SHARED_SECRET")).not.toBeNull();
 });

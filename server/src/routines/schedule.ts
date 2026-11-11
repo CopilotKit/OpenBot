@@ -4,9 +4,12 @@ import { CronExpressionParser } from "cron-parser";
 export const MINIMUM_INTERVAL_MS = 15 * 60 * 1000;
 
 export class ScheduleRefusedError extends Error {
-  constructor(message: string) {
+  /** Set when the HTTP routes rewrite the sentence for a person. See `RoutineRefusalCode`. */
+  readonly code?: "unknown_timezone";
+  constructor(message: string, code?: "unknown_timezone") {
     super(message);
     this.name = "ScheduleRefusedError";
+    this.code = code;
   }
 }
 
@@ -149,7 +152,10 @@ export function nextOccurrence(
     throw new ScheduleRefusedError(UNREADABLE_MESSAGE);
   }
   if (!isKnownTimeZone(timezone)) {
-    throw new ScheduleRefusedError(UNKNOWN_TIMEZONE_MESSAGE);
+    throw new ScheduleRefusedError(
+      UNKNOWN_TIMEZONE_MESSAGE,
+      "unknown_timezone",
+    );
   }
   refuseSubFloorCycle(cron, timezone);
 

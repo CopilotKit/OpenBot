@@ -256,6 +256,10 @@ export function createResponsibilityRoutes(
       ),
     });
   });
+  routes.delete("/:id", async (context) => {
+    await store.delete(context.var.actor.id, context.req.param("id"));
+    return context.body(null, 204);
+  });
   routes.get("/:id/runs", async (context) =>
     context.json({
       runs: await store.listRuns(context.var.actor.id, context.req.param("id")),

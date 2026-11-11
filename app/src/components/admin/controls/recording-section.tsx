@@ -33,7 +33,7 @@ export function RecordingSection() {
                 <ItemDescription>
                   {data.settings.actionRecording
                     ? `Shell commands Bots run are recorded with secrets removed, and kept ${data.actionRecordRetentionDays} days.`
-                    : "Off. Commands show in Audit only."}
+                    : "Off. Commands show in Activity only."}
                 </ItemDescription>
               </ItemContent>
               <ItemActions>

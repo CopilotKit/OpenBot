@@ -440,7 +440,7 @@ const ourGmailConfig = configsOf("gmail", [OUR_GMAIL]);
  * its own AND the absence of the others.
  */
 const NO_CONFIG_REMEDY =
-  /removing the app on its Plugins page and adding it again creates one/;
+  /removing the app on its page under Apps and adding it again creates one/;
 const DISABLED_REMEDY = /can enable it in Composio's dashboard/;
 const NO_PAGE_REMEDY =
   /connected by entering a credential rather than by visiting a page/;
@@ -930,7 +930,7 @@ describe("executing an action", () => {
     // holding a contradiction with nothing to do about it. The url this action was recorded under
     // has changed, and refreshing the app's tools is what reconciles the two.
     expect(refusal.message).toMatch(
-      /Refreshing this app's tools on its Plugins page/,
+      /Refreshing this app's tools on its page under Apps/,
     );
     expect(executed).toEqual([]);
   });
@@ -7604,7 +7604,7 @@ describe("the fields an app asks a person to fill in", () => {
     // act that rewrites the recorded scheme, which is an administrator's rather than this person's.
     expect(refusal.message).toMatch(/linear/);
     expect(refusal.message).toMatch(/API_KEY/);
-    expect(refusal.message).toMatch(/Plugins page/);
+    expect(refusal.message).toMatch(/page under Apps/);
   });
 
   /**
@@ -7680,7 +7680,7 @@ describe("the fields an app asks a person to fill in", () => {
        * answer and records the same word.
        */
       expect(refusal.message).toMatch(/@composio\/core/);
-      expect(refusal.message).not.toMatch(/Plugins page/);
+      expect(refusal.message).not.toMatch(/page under Apps/);
     }
   });
 
@@ -7711,7 +7711,7 @@ describe("the fields an app asks a person to fill in", () => {
       expect(refusal.message).not.toMatch(A_CRASH);
       expect(refusal.message).toMatch(/linear/);
       expect(refusal.message).toMatch(/@composio\/core/);
-      expect(refusal.message).not.toMatch(/Plugins page/);
+      expect(refusal.message).not.toMatch(/page under Apps/);
     }
   });
 

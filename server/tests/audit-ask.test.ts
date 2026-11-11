@@ -321,7 +321,7 @@ describe("POST /api/admin/audit-events/ask", () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
       error:
-        "OpenBot needs a model key to answer a question. Add one on the Credentials page, or set the filters yourself.",
+        "OpenBot needs a model key to answer a question. Add one in the Vault, or set the filters yourself.",
     });
     expect(mock.getRequests()).toHaveLength(0);
     expect(audit.map((event) => event.payload)).toEqual([

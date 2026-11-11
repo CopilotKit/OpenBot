@@ -9,13 +9,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
 import { useState } from "react";
+import { ASK_FIRST_TITLE } from "@/components/approvals/ask-first-copy";
 import {
   PageEmpty,
   PageRows,
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { ASK_FIRST_TITLE } from "@/components/approvals/ask-first-copy";
 import { AccessRequestsSection } from "@/components/plugins/access-requests";
 import { AccountModeDialog } from "@/components/plugins/account-mode-dialog";
 import {
@@ -77,12 +77,12 @@ import {
   pluginsPageQueryOptions,
   pluginsProvider,
 } from "@/lib/plugins/queries";
-import { toolsListError } from "@/lib/plugins/tools-error";
 import {
   botSharedAppsQueryOptions,
   describeApproval,
 } from "@/lib/plugins/shared-use";
 import { toolInWords, toolName } from "@/lib/plugins/tool-words";
+import { toolsListError } from "@/lib/plugins/tools-error";
 
 /**
  * One vendor: what it needs from this deployment, and which Bots hold its tools.
@@ -593,7 +593,7 @@ export function PluginPage({
    * connected this". The personal screen had the identical gap; see its own note.
    */
   if (plugins.isPending || connections.isPending) {
-    return <PageShell title="Plugin">{null}</PageShell>;
+    return <PageShell title="App">{null}</PageShell>;
   }
   /*
    * Gated on the plugin list having ARRIVED, the guard the per-Bot grant screen already keeps
@@ -612,7 +612,7 @@ export function PluginPage({
         <p className="mt-12 text-destructive text-sm" role="alert">
           {personal
             ? "Couldn't load your apps. Reload the page."
-            : "Couldn't load plugins. Reload the page."}
+            : "Couldn't load apps. Reload the page."}
         </p>
       </PageShell>
     );
@@ -624,14 +624,11 @@ export function PluginPage({
         description={
           personal
             ? "There is no app with that name."
-            : "There is no plugin with that name, here or in the catalogue."
+            : "There is no app with that name, here or in the catalogue."
         }
-        title={personal ? "Not an app" : "Not a plugin"}
+        title="Not an app"
       >
-        <PageEmpty
-          icon={IconPuzzle}
-          title={personal ? "App not found" : "Plugin not found"}
-        >
+        <PageEmpty icon={IconPuzzle} title="App not found">
           Nothing to configure.
         </PageEmpty>
       </PageShell>
