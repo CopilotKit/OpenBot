@@ -41,6 +41,9 @@ pub struct Problem {
     /// Boxed and flattened: the window reads `leftover_reset` and `leftover_containers`.
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub leftover: Option<Box<LeftoverReset>>,
+    /// Only a Windows restart fixes this, so the window offers one instead of Try again.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub restart_windows: bool,
 }
 
 /// Exactly what one confirmed reset removes: the containers first, then the volumes.
@@ -63,6 +66,7 @@ impl Problem {
             connection: None,
             database_reset: None,
             leftover: None,
+            restart_windows: false,
         }
     }
 
@@ -75,6 +79,7 @@ impl Problem {
             connection: None,
             database_reset: None,
             leftover: None,
+            restart_windows: false,
         }
     }
 
