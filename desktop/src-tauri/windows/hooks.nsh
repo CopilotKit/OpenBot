@@ -39,11 +39,58 @@
   Pop $0
 !macroend
 
+; Installing over an installed OpenBot with "Uninstall before installing" runs the old version's
+; uninstaller first, silently and as an update (windows/installer.nsi). A silent uninstaller closes a
+; running OpenBot without asking, so the installer asks first, with the words a running OpenBot gets
+; everywhere else (appRunningOkKill in installer-english.nsh). OK goes on, and the old uninstaller
+; closes it. Cancel stays on the page, where the person can close OpenBot themselves or choose
+; "Do not uninstall". A passive install asks nothing, as Tauri's own check doesn't.
+Var OpenBotRunning
+!macro OPENBOT_BEFORE_OLD_UNINSTALLER
+  ${If} $PassiveMode <> 1
+    !if "${INSTALLMODE}" == "currentUser"
+      nsis_tauri_utils::FindProcessCurrentUser "${MAINBINARYNAME}.exe"
+    !else
+      nsis_tauri_utils::FindProcess "${MAINBINARYNAME}.exe"
+    !endif
+    Pop $OpenBotRunning
+    ${If} $OpenBotRunning = 0
+      nsis_tauri_utils::StrReplace "$(appRunningOkKill)" "{{product_name}}" "${PRODUCTNAME}"
+      Pop $OpenBotRunning
+      ${If} ${Cmd} `MessageBox MB_OKCANCEL "$OpenBotRunning" IDCANCEL`
+        Abort
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+!macroend
+
+; Uninstalling (not updating) stops what OpenBot runs before its files go: OpenBot's containers, the
+; backend when OpenBot created it, and OpenBot's own Podman machine, "openbot". Before this, the
+; uninstaller closed the app and left all of them running with no app to stop them. The app does it
+; headless (src/uninstall.rs), so it stops exactly what Stop stops and never the person's own
+; machines or containers. OpenBot's machine is removed only when the person ticked "Delete the
+; application data"; otherwise it stays, stopped, for a reinstall to find. A running OpenBot is
+; closed first (Tauri's own check, which asks), so it cannot start anything again meanwhile.
+; The app's lines go to the uninstaller's details. It gives up after five minutes, and whatever it
+; could not stop never keeps OpenBot from being uninstalled.
+!macro OPENBOT_STOP_WHAT_OPENBOT_RUNS
+  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  ${If} $DeleteAppDataCheckboxState = 1
+    nsExec::ExecToLog '"$INSTDIR\${MAINBINARYNAME}.exe" --stop-for-uninstall --remove-machine'
+  ${Else}
+    nsExec::ExecToLog '"$INSTDIR\${MAINBINARYNAME}.exe" --stop-for-uninstall'
+  ${EndIf}
+  Pop $0
+!macroend
+
 !macro NSIS_HOOK_PREINSTALL
   !insertmacro OPENBOT_STOP_BUNDLED_CLI
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
+  ${If} $UpdateMode <> 1
+    !insertmacro OPENBOT_STOP_WHAT_OPENBOT_RUNS
+  ${EndIf}
   !insertmacro OPENBOT_STOP_BUNDLED_CLI
 !macroend
 

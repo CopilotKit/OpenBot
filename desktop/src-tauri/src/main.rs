@@ -24,7 +24,7 @@ use openbot_desktop_lib::{
     local_eval_state, logging, own_machine, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
-    telemetry, tray, troubleshooting, update_ready, upgrade, windows as win,
+    telemetry, tray, troubleshooting, uninstall, update_ready, upgrade, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -4778,6 +4778,65 @@ where
     }
 }
 
+/**
+The Windows uninstaller's stop (`uninstall`, run from `windows/hooks.nsh`): what OpenBot runs for the
+installation it last launched is stopped, and OpenBot's machine removed when the person chose to
+delete OpenBot's data. Each line goes to stdout, which the uninstaller shows in its details. Answers
+0 when everything stopped, 1 otherwise; the uninstaller goes on either way.
+*/
+fn stop_for_uninstall(asked: uninstall::Asked) -> i32 {
+    // The uninstaller waits for this, and a step that hangs must not hold it there.
+    std::thread::spawn(|| {
+        std::thread::sleep(uninstall::LIMIT);
+        println!("OpenBot didn't finish stopping in time. Uninstalling it anyway.");
+        std::process::exit(1);
+    });
+    let root = last_launched_root().unwrap_or_else(stack::default_root);
+    let failures = uninstall::stop_with(&mut ThisComputerAtUninstall, &root, asked, &mut |line| {
+        println!("{line}")
+    });
+    for failure in &failures {
+        println!("{failure}");
+    }
+    i32::from(!failures.is_empty())
+}
+
+/// `uninstall::Computer` on this computer, with what Stop and Quit use.
+struct ThisComputerAtUninstall;
+
+impl uninstall::Computer for ThisComputerAtUninstall {
+    /// The engine the installation was set up on, as a launch finds it, when it answers. There is
+    /// no app session to say which one its containers are on.
+    fn engine(&mut self, root: &Path) -> Option<engine::Address> {
+        let found = engine::detect_saved(preparation::saved_engine(root));
+        found.address.filter(|_| found.responding)
+    }
+
+    fn compose_down(&mut self, engine: &engine::Address, root: &Path) -> Result<(), String> {
+        stack::down(engine, root)
+    }
+
+    fn stop_backend(&mut self, engine: &engine::Address, root: &Path) -> Result<(), String> {
+        local_eval::use_engine(engine);
+        stop_local_eval(root, local_eval::Limits::for_quit())
+    }
+
+    fn machine(&mut self, name: &str) -> Result<Option<bool>, String> {
+        if engine::program(engine::Engine::Podman).is_none() {
+            return Ok(None);
+        }
+        acquire::machine_listed(name)
+    }
+
+    fn stop_machine(&mut self, name: &str) -> Result<(), String> {
+        acquire::stop_machine_named(name)
+    }
+
+    fn remove_machine(&mut self, name: &str) -> Result<(), String> {
+        acquire::remove_machine_named(name)
+    }
+}
+
 /// A category's name as the window knows it, `local-command-busy` rather than `LocalCommandBusy`.
 fn wire_name(category: impl Serialize) -> String {
     serde_json::to_value(category)
@@ -6689,8 +6748,10 @@ mod app_page_tests {
     /// notification plugin names the bundle identifier in an installed app (`desktop.rs`,
     /// `notification.app_id(&self.identifier)`), and Tauri's own NSIS template stamps the same
     /// `${BUNDLEID}` on the Start menu shortcut it names after the product (`installer.nsi`,
-    /// `SetLnkAppUserModelId`). So a toast reads "OpenBot" as long as the installer is that template
-    /// and the identifier and product name stay what they are.
+    /// `SetLnkAppUserModelId`). OpenBot's template, `windows/installer.nsi`, is that template with
+    /// OpenBot's lines added (`desktop/scripts/installer-update.test.ts`). So a toast reads "OpenBot"
+    /// as long as the installer keeps those lines and the identifier and product name stay what
+    /// they are.
     #[test]
     fn windows_toasts_name_the_app_the_start_menu_shortcut_carries() {
         let (app, _) = app();
@@ -6710,11 +6771,13 @@ mod app_page_tests {
             let file: serde_json::Value =
                 serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
             let nsis = &file["bundle"]["windows"]["nsis"];
-            assert!(
-                nsis.get("template").is_none(),
-                "{name}: a custom NSIS template has to stamp the Start menu shortcut's \
-                 AppUserModelID itself"
-            );
+            if let Some(template) = nsis.get("template") {
+                assert_eq!(
+                    template, "./windows/installer.nsi",
+                    "{name}: any other NSIS template has to stamp the Start menu shortcut's \
+                     AppUserModelID itself"
+                );
+            }
             if let Some(identifier) = file.get("identifier") {
                 assert_eq!(identifier, "ai.copilotkit.openbot.desktop", "{name}");
             }
@@ -6738,6 +6801,13 @@ mod app_page_tests {
             !hooks.contains("CreateShortcut"),
             "a shortcut the hooks make carries no AppUserModelID"
         );
+        let template = std::fs::read_to_string(folder.join("windows/installer.nsi")).unwrap();
+        for stamped in [
+            r#"CreateShortcut "$SMPROGRAMS\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe""#,
+            r#"!insertmacro SetLnkAppUserModelId "$SMPROGRAMS\${PRODUCTNAME}.lnk""#,
+        ] {
+            assert!(template.contains(stamped), "{stamped}");
+        }
     }
 
     /// Narration listens through the shell's speech recognition from OpenBot's own page, and from
@@ -7425,11 +7495,10 @@ fn recorder_ping_app_answers(port: u16) -> bool {
     .is_some()
 }
 
-/// What the Recorder's native host knows about this computer's OpenBot.
-///
-/// The browser starts the host as a fresh process with no app around it, so it finds the deployment
-/// the way the app's setup does: the root last launched, read from Tauri's config directory.
-fn recorder_host_environment() -> recorder_host::HostEnvironment {
+/// The installation the app last launched, for a process with no app around it (the Recorder's
+/// native host, the uninstaller's stop): read from Tauri's config directory, as the app's setup
+/// reads it.
+fn last_launched_root() -> Option<PathBuf> {
     let home = recorder_home().unwrap_or_else(|| PathBuf::from("."));
     let config = recorder_host::app_config_dir(
         recorder_os(),
@@ -7439,7 +7508,15 @@ fn recorder_host_environment() -> recorder_host::HostEnvironment {
             .map(Path::new),
         std::env::var_os("APPDATA").as_deref().map(Path::new),
     );
-    let root = preparation::selected_root(&config);
+    preparation::selected_root(&config)
+}
+
+/// What the Recorder's native host knows about this computer's OpenBot.
+///
+/// The browser starts the host as a fresh process with no app around it, so it finds the deployment
+/// the way the app's setup does: the root last launched, read from Tauri's config directory.
+fn recorder_host_environment() -> recorder_host::HostEnvironment {
+    let root = last_launched_root();
     if let Some(url) = recorder_host_test_app_url() {
         let port = reqwest::Url::parse(&url)
             .ok()
@@ -10228,6 +10305,12 @@ fn main() {
                 1
             }
         });
+    }
+    // The Windows uninstaller stopping what OpenBot runs before it removes it (`uninstall`):
+    // headless, and before the single-instance plugin, which would hand this launch to an OpenBot
+    // still open and exit.
+    if let Some(asked) = uninstall::asked(&args) {
+        std::process::exit(stop_for_uninstall(asked));
     }
     // The local time's offset from UTC, for the log's first line. Read now, while this is the only
     // thread: on macOS and Linux the time crate refuses to read it once there are others.

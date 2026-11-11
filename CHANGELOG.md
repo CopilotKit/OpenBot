@@ -10,6 +10,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **Installing a new OpenBot over the old one on Windows never offers to delete your data, and
+  uninstalling stops what OpenBot runs.** Running a new installer over an installed OpenBot opened
+  the old version's uninstaller in the middle of the update, with a "Delete the application data"
+  box, and one wrong tick deleted your Bots and conversations. The old version is now removed
+  silently, as an update, and your data stays. If OpenBot is open, the installer asks before it
+  closes it. Uninstalling from Settings > Apps used to close OpenBot and leave its containers, its
+  services and its Podman machine (`openbot`) running. It now stops them first, and never touches
+  your own Podman machines or containers. Tick "Delete the application data" to remove OpenBot's
+  machine as well; otherwise it stays, stopped, for a reinstall to find.
 - **OpenBot uses its own Podman machine when yours can't run it, and leaves yours as it is.** A
   Podman machine made with `podman machine init` is rootless, and OpenBot used it and stopped at
   "Change this computer's setup" because local Intelligence needs rootful Podman. On Windows even a

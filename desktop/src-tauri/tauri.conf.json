@@ -33,6 +33,7 @@
     },
     "windows": {
       "nsis": {
+        "template": "./windows/installer.nsi",
         "installerHooks": "./windows/hooks.nsh",
         "languages": ["English"],
         "customLanguageFiles": {
