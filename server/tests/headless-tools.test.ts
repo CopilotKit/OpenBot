@@ -6,12 +6,16 @@ import {
   HttpAgent,
   type RunAgentInput,
 } from "@ag-ui/client";
+import { NOT_RUN_AFTER_FAILURE } from "@openbot/shared/approval-outcomes";
+import { NOT_DRAWN } from "@openbot/shared/tool-steps";
 import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
 import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import { Observable } from "rxjs";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
 import { parseApprovalContinuation } from "../src/approvals/types";
 import type { AuditEventInput } from "../src/audit";
+import { createHeadlessComponentTools } from "../src/components/headless";
+import type { ComponentStore } from "../src/components/store";
 import { botSeat } from "../src/computer/computer-key";
 import {
   ComputerStillStartingError,
@@ -779,4 +783,245 @@ test("human help creates a durable suspension, persists the waiting event, and r
     }),
   );
   expect(lockCalls).toEqual(["acquire", "cleanup"]);
+});
+
+/**
+ * One step's calls, as a model that calls tools in parallel sends them: every call in one assistant
+ * message, and a backend's result for any it answered itself.
+ */
+function step(
+  messageId: string,
+  calls: { id: string; name: string; args?: unknown; answered?: string }[],
+): BaseEvent[] {
+  return calls.flatMap(({ id, name, args = {}, answered }) => [
+    {
+      type: EventType.TOOL_CALL_START,
+      toolCallId: id,
+      toolCallName: name,
+      parentMessageId: messageId,
+    },
+    {
+      type: EventType.TOOL_CALL_ARGS,
+      toolCallId: id,
+      delta: JSON.stringify(args),
+    },
+    { type: EventType.TOOL_CALL_END, toolCallId: id },
+    ...(answered === undefined
+      ? []
+      : [
+          {
+            type: EventType.TOOL_CALL_RESULT,
+            toolCallId: id,
+            messageId: `result-${id}`,
+            role: "tool",
+            content: answered,
+          } as BaseEvent,
+        ]),
+  ]) as BaseEvent[];
+}
+
+/** The answer each call got in the conversation the next request carried. */
+function answersIn(request: RunAgentInput | undefined) {
+  return Object.fromEntries(
+    (request?.messages ?? []).flatMap((message) =>
+      message.role === "tool"
+        ? [
+            [
+              message.toolCallId,
+              { content: message.content, error: message.error },
+            ],
+          ]
+        : [],
+    ),
+  );
+}
+
+/**
+ * A form's fields typed in one step run one at a time, in the order they were asked for, and stop
+ * at the first that fails: the page is no longer the one the rest were planned on. Anthropic's
+ * pattern for a computer's batch of actions; see `shared/tool-steps.ts`.
+ */
+test("a step's computer actions run in order and stop at the first that fails", async () => {
+  const typed: string[] = [];
+  const gateway = createComputerGateway({
+    provider: {
+      name: "test",
+      isolation: "per-person",
+      locate: async () => "http://computer:4100",
+      status: async (seat) => ({ botId: seat.botId, state: "ready" }),
+      list: async () => [],
+      stop: async () => ({ wasRunning: true }),
+      reset: async () => ({ cleared: true }),
+    },
+    auditStore: { insert: async () => {} },
+    policy: () => ({ mode: "enforce", allow: ["true"], deny: [] }),
+    fetchImpl: (async (url: string | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/snapshot")
+        return Response.json({
+          snapshotId: 7,
+          url: "https://crm.example/accounts/new",
+          title: "New account",
+          truncated: false,
+          elements: ["Account name", "Website", "Headquarters"].map(
+            (name, index) => ({ ref: `e${index + 1}`, role: "textbox", name }),
+          ),
+        });
+      if (path === "/type") {
+        const { ref } = JSON.parse(String(init?.body)) as { ref: string };
+        typed.push(ref);
+        // The Website field went away under the overlay the first field opened.
+        if (ref === "e2")
+          return Response.json(
+            {
+              error:
+                "locator.fill: Timeout 2000ms exceeded waiting for locator('aria-ref=e2')",
+            },
+            { status: 500 },
+          );
+        return Response.json({
+          action: "type",
+          url: "https://crm.example/accounts/new",
+          elapsedMs: 1,
+        });
+      }
+      throw new Error(`Unexpected computer request ${path}`);
+    }) as unknown as typeof fetch,
+  });
+  // The snapshot the Bot read the refs from, a step earlier.
+  await gateway.snapshot(botSeat("bot"));
+  const fields = [
+    ["type-name", "e1", "Halvorsen Freight"],
+    ["type-website", "e2", "halvorsen.com"],
+    ["type-headquarters", "e3", "Oslo"],
+  ] as const;
+  const remote = remoteTurn((input, index) =>
+    lifecycle(
+      input,
+      index === 0
+        ? step(
+            "fill-form",
+            fields.map(([id, ref, text]) => ({
+              id,
+              name: "computer_type",
+              args: { ref, snapshotId: 7, text },
+            })),
+          )
+        : reply("The Website field was not filled. I'll look again."),
+    ),
+  );
+  const { run, persisted } = turnHarness(remote.agent, async () =>
+    headless.createHeadlessComputerTools({
+      gateway,
+      seat: botSeat("bot"),
+      actor: { id: "owner", userId: "owner" },
+    }),
+  );
+
+  await run();
+
+  // In the order asked for, and nothing after the one that failed reached the computer.
+  expect(typed).toEqual(["e1", "e2"]);
+  const answers = answersIn(remote.requests[1]);
+  expect(JSON.parse(String(answers["type-name"]?.content))).toMatchObject({
+    ok: true,
+  });
+  expect(String(answers["type-website"]?.error)).toContain(
+    "not on the page any more",
+  );
+  // Answered, so every call still has its result, and as an error the model reads.
+  expect(answers["type-headquarters"]).toEqual({
+    content: NOT_RUN_AFTER_FAILURE,
+    error: NOT_RUN_AFTER_FAILURE,
+  });
+  expect(NOT_RUN_AFTER_FAILURE).toBe(
+    "Not run: an earlier browser action in this step failed. Look at the page again before trying it.",
+  );
+  expect(
+    persisted.filter((event) => event.type === EventType.TOOL_CALL_RESULT),
+  ).toHaveLength(3);
+});
+
+/**
+ * A chart asked for in the same step as the search meant to fill it is not recorded, and the Bot is
+ * told to draw it from the results. Drawn in the next step, on its own, it is recorded as before.
+ * Seen on Claude with General Assistant; see `shared/tool-steps.ts`.
+ */
+test("a headless turn records no component asked for beside a read, and records it drawn after", async () => {
+  const chart = {
+    title: "AI initiatives this quarter",
+    basis: "read",
+    sources: [{ title: "Search results" }],
+    points: [{ label: "Halvorsen Freight", value: 1200 }],
+  };
+  const table = {
+    title: "Companies",
+    columns: ["Company", "Employees"],
+    rows: [{ cells: ["Halvorsen Freight", 1200] }],
+  };
+  const remote = remoteTurn((input, index) =>
+    lifecycle(
+      input,
+      index === 0
+        ? step("searched-and-drew", [
+            {
+              id: "search",
+              name: "web_search",
+              args: { query: "logistics AI initiatives" },
+              // The Bot's own search, answered by its runtime in the same run.
+              answered: "Halvorsen Freight announced route planning with AI.",
+            },
+            { id: "chart-early", name: "showBarChart", args: chart },
+            { id: "table-early", name: "showTable", args: table },
+          ])
+        : index === 1
+          ? step("drew", [
+              { id: "chart", name: "showBarChart", args: chart },
+              { id: "table", name: "showTable", args: table },
+            ])
+          : reply("Here are the companies."),
+    ),
+  );
+  const store = {
+    listForAgent: async () =>
+      ["showBarChart", "showTable"].map((name) => ({
+        name,
+        description: `${name}, as published.`,
+      })),
+    decide: async () => ({ allowed: true, description: "" }),
+    mayCall: async () => true,
+  } as unknown as ComponentStore;
+  const { run } = turnHarness(remote.agent, async () =>
+    createHeadlessComponentTools({
+      store,
+      botId: "bot",
+      ownerUserId: "owner",
+      initiator: { kind: "routine", id: "routine" },
+    }),
+  );
+
+  await expect(run()).resolves.toEqual({
+    replyText: "Here are the companies.",
+  });
+
+  expect(remote.requests).toHaveLength(3);
+  const early = answersIn(remote.requests[1]);
+  expect(early["chart-early"]).toEqual({
+    content: NOT_DRAWN,
+    error: NOT_DRAWN,
+  });
+  expect(early["table-early"]).toEqual({
+    content: NOT_DRAWN,
+    error: NOT_DRAWN,
+  });
+  expect(NOT_DRAWN).toBe(
+    "Not drawn: you called this in the same step as other tools, before their results came back. Draw it now, from those results.",
+  );
+  const drawn = answersIn(remote.requests[2]);
+  expect(drawn.chart?.content).toBe(
+    "The bar chart is saved in this conversation and is drawn when the person opens it.",
+  );
+  expect(drawn.table?.content).toBe(
+    "The sortable table is saved in this conversation and is drawn when the person opens it.",
+  );
 });

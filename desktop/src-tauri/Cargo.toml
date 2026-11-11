@@ -1,6 +1,6 @@
 [package]
 name = "openbot-desktop"
-version = "1.0.0"
+version = "1.0.1"
 description = "OpenBot Desktop"
 edition = "2021"
 rust-version = "1.90"
@@ -26,6 +26,9 @@ shell-updater = []
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# The app's folders for a run with no app around it (the uninstaller's stop), found as Tauri 2 finds
+# them: the `dirs` it already builds. See `headless_local_data_dir` in main.rs.
+dirs = "7"
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -96,7 +99,9 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 
 # Narration on Windows: the SAPI in-process recognizer. See `speech/sapi.rs`. The version Tauri uses.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Media_Speech", "Win32_System_Com", "Data_Xml_Dom", "UI_Notifications", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_Storage_FileSystem"] }
+# `Win32_System_Pipes` and `Win32_Security`: holding Docker's default pipe name while OpenBot's
+# Podman machine starts. See `acquire::start_machine`.
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Media_Speech", "Win32_System_Com", "Data_Xml_Dom", "UI_Notifications", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_Pipes"] }
 # Where WSL keeps a Podman machine's disk, so its drive's free space is checked before Start. See
 # `windows::podman_machine_drive`. The version reqwest already uses.
 windows-registry = "0.6"

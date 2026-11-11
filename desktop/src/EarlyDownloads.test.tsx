@@ -13,6 +13,8 @@ import userEvent from "@testing-library/user-event";
 import type { EarlyDownloads } from "./EarlyDownloads";
 
 let invokeCalls: Array<{ command: string; args?: unknown }> = [];
+/** What the early downloads say once they have looked at the disk, when Install asks. */
+let measured: () => Promise<unknown> = async () => null;
 const downloadListeners = new Set<
   (event: { payload: EarlyDownloads }) => void
 >();
@@ -37,6 +39,8 @@ async function answer(command: string): Promise<unknown> {
       return false;
     case "early_downloads_now":
       return { state: "idle", bytes: 0 };
+    case "early_downloads_measured":
+      return measured();
     // Install and the sign-in stay in progress: the account step is where the person is.
     case "prepare_installation":
     case "sign_in_to_copilotkit":
@@ -77,6 +81,7 @@ afterEach(() => {
   setSystemTime();
   invokeCalls = [];
   downloadListeners.clear();
+  measured = async () => null;
 });
 afterAll(() => GlobalRegistrator.unregister());
 
@@ -107,7 +112,7 @@ test("the big downloads start when the first screen shows, before Install is cli
   await act(async () => {
     view = render(<App />);
   });
-  await view.findByRole("heading", { name: "Set up OpenBot" });
+  await view.findByRole("heading", { name: "Set up OpenBot (self-contained)" });
 
   // Nothing was clicked: the first screen alone started them, for the installation's folder.
   expect(called("start_early_downloads")).toEqual([
@@ -140,7 +145,8 @@ test("the big downloads start when the first screen shows, before Install is cli
   // Install moves on to the CopilotKit sign-in. The row for what is installing in the background
   // carries the download on, in the same words, and its bar goes on from where it was.
   await userEvent.click(view.getByRole("button", { name: "Install" }));
-  await view.findByRole("heading", { name: "Self-contained OpenBot" });
+  // The account step, checking the sign-in, which here never answers.
+  await view.findByRole("heading", { name: "Your OpenBot account" });
   const account = { ...welcome, bytes: 2.0 * GB };
   await said(account);
   await steadied(account);
@@ -159,28 +165,155 @@ test("the big downloads start when the first screen shows, before Install is cli
   expect(called("start_early_downloads")).toHaveLength(1);
 });
 
-test("a disk too full to download to is said plainly, with what is free and what is needed", async () => {
+/** A GB as Windows counts it, and as the account step says its 40 GB. */
+const GIB = 1024 ** 3;
+/** Windows F's figures, from its log: "16096509952 bytes free, 44436190301 needed". */
+const WINDOWS_F_SHORT: EarlyDownloads = {
+  state: "short",
+  bytes: 0,
+  free: 16_096_509_952,
+  needed: 40 * GIB,
+  download: 1_486_517_341,
+};
+
+/**
+ * Windows F, filled to 15.0 GB free: this line said "16 GB of free space, and OpenBot needs about
+ * 44 GB", and the next screen "It needs 40 GB free". Both were the back end's 40 GiB: this one added
+ * the download and counted billions of bytes. It says the 40 and the download apart now, in the GB
+ * Windows shows. And Install was pressable: it built OpenBot's machine at 15 GB free, then the next
+ * step stopped for space with less free than before. Install waits for room now.
+ */
+test("a disk too full to download to says what is free and what is needed, and Install waits for room", async () => {
   let view!: ReturnType<typeof render>;
   await act(async () => {
     view = render(<App />);
   });
-  await view.findByRole("heading", { name: "Set up OpenBot" });
-  await said({
-    state: "short",
-    bytes: 0,
-    free: 14.6 * GB,
-    needed: 44.3 * GB,
-  });
+  await view.findByRole("heading", { name: "Set up OpenBot (self-contained)" });
+  await said(WINDOWS_F_SHORT);
   const line = view.getByRole("status");
-  expect(line.textContent).toBe(
-    "This computer has 15 GB of free space, and OpenBot needs about 44 GB. Free up some space and the download starts by itself.",
+  // Each figure and its unit are kept on one line.
+  expect(line.textContent).toContain("2\u00a0GB for its download");
+  expect(line.textContent?.replaceAll("\u00a0", " ")).toBe(
+    "This computer has 15 GB of free space, and OpenBot needs 40 GB plus about 2 GB for its download. Free up some space and the download starts by itself.",
   );
   // Nothing is downloading, so nothing spins and there is no bar.
   expect(line.querySelector(".step-spinner")).toBeNull();
   expect(view.queryByRole("progressbar")).toBeNull();
+  const install = view.getByRole("button", {
+    name: "Install",
+  }) as HTMLButtonElement;
+  expect(install.disabled).toBe(true);
+  await userEvent.click(install);
+  expect(called("prepare_installation")).toEqual([]);
+  expect(
+    view.getByRole("heading", { name: "Set up OpenBot (self-contained)" }),
+  ).toBeTruthy();
+  // Space was freed: the download starts by itself, and Install is there again.
+  await said({ state: "downloading", bytes: 0 });
+  expect(install.disabled).toBe(false);
 });
 
-test("the line says what is known, and only the first screen says when it is all downloaded", () => {
+/**
+ * Install pressed in the seconds before the downloads have looked at the disk: it asks them, and on
+ * a disk too full it stays on this screen, says why, and builds nothing.
+ */
+test("an Install pressed before the disk is looked at builds nothing on a disk too full", async () => {
+  let looked!: (now: EarlyDownloads) => void;
+  measured = () => new Promise((resolve) => (looked = resolve));
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(<App />);
+  });
+  await view.findByRole("heading", { name: "Set up OpenBot (self-contained)" });
+  const install = view.getByRole("button", {
+    name: "Install",
+  }) as HTMLButtonElement;
+  expect(install.disabled).toBe(false);
+  await userEvent.click(install);
+  // Waiting for the answer, it can't be pressed twice.
+  expect(install.disabled).toBe(true);
+  await act(async () => {
+    for (const listener of downloadListeners)
+      listener({ payload: WINDOWS_F_SHORT });
+    looked(WINDOWS_F_SHORT);
+  });
+  expect(called("prepare_installation")).toEqual([]);
+  expect(
+    view.getByRole("heading", { name: "Set up OpenBot (self-contained)" }),
+  ).toBeTruthy();
+  expect(
+    view.getByRole("status").textContent?.replaceAll("\u00a0", " "),
+  ).toContain("This computer has 15 GB of free space");
+  expect(install.disabled).toBe(true);
+});
+
+/**
+ * Behind the account step the downloads pause while it asks the person to free space: the line says
+ * so, and the background row gets no bar that stopped.
+ */
+test("a download paused for space says so, with no bar and no time running on", async () => {
+  const { earlyDownload } = await import("./EarlyDownloads");
+  const paused = {
+    state: "downloading" as const,
+    bytes: 0.6 * GB,
+    size: 1.5 * GB,
+    paused: true,
+  };
+  expect(earlyDownloadsSaid(paused, false)).toBe(
+    "The download is paused until there's enough free space. It carries on by itself.",
+  );
+  expect(earlyDownload(paused)).toBeNull();
+  expect(earlyDownload({ ...paused, paused: false })).not.toBeNull();
+
+  // Install's own pulls hold too: its images row is paused (`report_holding_for_room`). The
+  // background row says so in its badge, where it said "Step 2 of 4 · 0s elapsed".
+  const { installingBehind, SetupProgress } = await import("./SetupProgress");
+  const row = installingBehind({
+    steps: [
+      { step: "engine", ok: true, detail: "", running: false },
+      {
+        step: "images",
+        ok: true,
+        running: true,
+        paused: true,
+        detail: earlyDownloadsSaid(paused, false) ?? "",
+      },
+    ],
+    installing: true,
+    installed: false,
+    since: Date.now() - 95_000,
+    backEnd: {
+      at: null,
+      running: false,
+      stopped: false,
+      ready: false,
+      detail: null,
+      download: null,
+      since: null,
+    },
+    early: earlyDownload(paused),
+  });
+  expect(row?.paused).toBe(true);
+  expect(row?.downloads).toBeUndefined();
+  const view = render(
+    <SetupProgress steps={row ? [row] : []} label="Background install" />,
+  );
+  const item = within(
+    view.getByRole("listitem", {
+      name: "Installing OpenBot in the background",
+    }),
+  );
+  expect(item.getByText("Step 2 of 4 · Paused")).toBeTruthy();
+  expect(item.queryByText(/elapsed/)).toBeNull();
+  expect(view.container.querySelector(".step-spinner")).toBeNull();
+  expect(
+    item.getByText(
+      "The download is paused until there's enough free space. It carries on by itself.",
+    ),
+  ).toBeTruthy();
+});
+
+test("the line says what is known, and nothing once it is all downloaded", () => {
   const downloading = {
     state: "downloading" as const,
     bytes: GB,
@@ -196,8 +329,9 @@ test("the line says what is known, and only the first screen says when it is all
   expect(
     earlyDownloadsSaid(downloading, false, { left: null, slow: true }),
   ).toBe("Downloading OpenBot. Taking longer than usual, still working.");
+  // Done says nothing, on the first screen too: Install is the next step either way.
   expect(earlyDownloadsSaid({ state: "done", bytes: GB, size: GB }, true)).toBe(
-    "OpenBot is downloaded and ready to install.",
+    null,
   );
   expect(
     earlyDownloadsSaid({ state: "done", bytes: GB, size: GB }, false),

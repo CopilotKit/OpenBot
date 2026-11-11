@@ -9,12 +9,14 @@ import {
   IconLogin2,
   IconMessages,
   IconSchool,
+  IconSparkles,
   IconUsers,
   IconUsersGroup,
 } from "@tabler/icons-react";
 import { Link, type LinkProps } from "@tanstack/react-router";
 import type * as React from "react";
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
+import { BrandName } from "@/components/edition/brand-name";
 import { BusinessOrb } from "@/components/edition/business-orb";
 import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { buttonVariants } from "@/components/ui/button";
@@ -63,6 +65,15 @@ export const TEAM_FEATURE_GROUPS: readonly {
         icon: IconAdjustments,
       },
       { title: "Rules every Bot follows", icon: IconListCheck },
+      /*
+       * Boundaries, team approval rules, auto-review guidance, permissions, the network allowlist
+       * and one Bot's app actions are each described in words on their Admin screen, and each
+       * replays the result over recorded activity before it is saved.
+       */
+      {
+        title: "Policies in plain English, tested on past activity",
+        icon: IconSparkles,
+      },
       { title: "Governance for everyone", icon: IconChecks },
       { title: "A full audit trail, with export", icon: IconHistory },
     ],
@@ -98,9 +109,18 @@ export function TeamFeaturesDialog() {
   const isOpen = useSyncExternalStore(subscribe, () => open);
   // Closed when the layout holding it goes (signing out), so it never reopens by itself later.
   useEffect(() => () => setOpen(false), []);
+  /*
+   * Focus starts on the list's own column. Left to the default, it lands on Talk to us, the first
+   * thing to tab to, and the column scrolls down to it: the dialog opened past its own title
+   * wherever the list is taller than the window.
+   */
+  const list = useRef<HTMLDivElement>(null);
   return (
     <Dialog onOpenChange={setOpen} open={isOpen}>
-      <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-5xl">
+      <DialogContent
+        className="gap-0 overflow-hidden p-0 sm:max-w-5xl"
+        initialFocus={list}
+      >
         <div className="grid min-h-0 sm:grid-cols-[2fr_3fr]">
           {/*
            * OpenBot's mark over the orb and its field, which fill the panel. Only where there is room
@@ -110,13 +130,17 @@ export function TeamFeaturesDialog() {
             <BusinessOrb />
             <div className="relative flex items-center gap-2 font-medium">
               <OpenBotLogo className="size-7" />
-              OpenBot
+              <BrandName>OpenBot</BrandName>
             </div>
           </div>
-          <div className="flex min-h-0 flex-col gap-6 overflow-y-auto p-6 sm:p-8">
+          <div
+            className="flex min-h-0 flex-col gap-6 overflow-y-auto p-6 outline-none sm:p-8"
+            ref={list}
+            tabIndex={-1}
+          >
             <DialogHeader>
               <DialogTitle className="text-xl">
-                OpenBot for Business
+                <BrandName>OpenBot for Business</BrandName>
               </DialogTitle>
               <DialogDescription>
                 Everything you have here, on prem and for a whole team.

@@ -1,24 +1,30 @@
-import type { ReactNode } from "react";
-import { EarlyDownloadsLine } from "./EarlyDownloads";
+import { type ReactNode, useState } from "react";
+import {
+  EarlyDownloadsLine,
+  earlyDownloadsMeasured,
+  useEarlyDownloads,
+} from "./EarlyDownloads";
 import { ExternalLink } from "./ExternalLink";
 
-/** What OpenBot Desktop sends, and what it never does, in full. */
-export const USAGE_DATA_DOC =
-  "https://github.com/CopilotKit/OpenBot/blob/main/desktop/TELEMETRY.md";
+/** OpenBot's one booking link. */
+export const BOOK_A_DEMO = "https://open.bot/business";
 
 /**
  * What OpenBot is, before it asks for anything.
  *
- * Few words on purpose. The person here was sent a link by their IT department and has not decided
- * to care yet: they need to know what this is, that it will not ask them for anything technical,
- * and where the button is. Install sets up OpenBot and CopilotKit Intelligence on this computer;
- * everything else waits for a screen that needs it.
- *
- * The usage-data notice is here because this is the first screen, and the CopilotKit sign-in that
- * links the data to an account is the next. Settings > General turns it off.
+ * Three short paragraphs, in this order: what this OpenBot is (self-contained, all on this
+ * computer, its backend too), how long setup takes, and where OpenBot for Business runs, with the
+ * one booking link. Usage data is not said here: it is the last screen's choice
+ * (`UsageDataChoice`).
  *
  * The big downloads start while this screen shows, before Install is clicked, and its line says how
- * far they are (`EarlyDownloadsLine`).
+ * far they are (`EarlyDownloadsLine`). Once they are done it says nothing: Install is the next step
+ * either way.
+ *
+ * On a disk too full for OpenBot, Install waits with the line that says so, and is there once the
+ * download starts by itself. On Windows F it was pressable at 15 GB free: it built OpenBot's machine,
+ * then the next step stopped for space, with less free than before. An Install pressed before the
+ * downloads have looked at the disk asks them first (`earlyDownloadsMeasured`).
  */
 export function Welcome({
   onInstall,
@@ -28,29 +34,48 @@ export function Welcome({
   /** A failure from setup itself, shown inside this card rather than under it. */
   failure?: ReactNode;
 }) {
+  const downloads = useEarlyDownloads();
+  const [checking, setChecking] = useState(false);
+  const short = downloads?.state === "short";
+  const install = () => {
+    setChecking(true);
+    void earlyDownloadsMeasured().then((now) => {
+      setChecking(false);
+      if (now?.state !== "short") onInstall();
+    });
+  };
   return (
     <div className="sheet">
       <div className="lockup">
         <div className="orb" aria-hidden="true" />
-        <span>OpenBot</span>
+        <span>
+          OpenBot
+          <sup className="trademark" aria-hidden="true">
+            ™
+          </sup>
+        </span>
       </div>
-      <h1>Set up OpenBot</h1>
+      <h1>Set up OpenBot (self-contained)</h1>
       <p className="lede big">
-        This installs OpenBot on this computer. The first setup takes about 10
+        This version of OpenBot is fully self-contained and runs entirely on
+        your computer, including the OpenBot backend.
+      </p>
+      <p className="lede big">
+        Depending on your internet speed, setup can take between 1 and 10
         minutes.
       </p>
+      <p className="lede big">
+        In production, <strong>OpenBot for Business</strong> runs on your own
+        infrastructure with Kubernetes, or on OpenBot Cloud.{" "}
+        <ExternalLink href={BOOK_A_DEMO}>Book a demo</ExternalLink> for early
+        access.
+      </p>
       <div className="row">
-        <button type="button" onClick={onInstall}>
+        <button type="button" disabled={short || checking} onClick={install}>
           Install
         </button>
       </div>
       <EarlyDownloadsLine firstScreen />
-      <p className="footnote">
-        OpenBot sends CopilotKit usage data, linked to your CopilotKit account.
-        It never sends your conversations, files or keys. You can turn this off
-        in Settings.{" "}
-        <ExternalLink href={USAGE_DATA_DOC}>What OpenBot sends</ExternalLink>
-      </p>
       {failure}
     </div>
   );

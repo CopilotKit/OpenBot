@@ -288,7 +288,11 @@ export function WindowsBlocker({
  * Also what OpenBot opens on while that restart is still owed, so a feature that reads as on but is
  * not running yet never lets setup carry on into a Docker that cannot start.
  */
-export function WindowsRestart() {
+export function WindowsRestart({
+  lede = "Windows Subsystem for Linux is set up. Windows needs to restart before OpenBot can use it. OpenBot opens again after you sign back in.",
+}: {
+  lede?: string;
+}) {
   const [restarting, setRestarting] = useState(false);
   const [failure, setFailure] = useState<Problem | null>(null);
   return (
@@ -296,10 +300,7 @@ export function WindowsRestart() {
       <div className="sheet blocker-sheet">
         <p className="steps-of">Before OpenBot can start</p>
         <h1>Restart Windows to finish</h1>
-        <p className="lede">
-          Windows Subsystem for Linux is set up. Windows needs to restart before
-          OpenBot can use it. OpenBot opens again after you sign back in.
-        </p>
+        <p className="lede">{lede}</p>
         {restarting && <StatusLine>Restarting Windows…</StatusLine>}
         {failure && <Failure problem={failure} />}
         <div className="row">

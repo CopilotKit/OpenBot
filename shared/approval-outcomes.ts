@@ -69,6 +69,14 @@ export const NOT_RUN_WHILE_WAITING = notRun(
 );
 
 /**
+ * A computer action asked for in the same step as one that failed before it, which was not run. The
+ * page is no longer the one the Bot planned the rest of the step on, so it looks again first. See
+ * `shared/tool-steps.ts`.
+ */
+export const NOT_RUN_AFTER_FAILURE =
+  "Not run: an earlier browser action in this step failed. Look at the page again before trying it.";
+
+/**
  * An approved step that the check just before it ran turned away. `why` is one sentence, with its
  * full stop, written for whoever reads it ("The rule that allowed this was removed before it ran.").
  */
@@ -91,6 +99,7 @@ const FOR_PERSON = new Map<string, string>([
     NOT_RUN_WHILE_WAITING,
     "Not done. The Bot stopped to wait for you on another step.",
   ],
+  [NOT_RUN_AFTER_FAILURE, "Not done. A step before it didn't work."],
   [
     OUTCOME_UNKNOWN,
     "It started, but OpenBot can't tell whether it finished. It wasn't run again.",

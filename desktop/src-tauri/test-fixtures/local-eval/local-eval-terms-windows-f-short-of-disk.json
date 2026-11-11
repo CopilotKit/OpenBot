@@ -1,0 +1,11 @@
+{
+  "status": "engine-too-small",
+  "podman": true,
+  "cpu": false,
+  "memory": false,
+  "disk": true,
+  "wsl": true,
+  "drive": "C:",
+  "diskGb": "13.2",
+  "freeOnDrive": true
+}

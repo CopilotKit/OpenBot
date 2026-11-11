@@ -11,8 +11,8 @@ In the code and the database a Bot is often a "coworker" or an "agent", and a co
 
 | Piece                | Table                           | Purpose                                                                                  |
 | -------------------- | ------------------------------- | ---------------------------------------------------------------------------------------- |
-| Runtime agent        | `agents`                        | Type (built-in, remote AG-UI or remote Mastra), endpoint or prompt, optional key reference. |
-| Profile              | `agent_profiles`                | Name, title, role, avatar seed, owner, visibility, and soft deletion.                    |
+| Runtime agent        | `agents`                        | Name, type (built-in, remote AG-UI or remote Mastra), endpoint or prompt, optional key reference. |
+| Profile              | `agent_profiles`                | Title, role, avatar seed, owner, visibility, isolation, and soft deletion.               |
 | Personal roster      | `agent_preferences`             | Per-user hidden and pinned state.                                                        |
 | Team publication     | `team_bot_publications`         | A Bot its owner has published to the whole team or to named people and groups.          |
 | Channel              | `channels`                      | Conversation membership and coworker binding.                                            |
@@ -22,21 +22,32 @@ Package-provided Bots are public and ownerless. A Bot a person makes is owned by
 
 ## Standing role
 
-A remote Bot receives a system message derived from its title and role description:
+A remote Bot receives a system message derived from its name, title and role description
+(`standingRoleMessage` in `server/src/copilot.ts`):
 
 ```text
-You are Expense Manager, Finance Operations.
+<identity>
+You are Expense Manager, Finance Operations. People call you "Expense Manager" or "the Expense Manager Bot". A request to ask, message or hand work to Expense Manager is a request to you, so answer it yourself.
+</identity>
 
+<role>
 Review receipts, categorize expenses, and prepare reimbursement reports.
 
-This standing role applies in every channel. Treat channel messages as task-specific instructions within it.
+Your role applies in every conversation, and each message sets the task within it. What the person says in the conversation comes before anything remembered about them.
+</role>
 ```
 
-A further provenance block is appended by the deployment rather than the package: it tells the Bot
-to say where each answer came from, to mark plainly anything it answers from its own knowledge
-rather than from a source, and never to present the latter as the former. A second block tells it
-how to read the untrusted-content envelope its tool results carry. Being deployment-wide, both
-cannot be forgotten from the next Bot somebody adds.
+When OpenBot knows the framework behind the endpoint, the identity block also names it.
+
+The deployment, not the package, then appends the working rules every Bot gets, each in a tag of
+its own (`workingGuidance` in `shared/bot-prompt.ts`): how to work, when to ask, where answers come
+from, how to format an answer, when to use subagents, and how to read the untrusted-content envelope
+its tool results carry. The sources block tells the Bot to say where each answer came from and to
+mark plainly anything it answers from its own knowledge rather than from a source. The asking block
+tells it that, for the apps and tools OpenBot gives it, OpenBot asks the person before a delete,
+send, share, post or payment unless they already allowed that kind of action, and that it should
+ask itself before a tool of its own does something that cannot be undone. Being deployment-wide,
+none of these can be forgotten from the next Bot somebody adds.
 
 The message is ordinary AG-UI system content, so it works with any AG-UI-compatible backend. Editing the role affects the next run.
 
@@ -47,7 +58,7 @@ The message is ordinary AG-UI system content, so it works with any AG-UI-compati
 | `private`  | Owner and administrators.   |
 | `public`   | Everyone in the deployment. |
 
-Filtering happens in server/database queries. Package-provided Bots cannot be edited or deleted through the product.
+Filtering happens in server/database queries. Package-provided Bots cannot be edited or deleted through the product, except the personal edition's starter Personal Assistant, which its person can edit.
 
 An owner can also publish a Bot as a Team Bot, to everybody signed in or to named people and groups
 (`/api/team-bots`, the Bot's **Sharing** page). Publishing is a separate, revocable record; the Bot's own
@@ -56,7 +67,9 @@ description and a name other than a placeholder such as "New Bot".
 
 A Team Bot reaches a Personal app through its **owner's own account** when the owner has connected
 it — for everyone it is published to, triggers included — and otherwise through the asker's own
-account, with their consent. A Shared app is the governed alternative: one account that belongs to
+account, with their consent. That holds for an app an administrator granted the Bot. An app the
+owner gave the Bot themselves always uses the asker's own account, so publishing a Bot never hands
+teammates the owner's account. A Shared app is the governed alternative: one account that belongs to
 the deployment, with an administrator approving who may use it through each Bot. See
 [Composio → Shared apps](plugins/composio.md#shared-apps).
 
@@ -86,10 +99,11 @@ That is `agent-langgraph`, which runs a real framework and its own tool loop. Th
 `4200` hand-writes the protocol and leaves the loop to whatever is watching, so it is a reference
 rather than something to build a deployment on.
 
-The URL is optional. Set it with `MANAGED_AGENT_TOKEN`, or leave it unset: Bots made in the product
-then need their own endpoint, and a package Bot whose endpoint expands to nothing is omitted rather
-than registered against a missing host. A leftover token with no URL is ignored. Package-provided
-Bots otherwise use their own `agents.yaml` configuration.
+The URL is optional. Set it with `MANAGED_AGENT_TOKEN`, or leave it unset: a Bot made in the
+product with no endpoint of its own then runs inside the server as a built-in Bot on its role
+description, and a package Bot whose endpoint expands to nothing is omitted rather than registered
+against a missing host. A leftover token with no URL is ignored. Package-provided Bots otherwise use
+their own `agents.yaml` configuration.
 
 ## Register an external AG-UI agent
 
@@ -125,7 +139,7 @@ and, in the team edition, in Admin:
 
 - browser and file actions go through the computer gateway policy;
 - components are published deployment-wide and can be withheld per Bot;
-- app (MCP) tools are granted per Bot by administrators;
+- app and MCP tools are granted per Bot by administrators, or by a Bot's owner for an app an administrator opened to owners;
 - personal skills can be attached only to Bots the author owns;
 - deployment skills are managed by administrators.
 

@@ -38,6 +38,7 @@
 //!   OpenBot installs and tests (`install::PODMAN`).
 
 use std::fmt;
+use std::time::{Duration, Instant};
 
 use crate::engine::{Address, Engine, StepLine};
 use crate::problem::Problem;
@@ -296,12 +297,23 @@ pub trait Updates {
     fn update_podman(&mut self, progress: &mut dyn FnMut(StepLine)) -> Result<(), Problem>;
     fn place_compose(&mut self, progress: &mut dyn FnMut(StepLine)) -> Result<(), Problem>;
     fn update_docker_desktop(&mut self, progress: &mut dyn FnMut(StepLine)) -> Result<(), Problem>;
+    /// The engine answers on the connection OpenBot uses, asked until `within` is up, or why not.
+    /// For a Podman machine that includes the Docker API Compose uses (`acquire::engine_answers`).
+    fn answers(&mut self, within: Duration) -> Result<(), String>;
+    /// Stop and start the Podman machine behind that connection, with what was running in it.
+    fn restart(&mut self) -> Result<(), String>;
 }
+
+/// How long an engine has to answer once it has been updated or started again. `machine start`
+/// returns once the machine's API pipe or socket is there, so this is a bound, not a wait.
+pub const ANSWER_WITHIN: Duration = Duration::from_secs(60);
 
 /// How `ensure` ended, when it did not fail.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Checked {
     NewEnough(Readings),
+    /// New enough, and its machine had to be stopped and started before it answered.
+    Restarted(Readings),
     /// What was updated, for the step row, and the versions now.
     Updated {
         said: String,
@@ -309,11 +321,21 @@ pub enum Checked {
     },
 }
 
-/// The engine new enough to run OpenBot: checked, updated when it is not, and checked again.
-///
-/// The second check is the point. An update that reported success and left the old version in use
-/// (a second Podman earlier on PATH, a Docker Desktop that did not restart) would otherwise reach
-/// Compose and fail there, with the error this exists to prevent.
+/// The row's line while OpenBot stops and starts a Podman machine whose API does not answer.
+pub fn restarting_line() -> StepLine {
+    StepLine::here("Restarting the software OpenBot runs on.")
+}
+
+/**
+The engine new enough to run OpenBot, and answering: checked, updated when it is not, and checked
+again.
+
+The second check is the point. An update that reported success and left the old version in use (a
+second Podman earlier on PATH, a Docker Desktop that did not restart) would otherwise reach Compose
+and fail there, with the error this exists to prevent. So is the last one, that the engine answers:
+a Podman update read 6.1.1 and said "updated" on a live Windows run while the person's machine had
+lost its Docker API, and every pull after it failed (see `answering`).
+*/
 pub fn ensure(
     engine: Engine,
     os: &str,
@@ -323,7 +345,12 @@ pub fn ensure(
 ) -> Result<Checked, Problem> {
     let before = updates.read();
     let said = match decide(engine, &before, os, arch) {
-        Verdict::NewEnough => return Ok(Checked::NewEnough(before)),
+        Verdict::NewEnough => {
+            return Ok(match answering_now(engine, os, updates, progress)? {
+                false => Checked::NewEnough(before),
+                true => Checked::Restarted(before),
+            });
+        }
         Verdict::CannotUpdate(problem) => return Err(problem),
         Verdict::UpdatePodman { podman, compose } => {
             log::info!(
@@ -355,6 +382,7 @@ pub fn ensure(
     if decide(engine, &now, os, arch) != Verdict::NewEnough {
         return Err(still_too_old(engine, &before, &now));
     }
+    answering(engine, true, updates, progress)?;
     log::info!(
         "[engine] updated: {} (was {})",
         now.said(engine),
@@ -364,6 +392,83 @@ pub fn ensure(
         said: said.to_string(),
         now,
     })
+}
+
+/**
+The engine answers, its machine stopped and started once when it does not. Whether it was.
+
+Asked at every check on a Mac or a PC that runs Podman, not only after an update. A Podman machine
+can answer `podman` over SSH while the Docker API Compose uses has gone (see `acquire`), and an
+update that left it so read as new enough on every later check: a Try again, or a Quit and Install
+again, failed on the same missing pipe until the person restarted their machine themselves. Docker
+answers through its API already, and is asked again only after it was updated.
+
+Asked once without waiting when nothing was updated, so a healthy engine costs one question. Only
+the machine behind OpenBot's own connection is restarted, and only once: an engine that still does not
+answer is the person's failure to see, with Try again, which runs this again.
+*/
+fn answering(
+    engine: Engine,
+    updated: bool,
+    updates: &mut dyn Updates,
+    progress: &mut dyn FnMut(StepLine),
+) -> Result<bool, Problem> {
+    let first = match updates.answers(if updated {
+        ANSWER_WITHIN
+    } else {
+        Duration::ZERO
+    }) {
+        Ok(()) => return Ok(false),
+        Err(why) => why,
+    };
+    if engine == Engine::Docker {
+        return Err(not_answering(engine, updated, first));
+    }
+    log::warn!("[engine] the engine does not answer ({first}); stopping and starting its machine");
+    progress(restarting_line().logged(format!(
+        "The Podman machine does not answer ({first}); podman machine stop, then start."
+    )));
+    if let Err(error) = updates.restart() {
+        return Err(not_answering(
+            engine,
+            updated,
+            format!("{first}; restarting its machine: {error}"),
+        ));
+    }
+    updates
+        .answers(ANSWER_WITHIN)
+        .map(|()| true)
+        .map_err(|again| {
+            not_answering(
+                engine,
+                updated,
+                format!("{first}; after its machine was restarted: {again}"),
+            )
+        })
+}
+
+/// `answering`, where nothing was updated: at every check (`ensure`), and when OpenBot's back end is
+/// about to be asked (`wake_engine`), whose own check says only that Docker is unavailable. Only a
+/// Podman machine on macOS or Windows is asked. Whether it was restarted.
+pub fn answering_now(
+    engine: Engine,
+    os: &str,
+    updates: &mut dyn Updates,
+    progress: &mut dyn FnMut(StepLine),
+) -> Result<bool, Problem> {
+    if engine != Engine::Podman || (os != "macos" && os != "windows") {
+        return Ok(false);
+    }
+    answering(engine, false, updates, progress)
+}
+
+fn not_answering(engine: Engine, updated: bool, detail: String) -> Problem {
+    let said = match (engine, updated) {
+        (Engine::Podman, true) => "OpenBot updated Podman, but Podman isn't answering. Try again.",
+        (Engine::Docker, true) => "OpenBot updated Docker, but Docker isn't answering. Try again.",
+        (_, false) => "The software OpenBot runs on isn't answering. Try again.",
+    };
+    Problem::with(said, detail)
 }
 
 fn still_too_old(engine: Engine, before: &Readings, now: &Readings) -> Problem {
@@ -412,7 +517,10 @@ impl Updates for OnThisMachine<'_> {
 
     fn place_compose(&mut self, progress: &mut dyn FnMut(StepLine)) -> Result<(), Problem> {
         progress(
-            StepLine::here("Updating the software OpenBot runs on.").logged(format!(
+            StepLine::here(
+                "Part of the software OpenBot runs on is too old, so OpenBot is updating it.",
+            )
+            .logged(format!(
                 "Compose is older than {COMPOSE}; placing Compose {} in front of it.",
                 crate::install::COMPOSE
             )),
@@ -422,6 +530,32 @@ impl Updates for OnThisMachine<'_> {
 
     fn update_docker_desktop(&mut self, progress: &mut dyn FnMut(StepLine)) -> Result<(), Problem> {
         crate::docker_desktop_update::update(&self.cache, progress, self.back, self.cancelled)
+    }
+
+    fn answers(&mut self, within: Duration) -> Result<(), String> {
+        let until = Instant::now() + within;
+        loop {
+            let why = match crate::acquire::engine_answers(&self.address) {
+                Ok(()) => return Ok(()),
+                Err(why) => why,
+            };
+            if Instant::now() >= until || (self.cancelled)() {
+                return Err(why);
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        }
+    }
+
+    fn restart(&mut self) -> Result<(), String> {
+        // By the name it is reached by, the default connection's included (`machine_reached`).
+        let Some(machine) = crate::acquire::machine_reached(&self.address) else {
+            return Err("no Podman machine to restart".into());
+        };
+        let containers = crate::acquire::running_containers(&machine);
+        if let Err(error) = crate::acquire::stop_machine_named(&machine) {
+            log::info!("[engine] podman machine stop {machine}: {error}");
+        }
+        crate::acquire::start_machine_named(&machine, &containers)
     }
 }
 
@@ -706,11 +840,23 @@ mod tests {
         );
     }
 
+    /// What a Docker client says when a Podman machine's API pipe has gone: Rust's own words for
+    /// opening a pipe that is not there, and the address `acquire::ping_api` names.
+    const PIPE_GONE: &str =
+        "npipe:////./pipe/podman-machine-default: The system cannot find the file specified. (os error 2)";
+
     /// A machine whose engine says each of `readings` in turn, recording what was done to it.
     struct Fake {
         readings: VecDeque<Readings>,
         done: Vec<&'static str>,
         fails: Option<&'static str>,
+        /// Whether its API answers now.
+        api: bool,
+        /// Whether its API answers after its machine is stopped and started.
+        api_after_restart: bool,
+        /// What a Podman update does to the API of the machine it finds running: the MSI took the
+        /// person's `win-sshproxy` with it on a live Windows run.
+        update_takes_the_api: bool,
     }
 
     impl Fake {
@@ -719,6 +865,9 @@ mod tests {
                 readings: readings.into(),
                 done: Vec::new(),
                 fails: None,
+                api: true,
+                api_after_restart: true,
+                update_takes_the_api: false,
             }
         }
 
@@ -742,6 +891,9 @@ mod tests {
             }
         }
         fn update_podman(&mut self, _: &mut dyn FnMut(StepLine)) -> Result<(), Problem> {
+            if self.update_takes_the_api {
+                self.api = false;
+            }
             self.step("update podman")
         }
         fn place_compose(&mut self, _: &mut dyn FnMut(StepLine)) -> Result<(), Problem> {
@@ -749,6 +901,19 @@ mod tests {
         }
         fn update_docker_desktop(&mut self, _: &mut dyn FnMut(StepLine)) -> Result<(), Problem> {
             self.step("update docker desktop")
+        }
+        fn answers(&mut self, _: Duration) -> Result<(), String> {
+            self.done.push("answers");
+            if self.api {
+                Ok(())
+            } else {
+                Err(PIPE_GONE.into())
+            }
+        }
+        fn restart(&mut self) -> Result<(), String> {
+            self.done.push("restart");
+            self.api = self.api_after_restart;
+            Ok(())
         }
     }
 
@@ -775,7 +940,10 @@ mod tests {
         };
         assert_eq!(said, "OpenBot updated Docker.");
         assert_eq!(now, docker_4_76());
-        assert_eq!(fake.done, ["read", "update docker desktop", "read"]);
+        assert_eq!(
+            fake.done,
+            ["read", "update docker desktop", "read", "answers"]
+        );
     }
 
     #[test]
@@ -808,7 +976,14 @@ mod tests {
         assert_eq!(now, all_new);
         assert_eq!(
             fake.done,
-            ["read", "update podman", "read", "place compose", "read"]
+            [
+                "read",
+                "update podman",
+                "read",
+                "place compose",
+                "read",
+                "answers"
+            ]
         );
     }
 
@@ -818,7 +993,10 @@ mod tests {
         let all_new = podman_readings(PODMAN_6_1_1, COMPOSE_5_5_1_SHORT);
         let mut fake = Fake::new(vec![old, all_new]);
         run(Engine::Podman, &mut fake).unwrap();
-        assert_eq!(fake.done, ["read", "update podman", "read", "read"]);
+        assert_eq!(
+            fake.done,
+            ["read", "update podman", "read", "read", "answers"]
+        );
     }
 
     #[test]
@@ -827,6 +1005,136 @@ mod tests {
         let mut fake = Fake::new(vec![old]);
         let problem = run(Engine::Podman, &mut fake).unwrap_err();
         assert!(problem.said.contains("an older copy is still in use"));
+    }
+
+    fn podman_5_8_9() -> Readings {
+        podman_readings(PODMAN_5_8_9, COMPOSE_5_5_1_SHORT)
+    }
+
+    fn podman_6_1_1() -> Readings {
+        podman_readings(PODMAN_6_1_1, COMPOSE_5_5_1_SHORT)
+    }
+
+    fn on_windows(fake: &mut Fake, said: &mut Vec<String>) -> Result<Checked, Problem> {
+        ensure(Engine::Podman, "windows", "x86_64", fake, &mut |line| {
+            said.push(line.said)
+        })
+    }
+
+    /// The live Windows run: Podman 5.8.9 updated to 6.1.1, the person's machine's API pipe gone
+    /// with it. The update brings it back and the check passes; only then is it "updated".
+    #[test]
+    fn a_podman_update_is_updated_only_once_the_engine_answers() {
+        let mut fake = Fake::new(vec![podman_5_8_9(), podman_6_1_1()]);
+        fake.update_takes_the_api = true;
+        let mut said = Vec::new();
+        let Checked::Updated { said: row, now } = on_windows(&mut fake, &mut said).unwrap() else {
+            panic!("Podman is updated, and answers");
+        };
+        assert_eq!(row, "OpenBot updated the software it runs on.");
+        assert_eq!(now, podman_6_1_1());
+        assert_eq!(
+            fake.done,
+            [
+                "read",
+                "update podman",
+                "read",
+                "read",
+                "answers",
+                "restart",
+                "answers"
+            ]
+        );
+        assert_eq!(said, ["Restarting the software OpenBot runs on."]);
+    }
+
+    /// An engine that does not answer after its update is a failure, with Try again, and never
+    /// "updated", whatever version it reads.
+    #[test]
+    fn a_podman_update_whose_engine_does_not_answer_fails_with_try_again() {
+        let mut fake = Fake::new(vec![podman_5_8_9(), podman_6_1_1()]);
+        fake.update_takes_the_api = true;
+        fake.api_after_restart = false;
+        let problem = on_windows(&mut fake, &mut Vec::new()).unwrap_err();
+        assert_eq!(
+            problem.said,
+            "OpenBot updated Podman, but Podman isn't answering. Try again."
+        );
+        let detail = problem.detail.unwrap();
+        assert!(detail.contains(PIPE_GONE), "{detail}");
+        assert!(
+            detail.contains("after its machine was restarted"),
+            "{detail}"
+        );
+        // Restarted once, not round in a loop.
+        assert_eq!(
+            fake.done.iter().filter(|done| **done == "restart").count(),
+            1
+        );
+        // The same for Docker Desktop: no "updated" while Docker does not answer.
+        let mut docker = Fake::new(vec![docker_4_27_2(), docker_4_76()]);
+        docker.api = false;
+        let problem = run(Engine::Docker, &mut docker).unwrap_err();
+        assert_eq!(
+            problem.said,
+            "OpenBot updated Docker, but Docker isn't answering. Try again."
+        );
+        assert!(!docker.done.contains(&"restart"));
+    }
+
+    /// Quit and Install again, or Try again, after the update: Podman reads 6.1.1 and is new
+    /// enough, and its machine still has no API. It is stopped and started once, then answers.
+    #[test]
+    fn a_running_machine_whose_api_has_gone_is_restarted_once_then_answers() {
+        let mut fake = Fake::new(vec![podman_6_1_1()]);
+        fake.api = false;
+        let mut said = Vec::new();
+        assert_eq!(
+            on_windows(&mut fake, &mut said).unwrap(),
+            Checked::Restarted(podman_6_1_1())
+        );
+        assert_eq!(fake.done, ["read", "answers", "restart", "answers"]);
+        assert_eq!(said, ["Restarting the software OpenBot runs on."]);
+
+        // The same before the back end is asked on a relaunch, where no versions are read.
+        let mut fake = Fake::new(vec![podman_6_1_1()]);
+        fake.api = false;
+        assert!(answering_now(Engine::Podman, "macos", &mut fake, &mut |_| {}).unwrap());
+        assert_eq!(fake.done, ["answers", "restart", "answers"]);
+
+        // One that still does not answer is the failure, with Try again, which runs all this again.
+        let mut fake = Fake::new(vec![podman_6_1_1()]);
+        fake.api = false;
+        fake.api_after_restart = false;
+        let problem = on_windows(&mut fake, &mut Vec::new()).unwrap_err();
+        assert_eq!(
+            problem.said,
+            "The software OpenBot runs on isn't answering. Try again."
+        );
+        assert_eq!(fake.done, ["read", "answers", "restart", "answers"]);
+    }
+
+    /// A machine that answers is asked once and left alone. Docker answered through its API to be
+    /// found, and Linux runs no machine, so neither is asked again.
+    #[test]
+    fn an_engine_that_answers_is_asked_once_and_left_alone() {
+        let mut fake = Fake::new(vec![podman_6_1_1()]);
+        let mut said = Vec::new();
+        assert_eq!(
+            on_windows(&mut fake, &mut said).unwrap(),
+            Checked::NewEnough(podman_6_1_1())
+        );
+        assert_eq!(fake.done, ["read", "answers"]);
+        assert!(said.is_empty());
+
+        let mut fake = Fake::new(vec![podman_6_1_1()]);
+        fake.api = false;
+        ensure(Engine::Podman, "linux", "x86_64", &mut fake, &mut |_| {}).unwrap();
+        assert_eq!(fake.done, ["read"]);
+        let mut fake = Fake::new(vec![docker_4_76()]);
+        fake.api = false;
+        run(Engine::Docker, &mut fake).unwrap();
+        assert_eq!(fake.done, ["read"]);
     }
 
     #[test]

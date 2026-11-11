@@ -49,6 +49,11 @@ type Page = {
   getByLabel(text: string, options: { exact: boolean }): Locator;
   evaluate<T, A = undefined>(run: (arg: A) => T, arg?: A): Promise<T>;
   waitForTimeout(ms: number): Promise<void>;
+  screenshot(options: { path: string }): Promise<unknown>;
+  mouse: {
+    move(x: number, y: number): Promise<void>;
+    wheel(deltaX: number, deltaY: number): Promise<void>;
+  };
   close(): Promise<void>;
 };
 type Browser = {
@@ -57,7 +62,12 @@ type Browser = {
   }): Promise<Page>;
   close(): Promise<void>;
 };
-type Chromium = { launch(options: { channel: string }): Promise<Browser> };
+type Chromium = {
+  launch(options: {
+    channel: string;
+    ignoreDefaultArgs?: string[];
+  }): Promise<Browser>;
+};
 
 /**
  * `@tauri-apps/api/core`, scripted. The page's `__fake.download` is what the download poll answers,
@@ -73,7 +83,10 @@ fake.emit = emit;
 const relaunch = location.hash === "#start";
 const signingIn = location.hash === "#signin";
 const installing = location.hash === "#licence-installing";
-const licence = location.hash === "#licence" || installing;
+const pausing = location.hash === "#pause-podman";
+// Signed in already, the CLI taking two seconds to say so, as on Windows G.
+const slowCheck = location.hash === "#licence-slow";
+const licence = location.hash === "#licence" || installing || slowCheck;
 let finishInstall;
 const installed = new Promise((resolve) => (finishInstall = resolve));
 let finishSetUp;
@@ -119,20 +132,34 @@ export async function invoke(command) {
     case "upgrade_and_start":
       return new Promise(() => {});
     case "providers":
+      // As provider::catalogue lists them.
       return [
-        { id: "openai", name: "OpenAI", summary: "Use OpenAI.", logins: ["api-key"], mark: null, caution: null },
+        { id: "openai", name: "OpenAI", summary: "Sign in with ChatGPT Plus, Pro, Team or Enterprise.", logins: ["plan", "api-key"], mark: "openai", caution: null },
+        { id: "anthropic", name: "Anthropic", summary: "Sign in with a Claude Pro, Max, Team or Enterprise plan.", logins: ["plan", "api-key"], mark: "anthropic", caution: null },
+        { id: "google", name: "Google Gemini", summary: "Use a Google AI Studio key or sign in for Gemini API access.", logins: ["endpoint", "oauth"], mark: "google-color", caution: null },
+        { id: "xai", name: "xAI", summary: "Use an xAI API key or sign in to your xAI account.", logins: ["endpoint", "oauth"], mark: "xai", caution: null },
+        { id: "unbiased", name: "Unbiased AI", summary: "Sign in with Unbiased AI to use Pareto, or use an API key.", logins: ["oauth", "endpoint"], mark: "unbiased", caution: null },
         { id: "openai-compatible", name: "Any OpenAI-compatible endpoint", summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.", logins: ["endpoint"], mark: null, caution: null },
       ];
     case "prepare_installation":
+      if (pausing) {
+        // A Mac whose own Podman OpenBot can't use: Install waits for the person's yes.
+        emit("setup:progress", { step: "pause-podman", ok: true, running: true, asks: true, detail: "Your Podman is set up in a way OpenBot can't use. OpenBot will use its own, and pause yours while OpenBot is running. Yours starts again when you quit OpenBot." });
+        return new Promise(() => {});
+      }
       emit("setup:progress", { step: "engine", ok: true, running: false, detail: "The software OpenBot runs on is ready." });
       return installing ? installed : new Promise((resolve) => setTimeout(() => resolve(null), 50));
     case "sign_in_to_copilotkit":
+      if (slowCheck) return new Promise((resolve) => setTimeout(() => resolve({ signedIn: true }), 1500));
       return signingIn ? new Promise(() => {}) : { signedIn: true };
     case "copilotkit_sign_in_page":
       return signingIn
         ? { url: "https://dashboard.copilotkit.ai/cli-auth/device?user_code=WXYZ-2345", userCode: "WXYZ-2345" }
         : null;
+    case "allow_pause_podman":
+      return true;
     case "local_eval_terms":
+      if (pausing) return { status: "engine-not-ready" };
       return { status: "required", accepted: !licence, version: "developer-edition-2026-10-01-web", url: "https://copilotkit.ai/legal/developer-edition", organizationName: "Acme" };
     case "set_up_local_eval":
       return setUp;
@@ -231,11 +258,12 @@ async function open(page: Page, hash = "") {
 
 let browser: Browser;
 let built: Window;
+let chromium: Chromium;
 
 beforeAll(async () => {
   if (!asked) return;
   built = await buildWindow();
-  const { chromium } = (await import(PLAYWRIGHT)) as { chromium: Chromium };
+  ({ chromium } = (await import(PLAYWRIGHT)) as { chromium: Chromium });
   // The CI job installs full Chromium without the headless shell.
   browser = await chromium.launch({ channel: "chromium" });
 });
@@ -264,6 +292,42 @@ async function measure(page: Page) {
  * now: the page is never taller than it, the window is never asked to grow, and a step taller than
  * the room it has scrolls inside its card.
  */
+/**
+ * The longest lines the background row is given, as the native side says them, and whether each
+ * sends the person to another window. Kept in step with `docker_desktop_update.rs`,
+ * `docker_desktop.rs`, `install.rs` and `engine.rs`.
+ */
+const LONGEST_ROW_LINES: [string, boolean][] = [
+  [
+    "The Docker Desktop on this computer is too old for OpenBot, so OpenBot is updating it. Windows will ask for your approval.",
+    true,
+  ],
+  [
+    "The Docker Desktop on this computer is too old for OpenBot, so OpenBot is updating it. Your Mac will ask for your password.",
+    true,
+  ],
+  [
+    "The Docker Desktop on this computer is too old for OpenBot, so OpenBot is updating it. About 25 minutes left.",
+    false,
+  ],
+  [
+    "The Podman on this computer is too old for OpenBot, so OpenBot is updating it. Your Mac will ask for your password.",
+    true,
+  ],
+  [
+    "Docker Desktop is starting in its own window. If it asks you to accept its terms or sign in, do that there. OpenBot comes back when Docker is ready.",
+    true,
+  ],
+  [
+    "Docker Desktop hasn't started yet. It may be waiting for you in its own window. Accept its terms or sign in there, and OpenBot carries on by itself.",
+    true,
+  ],
+  [
+    "Preparing this computer to run OpenBot. If a window asks to install a Windows feature OpenBot needs, allow it. Windows then asks for your approval and a restart.",
+    true,
+  ],
+];
+
 describe.skipIf(!asked)("the window through a first run", () => {
   for (const [width, height] of [
     [1000, 800],
@@ -375,7 +439,7 @@ describe.skipIf(!asked)("a setup step's foot", () => {
           .getByRole("button", { name: "Install", exact: true })
           .click();
         await account
-          .getByRole("heading", { name: "Self-contained OpenBot" })
+          .getByRole("heading", { name: "Get your free license key" })
           .waitFor();
         await account.waitForTimeout(600);
         await background(account);
@@ -472,6 +536,32 @@ describe.skipIf(!asked)(
           await minutesIn(licence);
           await licence.waitForTimeout(1200);
           const seen: (number | undefined)[] = [];
+          // The longest lines that reach this row, each read whole: an engine update with its
+          // prompt (on Windows G they were cut at "...so OpenBo…"), and Docker Desktop's own window
+          // ("...when Docker is…"). Each in full, and the step's button where it was.
+          for (const [detail, elsewhere] of LONGEST_ROW_LINES) {
+            await emit(licence, {
+              step: "engine",
+              ok: true,
+              running: true,
+              elsewhere,
+              detail,
+            });
+            const row = licence.locator(".behind-slot .step .detail", {
+              hasText: detail,
+            });
+            await row.waitFor();
+            expect({
+              detail,
+              cut: await licence.evaluate(() => {
+                const shown = document.querySelector(
+                  ".behind-slot .step .detail",
+                ) as HTMLElement;
+                return shown.scrollHeight > shown.clientHeight + 1;
+              }),
+            }).toEqual({ detail, cut: false });
+            seen.push(await top(licence, "Accept"));
+          }
           // A plain line.
           await emit(licence, {
             step: "images",
@@ -602,7 +692,7 @@ describe.skipIf(!asked)("the background row under the step's button", () => {
         }, name);
       };
       const scenes: Array<[string, string, string]> = [
-        ["#signin", "Self-contained OpenBot", "Cancel"],
+        ["#signin", "Get your free license key", "Cancel"],
         ["#licence", "Accept the license agreement", "Accept"],
         ["", "Connect your AI", "Continue"],
       ];
@@ -628,31 +718,28 @@ describe.skipIf(!asked)("the background row under the step's button", () => {
 
 /*
  * Seen on Windows F: on the first screen the download line shrank about 40px when the download
- * finished ("Downloading OpenBot." with its bar and bytes, then "OpenBot is downloaded and ready to
- * install."), and the usage-data text under it moved up. The line holds its tallest height in every
- * state, and before it says anything.
+ * finished ("Downloading OpenBot." with its bar and bytes, then a line saying it was downloaded),
+ * and the text under it moved up. The line holds its tallest height in every state, and before it
+ * says anything, so the card's bottom edge stays where it is.
  */
 describe.skipIf(!asked)("the first screen while its downloads run", () => {
   for (const [width, height] of [
     [1000, 800],
     [720, 560],
   ] as const) {
-    test(`at ${width}x${height}, the text under the download line stays where it is`, async () => {
+    test(`at ${width}x${height}, the card holds its height under the download line`, async () => {
       const page = await browser.newPage({ viewport: { width, height } });
       try {
         await open(page);
-        await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+        await page
+          .getByRole("heading", { name: "Set up OpenBot (self-contained)" })
+          .waitFor();
         await page.waitForTimeout(400);
-        const usage = async () =>
-          Math.round(
-            (
-              await page
-                .getByText("OpenBot sends CopilotKit usage data", {
-                  exact: false,
-                })
-                .boundingBox()
-            )?.y ?? -1,
-          );
+        // The card's bottom edge: nothing under the line moves, and the card does not shrink.
+        const usage = async () => {
+          const box = await page.locator("main > .sheet").boundingBox();
+          return Math.round(box ? box.y + box.height : -1);
+        };
         const say = async (payload: Record<string, unknown>) => {
           await page.evaluate((sent) => {
             (
@@ -845,3 +932,581 @@ describe.skipIf(!asked)("the Start screen while OpenBot updates", () => {
     }, 30_000);
   }
 });
+
+/*
+ * David's decision for 1.0.2: on a Mac whose own Podman OpenBot can't use, the account step says
+ * OpenBot needs its own and offers to pause theirs, with one button. The card, its button and the
+ * background row are all in the window at the setup window's sizes, without the page growing.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each size for a look.
+ */
+describe.skipIf(!asked)("the offer to pause the person's Podman", () => {
+  for (const [width, height] of [
+    [1016, 839],
+    [720, 560],
+  ] as const) {
+    test(`at ${width}x${height}, the offer and its button are in the window`, async () => {
+      const page = await browser.newPage({ viewport: { width, height } });
+      try {
+        await open(page, "#pause-podman");
+        await page
+          .getByRole("button", { name: "Install", exact: true })
+          .click();
+        await page
+          .getByRole("heading", { name: "Setting up this computer" })
+          .waitFor();
+        const card = page.getByRole("region", {
+          name: "OpenBot needs its own Podman",
+        });
+        await card.waitFor();
+        await page.waitForTimeout(400);
+        const button = page.getByRole("button", { name: "Pause my Podman" });
+        const box = await button.boundingBox();
+        const behind = page.getByRole("listitem", {
+          name: "Installing OpenBot in the background",
+        });
+        const foot = await page.locator(".step-footer").boundingBox();
+        expect(box).not.toBeNull();
+        expect(foot).not.toBeNull();
+        if (box && foot) {
+          // In the window, and not under the step's pinned foot: seen at 720x560, cut in half.
+          expect(box.y).toBeGreaterThanOrEqual(0);
+          expect(box.y + box.height).toBeLessThanOrEqual(foot.y);
+          expect(box.x + box.width).toBeLessThanOrEqual(width);
+        }
+        expect(await behind.textContent()).toContain(
+          "Waiting for you to pause your Podman.",
+        );
+        expect(
+          await page.evaluate(() => ({
+            page: document.documentElement.scrollHeight,
+            window: window.innerHeight,
+          })),
+        ).toEqual({ page: height, window: height });
+        const shots = process.env.OPENBOT_APP_SHOTS;
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/pause-podman-${width}x${height}.png`,
+          });
+        await button.click();
+        expect(
+          await page.evaluate(() =>
+            (
+              globalThis as unknown as { __fake: { calls: string[] } }
+            ).__fake.calls.filter((call) => call === "allow_pause_podman"),
+          ),
+        ).toEqual(["allow_pause_podman"]);
+      } finally {
+        await page.close();
+      }
+    }, 30_000);
+  }
+});
+
+/** Goes from the first screen to "Connect your AI", as a first run does. */
+async function toTheAiStep(page: Page) {
+  await open(page);
+  await page.getByRole("button", { name: "Install", exact: true }).click();
+  await page.getByRole("heading", { name: "Connect your AI" }).waitFor();
+  // The entrance animation settles before anything is measured.
+  await page.waitForTimeout(600);
+}
+
+const PROVIDERS = [
+  "OpenAI",
+  "Anthropic",
+  "Google Gemini",
+  "xAI",
+  "Unbiased AI",
+  "Any OpenAI-compatible endpoint",
+];
+
+/*
+ * Seen on Windows G (the default 1000x800 window): on "Connect your AI" the last providers sat under
+ * the step's pinned foot, Continue and the background row, with a sliver of one tile's edge
+ * showing, and nothing said the list went on. The list has no scroll of its own: the card is the
+ * one scroll area, the list plainly goes on under the foot, and each provider scrolls into view.
+ */
+describe.skipIf(!asked)("Connect your AI with every provider", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const) {
+    test(`at ${width}x${height}, one scroll area, the list plainly goes on under the foot, and every provider scrolls into view`, async () => {
+      const page = await browser.newPage({ viewport: { width, height } });
+      try {
+        await toTheAiStep(page);
+        const look = () =>
+          page.evaluate(() => {
+            const sheet = document.querySelector(
+              "main > .sheet",
+            ) as HTMLElement;
+            const foot = sheet.querySelector(".step-footer") as HTMLElement;
+            const top = sheet.getBoundingClientRect().top;
+            const footTop = foot.getBoundingClientRect().top;
+            const scrolling = [...document.querySelectorAll("*")]
+              .filter((element) => {
+                const { overflowY } = getComputedStyle(element);
+                return (
+                  /auto|scroll/.test(overflowY) &&
+                  element.scrollHeight > element.clientHeight + 1
+                );
+              })
+              .map((element) => element.className);
+            const fade = getComputedStyle(foot, "::before");
+            const tiles = [
+              ...sheet.querySelectorAll("fieldset.providers .tile"),
+            ].map((tile) => {
+              const box = tile.getBoundingClientRect();
+              const at = document.elementFromPoint(
+                box.left + box.width / 2,
+                box.top + box.height / 2,
+              );
+              return {
+                name: tile.querySelector(".tile-name")?.textContent ?? "",
+                // Whole, above the foot, and nothing over it.
+                shown:
+                  box.top >= top - 1 &&
+                  box.bottom <= footTop + 1 &&
+                  Boolean(at && tile.contains(at)),
+              };
+            });
+            return {
+              scrolling,
+              goesOn:
+                fade.content !== "none" && Number.parseFloat(fade.height) > 0,
+              tiles,
+            };
+          });
+        const first = await look();
+        expect(first.scrolling).toEqual(["sheet"]);
+        expect(first.tiles.map((tile) => tile.name)).toEqual(PROVIDERS);
+        // Some are under the foot at this size, and the screen says the list goes on.
+        expect(first.tiles.some((tile) => !tile.shown)).toBe(true);
+        expect(first.goesOn).toBe(true);
+        // A wheel over the list scrolls the card, and brings every provider into view.
+        const seen = new Set(
+          first.tiles.filter((tile) => tile.shown).map((tile) => tile.name),
+        );
+        await page.mouse.move(width / 2, height / 3);
+        let now = first;
+        for (let turn = 0; turn < 12 && now.goesOn; turn += 1) {
+          await page.mouse.wheel(0, 90);
+          await page.waitForTimeout(150);
+          now = await look();
+          for (const tile of now.tiles) if (tile.shown) seen.add(tile.name);
+          expect(now.scrolling).toEqual(["sheet"]);
+        }
+        expect([...seen].sort()).toEqual([...PROVIDERS].sort());
+        // At the end of the card nothing is under the foot, and the screen no longer says so.
+        expect(now.goesOn).toBe(false);
+        expect(now.tiles[now.tiles.length - 1]?.shown).toBe(true);
+      } finally {
+        await page.close();
+      }
+    }, 30_000);
+  }
+});
+
+/*
+ * Seen on Windows G: the background row read "Installing OpenBot in the backgr..." beside its
+ * "Step 3 of 4 · 4m 18s elapsed" badge. Its name is whole now, the badge on a line of its own, and
+ * the row still fits the height its slot holds in every state.
+ */
+describe.skipIf(!asked)(
+  "the background row's name beside minutes of install",
+  () => {
+    for (const [width, height] of [
+      [1016, 839],
+      [1000, 800],
+      [720, 560],
+    ] as const) {
+      test(`at ${width}x${height}, is read whole in Windows-wide type, and the row fits its slot`, async () => {
+        const page = await browser.newPage({ viewport: { width, height } });
+        try {
+          await toTheAiStep(page);
+          await page.evaluate(() => {
+            const real = Date.now;
+            Date.now = () => real() + 258_000;
+            // Wider type than this browser sets, as the foot's own test does: Windows' is.
+            const wider = document.createElement("style");
+            wider.textContent = ".behind-slot { letter-spacing: 0.12em; }";
+            document.head.append(wider);
+          });
+          const read = () =>
+            page.evaluate(() => {
+              const name = document.querySelector(
+                ".behind-slot .step-label",
+              ) as HTMLElement;
+              const row = document
+                .querySelector(".behind-slot > .steps")
+                ?.getBoundingClientRect();
+              const slot = document
+                .querySelector(".behind-slot")
+                ?.getBoundingClientRect();
+              return {
+                name: name.textContent,
+                cut: name.scrollWidth > name.clientWidth,
+                badge:
+                  document.querySelector(".behind-slot .step-status")
+                    ?.textContent ?? "",
+                fits: (row?.bottom ?? 1e9) <= (slot?.bottom ?? 0) + 0.5,
+              };
+            });
+          // Setting up, then downloading the rest with its bar and bytes, then installed.
+          await page.getByText(/Setting up OpenBot on this computer/).waitFor();
+          await page.waitForTimeout(1100);
+          const plain = await read();
+          expect(plain).toEqual({
+            name: "Installing OpenBot in the background",
+            cut: false,
+            badge: expect.stringMatching(/^Step 3 of 4 · 4m \d+s elapsed$/),
+            fits: true,
+          });
+          await page.evaluate(() => {
+            (
+              globalThis as unknown as { __fake: { download: unknown } }
+            ).__fake.download = { done: 481_800_000, total: 605_200_000 };
+          });
+          await page.getByText("481.8 MB of 605.2 MB").waitFor();
+          expect(await read()).toEqual({ ...plain, badge: expect.any(String) });
+        } finally {
+          await page.close();
+        }
+      }, 30_000);
+    }
+  },
+);
+
+/*
+ * Seen on Windows G: the background row moved about 15 px sideways when a provider was chosen, as
+ * the card stopped scrolling and its scrollbar went. With the scrollbars Windows draws, which
+ * take room, the row is where it was either way.
+ */
+describe.skipIf(!asked)(
+  "with scrollbars that take room, as Windows draws them",
+  () => {
+    test("at 1000x800, the background row holds still as the card's scrollbar comes and goes", async () => {
+      const drawn = await chromium.launch({
+        channel: "chromium",
+        ignoreDefaultArgs: ["--hide-scrollbars"],
+      });
+      try {
+        const page = await drawn.newPage({
+          viewport: { width: 1000, height: 800 },
+        });
+        await toTheAiStep(page);
+        const where = () =>
+          page.evaluate(() => {
+            const sheet = document.querySelector(
+              "main > .sheet",
+            ) as HTMLElement;
+            const row = document
+              .querySelector(".behind-slot > .steps")
+              ?.getBoundingClientRect();
+            const tile = document
+              .querySelector("fieldset.providers .tile")
+              ?.getBoundingClientRect();
+            return {
+              scrolls: sheet.scrollHeight > sheet.clientHeight + 1,
+              scrollbar: sheet.offsetWidth - sheet.clientWidth > 2,
+              row: row && { left: row.left, width: row.width },
+              tile: tile && { left: tile.left, width: tile.width },
+            };
+          });
+        const listing = await where();
+        expect(listing.scrolls).toBe(true);
+        expect(listing.scrollbar).toBe(true);
+        // A provider chosen, the step fits, and the card has no scrollbar to draw.
+        await page.getByText("Anthropic", { exact: true }).click();
+        await page
+          .getByRole("button", { name: "Choose a different provider" })
+          .waitFor();
+        await page.waitForTimeout(400);
+        const chosen = await where();
+        expect(chosen.scrolls).toBe(false);
+        expect(chosen.row).toEqual(listing.row);
+        expect(chosen.tile).toEqual(listing.tile);
+      } finally {
+        await drawn.close();
+      }
+    }, 30_000);
+  },
+);
+
+/** Opens a relaunch whose Start updates OpenBot, at its last step, OpenBot opening. */
+async function toStart(page: Page) {
+  await open(page, "#start");
+  await page.getByRole("listitem", { name: "Opening OpenBot" }).waitFor();
+  await page.waitForTimeout(600);
+}
+
+const emitProgress = (page: Page, payload: Record<string, unknown>) =>
+  page.evaluate(
+    (sent) =>
+      (
+        globalThis as unknown as {
+          __fake: { emit: (name: string, payload: unknown) => void };
+        }
+      ).__fake.emit("setup:progress", sent),
+    payload,
+  );
+
+describe.skipIf(!asked)("the Start screen's words and card", () => {
+  /*
+   * Seen on Windows G: "Starting OpenBot" said "This usually takes a minute or two" over a card
+   * that said "About 3 minutes left", and the start took four. The card's time comes from how long
+   * each part takes; the heading gives none of its own.
+   */
+  test("the time is said once, by the card", async () => {
+    const page = await browser.newPage({
+      viewport: { width: 1000, height: 800 },
+    });
+    try {
+      await toStart(page);
+      const said = await page.evaluate(() => ({
+        heading: document.querySelector("main h1")?.textContent,
+        lede: document.querySelector("main .lede")?.textContent ?? "",
+        card: document.querySelector(".journey-time")?.textContent ?? "",
+      }));
+      expect(said.heading).toBe("Starting OpenBot");
+      expect(said.lede).toBe("OpenBot is getting ready and opens by itself.");
+      expect(said.lede).not.toMatch(/minute|second|hour/i);
+      expect(said.card).toMatch(/left/);
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
+  /*
+   * Seen on Windows G: the card grew a line and shrank again as what it said changed, and moved the
+   * rows under it. Held at one fixed 130 px instead, its usual one-line form had an empty band under
+   * the bar. It is as tall as what it says, in its own padding, and what changes is said in place:
+   * "Taking longer than usual, still working" takes the time line's place and adds no line.
+   * Docker Desktop's three-line hand-off holds its own height while it shows.
+   */
+  test("the card fits what it says, and nothing moves as its time line changes", async () => {
+    const page = await browser.newPage({
+      viewport: { width: 1000, height: 800 },
+    });
+    try {
+      await toStart(page);
+      const measure = () =>
+        page.evaluate(() => {
+          const card = document
+            .querySelector(".journey")
+            ?.getBoundingClientRect();
+          const words = document
+            .querySelector(".journey-said")
+            ?.getBoundingClientRect();
+          const bar = document
+            .querySelector(".journey progress")
+            ?.getBoundingClientRect();
+          const time = document.querySelector(".journey-time") as HTMLElement;
+          return {
+            card: card?.height ?? 0,
+            row: document
+              .querySelector('[aria-label="Setting up OpenBot"]')
+              ?.getBoundingClientRect().top,
+            // The padding above what it says, and under the bar.
+            above: (words?.top ?? 0) - (card?.top ?? 0),
+            below: (card?.bottom ?? 0) - (bar?.bottom ?? 0),
+            time: time.textContent ?? "",
+            cut: time.scrollWidth > time.clientWidth,
+          };
+        });
+      const emit = (downloads: Record<string, number>) =>
+        emitProgress(page, {
+          step: "images",
+          ok: true,
+          running: true,
+          detail: "Downloading local software.",
+          downloads,
+        });
+      // OpenBot updating itself, its download under way, as on Windows G.
+      await emitProgress(page, {
+        step: "release",
+        ok: true,
+        running: true,
+        detail: "Downloading the update.",
+      });
+      await emit({
+        done: 1,
+        total: 5,
+        bytes: 190_900_000,
+        size: 944_400_000,
+        bytesPerSecond: 12_000_000,
+      });
+      await page.getByText(/190\.9 MB of 944\.4 MB/).waitFor();
+      await page.waitForTimeout(600);
+      const usual = await measure();
+      expect(Math.abs(usual.below - usual.above)).toBeLessThanOrEqual(2);
+      expect(usual.time).toMatch(
+        /left · 190\.9 MB of 944\.4 MB · \d+s so far$/,
+      );
+      expect(usual.cut).toBe(false);
+      // Every byte in, its last part unpacking, and fifteen minutes on: taking longer than usual.
+      await emit({
+        done: 4,
+        total: 5,
+        bytes: 944_400_000,
+        size: 944_400_000,
+        bytesPerSecond: 0,
+      });
+      await page.waitForTimeout(1500);
+      await page.evaluate(() => {
+        const real = Date.now;
+        Date.now = () => real() + 900_000;
+      });
+      await page.getByText(/Taking longer than usual/).waitFor();
+      const slow = await measure();
+      expect(slow.time).toBe(
+        "Taking longer than usual, still working · 944.4 MB downloaded",
+      );
+      expect(slow.cut).toBe(false);
+      expect({ card: slow.card, row: slow.row }).toEqual({
+        card: usual.card,
+        row: usual.row,
+      });
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
+  test("Docker Desktop's hand-off holds its three lines while it shows, whatever it says", async () => {
+    const page = await browser.newPage({
+      viewport: { width: 1000, height: 800 },
+    });
+    try {
+      await toStart(page);
+      const card = async () =>
+        (await page.locator(".journey").boundingBox())?.height ?? 0;
+      const usual = await card();
+      const handOff = async (detail: string) => {
+        await emitProgress(page, {
+          step: "engine",
+          ok: true,
+          running: true,
+          elsewhere: true,
+          detail,
+        });
+        await page
+          .locator(".journey-said", { hasText: detail.slice(0, 30) })
+          .waitFor();
+        return card();
+      };
+      const starting = await handOff(
+        "Docker Desktop is starting in its own window. If it asks you to accept its terms or sign in, do that there. OpenBot comes back when Docker is ready.",
+      );
+      const waiting = await handOff(
+        "Docker Desktop hasn't started yet. It may be waiting for you. Accept its terms there.",
+      );
+      expect(starting).toBe(usual + 44);
+      expect(waiting).toBe(starting);
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
+  /*
+   * Seen on Windows G: Cancel went at step 4 and the card shrank. Cancel stops the setup's own
+   * steps; the last, OpenBot starting or updating, can't be stopped partway. Its place says so, in
+   * a button's height.
+   */
+  test("at its last step, the place of Cancel says why it can't be cancelled", async () => {
+    const page = await browser.newPage({
+      viewport: { width: 1000, height: 800 },
+    });
+    try {
+      await toStart(page);
+      expect(await page.getByRole("button", { name: "Cancel" }).count()).toBe(
+        0,
+      );
+      const note = page.locator(".cannot-cancel");
+      expect(await note.textContent()).toBe(
+        "You can't cancel this last step. Stopping it partway could leave OpenBot half started.",
+      );
+      expect((await note.boundingBox())?.height).toBe(40);
+      // OpenBot updating itself, as on Windows G.
+      await emitProgress(page, {
+        step: "release",
+        ok: true,
+        running: true,
+        detail: "Downloading the update.",
+      });
+      await page
+        .locator(".cannot-cancel", { hasText: "the update half done" })
+        .waitFor();
+      expect((await note.boundingBox())?.height).toBe(40);
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+});
+
+describe.skipIf(!asked)(
+  "the account step for a person already signed in",
+  () => {
+    /*
+     * Seen on Windows G: for two seconds before the license agreement, a signed-in person saw the
+     * signed-out pitch ("It requires a free license key", "does NOT send traffic data") over
+     * "Checking your OpenBot account". The step says only that it is checking, until it knows.
+     */
+    test("while the sign-in is checked, the screen says so and nothing about signing in", async () => {
+      const page = await browser.newPage({
+        viewport: { width: 1000, height: 800 },
+      });
+      try {
+        await open(page, "#licence-slow");
+        await page
+          .getByRole("button", { name: "Install", exact: true })
+          .click();
+        await page
+          .getByRole("heading", { name: "Your OpenBot account" })
+          .waitFor();
+        const text = await page.evaluate(
+          () =>
+            (document.querySelector("main > .sheet") as HTMLElement).innerText,
+        );
+        expect(text).toContain("Checking your OpenBot account");
+        expect(text).not.toMatch(
+          /license key|traffic data|Self-contained|sign in/i,
+        );
+        await page
+          .getByRole("heading", { name: "Accept the license agreement" })
+          .waitFor();
+      } finally {
+        await page.close();
+      }
+    }, 30_000);
+
+    /*
+     * Seen on Windows G: signed in already, the license screen's background row still said "The rest
+     * of the install starts after you sign in and accept the license agreement".
+     */
+    test("the background row waits on the agreement only", async () => {
+      const page = await browser.newPage({
+        viewport: { width: 1000, height: 800 },
+      });
+      try {
+        await open(page, "#licence");
+        await page
+          .getByRole("button", { name: "Install", exact: true })
+          .click();
+        await page
+          .getByRole("heading", { name: "Accept the license agreement" })
+          .waitFor();
+        const row = page.getByRole("listitem", {
+          name: "Installing OpenBot in the background",
+        });
+        await page.getByText(/The rest of the install starts/).waitFor();
+        const said = (await row.textContent()) ?? "";
+        expect(said).toContain(
+          "The rest of the install starts after you accept the license agreement.",
+        );
+        expect(said).not.toMatch(/sign in/i);
+      } finally {
+        await page.close();
+      }
+    }, 30_000);
+  },
+);

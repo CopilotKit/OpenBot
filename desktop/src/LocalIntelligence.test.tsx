@@ -125,7 +125,9 @@ type Props = {
   /** Shows the status card another screen shows, whatever runs. */
   status?: boolean;
   onStart?: (startable: Startable) => Promise<StartOutcome>;
+  onForgotten?: () => void;
   pollDelays?: number[];
+  roomEveryMs?: number;
 };
 
 /** The window's part: it holds the sequence, and a screen shows it. */
@@ -135,7 +137,9 @@ function Holder(props: Props) {
     stack: props.stack ?? null,
     connected: props.connected ?? false,
     onStart: props.onStart ?? (async () => "started"),
+    onForgotten: props.onForgotten,
     pollDelays: props.pollDelays ?? [0, 0, 0],
+    roomEveryMs: props.roomEveryMs,
   });
   // biome-ignore lint/correctness/useExhaustiveDependencies: once, on arrival.
   useEffect(() => {
@@ -174,9 +178,14 @@ function statusCalls() {
 }
 
 /** The steps the sequence ran. Asking how far a download has got is not one. */
+/** The step's calls, in order. Not the download poll, nor what it tells the log. */
 function commands() {
   return invokeCalls
-    .filter((call) => call.command !== "local_eval_download")
+    .filter(
+      (call) =>
+        call.command !== "local_eval_download" &&
+        call.command !== "back_end_wait_ended",
+    )
     .map((call) =>
       call.command === "run_local_eval"
         ? `${call.command}:${(call.args as { action: string }).action}`
@@ -836,6 +845,77 @@ test("a setup whose download stopped offers Retry, which continues where it left
   expect(setups).toBe(2);
 });
 
+/**
+ * Box I: OpenBot's machine was made again, and the backend went with the old one. Every status
+ * failed, the card said "Setup stopped partway through with an error. Retry.", and Retry did the
+ * same. The native side now says the backend is lost (`stack-lost`, from the CLI's
+ * "local-command-failed, no stack" with the backend's cluster gone). The card says so in plain
+ * words, offers Start fresh in place of Retry, and Start fresh sets OpenBot up again, connects it,
+ * waits for it and opens it.
+ */
+test("a lost backend offers Start fresh, which sets OpenBot up again and opens it", async () => {
+  const lost = report({ outcome: "failed", stack: null, reason: "stack-lost" });
+  invokeHandler = answers({
+    run_local_eval: [lost, ready],
+    set_up_local_eval: [report()],
+    connect_local_eval: [connection()],
+  });
+  const started: Startable[] = [];
+  let forgotten = 0;
+  const screen = view({
+    stack: "local-1915a7aafba78d6207a561b0",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+    onForgotten: () => {
+      forgotten += 1;
+    },
+  });
+  await screen.findByText(
+    "OpenBot's saved data on this computer is gone, with your Bots and conversations. Start fresh to set OpenBot up again. Your sign-in and AI connection stay.",
+  );
+  // Retry would only ask again about what is gone.
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  expect(commands()).toEqual(["run_local_eval:status"]);
+
+  await userEvent.click(screen.getByRole("button", { name: "Start fresh" }));
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(forgotten).toBe(1);
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "set_up_local_eval",
+    "connect_local_eval",
+    "run_local_eval:status",
+  ]);
+});
+
+/** The same stop on a screen about something else: its card says what is gone and offers Start fresh. */
+test("a lost backend is said on the status card too, with Start fresh", async () => {
+  invokeHandler = answers({
+    run_local_eval: [
+      report({ outcome: "failed", stack: null, reason: "stack-lost" }),
+    ],
+  });
+  const screen = view({
+    stack: "local-1915a7aafba78d6207a561b0",
+    connected: true,
+    status: true,
+  });
+  const card = await screen.findByRole("alert", { name: "Setup" });
+  await waitFor(() =>
+    expect(card.textContent).toContain(
+      "OpenBot's saved data on this computer is gone, with your Bots and conversations.",
+    ),
+  );
+  expect(within(card).getByRole("heading").textContent).toBe("Setup needs you");
+  expect(
+    within(card).getByRole("button", { name: "Start fresh" }),
+  ).toBeTruthy();
+  expect(within(card).queryByRole("button", { name: "Retry" })).toBeNull();
+});
+
 const blockedOnSignIn = report({
   outcome: "blocked",
   stack: null,
@@ -850,7 +930,7 @@ const requiredTerms = {
   organizationName: "Acme",
 };
 
-test("setup that needs a CopilotKit sign-in offers it in the window, then carries on by itself", async () => {
+test("setup that needs a sign-in offers it in the window, then carries on by itself", async () => {
   invokeHandler = answers({
     // Blocked on the sign-in, then set up once it is done.
     set_up_local_eval: [blockedOnSignIn, report()],
@@ -861,7 +941,7 @@ test("setup that needs a CopilotKit sign-in offers it in the window, then carrie
   });
   const screen = view();
   await userEvent.click(
-    await screen.findByRole("button", { name: "Sign in to CopilotKit" }),
+    await screen.findByRole("button", { name: "Sign in to OpenBot" }),
   );
   await waitFor(() =>
     expect(row(screen, START).textContent).toContain("Complete"),
@@ -905,12 +985,104 @@ test("a setup refused for a full Docker disk says so, with Retry", async () => {
   await screen.findByRole("button", { name: "Retry" });
   const setup = row(screen, SETUP).textContent;
   expect(setup).toContain(
-    "Docker Desktop has 0 GB of free disk. OpenBot needs 40 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+    "Docker Desktop has 0 GB of free disk space. OpenBot needs 40 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   expect(setup).not.toContain("partway through");
 });
 
-test("a CopilotKit sign-in that does not finish says so and can be tried again", async () => {
+/**
+ * Windows G, on Docker Desktop with C: at 15 GB free: the native side did not start the setup on a
+ * drive that short (`local_eval::checked_call`). Its report, as `local_eval.rs` gives it for G.
+ */
+const notStartedOnC = report({
+  outcome: "blocked",
+  stack: null,
+  reason: "resources-short",
+  shortfall: {
+    podman: false,
+    cpu: false,
+    memory: false,
+    disk: true,
+    diskGb: "13.9",
+    drive: "C:",
+    freeOnDrive: true,
+  },
+});
+const shortOnC = notStartedOnC.shortfall;
+const ACCOUNT_STEP_SAYS =
+  "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.";
+
+/**
+ * On Windows G that setup was a red "Setup stopped" card with Retry and the troubleshooting logs,
+ * and with the space freed it still said 13.9 GB 50 seconds later, until Retry. A drive short of
+ * room is not an error: the setup is paused, says so in the account step's words with Try again,
+ * looks again by itself, and carries on once there is room.
+ */
+test("a setup paused for room on its drive says so calmly and carries on by itself", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [notStartedOnC, report()],
+    // Still short at the first look; room at the second.
+    local_eval_room: [shortOnC, null],
+    local_eval_download: [null],
+    connect_local_eval: [connection()],
+    run_local_eval: [ready],
+  });
+  const started: Startable[] = [];
+  const screen = view({
+    roomEveryMs: 300,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  const setup = await screen.findByRole("listitem", { name: SETUP });
+  await waitFor(() => expect(setup.textContent).toContain(ACCOUNT_STEP_SAYS));
+  expect(within(setup).getByText("Step 1 of 4 · Paused")).toBeTruthy();
+  expect(setup.textContent).not.toContain("elapsed");
+  expect(setup.querySelector(".step-spinner")).toBeNull();
+  expect(within(setup).getByRole("button", { name: "Try again" })).toBeTruthy();
+  // Not an error: no stop, no Retry, no logs.
+  expect(screen.queryByText("Setup stopped")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Copy logs" })).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+  // Room: it sets up again by itself, and goes on to start.
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(
+    commands().filter((call) => call === "set_up_local_eval"),
+  ).toHaveLength(2);
+  expect(
+    invokeCalls.filter((call) => call.command === "local_eval_room"),
+  ).toHaveLength(2);
+});
+
+/** Try again looks at once, rather than at the next look. */
+test("Try again on a setup paused for room looks again at once", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [notStartedOnC, report()],
+    local_eval_room: [null],
+    local_eval_download: [null],
+    connect_local_eval: [connection()],
+    run_local_eval: [ready],
+  });
+  const started: Startable[] = [];
+  const screen = view({
+    roomEveryMs: 60_000,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Try again" }),
+  );
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(
+    commands().filter((call) => call === "set_up_local_eval"),
+  ).toHaveLength(2);
+});
+
+test("a sign-in that does not finish says so and can be tried again", async () => {
   invokeHandler = answers({
     set_up_local_eval: [blockedOnSignIn],
     sign_in_to_copilotkit: [{ signedIn: false }],
@@ -918,16 +1090,16 @@ test("a CopilotKit sign-in that does not finish says so and can be tried again",
   });
   const screen = view();
   await userEvent.click(
-    await screen.findByRole("button", { name: "Sign in to CopilotKit" }),
+    await screen.findByRole("button", { name: "Sign in to OpenBot" }),
   );
   await screen.findByText("Sign-in did not finish. Try again.");
   expect(
-    screen.getByRole("button", { name: "Sign in to CopilotKit" }),
+    screen.getByRole("button", { name: "Sign in to OpenBot" }),
   ).toBeTruthy();
   expect(commands().filter((c) => c === "set_up_local_eval")).toHaveLength(1);
 });
 
-test("a CopilotKit sign-in waiting on the browser shows its code and page, and Cancel stops it", async () => {
+test("a sign-in waiting on the browser shows its code and page, and Cancel stops it", async () => {
   const page = {
     url: "https://dashboard.copilotkit.ai/cli-auth/device?user_code=WXYZ-2345",
     userCode: "WXYZ-2345",
@@ -941,9 +1113,12 @@ test("a CopilotKit sign-in waiting on the browser shows its code and page, and C
   });
   const screen = view();
   await userEvent.click(
-    await screen.findByRole("button", { name: "Sign in to CopilotKit" }),
+    await screen.findByRole("button", { name: "Sign in to OpenBot" }),
   );
   await screen.findByText("WXYZ-2345");
+  expect(
+    screen.getByText("Finish signing in to OpenBot in your browser…"),
+  ).toBeTruthy();
   expect(
     screen
       .getByRole("link", { name: "Open the sign-in page" })
@@ -962,16 +1137,16 @@ test("a CopilotKit sign-in waiting on the browser shows its code and page, and C
     },
   });
   expect(
-    await screen.findByRole("button", { name: "Sign in to CopilotKit" }),
+    await screen.findByRole("button", { name: "Sign in to OpenBot" }),
   ).toBeTruthy();
   expect(screen.queryByText("WXYZ-2345")).toBeNull();
 });
 
 /*
- * The sign-in setup stops for is a CopilotKit sign-in, so it shows CopilotKit's logotype, before and
- * while it waits on the browser. It showed none.
+ * The sign-in setup stops for leads with OpenBot by CopilotKit, before and while it waits on the
+ * browser, as the Account step does. It showed none, then CopilotKit's logotype alone.
  */
-test("a CopilotKit sign-in setup stops for shows CopilotKit's logotype, before and while it waits", async () => {
+test("a sign-in setup stops for leads with OpenBot by CopilotKit, before and while it waits", async () => {
   invokeHandler = answers({
     set_up_local_eval: [blockedOnSignIn],
     sign_in_to_copilotkit: [new Promise(() => {})],
@@ -984,15 +1159,22 @@ test("a CopilotKit sign-in setup stops for shows CopilotKit's logotype, before a
     cancel_local_eval: [null],
   });
   const screen = view();
-  const logo = () => screen.getByRole("img", { name: "CopilotKit" });
+  const leads = () => {
+    const card = screen.getByText("Sign in to finish setting up OpenBot.")
+      .parentElement as HTMLElement;
+    expect(card.querySelector(".lockup")?.textContent).toBe(
+      "OpenBot™by CopilotKit",
+    );
+    expect(screen.queryByRole("img", { name: "CopilotKit" })).toBeNull();
+  };
   await userEvent.click(
-    await screen.findByRole("button", { name: "Sign in to CopilotKit" }),
+    await screen.findByRole("button", { name: "Sign in to OpenBot" }),
   );
   await screen.findByText("WXYZ-2345");
-  expect(logo().getAttribute("src")).toBe("/copilotkit-logo.svg");
+  leads();
   await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-  await screen.findByRole("button", { name: "Sign in to CopilotKit" });
-  expect(logo().getAttribute("src")).toBe("/copilotkit-logo.svg");
+  await screen.findByRole("button", { name: "Sign in to OpenBot" });
+  leads();
 });
 
 test("setup that needs the agreement shows it, and only Accept sets up again with that version", async () => {
@@ -1005,7 +1187,7 @@ test("setup that needs the agreement shows it, and only Accept sets up again wit
   });
   const screen = view();
   await screen.findByText(
-    "To run OpenBot on this computer, accept the CopilotKit license agreement.",
+    "To run OpenBot on this computer, accept the OpenBot by CopilotKit license agreement.",
   );
   expect(
     screen.getByRole("link", { name: "Read the license agreement" }),
@@ -1064,7 +1246,7 @@ test("no build sends the person to a terminal", async () => {
     });
     const screen = view();
     await screen.findByRole("button", {
-      name: blocked === blockedOnTerms ? "Accept" : "Sign in to CopilotKit",
+      name: blocked === blockedOnTerms ? "Accept" : "Sign in to OpenBot",
     });
     expect(screen.queryByText(/copilotkit |Terminal/)).toBeNull();
     cleanup();
@@ -1161,6 +1343,16 @@ test("polling is bounded, and says so when Intelligence never became ready", asy
   );
   expect(statusCalls()).toHaveLength(3);
   expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  // The log says why the wait ended, with how long it took and what the back end last said
+  // (`back_end_wait_ended`): a five-minute wait on Windows had left no line at all.
+  expect(
+    invokeCalls.filter((call) => call.command === "back_end_wait_ended"),
+  ).toEqual([
+    {
+      command: "back_end_wait_ended",
+      args: { why: "OpenBot didn't get ready in time. Retry to check again." },
+    },
+  ]);
 });
 
 test("Cancel stops the running CLI call by its own attempt, and Retry resumes there", async () => {

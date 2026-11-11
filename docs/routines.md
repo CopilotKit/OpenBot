@@ -62,8 +62,8 @@ Routines under "Apps it can use".
 every Bot all of its tools, including the write tools `create_routine`, `update_routine` and
 `delete_routine`. A Bot made later gets them the first time it runs. Routines can't be turned off, and
 its tools can't be taken from a Bot: the server answers `403`. A Bot still asks before each write
-while Extra vigilant is on, and before `delete_routine` always (see
-[Approvals](approvals.md)). See `server/src/plugins/personal-defaults.ts`.
+while Extra vigilant is on, and `delete_routine` asks as any delete does, unless the person allowed
+it for the conversation or always (see [Approvals](approvals.md)). See `server/src/plugins/personal-defaults.ts`.
 
 **Goals too.** The same app carries a goal's tools for a conversation: `create_goal`, `list_goals`,
 `update_goal`, `run_goal`, `pause_goal`, `resume_goal` and `complete_goal`, beside the trigger tools
@@ -176,7 +176,8 @@ CronJob the same way the computer culler is a CronJob rather than a timer inside
 every replica, and a CronJob's single run does the whole sweep once. On a laptop, `scripts/start.sh`
 starts a worker process that runs that same sweep in a loop instead of once and exiting, so the two
 shapes are the same code doing the same thing on two different clocks, not two implementations to keep
-in sync.
+in sync. OpenBot Desktop runs the same loop as the `worker` Compose service, from the server image,
+behind the `openbot` profile in `docker-compose.yml`.
 
 ## Who a routine runs as
 

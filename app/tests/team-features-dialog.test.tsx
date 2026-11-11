@@ -9,9 +9,10 @@ import {
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient } from "@tanstack/react-query";
 import { isRedirect } from "@tanstack/react-router";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import {
   openTeamFeatures,
+  TEAM_FEATURE_GROUPS,
   TEAM_FEATURES,
   TeamFeaturesDialog,
 } from "@/components/edition/team-features-dialog";
@@ -44,6 +45,59 @@ describe("the team features dialog", () => {
     expect(
       view.queryAllByRole("button").map((button) => button.textContent),
     ).toEqual(["Close"]);
+  });
+
+  /*
+   * Every line is a claim about what OpenBot for Business does, so the list is pinned word for
+   * word: a line changes here, on purpose, or not at all. "Policies in plain English, tested on past
+   * activity" stands for the describe-in-words screens (boundaries, team approval rules, auto-review
+   * guidance, permissions, the network allowlist, one Bot's app actions), each of which replays what
+   * it wrote over recorded activity before it is saved.
+   */
+  test("says exactly these things, in these groups", () => {
+    expect(
+      TEAM_FEATURE_GROUPS.map((group) => [
+        group.title,
+        group.features.map((feature) => feature.title),
+      ]),
+    ).toEqual([
+      [
+        "For your whole team",
+        [
+          "Sign-in with Google, Microsoft or Okta",
+          "People, roles and admins",
+          "Bots shared with your whole team",
+          "Learning shared across the team",
+        ],
+      ],
+      [
+        "Where your Bots work",
+        ["Bots in Slack and Microsoft Teams", "A computer for each Bot"],
+      ],
+      [
+        "In control",
+        [
+          "Controls over models, apps and networks",
+          "Rules every Bot follows",
+          "Policies in plain English, tested on past activity",
+          "Governance for everyone",
+          "A full audit trail, with export",
+        ],
+      ],
+    ]);
+  });
+
+  test("opens at its title, not scrolled down to Talk to us", async () => {
+    const view = render(<TeamFeaturesDialog />);
+    act(() => openTeamFeatures());
+    const dialog = await view.findByRole("dialog");
+    const talk = view.getByRole("link", { name: /Talk to us/ });
+    // Base UI moves focus on the next frame; wait for it to land somewhere inside the dialog.
+    await waitFor(() =>
+      expect(dialog.contains(document.activeElement)).toBe(true),
+    );
+    expect(document.activeElement).not.toBe(talk);
+    expect(document.activeElement?.contains(talk)).toBe(true);
   });
 });
 

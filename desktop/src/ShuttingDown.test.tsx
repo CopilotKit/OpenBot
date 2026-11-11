@@ -87,3 +87,44 @@ test("a Quit's bar and time so far never go back, in the gap between its steps",
   expect(soFar).toBeGreaterThanOrEqual(24);
   expect(bar).toBeGreaterThan(0.5);
 });
+
+/**
+ * On a Mac where OpenBot paused the person's own Podman while it ran, Quit starts it again last,
+ * and says so. Anywhere else there is no such part, and nothing waits on it.
+ */
+test("Quit says it is starting the person's Podman again only when OpenBot paused it", () => {
+  setSystemTime(new Date("2026-11-10T07:14:24Z"));
+  const done = (step: string) => ({
+    step,
+    ok: true,
+    running: false,
+    detail: "",
+  });
+  const view = render(
+    <ShuttingDown
+      status={{
+        seq: 3,
+        steps: [
+          done("stop-openbot"),
+          done("stop-intelligence"),
+          { step: "start-your-podman", ok: true, running: true, detail: "" },
+        ],
+      }}
+    />,
+  );
+  expect(view.container.querySelector(".journey-said")?.textContent).toBe(
+    "Starting your Podman again",
+  );
+  view.rerender(
+    <ShuttingDown
+      status={{
+        seq: 4,
+        steps: [
+          done("stop-openbot"),
+          { step: "stop-intelligence", ok: true, running: true, detail: "" },
+        ],
+      }}
+    />,
+  );
+  expect(view.container.textContent).not.toContain("your Podman");
+});

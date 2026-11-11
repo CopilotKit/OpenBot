@@ -1125,7 +1125,14 @@ pub fn up(
     secrets: &Secrets,
 ) -> Result<Vec<&'static str>, crate::problem::Problem> {
     crate::logging::timed("compose up", || {
-        up_retrying(engine, root, harness, secrets, &FOLDER_NOT_SHARED_YET_WAITS)
+        up_retrying(
+            engine,
+            root,
+            harness,
+            secrets,
+            &FOLDER_NOT_SHARED_YET_WAITS,
+            std::env::consts::OS,
+        )
     })
 }
 
@@ -1173,19 +1180,146 @@ fn folder_not_shared_yet(said: &str) -> bool {
     })
 }
 
-/// `up`, tried again after each of `waits` while the engine still cannot see a bind mount's folder.
+/**
+The folder of this installation's that Docker Desktop on a Mac refused to stat, as the Mac names it.
+
+Docker Desktop shares the Mac's folders into its VM under `/host_mnt` and names the one it could not
+open: `stat /host_mnt/Users/<name>/OpenBot/.openbot: operation not permitted`. Only a folder inside
+`root` counts. Anything else is not OpenBot's to touch.
+*/
+fn refused_folder_in(said: &str, root: &Path) -> Option<PathBuf> {
+    let roots = [Some(root.to_path_buf()), std::fs::canonicalize(root).ok()];
+    said.lines().find_map(|line| {
+        let (_, after) =
+            line.split_once("invalid mount config for type \"bind\": stat /host_mnt/")?;
+        let folder = after.trim_end().strip_suffix(": operation not permitted")?;
+        let folder = PathBuf::from(format!("/{folder}"));
+        roots
+            .iter()
+            .flatten()
+            .any(|root| root.parent().is_some() && folder.starts_with(root))
+            .then_some(folder)
+    })
+}
+
+/// The image the installation's database runs, which is on the computer before any `up`.
+fn local_image_for_share_refresh(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+) -> Option<String> {
+    let output = compose_command(engine, root, secrets)
+        .args(["config", "--images", "postgres"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        log::warn!(
+            "[compose up] could not name the database image to refresh Docker Desktop's file sharing: {}",
+            command_said(&output.stderr)
+        );
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+}
+
+/**
+Make Docker Desktop look at `folder` again, by reading it through a container that is gone at once.
+
+Docker Desktop's file sharing on a Mac keeps a handle on a folder it has shared. Move that folder to
+the Trash and make a new one at the same place, as reinstalling OpenBot does, and the handle still
+follows the old one into `~/.Trash`, which macOS keeps from other apps. Every bind mount of the new
+folder is then refused with `operation not permitted`, and waiting does not change that. Reading the
+folder through its parent makes Docker Desktop look it up again, and the next `up` mounts it.
+
+The container runs the database image the installation already has, with `--pull never`, so nothing
+is downloaded for this. It has no network, and the parent is mounted read-only.
+*/
+fn refresh_docker_desktop_share(engine: &Address, root: &Path, secrets: &Secrets, folder: &Path) {
+    let (Some(parent), Some(name)) = (root.parent(), root.file_name()) else {
+        return;
+    };
+    let canonical = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let inside = folder
+        .strip_prefix(root)
+        .or_else(|_| folder.strip_prefix(&canonical))
+        .unwrap_or(Path::new(""));
+    let Some(image) = local_image_for_share_refresh(engine, root, secrets) else {
+        return;
+    };
+    let mut seen = PathBuf::from("/openbot-share").join(name);
+    seen.push(inside);
+    let output = engine
+        .command()
+        .current_dir(root)
+        .args(["run", "--rm", "--pull", "never", "--network", "none"])
+        .arg("--volume")
+        .arg(format!("{}:/openbot-share:ro", parent.display()))
+        .args(["--entrypoint", "ls", &image, "-d"])
+        .arg(&seen)
+        .output();
+    match output {
+        Ok(output) if output.status.success() => {
+            log::info!("[compose up] refreshed Docker Desktop's view of the OpenBot folder")
+        }
+        Ok(output) => log::warn!(
+            "[compose up] refreshing Docker Desktop's view of the OpenBot folder failed: {}",
+            command_said(&output.stderr)
+        ),
+        Err(error) => log::warn!(
+            "[compose up] could not refresh Docker Desktop's view of the OpenBot folder: {error}"
+        ),
+    }
+}
+
+/// What a person is told when Docker Desktop still cannot open the OpenBot folder after a refresh.
+const DOCKER_DESKTOP_STALE_FOLDER: &str = "Docker Desktop is still using an older OpenBot folder, \
+     so it can't open the new one. Restart Docker Desktop, then try again.";
+
+/**
+`up`, tried again after each of `waits` while the engine still cannot see a bind mount's folder.
+
+On a Mac with Docker Desktop, a refusal for a folder of this installation first makes Docker Desktop
+look at that folder again (`refresh_docker_desktop_share`) and tries `up` at once, before any wait.
+If the waits then run out, the person is told to restart Docker Desktop, which is what clears it.
+*/
 fn up_retrying(
     engine: &Address,
     root: &Path,
     harness: bool,
     secrets: &Secrets,
     waits: &[std::time::Duration],
+    os: &str,
 ) -> Result<Vec<&'static str>, crate::problem::Problem> {
+    let docker_desktop = os == "macos" && engine.engine == crate::engine::Engine::Docker;
+    let mut refreshed = false;
     let mut waits = waits.iter();
     loop {
         match up_now(engine, root, harness, secrets) {
             Err(problem) if problem.detail.as_deref().is_some_and(folder_not_shared_yet) => {
+                let refused = problem
+                    .detail
+                    .as_deref()
+                    .filter(|_| docker_desktop)
+                    .and_then(|said| refused_folder_in(said, root));
+                if let (Some(folder), false) = (&refused, refreshed) {
+                    refreshed = true;
+                    log::warn!(
+                        "[compose up] Docker Desktop cannot open a folder OpenBot mounts; refreshing its file sharing and trying again"
+                    );
+                    refresh_docker_desktop_share(engine, root, secrets, folder);
+                    continue;
+                }
                 let Some(wait) = waits.next() else {
+                    if refused.is_some() {
+                        return Err(crate::problem::Problem::with(
+                            DOCKER_DESKTOP_STALE_FOLDER,
+                            problem.detail.unwrap_or_default(),
+                        ));
+                    }
                     return Err(problem);
                 };
                 log::warn!(
@@ -3661,26 +3795,110 @@ pub fn wait_until_healthy(
     patience: std::time::Duration,
     keep_going: impl Fn() -> bool,
 ) -> Result<(), String> {
-    let deadline = std::time::Instant::now() + patience;
+    wait_until_healthy_saying(ready, patience, keep_going, &mut |line| {
+        log::info!("{line}")
+    })
+}
+
+/// [`wait_until_healthy`], with what it waited on and why it stopped said to `say`: each poll's
+/// answer as it changes (the URL, and its status or the error), and the reason it ended. A wait
+/// that gave up after minutes had left no line at all (see `logging::WaitLog`).
+pub fn wait_until_healthy_saying(
+    ready: &Ready,
+    patience: std::time::Duration,
+    keep_going: impl Fn() -> bool,
+    say: &mut dyn FnMut(String),
+) -> Result<(), String> {
+    let started = std::time::Instant::now();
+    let deadline = started + patience;
+    let mut waited = crate::logging::WaitLog::new(
+        format!(
+            "OpenBot's services, GET /health on port {} (API) and port {} (app)",
+            ready.api, ready.app
+        ),
+        started,
+    );
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .map_err(|error| format!("could not ask OpenBot's services: {error}"))?;
     let mut api_up = false;
 
     while std::time::Instant::now() < deadline && keep_going() {
         // An earlier API success is no longer sufficient when the app becomes ready later.
-        api_up = answering_at(ready.api, "/health").is_some();
-        if api_up && answering_at(ready.app, "/health").is_some() {
+        let api = health_answer(&client, ready.api, "/health");
+        api_up = api.is_ok();
+        let app = api_up.then(|| health_answer(&client, ready.app, "/health"));
+        let answer = format!(
+            "API {}; app {}",
+            answer_said(&api),
+            app.as_ref()
+                .map_or("not asked until the API answers".to_string(), answer_said)
+        );
+        if let Some(line) = waited.answered(std::time::Instant::now(), &answer) {
+            say(line);
+        }
+        if app.is_some_and(|app| app.is_ok()) {
+            say(waited.ended(std::time::Instant::now(), "both answered"));
             return Ok(());
         }
 
         std::thread::sleep(std::time::Duration::from_millis(750));
     }
 
-    if api_up {
-        return Err(format!(
+    let failed = if api_up {
+        format!(
             "the API is answering, but the app is not answering on port {}.",
             ready.app
-        ));
+        )
+    } else {
+        format!("the API is not answering on port {}.", ready.api)
+    };
+    let why = if keep_going() {
+        format!("gave up: {failed}")
+    } else {
+        "stopped by Stop or Quit".to_string()
+    };
+    say(waited.ended(std::time::Instant::now(), &why));
+    Err(failed)
+}
+
+/// What `port` answered at `path` on either loopback: the address that answered, or what each
+/// one said instead (its HTTP status, or the error that kept it from answering).
+fn health_answer(
+    client: &reqwest::blocking::Client,
+    port: u16,
+    path: &str,
+) -> Result<String, String> {
+    let mut said = Vec::new();
+    for host in LOOPBACKS {
+        let url = format!("http://{host}:{port}{path}");
+        match client.get(&url).send() {
+            Ok(response) if response.status().is_success() => {
+                return Ok(format!("http://{host}:{port}"))
+            }
+            Ok(response) => said.push(format!("{url} answered {}", response.status())),
+            Err(error) => said.push(format!("{url}: {}", deepest_cause(&error))),
+        }
     }
-    Err(format!("the API is not answering on port {}.", ready.api))
+    Err(said.join(", "))
+}
+
+fn answer_said(answer: &Result<String, String>) -> String {
+    match answer {
+        Ok(base) => format!("answering on {base}"),
+        Err(said) => format!("not answering ({said})"),
+    }
+}
+
+/// The innermost reason: reqwest's own message is "error sending request for url", and what
+/// support needs is underneath it ("Connection refused", "operation timed out").
+fn deepest_cause(error: &dyn std::error::Error) -> String {
+    let mut cause = error;
+    while let Some(source) = cause.source() {
+        cause = source;
+    }
+    cause.to_string()
 }
 
 /// Keep a short startup headline and useful local diagnostics, with credentials removed.
@@ -6371,6 +6589,37 @@ fn main() {
         }
         return;
     }
+    // Docker Desktop on a Mac after `~/OpenBot` went to the Trash and was made again: while
+    // `.fixture-stale` is there, `up` is refused with its daemon's exact words for the new sign-in
+    // folder. A `run` that reads the folder is recorded in `.fixture-refresh` and clears it, unless
+    // `.fixture-stale-stays`. `compose config --images postgres` names the database image.
+    if scenario == "stale-share" {
+        if args.iter().any(|arg| arg == "config") {
+            assert!(args.ends_with(&["--images".to_string(), "postgres".to_string()]), "{args:?}");
+            println!("pgvector/pgvector:pg17");
+            return;
+        }
+        if args.first().map(String::as_str) == Some("run") {
+            let mut record = std::fs::read_to_string(".fixture-refresh").unwrap_or_default();
+            record.push_str(&args.join(" "));
+            record.push('\n');
+            std::fs::write(".fixture-refresh", record).unwrap();
+            if !std::path::Path::new(".fixture-stale-stays").exists() {
+                std::fs::remove_file(".fixture-stale").ok();
+            }
+            return;
+        }
+        assert!(args.iter().any(|arg| arg == "up"), "unexpected command: {args:?}");
+        let tries = std::fs::read_to_string(".fixture-up-tries").unwrap_or_default().len() + 1;
+        std::fs::write(".fixture-up-tries", "x".repeat(tries)).unwrap();
+        if std::path::Path::new(".fixture-stale").exists() {
+            let here = std::env::current_dir().unwrap();
+            let said = format!("Error response from daemon: invalid mount config for type \"bind\": stat /host_mnt{}/.openbot: operation not permitted", here.display());
+            eprint!("Container openbot-desktop-server-1 Creating \n Container openbot-desktop-server-1 {said} \n{said}\n");
+            std::process::exit(1);
+        }
+        return;
+    }
     if scenario == "computer-stop" {
         let root = std::path::PathBuf::from(std::env::var("OPENBOT_TEST_ENGINE_RECORD").unwrap()).with_extension("");
         let race = root.join(".fixture-race").exists();
@@ -8870,6 +9119,7 @@ fn main() {
             false,
             &Secrets::new(),
             &[std::time::Duration::ZERO; 4],
+            "linux",
         )
         .unwrap_err();
         assert_eq!(tries(), 5);
@@ -8892,6 +9142,125 @@ fn main() {
         let problem = up(&docker, &root, false, &Secrets::new()).unwrap_err();
         assert_eq!(tries(), 1);
         assert!(problem.detail.unwrap().contains("is already in use"));
+    }
+
+    /// Docker Desktop's words from OpenBot Desktop 1.0.2-rc.1 on a Mac, after `~/OpenBot` went to
+    /// the Trash and OpenBot was installed again, with the person's name in place of theirs.
+    const STALE_SHARE_SAID: &str = " Container openbot-desktop-server-1 Creating \n Container openbot-desktop-server-1 Error response from daemon: invalid mount config for type \"bind\": stat /host_mnt/Users/person/OpenBot/.openbot: operation not permitted \nError response from daemon: invalid mount config for type \"bind\": stat /host_mnt/Users/person/OpenBot/.openbot: operation not permitted";
+
+    #[test]
+    fn the_folder_docker_desktop_refused_is_read_from_its_own_words_and_only_inside_openbot() {
+        assert!(folder_not_shared_yet(STALE_SHARE_SAID));
+        assert_eq!(
+            refused_folder_in(STALE_SHARE_SAID, Path::new("/Users/person/OpenBot")),
+            Some(PathBuf::from("/Users/person/OpenBot/.openbot"))
+        );
+        // Another installation's folder, or somebody else's, is not OpenBot's to touch.
+        assert_eq!(
+            refused_folder_in(STALE_SHARE_SAID, Path::new("/Users/person/OpenBot-work")),
+            None
+        );
+        assert_eq!(
+            refused_folder_in(STALE_SHARE_SAID, Path::new("/Users/other/OpenBot")),
+            None
+        );
+        // Not Docker Desktop's file sharing, or not this refusal.
+        assert_eq!(
+            refused_folder_in(
+                "Error response from daemon: invalid mount config for type \"bind\": stat /Users/person/OpenBot/.openbot: operation not permitted",
+                Path::new("/Users/person/OpenBot")
+            ),
+            None
+        );
+        assert_eq!(
+            refused_folder_in(
+                "Error response from daemon: invalid mount config for type \"bind\": bind source path does not exist: /host_mnt/Users/person/OpenBot/.openbot",
+                Path::new("/Users/person/OpenBot")
+            ),
+            None
+        );
+    }
+
+    /**
+    OpenBot Desktop 1.0.2-rc.1 on a Mac with Docker Desktop: `~/OpenBot` went to the Trash and
+    OpenBot was installed again. Docker Desktop's file sharing still pointed at the old folder, so
+    every `up` was refused for the new sign-in folder, Retry and relaunching repeated it, and the
+    person read "Something went wrong". One read of the folder's parent through a container made
+    Docker Desktop look again. Start now does that read itself, with an image already there, and
+    goes on. When that does not clear it, the person is told to restart Docker Desktop.
+
+    Unix only: the fake names the folder as Docker Desktop on a Mac does, `/host_mnt` and the Mac's
+    path, which a Windows temporary folder (`C:\...`) cannot be.
+    */
+    #[cfg(unix)]
+    #[test]
+    fn up_refreshes_docker_desktops_view_of_a_folder_that_went_to_the_trash() {
+        if crate::test_support::isolated_process(
+            "stack::tests::up_refreshes_docker_desktops_view_of_a_folder_that_went_to_the_trash",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("stale-share");
+        let [docker, _] = computer_stop_addresses(&path);
+        let (root, _) = computer_stop_root(&path, "OpenBot", "{}");
+        let read = |name: &str| std::fs::read_to_string(root.join(name)).unwrap_or_default();
+        let reset = || {
+            for name in [
+                ".fixture-up-tries",
+                ".fixture-refresh",
+                ".fixture-stale-stays",
+            ] {
+                std::fs::remove_file(root.join(name)).ok();
+            }
+            std::fs::write(root.join(".fixture-stale"), "").unwrap();
+        };
+        let zero = [std::time::Duration::ZERO; 4];
+
+        // Refused, refreshed once with the database image and never a pull, then mounted at once.
+        reset();
+        let services = up_retrying(&docker, &root, false, &Secrets::new(), &zero, "macos").unwrap();
+        assert_eq!(services, selected_services(false));
+        assert_eq!(read(".fixture-up-tries").len(), 2);
+        let refresh = read(".fixture-refresh");
+        assert_eq!(refresh.lines().count(), 1, "{refresh}");
+        let parent = root.parent().unwrap().display().to_string();
+        assert!(
+            refresh.starts_with("run --rm --pull never --network none "),
+            "{refresh}"
+        );
+        assert!(
+            refresh.contains(&format!("--volume {parent}:/openbot-share:ro")),
+            "{refresh}"
+        );
+        assert!(
+            refresh.contains(
+                "--entrypoint ls pgvector/pgvector:pg17 -d /openbot-share/OpenBot/.openbot"
+            ),
+            "{refresh}"
+        );
+
+        // Still refused after the refresh: one refresh, the waits as before, then the cause and
+        // the fix, with Docker Desktop's own words kept as the detail.
+        reset();
+        std::fs::write(root.join(".fixture-stale-stays"), "").unwrap();
+        let problem =
+            up_retrying(&docker, &root, false, &Secrets::new(), &zero, "macos").unwrap_err();
+        assert_eq!(read(".fixture-refresh").lines().count(), 1);
+        assert_eq!(read(".fixture-up-tries").len(), 6);
+        assert_eq!(problem.said, DOCKER_DESKTOP_STALE_FOLDER);
+        assert!(problem.said.contains("Restart Docker Desktop"));
+        assert!(problem
+            .detail
+            .unwrap()
+            .contains("/.openbot: operation not permitted"));
+
+        // Not Docker Desktop on a Mac: nothing is run, and the waits go on as before.
+        reset();
+        let problem =
+            up_retrying(&docker, &root, false, &Secrets::new(), &zero, "linux").unwrap_err();
+        assert_eq!(read(".fixture-refresh"), "");
+        assert_eq!(read(".fixture-up-tries").len(), 5);
+        assert_ne!(problem.said, DOCKER_DESKTOP_STALE_FOLDER);
     }
 
     #[test]
@@ -9391,13 +9760,81 @@ fn main() {
         }
     }
 
+    /// A readiness wait that runs out writes what it asked, what each answer was, and why it gave
+    /// up: here a real server that answers its health check with 503, as one still migrating does.
+    #[test]
+    fn a_readiness_timeout_writes_its_waits_and_its_reason_to_the_log() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut request = [0u8; 1024];
+                let _ = stream.read(&mut request);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+            }
+        });
+        let ready = Ready {
+            api: port,
+            app: port,
+        };
+        let mut lines = Vec::new();
+        let result = wait_until_healthy_saying(
+            &ready,
+            std::time::Duration::from_secs(2),
+            || true,
+            &mut |line| lines.push(line),
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            format!("the API is not answering on port {port}.")
+        );
+        let what = format!("[wait] OpenBot's services, GET /health on port {port} (API)");
+        let first = &lines[0];
+        assert!(first.starts_with(&what), "{lines:#?}");
+        assert!(
+            first.contains(&format!(
+                "http://127.0.0.1:{port}/health answered 503 Service Unavailable"
+            )),
+            "{lines:#?}"
+        );
+        assert!(first.contains("check 1)"), "{lines:#?}");
+        let last = lines.last().unwrap();
+        assert!(
+            last.contains(&format!(
+                "gave up: the API is not answering on port {port}. after "
+            )),
+            "{lines:#?}"
+        );
+        assert!(last.contains("checks; last answer: API not answering (http://127.0.0.1"));
+        assert!(last.contains("503 Service Unavailable"), "{lines:#?}");
+        // The same answer each poll is said once, not once a poll.
+        assert_eq!(lines.len(), 2, "{lines:#?}");
+    }
+
     #[test]
     fn readiness_ends_at_once_when_the_start_is_stopped() {
         // Port 1 needs privilege to bind, so nothing here will ever answer it.
         let ready = Ready { api: 1, app: 1 };
         let started = std::time::Instant::now();
-        let result = wait_until_healthy(&ready, std::time::Duration::from_secs(30), || false);
+        let mut lines = Vec::new();
+        let result = wait_until_healthy_saying(
+            &ready,
+            std::time::Duration::from_secs(30),
+            || false,
+            &mut |line| lines.push(line),
+        );
         assert!(result.is_err());
+        assert!(
+            lines
+                .last()
+                .unwrap()
+                .contains("stopped by Stop or Quit after"),
+            "{lines:#?}"
+        );
         assert!(
             started.elapsed() < std::time::Duration::from_secs(5),
             "a stopped Start sat out the readiness wait"

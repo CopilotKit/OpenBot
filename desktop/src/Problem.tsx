@@ -19,6 +19,8 @@ export type Problem = {
   leftover_reset?: string[] | null;
   /** Stopped containers that still hold those volumes, removed first by the same reset. */
   leftover_containers?: string[] | null;
+  /** Only a Windows restart fixes this: the window offers one instead of Try again. */
+  restart_windows?: boolean | null;
 };
 
 /** Anything thrown, as a problem. A bare string keeps working and reads as it always did. */
@@ -153,11 +155,28 @@ export function TroubleshootingLogs({
   );
 }
 
-export function Failure({ problem }: { problem: Problem }) {
+/**
+ * `onRetry`, where the screen has no other way to run what failed again: Try again, in the card.
+ * The install behind the account step had none, and its failure sat there with nothing to press.
+ */
+export function Failure({
+  problem,
+  onRetry,
+}: {
+  problem: Problem;
+  onRetry?: () => void;
+}) {
   return (
     <div className="blocker" role="alert">
       <h2>That didn’t finish</h2>
       <p>{problem.said}</p>
+      {onRetry && (
+        <div className="row">
+          <button type="button" onClick={onRetry}>
+            Try again
+          </button>
+        </div>
+      )}
       {/* The real output, kept but not the headline. Whoever is debugging opens this; the person
           reading the sentence above never has to. */}
       {problem.detail && (
