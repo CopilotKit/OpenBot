@@ -116,7 +116,7 @@ function listed(words: string[]): string {
 const resourceName: Record<Resource, string> = {
   cpu: "CPUs",
   memory: "memory",
-  disk: "disk space",
+  disk: "free disk space",
 };
 const limitName: Record<Resource, string> = {
   cpu: "CPU",
@@ -132,7 +132,8 @@ const podmanFlag: Record<Resource, string> = {
 
 /**
  * Which resource is short and where to raise it. `needs` is what OpenBot needs of each: free, at
- * Start, as the CLI measures it, or in total, before it. Disk alone is "out of disk space".
+ * Start, as the CLI measures it, or in total, before it. A disk that is short is never "out of disk
+ * space": Windows F was told so with 13 GB free.
  */
 function shortfallSaid(
   shortfall: Shortfall,
@@ -186,9 +187,7 @@ function shortfallSaid(
           ? needed[short[0]]
           : listed(short.map((resource) => neededFully[resource]))
       }.`
-    : short.length === 1 && short[0] === "disk"
-      ? `${engine} is out of disk space. ${needsWho} ${needs.disk}.`
-      : `${engine} doesn't have enough ${listed(short.map((resource) => resourceName[resource]))}. ${needsWho} ${listed(short.map((resource) => needs[resource]))}.`;
+    : `${engine} doesn't have enough ${listed(short.map((resource) => resourceName[resource]))}. ${needsWho} ${listed(short.map((resource) => needs[resource]))}.`;
   const full = shortfall.nearlyFull
     ? "OpenBot is nearly out of disk space. "
     : "";
