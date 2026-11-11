@@ -46,8 +46,8 @@ off always applies.
 Each asks with Allow once, Allow for this conversation, Always allow here and Deny.
 
 **One exception: changing a password or other credential on a website.** The Bot would type it into
-a form, and only you have it, so no answer of yours can stand in for it. It is handed to you: **This
-needs you.** You do it yourself and mark it done, or tell the Bot not to. A credential an app's own
+a form, and only you have it, so no answer of yours can stand in for it. It is handed to you: the
+card says it is yours to do, and offers **I did it myself** and **Don't do it**. A credential an app's own
 tool changes (rotating an API key, say) asks like everything else.
 
 This reverses [#998](https://github.com/CopilotKit/OpenBot/pull/998), which made deleting, sending,
@@ -62,17 +62,19 @@ In the team edition, **Admin → Approvals → Actions that ask first** sets eac
 | --- | --- |
 | **Members choose** (the default) | Allow once, Allow for this conversation, Always allow here, Deny. |
 | **Ask every time** | Allow once and Deny only. What members allowed before for that kind stops applying. |
-| **Members do it themselves** | **This needs you.** The Bot never does it. |
+| **Members do it themselves** | The card says it is theirs to do, with **I did it myself** and **Don't do it**. The Bot never does it. |
 
 A team rule that asks or hands off also beats anything a member allowed, saved or for the
 conversation. Turning **Let members set personal rules** off turns off members' conversation answers
 too. Each change is on the audit trail.
 
 You are asked once. A Bot OpenBot runs is told that OpenBot asks before these, so it doesn't put
-its own approval card in front of OpenBot's (`APPROVAL_GUIDANCE` in `shared/bot-prompt.ts`). A tool
+its own approval card in front of OpenBot's (`ASKING_GUIDANCE` in `shared/bot-prompt.ts`). A tool
 its app marks destructive can be called anything, so its description, as the Bot is offered it, also
-says that OpenBot asks before it runs (`DESTRUCTIVE_TOOL_NOTE`). A remote Bot is not told so, because
-its own tools don't go through this policy.
+says that OpenBot asks before it runs (`DESTRUCTIVE_TOOL_NOTE`). A remote Bot is told the same for
+the apps and tools OpenBot gives it, and told to ask you itself before one of its own tools does
+something that cannot be undone, because its own tools don't go through this policy
+(`BROUGHT_BOT_ASKING_GUIDANCE`).
 
 They are recognised by what the action is called, never by what it carries. A document that says
 "delete the old draft", a note about a purchase, or an email draft addressed to someone is an

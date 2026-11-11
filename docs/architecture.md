@@ -20,20 +20,24 @@ Regenerate it with `bun run diagram` after changing anything it shows.
 | `agent-langgraph`        | 4201                       | LangGraph AG-UI Bot.                                                                                                                        |
 | `agent-harness`          | 4202                       | The Bot framework harness chosen during setup, one of the `agent-<framework>` images, behind the `harness` compose profile.                 |
 | `supervisor`             | 4500 host / 4300 container | Creates, stops, resets, and lists per-Bot computer containers.                                                                              |
-| PostgreSQL with pgvector | 5432                       | Product data, audit rows, credentials, policy, grants, channels, and components.                                           |
-| CopilotKit Intelligence  | external                   | Durable threads, memory, and realtime gateway.                                                                                              |
+| PostgreSQL               | 5432                       | Product data, audit rows, credentials, policy, grants, channels, components, and the work queue.                                           |
+| CopilotKit Intelligence  | external                   | Durable threads, memory, Learning, and realtime gateway. OpenBot Desktop runs a local one through its bundled CopilotKit CLI, on k3d.      |
 
-`scripts/start.sh` starts PostgreSQL, `agent-computer`, `agent-langgraph`, `agent-bot` (skipped when `BOT_PROVIDER=anthropic`, since that sample only takes OpenAI keys) and the supervisor (unless `OPENBOT_ONE_COMPUTER_EACH=false`) through Docker Compose, and runs `migrate`. It then starts `server`, the routines worker (`bun worker/src/index.ts`, the local stand-in for the routines CronJob) and `app` on the host.
+`scripts/start.sh` starts PostgreSQL, `agent-computer`, `agent-langgraph`, `agent-bot` (skipped when `BOT_PROVIDER=anthropic`, since that sample only takes OpenAI keys; neither Bot service starts for the personal edition, whose Bot runs inside the server) and the supervisor (unless `OPENBOT_ONE_COMPUTER_EACH=false`) through Docker Compose, and runs `migrate`. It then starts `server`, the routines worker (`bun worker/src/index.ts`, the local stand-in for the routines CronJob) and `app` on the host.
+
+The compose file also defines `server` and `worker` from the server image, behind the `openbot` profile so a plain `docker compose up` never starts a second server beside the one `start.sh` runs. OpenBot Desktop runs those two with PostgreSQL and one `agent-computer` (and `agent-harness` when a harness was picked), and starts no supervisor and none of the bundled Bots.
 
 The compose file also defines optional SPIRE services. `start.sh` does not start them.
+
+Several API replicas can share one database. What one changes reaches the others through PostgreSQL `LISTEN`/`NOTIFY`: `channel_activity` (a conversation's new message or name, for the people watching it), `action_policy_changed` (a saved action policy), `enterprise_settings_changed` (the enterprise controls), and `openbot_work_offered` (work was queued, so a sweep starts now instead of at its next poll). A notification is never the record: the listener re-reads the row or the queue, and a missed one is covered by a re-read on reconnect or the next poll.
 
 ## Runtime flow
 
 1. The app opens a channel or direct Bot session.
 2. The server resolves the signed-in actor and selected coworker.
 3. CopilotKit runtime sends the turn to the configured AG-UI endpoint.
-4. The surface registers available frontend tools: browser tools, MCP tools, and components granted to that Bot.
-5. Acting browser/file/MCP calls return to the server for authorization and audit.
+4. The browser registers its frontend tools for that Bot: browser and file tools, and the components granted to it. App and MCP tools the Bot holds are registered on the server's runtime.
+5. Acting browser, file and app calls go through the server for authorization and audit.
 6. The server streams results back to the app and Intelligence thread.
 
 ## Browser action governance
@@ -42,7 +46,7 @@ The computer itself does not decide policy. The server gateway is the action bou
 
 1. resolve the target from the server-held snapshot or request subject;
 2. evaluate the current action policy;
-3. write an audit row for the decision;
+3. write an audit row for the decision (an action held for a person's approval is written when they answer; see [approvals.md](approvals.md));
 4. call the computer only when the decision forwards;
 5. write a second audit row if a forwarded action fails.
 
@@ -59,8 +63,9 @@ Policy rules can inspect:
 - `file.path`, `file.name`, `file.extension`
 - `mcp.server`, `mcp.tool`, `mcp.effect`
 - `initiator.kind`, `initiator.id` — what started the run, as distinct from whose
-  authority it carries. `person`, `deployment`, `routine` or `handoff`, with the
-  routine or Bot id where there is one. `actor.id` is the routine's owner on a
+  authority it carries. `person`, `deployment`, `routine`, `responsibility` (a goal),
+  `memory` or `handoff`, with the routine, goal, memory source or Bot id where there
+  is one. `actor.id` is the routine's owner on a
   scheduled run, so this is the only field that can tell an unattended run from
   somebody typing.
 
@@ -70,7 +75,13 @@ missing or empty policy permits nothing, a broken deny rule denies, and a broken
 allow rule does not permit. OpenBot's shipped startup default is explicit:
 `deny: []` and `allow: ["true"]`, unless `AGENT_COMPUTER_POLICY` or a saved
 administrator policy replaces it. A malformed configured policy stops server
-startup.
+startup. A policy in `dry-run` mode decides and records every action but lets it
+through.
+
+The deployment's enterprise controls (Use Bots, cloud browser, computer and network
+use, the network policy, and the MCP allowlist) are asked before these rules, from a
+snapshot kept current over `LISTEN`/`NOTIFY`; a snapshot that never loaded refuses
+everything (`server/src/admin/controls.ts`).
 
 ## Computers
 
@@ -90,7 +101,7 @@ The supervisor exposes only ensure, stop, reset, and list operations. It holds t
 
 ## What started a run
 
-Every audit row records on whose authority an action was taken. A routine or a Responsibility asserts
+Every audit row records on whose authority an action was taken. A routine or a goal asserts
 its owner, and a hop between Bots asserts the person who began the conversation, so that column alone cannot say
 whether anybody was there when it happened. An interactive run has somebody watching who will notice
 a wrong tool call; an unattended one does not, which is the case worth being able to find.
@@ -102,7 +113,7 @@ Each row therefore also names what caused it:
 | `person`         | none                   | Somebody was in the room. The default.                  |
 | `deployment`     | none                   | The deployment itself, at start-up or refusing a caller it could not identify. |
 | `routine`        | the routine's id       | A schedule fired it, as its owner, with nobody there.   |
-| `responsibility` | the Responsibility's id | One of a Bot's standing Responsibilities was triggered, as its owner, with nobody there. |
+| `responsibility` | the goal's id          | One of a Bot's goals was triggered, as its owner, with nobody there. The value keeps the goal's code name. |
 | `memory`         | the memory source's id | Memory read a connected app to import facts, as the source's owner. |
 | `handoff`        | the Bot that handed on | Another Bot asked for this, on the person's behalf.     |
 
@@ -124,7 +135,7 @@ person, and a stream that stalls all say the same thing without each being told 
 cannot relabel its own run, because the assertion is signed by the deployment, and a kind this
 deployment does not write is read as a person rather than kept.
 
-Computer actions carry the initiator too. A run with no browser attached (a routine, a Responsibility,
+Computer actions carry the initiator too. A run with no browser attached (a routine, a goal,
 a group turn) is given the computer tools server-side, with the Bot and the person bound before the
 model supplies any arguments, and the gateway writes that run's initiator on every decision.
 
@@ -156,16 +167,16 @@ Secret entry is separate from chat content. The audit trail records that a secre
 
 ## Watching a Bot work
 
-Two surfaces beside the conversation. The screen is the live browser, proxied over a websocket and gated on the same question as every other route about that Bot. The Activity list under it is what the Bot did away from the browser: every command with its output and exit code, every file read, write and listing, newest first.
+The Computer panel beside the conversation has two tabs. **Screen** is the live browser, proxied over a websocket and gated on the same question as every other route about that Bot. **Terminal** is the Bot's one live shell on its computer (`agent-computer/src/live-shell.ts`): each command is typed into the same bash, so `cd` and the environment carry over, and its output streams as it runs. It is proxied the same way, and whoever may watch the screen may watch it. **Take control** gives a person its keyboard as it does the browser's. The Activity list is what the Bot did away from the browser: every command with its output and exit code, every file read, write and listing, newest first.
 
-Activity is held in the browser for the open conversation and is gone on reload. It is a window rather than a record; the record is the audit trail, which is server-side, survives restarts, and is what an investigation reads. A saved file contributes its path and size and never its contents, matching the write route, which declines to echo them because a Bot may be saving something it was told in confidence.
+Activity is read from the conversation's own tool results, so reopening the conversation shows it again, and it keeps no copy of its own. It is a window rather than a record; the record is the audit trail, which is server-side, survives restarts, and is what an investigation reads. A saved file contributes its path and size and never its contents, matching the write route, which declines to echo them because a Bot may be saving something it was told in confidence.
 
 ## Coworkers and channels
 
 A coworker is a durable Bot profile:
 
-- `agents` stores runtime identity and endpoint/key reference.
-- `agent_profiles` stores name, title, role, owner, visibility, and deletion state.
+- `agents` stores name, runtime identity and endpoint/key reference.
+- `agent_profiles` stores title, role, owner, visibility, isolation, and deletion state.
 - `agent_preferences` stores per-user roster state.
 
 A channel is a conversation with one coworker and a CopilotKit Intelligence thread mapping. Starting a new channel creates a new thread.
@@ -179,16 +190,18 @@ A group conversation holds several Bots. An Intelligence thread admits exactly o
 
 Who may reach one is decided by membership: every channel route resolves the caller in
 `channel_memberships` and refuses without a row. `channels.allowed_groups` is declared in the
-tenant package and stored, and is not part of that decision — `users.groups` is never populated by
-any sign-in path, so a group-based rule has nothing to evaluate. Treat it as a declaration waiting
-on group membership from the identity provider, not as a control that is running.
+tenant package and stored, and is not part of that decision. `users.groups` is written only by SCIM
+provisioning (`server/src/auth/scim.ts`, on when `SCIM_BEARER_TOKEN` is set), and per-group
+capability switches and network policies read it; channel access does not. Treat
+`allowed_groups` as a declaration, not as a control that is running.
 
 See [coworkers.md](coworkers.md).
 
 ## Routines
 
-A routine is a standing instruction, created by asking a Bot in a channel rather than through a form,
-that fires on a schedule and posts its reply into that channel as the person who created it.
+A routine is a standing instruction, created from the Routines page's form or by asking a Bot in a
+conversation, that fires on a schedule, runs as the person who created it, and posts the Bot's reply
+into its conversation.
 
 The sweep that notices a routine is due sits beside the computer culler on one shared mechanism: both
 write to `work_items`, one PostgreSQL table claimed with `select ... for update skip locked`, leases
@@ -313,7 +326,7 @@ nobody, which is the row worth finding later.
 
 MCP servers and skills share the plugin grant table, but they have different ownership rules.
 
-- MCP tools are admin-governed because they can reach external systems with stored credentials.
+- MCP tools are admin-governed because they can reach external systems with stored credentials. An administrator adds and switches on every app. A Bot's owner may give an app to a Bot they own only where an administrator opened that app to owners (`mcp_servers.owner_grants`) and the `ownerApps` capability allows it, and such a grant always uses the asking person's own account (`server/src/plugins/owner-grants.ts`).
 - Skills are reusable instructions. A person can create personal skills and attach them only to Bots they own. Administrators create deployment skills.
 
 The curated MCP catalogue contains the public-web research providers Parallel, Exa and Firecrawl (see [web-research.md](web-research.md)), Google Drive, Notion, and the built-in Routines server. Custom MCP servers must pass URL checks; unknown tools and custom-server tools are treated as writes unless positively classified as reads.
@@ -322,7 +335,7 @@ A catalogue entry says whose credential a Bot reaches it with, which is a differ
 
 Every MCP call checks the grant first, then evaluates the same action policy engine with MCP context, then audits the result.
 
-Whether a person can use an app through a Bot is answered once, on the server, from those same facts — the app's row, the Bot's grants, the person's own connection, a Shared app's team account — as one of six states: `ready`, `not_connected`, `reconnect`, `shared_not_connected`, `disabled` or `not_granted` (`server/src/plugins/app-access.ts`). The last three are an administrator's to fix, so a person can file a request (`app_access_requests`) for exactly what the state is missing, and approving one performs it — switching the app on, granting it to the Bot — through the same code paths the admin screens use. See [Composio](plugins/composio.md#what-an-app-is-for-one-person-on-one-bot).
+Whether a person can use an app through a Bot is answered once, on the server, from those same facts (the app's row, the Bot's grants, the person's own connection, a Shared app's team account) as one of eight states: `ready`, `not_connected`, `reconnect`, `shared_not_connected`, `shared_not_approved`, `disabled`, `not_granted` or `owner_grantable` (`server/src/plugins/app-access.ts`). `shared_not_connected`, `disabled` and `not_granted` are an administrator's to fix, so a person can file a request (`app_access_requests`) for exactly what the state is missing; under `shared_not_approved` the shared-use gate files the administrator's request itself, and `owner_grantable` is the Bot owner's to do. Approving a filed request performs it (switching the app on, or granting it to the Bot) through the same code paths the admin screens use. See [Composio](plugins/composio.md#what-an-app-is-for-one-person-on-one-bot).
 
 ### Writing a skill in a conversation
 
@@ -352,12 +365,15 @@ The model searches in a few words, and the tools a search names are sent from it
 
 Like narrowing, this is not a boundary. Every granted tool stays registered with the runtime and executes through the plugin store's `callTool`, so a waiting tool is checked, evaluated and audited exactly as a shown one is, and a search ranks only what the Bot was granted. The providers' own tool search (`tool_search`, `defer_loading`) is not used: replayed through the runtime it breaks a conversation from its second turn, and it exists only on some models and APIs.
 
-Before the model call, a run is counted (`toolNamesSent`, without what waits). A run that would still send more than Chat Completions accepts, or more than search allows, is refused with a sentence, and the audit trail records `agent.tool_limit_refused`.
+Before the model call, a run is counted (`admitTools` in `server/src/copilot.ts`, without what waits). A run that would still send more than Chat Completions accepts, or more than search allows, is refused with a sentence, and the audit trail records `agent.tool_limit_refused`.
 
 ## Personal memory
 
 A person's memory is kept in CopilotKit Intelligence when the deployment is entitled to Intelligence
 memory (`features.memory` in its runtime entitlement), and in OpenBot's own tables when it is not.
+The personal edition has no memory at all: OpenBot Desktop's local Intelligence is licensed without
+it, so there memory has no screens, routes, tools or sources (`editionHasMemory` in
+`server/src/edition.ts`). Everything below is the team edition.
 
 - **Intelligence holds the content and does the recall.** Every memory the person has accepted is
   mirrored there: one they wrote, a Bot-formed or imported one once they confirm it. Editing a memory
@@ -408,6 +424,7 @@ Connector credentials are stored through the credential vault and referenced by 
 - A provider's client secret and SAML signing material are encrypted at rest with `KEY_ENCRYPTION_KEY`, through a wrapper on the Better Auth storage adapter, since the plugin stores them as plaintext JSON. OAuth access and refresh tokens use Better Auth's own encryption, keyed on `BETTER_AUTH_SECRET`.
 - Signing in, being refused, and being granted the administrator role by configuration each write an audit row. They are the only record that somebody who can edit `INITIAL_ADMIN_EMAILS` promoted themselves, and the only evidence a revoked person was ever here, since revoking them deletes their sessions.
 - Removing somebody deletes their sessions and denies their address, because deleting the user row alone is not removal: the next sign-in through the provider recreates it.
+- With `SCIM_BEARER_TOKEN` set, a directory provisions people over SCIM 2.0 (`server/src/auth/scim.ts`). A provisioned person still signs in through the company's SSO. Deactivating or deleting them in the directory ends their sessions, denies their address, retires every connector credential they granted, and stops their Bots' computers.
 - With no identity provider configured, the deployment refuses to start unless `OPENBOT_SINGLE_USER=true` says every request may be one fixed administrator. That flag is the only thing that permits it; `NODE_ENV` does not. The flag alone is not enough on a public address: if `OPENBOT_PUBLIC_URL`, `OPENBOT_APP_URL` or any `TRUSTED_ORIGINS` entry resolves to an address the public internet routes to, the deployment refuses to start anyway, because no sign-in there means every visitor is the administrator. Loopback is silent, and a private address (a home LAN, a Tailnet, a VPN, a `.local` name) is allowed with a warning naming it, since that is the deployment the flag exists for.
 - `KEY_ENCRYPTION_KEY` must be a base64-encoded 32-byte value. The example key is refused with `NODE_ENV=production`. A vault read or decryption fault stops an OAuth client lookup without registering a replacement, so a misconfigured replica cannot replace a client still usable by the others. Connect records `mcp.oauth_client_read_failed` with the authenticated person and server before returning a safe 503; raw vault errors and causes are neither retained nor included in the audit payload.
 - Credential plaintext is encrypted at rest, never returned by APIs, and redacted from audit events.
