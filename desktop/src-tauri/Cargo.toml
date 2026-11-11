@@ -26,6 +26,9 @@ shell-updater = []
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# The app's folders for a run with no app around it (the uninstaller's stop), found as Tauri 2 finds
+# them: the `dirs` it already builds. See `headless_local_data_dir` in main.rs.
+dirs = "7"
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

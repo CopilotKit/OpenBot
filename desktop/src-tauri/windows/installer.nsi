@@ -9,14 +9,16 @@
 ; fails that test until this file is copied again and OpenBot's lines put back.
 ;
 ; What OpenBot adds: running a new installer over an installed OpenBot showed "Already Installed"
-; with "Uninstall before installing" chosen, then ran the old version's uninstaller as it was. Its
-; window opened in the middle of the update, with a "Delete the application data" box, and one
-; wrong tick deleted the person's Bots and conversations. The old uninstaller now runs as an update
-; (/UPDATE), which keeps the data, and silently (/S), with no window and no box. Nothing else could
-; do it: the page runs the old uninstaller before any of Tauri's hooks (NSIS_HOOK_PREINSTALL runs
-; later, in the Install section), and no setting changes its command. Uninstalling from Windows'
-; Apps runs the uninstaller on its own and is unchanged, so the person can still delete the data
-; there.
+; with "Uninstall before installing" chosen, and leaving that page ran the old version's uninstaller
+; as it was. Its window opened in the middle of the update, with a "Delete the application data"
+; box, and one wrong tick deleted the person's Bots and conversations. Now the page only notes the
+; choice, and NSIS_HOOK_PREINSTALL (windows/hooks.nsh) uninstalls the old version on the Installing
+; page: as an update (/UPDATE), which keeps the data, silently (/S), with no window or box of its
+; own, and with this installer's window, a line in plain words and a moving progress bar on screen.
+; Tauri's page hid the installer's window while it waited for the old uninstaller, and run silently
+; that left nothing on screen for minutes. No hook could change the page, and no setting changes
+; what it runs. Uninstalling from Windows' Apps runs the uninstaller on its own and is unchanged, so
+; the person can still delete the data there.
 ; <<< OpenBot
 Unicode true
 ManifestDPIAware true
@@ -328,6 +330,10 @@ Function PageReinstallUpdateSelection
   ${EndIf}
 FunctionEnd
 Function PageLeaveReinstall
+  ; >>> OpenBot
+  ; A choice made on an earlier visit to this page never carries over.
+  StrCpy $OpenBotUninstallFirst 0
+  ; <<< OpenBot
   ${NSD_GetState} $R2 $R1
 
   ; If migrating from Wix, always uninstall
@@ -366,10 +372,15 @@ Function PageLeaveReinstall
 
   reinst_uninstall:
     ; >>> OpenBot
-    ; The old uninstaller below runs silently, and a silent uninstaller closes a running OpenBot
-    ; without asking. So ask first, in OpenBot's own words. Cancel stays on this page
-    ; (OPENBOT_BEFORE_OLD_UNINSTALLER in windows/hooks.nsh).
-    !insertmacro OPENBOT_BEFORE_OLD_UNINSTALLER
+    ; An NSIS install (any of OpenBot's) is uninstalled on the Installing page instead, with this
+    ; installer's window on screen (NSIS_HOOK_PREINSTALL in windows/hooks.nsh). Here it would run
+    ; with the window hidden. A running OpenBot is asked about and closed now. WiX goes on as
+    ; Tauri runs it.
+    ${If} $WixMode <> 1
+      !insertmacro OPENBOT_BEFORE_OLD_UNINSTALLER
+      StrCpy $OpenBotUninstallFirst 1
+      Goto reinst_done
+    ${EndIf}
     ; <<< OpenBot
     HideWindow
     ClearErrors
@@ -382,12 +393,6 @@ Function PageLeaveReinstall
       ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
       ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
       ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
-      ; >>> OpenBot
-      ; As an update and silently: no window, no "Delete the application data" box, and the data
-      ; stays (Section Uninstall deletes it only when $UpdateMode isn't 1). Before `_?=`, which
-      ; NSIS reads only as the last parameter.
-      StrCpy $R1 "$R1 /UPDATE /S"
-      ; <<< OpenBot
       StrCpy $R1 "$R1 _?=$4" ; append uninstall directory
       ExecWait '$R1' $0
     ${EndIf}

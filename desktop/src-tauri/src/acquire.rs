@@ -1116,10 +1116,11 @@ pub fn stop_machine_named(name: &str) -> Result<(), String> {
 /// The machine `name` as `podman machine list` has it: `None` when there is no such machine, else
 /// whether it is running.
 pub fn machine_listed(name: &str) -> Result<Option<bool>, String> {
-    state_in(&podman(&["machine", "list", "--format", "json"])?, name)
+    machine_in(&podman(&["machine", "list", "--format", "json"])?, name)
 }
 
-pub(crate) fn state_in(listing: &str, name: &str) -> Result<Option<bool>, String> {
+/// `machine_listed`, read from a listing already taken.
+pub fn machine_in(listing: &str, name: &str) -> Result<Option<bool>, String> {
     #[derive(Deserialize)]
     struct Listed {
         #[serde(rename = "Name")]
@@ -1475,14 +1476,14 @@ mod tests {
             {"Name":"podman-machine-default","Default":true,"Running":true,"VMType":"wsl"},
             {"Name":"openbot","Default":false,"Running":true,"VMType":"wsl"}
         ]"#;
-        assert_eq!(state_in(listing, MACHINE), Ok(Some(true)));
+        assert_eq!(machine_in(listing, MACHINE), Ok(Some(true)));
         let stopped = r#"[{"Name":"openbot","Default":true,"Running":false,"VMType":"wsl"}]"#;
-        assert_eq!(state_in(stopped, MACHINE), Ok(Some(false)));
+        assert_eq!(machine_in(stopped, MACHINE), Ok(Some(false)));
         let theirs_only =
             r#"[{"Name":"podman-machine-default","Default":true,"Running":true,"VMType":"wsl"}]"#;
-        assert_eq!(state_in(theirs_only, MACHINE), Ok(None));
-        assert_eq!(state_in("[]", MACHINE), Ok(None));
-        assert!(state_in("not json", MACHINE).is_err());
+        assert_eq!(machine_in(theirs_only, MACHINE), Ok(None));
+        assert_eq!(machine_in("[]", MACHINE), Ok(None));
+        assert!(machine_in("not json", MACHINE).is_err());
     }
 
     #[test]

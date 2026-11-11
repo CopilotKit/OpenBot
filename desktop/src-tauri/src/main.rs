@@ -481,12 +481,47 @@ async fn wake_engine(app: tauri::AppHandle, root: String) -> Result<(), Problem>
     }
     let asked = std::time::Instant::now();
     let saved = preparation::saved_engine(&root);
-    let woken = match wake_installation_engine(&app, saved).await {
-        Ok(()) => heal_installation_engine(&app, saved).await,
-        failed => failed,
+    let gone = tauri::async_runtime::spawn_blocking(move || {
+        our_machine_is_gone(
+            saved,
+            engine::own_machine_only(std::env::consts::OS),
+            || engine::detect_saved(saved).responding,
+            || acquire::machine_exists().unwrap_or(false),
+        )
+    })
+    .await
+    .unwrap_or(false);
+    let woken = if gone {
+        log::info!("[wake engine] OpenBot's Podman machine is gone; making it again as setup does");
+        engine_ready(&app, saved).await.map(|_| ())
+    } else {
+        match wake_installation_engine(&app, saved).await {
+            Ok(()) => heal_installation_engine(&app, saved).await,
+            failed => failed,
+        }
     };
     logging::outcome("wake engine", asked, &woken);
     woken
+}
+
+/**
+Whether this installation's own Podman machine is gone, so a relaunch makes it again (`wake_engine`).
+
+On Windows OpenBot's engine is only ever its own machine (`engine::own_machine_only`). Uninstalled
+with OpenBot's data, or removed by hand, the machine goes while the installation folder may stay.
+Nothing then answered, the relaunch went on to the backend's check, and the CLI, told no engine,
+took Podman's default connection: on box I that was the person's rootless machine, and OpenBot
+said it couldn't run on this computer, with no way on. Now the machine is made again through
+setup's own engine step, with setup's rows. Never on a Mac, where the installation may have run on
+a rootful machine of the person's.
+*/
+fn our_machine_is_gone(
+    saved: Option<engine::Engine>,
+    own_machine_only: bool,
+    answers: impl FnOnce() -> bool,
+    our_machine_exists: impl FnOnce() -> bool,
+) -> bool {
+    own_machine_only && saved == Some(engine::Engine::Podman) && !answers() && !our_machine_exists()
 }
 
 /**
@@ -4928,10 +4963,16 @@ delete OpenBot's data. Each line goes to stdout, which the uninstaller shows in 
 0 when everything stopped, 1 otherwise; the uninstaller goes on either way.
 */
 fn stop_for_uninstall(asked: uninstall::Asked) -> i32 {
+    // The details go to OpenBot's own log, as the app's would; the uninstaller shows plain words.
+    if let Some(folder) = headless_log_dir() {
+        logging::append_without_app(&folder);
+    }
+    prepare_for_uninstall();
     // The uninstaller waits for this, and a step that hangs must not hold it there.
     std::thread::spawn(|| {
         std::thread::sleep(uninstall::LIMIT);
-        println!("OpenBot didn't finish stopping in time. Uninstalling it anyway.");
+        log::warn!("[uninstall] gave up after {:?}", uninstall::LIMIT);
+        println!("OpenBot didn't finish stopping in time. Uninstalling anyway.");
         std::process::exit(1);
     });
     let root = last_launched_root().unwrap_or_else(stack::default_root);
@@ -4944,18 +4985,45 @@ fn stop_for_uninstall(asked: uninstall::Asked) -> i32 {
     i32::from(!failures.is_empty())
 }
 
-/// Tauri's `app_local_data_dir`, for a process with no app around it.
+/// The app's identifier, the name of each folder Tauri keeps for it.
+const APP_IDENTIFIER: &str = "ai.copilotkit.openbot.desktop";
+
+/// Tauri's `app_local_data_dir`, for a process with no app around it: the same folder, found the
+/// way Tauri 2 finds it (`dirs::data_local_dir`, then the identifier).
 fn headless_local_data_dir() -> Option<PathBuf> {
-    None
+    dirs::data_local_dir().map(|dir| dir.join(APP_IDENTIFIER))
 }
 
-/// Tauri's `app_log_dir`, for a process with no app around it.
+/// Tauri's `app_log_dir`, for a process with no app around it: `~/Library/Logs/<identifier>` on a
+/// Mac, `logs` in the local data folder elsewhere, as Tauri 2 finds it.
 fn headless_log_dir() -> Option<PathBuf> {
-    None
+    if cfg!(target_os = "macos") {
+        dirs::home_dir().map(|home| home.join("Library/Logs").join(APP_IDENTIFIER))
+    } else {
+        headless_local_data_dir().map(|data| data.join("logs"))
+    }
 }
 
-/// What the app's setup gives every engine command, given to the uninstaller's stop.
-fn prepare_for_uninstall() {}
+/**
+What the app's setup gives every engine command, set once per process: the folder of the Compose
+provider OpenBot installed, first on each engine command's PATH (`engine::command_at`), OpenBot's own
+Docker configuration (`docker_config`) and the registry file a new backend node reads
+(`local_images::Mirror`). The app's setup and the uninstaller's stop both set them here, so both run
+Compose the same way. Without the first, `podman compose` finds no provider: OpenBot's
+`docker-compose` is only in that folder.
+*/
+fn use_engine_folders(root: &Path, local_data: Option<&Path>) {
+    engine::tools_live_in(engine::tools_dir_under(&acquire::download_dir(root)));
+    if let Some(data) = local_data {
+        docker_config::lives_in(data.join("docker-config"));
+        openbot_desktop_lib::local_images::registries_file_lives_at(data.join("registries.yaml"));
+    }
+}
+
+/// The uninstaller's stop, set up as the app sets itself up (`use_engine_folders`).
+fn prepare_for_uninstall() {
+    use_engine_folders(&stack::default_root(), headless_local_data_dir().as_deref());
+}
 
 /// `uninstall::Computer` on this computer, with what Stop and Quit use.
 struct ThisComputerAtUninstall;
@@ -4977,6 +5045,23 @@ impl uninstall::Computer for ThisComputerAtUninstall {
         stop_local_eval(root, local_eval::Limits::for_quit())
     }
 
+    /// The CLI's `local delete` for the stack OpenBot created, found as the stop finds it. A stack
+    /// that was there before OpenBot may serve other apps, and stays.
+    fn delete_backend(&mut self, engine: &engine::Address, root: &Path) -> Result<(), String> {
+        local_eval::use_engine(engine);
+        let Some(state) =
+            local_eval_state::read(root, None).filter(|state| state.tied_to_openbot())
+        else {
+            return Ok(());
+        };
+        local_eval::delete_installed(&state.stack_id()).map_err(|failure| {
+            format!(
+                "the backend's command-line tool did not delete the backend ({})",
+                wire_name(failure)
+            )
+        })
+    }
+
     fn machine(&mut self, name: &str) -> Result<Option<bool>, String> {
         if engine::program(engine::Engine::Podman).is_none() {
             return Ok(None);
@@ -4990,6 +5075,10 @@ impl uninstall::Computer for ThisComputerAtUninstall {
 
     fn remove_machine(&mut self, name: &str) -> Result<(), String> {
         acquire::remove_machine_named(name)
+    }
+
+    fn remove_installation(&mut self, root: &Path) -> Result<(), String> {
+        uninstall::remove_installation(root, dirs::home_dir().as_deref())
     }
 }
 
@@ -6924,10 +7013,8 @@ mod app_page_tests {
     fn the_uninstallers_stop_runs_engine_commands_as_the_app_does() {
         const CHILD: &str = "OPENBOT_TEST_UNINSTALL_ENGINE_CHILD";
         let Some(home) = std::env::var_os(CHILD).map(PathBuf::from) else {
-            let home = std::env::temp_dir().join(format!(
-                "openbot-uninstall-engine-{}",
-                std::process::id()
-            ));
+            let home = std::env::temp_dir()
+                .join(format!("openbot-uninstall-engine-{}", std::process::id()));
             std::fs::create_dir_all(&home).unwrap();
             let output = std::process::Command::new(std::env::current_exe().unwrap())
                 .args([
@@ -8257,6 +8344,17 @@ fn local_eval_answer(
     stack: &local_eval::StackId,
 ) -> Result<local_eval::Report, local_eval::Failure> {
     know_cli_engine(root);
+    if cli_left_to_pick(
+        std::env::consts::OS,
+        local_eval::engine_known(),
+        preparation::saved_engine(root),
+    ) {
+        log::info!(
+            "[local eval] {action:?} not asked: OpenBot's own engine does not answer, and the \
+             backend's tool would take Podman's default connection"
+        );
+        return Ok(local_eval::Report::engine_not_answering());
+    }
     let mut report = local_eval::run_installed(attempt, action, stack)?;
     // An Intelligence an older app installed, behind the release this app's CLI installs, or one
     // whose update did not finish: the window updates it before it starts OpenBot on it.
@@ -8298,6 +8396,17 @@ fn know_cli_engine(root: &Path) {
 }
 
 /**
+Whether asking the CLI now would leave it to pick a Podman machine itself. Told no engine, it takes
+Podman's default connection, and on Windows that can be the person's machine: on box I their
+rootless `mine`, which the backend's check called an engine it can't run on. On Windows, where
+OpenBot runs only on its own machine, the CLI is asked only once that answers (`know_cli_engine`);
+until then the answer is that the engine does not answer, which Retry and the next start repair.
+*/
+fn cli_left_to_pick(os: &str, engine_known: bool, saved: Option<engine::Engine>) -> bool {
+    engine::own_machine_only(os) && !engine_known && saved != Some(engine::Engine::Docker)
+}
+
+/**
 Whether the person's own Podman machine answers while OpenBot's is still on its way, so the CLI must
 not be asked yet.
 
@@ -8308,11 +8417,14 @@ makes its own (`engine::passed_over_machine`), so until that answers, the accoun
 waits for any engine coming up. Asked only while no engine is known, after `know_cli_engine`.
 */
 fn own_machine_on_its_way(root: &Path) -> bool {
-    own_machine_on_its_way_with(
-        local_eval::engine_known(),
-        preparation::saved_engine(root),
-        || engine::passed_over_machine(&engine::Address::new(engine::Engine::Podman, None)),
-    )
+    let (engine_known, saved) = (local_eval::engine_known(), preparation::saved_engine(root));
+    // On Windows nothing of the person's is asked: OpenBot's own machine answers, or it waits.
+    if engine::own_machine_only(std::env::consts::OS) {
+        return cli_left_to_pick(std::env::consts::OS, engine_known, saved);
+    }
+    own_machine_on_its_way_with(engine_known, saved, || {
+        engine::passed_over_machine(&engine::Address::new(engine::Engine::Podman, None))
+    })
 }
 
 /// `own_machine_on_its_way`, with what it reads passed in: whether an engine is known, the engine
@@ -10781,20 +10893,13 @@ fn main() {
             {
                 remember_selected_root(&app.state::<Shell>(), &root);
             }
-            // Where the Compose provider OpenBot installs itself lives, told once so every engine
-            // command can put it on the child's PATH. Before anything asks for an engine.
-            engine::tools_live_in(engine::tools_dir_under(&acquire::download_dir(
+            // Where the Compose provider OpenBot installs itself lives, OpenBot's own Docker
+            // configuration (the one without the person's credential helper) and the registry
+            // mirror k3d writes into a new back end node. Before anything asks for an engine.
+            use_engine_folders(
                 &stack::default_root(),
-            )));
-            // Where OpenBot's own Docker configuration lives, the one without the person's
-            // credential helper (see `docker_config`). Before anything runs a container command.
-            if let Ok(data) = app.path().app_local_data_dir() {
-                docker_config::lives_in(data.join("docker-config"));
-                // The registry mirror k3d writes into a new back end node (`local_images::Mirror`).
-                openbot_desktop_lib::local_images::registries_file_lives_at(
-                    data.join("registries.yaml"),
-                );
-            }
+                app.path().app_local_data_dir().ok().as_deref(),
+            );
 
             remember_setup_url(app.handle())?;
             if let Some(main) = app.get_webview_window("main") {
@@ -13825,6 +13930,78 @@ mod tests {
         assert_eq!(run(None, true, false, false), none);
         // Linux runs Podman natively: there is no machine to start.
         assert_eq!(run(Some(Podman), false, false, true), none);
+    }
+
+    /// Box I, step 7: "Delete the application data" took OpenBot's machine, the installation folder
+    /// stayed, and Podman made the person's rootless `mine` its default connection. The relaunch
+    /// found nothing answering, did nothing, and the backend's tool, told no engine, judged `mine`:
+    /// "OpenBot can't run on this computer as it's set up", with no way on. Now, on Windows, the
+    /// relaunch makes OpenBot's machine again, and the tool is never asked before it answers.
+    #[test]
+    fn a_relaunch_without_openbots_machine_makes_it_again_and_never_judges_the_persons() {
+        use engine::Engine::{Docker, Podman};
+        // `podman machine list --format json` as box I printed it: only the person's machine.
+        let only_theirs = r#"[{"Name":"mine","Default":true,"Running":true,"VMType":"wsl"}]"#;
+        let with_ours = r#"[
+            {"Name":"mine","Default":true,"Running":true,"VMType":"wsl"},
+            {"Name":"openbot","Default":false,"Running":false,"VMType":"wsl"}
+        ]"#;
+        let ours_in = |listing: &str| {
+            acquire::machine_in(listing, acquire::MACHINE)
+                .unwrap()
+                .is_some()
+        };
+        let windows = engine::own_machine_only("windows");
+
+        // Nothing answers and only the person's machine is there: OpenBot's is made again.
+        assert!(our_machine_is_gone(
+            Some(Podman),
+            windows,
+            || false,
+            || ours_in(only_theirs)
+        ));
+        // OpenBot's machine is there, stopped: started as before, never made again.
+        assert!(!our_machine_is_gone(
+            Some(Podman),
+            windows,
+            || false,
+            || ours_in(with_ours)
+        ));
+        // Answering: nothing is done, and the machines are not even listed.
+        assert!(!our_machine_is_gone(
+            Some(Podman),
+            windows,
+            || true,
+            || { panic!("listed while the engine answered") }
+        ));
+        // Docker installations, ones from before engines were saved, and a Mac, where the
+        // installation may have run on a rootful machine of the person's: as before.
+        assert!(!our_machine_is_gone(
+            Some(Docker),
+            windows,
+            || false,
+            || false
+        ));
+        assert!(!our_machine_is_gone(None, windows, || false, || false));
+        assert!(!our_machine_is_gone(
+            Some(Podman),
+            engine::own_machine_only("macos"),
+            || false,
+            || false
+        ));
+
+        // Until OpenBot's own engine answers, the backend's tool is not asked on Windows: the answer
+        // is that the engine doesn't answer, which the relaunch repairs, never "unsupported engine"
+        // from a look at the person's machine.
+        for saved in [Some(Podman), None] {
+            assert!(cli_left_to_pick("windows", false, saved), "{saved:?}");
+        }
+        assert!(!cli_left_to_pick("windows", true, Some(Podman)));
+        assert!(!cli_left_to_pick("windows", false, Some(Docker)));
+        assert!(!cli_left_to_pick("macos", false, Some(Podman)));
+        let answer = local_eval::Report::engine_not_answering();
+        assert_eq!(answer.outcome, local_eval::Outcome::Blocked);
+        assert_eq!(answer.reason, Some(local_eval::Reason::DockerUnavailable));
     }
 
     /// The tester's Start: Docker Desktop 4.27.2 answered, and Compose v2.24.5 stopped at its first

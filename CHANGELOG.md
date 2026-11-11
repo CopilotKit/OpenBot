@@ -29,11 +29,16 @@ Desktop installation:
   uninstalling stops what OpenBot runs.** Running a new installer over an installed OpenBot opened
   the old version's uninstaller in the middle of the update, with a "Delete the application data"
   box, and one wrong tick deleted your Bots and conversations. The old version is now removed
-  silently, as an update, and your data stays. If OpenBot is open, the installer asks before it
-  closes it. Uninstalling from Settings > Apps used to close OpenBot and leave its containers, its
-  services and its Podman machine (`openbot`) running. It now stops them first, and never touches
-  your own Podman machines or containers. Tick "Delete the application data" to remove OpenBot's
-  machine as well; otherwise it stays, stopped, for a reinstall to find.
+  silently, as an update, on the Installing page, which says "Removing the previous version of
+  OpenBot. Your Bots and data stay." with its progress bar moving. If OpenBot is open, the installer
+  asks before it closes it. Uninstalling from Settings > Apps used to close OpenBot and leave its
+  containers, its services and its Podman machine (`openbot`) running. It now stops them first,
+  with the same Compose OpenBot runs, and never touches your own Podman machines or containers.
+  Tick "Delete the application data" to remove OpenBot's machine, the backend OpenBot created and
+  OpenBot's files in its installation folder as well, so installing again starts from nothing; a
+  file of yours in that folder stays. Otherwise they stay, stopped, for a reinstall to find. And on
+  Windows, an OpenBot whose own Podman machine is gone makes it again when it opens. It used to open
+  on "OpenBot can't run on this computer as it's set up", having looked at your own machine.
 - **Setup says what self-contained means up front, and asks about usage data last.** The first
   screen, "Set up OpenBot (self-contained)", says this version runs entirely on your computer,
   backend included, that setup takes between 1 and 10 minutes depending on your internet speed,
