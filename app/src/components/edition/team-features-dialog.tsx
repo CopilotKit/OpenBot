@@ -55,7 +55,10 @@ export const TEAM_FEATURE_GROUPS: readonly {
   {
     title: "For your whole team",
     features: [
-      { title: "Sign-in with Google, Microsoft or custom SSO", icon: IconLogin2 },
+      {
+        title: "Sign-in with Google, Microsoft or custom SSO",
+        icon: IconLogin2,
+      },
       { title: "People, roles and admins", icon: IconUsers },
       { title: "Bots shared with your whole team", icon: IconUsersGroup },
       { title: "Learning shared across the team", icon: IconSchool },
