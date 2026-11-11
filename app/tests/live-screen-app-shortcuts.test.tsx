@@ -11,7 +11,9 @@ import {
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { LiveScreen } from "@/components/computer/live-screen";
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar";
+import { useState } from "react";
 import { AppHotkeys } from "@/lib/hotkeys/app-hotkeys";
+import { useHotkey } from "@/lib/hotkeys/use-hotkey";
 
 /**
  * The app's own shortcuts while a person drives a Bot's browser.
@@ -68,6 +70,13 @@ afterAll(() => {
   GlobalRegistrator.unregister();
 });
 
+/** Counts what reaches the Search and jump shortcut, as the command menu listens for it. */
+function MenuShortcut() {
+  const [opened, setOpened] = useState(0);
+  useHotkey("command-menu", () => setOpened((count) => count + 1));
+  return <span data-testid="menu-shortcut">{opened}</span>;
+}
+
 function SidebarState() {
   return <output>{useSidebar().open ? "open" : "closed"}</output>;
 }
@@ -78,6 +87,7 @@ async function renderDriving(driving: boolean) {
     component: () => (
       <SidebarProvider>
         <AppHotkeys />
+        <MenuShortcut />
         <SidebarState />
         <Outlet />
       </SidebarProvider>
@@ -113,6 +123,9 @@ async function renderDriving(driving: boolean) {
   return {
     router,
     sidebar: () => view.container.querySelector("output")?.textContent,
+    menuOpens: () =>
+      view.container.querySelector('[data-testid="menu-shortcut"]')
+        ?.textContent,
     /** A keystroke where the browser sends one: at the screen while it has the focus, else at the body. */
     press(init: KeyboardEventInit) {
       act(() => {
@@ -177,4 +190,25 @@ test("the same shortcuts still work while nobody is driving", async () => {
   await waitFor(() =>
     expect(screen.router.state.location.pathname).toBe("/channel/new"),
   );
+});
+
+test("Ctrl+K and Cmd+K typed into the Bot's browser go to it, and open no Search and jump", async () => {
+  const screen = await renderDriving(true);
+
+  screen.press({ key: "k", code: "KeyK", keyCode: 75, ctrlKey: true });
+  screen.press({ key: "k", code: "KeyK", keyCode: 75, metaKey: true });
+
+  expect(screen.menuOpens()).toBe("0");
+  expect(SocketDouble.latest?.sent.map((message) => message.key)).toEqual([
+    "k",
+    "k",
+  ]);
+});
+
+test("Search and jump's shortcut still works while nobody is driving", async () => {
+  const screen = await renderDriving(false);
+  screen.press({ key: "k", code: "KeyK", keyCode: 75, ctrlKey: true });
+  screen.press({ key: "k", code: "KeyK", keyCode: 75, metaKey: true });
+  // One of the two is this platform's; the other has the wrong modifier and is ignored.
+  expect(screen.menuOpens()).toBe("1");
 });

@@ -16,6 +16,7 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { CommandMenu } from "@/components/navigation/command-menu";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { TeamFeaturesDialog } from "@/components/edition/team-features-dialog";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -150,6 +151,7 @@ function renderSidebar(
           <AppSidebar />
           {/* Mounted once by the signed-in layout; here so the entry has something to open. */}
           <TeamFeaturesDialog />
+          <CommandMenu />
         </SidebarProvider>
       ),
     }),
@@ -311,4 +313,17 @@ test("a single-person install has no Sign out, because nobody signed in", async 
   const menu = await view.findByRole("menu");
   expect(within(menu).queryByRole("menuitem", { name: "Sign out" })).toBeNull();
   expect(within(menu).getAllByRole("menuitem").length).toBeGreaterThan(0);
+});
+
+test("the sidebar's Search and jump opens the menu, with its shortcut on the row", async () => {
+  const { view, user } = renderSidebar("user");
+  const entry = await view.findByRole("button", { name: /Search and jump/ });
+  expect(entry.getAttribute("aria-keyshortcuts")).toBe("Meta+K Control+K");
+  expect(entry.textContent).toMatch(/K$/);
+  await user.click(entry);
+  expect(
+    await within(document.body).findByRole("dialog", {
+      name: "Search and jump",
+    }),
+  ).toBeTruthy();
 });

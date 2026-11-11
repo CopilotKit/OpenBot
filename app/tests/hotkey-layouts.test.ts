@@ -76,3 +76,20 @@ test("the modifiers are still exact on the physical key", () => {
     matchesHotkey(keydown("Shift", "ShiftLeft", { shiftKey: true }), combo),
   ).toBe(false);
 });
+
+test("Search and jump's Cmd/Ctrl+K is the K key on any layout, and exact about its modifier", () => {
+  const menu = getHotkey("command-menu").combo;
+  const mod = /Mac|iPhone|iPad/.test(
+    typeof navigator === "undefined" ? "" : navigator.platform,
+  )
+    ? { metaKey: true }
+    : { ctrlKey: true };
+  // Russian writes "л" on the K key.
+  expect(matchesHotkey(keydown("л", "KeyK", mod), menu)).toBe(true);
+  expect(matchesHotkey(keydown("k", "KeyK", mod), menu)).toBe(true);
+  // Without its modifier it is a letter being typed, and with Shift it is something else.
+  expect(matchesHotkey(keydown("k", "KeyK"), menu)).toBe(false);
+  expect(
+    matchesHotkey(keydown("K", "KeyK", { ...mod, shiftKey: true }), menu),
+  ).toBe(false);
+});

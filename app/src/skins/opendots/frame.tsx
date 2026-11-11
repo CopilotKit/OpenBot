@@ -7,6 +7,7 @@ import {
   IconPlayerPause,
   IconPlayerPlay,
   IconPlus,
+  IconSearch,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
@@ -20,6 +21,11 @@ import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import { OpenBotVersion } from "@/components/layout/openbot-version";
+import {
+  COMMAND_MENU_KEYS,
+  openCommandMenu,
+  useBeforeCommandNavigate,
+} from "@/components/navigation/command-menu";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
 import {
@@ -201,6 +207,17 @@ function Rail({
           <IconPlus className="size-[19px]!" />
         </Link>
       </RailTip>
+      <RailTip label="Search and jump">
+        <button
+          aria-keyshortcuts={COMMAND_MENU_KEYS}
+          aria-label="Search and jump"
+          className={railButton}
+          onClick={openCommandMenu}
+          type="button"
+        >
+          <IconSearch />
+        </button>
+      </RailTip>
       <RailTip label="Routines">
         <Link
           aria-label="Routines"
@@ -343,6 +360,8 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
   const place = usePlace();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Opened over the phone drawer with Cmd/Ctrl+K, the menu closes it before it navigates.
+  useBeforeCommandNavigate(() => setMobileOpen(false));
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [paneOpen, setPaneOpen] = useState(false);
   const href = useRouterState({ select: (state) => state.location.href });

@@ -40,6 +40,12 @@ import {
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
+import {
+  COMMAND_MENU_KEYS,
+  CommandMenuKeys,
+  openCommandMenu,
+  useBeforeCommandNavigate,
+} from "@/components/navigation/command-menu";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { relativeTimeShort } from "@/lib/relative-time";
 import {
@@ -369,6 +375,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const animateOrder = (channels.data?.length ?? 0) <= MAX_ANIMATED_ROWS;
   const navigation = useNavigationItems();
   const { setOpenMobile } = useSidebar();
+  // Opened with Cmd/Ctrl+K over the phone sidebar, the menu closes it before it navigates.
+  useBeforeCommandNavigate(() => setOpenMobile(false));
 
   return (
     <Sidebar variant="inset" {...props}>
@@ -490,6 +498,22 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarContent>
       <SidebarFooter>
         <SidebarMenu className="gap-px">
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              aria-keyshortcuts={COMMAND_MENU_KEYS}
+              className="hover:bg-foreground/5 h-10"
+              onClick={() => {
+                setOpenMobile(false);
+                openCommandMenu();
+              }}
+            >
+              <div className="size-[28px] flex items-center justify-center">
+                <IconSearch />
+              </div>
+              <span className="text-sm">Search and jump</span>
+              <CommandMenuKeys className="ml-auto" />
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           {navigation
             .filter(isNavigationLink)
             .filter((item) => item.section === "primary")
