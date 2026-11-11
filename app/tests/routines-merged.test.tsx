@@ -4,7 +4,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
+  createRoute,
   createRouter,
+  Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
 import {
@@ -15,7 +17,10 @@ import {
   within,
 } from "@testing-library/react";
 import { NewRoutineButton } from "@/components/routines/new-routine-button";
-import { scheduleWords } from "@/components/routines/routine-dialog";
+import {
+  RoutineRoutePage,
+  scheduleWords,
+} from "@/components/routines/routine-page";
 import { RoutinesList } from "@/components/routines/routines-list";
 import { mergeRoutines } from "@/lib/routines/merged";
 import type { RoutineRecord } from "@/lib/routines/queries";
@@ -163,16 +168,36 @@ function draw(scope: string | null = "expenses") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  // The list, and the page each schedule's row links to, as the app routes them.
+  const root = createRootRoute({ component: Outlet });
+  const schedule = createRoute({
+    getParentRoute: () => root,
+    path: "/routines/schedules/$routineId",
+    component: function SchedulePage() {
+      const { routineId } = schedule.useParams();
+      return <RoutineRoutePage agentId={agentId} routineId={routineId} />;
+    },
+  });
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
-    routeTree: createRootRoute({
-      component: () => (
-        <>
-          <NewRoutineButton agentId={agentId} />
-          <RoutinesList agentId={agentId} />
-        </>
-      ),
-    }),
+    routeTree: root.addChildren([
+      createRoute({
+        getParentRoute: () => root,
+        path: "/",
+        component: () => (
+          <>
+            <NewRoutineButton agentId={agentId} />
+            <RoutinesList agentId={agentId} />
+          </>
+        ),
+      }),
+      schedule,
+      createRoute({
+        getParentRoute: () => root,
+        path: "/bots/$agentId/routines",
+        component: () => <RoutinesList agentId={agentId} />,
+      }),
+    ]),
   });
   return render(
     <QueryClientProvider client={client}>
@@ -374,10 +399,16 @@ test("a goal's row is a link to the goal's own page, back to the Bot's list it c
  */
 async function openSchedule(view: ReturnType<typeof draw>) {
   const row = (await view.findByText("Post the standup summary.")).closest(
-    "a, button",
+    "a",
   ) as HTMLElement;
   fireEvent.click(row);
-  return within(document.body).findByRole("dialog");
+  // Its own page, not a dialog over the list.
+  await view.findByRole("heading", {
+    level: 1,
+    name: "Post the standup summary.",
+  });
+  expect(within(document.body).queryByRole("dialog")).toBeNull();
+  return document.body;
 }
 
 test("every kind of row is one link or button with a chevron, with no control inside it", async () => {
@@ -401,7 +432,7 @@ test("every kind of row is one link or button with a chevron, with no control in
   expect(view.queryByRole("button", { name: /^Delete/ })).toBeNull();
 });
 
-test("a schedule's details pause it, run it, show its runs and delete it", async () => {
+test("a schedule's page pauses it, runs it, shows its runs and deletes it", async () => {
   serving({ routines: [routine("r1", "expenses")] });
   const view = draw();
   const details = within(await openSchedule(view));
@@ -429,14 +460,8 @@ test("a schedule's details pause it, run it, show its runs and delete it", async
       "POST /api/routines/r1/run",
     ),
   );
-  // Run now opens the runs, so the one it started is there to watch.
-  expect(
-    details
-      .getByRole("button", {
-        name: "Run history for the routine scheduled Weekdays at 09:00",
-      })
-      .getAttribute("aria-expanded"),
-  ).toBe("true");
+  // Its runs are on the page, so the one Run now started appears there.
+  expect(details.getByRole("heading", { name: "Runs" })).toBeTruthy();
 
   fireEvent.click(
     details.getByRole("button", {
@@ -455,6 +480,15 @@ test("a schedule's details pause it, run it, show its runs and delete it", async
     expect(writes.map((write) => write.request)).toContain(
       "DELETE /api/routines/r1",
     ),
+  );
+  // Deleted, it goes back to the Bot's list it came from.
+  await waitFor(() =>
+    expect(
+      view.queryByRole("heading", {
+        level: 1,
+        name: "Post the standup summary.",
+      }),
+    ).toBeNull(),
   );
 });
 
@@ -516,7 +550,7 @@ test("a skipped last run is on the row, and a quiet success is not", async () =>
   expect(within(quiet).queryByText(/^Ran /)).toBeNull();
 });
 
-test("on the every-Bot list a schedule's row names its Bot, and its details lead to that Bot", async () => {
+test("on the every-Bot list a schedule's row names its Bot, and its page leads to that Bot", async () => {
   serving({ goals: [], routines: [routine("r1", "expenses")] });
   const view = draw(null);
   expect(await view.findByText(/^Expenses · Weekdays at 09:00/)).toBeTruthy();

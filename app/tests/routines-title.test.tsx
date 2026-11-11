@@ -8,7 +8,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
-import { scheduleWords } from "@/components/routines/routine-dialog";
+import { scheduleWords } from "@/components/routines/routine-page";
 import { RoutinesList } from "@/components/routines/routines-list";
 import type { RoutinesPage } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";

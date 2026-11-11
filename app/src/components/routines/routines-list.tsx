@@ -3,9 +3,9 @@ import {
   IconClock,
   IconPlayerPause,
 } from "@tabler/icons-react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Fragment, useState } from "react";
+import { Fragment } from "react";
 import { LoadingRows } from "@/components/layout/loading-rows";
 import {
   PageEmpty,
@@ -18,16 +18,6 @@ import {
   SettingRow,
   useCheckInsBlocked,
 } from "@/components/suggestions/proactive-panel";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   Item,
   ItemActions,
@@ -48,33 +38,32 @@ import {
   triggersQueryOptions,
 } from "@/lib/responsibilities";
 import { goalStarts, mergeRoutines } from "@/lib/routines/merged";
-import { deleteRoutineMutationOptions } from "@/lib/routines/mutations";
 import {
   nothingIsFiring,
   type RoutineRecord,
   routinesQueryOptions,
   stoppedRoutinesGuidance,
 } from "@/lib/routines/queries";
-import { queryClient } from "@/query-client";
 import { NewRoutineButton } from "./new-routine-button";
-import { lastRunLabel, RoutineDialog, scheduleWords } from "./routine-dialog";
+import { lastRunLabel, scheduleWords } from "./routine-page";
 
 type BotDirectory = Map<string, AgentProfile>;
 
 /**
  * A scheduled routine's row, the same shape as a goal's and a check-in's: what it does (its title,
  * else its instruction), when it starts, that it acts, and a last run worth knowing about. The
- * whole row opens its details, where it is switched, run, read back and deleted.
+ * whole row links to its page, where it is switched, run, read back and deleted.
  */
 function RoutineItem({
   routine,
   botName,
-  onOpen,
+  agentId,
 }: {
   routine: RoutineRecord;
   /** Absent on one Bot's own list. */
   botName?: string;
-  onOpen: () => void;
+  /** The Bot whose own list this is, so the page's back link returns to it. */
+  agentId?: string;
 }) {
   const lastRun = lastRunLabel(routine.lastRun);
   const outcome = routine.lastRun?.status;
@@ -88,7 +77,16 @@ function RoutineItem({
     .filter(Boolean)
     .join(" · ");
   return (
-    <Item render={<button onClick={onOpen} type="button" />} size="sm">
+    <Item
+      render={
+        <Link
+          params={{ routineId: routine.id }}
+          search={agentId ? { agentId } : {}}
+          to="/routines/schedules/$routineId"
+        />
+      }
+      size="sm"
+    >
       <ItemMedia variant="icon">
         {routine.enabled ? <IconClock /> : <IconPlayerPause />}
       </ItemMedia>
@@ -250,11 +248,6 @@ export function RoutinesList({
       bot,
     ]),
   );
-  const deleteRoutine = useMutation(deleteRoutineMutationOptions(queryClient));
-  /** The scheduled routine whose details are open. Looked up from the query, as a goal's is. */
-  const [routineId, setRoutineId] = useState<string | null>(null);
-  /** The routine a delete is being confirmed for, or null. Its own dialog rather than one per row. */
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   const rows = mergeRoutines({
     routines: routines.data?.routines ?? [],
@@ -271,11 +264,6 @@ export function RoutinesList({
   ).length;
   const noWorker = nothingIsFiring(sweep, scheduled);
   const edition = useQuery(deploymentCapabilitiesQueryOptions()).data?.edition;
-  const confirming =
-    routines.data?.routines.find((row) => row.id === confirmingId) ?? null;
-  // Gone once it is deleted, which closes its details with it.
-  const openRoutine =
-    routines.data?.routines.find((row) => row.id === routineId) ?? null;
   const pending = routines.isPending || goals.isPending || checkIns.isPending;
   const failed = [
     routines.error ? "routines" : null,
@@ -333,7 +321,7 @@ export function RoutinesList({
                       ? (bots.get(row.agentId)?.name ?? "A Bot")
                       : undefined
                   }
-                  onOpen={() => setRoutineId(row.id)}
+                  agentId={agentId}
                   routine={row.routine}
                 />
               ) : row.kind === "goal" ? (
@@ -349,6 +337,7 @@ export function RoutinesList({
                 />
               ) : (
                 <SettingRow
+                  agentId={agentId}
                   blocked={blocked}
                   botName={bots.get(row.agentId)?.name ?? "A Bot"}
                   label="Check-in"
@@ -360,79 +349,6 @@ export function RoutinesList({
           ))}
         </PageRows>
       )}
-
-      {openRoutine ? (
-        <RoutineDialog
-          bot={
-            showBot
-              ? {
-                  id: openRoutine.agentId,
-                  name: bots.get(openRoutine.agentId)?.name ?? "A Bot",
-                }
-              : undefined
-          }
-          key={openRoutine.id}
-          onClose={() => setRoutineId(null)}
-          onDelete={() => {
-            deleteRoutine.reset();
-            setConfirmingId(openRoutine.id);
-          }}
-          routine={openRoutine}
-        />
-      ) : null}
-
-      {/*
-       * One dialog for the whole list rather than one per row, keyed by which routine is being
-       * confirmed. It names the schedule, the word a person reads first on the row.
-       */}
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open) setConfirmingId(null);
-        }}
-        open={confirming !== null}
-      >
-        {/* The heavier backdrop, forced: opened from a Bot's dialog this stacks over it, and Base
-            UI would otherwise render a nested dialog with no backdrop at all. */}
-        <DialogContent overlayClassName="bg-black/20 supports-backdrop-filter:backdrop-blur-sm">
-          <DialogHeader>
-            <DialogTitle>Delete "{confirming?.schedule}"?</DialogTitle>
-            <DialogDescription>
-              This routine stops for good. You can't undo this.
-            </DialogDescription>
-          </DialogHeader>
-          {deleteRoutine.error ? (
-            <DialogBody className="mt-4">
-              <p className="text-destructive text-sm" role="alert">
-                {deleteRoutine.error.message}
-              </p>
-            </DialogBody>
-          ) : null}
-          <DialogFooter className="mt-4">
-            <Button
-              onClick={() => setConfirmingId(null)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              Cancel
-            </Button>
-            <Button
-              disabled={deleteRoutine.isPending}
-              onClick={() => {
-                if (!confirmingId) return;
-                deleteRoutine.mutate(confirmingId, {
-                  onSuccess: () => setConfirmingId(null),
-                });
-              }}
-              size="sm"
-              type="button"
-              variant="destructive"
-            >
-              {deleteRoutine.isPending ? "Deleting…" : "Delete"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </PageSection>
   );
 }

@@ -7,10 +7,11 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, within } from "@testing-library/react";
+import { cleanup, render, within } from "@testing-library/react";
 import type * as React from "react";
 import { RoutineComposerButton } from "@/components/routines/new-routine-button";
 import { RoutinesConnectionPage } from "@/components/routines/routines-connection-page";
+import { RoutineRoutePage } from "@/components/routines/routine-page";
 import { RoutinesList } from "@/components/routines/routines-list";
 import { cronFrom, scheduleSentence } from "@/lib/routines/form";
 import type { RoutineRecord, RoutinesPage } from "@/lib/routines/queries";
@@ -134,12 +135,18 @@ test("the Routines page says which Bot each routine belongs to", async () => {
     routines: [routine({})],
     sweep: SWEEP,
   });
-  // On the row, by name; in its details, as the way to that Bot's routines.
+  // On the row, by name, and the row links to its page.
   const row = (await view.findByText(/^Lead Desk · /)).closest(
-    "button",
-  ) as HTMLElement;
-  fireEvent.click(row);
-  const bot = await view.findByRole("link", { name: /Lead Desk/ });
+    "a",
+  ) as HTMLAnchorElement;
+  expect(row.getAttribute("href")).toMatch(/^\/routines\/schedules\//);
+  cleanup();
+  // On its page, as the way to that Bot's routines.
+  const details = draw(<RoutineRoutePage routineId={routine({}).id} />, {
+    routines: [routine({})],
+    sweep: SWEEP,
+  });
+  const bot = await details.findByRole("link", { name: /Lead Desk/ });
   expect(bot.getAttribute("href")).toBe("/bots/lead-desk/routines");
 });
 

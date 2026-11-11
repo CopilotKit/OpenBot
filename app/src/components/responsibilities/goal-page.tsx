@@ -17,13 +17,13 @@ import { Streamdown } from "streamdown";
 import { LoadingRows } from "@/components/layout/loading-rows";
 import {
   PageCard,
-  PageEmpty,
   PageRows,
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
 import { GoalSchedules } from "@/components/routines/goal-schedules";
 import { routinesOf } from "@/components/routines/new-routine-page";
+import { RoutineDetailMissing } from "@/components/routines/routine-detail-missing";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -145,30 +145,12 @@ export function GoalRoutePage({
     );
 
   return (
-    <PageShell backButton={{ label: "Routines", linkProps: back }} title="Goal">
-      {goals.isPending ? (
-        <LoadingRows label="Loading this goal" rows={4} />
-      ) : goals.error ? (
-        <div className="flex flex-wrap items-center gap-3" role="alert">
-          <p className="text-destructive text-sm">
-            Couldn't load this goal. Try again.
-          </p>
-          <Button
-            disabled={goals.isFetching}
-            onClick={() => goals.refetch()}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            Retry
-          </Button>
-        </div>
-      ) : (
-        <PageEmpty icon={IconTarget} title="This goal isn't here">
-          It may have been deleted, or it belongs to someone else.
-        </PageEmpty>
-      )}
-    </PageShell>
+    <RoutineDetailMissing
+      back={back}
+      icon={IconTarget}
+      kind="goal"
+      read={goals}
+    />
   );
 }
 
