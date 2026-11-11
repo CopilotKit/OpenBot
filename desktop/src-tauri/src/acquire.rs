@@ -231,7 +231,15 @@ pub fn connection_of_machine(machine: &str) -> String {
     connection_keeping_openbot(machine, rootful, holds_openbot)
 }
 
+/// A `podman` command, run so that the person's default connection stays as they had it (see
+/// `podman_default`).
 fn podman(args: &[&str]) -> Result<String, String> {
+    crate::podman_default::keeping(&mut crate::podman_default::ThisComputer, args)
+}
+
+/// A `podman` command as it is. Only `podman_default` runs these: everything else goes through
+/// `podman`.
+pub(crate) fn podman_as_is(args: &[&str]) -> Result<String, String> {
     podman_with(args, || {
         crate::engine::tool(Engine::Podman).args(args).output()
     })
@@ -335,7 +343,7 @@ pub fn create_machine(
     )
 }
 
-fn create_machine_with(
+pub(crate) fn create_machine_with(
     cpus: u32,
     memory_mib: u32,
     disk_gib: u32,
@@ -1354,7 +1362,14 @@ fn clear_own_port_rules_with(
 /// Remove the machine `name` and everything in it, stopping it first if it runs. `--force` because
 /// `podman machine rm` otherwise asks at a terminal, and OpenBot's commands have none.
 pub fn remove_machine_named(name: &str) -> Result<(), String> {
-    podman(&["machine", "rm", "--force", name]).map(|_| ())
+    remove_machine_with(name, podman)
+}
+
+pub(crate) fn remove_machine_with(
+    name: &str,
+    mut run: impl FnMut(&[&str]) -> Result<String, String>,
+) -> Result<(), String> {
+    run(&["machine", "rm", "--force", name]).map(|_| ())
 }
 
 /// Start the machine `name`, then the containers that were running in it.

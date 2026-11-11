@@ -25,12 +25,10 @@
 //! stays paused across it.
 //!
 //! **The person's default connection stays theirs.** OpenBot addresses its machine by name, never
-//! through the default connection (see `engine.rs`). `podman machine init` makes a new machine's
-//! connection the default only when there were no connections at all (`addConnection` in
-//! `pkg/machine/connection/connection.go`), and `podman machine start` changes it only with
-//! `--update-connection` or when the person answers yes at a terminal prompt (`shim.Start`).
-//! OpenBot passes neither, and its commands have no terminal: `Command::output` gives them a closed
-//! stdin.
+//! through the default connection (see `engine.rs`). Every `machine init`, `machine start` and
+//! `machine rm` it runs, the person's machine's start on a Mac included, goes through
+//! `podman_default::keeping`: init and start are told to leave the default alone, and a default
+//! Podman moved anyway is put back. `podman machine rm` always picks a new one.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex};
