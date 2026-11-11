@@ -325,6 +325,11 @@ export type ResponsibilityStore = {
     id: string,
     status: ResponsibilityStatus,
   ): Promise<Responsibility>;
+  /**
+   * Delete this goal and the routines that record it (`goal_id`): they exist to run it. Its runs and
+   * triggers go with it. Not found for another person's goal.
+   */
+  delete(ownerUserId: string, id: string): Promise<void>;
   recordProgress(
     ownerUserId: string,
     id: string,

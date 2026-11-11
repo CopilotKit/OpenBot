@@ -346,6 +346,22 @@ export function createResponsibilityStore(
         return row;
       });
     },
+    async delete(ownerUserId, id) {
+      await database.transaction(async (transaction) => {
+        await owned(transaction, ownerUserId, id, true);
+        // Its routines exist to run it. Left behind, `goal_id` would clear and each would become a
+        // routine of its own, firing `run_goal` at a goal that is gone.
+        await transaction
+          .delete(routines)
+          .where(
+            and(eq(routines.ownerUserId, ownerUserId), eq(routines.goalId, id)),
+          );
+        // Its runs and triggers go with it, by foreign key.
+        await transaction
+          .delete(responsibilities)
+          .where(eq(responsibilities.id, id));
+      });
+    },
     async recordProgress(ownerUserId, id, input, agentId) {
       const summary = input.summary.trim();
       if (!summary || summary.length > 6000)
