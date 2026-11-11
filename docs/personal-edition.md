@@ -70,7 +70,7 @@ runs on the one computer, beside your Bots (see [Teach a Bot](#teach-a-bot) belo
 Chrome window opens. Narration comes from the OpenBot window, as on hosted OpenBot. The window's web
 view has no speech recognition that stays on your computer, so the desktop app does it instead: Apple's
 Speech framework with on-device recognition required on macOS, the in-process SAPI recognizer on
-Windows. Your voice never leaves the machine; where neither can recognise your language, narration is
+Windows. Your voice never leaves the machine; where neither can recognize your language, narration is
 off. macOS asks once for speech recognition and the microphone. The desktop runs
 no browser of its own on your machine, and writes no `OPENBOT_BROWSER_URL`; Start takes out one an
 earlier version wrote.

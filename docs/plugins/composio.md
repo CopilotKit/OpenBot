@@ -158,7 +158,7 @@ deployment sends Composio as the person a call is for: the `vendor_user_id` on t
 `brokered_connections` row, which is their own user id except on a single-user deployment (see
 [Configuration](../configuration.md#authentication)).
 `--call` additionally runs one read-only action, `GMAIL_GET_PROFILE`, and only after checking
-Composio's own behaviour label at call time rather than trusting the name.
+Composio's own behavior label at call time rather than trusting the name.
 
 **Which stream a line goes to is decided by the exit code it explains.** A line that explains a
 non-zero exit is written to stderr; every other line is written to stdout. So `… > report.txt` keeps
@@ -573,7 +573,7 @@ the source of truth and the row here is a cache of it.
 **A failure at Composio arrives as the vendor's own sentence, unless it names Composio.** A wrong
 key, a revoked one, an app whose authorization config was deleted at the dashboard: each of those
 comes back as the one sentence the vendor wrote (*Invalid API key provided.*), with everything that
-travelled beside it left where it was. On the routes a person calls (connect, confirm, re-check,
+traveled beside it left where it was. On the routes a person calls (connect, confirm, re-check,
 disconnect), a sentence that names Composio was written for an operator who can open Composio's
 dashboard, so the person reads the route's own sentence instead, saying what failed and who to ask,
 with the same status, and the original goes to the server log as a

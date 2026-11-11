@@ -15,12 +15,12 @@ One person, from their own computer, on any cluster with a default StorageClass 
 OpenBot image is amd64 only, and so is the embeddings image Intelligence runs). From a checkout of
 this repository:
 
-**1. Write your licence and model key into a file you keep and never commit.**
+**1. Write your license and model key into a file you keep and never commit.**
 
 ```sh
 cat > openbot-secrets.yaml <<EOF
 secrets:
-  licenseToken: "<your CopilotKit licence>"
+  licenseToken: "<your CopilotKit license>"
   modelApiKey: "<your OpenAI API key>"
 EOF
 ```
@@ -66,11 +66,11 @@ reaches the server with no sign-in, which is why it is only ever reached through
 your own computer, and why the chart refuses it with a public URL or an open LoadBalancer.
 
 `ci/vanilla-values.yaml` is single-user mode, OpenBot's bundled database, and a placeholder for the
-licence and the model key your file replaces. CI renders exactly this install on every change.
+license and the model key your file replaces. CI renders exactly this install on every change.
 
 **What happens, so a first install that takes a few minutes is not a surprise.** The chart installs
 Intelligence, generates every credential it needs as Secrets that are kept across upgrades and
-uninstalls, including OpenBot's runtime key in `openbot-intel-api-key`, and gives it the licence from
+uninstalls, including OpenBot's runtime key in `openbot-intel-api-key`, and gives it the license from
 your file (OpenBot gets the same one). Intelligence's bootstrap Job then creates OpenBot's organization
 and project, stores that key for it, and creates the `openbot` Learning container. Nobody signs in to
 anything. `--timeout 15m` gives a fresh cluster room to pull every image; `--wait` works on a first
@@ -103,7 +103,7 @@ it, with the keys `license-token`, `model-api-key` (or `anthropic-api-key`, or b
 `key-encryption-key` and `computer-token`; put the
 database password under `postgres-password` and set `postgresql.auth.existingSecret` to the same
 Secret; and set `intelligence.appApi.licenseSecret.existingSecret` to it too, so Intelligence reads the
-same licence. Intelligence's Learning agent reads `model-api-key` and `anthropic-api-key` from that
+same license. Intelligence's Learning agent reads `model-api-key` and `anthropic-api-key` from that
 Secret as well: the chart copies them at install and on every upgrade, so a new key there reaches
 Learning on its next run after `helm upgrade`, and picks Learning's model from which of them is there
 (adding or removing one wants a restart, see [Automatic Learning](#automatic-learning)).
@@ -143,7 +143,7 @@ docker save --platform linux/amd64 "$IMAGE" \
 
 **Intelligence credentials, unless the chart installs Intelligence.** With the bundled Intelligence
 (the default) there are none to fetch: the chart makes OpenBot's key itself and needs only the
-licence. With `intelligence.enabled: false`, OpenBot requires an Intelligence you name and the chart
+license. With `intelligence.enabled: false`, OpenBot requires an Intelligence you name and the chart
 refuses to install without `secrets.intelligenceApiKey`. It comes from the CLI, on any machine with a
 browser:
 
@@ -154,11 +154,11 @@ npx --yes copilotkit@latest project select  # prints the cpk-... runtime key
 
 That key is the only Intelligence credential a managed install needs; the free plan is enough.
 `secrets.licenseToken` is optional and exists for a self-hosted Intelligence that issues its own
-licence. `npx --yes copilotkit@latest license --print` prints one without writing it to a local
+license. `npx --yes copilotkit@latest license --print` prints one without writing it to a local
 `.env`, which is what you want for something you are about to paste into a Secret. With
 `externalSecrets`, name `license-token` in its `data` and the server receives it the same way.
 
-**A self-hosted Intelligence needs that licence too, on its own deployment.** Its chart takes it as
+**A self-hosted Intelligence needs that license too, on its own deployment.** Its chart takes it as
 `appApi.licenseSecret` or `externalSecrets.secrets.license`. Without it Intelligence answers every
 entitlement read with `RUNTIME_ENTITLEMENTS_SELF_HOSTED_MISCONFIGURED` and refuses memory, while
 conversations carry on; OpenBot logs `intelligence-entitlement-not-ready` at boot when it does.
@@ -548,7 +548,7 @@ nobody could sign in or nobody would be an administrator; an identity provider i
 `secrets.betterAuthSecret` or `config.publicUrl`; `singleUser` is combined with a public URL or a
 public LoadBalancer; with `intelligence.enabled: false`, the Intelligence URLs or
 `secrets.intelligenceApiKey` are missing; with the bundled Intelligence, an Intelligence address or key
-of your own is named beside it, the licence is missing, or the release predates it (no
+of your own is named beside it, the license is missing, or the release predates it (no
 `intelligence.enabled` at all);
 `secrets.keyEncryptionKey` is not a base64 32-byte value, or is the public example key; with a
 database of your own, there is no `secrets.keyEncryptionKey` or no `secrets.computerToken`;
@@ -623,7 +623,7 @@ kubectl -n openbot rollout restart deployment/openbot-intelligence-learning-agen
 It runs by itself after
 15 finished conversations and after every 15 more, and keeps what it learns in an object store the
 release runs (`intelligence.localObjectStorage`). Trajectories, the sessions the Recorder captures, are
-on as well, which any valid licence allows.
+on as well, which any valid license allows.
 
 Intelligence's own dashboard is not installed, so Admin → Automatic learning is where its work is
 reviewed: the skills it proposes, each one's SKILL.md and the conversations it was learned from,

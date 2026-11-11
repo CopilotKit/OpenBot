@@ -390,7 +390,7 @@ it, so there memory has no screens, routes, tools or sources (`editionHasMemory`
 - **Memories formed elsewhere.** A memory Intelligence holds for the person that no OpenBot row
   describes (another app on the same project, or Intelligence itself) appears in their Memory page as
   "Kept in Intelligence" and is recalled as their own. It can be edited or forgotten there, not paused.
-- **Without Intelligence memory** (not entitled, a lapsed licence, an outage), OpenBot reads and writes
+- **Without Intelligence memory** (not entitled, a lapsed license, an outage), OpenBot reads and writes
   its tables exactly as before and nothing fails. Writes made meanwhile are mirrored by the memory sweep
   once Intelligence memory is available again; the first passes after a deployment becomes entitled are
   the backfill of everything it already holds.

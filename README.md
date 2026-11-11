@@ -223,7 +223,7 @@ The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the ap
    set that one to the same deployment yourself. Once `openbot` exists, the server assigns it
    as the default by itself unless [Admin → Automatic Learning](docs/automatic-learning.md)
    has a saved setting.
-   Managed Intelligence needs no separate licence token.
+   Managed Intelligence needs no separate license token.
 
    The same CopilotKit CLI sign-in provisions Composio automatically when you run
    `bash scripts/start.sh`. If that cannot complete, OpenBot still starts, with apps
@@ -269,7 +269,7 @@ Ubuntu terminal open while you use OpenBot, and open the app from your Windows b
 
 To try Intelligence on one Mac instead of the managed service, follow
 [Evaluate Intelligence locally](https://docs.copilotkit.ai/intelligence/self-hosting-local). The free
-[Developer plan](https://www.copilotkit.ai/pricing) qualifies. The local licence lasts 30 days and
+[Developer plan](https://www.copilotkit.ai/pricing) qualifies. The local license lasts 30 days and
 `npx copilotkit@latest local renew` renews it as often as you need, while your account is in good
 standing. It is a preview for macOS with Docker Desktop,
 not a production installation. Run its
@@ -437,9 +437,9 @@ See [docs/configuration.md](docs/configuration.md) and [docs/coworkers.md](docs/
 - `CPK_INTELLIGENCE_API_KEY` (or the older `INTELLIGENCE_API_KEY`)
 
 `COPILOTKIT_LICENSE_TOKEN` is optional. A self-hosted Intelligence with its own
-licence can still set it and it is forwarded to the runtime; managed Intelligence
+license can still set it and it is forwarded to the runtime; managed Intelligence
 does not issue one and startup no longer asks for it. A self-hosted Intelligence
-also needs the licence on its own deployment, or it refuses memory; OpenBot logs
+also needs the license on its own deployment, or it refuses memory; OpenBot logs
 `intelligence-entitlement-not-ready` at boot when that is missing.
 
 Settings worth knowing:
@@ -478,7 +478,7 @@ Full reference: [docs/configuration.md](docs/configuration.md).
 | `agent-harness`          | 4202 to 4214, per framework | The agent framework picked in OpenBot Desktop setup, behind the `harness` Compose profile.       |
 | `supervisor`             | 4500 host / 4300 container | Creates and manages one computer per person, and one per Isolated Bot.                           |
 | `worker`                 | none                       | Fires due routines by handing each run to the server.                                            |
-| PostgreSQL with pgvector | 5432                       | Product data, policy, audit, credentials, grants, channels, and component metadata.              |
+| PostgreSQL               | 5432                       | Product data, policy, audit, credentials, grants, channels, and component metadata.              |
 | CopilotKit Intelligence  | external                   | Durable threads and memory.                                                                      |
 
 The server gateway is the product/API path for Bot browser and file tool calls.

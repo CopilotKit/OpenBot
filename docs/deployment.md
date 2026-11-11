@@ -35,7 +35,7 @@ a redeploy takes the audit trail with it, and the audit trail is the product.
 
 **Mount the parent, not `/var/lib/postgresql/data`.** On any platform whose volume is an ext4 mount,
 and that is most of them, the mount arrives holding a `lost+found` directory. `initdb` will not
-initialise into a directory that has anything in it, so mounting it directly on the data directory
+initialize into a directory that has anything in it, so mounting it directly on the data directory
 leaves the cluster uncreated — and because `api` waits on `postgres` and `migrate`, the container
 starts, the platform reports the deploy a success, and the URL serves a 502. Mounting the parent
 leaves `data` as an ordinary subdirectory, which is what PostgreSQL asks for. A Docker named volume
@@ -125,7 +125,7 @@ and the fix would not be available.
 | `EMBEDDED_POSTGRES` | `on` to run the database inside the container. Off by default |
 | `KEY_ENCRYPTION_KEY` | base64 32 bytes. `openssl rand -base64 32`. The example key is refused in production |
 | `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL`, `INTELLIGENCE_API_KEY` | CopilotKit Intelligence. A free plan is available and it can be self-hosted |
-| `COPILOTKIT_LICENSE_TOKEN` | optional. Managed Intelligence issues none; set it for a self-hosted Intelligence, which needs the same licence on its own deployment too |
+| `COPILOTKIT_LICENSE_TOKEN` | optional. Managed Intelligence issues none; set it for a self-hosted Intelligence, which needs the same license on its own deployment too |
 | a model key | `OPENAI_API_KEY`, or the provider you configured |
 
 `COMPUTER_TOKEN` is generated at start if you do not set one. Both processes that need it are inside

@@ -45,7 +45,7 @@ every start. With your own DATABASE_URL, leave EMBEDDED_POSTGRES off and enable 
 extension in that database.
 
 Mount the volume at `/var/lib/postgresql`, the parent, not `/var/lib/postgresql/data`. `initdb` will
-not initialise into a directory that already contains `lost+found`.
+not initialize into a directory that already contains `lost+found`.
 
 The one-container image does not carry the separate framework Bot images that `docker-compose.yml`
 starts. Leave MANAGED_AGENT_AG_UI_URL unset unless a Bot endpoint is actually reachable from this
@@ -113,11 +113,11 @@ OpenBot root where `.env` is:
 `local connect` writes INTELLIGENCE_API_URL, INTELLIGENCE_GATEWAY_WS_URL and
 CPK_INTELLIGENCE_API_KEY to `.env`. OpenBot reads those values directly; do not copy or rename
 the key. INTELLIGENCE_API_KEY remains a legacy fallback when the CLI key is empty or absent.
-When both are set, the non-empty CLI key takes precedence. The local licence lasts 30 days;
+When both are set, the non-empty CLI key takes precedence. The local license lasts 30 days;
 `npx copilotkit@latest local renew` renews it as often as needed while the account is in good
 standing. Skip the managed `project select` and setup-learning commands on this path.
 
-There is no licence step for managed Intelligence. `copilotkit license` still exists for self-hosted Intelligence, and
+There is no license step for managed Intelligence. `copilotkit license` still exists for self-hosted Intelligence, and
 COPILOTKIT_LICENSE_TOKEN is honoured when set, but managed Intelligence needs only the cpk- key.
 
 For manual key-only setup, put the `cpk-...` key in `.env` as INTELLIGENCE_API_KEY. For the default

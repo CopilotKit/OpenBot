@@ -125,7 +125,7 @@ the local tests.
 |---|---|
 | Window (`desktop/src`) | Screens, order, what the person reads. Holds no credentials. |
 | Native side (`desktop/src-tauri`) | Engine install, deployment layout, images, Compose, host processes, secrets, Stop and Quit. |
-| Intelligence CLI (`copilotkit`, bundled) | Intelligence topology, sign-in, licence, readiness and its endpoints. |
+| Intelligence CLI (`copilotkit`, bundled) | Intelligence topology, sign-in, license, readiness and its endpoints. |
 
 **The CLI owns Intelligence.** The app runs the CLI as a bounded child process
 (`src-tauri/src/local_eval.rs`) and never reads its credential files or probes its containers to
@@ -138,7 +138,7 @@ fill a gap. Three rules hold that boundary:
   `--mode openbot`, so the sign-in page explains OpenBot's setup, only when the CLI's own
   `login --help` lists it: an older CLI refuses an unknown flag.
 - **Only allowlisted facts cross into the window.** Raw stdout and stderr never reach the window or
-  a log. Readiness and licence come only from the exact values of `local status`; anything else
+  a log. Readiness and license come only from the exact values of `local status`; anything else
   reads as unknown, and unknown keeps chat closed.
 
 ## Decisions and the reasons for them
@@ -158,7 +158,7 @@ fill a gap. Three rules hold that boundary:
   a declined administrator prompt is asked again the same way. The restart after it is the one
   step that waits for the person's click: OpenBot never restarts the computer on its own, because
   the person may have unsaved work open.
-- **Licence work after acceptance.** Intelligence setup waits for the evaluation agreement, and
+- **License work after acceptance.** Intelligence setup waits for the evaluation agreement, and
   uses the version of the terms the person accepted.
 - **One engine for both.** OpenBot and Intelligence share one container engine. The app uses, in
   order: a Docker that answers; on macOS and Windows a stopped Docker Desktop that has run before,
@@ -198,7 +198,7 @@ fill a gap. Three rules hold that boundary:
   that Docker is unavailable, and Stop and Quit do it once before both their stops (`compose
   down` and the back end's `local stop`). The install's `engine` row is said done only after this
   check, so the back end's setup, which starts on it, never runs against an engine about to be
-  updated. While a row says the engine is updating, the account's licence check is not asked; one
+  updated. While a row says the engine is updating, the account's license check is not asked; one
   refused before that waits for the engine instead of asking again. A Docker
   Desktop that is too old (4.31 and earlier) is updated to Docker's newest release with Docker's
   own installer command line, after its checksum and Docker's signature are checked

@@ -39,7 +39,7 @@ credential is otherwise good is most often this API not being enabled on the pro
 
 ### 3. Create an OAuth client
 
-Type **Web application**. Under **Authorised redirect URIs**, add this deployment's callback:
+Type **Web application**. Under **Authorized redirect URIs**, add this deployment's callback:
 
 ```
 <OPENBOT_PUBLIC_URL>/api/plugins/oauth/callback

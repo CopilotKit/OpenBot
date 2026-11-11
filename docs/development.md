@@ -28,7 +28,7 @@ Chrome or Edge first: the helper opens an isolated browser window for the deploy
 sign-in, lets you choose an accessible project, and creates or reuses `openbot` before minting
 its runtime key. Local development may use a loopback HTTP origin. Existing key-only setups
 use authenticated Intelligence administration to create a container and assign it in OpenBot Admin.
-There is no managed licence step. Then add `OPENAI_API_KEY`.
+There is no managed license step. Then add `OPENAI_API_KEY`.
 
 The same CLI sign-in also prepares Composio on the first `bash scripts/start.sh`;
 `bun run setup:composio` runs that step alone, independently of Learning. A failure

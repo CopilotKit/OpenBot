@@ -43,9 +43,9 @@ OpenBot Recorder is not on the page, so its capture pass names the socket on the
 Recorder reached OpenBot at, and only where that is this machine's loopback, as over
 `kubectl port-forward`. A Recorder that reaches OpenBot any other way needs `OPENBOT_PUBLIC_URL`.
 
-`COPILOTKIT_LICENSE_TOKEN` is optional: managed Intelligence issues no licence token, and a
+`COPILOTKIT_LICENSE_TOKEN` is optional: managed Intelligence issues no license token, and a
 self-hosted Intelligence that has one sets this and has it forwarded to the runtime. That
-Intelligence needs the same licence on its own deployment as well, or it refuses memory and the
+Intelligence needs the same license on its own deployment as well, or it refuses memory and the
 other licensed features while conversations carry on. OpenBot asks Intelligence at boot and logs
 `intelligence-entitlement-not-ready`, naming the fix, when the answer is not ready. An
 Intelligence still starting, as one installed beside OpenBot is while its migrations run, is asked
@@ -104,7 +104,7 @@ at `agent-langgraph` on a laptop.
 **`OPENBOT_GENERATIVE_UI`** enables generated interfaces by default: streamed HTML/CSS/JavaScript
 in a sandboxed iframe, and A2UI 1.0 interfaces built from CopilotKit's standard catalog (every
 standard component except Map, Favicon, LinkCard and Citation), plus OpenBot's own Breakdown:
-editable amounts that add up to a total, each in its own colour, with a bar of how the total splits.
+editable amounts that add up to a total, each in its own color, with a bar of how the total splits.
 Their buttons send their named action and the values entered back to the current conversation's Bot.
 Set `OPENBOT_GENERATIVE_UI=false` or `0` to disable both. `true`, `1`, an empty value, or an unset
 value leave the capability on. The server configures both runtime renderers and reports the same
@@ -118,7 +118,7 @@ OpenBot for its own organization. Any other value, or none, leaves it on.
 
 Left on, it still never shows on a deployment that pays for Intelligence. The server reads the
 deployment's Intelligence entitlement and hides the bar when it is active on a paid plan (`pro`,
-`team`, `team_self_hosted` or `enterprise`) or comes from an AWS Marketplace licence. A free or
+`team`, `team_self_hosted` or `enterprise`) or comes from an AWS Marketplace license. A free or
 developer plan, an inactive entitlement, and one that cannot be read all show it. The answer is
 kept for ten minutes, so a plan bought today hides the bar within ten minutes, and a page waits at
 most a second for the first answer after the server starts. In Helm, set the variable through
@@ -512,7 +512,7 @@ active broker means the person's own id. That is also the `--user` to give
 administrator once in. Matching is exact with no wildcards, so `example.com` admits neither
 `sub.example.com` nor `evil-example.com`, and both sides go through the same IDNA normalisation, so
 a rule may be written `@Example.COM.` or in punycode and still mean what it says. Two arrangements
-are refused at start-up rather than documented and hoped for: a list that normalises to nothing,
+are refused at start-up rather than documented and hoped for: a list that normalizes to nothing,
 which `@` and a stray `.` both produce, because it is a non-empty list no address can match; and a
 list combined with a `MICROSOFT_OAUTH_TENANT_ID` that names no directory (`common`, `organizations`
 or `consumers`), because there the address the list is checked against is one the signing-in tenant
@@ -688,7 +688,7 @@ Slack app of its own.
 Point OpenTag's `AGENT_URL` at `<public URL>/api/delivery/webhooks/opentag/agent`. A person links
 their Slack or Teams identity from a Bot's page, under **Reaching you**: OpenBot shows a one-time `link <code>` message,
 valid for ten minutes, which they send to the OpenTag app in a direct message. On Slack, a code posted
-in a shared channel is cancelled, because whoever sends it first is linked to that Bot. After that, only that person's messages
+in a shared channel is canceled, because whoever sends it first is linked to that Bot. After that, only that person's messages
 reach their chosen Bot, in their own OpenBot conversation, with learning, governance, approvals and
 audit on every turn. Anyone unlinked is told how to link and nothing runs. Approval requests appear
 as OpenTag approval cards (allow once, always allow, cancel) and are decided through the approvals
@@ -697,7 +697,7 @@ service as the linked owner; a reply to a Bot's question answers that question.
 The former direct Slack settings (`SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_BOT_TOKEN`,
 `SLACK_TEAM_ID`, `SLACK_SIGNING_SECRET`) are refused at start-up; unset them.
 
-SMS through Twilio honours Advanced Opt-Out: `STOP` (and Twilio's other opt-out keywords) marks the
+SMS through Twilio honors Advanced Opt-Out: `STOP` (and Twilio's other opt-out keywords) marks the
 number opted out, later messages show `opted_out` in the delivery history instead of being sent, and
 `START` resumes. Twilio sends the confirmation reply itself, so OpenBot does not.
 

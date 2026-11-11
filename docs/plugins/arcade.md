@@ -13,7 +13,7 @@ the approval rules and the audit trail are the same here and are not repeated.
 
 Some things on this page are stated as **unproven**, and the last section lists them. What is
 marked _measured_ was observed by hand against a live Arcade project during development, in two
-rounds, and **nothing in CI dials Arcade** — the vendor's behaviour can change without any check
+rounds, and **nothing in CI dials Arcade** — the vendor's behavior can change without any check
 here noticing:
 
 - **Before this page was first written (2026-10-12)**, with a throwaway script that is not in this
@@ -90,7 +90,7 @@ configuration.
 This was confirmed the hard way, and the reason matters because it is not a preference. A consent
 link was minted for an arbitrary `user_id` against Arcade's default Google provider. It **failed at
 verification** with _"the authorization process was not completed"_. The same consent minted for an
-Arcade project member's own identity **completed**. Arcade's built-in verifier has to recognise the
+Arcade project member's own identity **completed**. Arcade's built-in verifier has to recognize the
 end user as a member of the project, so it can only serve a `user_id` that is one. Per-person
 connections in OpenBot are arbitrary ids by definition — nobody is made a member of your Arcade
 project in order to connect their mailbox — so a default provider cannot serve them at all.

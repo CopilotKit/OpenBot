@@ -34,7 +34,7 @@ off always applies.
 
 ## What asks
 
-| What the Bot is about to do | How it is recognised |
+| What the Bot is about to do | How it is recognized |
 | --- | --- |
 | Pay, buy or move money: a payment, a checkout, a refund, a transfer or payout, placing an order, paying an invoice, running payroll, a paid plan | Payment words anywhere in the action and its page. A transfer, payout, withdrawal, charge, order, purchase, paid invoice or order, payroll run, plan upgrade or change, or app subscription in an app's tool name. A button labelled Transfer, Withdraw, Pay, Buy, Place your order, Complete purchase, Upgrade, Downgrade, Change plan, or Send with an amount, and Subscribe when its label or page is about a paid plan. |
 | Change a password, two-factor setting or other credential, or security and sharing settings | Credential and security-setting words anywhere in the action and its page. For credentials the page is read by its address up to the path: a query string or fragment that carries a signature or a token (`X-Amz-Credential=`, `access_token=`) doesn't make an ordinary form a credentials page, while a password field, a Change password button or a `/security/2fa` page still does. |
@@ -52,7 +52,7 @@ tool changes (rotating an API key, say) asks like everything else.
 
 This reverses [#998](https://github.com/CopilotKit/OpenBot/pull/998), which made deleting, sending,
 sharing and posting ask every time with Allow once and Deny only, and handed payments and account
-changes to you. OpenBot opens these by default; closing them is the organisation's call.
+changes to you. OpenBot opens these by default; closing them is the organization's call.
 
 ## What an admin can close
 
@@ -76,7 +76,7 @@ the apps and tools OpenBot gives it, and told to ask you itself before one of it
 something that cannot be undone, because its own tools don't go through this policy
 (`BROUGHT_BOT_ASKING_GUIDANCE`).
 
-They are recognised by what the action is called, never by what it carries. A document that says
+They are recognized by what the action is called, never by what it carries. A document that says
 "delete the old draft", a note about a purchase, or an email draft addressed to someone is an
 ordinary change. In an app's tool name the action is its first verb, so a word that only names what
 it acts on doesn't count: marking a comment as spam, bookmarking or liking a post, editing a
@@ -107,7 +107,7 @@ Auto-review or a rule says so. A folder on your own computer is different: the O
 asks before every edit or command in it, and **Commands on your computer** in Settings → Approvals
 can refuse commands there altogether. Settings → Approvals says this above its switches.
 
-## What isn't recognised
+## What isn't recognized
 
 - **A button with no label**, such as an icon with no accessible name. There is nothing to read.
 - **Other keyboard sends**, such as Enter in a box whose label doesn't say it is for a message,
