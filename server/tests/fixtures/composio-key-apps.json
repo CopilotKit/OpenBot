@@ -1,5 +1,5 @@
 {
-  "_captured": "GET https://backend.composio.dev/api/v3/toolkits (catalogue rows) and /api/v3/toolkits/{slug} (details), read-only, 2026-11-08. Verbatim, trimmed to the keys the server reads.",
+  "_captured": "GET https://backend.composio.dev/api/v3/toolkits (catalogue rows) and /api/v3/toolkits/{slug} (details), read-only, 2026-11-08 (Fireflies and Pipedrive on 2026-11-11). Verbatim, trimmed to the keys the server reads.",
   "catalogue": [
     {
       "name": "HubSpot",
@@ -132,6 +132,76 @@
       "deprecated": {
         "toolkitId": "8153cee4-4659-48ec-9bd2-27b36603e42b"
       }
+    },
+    {
+      "name": "Fireflies",
+      "slug": "fireflies",
+      "type": "native",
+      "app": "Fireflies",
+      "toolkit_type": "api",
+      "auth_schemes": ["API_KEY"],
+      "composio_managed_auth_schemes": [],
+      "is_local_toolkit": false,
+      "meta": {
+        "triggers_count": 1,
+        "tools_count": 26,
+        "description": "Fireflies.ai helps your team transcribe, summarize, search, and analyze voice conversations.",
+        "logo": "https://logos.composio.dev/api/fireflies",
+        "app_url": "https://www.fireflies.ai",
+        "categories": [
+          {
+            "id": "ai-meeting-assistants",
+            "name": "ai meeting assistants"
+          },
+          {
+            "id": "transcription",
+            "name": "transcription"
+          }
+        ],
+        "created_at": "2025-01-24T05:38:21.223Z",
+        "updated_at": "2026-11-11T11:29:01.805Z",
+        "version": "20261101_00"
+      },
+      "no_auth": false,
+      "auth_guide_url": null,
+      "deprecated": {
+        "toolkitId": "21a4da4d-3271-4152-8b57-4f31d5979c54"
+      }
+    },
+    {
+      "name": "Pipedrive",
+      "slug": "pipedrive",
+      "type": "native",
+      "app": "Pipedrive",
+      "toolkit_type": "api",
+      "auth_schemes": ["OAUTH2", "API_KEY"],
+      "composio_managed_auth_schemes": [],
+      "is_local_toolkit": false,
+      "meta": {
+        "triggers_count": 3,
+        "tools_count": 403,
+        "description": "Pipedrive is a sales management tool built around pipeline visualization, lead tracking, activity reminders, and automation to keep deals progressing",
+        "logo": "https://logos.composio.dev/api/pipedrive",
+        "app_url": "https://www.pipedrive.com/",
+        "categories": [
+          {
+            "id": "crm",
+            "name": "crm"
+          },
+          {
+            "id": "sales-&-crm",
+            "name": "sales & crm"
+          }
+        ],
+        "created_at": "2024-05-03T11:44:32.061Z",
+        "updated_at": "2026-11-11T00:56:28.655Z",
+        "version": "20261101_00"
+      },
+      "no_auth": false,
+      "auth_guide_url": null,
+      "deprecated": {
+        "toolkitId": "006311eb-3342-4353-95c6-b1ad0a364406"
+      }
     }
   ],
   "details": {
@@ -221,6 +291,41 @@
             "base_url": "{{full}}"
           },
           "auth_hint_url": "https://www.braze.com/docs/api/basics#creating-a-rest-api-key"
+        }
+      ],
+      "auth_guide_url": null
+    },
+    "fireflies": {
+      "name": "Fireflies",
+      "slug": "fireflies",
+      "composio_managed_auth_schemes": [],
+      "auth_config_details": [
+        {
+          "name": "fireflies_api_key",
+          "mode": "API_KEY",
+          "required_scopes": [],
+          "fields": {
+            "auth_config_creation": {
+              "required": [],
+              "optional": []
+            },
+            "connected_account_initiation": {
+              "required": [
+                {
+                  "name": "generic_api_key",
+                  "displayName": "API Key",
+                  "type": "string",
+                  "description": "Your Fireflies API key \u2014 a secret token that lets Composio access your meetings and transcripts. Find it at app.fireflies.ai \u2192 Integrations \u2192 Fireflies API.",
+                  "required": true,
+                  "is_secret": true,
+                  "legacy_template_name": "api_key",
+                  "user_visible": true
+                }
+              ],
+              "optional": []
+            }
+          },
+          "auth_hint_url": null
         }
       ],
       "auth_guide_url": null

@@ -289,6 +289,13 @@ every deployment:
 
 ### Conversations
 
+- **Switching back to a conversation the Bot is working in shows it working.** Leave a conversation
+  right after sending, or while the Bot takes a browser step, and come back: the conversation could
+  be empty, your message gone, no sign of the Bot working and the message box open, until the whole
+  answer appeared at once when the Bot was done, minutes later on a long task. A message typed
+  meanwhile started a second run on the same conversation. The conversation now picks the Bot's
+  work up as soon as it continues, so the answer streams in as it is written, and a message typed
+  while the Bot works waits for it, as it does when you never left.
 - **An answer that reaches the screen with pieces missing is put right, and the Bot carries on.**
   Sometimes a run's live stream reached the conversation out of shape while the run itself went
   fine: the answer drew with words missing mid-sentence until a reload, or a step that asked for
@@ -348,6 +355,10 @@ every deployment:
   and keeps what did. The message box shows no plus when there is nothing to attach. The Bot's
   screen opened full size is a modal that returns focus to what opened it, and a finished turn's
   screenshot uses the full width of a phone. A Bot's Skills page no longer waits for its apps.
+- Connecting an app that takes a key no longer says the app has no sign-in. The dialog said
+  "Fireflies doesn't offer a sign-in here", and Fireflies does have one, just not through the way
+  OpenBot connects it. It now reads "OpenBot connects to Fireflies with a key from your Fireflies
+  account, not a sign-in." for every such app. How the app connects is unchanged.
 - "Backend" is one word everywhere OpenBot shows it: OpenBot Desktop's Status window, tray and
   messages, the app, the server's messages and the Recorder. Desktop's Status window heads its card
   "Backend" where it said "Back end".

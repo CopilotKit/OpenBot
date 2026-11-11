@@ -30,7 +30,6 @@ import { attachmentModality } from "@/components/channels/chat-messages";
 import { IconWaveform } from "@/components/icons/waveform";
 import { RoutineComposerButton } from "@/components/routines/new-routine-button";
 import {
-  attachmentUrl,
   classifyAttachment,
   MAX_ATTACHMENTS_PER_MESSAGE,
   mayBeTruncatedForModel,
@@ -43,7 +42,9 @@ import { Button } from "../../ui/button";
 import { AttachmentStrip } from "./attachment-strip";
 import {
   attachmentsConfigFor,
+  discardStagedAttachment,
   FILE_PICKER_ACCEPT,
+  heldAttachmentsConfig,
   stagedRowId,
 } from "./attachments";
 import {
@@ -199,17 +200,30 @@ export type ComposerProps = {
    */
   autoFocus?: boolean;
   /**
-   * The channel a picked file is uploaded to, and the one switch for the whole attachment feature.
+   * The channel a picked file is uploaded to. With it, every file is uploaded the moment it is
+   * picked, and the draft carries stored attachments.
    *
-   * WITH NO `channelId` THIS COMPOSER BEHAVES EXACTLY AS IT DID BEFORE ATTACHMENTS EXISTED, which
-   * is what keeps `/channel/new`, the home screen and the onboarding poster working untouched. No
-   * config reaches `useAttachments`, so it installs no paste listener at all; the form takes no
-   * drag handlers, no file input is rendered, and the `+` button goes on saying it has nothing to
-   * offer. That is the right answer rather than a degraded one for a screen with nowhere to put an
-   * upload: the compose screen creates its channel on send, so a file staged there would belong to
-   * a channel that does not exist yet.
+   * WITH NEITHER THIS NOR `holdsFilesUntilSent`, THIS COMPOSER TAKES NO FILES: no config reaches
+   * `useAttachments`, so it installs no paste listener, no file input is rendered, the `+` button
+   * says it has nothing to offer, and a drop is refused with a sentence. That is the onboarding
+   * poster, the start placeholder and a group conversation.
    */
   channelId?: string;
+  /**
+   * For a screen whose conversation is created by its first message: `/channel/new` and the home
+   * screen. Picked, pasted and dropped files are held in this tab and shown on the strip exactly as
+   * in a conversation, and `onSubmit` receives them on the draft with nothing uploaded yet. The
+   * caller creates the conversation and sends them with `uploadHeldFiles` before the first message
+   * goes. See `heldAttachmentsConfig` for why the files wait instead of the conversation being
+   * created at the first pick. Ignored when there is a `channelId`.
+   */
+  holdsFilesUntilSent?: boolean;
+  /**
+   * Files to put back on the strip when this composer mounts, as `initialValue` puts words back:
+   * the home screen restoring a first message whose start failed after it had navigated away.
+   * Screened like any other pick. Read once.
+   */
+  initialFiles?: readonly File[];
   /**
    * There is a run on the wire for Stop to reach.
    *
@@ -360,6 +374,8 @@ export function Composer({
   pending = false,
   autoFocus = false,
   channelId,
+  holdsFilesUntilSent = false,
+  initialFiles,
   stoppable,
   initialValue,
   droppedAttachments,
@@ -506,6 +522,16 @@ export function Composer({
     }
   }, []);
 
+  /**
+   * The object URLs a held composer made for its chips' previews, revoked once the chip is gone.
+   * A ref for the reason `uploadedRows` is one: nothing is drawn from it.
+   */
+  const heldPreviews = useRef<Set<string>>(new Set());
+
+  const recordHeld = useCallback((previewUrl: string) => {
+    heldPreviews.current.add(previewUrl);
+  }, []);
+
   const attachmentsConfig = useMemo(
     () =>
       channelId
@@ -515,8 +541,17 @@ export function Composer({
             recordRejection,
             recordUpload,
           )
-        : undefined,
-    [channelId, uploadGroup, recordRejection, recordUpload],
+        : holdsFilesUntilSent
+          ? heldAttachmentsConfig(recordRejection, recordHeld)
+          : undefined,
+    [
+      channelId,
+      holdsFilesUntilSent,
+      uploadGroup,
+      recordRejection,
+      recordUpload,
+      recordHeld,
+    ],
   );
 
   /**
@@ -684,9 +719,43 @@ export function Composer({
         continue;
       }
       uploadedRows.current.delete(rowId);
-      discardStagedAttachment(rowId);
+      void discardStagedAttachment(rowId);
     }
   }, [attachments]);
+
+  /*
+   * A held chip's preview is released once the chip is gone: removed by hand, or sent. Gated on
+   * nothing uploading for the reason the reconciler above is: the URL exists a moment before the
+   * SDK writes it onto its placeholder, and revoking it in that window would blank a live preview.
+   */
+  useEffect(() => {
+    if (heldPreviews.current.size === 0) {
+      return;
+    }
+    if (attachments.some((attachment) => attachment.status === "uploading")) {
+      return;
+    }
+    const drawn = new Set(
+      attachments.map((attachment) => attachment.source.value),
+    );
+    for (const previewUrl of heldPreviews.current) {
+      if (!drawn.has(previewUrl)) {
+        heldPreviews.current.delete(previewUrl);
+        URL.revokeObjectURL(previewUrl);
+      }
+    }
+  }, [attachments]);
+
+  // And all of them when the composer goes, whatever is still on the strip.
+  useEffect(() => {
+    const previews = heldPreviews.current;
+    return () => {
+      for (const previewUrl of previews) {
+        URL.revokeObjectURL(previewUrl);
+      }
+      previews.clear();
+    };
+  }, []);
 
   /**
    * How many attachments the next screen must count, including any this tick has already accepted.
@@ -773,6 +842,16 @@ export function Composer({
     },
     [disabled, processFiles, queuedAttachmentCount],
   );
+
+  /** `initialFiles` has been put back once, and is not owed again for the life of this composer. */
+  const restoredFiles = useRef(false);
+  useEffect(() => {
+    if (restoredFiles.current || !canAttach || !initialFiles?.length) {
+      return;
+    }
+    restoredFiles.current = true;
+    void stageFiles(initialFiles);
+  }, [canAttach, initialFiles, stageFiles]);
 
   /**
    * The image half of a paste that our own listener let through.
@@ -930,9 +1009,9 @@ export function Composer({
    * stay orphaned until the 24-hour sweep. The person sees their raw PNG on a blank page and
    * presses Back.
    *
-   * ALWAYS INSTALLED; ONLY THE ACCEPTANCE IS CONDITIONAL. The states that reach here are the three
-   * the `channelId` docblock names — `/channel/new`, the home screen, the onboarding poster — plus
-   * every channel whose composer is `disabled`.
+   * ALWAYS INSTALLED; ONLY THE ACCEPTANCE IS CONDITIONAL. The states that reach here are the ones
+   * the `channelId` docblock names (the onboarding poster, the start placeholder, a group), plus
+   * every composer that is `disabled`.
    *
    * THE APP-WIDE GUARD NOW EXISTS, AND THIS IS STILL NOT REDUNDANT. `useUnclaimedDropGuard` in
    * `routes/__root.tsx` refuses any drop nobody claimed, which covers the transcript, the sidebar,
@@ -1767,27 +1846,6 @@ export function Composer({
       </div>
     </div>
   );
-}
-
-/**
- * GIVE BACK THE STAGED ROW A REMOVED CHIP STOOD FOR — THE ONLY CALLER THIS ENDPOINT HAS.
- *
- * `removeAttachment` only filters client state, so until this existed, attach-then-change-your-mind
- * left the row staged with `attachedAt IS NULL` for good. The upload handler counts exactly those
- * rows per person per channel and refuses the ninth with "You already have 8 attachments waiting to
- * send in this channel." — naming files that are on nobody's screen, with no way back.
- *
- * BEST-EFFORT, AND DELIBERATELY UNINSPECTED. The chip is gone from the strip before this is called,
- * because that is what the person asked for; making that wait on a round trip, or reporting what
- * comes back, would put an error in front of somebody for a request they never made. There are two
- * such answers — 404 for a non-uploader, 409 for an attachment already sent — and neither is
- * actionable. `cull-staged-attachments.ts` is the backstop for whatever this misses.
- */
-function discardStagedAttachment(attachmentId: string): void {
-  void fetch(attachmentUrl(attachmentId), {
-    method: "DELETE",
-    credentials: "include",
-  }).catch(() => undefined);
 }
 
 /**
