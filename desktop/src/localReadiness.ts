@@ -16,6 +16,7 @@ import {
   type LocalReason,
   licenceExpiresSoon,
   onInstalledRelease,
+  type PodmanPlan,
   type Shortfall,
 } from "./localEvalCli";
 
@@ -255,6 +256,76 @@ export function resourcesShortSaid(shortfall: Shortfall): string {
     },
     "Retry",
   );
+}
+
+/** MiB as the GB a person reads: 6144 is "6", 3277 is "3.2". */
+function gb(mib: number): string {
+  const tenths = Math.floor((mib / 1024) * 10) / 10;
+  return tenths.toFixed(1).replace(/\.0$/, "");
+}
+
+/**
+ * What happened, when setup found the person's Podman machine too small and OpenBot knows its size
+ * (`podmanMachinePlan`). What to do is the fix card's (`PodmanTooSmall`), so it is not said here.
+ *
+ * The CLI counts free CPUs: the machine's, less what is already running in it. A 4-CPU machine
+ * with anything running measures 3.9, and "OpenBot has 3.9 free CPUs. It needs 4." read as a
+ * mistake to the person who reported it. So the machine's own size is said, and why less is free.
+ */
+export function podmanTooSmallSaid(
+  shortfall: Shortfall,
+  plan: PodmanPlan,
+): string {
+  const has = "Your Podman machine has";
+  if (shortfall.disk) {
+    const short = (["cpu", "memory", "disk"] as const).filter(
+      (resource) => shortfall[resource],
+    );
+    return `Your Podman machine doesn't have enough ${listed(short.map((resource) => resourceName[resource]))} for OpenBot.`;
+  }
+  if (shortfall.cpu && shortfall.memory) {
+    return shortfall.cpus && shortfall.memoryGb
+      ? `${has} ${shortfall.cpus} free CPUs and ${shortfall.memoryGb} GB of free memory. OpenBot needs 4 free CPUs and 4 GB of free memory.`
+      : `${has} ${plan.cpus} CPUs and ${gb(plan.memoryMib)} GB of memory. OpenBot needs 4 free CPUs and 4 GB of free memory.`;
+  }
+  if (shortfall.cpu) {
+    return shortfall.cpus && Number(shortfall.cpus) < plan.cpus
+      ? `${has} ${plan.cpus} CPUs, and what's already running in it uses some, so ${shortfall.cpus} are free. OpenBot needs 4 free.`
+      : `${has} ${plan.cpus} CPUs. OpenBot needs 4 free.`;
+  }
+  return shortfall.memoryGb
+    ? `${has} ${gb(plan.memoryMib)} GB of memory, and ${shortfall.memoryGb} GB of it is free. OpenBot needs 4 GB free.`
+    : `${has} ${gb(plan.memoryMib)} GB of memory. OpenBot needs 4 GB free.`;
+}
+
+/** What OpenBot gives the machine, in words: "6 CPUs and 8 GB of memory". */
+export function podmanRaisedSaid(plan: PodmanPlan): string {
+  const raised = [
+    plan.toCpus > plan.cpus && `${plan.toCpus} CPUs`,
+    plan.toMemoryMib > plan.memoryMib && `${gb(plan.toMemoryMib)} GB of memory`,
+  ].filter((said): said is string => Boolean(said));
+  return listed(raised);
+}
+
+/**
+ * The three commands that make the machine bigger by hand, for when OpenBot can't: stop it, set
+ * what is short, start it. Named by the machine, since `podman machine set` without a name changes
+ * `podman-machine-default`, which may not be the one OpenBot uses.
+ */
+export function podmanResizeCommands(
+  shortfall: Shortfall,
+  plan: PodmanPlan,
+): { stop: string; set: string; start: string } {
+  const flags = [
+    plan.toCpus > plan.cpus && `--cpus ${plan.toCpus}`,
+    plan.toMemoryMib > plan.memoryMib && `--memory ${plan.toMemoryMib}`,
+    shortfall.disk && podmanFlag.disk,
+  ].filter(Boolean);
+  return {
+    stop: `podman machine stop ${plan.machine}`,
+    set: `podman machine set ${flags.join(" ")} ${plan.machine}`,
+    start: `podman machine start ${plan.machine}`,
+  };
 }
 
 /** OpenBot's own check before Start: the engine's totals, with room for its own containers. */

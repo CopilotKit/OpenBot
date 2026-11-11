@@ -256,6 +256,45 @@ export function localEvalRoom(): Promise<Shortfall | null> {
 }
 
 /**
+ * `machine_size::Plan`: how the Podman machine OpenBot runs on would be made big enough for what
+ * setup found short. Memory in MiB, as Podman counts it. `forThem` when OpenBot can do it itself;
+ * otherwise the window gives the person the commands.
+ */
+export type PodmanPlan = {
+  machine: string;
+  cpus: number;
+  memoryMib: number;
+  toCpus: number;
+  toMemoryMib: number;
+  forThem: boolean;
+};
+
+/**
+ * The plan for a Podman machine the CLI found too few CPUs or too little memory in, or null when a
+ * bigger machine isn't the answer here (not a Mac, WSL, a computer with no more to give).
+ */
+export function podmanMachinePlan(
+  shortfall: Shortfall,
+): Promise<PodmanPlan | null> {
+  if (!shortfall.podman || !(shortfall.cpu || shortfall.memory))
+    return Promise.resolve(null);
+  return invoke<PodmanPlan | null>("podman_machine_plan", {
+    short: shortfall,
+  }).catch(() => null);
+}
+
+/**
+ * The person's yes: restart their Podman machine with the plan's CPUs and memory, and the
+ * containers that were running in it. Rejects with a plain sentence when it couldn't.
+ */
+export function resizePodmanMachine(plan: PodmanPlan): Promise<void> {
+  return invoke<void>("resize_podman_machine", {
+    cpus: plan.toCpus,
+    memoryMib: plan.toMemoryMib,
+  });
+}
+
+/**
  * A setup the native side did not start, because the drive that holds the engine's disk is short
  * of what OpenBot needs (`local_eval::checked_call`). Not a failure: it waits for room.
  */

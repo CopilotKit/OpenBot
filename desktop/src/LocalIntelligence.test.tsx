@@ -991,6 +991,165 @@ test("a setup refused for a full Docker disk says so, with Retry", async () => {
 });
 
 /**
+ * 1.0.2 on a Mac with the person's own 4-CPU Podman machine: "OpenBot has 3.9 free CPUs. It needs
+ * 4. Stop your Podman machine, run podman machine set --cpus 6, start it again, then Retry." The CLI
+ * counts free CPUs, the machine's less what already runs in it, so the 4-CPU machine measured 3.9.
+ * The row now says that, and OpenBot offers to make the machine bigger and sets up again after.
+ */
+const cpuShortOnPodman = report({
+  outcome: "failed",
+  stack: null,
+  reason: "resources-short",
+  // As `local_eval.rs` reads "Docker available resources: 3.9124 CPUs (requires 4), 5.2 GiB RAM
+  // available (requires 4), 51 GiB free storage (requires 40)." on Podman.
+  shortfall: {
+    podman: true,
+    cpu: true,
+    memory: false,
+    disk: false,
+    cpus: "3.9",
+    memoryGb: "5.2",
+    diskGb: "51",
+  },
+});
+// `machine_size::plan` for that machine on a 10-CPU Mac.
+const resizeToSix = {
+  machine: "podman-machine-default",
+  cpus: 4,
+  memoryMib: 6144,
+  toCpus: 6,
+  toMemoryMib: 6144,
+  forThem: true,
+};
+
+test("a 4-CPU Podman machine measured at 3.9 free CPUs says why, and Resize makes it bigger and sets up again", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [cpuShortOnPodman, report()],
+    podman_machine_plan: [resizeToSix],
+    resize_podman_machine: [null],
+    connect_local_eval: [connection()],
+    run_local_eval: [ready],
+    local_eval_download: [null],
+    cancel_local_eval: [null],
+  });
+  const started: Startable[] = [];
+  const screen = view({
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  const offer = await screen.findByRole("region", {
+    name: "OpenBot can fix this for you",
+  });
+  expect(row(screen, SETUP).textContent).toContain(
+    "Your Podman machine has 4 CPUs, and what's already running in it uses some, so 3.9 are free. OpenBot needs 4 free.",
+  );
+  // The command is not crammed into the sentence any more.
+  expect(row(screen, SETUP).textContent).not.toContain("podman machine set");
+  expect(offer.textContent).toContain(
+    "Resizing restarts your Podman machine with 6 CPUs.",
+  );
+  // The native side is asked about what the CLI found, the measured number included.
+  expect(
+    invokeCalls.find((call) => call.command === "podman_machine_plan")?.args,
+  ).toEqual({ short: cpuShortOnPodman.shortfall });
+  // Nothing is changed until the person says so.
+  expect(commands()).not.toContain("resize_podman_machine");
+  await userEvent.click(
+    within(offer).getByRole("button", { name: "Resize my Podman" }),
+  );
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(
+    invokeCalls.find((call) => call.command === "resize_podman_machine")?.args,
+  ).toEqual({ cpus: 6, memoryMib: 6144 });
+  expect(commands()).toEqual([
+    "set_up_local_eval",
+    "podman_machine_plan",
+    "resize_podman_machine",
+    "set_up_local_eval",
+    "connect_local_eval",
+    "run_local_eval:status",
+  ]);
+});
+
+test("when OpenBot can't resize the Podman machine, the fix is numbered steps, each command in its own block with Copy", async () => {
+  const withDisk = report({
+    ...cpuShortOnPodman,
+    shortfall: {
+      ...(cpuShortOnPodman.shortfall as NonNullable<LocalReport["shortfall"]>),
+      disk: true,
+      diskGb: "12",
+    },
+  });
+  invokeHandler = answers({
+    set_up_local_eval: [withDisk],
+    podman_machine_plan: [{ ...resizeToSix, forThem: false }],
+    local_eval_download: [null],
+    cancel_local_eval: [null],
+  });
+  const screen = view();
+  const steps = await screen.findByRole("region", {
+    name: "Make your Podman machine bigger",
+  });
+  expect(row(screen, SETUP).textContent).toContain(
+    "Your Podman machine doesn't have enough CPUs and free disk space for OpenBot.",
+  );
+  const items = within(steps).getAllByRole("listitem");
+  expect(items.map((item) => item.querySelector("code")?.textContent)).toEqual([
+    "podman machine stop podman-machine-default",
+    "podman machine set --cpus 6 --disk-size 160 podman-machine-default",
+    "podman machine start podman-machine-default",
+    undefined,
+  ]);
+  expect(items[3].textContent).toBe("Come back here and click Retry.");
+  expect(within(steps).getAllByRole("button", { name: "Copy" }).length).toBe(3);
+  expect(
+    within(steps).queryByRole("button", { name: "Resize my Podman" }),
+  ).toBeNull();
+  // Retry is the way on after doing it by hand.
+  expect(screen.getByRole("button", { name: "Retry" }).className).not.toContain(
+    "quiet",
+  );
+});
+
+test("a resize Podman refused says so and gives the steps instead", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [cpuShortOnPodman],
+    podman_machine_plan: [resizeToSix],
+    resize_podman_machine: [
+      "OpenBot couldn't resize your Podman machine. Use the steps below instead.",
+    ],
+    local_eval_download: [null],
+    cancel_local_eval: [null],
+  });
+  // The native side rejects with its sentence.
+  const answer = invokeHandler;
+  invokeHandler = async (command, args) => {
+    const answered = await answer(command, args);
+    if (command === "resize_podman_machine") throw answered;
+    return answered;
+  };
+  const screen = view();
+  const offer = await screen.findByRole("region", {
+    name: "OpenBot can fix this for you",
+  });
+  await userEvent.click(
+    within(offer).getByRole("button", { name: "Resize my Podman" }),
+  );
+  const steps = await screen.findByRole("region", {
+    name: "Make your Podman machine bigger",
+  });
+  expect(steps.textContent).toContain(
+    "OpenBot couldn't resize your Podman machine. Use the steps below instead.",
+  );
+  expect(steps.textContent).toContain(
+    "podman machine set --cpus 6 podman-machine-default",
+  );
+  expect(commands().filter((c) => c === "set_up_local_eval")).toHaveLength(1);
+});
+
+/**
  * Windows G, on Docker Desktop with C: at 15 GB free: the native side did not start the setup on a
  * drive that short (`local_eval::checked_call`). Its report, as `local_eval.rs` gives it for G.
  */
