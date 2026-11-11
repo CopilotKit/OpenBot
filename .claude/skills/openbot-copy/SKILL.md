@@ -47,12 +47,10 @@ backend. Try again." Name a feature by what it does (Automatic learning, Memory,
 docs under `docs/` and `charts/` are not shown to a person and may name it.
 `tests/no-intelligence-in-user-copy.test.ts` fails on a shown string that says it.
 
-**One exception: OpenBot Desktop's Account step.** Its lede says "This version of OpenBot
-runs self-contained on this computer. It uses a local version of CopilotKit Intelligence, which
-requires a free license key." That copy is Atai's, word for word.
-That screen asks the person to sign in to another company's account, and the name is what makes
-the license key make sense; the CopilotKit sign-in page it opens says the same. It is listed by
-exact text in `SHOWN_BY_DECISION` in the test. Anywhere else, the back end.
+**OpenBot Desktop's first screen says self-contained.** "This version of OpenBot is fully
+self-contained and runs entirely on your computer, including the OpenBot backend." The Account
+step after it says only what it is for: "OpenBot needs a free license key. Sign in to get one."
+Neither names Intelligence.
 
 **Never "CopilotKit" alone.** Product copy says OpenBot, or "OpenBot by CopilotKit" where the
 company has to be named. Addresses (`dashboard.copilotkit.ai`, `github.com/CopilotKit/OpenBot`),

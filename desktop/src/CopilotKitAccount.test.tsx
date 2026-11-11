@@ -364,9 +364,9 @@ test("the sign-in leads with OpenBot, while it waits and once stopped", async ()
   const screen = await startSigningIn();
   await screen.findByText(PAGE.userCode);
   expect(
-    screen.getByRole("heading", { name: "Self-contained OpenBot" }),
+    screen.getByRole("heading", { name: "Get your free license key" }),
   ).toBeTruthy();
-  expect(screen.getByText(/requires a free license key/)).toBeTruthy();
+  expect(screen.getByText(/needs a free license key/)).toBeTruthy();
   expect(
     screen.getByText(/does NOT send traffic data to OpenBot by CopilotKit\./),
   ).toBeTruthy();
@@ -415,9 +415,9 @@ test("after Accept, the step says it is setting up your apps, not to sign in", a
   ).toBeTruthy();
   expect(screen.getByText("Connecting your apps…")).toBeTruthy();
   expect(
-    screen.queryByRole("heading", { name: "Self-contained OpenBot" }),
+    screen.queryByRole("heading", { name: "Get your free license key" }),
   ).toBeNull();
-  expect(screen.queryByText(/requires a free license key/)).toBeNull();
+  expect(screen.queryByText(/needs a free license key/)).toBeNull();
   connected();
   await waitFor(() => expect(done).toBe("developer-edition-2026-10-01-web"));
 });
