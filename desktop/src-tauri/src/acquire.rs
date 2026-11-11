@@ -2019,6 +2019,10 @@ mod tests {
     struct WslMachine {
         listing: String,
         networks: String,
+        /// `ip route` in the namespace, and `podman ps -a --format json` on OpenBot's machine, when
+        /// the case has them.
+        routes: String,
+        published: String,
         reads: usize,
     }
 
@@ -2027,8 +2031,16 @@ mod tests {
             Self {
                 listing: listing.to_string(),
                 networks: networks.to_string(),
+                routes: String::new(),
+                published: String::new(),
                 reads: 0,
             }
+        }
+
+        fn with_namespace(mut self, routes: &str, published: &str) -> Self {
+            self.routes = routes.to_string();
+            self.published = published.to_string();
+            self
         }
 
         fn run(&mut self, args: &[&str]) -> Result<String, String> {
@@ -2048,12 +2060,21 @@ mod tests {
                     if *script == crate::netavark_rules::read_script() =>
                 {
                     self.reads += 1;
-                    let said = format!(
+                    let mut said = format!(
                         "{}{}\n{}\n",
                         self.listing,
                         crate::netavark_rules::BETWEEN,
                         self.networks
                     );
+                    if !self.routes.is_empty() {
+                        said.push_str(&format!(
+                            "{}\n{}{}\n{}\n",
+                            crate::netavark_rules::ROUTES,
+                            self.routes,
+                            crate::netavark_rules::PUBLISHED,
+                            self.published
+                        ));
+                    }
                     Ok(said.trim().to_string())
                 }
                 ["machine", "ssh", "openbot", script] if script.starts_with("failed=0;") => {
@@ -2111,19 +2132,134 @@ mod tests {
         }
     }
 
-    /// Where a connection to `127.0.0.1:port` is sent: the first jump for the port in
-    /// `NETAVARK-HOSTPORT-DNAT`, then the first DNAT for it in that chain.
+    /// Where a connection to `127.0.0.1:port` is sent: the jumps for the port in
+    /// `NETAVARK-HOSTPORT-DNAT` in order, and the first DNAT for it in the first chain that has one.
     fn reaches(listing: &str, port: u16) -> Option<std::net::IpAddr> {
         let rules = crate::netavark_rules::rules(listing);
         let dport = format!("dport {port} ");
-        let jump = rules
-            .iter()
-            .find(|rule| rule.chain == "NETAVARK-HOSTPORT-DNAT" && rule.text.contains(&dport))?;
-        let chain = jump.text.rsplit("jump ").next()?.trim();
+        // A jump into a chain with nothing for the port comes back, and the next one is tried.
         rules
             .iter()
-            .find(|rule| rule.chain == chain && rule.text.contains(&dport) && rule.to.is_some())?
-            .to
+            .filter(|rule| rule.chain == "NETAVARK-HOSTPORT-DNAT" && rule.text.contains(&dport))
+            .filter_map(|jump| jump.text.rsplit("jump ").next())
+            .find_map(|chain| {
+                rules
+                    .iter()
+                    .find(|rule| {
+                        rule.chain == chain.trim()
+                            && rule.text.contains(&dport)
+                            && rule.to.is_some()
+                    })?
+                    .to
+            })
+    }
+
+    /*
+     * Box I (I-evidence I2-F-12): a ticked uninstall removed OpenBot's machine with its service stop
+     * failing, the person's rootless machine kept WSL up, and an install made a new `openbot`. The
+     * removed machine's chains, for 10.89.1.0/24 and 10.89.2.0/24, sit ahead of the new machine's,
+     * and no network anywhere maps to them now. The ruleset is the capture's, verbatim; the
+     * networks and containers are the capture's own list. The routes were not captured: they are
+     * the shape WSL lists them in, the removed machine's bridges with nothing attached (`linkdown`,
+     * as box F's capture shows such a bridge).
+     */
+    const BOX_I: &str = include_str!("../test-fixtures/netavark-rules/box-i.nft");
+    const BOX_I_NETWORKS: &str = include_str!("../test-fixtures/netavark-rules/box-i-inspect.json");
+    const BOX_I_ROUTES: &str = include_str!("../test-fixtures/netavark-rules/box-i-routes.txt");
+    const BOX_I_PS: &str = include_str!("../test-fixtures/netavark-rules/box-i-ps.json");
+    /// Box I with a rootful machine of the person's beside it, publishing 127.0.0.1:5432, one of
+    /// OpenBot's ports, to a postgres of theirs that runs, and Docker publishing 3001.
+    const BOX_I_WITH_PERSON: &str =
+        include_str!("../test-fixtures/netavark-rules/box-i-with-person-and-docker.nft");
+    const BOX_I_WITH_PERSON_ROUTES: &str =
+        include_str!("../test-fixtures/netavark-rules/box-i-with-person-routes.txt");
+
+    /// The removed machine's rules go, all of them, before the back end starts, so 3001, 3010,
+    /// 5432, 4100 and 4206 reach the new machine's containers; the new machine's rules stay.
+    #[test]
+    fn rules_a_removed_machine_left_go_before_the_back_end_starts() {
+        let mut machine =
+            WslMachine::new(BOX_I, BOX_I_NETWORKS).with_namespace(BOX_I_ROUTES, BOX_I_PS);
+        let address = Address::new(Engine::Podman, Some("openbot-root".into()));
+        readied_for_backend_with(Some(&address), |args| machine.run(args), true, || ());
+
+        let ip = |address: &str| address.parse::<std::net::IpAddr>().unwrap();
+        for (port, to) in [
+            (3001, "10.89.4.7"),
+            (3010, "10.89.4.7"),
+            (5432, "10.89.4.2"),
+            (4100, "10.89.5.2"),
+            (4206, "10.89.5.3"),
+            (49897, "10.89.3.3"),
+        ] {
+            assert_eq!(
+                reaches(&machine.listing, port),
+                Some(ip(to)),
+                "127.0.0.1:{port}"
+            );
+        }
+        let before = crate::netavark_rules::rules(BOX_I);
+        let after = crate::netavark_rules::rules(&machine.listing);
+        let removed: Vec<(String, u64)> = before
+            .iter()
+            .filter(|rule| !after.contains(rule))
+            .map(|rule| (rule.chain.clone(), rule.handle))
+            .collect();
+        let removed_machine = |chain: &str, handles: &[u64]| {
+            handles
+                .iter()
+                .map(|handle| (chain.to_string(), *handle))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            removed,
+            [
+                removed_machine(
+                    "nv_9251097f_10_89_1_0_nm24_dnat",
+                    &[145, 168, 172, 215, 223, 227]
+                ),
+                removed_machine(
+                    "nv_6bd7ac84_10_89_2_0_nm24_dnat",
+                    &[160, 164, 176, 180, 211, 219, 231, 235]
+                ),
+            ]
+            .concat()
+        );
+    }
+
+    /// The same, with a rootful machine of the person's beside it that publishes 127.0.0.1:5432,
+    /// one of OpenBot's own ports, to a postgres of theirs that runs, and Docker publishing 3001.
+    /// OpenBot can't see that machine's containers, but their bridge is up, so their chain is not
+    /// taken for a removed machine's; Docker's is not netavark's. Both stay as they were.
+    #[test]
+    fn a_persons_machine_on_one_of_openbots_ports_is_not_taken_for_a_removed_one() {
+        let mut machine = WslMachine::new(BOX_I_WITH_PERSON, BOX_I_NETWORKS)
+            .with_namespace(BOX_I_WITH_PERSON_ROUTES, BOX_I_PS);
+        let address = Address::new(Engine::Podman, Some("openbot-root".into()));
+        readied_for_backend_with(Some(&address), |args| machine.run(args), true, || ());
+
+        let after = crate::netavark_rules::rules(&machine.listing);
+        for kept in ["dnat ip to 10.89.6.2:5432", "dnat to 172.17.0.2:3001"] {
+            assert!(after.iter().any(|rule| rule.text.ends_with(kept)), "{kept}");
+        }
+        let before = crate::netavark_rules::rules(BOX_I_WITH_PERSON);
+        let gone: Vec<&str> = before
+            .iter()
+            .filter(|rule| !after.contains(rule))
+            .map(|rule| rule.chain.as_str())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        assert_eq!(
+            gone,
+            [
+                "nv_6bd7ac84_10_89_2_0_nm24_dnat",
+                "nv_9251097f_10_89_1_0_nm24_dnat"
+            ]
+        );
+        // Their 5432 comes first, as it did: OpenBot changes nothing of theirs.
+        let ip = |address: &str| address.parse::<std::net::IpAddr>().unwrap();
+        assert_eq!(reaches(&machine.listing, 5432), Some(ip("10.89.6.2")));
     }
 
     /// The bug on a Windows machine: OpenBot's machine stopped and started again, and its ports
