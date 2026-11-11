@@ -16,6 +16,7 @@ import {
   parseResponsibilityInput,
   parseResponsibilityPatch,
   ENDS_WITHOUT_OUTCOME,
+  instructionNamesGoal,
   RECURS_AND_ENDS,
   type Responsibility,
   ResponsibilityNotFoundError,
@@ -153,6 +154,13 @@ export function createResponsibilityStore(
    *
    * Serialized per Bot, so two goals one routine runs, completed at once, can't each read the other
    * as still open and both leave it on: the second reads the first as completed, and switches it off.
+   *
+   * FOUND IN REVIEW: a broad routine ("Summarise my inbox, and if a release shipped run the goal")
+   * records the goal its firing ran through run_goal (`linkGoal` in the routine store), though its
+   * instruction never names it. Completing that goal switched the routine off, and switching it back
+   * on was refused as `goal_complete`, so the rest of what it did stopped for good. A routine that
+   * records this goal but whose instruction doesn't name it (`instructionNamesGoal`) is unlinked and
+   * left on; one that names it is switched off.
    */
   async function switchOffRoutinesOf(
     transaction: Transaction,
@@ -168,7 +176,25 @@ export function createResponsibilityStore(
       [goal.id],
     );
     const running = new Set(await routinesRunning(transaction, goal, enabled));
-    const runs = enabled.filter((routine) => running.has(routine.id));
+    const linkedOnly = enabled.filter(
+      (routine) =>
+        running.has(routine.id) &&
+        routine.goalId === goal.id &&
+        !instructionNamesGoal(routine.instruction, goal),
+    );
+    if (linkedOnly.length > 0)
+      await transaction
+        .update(routines)
+        .set({ goalId: null, updatedAt: new Date() })
+        .where(
+          inArray(
+            routines.id,
+            linkedOnly.map((routine) => routine.id),
+          ),
+        );
+    const runs = enabled.filter(
+      (routine) => running.has(routine.id) && !linkedOnly.includes(routine),
+    );
     const stillOpen = runs.some((routine) => !routine.goalId)
       ? await transaction
           .select({ id: responsibilities.id, title: responsibilities.title })

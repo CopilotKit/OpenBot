@@ -75,6 +75,7 @@ afterAll(async () => {
 async function goal(endsWhenMet: boolean) {
   return store.create(ownerId, { ...valid, endsWhenMet });
 }
+/** A routine made for a goal: it records the goal, and its instruction names it as the page writes. */
 async function routineRunning(goalId: string, agentId = botId) {
   const id = `routine_${randomUUID()}`;
   await database.insert(routines).values({
@@ -82,7 +83,7 @@ async function routineRunning(goalId: string, agentId = botId) {
     ownerUserId: ownerId,
     agentId,
     channelId,
-    instruction: "Work on the report",
+    instruction: `Run the goal "${valid.title}" (${goalId}) with run_goal.`,
     cron: "0 9 * * *",
     timezone: "UTC",
     nextRunAt: new Date(Date.now() + 3_600_000),
@@ -368,7 +369,8 @@ test("the person completing a goal leaves on an older routine that also runs ano
   const doneAndEnded = await olderRoutine(
     `Run goal ${done.id}, then the goal "${ended.title}"`,
   );
-  // Records the goal it was made for, so it runs that goal alone, whatever its instruction quotes.
+  // Records the goal its firing ran, but its instruction names only the open goal: completing the
+  // recorded goal unlinks it, and it goes on running the goal it names.
   const recordsDone = await routineRunning(done.id);
   await database
     .update(routines)
@@ -380,7 +382,8 @@ test("the person completing a goal leaves on an older routine that also runs ano
   expect((await routineRow(both))?.enabled).toBe(true);
   expect((await routineRow(onlyDone))?.enabled).toBe(false);
   expect((await routineRow(doneAndEnded))?.enabled).toBe(false);
-  expect((await routineRow(recordsDone))?.enabled).toBe(false);
+  expect((await routineRow(recordsDone))?.enabled).toBe(true);
+  expect((await routineRow(recordsDone))?.goalId).toBeNull();
   expect(await store.repeats(ownerId, open.id)).toBe("routine");
   expect((await store.repeatingGoals(ownerId, botId)).get(open.id)).toBe(
     "routine",
@@ -390,6 +393,7 @@ test("the person completing a goal leaves on an older routine that also runs ano
   // The last open goal it runs completes, and it is switched off.
   await store.transition(ownerId, open.id, "completed");
   expect((await routineRow(both))?.enabled).toBe(false);
+  expect((await routineRow(recordsDone))?.enabled).toBe(false);
 });
 
 // The Routines page draws such a routine under the goal it still runs, in whatever order goals are read.
@@ -582,4 +586,99 @@ test("an older schedule may be enabled while another named goal remains open", a
   await schedules.setEnabled(ownerId, id, false);
   await schedules.setEnabled(ownerId, id, true);
   expect((await routineRow(id))?.enabled).toBe(true);
+});
+
+/*
+ * A broad routine runs a goal only some days: "Summarise my inbox, and if a release shipped run the
+ * goal". Its firing ran the goal through run_goal, so `linkGoal` recorded it, though its instruction
+ * names neither the goal's id nor its quoted title.
+ *
+ * FOUND IN REVIEW: completing the goal switched the routine off, and switching it back on was refused
+ * as `goal_complete`, so the person lost their daily inbox summary for good. Completion unlinks such a
+ * routine and leaves it on; a routine whose instruction names the goal is still switched off.
+ */
+async function broadRoutineLinkedTo(goalId: string) {
+  const id = `routine_${randomUUID()}`;
+  await database.insert(routines).values({
+    id,
+    ownerUserId: ownerId,
+    agentId: botId,
+    channelId,
+    instruction:
+      "Summarise my inbox, and if a release shipped run the goal that tracks it.",
+    cron: "0 9 * * *",
+    timezone: "UTC",
+    nextRunAt: new Date(Date.now() + 3_600_000),
+  });
+  expect(
+    await createRoutineStore(database).linkGoal(ownerId, botId, id, goalId),
+  ).toBe(true);
+  expect((await routineRow(id))?.goalId).toBe(goalId);
+  return id;
+}
+async function expectLeftOnAndUnlinked(id: string) {
+  const row = await routineRow(id);
+  expect(row?.enabled).toBe(true);
+  expect(row?.goalId).toBeNull();
+  // Not refused as `goal_complete`: the person can switch it off and on again.
+  const schedules = createRoutineStore(database);
+  await schedules.setEnabled(ownerId, id, false);
+  await schedules.setEnabled(ownerId, id, true);
+  expect((await routineRow(id))?.enabled).toBe(true);
+}
+
+test("the person completing a goal unlinks a broad routine that only ran it, and leaves it on", async () => {
+  const value = await store.create(ownerId, {
+    ...valid,
+    title: `Track releases ${randomUUID()}`,
+  });
+  const broad = await broadRoutineLinkedTo(value.id);
+  await store.transition(ownerId, value.id, "completed");
+  await expectLeftOnAndUnlinked(broad);
+});
+
+test("a run completing a goal unlinks a broad routine that only ran it, and leaves it on", async () => {
+  const value = await store.create(ownerId, {
+    ...valid,
+    title: `Track releases ${randomUUID()}`,
+    endsWhenMet: true,
+  });
+  const broad = await broadRoutineLinkedTo(value.id);
+  const sourceRunId = await runningRun(value.id);
+  await store.recordProgress(ownerId, value.id, {
+    summary: "Shipped.",
+    complete: true,
+    sourceRunId,
+  });
+  await expectLeftOnAndUnlinked(broad);
+});
+
+test("completing a goal still switches off the routines whose instruction names it", async () => {
+  const value = await store.create(ownerId, {
+    ...valid,
+    title: `Track releases ${randomUUID()}`,
+  });
+  const fromPage = await routineRunning(value.id);
+  await database
+    .update(routines)
+    .set({
+      instruction: `Run the goal "${value.title}" (${value.id}) with run_goal.`,
+    })
+    .where(eq(routines.id, fromPage));
+  const fromBot = await routineRunning(value.id);
+  await database
+    .update(routines)
+    .set({ instruction: `Run the goal "${value.title}"` })
+    .where(eq(routines.id, fromBot));
+  const broad = await broadRoutineLinkedTo(value.id);
+  await store.transition(ownerId, value.id, "completed");
+  for (const id of [fromPage, fromBot]) {
+    const row = await routineRow(id);
+    expect(row?.enabled).toBe(false);
+    expect(row?.goalId).toBe(value.id);
+    await expect(
+      createRoutineStore(database).setEnabled(ownerId, id, true),
+    ).rejects.toBeInstanceOf(RoutineRefusedError);
+  }
+  await expectLeftOnAndUnlinked(broad);
 });

@@ -197,8 +197,9 @@ export type RoutineGoalLink = {
  * Activity, and by the routine store when it names an untitled routine for its goal.
  *
  * BY THE GOAL IT RECORDS. A routine made for a goal records its id, and runs that goal and no other,
- * whatever its instruction quotes; completing that goal switches it off. An older routine can name
- * several goals, and stays on while one of them is not completed (`switchOffRoutinesOf`).
+ * whatever its instruction quotes; completing that goal switches it off, or, when its instruction
+ * doesn't name the goal (`instructionNamesGoal`), unlinks it and leaves it on. An older routine can
+ * name several goals, and stays on while one of them is not completed (`switchOffRoutinesOf`).
  *
  * FOUND BEFORE 0.3.3: the rule was "the instruction contains the goal's title anywhere", so a goal
  * titled "Email" was run by any routine that mentioned email. Its runs could then never complete it,
@@ -213,10 +214,22 @@ export function routineRunsGoal(
 ): boolean {
   if (routine.goalId) return routine.goalId === goal.id;
   if (!routine.goalByTitle) return false;
+  return instructionNamesGoal(routine.instruction, goal);
+}
+
+/**
+ * Whether a routine's instruction names this goal: by its id, or by its whole title between quotes
+ * (`TITLE_QUOTES`). What the page writes (`Run the goal "Title" (id) with run_goal.`) and what a Bot
+ * writes (`Run the goal "Title"`) both do; a word of the title inside a sentence does not.
+ */
+export function instructionNamesGoal(
+  instruction: string,
+  goal: { id: string; title: string },
+): boolean {
   return (
-    routine.instruction.includes(goal.id) ||
+    instruction.includes(goal.id) ||
     TITLE_QUOTES.some(([open, close]) =>
-      routine.instruction.includes(`${open}${goal.title}${close}`),
+      instruction.includes(`${open}${goal.title}${close}`),
     )
   );
 }

@@ -611,7 +611,7 @@ describe("ending a goal that repeats", () => {
 
   async function routineRunning(goalId: string) {
     const made = await call("create_routine", {
-      instruction: "Check the latest release and report what changed.",
+      instruction: `Run the goal ${goalId} and report what changed.`,
       goalId,
       cron: "0 8 * * *",
       timezone: "UTC",
