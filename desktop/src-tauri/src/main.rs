@@ -2719,6 +2719,9 @@ async fn prepare_installation_inner(
             "images",
             "Checking what OpenBot needs to download.",
         );
+        // On OpenBot's own machine on Windows the downloads go through the machine's network, which
+        // a Retry reaches without starting the machine again: checked, and set up again, first.
+        acquire::prepare_for_compose(&address)?;
         // The first screen may have started pulling these already: wait for it, showing its
         // download, and the pulls below find them there.
         early_downloads::wait_for_images(|downloads| report_downloads(&handle, downloads.clone()));

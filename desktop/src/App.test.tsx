@@ -348,6 +348,32 @@ test("the Install step shows one step in progress at a time while both downloads
   expect(view.container.textContent).toContain("400.0 MB of 1.6 GB");
 });
 
+test("a setup failure only a Windows restart fixes offers the restart, not Try again", async () => {
+  const { view, preparation } = await beginPendingInstallation();
+  await act(async () =>
+    preparation.reject({
+      said: "Windows needs to restart to finish setting up the software OpenBot runs on. Restart Windows, then open OpenBot again.",
+      detail:
+        "user-mode networking is not working in the openbot VM: host.containers.internal did not resolve in the openbot VM within 60s: podman machine ssh openbot timeout 10 getent ahostsv4 host.containers.internal exited with status 124",
+      restart_windows: true,
+    }),
+  );
+  expect(
+    await view.findByRole("heading", { name: "Restart Windows to finish" }),
+  ).toBeTruthy();
+  expect(view.container.textContent).toContain(
+    "Windows needs to restart to finish setting up the software OpenBot runs on.",
+  );
+  expect(view.container.textContent).not.toContain(
+    "Windows Subsystem for Linux is set up.",
+  );
+  expect(view.queryByRole("button", { name: /Try again|Retry/ })).toBeNull();
+  await userEvent.click(view.getByRole("button", { name: "Restart now" }));
+  expect(invokeCalls.some((call) => call.command === "windows_restart")).toBe(
+    true,
+  );
+});
+
 test("installation failure stops active indicators and retry begins fresh", async () => {
   const { view, preparation, retry } = await beginPendingInstallation();
   await emitProgress({

@@ -104,6 +104,10 @@ function comeForward(why: string) {
  * 54 px up and 139 px taller on "Connect your AI". A step taller than the window scrolls inside its
  * card instead (`main > .sheet` in styles.css).
  */
+/** The restart screen's words when setup found that only a Windows restart lets it carry on. */
+const SETUP_NEEDS_RESTART =
+  "Windows needs to restart to finish setting up the software OpenBot runs on. OpenBot opens again after you sign back in.";
+
 export function App() {
   return <Setup />;
 }
@@ -112,6 +116,8 @@ function Setup() {
   const [blocker, setBlocker] = useState<Blocker | null>(null);
   // A Windows fix made earlier that only counts once Windows has restarted, and it has not.
   const [restartPending, setRestartPending] = useState(false);
+  // Said on the restart screen when setup, not a Windows feature, is what needs the restart.
+  const [restartLede, setRestartLede] = useState<string | undefined>();
   const [blockerFailure, setBlockerFailure] = useState<Problem | null>(null);
   const [instruction, setInstruction] = useState("");
   const [root, setRoot] = useState("");
@@ -232,6 +238,11 @@ function Setup() {
     // Start was refused until Install runs again: an earlier app's deployment this app cannot
     // start. Install does that by itself, as the person would otherwise be told to.
     if (problem.connection === "installation") setReinstall(true);
+    // Only a Windows restart fixes this one: the restart screen, not a Try again that can't work.
+    if (problem.restart_windows) {
+      setRestartLede(SETUP_NEEDS_RESTART);
+      setRestartPending(true);
+    }
   }, []);
   const [reinstall, setReinstall] = useState(false);
   // A local Intelligence stack OpenBot could not stop. Shown, but it never holds a start.
@@ -488,6 +499,11 @@ function Setup() {
       setSteps((current) => settleProgress(current, problem));
       setPreparation({ key: installationKey, status: "failed" });
       setFailure(problem);
+      // Only a Windows restart fixes this one: the restart screen, not a Try again that can't work.
+      if (problem.restart_windows) {
+        setRestartLede(SETUP_NEEDS_RESTART);
+        setRestartPending(true);
+      }
       // The failure is the person's to act on, wherever they went while it installed.
       comeForward("the installation failed");
       return false;
@@ -822,7 +838,7 @@ function Setup() {
     );
   }
 
-  if (restartPending) return <WindowsRestart />;
+  if (restartPending) return <WindowsRestart lede={restartLede} />;
 
   if (blocker) {
     return (
