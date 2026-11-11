@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { connectionRows } from "@/lib/connections/rows";
+import { connectionRows, personalConnectionRows } from "@/lib/connections/rows";
 import type { LinkedAccount } from "@/lib/identity/queries";
 import type { CatalogueItem, PluginServer } from "@/lib/plugins/queries";
 
@@ -142,4 +142,32 @@ test("a key app nobody has connected says it needs a key; a sign-in app does not
     ["composio-mixpanel", "Needs a key from Mixpanel"],
     ["composio-gmail", ""],
   ]);
+});
+
+/*
+ * The personal edition lists the search providers and the broker's apps, nothing else: no GitHub or
+ * Slack link, which only tells one person from another, and there is one.
+ */
+test("the personal edition lists no account links, and a brokered GitHub app is a row of its own", () => {
+  const exa = {
+    key: "exa",
+    title: "Exa Search",
+    summary: "Public-web search.",
+    auth: "none",
+  } as CatalogueItem;
+  const rows = personalConnectionRows({
+    catalogue: [exa],
+    added: new Set<string>(),
+    brokered: [
+      app("composio-github", "GitHub"),
+      app("composio-gmail", "Gmail"),
+    ],
+    connected: new Set<string>(),
+  });
+  expect(rows.map((row) => row.key)).toEqual([
+    "exa",
+    "composio-github",
+    "composio-gmail",
+  ]);
+  expect(rows.some((row) => row.mark.kind === "provider")).toBe(false);
 });
