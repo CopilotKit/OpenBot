@@ -219,6 +219,13 @@ Desktop installation:
 
 ### Conversations
 
+- **Switching back to a conversation the Bot is working in shows it working.** Leave a conversation
+  right after sending, or while the Bot takes a browser step, and come back: the conversation could
+  be empty, your message gone, no sign of the Bot working and the message box open, until the whole
+  answer appeared at once when the Bot was done, minutes later on a long task. A message typed
+  meanwhile started a second run on the same conversation. The conversation now picks the Bot's
+  work up as soon as it continues, so the answer streams in as it is written, and a message typed
+  while the Bot works waits for it, as it does when you never left.
 - **An answer that reaches the screen with pieces missing is put right, and the Bot carries on.**
   Sometimes a run's live stream reached the conversation out of shape while the run itself went
   fine: the answer drew with words missing mid-sentence until a reload, or a step that asked for
