@@ -130,10 +130,13 @@ export function SkillMark({ children }: { children: React.ReactNode }) {
  */
 export function LearningSharing({
   written = [],
+  writtenKnown = true,
   action,
 }: {
   /** Rows for the skills the person wrote, drawn above the learned ones in the same list. */
   written?: React.ReactNode[];
+  /** False while the page is still reading the written skills, or failed to: an empty `written` then means "not known", not "none". */
+  writtenKnown?: boolean;
   /** The section's one verb: New skill. */
   action?: React.ReactNode;
 } = {}) {
@@ -147,14 +150,32 @@ export function LearningSharing({
   );
   const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
   const [reading, setReading] = React.useState<string | null>(null);
+  const writtenRows = written.map((row, index) => (
+    // biome-ignore lint/suspicious/noArrayIndexKey: the page builds these rows in a fixed order.
+    <React.Fragment key={index}>
+      {index > 0 ? <Separator /> : null}
+      {row}
+    </React.Fragment>
+  ));
   // Which edition decides the layout, so nothing draws until it is known. A failed read counts as the team edition.
-  if (sharing.isPending || capabilities.isPending) return null;
+  if (capabilities.isPending) return null;
+  // Nothing to list yet from either read.
+  if (sharing.isPending && !writtenKnown) return null;
   const personal = capabilities.data?.edition === "personal";
-  if (sharing.error) {
+  /*
+   * The skills a person wrote don't come from Learning, so they and New skill are drawn whether or
+   * not it answered. Its failure is said inside the section, above what is still known.
+   */
+  if (sharing.isPending || sharing.error) {
     return (
-      <p className="mt-6 text-destructive text-sm" role="alert">
-        {sharing.error.message}
-      </p>
+      <PageSection action={action} title="Your skills">
+        {sharing.error ? (
+          <p className="text-destructive text-sm" role="alert">
+            {sharing.error.message}
+          </p>
+        ) : null}
+        {written.length > 0 ? <PageRows>{writtenRows}</PageRows> : null}
+      </PageSection>
     );
   }
   const data = sharing.data;
@@ -183,20 +204,16 @@ export function LearningSharing({
         }
       >
         {none ? (
-          <PageEmpty>
-            {data.skills === null
-              ? emptySentence(data, mode, true)
-              : "No skills yet. Write one with New skill, or teach a Bot a task."}
-          </PageEmpty>
+          writtenKnown ? (
+            <PageEmpty>
+              {data.skills === null
+                ? emptySentence(data, mode, true)
+                : "No skills yet. Write one with New skill, or teach a Bot a task."}
+            </PageEmpty>
+          ) : null
         ) : (
           <PageRows>
-            {written.map((row, index) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: the page builds these rows in a fixed order.
-              <React.Fragment key={index}>
-                {index > 0 ? <Separator /> : null}
-                {row}
-              </React.Fragment>
-            ))}
+            {writtenRows}
             {learned.map((skill, index) => (
               <React.Fragment key={skill.name}>
                 {index > 0 || written.length > 0 ? <Separator /> : null}
@@ -302,20 +319,16 @@ export function LearningSharing({
         }
       >
         {learned.length === 0 && written.length === 0 ? (
-          <PageEmpty>
-            {data.skills === null || data.unavailable === "off"
-              ? emptySentence(data, mode, false)
-              : "No skills yet. Write one with New skill, or teach a Bot a task."}
-          </PageEmpty>
+          writtenKnown ? (
+            <PageEmpty>
+              {data.skills === null || data.unavailable === "off"
+                ? emptySentence(data, mode, false)
+                : "No skills yet. Write one with New skill, or teach a Bot a task."}
+            </PageEmpty>
+          ) : null
         ) : (
           <PageRows>
-            {written.map((row, index) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: the page builds these rows in a fixed order.
-              <React.Fragment key={index}>
-                {index > 0 ? <Separator /> : null}
-                {row}
-              </React.Fragment>
-            ))}
+            {writtenRows}
             {learned.map((skill, index) => {
               const open =
                 (setOpen.isPending && setOpen.variables?.name === skill.name

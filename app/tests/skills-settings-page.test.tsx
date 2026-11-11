@@ -55,7 +55,23 @@ const skill = (
   tools: [],
 });
 
-function draw(edition: "team" | "personal", { browser = false } = {}) {
+const refundOrder = {
+  name: "refund-order",
+  description: "Refunds an order.",
+  open: false,
+  approvedBy: null,
+  sharing: "none",
+};
+
+function draw(
+  edition: "team" | "personal",
+  {
+    browser = false,
+    learning = true,
+    written = true,
+    learned = [refundOrder] as unknown[],
+  } = {},
+) {
   global.fetch = (async () =>
     Response.json({}, { status: 404 })) as unknown as typeof fetch;
   const client = new QueryClient({
@@ -73,28 +89,24 @@ function draw(edition: "team" | "personal", { browser = false } = {}) {
     email: "maya@example.test",
     role: "user",
   });
-  client.setQueryData(pluginKeys.page(), {
-    catalogue: [],
-    servers: [],
-    skills: [
-      skill("weekly-report", "Weekly report", "me"),
-      skill("onboarding", "Onboarding", null),
-    ],
-    botsMayCallBack: true,
-  });
-  client.setQueryData(learningKeys.personal, {
-    mode: "closed",
-    sharingAllowed: true,
-    skills: [
-      {
-        name: "refund-order",
-        description: "Refunds an order.",
-        open: false,
-        approvedBy: null,
-        sharing: "none",
-      },
-    ],
-  });
+  if (written) {
+    client.setQueryData(pluginKeys.page(), {
+      catalogue: [],
+      servers: [],
+      skills: [
+        skill("weekly-report", "Weekly report", "me"),
+        skill("onboarding", "Onboarding", null),
+      ],
+      botsMayCallBack: true,
+    });
+  }
+  if (learning) {
+    client.setQueryData(learningKeys.personal, {
+      mode: "closed",
+      sharingAllowed: true,
+      skills: learned,
+    });
+  }
   client.setQueryData(learningKeys.review, {
     canReview: true,
     autoApprove: null,
@@ -166,6 +178,45 @@ test("no Teach a Bot row where OpenBot can't run a browser for you", async () =>
   const view = draw("team");
   await view.findByRole("heading", { name: "Skills" });
   expect(view.queryByRole("heading", { name: "Teach a Bot" })).toBeNull();
+});
+
+test("the skills you wrote and New skill stay when Learning can't be read", async () => {
+  const view = draw("team", { learning: false });
+  await view.findByRole("heading", { name: "Skills" });
+  await view.findByText(
+    "Couldn't load your Learning settings. Reload the page.",
+  );
+  const yours = section(view, "Your skills");
+  expect(within(yours).getByText("Weekly report")).toBeTruthy();
+  expect(view.getByText("New skill")).toBeTruthy();
+  expect(view.queryByText(/No skills yet/)).toBeNull();
+});
+
+test("in the personal edition too, the skills you wrote and New skill stay when Learning can't be read", async () => {
+  const view = draw("personal", { learning: false });
+  await view.findByRole("heading", { name: "Skills" });
+  await view.findByText(
+    "Couldn't load your Learning settings. Reload the page.",
+  );
+  const yours = section(view, "Your skills");
+  expect(within(yours).getByText("Weekly report")).toBeTruthy();
+  expect(within(yours).getByText("Onboarding")).toBeTruthy();
+  expect(view.getByText("New skill")).toBeTruthy();
+  expect(view.queryByText(/No skills yet/)).toBeNull();
+});
+
+test("no empty state when the skills you wrote couldn't be read", async () => {
+  const view = draw("team", { written: false });
+  await view.findByText("Couldn't load the skills you wrote. Reload the page.");
+  const yours = section(view, "Your skills");
+  expect(within(yours).getByText("Refund order")).toBeTruthy();
+  cleanup();
+
+  const empty = draw("team", { written: false, learned: [] });
+  await empty.findByText(
+    "Couldn't load the skills you wrote. Reload the page.",
+  );
+  expect(empty.queryByText(/No skills yet/)).toBeNull();
 });
 
 function redirectOf(

@@ -97,6 +97,8 @@ export function SkillsSettingsPage({
   const showCreate = creating;
   const showEdit = !showCreate && editing !== undefined;
   const loaded = !plugins.isPending && !me.isPending;
+  /** Both reads answered, so `written` is the whole truth and an empty list means none. */
+  const writtenKnown = plugins.data !== undefined && me.data !== undefined;
   const skills = plugins.data?.skills ?? [];
   /*
    * The server has already left out skills this person may not see. Theirs are the ones they own;
@@ -196,7 +198,7 @@ export function SkillsSettingsPage({
     );
   };
 
-  const written = loaded
+  const written = writtenKnown
     ? [...mine.map(writtenRow), ...(personal ? everyBot.map(everyBotRow) : [])]
     : [];
 
@@ -222,7 +224,7 @@ export function SkillsSettingsPage({
             {error}
           </p>
         ) : null}
-        {loaded && !plugins.data ? (
+        {loaded && !writtenKnown ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
             Couldn't load the skills you wrote. Reload the page.
           </p>
@@ -242,6 +244,7 @@ export function SkillsSettingsPage({
             </Button>
           }
           written={written}
+          writtenKnown={writtenKnown}
         />
 
         {/*
