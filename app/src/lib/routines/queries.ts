@@ -65,6 +65,33 @@ export function nothingIsFiring(
   return sweep !== undefined && !sweep.working && routineCount > 0;
 }
 
+/**
+ * What the Routines page says when nothing is running them, for whoever reads it.
+ *
+ * A team member's admin runs OpenBot, so they are pointed at one. The personal edition has no
+ * admin: the person reading is the one who runs it, and restarting OpenBot restarts what runs
+ * routines (OpenBot Desktop and `scripts/start.sh` both start it with the server). There is no
+ * restart to press here, so it says what to do. Before the edition is known it says only what is
+ * true for both, so a personal owner is never told to ask an admin for a moment.
+ *
+ * `lastSwept` is the last check already put into words (`relativeTime`), or null when none was
+ * ever recorded. A stop is never described as routines that ran.
+ */
+export function stoppedRoutinesGuidance(
+  lastSwept: string | null,
+  edition: "team" | "personal" | undefined,
+): string {
+  const fact = lastSwept
+    ? `OpenBot last checked them ${lastSwept}. None will run until it starts again.`
+    : "OpenBot hasn't started running routines yet, so none of these will run.";
+  if (edition === "personal") return `${fact} Restart OpenBot to start them.`;
+  if (edition === "team")
+    return lastSwept
+      ? `${fact} Ask an admin if this keeps happening.`
+      : `${fact} Ask an admin to set this up.`;
+  return fact;
+}
+
 export const routineKeys = {
   all: ["routines"] as const,
   list: () => ["routines", "list"] as const,

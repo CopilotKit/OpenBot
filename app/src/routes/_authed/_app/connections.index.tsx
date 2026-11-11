@@ -33,6 +33,7 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group";
+import { Button } from "@/components/ui/button";
 import {
   Item,
   ItemActions,
@@ -342,8 +343,10 @@ function RouteComponent() {
    * THE PERSONAL EDITION LISTS EVERY APP HERE, added or not, because the one person is the one who
    * adds it: a tile's press adds the app and connects it in one go (`useConnectApp`).
    */
-  const personal =
-    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
+  /** Undefined until it answers, and on a failed read: neither edition's guidance is assumed. */
+  const edition = capabilities.data?.edition;
+  const personal = edition === "personal";
   const connectApp = useConnectApp();
   const paths = useManagePaths();
   // The broker's directory of more apps, as one more tile, where a broker is set up.
@@ -394,7 +397,9 @@ function RouteComponent() {
     plugins.isPending ||
     connections.isPending ||
     links.isPending ||
-    providers.isPending;
+    providers.isPending ||
+    // Which rows there are depends on the edition, so the team list never flashes before the personal one.
+    capabilities.isPending;
 
   return (
     <PageShell
@@ -454,13 +459,64 @@ function RouteComponent() {
          * nothing is listed rather than a list that may be wrong.
          */}
         {loading ? null : plugins.error || connections.error ? (
-          <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load your connections. Reload the page, or ask an admin if
-            it keeps happening.
-          </p>
+          /*
+           * A failed read is not missing setup, so Retry comes first. Only the team edition has an
+           * admin to ask; a personal owner is pointed at Setup, which is theirs.
+           */
+          <div className="mt-4 flex flex-col items-start gap-3" role="alert">
+            <p className="text-destructive text-sm">
+              {edition === "team"
+                ? "Couldn't load your connections. Try again, or ask an admin if it keeps happening."
+                : edition === "personal"
+                  ? "Couldn't load your connections. Try again, or check Setup if it keeps happening."
+                  : "Couldn't load your connections. Try again."}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                disabled={plugins.isFetching || connections.isFetching}
+                onClick={() => {
+                  if (plugins.error) void plugins.refetch();
+                  if (connections.error) void connections.refetch();
+                }}
+                size="sm"
+                variant="outline"
+              >
+                {plugins.isFetching || connections.isFetching
+                  ? "Retrying…"
+                  : "Retry"}
+              </Button>
+              {edition === "personal" ? (
+                <Button
+                  render={<Link to="/settings/setup" />}
+                  size="sm"
+                  variant="ghost"
+                >
+                  Open Setup
+                </Button>
+              ) : null}
+            </div>
+          </div>
         ) : rows.length === 0 ? (
-          <PageEmpty icon={IconPlug} title="No apps yet">
-            Apps show up here once an admin turns them on.
+          <PageEmpty
+            action={
+              edition === "personal" ? (
+                <Button
+                  render={<Link to="/settings/setup" />}
+                  size="sm"
+                  variant="outline"
+                >
+                  Open Setup
+                </Button>
+              ) : undefined
+            }
+            icon={IconPlug}
+            title="No apps yet"
+          >
+            {edition === "team"
+              ? "Apps show up here once an admin turns them on."
+              : edition === "personal"
+                ? "Apps show up here once OpenBot is set up to reach them."
+                : "Apps show up here once they're turned on."}
           </PageEmpty>
         ) : (
           <>

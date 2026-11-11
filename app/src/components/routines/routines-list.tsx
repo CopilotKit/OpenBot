@@ -47,6 +47,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import { relativeTime } from "@/lib/relative-time";
 import {
@@ -70,6 +71,7 @@ import {
   type RoutineRunRecord,
   routineRunsQueryOptions,
   routinesQueryOptions,
+  stoppedRoutinesGuidance,
 } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -565,6 +567,7 @@ export function RoutinesList({
     (routine) => agentId === undefined || routine.agentId === agentId,
   ).length;
   const noWorker = nothingIsFiring(sweep, scheduled);
+  const edition = useQuery(deploymentCapabilitiesQueryOptions()).data?.edition;
   const confirming =
     routines.data?.routines.find((row) => row.id === confirmingId) ?? null;
   const openGoal = rows.find(
@@ -586,9 +589,10 @@ export function RoutinesList({
           <span className="font-medium text-amber-600 dark:text-amber-500">
             Routines aren't running.
           </span>{" "}
-          {sweep?.lastSweptAt
-            ? `OpenBot last checked them ${relativeTime(sweep.lastSweptAt)}. None will run until it starts again. Ask an admin if this keeps happening.`
-            : "OpenBot hasn't started running routines yet, so none of these will run. Ask an admin to set this up."}
+          {stoppedRoutinesGuidance(
+            sweep?.lastSweptAt ? relativeTime(sweep.lastSweptAt) : null,
+            edition,
+          )}
         </p>
       ) : null}
 
