@@ -15,12 +15,12 @@ One person, from their own computer, on any cluster with a default StorageClass 
 OpenBot image is amd64 only, and so is the embeddings image Intelligence runs). From a checkout of
 this repository:
 
-**1. Write your licence and model key into a file you keep and never commit.**
+**1. Write your license and model key into a file you keep and never commit.**
 
 ```sh
 cat > openbot-secrets.yaml <<EOF
 secrets:
-  licenseToken: "<your CopilotKit licence>"
+  licenseToken: "<your CopilotKit license>"
   modelApiKey: "<your OpenAI API key>"
 EOF
 ```
@@ -66,11 +66,11 @@ reaches the server with no sign-in, which is why it is only ever reached through
 your own computer, and why the chart refuses it with a public URL or an open LoadBalancer.
 
 `ci/vanilla-values.yaml` is single-user mode, OpenBot's bundled database, and a placeholder for the
-licence and the model key your file replaces. CI renders exactly this install on every change.
+license and the model key your file replaces. CI renders exactly this install on every change.
 
 **What happens, so a first install that takes a few minutes is not a surprise.** The chart installs
 Intelligence, generates every credential it needs as Secrets that are kept across upgrades and
-uninstalls, including OpenBot's runtime key in `openbot-intel-api-key`, and gives it the licence from
+uninstalls, including OpenBot's runtime key in `openbot-intel-api-key`, and gives it the license from
 your file (OpenBot gets the same one). Intelligence's bootstrap Job then creates OpenBot's organization
 and project, stores that key for it, and creates the `openbot` Learning container. Nobody signs in to
 anything. `--timeout 15m` gives a fresh cluster room to pull every image; `--wait` works on a first
@@ -84,8 +84,9 @@ connection errors. `kubectl -n openbot logs deploy/openbot-server -c wait-for-da
 is waiting for.
 
 `kubectl -n openbot get pods,jobs` shows it coming up, and the log of the
-`openbot-intelligence-bootstrap` Job says what Intelligence set up. The browser reaches Intelligence's
-gateway through OpenBot's own address, so the one port-forward is all it needs.
+`openbot-intelligence-bootstrap-1` Job (its suffix is the release revision) says what Intelligence
+set up. The browser reaches Intelligence's gateway through OpenBot's own address, so the one
+port-forward is all it needs.
 
 **Routines run.** A Bot asked to do something on a schedule stores a routine, and the
 `openbot-routines` CronJob fires whatever is due every five minutes. It proves itself to the server
@@ -102,7 +103,7 @@ it, with the keys `license-token`, `model-api-key` (or `anthropic-api-key`, or b
 `key-encryption-key` and `computer-token`; put the
 database password under `postgres-password` and set `postgresql.auth.existingSecret` to the same
 Secret; and set `intelligence.appApi.licenseSecret.existingSecret` to it too, so Intelligence reads the
-same licence. Intelligence's Learning agent reads `model-api-key` and `anthropic-api-key` from that
+same license. Intelligence's Learning agent reads `model-api-key` and `anthropic-api-key` from that
 Secret as well: the chart copies them at install and on every upgrade, so a new key there reaches
 Learning on its next run after `helm upgrade`, and picks Learning's model from which of them is there
 (adding or removing one wants a restart, see [Automatic Learning](#automatic-learning)).
@@ -115,14 +116,16 @@ explains every value the bundle sets.
 Four things this chart assumes and does not create.
 
 **An image the cluster can pull.** A release publishes `ghcr.io/copilotkit/openbot:vX.Y.Z`
-publicly, and that tag is what `image.tag` wants. It is built for **`linux/amd64` only**, so an
+publicly, and that tag is what `image.tag` wants. Left empty, `image.tag` is `v` followed by the
+chart's `appVersion` (`appVersion: "1.0.1"` deploys `v1.0.1`), so upgrading the chart moves the
+image with it. It is built for **`linux/amd64` only**, so an
 arm64 node group (Graviton on EKS, Tau T2A on GKE, Ampere on AKS) cannot run it: the pods sit in
 `ImagePullBackOff`, which is the same thing a wrong tag or a missing pull secret looks like, so the
 node pool being the wrong shape is the last thing anybody checks. Either run amd64 nodes, or build the image for the
 architecture you have and push it somewhere the cluster can reach. Check before assuming:
 
 ```sh
-docker manifest inspect ghcr.io/copilotkit/openbot:v0.0.9 | grep architecture
+docker manifest inspect ghcr.io/copilotkit/openbot:v1.0.1 | grep architecture
 ```
 
 **On kind, on an Apple Silicon Mac**, the node is arm64 and the vanilla install has two amd64-only
@@ -140,7 +143,7 @@ docker save --platform linux/amd64 "$IMAGE" \
 
 **Intelligence credentials, unless the chart installs Intelligence.** With the bundled Intelligence
 (the default) there are none to fetch: the chart makes OpenBot's key itself and needs only the
-licence. With `intelligence.enabled: false`, OpenBot requires an Intelligence you name and the chart
+license. With `intelligence.enabled: false`, OpenBot requires an Intelligence you name and the chart
 refuses to install without `secrets.intelligenceApiKey`. It comes from the CLI, on any machine with a
 browser:
 
@@ -151,11 +154,11 @@ npx --yes copilotkit@latest project select  # prints the cpk-... runtime key
 
 That key is the only Intelligence credential a managed install needs; the free plan is enough.
 `secrets.licenseToken` is optional and exists for a self-hosted Intelligence that issues its own
-licence. `npx --yes copilotkit@latest license --print` prints one without writing it to a local
+license. `npx --yes copilotkit@latest license --print` prints one without writing it to a local
 `.env`, which is what you want for something you are about to paste into a Secret. With
 `externalSecrets`, name `license-token` in its `data` and the server receives it the same way.
 
-**A self-hosted Intelligence needs that licence too, on its own deployment.** Its chart takes it as
+**A self-hosted Intelligence needs that license too, on its own deployment.** Its chart takes it as
 `appApi.licenseSecret` or `externalSecrets.secrets.license`. Without it Intelligence answers every
 entitlement read with `RUNTIME_ENTITLEMENTS_SELF_HOSTED_MISCONFIGURED` and refuses memory, while
 conversations carry on; OpenBot logs `intelligence-entitlement-not-ready` at boot when it does.
@@ -335,9 +338,9 @@ A tag can be moved; a digest cannot. Each release's `container-images.json` name
 tested, and `image.digest` deploys exactly that:
 
 ```sh
-gh release download v0.2.0 --pattern container-images.json
+gh release download v1.0.1 --pattern container-images.json
 helm upgrade --install openbot charts/openbot ... \
-  --set image.tag=v0.2.0 \
+  --set image.tag=v1.0.1 \
   --set-string image.digest="$(jq -r '.images.openbot.reference | split("@")[1]' container-images.json)"
 ```
 
@@ -545,7 +548,7 @@ nobody could sign in or nobody would be an administrator; an identity provider i
 `secrets.betterAuthSecret` or `config.publicUrl`; `singleUser` is combined with a public URL or a
 public LoadBalancer; with `intelligence.enabled: false`, the Intelligence URLs or
 `secrets.intelligenceApiKey` are missing; with the bundled Intelligence, an Intelligence address or key
-of your own is named beside it, the licence is missing, or the release predates it (no
+of your own is named beside it, the license is missing, or the release predates it (no
 `intelligence.enabled` at all);
 `secrets.keyEncryptionKey` is not a base64 32-byte value, or is the public example key; with a
 database of your own, there is no `secrets.keyEncryptionKey` or no `secrets.computerToken`;
@@ -620,7 +623,7 @@ kubectl -n openbot rollout restart deployment/openbot-intelligence-learning-agen
 It runs by itself after
 15 finished conversations and after every 15 more, and keeps what it learns in an object store the
 release runs (`intelligence.localObjectStorage`). Trajectories, the sessions the Recorder captures, are
-on as well, which any valid licence allows.
+on as well, which any valid license allows.
 
 Intelligence's own dashboard is not installed, so Admin → Automatic learning is where its work is
 reviewed: the skills it proposes, each one's SKILL.md and the conversations it was learned from,
@@ -1016,6 +1019,5 @@ hook has finished before the new pods exist, so `--wait` works either way.
 
 Roll back a failed upgrade rather than leaving half a rollout: `helm upgrade --install --atomic` on
 Helm 3, and `--rollback-on-failure` on Helm 4, which renamed the flag. Helm 4 still accepts
-`--atomic` on `upgrade` as a deprecated alias and prints a warning, so the Helm 3 spelling keeps
-working on both today; it is `helm install --atomic` that Helm 4 removed outright, which is one more
-reason this is written as `upgrade --install`.
+`--atomic` on both `install` and `upgrade` as a deprecated alias and prints a warning (checked on
+Helm 4.2.0), so the Helm 3 spelling keeps working on both today.

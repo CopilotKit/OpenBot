@@ -455,7 +455,7 @@ const HOST_GATEWAY_LOOKUP: [&str; 8] = [
     "ssh",
     MACHINE,
     "timeout",
-    "10",
+    "3",
     "getent",
     "ahostsv4",
     "host.containers.internal",
@@ -468,7 +468,10 @@ const MACHINE_NETWORK: [&str; 4] = ["machine", "ssh", MACHINE, "ip route; cat /e
 /// 192.168.127.1, its DNS server.
 const USER_MODE_DEVICE: &str = "podman-usermode";
 /// How long the machine gets for that name to resolve, before it is restarted and again after.
-const HOST_GATEWAY_WAIT: Duration = Duration::from_secs(60);
+/// gvproxy answers the name itself, well inside the 3 s each lookup gets, and after a start the
+/// network comes up within seconds. With a minute and 10 s lookups, a live Windows run waited a
+/// minute before the restart began.
+const HOST_GATEWAY_WAIT: Duration = Duration::from_secs(30);
 const HOST_GATEWAY_RETRY_EVERY: Duration = Duration::from_secs(1);
 /// Said in a failure when the machine's network is still down after restarting it: only a Windows
 /// restart has been seen to bring it back. `explain_machine_error` and `StepOutcome::problem` read it.
@@ -516,6 +519,12 @@ fn configure_host_gateway_after_start_with<H>(
     }
 
     let ip = host_gateway_restarting_once(run, clock, hold_docker_pipe)?;
+    // After the machine's last start, its restart above included, and before any of OpenBot's
+    // containers start: every WSL distro shares one network namespace, where a stopped machine's
+    // port rules stay. Every start of OpenBot's machine on Windows comes through here, and so does
+    // Start before Compose. A Mac's machine has a kernel of its own, and its rules go with it. See
+    // `netavark_rules`.
+    clear_dead_port_rules(run);
     let script = if rootful {
         rootful_host_gateway_config_script(ip)
     } else {
@@ -553,14 +562,148 @@ fn configure_owned_windows_podman_for_compose<H>(
 /// Run before Compose even when an existing engine skipped the install/start steps, and before
 /// the images are downloaded: on OpenBot's own machine on Windows, its network has to work first.
 pub fn prepare_for_compose(address: &Address) -> Result<(), crate::problem::Problem> {
+    prepare_for_compose_saying(address, || {}).map(|_| ())
+}
+
+/// `prepare_for_compose`, calling `say` once if the machine's network makes it wait, and saying
+/// whether OpenBot restarted its machine to set the network up again. A restart stops everything
+/// running in the machine, the back end's cluster included.
+pub fn prepare_for_compose_saying(
+    address: &Address,
+    say: impl FnMut(),
+) -> Result<Network, crate::problem::Problem> {
+    let restarted = std::cell::Cell::new(false);
     configure_owned_windows_podman_for_compose(
         address,
         podman,
         cfg!(target_os = "windows"),
-        &mut real_clock(),
-        hold_docker_pipe,
+        &mut saying_once(real_clock(), say),
+        || {
+            restarted.set(true);
+            hold_docker_pipe()
+        },
     )
-    .map_err(|error| machine_problem(&error))
+    .map_err(|error| machine_problem(&error))?;
+    Ok(Network::restarted(restarted.get()))
+}
+
+/// Said on the running step while OpenBot waits for its machine's network or sets it up again.
+pub const RECONNECTING: &str =
+    "Reconnecting OpenBot to the internet. This can take a minute or two.";
+
+/// What checking OpenBot's machine's network did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Network {
+    /// It answered, at once or after a wait, or it isn't OpenBot's machine to check.
+    Answered,
+    /// OpenBot restarted its machine to set the network up again, and it answers now. Whatever was
+    /// running in the machine stopped with it.
+    RestartedMachine,
+}
+
+impl Network {
+    fn restarted(restarted: bool) -> Self {
+        if restarted {
+            Self::RestartedMachine
+        } else {
+            Self::Answered
+        }
+    }
+}
+
+/// OpenBot's own machine on Windows, made ready before the back end starts in it.
+///
+/// First its network: the same wait and restart as `prepare_for_compose`, without the gateway
+/// setting. Run before the back end, so a restart can never stop a back end that was started before
+/// it: on a live Windows run the check ran only at Start, after the back end had started, and the
+/// restart stopped the back end's cluster with nothing to start it again. Whatever else the machine
+/// needs before the back end goes after the network, in `owned_machine_before_back_end`, so it
+/// follows the machine's last start.
+pub fn machine_before_back_end(
+    address: &Address,
+    say: impl FnMut(),
+) -> Result<Network, crate::problem::Problem> {
+    let restarted = std::cell::Cell::new(false);
+    owned_machine_before_back_end(
+        address,
+        podman,
+        cfg!(target_os = "windows"),
+        &mut saying_once(real_clock(), say),
+        || {
+            restarted.set(true);
+            hold_docker_pipe()
+        },
+    )
+    .map_err(|error| machine_problem(&error))?;
+    Ok(Network::restarted(restarted.get()))
+}
+
+fn owned_machine_before_back_end<H>(
+    address: &Address,
+    mut run: impl FnMut(&[&str]) -> Result<String, String>,
+    target_is_windows: bool,
+    clock: &mut Clock<impl Fn() -> Duration, impl FnMut(Duration)>,
+    hold_docker_pipe: impl Fn() -> H,
+) -> Result<(), String> {
+    if !owned_windows_podman_address(address, target_is_windows) {
+        return Ok(());
+    }
+    let networking = owned_machine_networking(&run(&["machine", "inspect", MACHINE])?)?;
+    // A stopped machine, or one without user-mode networking, is said by the checks before Compose.
+    if !networking.user_mode || !networking.state.eq_ignore_ascii_case("running") {
+        return Ok(());
+    }
+    // The network first: setting it up again restarts the machine.
+    host_gateway_restarting_once(&mut run, clock, hold_docker_pipe)?;
+    // Then the port rules the machine's last stop left, that restart's included, before the back
+    // end's cluster starts behind them. See `netavark_rules`.
+    clear_dead_port_rules(&mut run);
+    Ok(())
+}
+
+/// `clock`, calling `say` once, the first time the wait pauses: the network did not answer at once.
+fn saying_once<N>(
+    clock: Clock<N, impl FnMut(Duration)>,
+    mut say: impl FnMut(),
+) -> Clock<N, impl FnMut(Duration)> {
+    let mut pause = clock.pause;
+    let mut said = false;
+    Clock {
+        now: clock.now,
+        pause: move |duration| {
+            if !said {
+                said = true;
+                say();
+            }
+            pause(duration)
+        },
+    }
+}
+
+/**
+OpenBot's own machine readied for the back end, then `start`: the call that starts it (`local start`
+or `local update`), or nothing, when OpenBot is only about to ask it (a relaunch's wake).
+
+OpenBot uses machines it did not start: one Quit left running, or that an older OpenBot, a crash or
+a kill left behind, with the port rules of containers from before still ahead of the ones the back
+end's start makes. On the Windows test machine, `local start` then waited 4m50s on 127.0.0.1:55059
+and gave up, the k3d rules for an address from before ahead of the live one. So OpenBot's dead port
+rules are cleared first, on Windows and on OpenBot's own machine only. See `netavark_rules`.
+*/
+pub fn readied_for_backend<T>(address: Option<&Address>, start: impl FnOnce() -> T) -> T {
+    readied_for_backend_with(address, podman, cfg!(target_os = "windows"), start)
+}
+
+fn readied_for_backend_with<T>(
+    address: Option<&Address>,
+    mut run: impl FnMut(&[&str]) -> Result<String, String>,
+    target_is_windows: bool,
+    start: impl FnOnce() -> T,
+) -> T {
+    if address.is_some_and(|address| owned_windows_podman_address(address, target_is_windows)) {
+        clear_dead_port_rules(&mut run);
+    }
+    start()
 }
 
 fn owned_windows_podman_address(address: &Address, target_is_windows: bool) -> bool {
@@ -594,6 +737,11 @@ fn host_gateway_restarting_once<H>(
     clock: &mut Clock<impl Fn() -> Duration, impl FnMut(Duration)>,
     hold_docker_pipe: impl Fn() -> H,
 ) -> Result<Ipv4Addr, String> {
+    // One at a time: setup's check before its downloads and the back end's before it starts can
+    // overlap, and two of them must not both restart the machine.
+    let _one_at_a_time = NETWORK_CHECK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let gave_up = match wait_for_host_gateway(run, clock)? {
         Waited::Resolved(ip) => return Ok(ip),
         Waited::GaveUp(why) => why,
@@ -632,6 +780,8 @@ fn host_gateway_restarting_once<H>(
         }
     }
 }
+
+static NETWORK_CHECK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 enum Waited {
     Resolved(Ipv4Addr),
@@ -815,12 +965,35 @@ fn start_machine_with<H>(
         }
         Err(error) => return StepOutcome::stopped(Step::StartMachine, &error),
     };
+    // On Windows this also clears OpenBot's dead port rules, after any restart it makes.
     if let Err(error) =
         configure_host_gateway_after_start(&mut run, target_is_windows, rootful, hold_docker_pipe)
     {
         return StepOutcome::stopped(Step::StartMachine, &error);
     }
     StepOutcome::went(Step::StartMachine, started)
+}
+
+/// OpenBot's dead port rules removed, said in the log. Never stops the start: a machine whose rules
+/// could not be read or removed still starts, as it did before.
+fn clear_dead_port_rules(run: &mut impl FnMut(&[&str]) -> Result<String, String>) {
+    match crate::netavark_rules::clear_dead(run, MACHINE) {
+        Ok(dead) if dead.is_empty() => {}
+        Ok(dead) => {
+            for rule in &dead {
+                log::info!(
+                    "[engine] removed a dead port rule in {}: {}",
+                    rule.chain,
+                    rule.text
+                );
+            }
+            log::info!(
+                "[engine] removed {} port rule(s) left by {MACHINE}'s last run",
+                dead.len()
+            );
+        }
+        Err(error) => log::warn!("[engine] could not check {MACHINE}'s port rules: {error}"),
+    }
 }
 
 pub fn start_machine() -> StepOutcome {
@@ -1111,6 +1284,36 @@ pub fn running_containers(name: &str) -> Containers {
 /// Stop the machine `name`.
 pub fn stop_machine_named(name: &str) -> Result<(), String> {
     podman(&["machine", "stop", name]).map(|_| ())
+}
+
+/// The machine `name` as `podman machine list` has it: `None` when there is no such machine, else
+/// whether it is running.
+pub fn machine_listed(name: &str) -> Result<Option<bool>, String> {
+    machine_in(&podman(&["machine", "list", "--format", "json"])?, name)
+}
+
+/// `machine_listed`, read from a listing already taken.
+pub fn machine_in(listing: &str, name: &str) -> Result<Option<bool>, String> {
+    #[derive(Deserialize)]
+    struct Listed {
+        #[serde(rename = "Name")]
+        name: String,
+        #[serde(rename = "Running", default)]
+        running: bool,
+    }
+    let machines: Vec<Listed> = serde_json::from_str(listing).map_err(|error| {
+        format!("could not read podman machine list JSON: {error}; stdout: {listing}")
+    })?;
+    Ok(machines
+        .into_iter()
+        .find(|machine| machine.name == name)
+        .map(|machine| machine.running))
+}
+
+/// Remove the machine `name` and everything in it, stopping it first if it runs. `--force` because
+/// `podman machine rm` otherwise asks at a terminal, and OpenBot's commands have none.
+pub fn remove_machine_named(name: &str) -> Result<(), String> {
+    podman(&["machine", "rm", "--force", name]).map(|_| ())
 }
 
 /// Start the machine `name`, then the containers that were running in it.
@@ -1438,6 +1641,24 @@ mod tests {
         }
     }
 
+    /// What the uninstaller reads of OpenBot's machine (`uninstall`), from `podman machine list
+    /// --format json` as Podman 6.1.1 on Windows prints it: OpenBot's beside the person's own.
+    #[test]
+    fn the_uninstaller_finds_openbots_machine_by_name_among_the_persons() {
+        let listing = r#"[
+            {"Name":"podman-machine-default","Default":true,"Running":true,"VMType":"wsl"},
+            {"Name":"openbot","Default":false,"Running":true,"VMType":"wsl"}
+        ]"#;
+        assert_eq!(machine_in(listing, MACHINE), Ok(Some(true)));
+        let stopped = r#"[{"Name":"openbot","Default":true,"Running":false,"VMType":"wsl"}]"#;
+        assert_eq!(machine_in(stopped, MACHINE), Ok(Some(false)));
+        let theirs_only =
+            r#"[{"Name":"podman-machine-default","Default":true,"Running":true,"VMType":"wsl"}]"#;
+        assert_eq!(machine_in(theirs_only, MACHINE), Ok(None));
+        assert_eq!(machine_in("[]", MACHINE), Ok(None));
+        assert!(machine_in("not json", MACHINE).is_err());
+    }
+
     #[test]
     fn existing_stopped_default_machine_is_not_initialized_again() {
         // Podman 6.1.1 reports this stopped default machine as `openbot*` in --quiet output.
@@ -1686,7 +1907,7 @@ mod tests {
                 match args {
                     ["machine", "inspect", "openbot"] => Ok(inspect.clone()),
                     ["machine", "start", "openbot"] => Ok(String::new()),
-                    ["machine", "ssh", "openbot", "timeout", "10", "getent", ..] => {
+                    ["machine", "ssh", "openbot", "timeout", "3", "getent", ..] => {
                         Ok("192.168.127.254 STREAM host.containers.internal\n".into())
                     }
                     ["machine", "ssh", "openbot", _] => Ok(String::new()),
@@ -1728,7 +1949,7 @@ mod tests {
                 match args {
                     ["machine", "inspect", "openbot"] => Ok(inspect.clone()),
                     ["machine", "start", "openbot"] => Ok(String::new()),
-                    ["machine", "ssh", "openbot", "timeout", "10", "getent", ..] => {
+                    ["machine", "ssh", "openbot", "timeout", "3", "getent", ..] => {
                         Ok("192.168.127.254 STREAM host.containers.internal\n".into())
                     }
                     ["machine", "ssh", "openbot", _] => Ok(String::new()),
@@ -1783,7 +2004,7 @@ mod tests {
                     }
                     match args {
                         ["machine", "inspect", "openbot"] => Ok(inspect.clone()),
-                        ["machine", "ssh", "openbot", "timeout", "10", "getent", ..] => {
+                        ["machine", "ssh", "openbot", "timeout", "3", "getent", ..] => {
                             Ok("192.168.127.254 STREAM host.containers.internal\n".into())
                         }
                         _ => Ok(String::new()),
@@ -1800,6 +2021,533 @@ mod tests {
             assert!(!held_elsewhere, "held only for the start");
             assert!(!holding.get(), "let go once it started");
         }
+    }
+
+    /*
+     * OpenBot's machine on Windows, its WSL namespace shared with the person's own Podman machine
+     * and Docker Desktop. Each listing is `nft -a list ruleset` as the machine prints it (stdout:
+     * nft's iptables-nft warnings go to stderr), and each networks file is `podman network inspect`
+     * in OpenBot's machine at the same moment:
+     *
+     * - machine D: the Windows test machine at D80-Q-01, its first Start after OpenBot restarted its
+     *   machine. Every DNAT rule and every OpenBot jump rule is the evidence's own, in its order, in
+     *   netavark 1.17.2's iptables-nft layout; the running containers are its "live container IPs".
+     *   The 60501-60505 rules sit apart from the 64953-64957 ones, in a chain no network on
+     *   OpenBot's machine hashes to now (named here for the earlier cluster in D80-00): not
+     *   provably OpenBot's, so left alone.
+     * - Podman 5.8.9 (netavark 1.17.2, iptables, as Podman forces it on WSL before 6.0) and Podman
+     *   6.1.3 (netavark 2.1.0, nftables): captured verbatim from `netavark_rules::live`'s
+     *   reproduction. The server ran on both networks, the machine was stopped as WSL stops it and
+     *   started again, and the server came back on new addresses behind its old rules.
+     *
+     * In all three the person's machine has `myapp_default` (8081) and a container on its default
+     * network (8082), and Docker has its own DNAT (8080), none of them on OpenBot's machine.
+     */
+    const MACHINE_D: &str = include_str!("../test-fixtures/netavark-rules/machine-d.nft");
+    const MACHINE_D_NETWORKS: &str =
+        include_str!("../test-fixtures/netavark-rules/machine-d-inspect.json");
+    const PODMAN_5_8_9: &str =
+        include_str!("../test-fixtures/netavark-rules/podman-5.8.9-iptables.nft");
+    const PODMAN_5_8_9_NETWORKS: &str =
+        include_str!("../test-fixtures/netavark-rules/podman-5.8.9-iptables-inspect.json");
+    const PODMAN_6_1_3: &str =
+        include_str!("../test-fixtures/netavark-rules/podman-6.1.3-nftables.nft");
+    const PODMAN_6_1_3_NETWORKS: &str =
+        include_str!("../test-fixtures/netavark-rules/podman-6.1.3-nftables-inspect.json");
+    /// Machine D at the first launch of a build with the cleanup (D90 NV-12): left running by the
+    /// release before it, with nothing of OpenBot's running and every rule of its containers from
+    /// before still there, the k3d network's for `local start` among them. NV-12's own rules and
+    /// handles; the live k3d rules it also lists came after the wake, from `local start`.
+    const MACHINE_D_WAKE: &str = include_str!("../test-fixtures/netavark-rules/machine-d-wake.nft");
+    const MACHINE_D_WAKE_NETWORKS: &str =
+        include_str!("../test-fixtures/netavark-rules/machine-d-wake-inspect.json");
+
+    /// OpenBot's WSL machine as `podman machine ssh` answers for it. A rule deleted by handle is
+    /// gone from the listing, as nft does it, and one that is not there fails, as nft fails.
+    struct WslMachine {
+        listing: String,
+        networks: String,
+        reads: usize,
+    }
+
+    impl WslMachine {
+        fn new(listing: &str, networks: &str) -> Self {
+            Self {
+                listing: listing.to_string(),
+                networks: networks.to_string(),
+                reads: 0,
+            }
+        }
+
+        fn run(&mut self, args: &[&str]) -> Result<String, String> {
+            match args {
+                ["machine", "inspect", "openbot"] => Ok(serde_json::json!([{
+                    "Name": "openbot",
+                    "State": "stopped",
+                    "UserModeNetworking": true,
+                    "Rootful": true
+                }])
+                .to_string()),
+                ["machine", "start", "openbot"] => Ok(String::new()),
+                ["machine", "ssh", "openbot", "timeout", _, "getent", ..] => {
+                    Ok("192.168.127.254 STREAM host.containers.internal\n".into())
+                }
+                ["machine", "ssh", "openbot", script]
+                    if *script == crate::netavark_rules::read_script() =>
+                {
+                    self.reads += 1;
+                    let said = format!(
+                        "{}{}\n{}\n",
+                        self.listing,
+                        crate::netavark_rules::BETWEEN,
+                        self.networks
+                    );
+                    Ok(said.trim().to_string())
+                }
+                ["machine", "ssh", "openbot", script] if script.starts_with("failed=0;") => {
+                    self.delete(script)
+                }
+                // The gateway's configuration.
+                ["machine", "ssh", "openbot", _] => Ok(String::new()),
+                _ => Err(format!("unexpected args: {args:?}")),
+            }
+        }
+
+        /// `podman machine stop`: the containers running in it stop with it, and their rules stay.
+        fn stop(&mut self) {
+            let mut networks: serde_json::Value = serde_json::from_str(&self.networks).unwrap();
+            for network in networks.as_array_mut().unwrap() {
+                network["containers"] = serde_json::json!({});
+            }
+            self.networks = networks.to_string();
+        }
+
+        fn delete(&mut self, script: &str) -> Result<String, String> {
+            let mut failed = false;
+            for command in script.split(';') {
+                let words: Vec<&str> = command.split_whitespace().collect();
+                let ["sudo", "nft", "delete", "rule", family, table, chain, "handle", handle, ..] =
+                    words.as_slice()
+                else {
+                    continue;
+                };
+                let listed = crate::netavark_rules::rules(&self.listing)
+                    .into_iter()
+                    .find(|rule| {
+                        rule.family == *family
+                            && rule.table == *table
+                            && rule.chain == *chain
+                            && rule.handle.to_string() == *handle
+                    });
+                let Some(rule) = listed else {
+                    failed = true;
+                    continue;
+                };
+                let line = format!("{} # handle {}", rule.text, rule.handle);
+                self.listing = self
+                    .listing
+                    .lines()
+                    .filter(|listed| listed.trim() != line)
+                    .map(|listed| format!("{listed}\n"))
+                    .collect();
+            }
+            if failed {
+                Err("Error: Could not process rule: No such file or directory".into())
+            } else {
+                Ok(String::new())
+            }
+        }
+    }
+
+    /// Where a connection to `127.0.0.1:port` is sent: the first jump for the port in
+    /// `NETAVARK-HOSTPORT-DNAT`, then the first DNAT for it in that chain.
+    fn reaches(listing: &str, port: u16) -> Option<std::net::IpAddr> {
+        let rules = crate::netavark_rules::rules(listing);
+        let dport = format!("dport {port} ");
+        let jump = rules
+            .iter()
+            .find(|rule| rule.chain == "NETAVARK-HOSTPORT-DNAT" && rule.text.contains(&dport))?;
+        let chain = jump.text.rsplit("jump ").next()?.trim();
+        rules
+            .iter()
+            .find(|rule| rule.chain == chain && rule.text.contains(&dport) && rule.to.is_some())?
+            .to
+    }
+
+    /// The bug on a Windows machine: OpenBot's machine stopped and started again, and its ports
+    /// still sent to the addresses its containers had before. Started now, only OpenBot's dead
+    /// DNAT rules go, before any of its containers start, and every other rule in the shared
+    /// namespace, the person's machine's and Docker's among them, is listed as before.
+    #[test]
+    fn a_restarted_windows_machine_loses_only_openbots_dead_port_rules() {
+        struct Case {
+            name: &'static str,
+            listing: &'static str,
+            networks: &'static str,
+            /// Where each port goes once the machine has started: the container running there.
+            reaches: Vec<(u16, &'static str)>,
+            /// The rules that go, by chain, port and the address they sent to.
+            dead: Vec<(&'static str, u16, &'static str)>,
+        }
+        let cases = [
+            Case {
+                name: "machine D",
+                listing: MACHINE_D,
+                networks: MACHINE_D_NETWORKS,
+                reaches: vec![
+                    (3010, "10.89.2.5"),
+                    (3001, "10.89.2.5"),
+                    (4206, "10.89.2.2"),
+                    (4100, "10.89.2.3"),
+                    (5432, "10.89.1.2"),
+                    (64953, "10.89.0.2"),
+                    (64957, "10.89.0.2"),
+                ],
+                dead: vec![
+                    ("NETAVARK-DN-7328AD6CBA0C6", 3001, "10.89.2.6"),
+                    ("NETAVARK-DN-7328AD6CBA0C6", 3010, "10.89.2.6"),
+                    ("NETAVARK-DN-D41128E48D962", 3001, "10.89.1.7"),
+                    ("NETAVARK-DN-D41128E48D962", 3010, "10.89.1.7"),
+                    ("NETAVARK-DN-A326F35FF0AA7", 64953, "10.89.0.3"),
+                    ("NETAVARK-DN-A326F35FF0AA7", 64954, "10.89.0.3"),
+                    ("NETAVARK-DN-A326F35FF0AA7", 64955, "10.89.0.3"),
+                    ("NETAVARK-DN-A326F35FF0AA7", 64957, "10.89.0.3"),
+                ],
+            },
+            Case {
+                name: "Podman 5.8.9, iptables",
+                listing: PODMAN_5_8_9,
+                networks: PODMAN_5_8_9_NETWORKS,
+                reaches: vec![(3010, "10.89.1.2"), (3001, "10.89.1.2")],
+                dead: vec![
+                    ("NETAVARK-DN-D41128E48D962", 3001, "10.89.1.3"),
+                    ("NETAVARK-DN-D41128E48D962", 3010, "10.89.1.3"),
+                    ("NETAVARK-DN-7328AD6CBA0C6", 3001, "10.89.0.3"),
+                    ("NETAVARK-DN-7328AD6CBA0C6", 3010, "10.89.0.3"),
+                ],
+            },
+            Case {
+                name: "Podman 6.1.3, nftables",
+                listing: PODMAN_6_1_3,
+                networks: PODMAN_6_1_3_NETWORKS,
+                reaches: vec![(3010, "10.89.0.2"), (3001, "10.89.0.2")],
+                dead: vec![
+                    ("nv_69db1544_10_89_0_0_nm24_dnat", 3001, "10.89.0.3"),
+                    ("nv_69db1544_10_89_0_0_nm24_dnat", 3010, "10.89.0.3"),
+                    ("nv_e7a4ec37_10_89_1_0_nm24_dnat", 3001, "10.89.1.3"),
+                    ("nv_e7a4ec37_10_89_1_0_nm24_dnat", 3010, "10.89.1.3"),
+                ],
+            },
+        ];
+        for Case {
+            name,
+            listing,
+            networks,
+            reaches: ports,
+            dead,
+        } in cases
+        {
+            let ip = |address: &str| address.parse::<std::net::IpAddr>().unwrap();
+            // As the machine was: its first port sent to an address nothing holds.
+            let (first_port, first_to) = ports[0];
+            assert_ne!(reaches(listing, first_port), Some(ip(first_to)), "{name}");
+
+            let mut machine = WslMachine::new(listing, networks);
+            let started = start_machine_with(|args| machine.run(args), true, || ());
+            assert!(started.ok, "{name}: {started:?}");
+
+            for (port, to) in ports {
+                assert_eq!(
+                    reaches(&machine.listing, port),
+                    Some(ip(to)),
+                    "{name}: 127.0.0.1:{port}"
+                );
+            }
+            // The person's machine and Docker, whose addresses OpenBot's machine does not hold.
+            assert_eq!(
+                reaches(&machine.listing, 8081),
+                Some(ip("10.89.5.2")),
+                "{name}"
+            );
+            assert_eq!(
+                reaches(&machine.listing, 8082),
+                Some(ip("10.88.0.2")),
+                "{name}"
+            );
+            assert!(
+                machine.listing.contains(
+                    "iifname != \"docker0\" tcp dport 8080 counter packets 0 bytes 0 dnat to \
+                     172.17.0.2:80"
+                ),
+                "{name}"
+            );
+
+            let before = crate::netavark_rules::rules(listing);
+            let after = crate::netavark_rules::rules(&machine.listing);
+            let removed: Vec<_> = before.iter().filter(|rule| !after.contains(rule)).collect();
+            let described: Vec<(&str, u16, String)> = removed
+                .iter()
+                .map(|rule| {
+                    let port = rule
+                        .text
+                        .split("dport ")
+                        .nth(1)
+                        .and_then(|rest| rest.split_whitespace().next())
+                        .and_then(|port| port.parse().ok())
+                        .unwrap_or(0);
+                    (rule.chain.as_str(), port, rule.to.unwrap().to_string())
+                })
+                .collect();
+            let dead: Vec<(&str, u16, String)> = dead
+                .into_iter()
+                .map(|(chain, port, to)| (chain, port, to.to_string()))
+                .collect();
+            assert_eq!(described, dead, "{name}");
+            assert_eq!(
+                after,
+                before
+                    .iter()
+                    .filter(|rule| !removed.contains(rule))
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                "{name}: nothing else changed"
+            );
+        }
+    }
+
+    /// Where nothing can be told apart, nothing is touched: on a Mac, whose machine's rules end
+    /// with it, and with a Podman before 5.0 in the machine, whose `podman network inspect` does
+    /// not say which containers run.
+    #[test]
+    fn port_rules_are_left_alone_where_nothing_can_be_told_apart() {
+        let mut mac = WslMachine::new(MACHINE_D, MACHINE_D_NETWORKS);
+        let started = start_machine_with(|args| mac.run(args), false, || ());
+        assert!(started.ok, "{started:?}");
+        assert_eq!(mac.reads, 0);
+        assert_eq!(mac.listing, MACHINE_D);
+
+        let mut networks: serde_json::Value = serde_json::from_str(MACHINE_D_NETWORKS).unwrap();
+        for network in networks.as_array_mut().unwrap() {
+            network.as_object_mut().unwrap().remove("containers");
+        }
+        let mut older = WslMachine::new(MACHINE_D, &networks.to_string());
+        let started = start_machine_with(|args| older.run(args), true, || ());
+        assert!(started.ok, "{started:?}");
+        assert_eq!(older.reads, 1);
+        assert_eq!(older.listing, MACHINE_D);
+
+        // Readied for the back end, an engine that is not OpenBot's own machine is not touched:
+        // Docker, or a machine of the person's.
+        for address in [
+            Address::new(Engine::Docker, None),
+            Address::new(Engine::Podman, Some("podman-machine-default-root".into())),
+        ] {
+            let mut theirs = WslMachine::new(MACHINE_D_WAKE, MACHINE_D_WAKE_NETWORKS);
+            readied_for_backend_with(Some(&address), |args| theirs.run(args), true, || ());
+            assert_eq!(theirs.reads, 0, "{address:?}");
+        }
+    }
+
+    /// The order a relaunch now runs in, on a machine found running with OpenBot's containers in
+    /// it: the network checked and set up again with a restart (`owned_machine_before_back_end`),
+    /// then the port rules that restart left cleared, still in that step, then the back end started
+    /// (`readied_for_backend`, around `local start`). Nothing of OpenBot's is left by then to send
+    /// a port to an address from before, and the person's and Docker's rules stay.
+    #[test]
+    fn network_check_then_restart_then_dead_rules_then_local_start() {
+        let time = std::cell::Cell::new(std::time::Duration::ZERO);
+        // The server runs at 10.89.1.2, behind its rules for 10.89.1.3 from the run before.
+        let machine = std::cell::RefCell::new(WslMachine::new(PODMAN_5_8_9, PODMAN_5_8_9_NETWORKS));
+        let restarted = std::cell::Cell::new(false);
+        let calls = std::cell::RefCell::new(Vec::<String>::new());
+        let address = Address::new(Engine::Podman, Some("openbot-root".into()));
+        let mut run = |args: &[&str]| {
+            calls.borrow_mut().push(args.join(" "));
+            match args {
+                ["machine", "inspect", "openbot"] => Ok(machine_inspect("running", true)),
+                lookup if lookup == HOST_GATEWAY_LOOKUP => {
+                    if restarted.get() {
+                        return Ok(HOST_NAME_RESOLVED.into());
+                    }
+                    time.set(time.get() + LOOKUP_TIMEOUT);
+                    Err(HOST_NAME_TIMED_OUT.into())
+                }
+                ["machine", "ssh", "openbot", "ip route; cat /etc/resolv.conf"] => {
+                    Ok(NETWORK_WITHOUT_USER_MODE.into())
+                }
+                ["machine", "list", "--format", "json"] => Ok(machine_list(false)),
+                ["machine", "stop", "openbot"] => {
+                    machine.borrow_mut().stop();
+                    Ok(String::new())
+                }
+                ["machine", "start", "openbot"] => {
+                    restarted.set(true);
+                    Ok(String::new())
+                }
+                _ => machine.borrow_mut().run(args),
+            }
+        };
+
+        owned_machine_before_back_end(&address, &mut run, true, &mut test_clock(&time), || ())
+            .expect("the network came back after the restart");
+        calls.borrow_mut().push("ready for the back end".into());
+        let at_local_start = readied_for_backend_with(Some(&address), &mut run, true, || {
+            calls.borrow_mut().push("local start".into());
+            machine.borrow().listing.clone()
+        });
+
+        let calls = calls.into_inner();
+        let at = |wanted: &str| {
+            calls
+                .iter()
+                .position(|call| call == wanted)
+                .unwrap_or_else(|| panic!("{wanted}: {calls:#?}"))
+        };
+        let lookup = HOST_GATEWAY_LOOKUP.join(" ");
+        let read = format!(
+            "machine ssh openbot {}",
+            crate::netavark_rules::read_script()
+        );
+        let deleted = calls
+            .iter()
+            .position(|call| call.starts_with("machine ssh openbot failed=0;"))
+            .unwrap_or_else(|| panic!("nothing deleted: {calls:#?}"));
+        let order = [
+            at(&lookup),
+            at("machine stop openbot"),
+            at("machine start openbot"),
+            at(&read),
+            deleted,
+            at("ready for the back end"),
+            at("local start"),
+        ];
+        assert!(
+            order.windows(2).all(|pair| pair[0] < pair[1]),
+            "{order:?} {calls:#?}"
+        );
+        assert_eq!(reaches(&at_local_start, 3010), None);
+        assert_eq!(reaches(&at_local_start, 3001), None);
+        let ip = |address: &str| address.parse::<std::net::IpAddr>().unwrap();
+        assert_eq!(reaches(&at_local_start, 8081), Some(ip("10.89.5.2")));
+        assert_eq!(reaches(&at_local_start, 8082), Some(ip("10.88.0.2")));
+        assert!(at_local_start.contains("dnat to 172.17.0.2:80"));
+    }
+
+    /// The gap machine D found (D90 NV-12): the release before left OpenBot's machine running, so
+    /// the next launch only woke it, nothing started it, and nothing cleared its dead rules. `local
+    /// start` then waited 4m50s on 127.0.0.1:55059 behind the k3d rules for 10.89.0.4 and gave up.
+    /// The back end's start is now readied first: the machine is not stopped or started, and when
+    /// `local start` runs, none of OpenBot's dead rules is left, the k3d network's included, while
+    /// the person's machine's rule on the shared default network stays.
+    #[test]
+    fn a_running_machine_openbot_did_not_start_loses_its_dead_port_rules_before_the_back_end_starts(
+    ) {
+        let machine =
+            std::cell::RefCell::new(WslMachine::new(MACHINE_D_WAKE, MACHINE_D_WAKE_NETWORKS));
+        let mut calls = Vec::<String>::new();
+        let address = Address::new(Engine::Podman, Some("openbot-root".into()));
+        let mut at_local_start = None;
+        readied_for_backend_with(
+            Some(&address),
+            |args: &[&str]| {
+                calls.push(args.join(" "));
+                machine.borrow_mut().run(args)
+            },
+            true,
+            || at_local_start = Some(machine.borrow().listing.clone()),
+        );
+
+        assert!(
+            !calls
+                .iter()
+                .any(|call| call.contains("machine start") || call.contains("machine stop")),
+            "{calls:#?}"
+        );
+        let at_local_start = at_local_start.expect("the back end was started");
+        for port in [55059, 55060, 55061, 55063, 3010, 3001, 4206, 4100, 5432] {
+            assert_eq!(reaches(&at_local_start, port), None, "127.0.0.1:{port}");
+        }
+        let ip = |address: &str| address.parse::<std::net::IpAddr>().unwrap();
+        assert_eq!(reaches(&at_local_start, 8081), Some(ip("10.88.0.2")));
+        let before = crate::netavark_rules::rules(MACHINE_D_WAKE);
+        let after = crate::netavark_rules::rules(&at_local_start);
+        let removed: Vec<u64> = before
+            .iter()
+            .filter(|rule| !after.contains(rule))
+            .map(|rule| rule.handle)
+            .collect();
+        // NV-12's eleven stale rules, by handle, and nothing else.
+        assert_eq!(removed, [111, 115, 127, 130, 86, 89, 92, 95, 107, 119, 122]);
+    }
+
+    /// The network check's own restart (`host_gateway_restarting_once`): OpenBot's machine's
+    /// network did not come up, so OpenBot stopped and started its machine once, here with its
+    /// containers running, as Start finds them before Compose. That stop is what leaves their rules
+    /// behind, so the dead ones are cleared after the restart, and before Compose starts the
+    /// containers again on new addresses: no rule of OpenBot's is left to send a port to an address
+    /// from before it. Cleared before the restart, the server's rules from before it would stay.
+    #[test]
+    fn dead_port_rules_are_cleared_after_the_network_check_restarts_the_machine() {
+        let time = std::cell::Cell::new(std::time::Duration::ZERO);
+        // The server runs at 10.89.1.2, behind its rules for 10.89.1.3 from the run before.
+        let mut machine = WslMachine::new(PODMAN_5_8_9, PODMAN_5_8_9_NETWORKS);
+        let mut restarted = false;
+        let mut calls = Vec::<String>::new();
+        configure_owned_windows_podman_for_compose(
+            &Address::new(Engine::Podman, Some("openbot".into())),
+            |args: &[&str]| {
+                calls.push(args.join(" "));
+                match args {
+                    ["machine", "inspect", "openbot"] => Ok(machine_inspect("running", true)),
+                    lookup if lookup == HOST_GATEWAY_LOOKUP => {
+                        if restarted {
+                            return Ok(HOST_NAME_RESOLVED.into());
+                        }
+                        time.set(time.get() + LOOKUP_TIMEOUT);
+                        Err(HOST_NAME_TIMED_OUT.into())
+                    }
+                    ["machine", "ssh", "openbot", "ip route; cat /etc/resolv.conf"] => {
+                        Ok(NETWORK_WITHOUT_USER_MODE.into())
+                    }
+                    ["machine", "list", "--format", "json"] => Ok(machine_list(false)),
+                    ["machine", "stop", "openbot"] => {
+                        machine.stop();
+                        Ok(String::new())
+                    }
+                    ["machine", "start", "openbot"] => {
+                        restarted = true;
+                        Ok(String::new())
+                    }
+                    _ => machine.run(args),
+                }
+            },
+            true,
+            &mut test_clock(&time),
+            || (),
+        )
+        .expect("the network came back after the restart");
+
+        let restart = calls
+            .iter()
+            .position(|call| call == "machine start openbot")
+            .expect("the machine was restarted");
+        let read = format!(
+            "machine ssh openbot {}",
+            crate::netavark_rules::read_script()
+        );
+        let cleared = calls
+            .iter()
+            .position(|call| *call == read)
+            .expect("the rules were read");
+        assert!(restart < cleared, "{calls:#?}");
+        assert_eq!(machine.reads, 1);
+        // Nothing of OpenBot's runs until Compose starts it, so no port of its goes anywhere yet.
+        assert_eq!(reaches(&machine.listing, 3010), None);
+        assert_eq!(reaches(&machine.listing, 3001), None);
+        let ip = |address: &str| address.parse::<std::net::IpAddr>().unwrap();
+        assert_eq!(reaches(&machine.listing, 8081), Some(ip("10.89.5.2")));
+        assert_eq!(reaches(&machine.listing, 8082), Some(ip("10.88.0.2")));
+        assert!(machine.listing.contains("dnat to 172.17.0.2:80"));
     }
 
     /// The real pipe, as Podman looks for it: `PipeNameAvailable` asks whether
@@ -1914,7 +2662,7 @@ mod tests {
                         Ok(String::new())
                     }
                     ["machine", "start", "openbot"] => Ok(String::new()),
-                    ["machine", "ssh", "openbot", "timeout", "10", "getent", "ahostsv4", "host.containers.internal"] => {
+                    ["machine", "ssh", "openbot", "timeout", "3", "getent", "ahostsv4", "host.containers.internal"] => {
                         Ok("192.168.127.254 STREAM host.containers.internal\n".into())
                     }
                     ["machine", "ssh", "openbot", script]
@@ -1951,7 +2699,7 @@ mod tests {
                     "ssh",
                     "openbot",
                     "timeout",
-                    "10",
+                    "3",
                     "getent",
                     "ahostsv4",
                     "host.containers.internal",
@@ -1959,6 +2707,13 @@ mod tests {
                 .into_iter()
                 .map(str::to_string)
                 .collect::<Vec<_>>(),
+                // OpenBot's dead port rules looked for, once its network answers, before its containers start.
+                vec![
+                    "machine".to_string(),
+                    "ssh".to_string(),
+                    "openbot".to_string(),
+                    crate::netavark_rules::read_script(),
+                ],
                 vec![
                     "machine".to_string(),
                     "ssh".to_string(),
@@ -1980,7 +2735,7 @@ mod tests {
                 calls.push(args.iter().map(|arg| (*arg).to_string()).collect());
                 match args {
                     ["machine", "inspect", "openbot"] => Ok(inspect.clone()),
-                    ["machine", "ssh", "openbot", "timeout", "10", "getent", "ahostsv4", "host.containers.internal"] => {
+                    ["machine", "ssh", "openbot", "timeout", "3", "getent", "ahostsv4", "host.containers.internal"] => {
                         Ok("192.168.127.254 STREAM host.containers.internal\n".into())
                     }
                     ["machine", "ssh", "openbot", script]
@@ -1997,16 +2752,18 @@ mod tests {
         )
         .expect("owned Windows Podman health gate should prepare host-gateway config");
 
-        assert_eq!(calls.len(), 3);
+        // The machine, its host name, its dead port rules looked for, and the gateway setting.
+        assert_eq!(calls.len(), 4);
+        assert_eq!(calls[2].last(), Some(&crate::netavark_rules::read_script()));
     }
 
     /// getent's "not found" for the lookup, as `podman machine ssh` reported it on a brand-new
     /// Windows Server right after the machine's first start.
-    const HOST_NAME_NOT_FOUND: &str = "podman machine ssh openbot timeout 10 getent ahostsv4 \
+    const HOST_NAME_NOT_FOUND: &str = "podman machine ssh openbot timeout 3 getent ahostsv4 \
                                        host.containers.internal exited with status 2";
     /// The same lookup a few minutes later on that computer: no DNS server answered, and `timeout`
     /// stopped it.
-    const HOST_NAME_TIMED_OUT: &str = "podman machine ssh openbot timeout 10 getent ahostsv4 \
+    const HOST_NAME_TIMED_OUT: &str = "podman machine ssh openbot timeout 3 getent ahostsv4 \
                                        host.containers.internal exited with status 124";
     const HOST_NAME_RESOLVED: &str = "192.168.127.254 STREAM host.containers.internal\n";
     /// `ip route; cat /etc/resolv.conf` in the machine on that computer: resolv.conf names gvproxy,
@@ -2016,7 +2773,7 @@ mod tests {
          192.168.240.0/20 dev eth0 proto kernel scope link src 192.168.250.127\n\
          nameserver 192.168.127.1";
     /// The time one lookup took when it timed out.
-    const LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+    const LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
     /// `podman machine list --format json`, with OpenBot's machine and, when asked, one of the
     /// person's own, both on user-mode networking.
@@ -2069,7 +2826,7 @@ mod tests {
             &mut |args: &[&str]| {
                 calls.push(args.iter().map(|arg| (*arg).to_string()).collect());
                 match args {
-                    ["machine", "ssh", "openbot", "timeout", "10", "getent", "ahostsv4", "host.containers.internal"] => {
+                    ["machine", "ssh", "openbot", "timeout", "3", "getent", "ahostsv4", "host.containers.internal"] => {
                         lookups += 1;
                         if lookups <= 3 {
                             Err(HOST_NAME_NOT_FOUND.into())
@@ -2116,7 +2873,7 @@ mod tests {
                 calls.push(args.join(" "));
                 match args {
                     ["machine", "inspect", "openbot"] => Ok(machine_inspect("running", true)),
-                    ["machine", "ssh", "openbot", "timeout", "10", "getent", "ahostsv4", "host.containers.internal"] => {
+                    ["machine", "ssh", "openbot", "timeout", "3", "getent", "ahostsv4", "host.containers.internal"] => {
                         lookups += 1;
                         if lookups == 1 {
                             return Err(HOST_NAME_NOT_FOUND.into());
@@ -2185,7 +2942,7 @@ mod tests {
             &mut |args: &[&str]| {
                 calls.push(args.join(" "));
                 match args {
-                    ["machine", "ssh", "openbot", "timeout", "10", "getent", "ahostsv4", "host.containers.internal"] => {
+                    ["machine", "ssh", "openbot", "timeout", "3", "getent", "ahostsv4", "host.containers.internal"] => {
                         if started {
                             return Ok(HOST_NAME_RESOLVED.into());
                         }
@@ -2231,7 +2988,7 @@ mod tests {
             &mut |args: &[&str]| {
                 calls.push(args.join(" "));
                 match args {
-                    ["machine", "ssh", "openbot", "timeout", "10", "getent", "ahostsv4", "host.containers.internal"] => {
+                    ["machine", "ssh", "openbot", "timeout", "3", "getent", "ahostsv4", "host.containers.internal"] => {
                         time.set(time.get() + LOOKUP_TIMEOUT);
                         Err(HOST_NAME_TIMED_OUT.into())
                     }
@@ -2254,10 +3011,87 @@ mod tests {
         assert!(!shares_user_mode_network(&machine_list(false)).unwrap());
     }
 
+    /// A live Windows run broke OpenBot's machine's network the way the brand-new Windows Server
+    /// had it. The check before the back end starts finds it, says it is reconnecting once, and
+    /// restarts OpenBot's machine, with nothing else written to the machine: the gateway setting is
+    /// Start's (`prepare_for_compose`).
+    #[test]
+    fn the_check_before_the_back_end_sets_the_network_up_again_and_says_so_once() {
+        let time = std::cell::Cell::new(std::time::Duration::ZERO);
+        let mut said = 0;
+        let mut started = false;
+        let mut calls = Vec::<String>::new();
+        let restarted = std::cell::Cell::new(false);
+        owned_machine_before_back_end(
+            &Address::new(Engine::Podman, Some("openbot-root".into())),
+            |args: &[&str]| {
+                calls.push(args.join(" "));
+                match args {
+                    ["machine", "inspect", "openbot"] => Ok(machine_inspect("running", true)),
+                    ["machine", "ssh", "openbot", "timeout", "3", "getent", "ahostsv4", "host.containers.internal"] => {
+                        if started {
+                            return Ok(HOST_NAME_RESOLVED.into());
+                        }
+                        time.set(time.get() + LOOKUP_TIMEOUT);
+                        Err(HOST_NAME_TIMED_OUT.into())
+                    }
+                    ["machine", "ssh", "openbot", "ip route; cat /etc/resolv.conf"] => {
+                        Ok(NETWORK_WITHOUT_USER_MODE.into())
+                    }
+                    ["machine", "list", "--format", "json"] => Ok(machine_list(false)),
+                    ["machine", "stop", "openbot"] => Ok(String::new()),
+                    ["machine", "start", "openbot"] => {
+                        started = true;
+                        Ok(String::new())
+                    }
+                    _ => Err(format!("unexpected args: {args:?}")),
+                }
+            },
+            true,
+            &mut saying_once(test_clock(&time), || said += 1),
+            || restarted.set(true),
+        )
+        .expect("a network that comes back after the restart is ready for the back end");
+
+        assert_eq!(said, 1);
+        assert!(restarted.get());
+        assert!(calls.contains(&"machine start openbot".to_string()));
+        assert!(
+            !calls.iter().any(|call| call.contains("containers.conf.d")),
+            "{calls:?}"
+        );
+        assert_eq!(
+            RECONNECTING,
+            "Reconnecting OpenBot to the internet. This can take a minute or two."
+        );
+    }
+
+    /// A network that answers at once says nothing and restarts nothing.
+    #[test]
+    fn a_network_that_answers_at_once_is_not_said() {
+        let time = std::cell::Cell::new(std::time::Duration::ZERO);
+        let mut said = 0;
+        owned_machine_before_back_end(
+            &Address::new(Engine::Podman, Some("openbot-root".into())),
+            |args: &[&str]| match args {
+                ["machine", "inspect", "openbot"] => Ok(machine_inspect("running", true)),
+                ["machine", "ssh", "openbot", "timeout", "3", "getent", "ahostsv4", "host.containers.internal"] => {
+                    Ok(HOST_NAME_RESOLVED.into())
+                }
+                _ => Err(format!("unexpected args: {args:?}")),
+            },
+            true,
+            &mut saying_once(test_clock(&time), || said += 1),
+            || panic!("no machine is started"),
+        )
+        .unwrap();
+        assert_eq!(said, 0);
+    }
+
     /// A failure waiting can't fix is Podman's own, at once: a machine that is not running.
     #[test]
     fn a_failure_waiting_cannot_fix_is_returned_at_once() {
-        let stopped = "podman machine ssh openbot timeout 10 getent ahostsv4 \
+        let stopped = "podman machine ssh openbot timeout 3 getent ahostsv4 \
                        host.containers.internal exited with status 125; stderr: Error: vm \
                        \"openbot\" is not running";
         let time = std::cell::Cell::new(std::time::Duration::ZERO);

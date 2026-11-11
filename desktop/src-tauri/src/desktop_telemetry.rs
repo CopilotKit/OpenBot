@@ -1850,6 +1850,8 @@ mod tests {
                 disk: false,
                 wsl: false,
                 drive: None,
+                disk_gb: None,
+                free_on_drive: false,
                 measured: local_eval::EngineMeasure {
                     cpus: 4,
                     memory_bytes: 2 * 1024 * 1024 * 1024,

@@ -1,0 +1,111 @@
+table ip nat { # handle 1
+	chain NETAVARK-673F039D1D6EB { # handle 2
+		ip daddr 10.89.0.0/24 counter packets 0 bytes 0 accept # handle 3
+		ip daddr != 224.0.0.0/4 counter packets 0 bytes 0 masquerade # handle 4
+	}
+
+	chain NETAVARK-7328AD6CBA0C6 { # handle 5
+		ip daddr 10.89.2.0/24 counter packets 0 bytes 0 accept # handle 6
+		ip daddr != 224.0.0.0/4 counter packets 0 bytes 0 masquerade # handle 7
+	}
+
+	chain NETAVARK-D41128E48D962 { # handle 8
+		ip daddr 10.89.1.0/24 counter packets 0 bytes 0 accept # handle 9
+		ip daddr != 224.0.0.0/4 counter packets 0 bytes 0 masquerade # handle 10
+	}
+
+	chain NETAVARK-1D8721804F16F { # handle 11
+		ip daddr 10.88.0.0/16 counter packets 0 bytes 0 accept # handle 12
+		ip daddr != 224.0.0.0/4 counter packets 0 bytes 0 masquerade # handle 13
+	}
+
+	chain POSTROUTING { # handle 14
+		type nat hook postrouting priority srcnat; policy accept;
+		counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-MASQ # handle 15
+		ip saddr 10.89.0.0/24 counter packets 0 bytes 0 jump NETAVARK-673F039D1D6EB # handle 16
+		ip saddr 10.89.2.0/24 counter packets 0 bytes 0 jump NETAVARK-7328AD6CBA0C6 # handle 17
+		ip saddr 10.89.1.0/24 counter packets 0 bytes 0 jump NETAVARK-D41128E48D962 # handle 18
+		ip saddr 10.88.0.0/16 counter packets 0 bytes 0 jump NETAVARK-1D8721804F16F # handle 19
+	}
+
+	chain NETAVARK-HOSTPORT-SETMARK { # handle 20
+		counter packets 0 bytes 0 meta mark set mark or 0x2000 # handle 21
+	}
+
+	chain NETAVARK-HOSTPORT-MASQ { # handle 22
+		 meta mark & 0x00002000 == 0x00002000 counter packets 0 bytes 0 masquerade # handle 23
+	}
+
+	chain NETAVARK-HOSTPORT-DNAT { # handle 24
+		tcp dport 55059  counter packets 0 bytes 0 jump NETAVARK-DN-673F039D1D6EB # handle 25
+		tcp dport 55060  counter packets 0 bytes 0 jump NETAVARK-DN-673F039D1D6EB # handle 26
+		tcp dport 55061  counter packets 0 bytes 0 jump NETAVARK-DN-673F039D1D6EB # handle 27
+		tcp dport 55063  counter packets 0 bytes 0 jump NETAVARK-DN-673F039D1D6EB # handle 28
+		tcp dport 5432  counter packets 0 bytes 0 jump NETAVARK-DN-D41128E48D962 # handle 29
+		tcp dport 4206  counter packets 0 bytes 0 jump NETAVARK-DN-7328AD6CBA0C6 # handle 30
+		tcp dport 4100  counter packets 0 bytes 0 jump NETAVARK-DN-7328AD6CBA0C6 # handle 31
+		tcp dport 3001  counter packets 0 bytes 0 jump NETAVARK-DN-7328AD6CBA0C6 # handle 32
+		tcp dport 3010  counter packets 0 bytes 0 jump NETAVARK-DN-7328AD6CBA0C6 # handle 33
+		tcp dport 3001  counter packets 0 bytes 0 jump NETAVARK-DN-D41128E48D962 # handle 34
+		tcp dport 3010  counter packets 0 bytes 0 jump NETAVARK-DN-D41128E48D962 # handle 35
+		tcp dport 8081  counter packets 0 bytes 0 jump NETAVARK-DN-1D8721804F16F # handle 36
+	}
+
+	chain PREROUTING { # handle 37
+		type nat hook prerouting priority dstnat; policy accept;
+		fib daddr type local counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-DNAT # handle 38
+	}
+
+	chain OUTPUT { # handle 39
+		type nat hook output priority dstnat; policy accept;
+		fib daddr type local counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-DNAT # handle 40
+	}
+
+	chain NETAVARK-DN-7328AD6CBA0C6 { # handle 41
+		ip saddr 10.89.2.0/24 ip daddr 127.0.0.1 tcp dport 4206 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 42
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 4206 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 43
+		ip daddr 127.0.0.1 tcp dport 4206 counter packets 0 bytes 0 dnat to 10.89.2.6:4206 # handle 111
+		ip saddr 10.89.2.0/24 ip daddr 127.0.0.1 tcp dport 4100 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 44
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 4100 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 45
+		ip daddr 127.0.0.1 tcp dport 4100 counter packets 0 bytes 0 dnat to 10.89.2.7:4100 # handle 115
+		ip saddr 10.89.2.0/24 ip daddr 127.0.0.1 tcp dport 3001 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 46
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 3001 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 47
+		ip daddr 127.0.0.1 tcp dport 3001 counter packets 0 bytes 0 dnat to 10.89.2.8:3001 # handle 127
+		ip saddr 10.89.2.0/24 ip daddr 127.0.0.1 tcp dport 3010 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 48
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 3010 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 49
+		ip daddr 127.0.0.1 tcp dport 3010 counter packets 0 bytes 0 dnat to 10.89.2.8:3001 # handle 130
+	}
+
+	chain NETAVARK-DN-673F039D1D6EB { # handle 50
+		ip saddr 10.89.0.0/24 ip daddr 127.0.0.1 tcp dport 55059 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 51
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 55059 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 52
+		ip daddr 127.0.0.1 tcp dport 55059 counter packets 0 bytes 0 dnat to 10.89.0.4:8082 # handle 86
+		ip saddr 10.89.0.0/24 ip daddr 127.0.0.1 tcp dport 55060 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 53
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 55060 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 54
+		ip daddr 127.0.0.1 tcp dport 55060 counter packets 0 bytes 0 dnat to 10.89.0.4:8080 # handle 89
+		ip saddr 10.89.0.0/24 ip daddr 127.0.0.1 tcp dport 55061 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 55
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 55061 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 56
+		ip daddr 127.0.0.1 tcp dport 55061 counter packets 0 bytes 0 dnat to 10.89.0.4:4401 # handle 92
+		ip saddr 10.89.0.0/24 ip daddr 127.0.0.1 tcp dport 55063 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 57
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 55063 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 58
+		ip daddr 127.0.0.1 tcp dport 55063 counter packets 0 bytes 0 dnat to 10.89.0.4:6443 # handle 95
+	}
+
+	chain NETAVARK-DN-D41128E48D962 { # handle 59
+		ip saddr 10.89.1.0/24 ip daddr 127.0.0.1 tcp dport 5432 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 60
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 5432 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 61
+		ip daddr 127.0.0.1 tcp dport 5432 counter packets 0 bytes 0 dnat to 10.89.1.2:5432 # handle 107
+		ip saddr 10.89.1.0/24 ip daddr 127.0.0.1 tcp dport 3001 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 62
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 3001 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 63
+		ip daddr 127.0.0.1 tcp dport 3001 counter packets 0 bytes 0 dnat to 10.89.1.4:3001 # handle 119
+		ip saddr 10.89.1.0/24 ip daddr 127.0.0.1 tcp dport 3010 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 64
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 3010 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 65
+		ip daddr 127.0.0.1 tcp dport 3010 counter packets 0 bytes 0 dnat to 10.89.1.4:3001 # handle 122
+	}
+
+	chain NETAVARK-DN-1D8721804F16F { # handle 66
+		ip saddr 10.88.0.0/16 ip daddr 127.0.0.1 tcp dport 8081 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 67
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 8081 counter packets 0 bytes 0 jump NETAVARK-HOSTPORT-SETMARK # handle 68
+		ip daddr 127.0.0.1 tcp dport 8081 counter packets 0 bytes 0 dnat to 10.88.0.2:80 # handle 140
+	}
+}

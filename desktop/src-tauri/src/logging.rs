@@ -94,6 +94,67 @@ pub fn builder(
     })
 }
 
+/**
+The same log for a run with no app around it (the Windows uninstaller's stop, `uninstall`): its
+lines are written as the plugin writes the app's, with the same levels and scrubbing, at the end of
+the current file in `folder`. Nothing rotates it here; the app does when it next starts. Answers
+whether this process now logs there.
+*/
+pub fn append_without_app(folder: &Path) -> bool {
+    struct Appending {
+        file: std::sync::Mutex<std::fs::File>,
+        home: Option<String>,
+    }
+    impl log::Log for Appending {
+        fn enabled(&self, metadata: &log::Metadata) -> bool {
+            let own = OWN_CRATES.iter().any(|own| {
+                metadata.target() == *own || metadata.target().starts_with(&format!("{own}::"))
+            });
+            metadata.level()
+                <= if own {
+                    log::Level::Info
+                } else {
+                    log::Level::Warn
+                }
+        }
+        fn log(&self, record: &log::Record) {
+            if !self.enabled(record.metadata()) {
+                return;
+            }
+            let entry = line(
+                &timestamp(),
+                record.level(),
+                record.target(),
+                &record.args().to_string(),
+                self.home.as_deref(),
+            );
+            if let Ok(mut file) = self.file.lock() {
+                use std::io::Write;
+                let _ = writeln!(file, "{entry}");
+            }
+        }
+        fn flush(&self) {}
+    }
+    let opened = std::fs::create_dir_all(folder).and_then(|()| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(folder.join(format!("{FILE_NAME}.log")))
+    });
+    let Ok(file) = opened else {
+        return false;
+    };
+    let logger = Appending {
+        file: std::sync::Mutex::new(file),
+        home: home_folder(),
+    };
+    if log::set_boxed_logger(Box::new(logger)).is_err() {
+        return false;
+    }
+    log::set_max_level(log::LevelFilter::Info);
+    true
+}
+
 /// The folder the log file is written to, as the plugin resolves it.
 pub fn folder<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<PathBuf> {
     use tauri::Manager;

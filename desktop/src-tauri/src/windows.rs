@@ -1066,6 +1066,72 @@ fn distribution_folder(registry: &str, distribution: &str) -> Option<String> {
     })
 }
 
+/**
+Where Docker Desktop keeps its WSL disks, and the space free on that drive.
+
+Docker Desktop on WSL keeps its data on a sparse virtual disk of about a terabyte, so a container
+sees about a terabyte free whatever the drive under it has: Windows G showed 938.3 GiB free in a
+container with 15 GB free on C:, and setup took C: from 14.5 to 11.8 GB. The drive is found as Docker
+Desktop finds its disks (`docker_data_folder`). None off Windows.
+*/
+pub fn docker_data_drive() -> Option<MachineDrive> {
+    #[cfg(target_os = "windows")]
+    {
+        let env = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
+        let read = |folder: Option<String>, file: &str| {
+            folder.and_then(|folder| {
+                std::fs::read_to_string(Path::new(&folder).join("Docker").join(file)).ok()
+            })
+        };
+        let folder = docker_data_folder(
+            read(env("APPDATA"), "settings-store.json").as_deref(),
+            read(env("APPDATA"), "settings.json").as_deref(),
+            env("LOCALAPPDATA").as_deref(),
+            env("SystemDrive").as_deref(),
+        )?;
+        // A folder Docker has not made yet is on the drive its path names.
+        let free = free_space(&folder)
+            .or_else(|| drive_of(&folder).and_then(|drive| free_space(&format!(r"{drive}\"))))?;
+        Some(MachineDrive {
+            drive: drive_of(&folder),
+            free,
+        })
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
+/**
+The folder Docker Desktop keeps its WSL disks in (`disk\docker_data.vhdx`, `main\ext4.vhdx`), from
+the contents of its settings files under `%APPDATA%\Docker` and the person's folders.
+
+Settings > Resources > Advanced > Disk image location sets it: `CustomWslDistroDir` in
+`settings-store.json`, or `customWslDistroDir` in the `settings.json` of releases before that file.
+Otherwise it is `%LOCALAPPDATA%\Docker\wsl`, and without that, the system drive.
+*/
+pub fn docker_data_folder(
+    settings_store: Option<&str>,
+    settings: Option<&str>,
+    local_app_data: Option<&str>,
+    system_drive: Option<&str>,
+) -> Option<String> {
+    let chosen = |file: Option<&str>| {
+        let settings: serde_json::Value = serde_json::from_str(file?).ok()?;
+        ["CustomWslDistroDir", "customWslDistroDir"]
+            .iter()
+            .find_map(|key| settings.get(*key)?.as_str())
+            .map(str::trim)
+            .filter(|folder| !folder.is_empty())
+            .map(str::to_owned)
+    };
+    chosen(settings_store)
+        .or_else(|| chosen(settings))
+        .or_else(|| local_app_data.map(|folder| format!(r"{folder}\Docker\wsl")))
+        .or_else(|| system_drive.map(|drive| format!(r"{drive}\")))
+}
+
 /// The bytes free to this account on the volume that holds `folder`.
 #[cfg(target_os = "windows")]
 pub(crate) fn free_space(folder: &str) -> Option<u64> {
@@ -1094,6 +1160,41 @@ pub(crate) fn free_space(folder: &str) -> Option<u64> {
 mod tests {
     use super::*;
     use crate::test_support::temp_root;
+
+    /// Docker Desktop's disks are where its Disk image location setting puts them, in either
+    /// settings file it has used, and otherwise in `%LOCALAPPDATA%\Docker\wsl`.
+    #[test]
+    fn docker_desktops_disks_are_found_where_its_settings_put_them() {
+        let local = r"C:\Users\Administrator\AppData\Local";
+        // Windows G: nothing set, so the default folder, on C:.
+        let store = r#"{"AutoStart":false,"DisplayedOnboarding":true,"EnableIntegrationWithDefaultWslDistro":false,"SettingsVersion":40}"#;
+        let folder = docker_data_folder(Some(store), None, Some(local), Some("C:")).unwrap();
+        assert_eq!(folder, r"C:\Users\Administrator\AppData\Local\Docker\wsl");
+        assert_eq!(drive_of(&folder).as_deref(), Some("C:"));
+        // Moved to another drive with Disk image location.
+        let moved =
+            r#"{"AutoStart":false,"CustomWslDistroDir":"D:\\DockerDesktop","SettingsVersion":40}"#;
+        let folder = docker_data_folder(Some(moved), None, Some(local), Some("C:")).unwrap();
+        assert_eq!(folder, r"D:\DockerDesktop");
+        assert_eq!(drive_of(&folder).as_deref(), Some("D:"));
+        // A release before settings-store.json, and an empty setting, which is no setting.
+        let older = r#"{"autoStart":false,"customWslDistroDir":"E:\\wsl","settingsVersion":30}"#;
+        assert_eq!(
+            docker_data_folder(None, Some(older), Some(local), Some("C:")).as_deref(),
+            Some(r"E:\wsl")
+        );
+        let empty = r#"{"CustomWslDistroDir":"  "}"#;
+        assert_eq!(
+            docker_data_folder(Some(empty), Some("not json"), Some(local), Some("C:")).as_deref(),
+            Some(r"C:\Users\Administrator\AppData\Local\Docker\wsl")
+        );
+        // No profile folder to go by: the system drive.
+        assert_eq!(
+            docker_data_folder(None, None, None, Some("C:")).as_deref(),
+            Some(r"C:\")
+        );
+        assert_eq!(docker_data_folder(None, None, None, None), None);
+    }
 
     /// Podman names its machine's WSL distribution as `env.WithPodmanPrefix` does, and WSL records
     /// its folder with the `\\?\` prefix or without.

@@ -20,11 +20,25 @@ Desktop installation:
 - At setup and at every Start, a Docker Desktop or Podman too old to run OpenBot is updated
   (below). Docker Desktop quits while it updates, which stops its containers; the ones that were
   running are started again afterwards.
-- OpenBot Desktop's bundled CLI moves to `copilotkit@2e1c519` (below). The back end stays on
-  CopilotKit Intelligence 0.16.0-rc.10.
+- OpenBot Desktop's back end and the Helm chart move to CopilotKit Intelligence 0.16.0-rc.11, and
+  the bundled CLI to `copilotkit@7bd073b` (below).
 
 ### OpenBot Desktop
 
+- **Installing a new OpenBot over the old one on Windows never offers to delete your data, and
+  uninstalling stops what OpenBot runs.** Running a new installer over an installed OpenBot opened
+  the old version's uninstaller in the middle of the update, with a "Delete the application data"
+  box, and one wrong tick deleted your Bots and conversations. The old version is now removed
+  silently, as an update, on the Installing page, which says "Removing the previous version of
+  OpenBot. Your Bots and data stay." with its progress bar moving. If OpenBot is open, the installer
+  asks before it closes it. Uninstalling from Settings > Apps used to close OpenBot and leave its
+  containers, its services and its Podman machine (`openbot`) running. It now stops them first,
+  with the same Compose OpenBot runs, and never touches your own Podman machines or containers.
+  Tick "Delete the application data" to remove OpenBot's machine, the backend OpenBot created and
+  OpenBot's files in its installation folder as well, so installing again starts from nothing; a
+  file of yours in that folder stays. Otherwise they stay, stopped, for a reinstall to find. And on
+  Windows, an OpenBot whose own Podman machine is gone makes it again when it opens. It used to open
+  on "OpenBot can't run on this computer as it's set up", having looked at your own machine.
 - **Setup says what self-contained means up front, and asks about usage data last.** The first
   screen, "Set up OpenBot (self-contained)", says this version runs entirely on your computer,
   backend included, that setup takes between 1 and 10 minutes depending on your internet speed,
@@ -125,10 +139,14 @@ Desktop installation:
   boot after Windows Subsystem for Linux was turned on, the machine's network could fail to come
   up. Accepting the license agreement stopped at "OpenBot couldn't prepare this computer to run it.
   Try again.", and Try again then failed the downloads, again and again, until Windows restarted.
-  OpenBot now waits up to a minute for the machine's network, checks it again before the
+  OpenBot now waits up to half a minute for the machine's network, checks it again before the
   downloads, and restarts its own machine once when it is still down, which sets the network up
   from scratch. A Podman machine of yours that shares that network is never stopped. If it is still
-  down, setup shows "Restart Windows to finish", with Restart now, instead of Try again.
+  down, setup shows "Restart Windows to finish", with Restart now, instead of Try again. OpenBot
+  checks the network every time it opens or starts, before its backend starts, so restarting the
+  machine never stops a running backend, and the screen says "Reconnecting OpenBot to the
+  internet" while it waits. If Start still has to restart the machine, it starts the backend again
+  and waits for it before it starts OpenBot.
 - **OpenBot stays behind your browser while you sign in, and opens where you left it.** On
   Windows, OpenBot came in front of the browser partway through setup while you were typing your
   email to sign in. While the browser sign-in is open it now stays where it is, and comes forward
@@ -175,13 +193,23 @@ Desktop installation:
   `localhost`, `127.0.0.1` and `[::1]` with the same port as the same address, connects again, and
   leaves OpenBot's addresses as they are. An address changed to another port or host is still
   refused.
-- **CopilotKit CLI `copilotkit@2e1c519`.** OpenBot Desktop's bundled CLI moves to the production
-  build of Intelligence `2e1c51900`: `6bfaa0f5c`, which added `telemetry link`, with `--app-path`
-  added to its `local` commands and a second `local connect` accepted after OpenBot rewrote its
-  addresses to `127.0.0.1`. It keeps Intelligence 0.16.0-rc.10 and CopilotKit v1.85.0 templates.
+- **CopilotKit Intelligence 0.16.0-rc.11, CLI `copilotkit@7bd073b`.** OpenBot Desktop's back end
+  and the Helm chart move to Intelligence 0.16.0-rc.11, and the bundled CLI to its production
+  build. The CLI is `6bfaa0f5c`, which added `telemetry link`, with `--app-path` added to its
+  `local` commands and a second `local connect` accepted after OpenBot rewrote its addresses to
+  `127.0.0.1`, and CopilotKit v1.85.0 templates. The back end now streams an answer whole to a
+  conversation that starts following it mid-reply: before, it could send the reply's pieces out of
+  order, so the answer drew with words missing and a step's browser actions never ran.
 
 ### Conversations
 
+- **An answer that reaches the screen with pieces missing is put right, and the Bot carries on.**
+  Sometimes a run's live stream reached the conversation out of shape while the run itself went
+  fine: the answer drew with words missing mid-sentence until a reload, or a step that asked for
+  several browser actions at once showed "Not completed", took none of them, and the conversation
+  stopped there with nothing said. The conversation now reads such a run back from its stored copy,
+  so the answer shows whole, and browser actions that never ran are retried once. If that breaks
+  again, it says so under the turn.
 - **A new conversation's first message starts one run.** Every first message started a second run
   on the Bot about a second after yours: the CopilotKit runtime named the new conversation by
   running the same Bot again on a title prompt. On a Bot OpenBot runs in a harness, such as the
