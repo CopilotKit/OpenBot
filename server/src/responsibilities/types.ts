@@ -326,8 +326,10 @@ export type ResponsibilityStore = {
     status: ResponsibilityStatus,
   ): Promise<Responsibility>;
   /**
-   * Delete this goal and the routines that record it (`goal_id`): they exist to run it. Its runs and
-   * triggers go with it. Not found for another person's goal.
+   * Delete this goal and the routines that run it (`routineRunsGoal`): they exist to run it. An older
+   * routine that still runs another of its Bot's goals that is not completed stays. Its runs and
+   * triggers go with it, a run in progress too, which then settles as gone (`settleRun`). Not found
+   * for another person's goal.
    */
   delete(ownerUserId: string, id: string): Promise<void>;
   recordProgress(
@@ -348,8 +350,8 @@ export type ResponsibilityStore = {
     title: string,
   ): Promise<boolean>;
   /**
-   * The goals of this Bot that repeat, and why (`repeats`), read together. Any status counts, so a
-   * paused or completed goal can be in it; a goal that is not active never runs, so that is harmless.
+   * The goals of this Bot that repeat, and why (`repeats`), read together. A completed goal is never
+   * in it; a paused one can be, which is harmless, since a goal that is not active never runs.
    */
   repeatingGoals(
     ownerUserId: string,
@@ -361,7 +363,11 @@ export type ResponsibilityStore = {
     runId: string,
     options?: { recovered: boolean },
   ): Promise<ResponsibilityRunContext | null>;
-  settleRun(runId: string, outcome: ResponsibilityRunOutcome): Promise<void>;
+  /**
+   * Record how a run ended. False when the run is gone: its goal was deleted while it ran, so there
+   * is nothing to record and nobody to tell.
+   */
+  settleRun(runId: string, outcome: ResponsibilityRunOutcome): Promise<boolean>;
   /**
    * Put a run that started back in the queue, unrun: its conversation was busy, so nothing happened.
    * False when it is no longer running.

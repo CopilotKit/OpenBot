@@ -10,6 +10,7 @@ import {
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NewRoutinePage } from "@/components/routines/new-routine-page";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { proactiveKeys } from "@/lib/proactive";
 import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
@@ -60,7 +61,10 @@ function serving({
   proactive = { allowed: true, settings: [] } as unknown,
   routines = () => Response.json({ routine: { id: "r1" } }, { status: 201 }),
   goalDeletes = true,
+  edition = "team",
 }: {
+  /** What `GET /api/capabilities` says this deployment is. */
+  edition?: "team" | "personal";
   proactive?: unknown;
   /** How `POST /api/routines` answers. */
   routines?: () => Response | Promise<Response>;
@@ -105,6 +109,7 @@ function serving({
       });
     if (url === "/api/proactive/settings")
       return Response.json(proactiveAnswer);
+    if (url === "/api/capabilities") return Response.json({ edition });
     return Response.json({});
   }) as unknown as typeof fetch;
 }
@@ -223,6 +228,28 @@ test("When something happens asks for a source and an event", async () => {
   ).toBe("true");
   await settleReactWork();
   expect(writes()).toEqual([]);
+});
+
+test("the personal edition, which has no Slack, offers no Slack event", async () => {
+  for (const edition of ["team", "personal"] as const) {
+    serving({ edition });
+    const view = draw();
+    const user = userEvent.setup({ document });
+    await choose(view, user, "Starts", "When something happens");
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryState(deploymentCapabilitiesQueryOptions().queryKey)
+          ?.status,
+      ).toBe("success"),
+    );
+    await user.click(await view.findByLabelText("Source"));
+    expect(await view.findByRole("option", { name: "GitHub" })).toBeTruthy();
+    expect(view.queryByRole("option", { name: "Slack" }) !== null).toBe(
+      edition === "team",
+    );
+    view.unmount();
+    queryClient.clear();
+  }
 });
 
 test("When something happens makes a goal with that subscription", async () => {

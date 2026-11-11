@@ -359,9 +359,15 @@ function Granted({
   const edition =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition ?? "team";
   const plugins = useQuery(agentPluginsQueryOptions(agentId));
-  const apps = useQuery(botAppsQueryOptions(agentId));
-  // Both, so no row is drawn without its state and then redrawn with one a moment later.
-  if (plugins.isPending || apps.isPending) return null;
+  // Only on the Apps page: the Skills page draws no app, and this read can wait on the app
+  // directory, so the skills waited for it for nothing. A query that is not enabled stays pending.
+  const apps = useQuery({
+    ...botAppsQueryOptions(agentId),
+    enabled: kind === "apps",
+  });
+  // Both on the Apps page, so no row is drawn without its state and then redrawn with one a moment
+  // later.
+  if (plugins.isPending || (kind === "apps" && apps.isPending)) return null;
   if (!plugins.data) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
