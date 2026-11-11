@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFiring } from "@openbot/shared/routine-firing";
 import { isStarterTourAgent } from "@openbot/shared/starter-tour";
 import {
@@ -11,6 +12,8 @@ import {
   lt,
   ne,
   or,
+  type SQL,
+  type SQLWrapper,
   sql,
 } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
@@ -110,6 +113,17 @@ export type ChannelPage = {
 export type ChannelQuery = { cursor?: string; limit?: number };
 
 /**
+ * A search of somebody's whole roster: `query` is what they typed, already normalised (see
+ * {@link normalizeChannelSearch}), and `cursor` is the opaque one a previous page of the same search
+ * returned.
+ */
+export type ChannelSearchQuery = {
+  query: string;
+  cursor?: string;
+  limit?: number;
+};
+
+/**
  * How many channels one page holds.
  *
  * The sidebar asked for all of them on every render, one row per channel-agent pair, and nothing
@@ -168,6 +182,132 @@ export function decodeChannelCursor(
   }
 }
 
+/** A search page: smaller than a roster page, because it answers somebody who is still typing. */
+const DEFAULT_SEARCH_PAGE = 20;
+
+/** The most one search page may hold. */
+export const MAX_SEARCH_PAGE = 50;
+
+/** The shortest search worth sending to the database. One character matches nearly everything. */
+export const MIN_SEARCH_CODE_POINTS = 2;
+
+/** The longest search accepted, in code points, so a pasted page never becomes a pattern. */
+export const MAX_SEARCH_CODE_POINTS = 200;
+
+export const SEARCH_TOO_SHORT_ERROR =
+  "Type at least 2 characters to search history.";
+export const SEARCH_TOO_LONG_ERROR =
+  "Keep your search to 200 characters or fewer.";
+export const SEARCH_CONTROL_ERROR =
+  "Your search can't include control characters.";
+export const SEARCH_CURSOR_ERROR =
+  "These results are out of date. Search again.";
+
+/**
+ * A search as the store compares it: trimmed, and composed (NFC) so an accent typed as two code
+ * points and an accent typed as one are the same search. Case is left alone: the match ignores it,
+ * and the cursor only has to tell two searches apart.
+ */
+export function normalizeChannelSearch(raw: string): string {
+  return raw.trim().normalize("NFC");
+}
+
+/**
+ * Why a normalised search cannot run, or null when it can.
+ *
+ * Control characters are refused outright. A NUL in a text parameter is an error inside
+ * PostgreSQL, so letting one through turned a typo into a 500.
+ */
+export function channelSearchProblem(query: string): string | null {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: the control characters are the point.
+  if (/[\u0000-\u001f\u007f]/.test(query)) return SEARCH_CONTROL_ERROR;
+  const codePoints = Array.from(query).length;
+  if (codePoints < MIN_SEARCH_CODE_POINTS) return SEARCH_TOO_SHORT_ERROR;
+  if (codePoints > MAX_SEARCH_CODE_POINTS) return SEARCH_TOO_LONG_ERROR;
+  return null;
+}
+
+/**
+ * Which search a cursor belongs to: a digest of the normalised query, not the query itself, so a
+ * cursor stays short whatever was typed.
+ */
+function searchTag(query: string): string {
+  return createHash("sha256")
+    .update(query, "utf8")
+    .digest("base64url")
+    .slice(0, 22);
+}
+
+/**
+ * A roster cursor that also names the search it came from.
+ *
+ * Bound to the query because a position is only a position in one result set: the next page of
+ * "invoice" read from where "travel" stopped would skip every invoice newer than the last travel
+ * row and never say so.
+ */
+export function encodeChannelSearchCursor(
+  cursor: ChannelCursor,
+  query: string,
+): string {
+  return Buffer.from(
+    JSON.stringify({ ...cursor, q: searchTag(query) }),
+    "utf8",
+  ).toString("base64url");
+}
+
+/**
+ * The position a search cursor names, or undefined when it is malformed or belongs to another
+ * search. Unlike the roster's, a bad cursor here is the caller's error and not the first page: the
+ * caller asked for "more of these results", and the first page again is not that.
+ */
+export function decodeChannelSearchCursor(
+  value: string,
+  query: string,
+): ChannelCursor | undefined {
+  const cursor = decodeChannelCursor(value);
+  if (!cursor) return undefined;
+  const { q } = cursor as ChannelCursor & { q?: unknown };
+  if (q !== searchTag(query)) return undefined;
+  return { pinned: cursor.pinned, recency: cursor.recency, id: cursor.id };
+}
+
+/**
+ * A search's `?q=&limit=&cursor=`, checked before anything reaches the store.
+ *
+ * `limit` follows every other paged list here (see `parsePageLimit`): digits are clamped into
+ * `1..50`, anything else is a 400.
+ */
+export function parseChannelSearchParams(
+  params: URLSearchParams,
+): { ok: true; value: ChannelSearchQuery } | { ok: false; error: string } {
+  const query = normalizeChannelSearch(params.get("q") ?? "");
+  const problem = channelSearchProblem(query);
+  if (problem) return { ok: false, error: problem };
+
+  const limit = parsePageLimit(params.get("limit"), MAX_SEARCH_PAGE);
+  if (!limit.ok) return { ok: false, error: limit.error };
+
+  // Blank reads as absent, the way the roster reads `?cursor=`.
+  const cursor = params.get("cursor") || null;
+  if (cursor !== null && !decodeChannelSearchCursor(cursor, query)) {
+    return { ok: false, error: SEARCH_CURSOR_ERROR };
+  }
+
+  return {
+    ok: true,
+    value: {
+      query,
+      ...(cursor !== null ? { cursor } : {}),
+      ...(limit.limit !== undefined ? { limit: limit.limit } : {}),
+    },
+  };
+}
+
+/** `%`, `_` and the escape itself, made literal for an `ilike … escape '\'` pattern. */
+export function likeLiteral(text: string): string {
+  return text.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
+
 /**
  * The roster's sort key, as SQL, in the order it sorts.
  *
@@ -220,6 +360,17 @@ export type ChannelStore = {
   direct(actor: AgentActor, agentId: string): Promise<AgentChannel>;
   get(actor: AgentActor, channelId: string): Promise<AgentChannel | null>;
   list(actor: AgentActor, query?: ChannelQuery): Promise<ChannelPage>;
+  /**
+   * The caller's conversations whose name, summary, opening or last message contains `query`,
+   * ignoring case, as literal text. The roster's rows in the roster's order, chosen by the same
+   * membership and deletion rules as `list` before the page is cut, so nothing reaches a page here
+   * that `list` would not also show this person.
+   *
+   * Only the roster's own columns are read: no transcript, no call to the backend per conversation.
+   * Throws ChannelSearchInputError for a query `parseChannelSearchParams` would refuse, or a cursor
+   * minted by a different search.
+   */
+  search(actor: AgentActor, query: ChannelSearchQuery): Promise<ChannelPage>;
   /** Pin or unpin the caller's own membership. Throws ChannelNotFoundError for a non-member. */
   setPinned(
     actor: AgentActor,
@@ -510,6 +661,164 @@ export function createChannelStore(
       await notify({ ...base, memberIds: others });
   };
 
+  /**
+   * One page of the caller's roster, optionally narrowed by `match`: the query `list` and `search`
+   * share, so a rule about which conversations a person can see is written once and holds for both.
+   */
+  const rosterPage = async (
+    actor: AgentActor,
+    {
+      limit,
+      cursor,
+      match,
+      encodeCursor,
+    }: {
+      limit: number;
+      cursor: ChannelCursor | undefined;
+      /** A further condition on the channel, applied with membership and deletion before the cut. */
+      match?: SQL;
+      encodeCursor: (cursor: ChannelCursor) => string;
+    },
+  ): Promise<ChannelPage> => {
+    /*
+     * The page of channels is chosen first, and the agents are joined to that page.
+     *
+     * The row set below is one row per channel-agent pair, so a limit on rows would cut a channel
+     * in half: its second Bot would arrive on the next page as a separate entry with the same id.
+     * Limiting the channels and then joining keeps a channel whole whatever it holds.
+     */
+    const page = await database
+      .select({
+        id: channels.id,
+        /*
+         * To the microsecond, as text, for the cursor only: the audit reader's fix, for the same
+         * fault. The column keeps microseconds and a `Date` keeps milliseconds, so a cursor made
+         * from a `Date` named a moment just before its own row, and any channel later in that
+         * millisecond compared as newer than the cursor and was on no page at all.
+         */
+        recency: sql<string>`to_char(${RECENCY} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+        pinned: sql<boolean>`${channelMemberships.pinnedAt} is not null`,
+      })
+      .from(channels)
+      .innerJoin(
+        channelMemberships,
+        and(
+          eq(channelMemberships.channelId, channels.id),
+          eq(channelMemberships.userId, actor.id),
+        ),
+      )
+      .where(
+        and(
+          isNull(channels.deletedAt),
+          match,
+          // One row comparison over the whole sort key, which only reads as "everything after the
+          // cursor" because every part of that key descends. See ROSTER_ORDER.
+          cursor
+            ? sql`(${PINNED_RANK}, ${RECENCY}, ${channels.id}) < (${cursor.pinned ? 1 : 0}::int, ${cursor.recency}::timestamptz, ${cursor.id})`
+            : undefined,
+        ),
+      )
+      .orderBy(...ROSTER_ORDER)
+      // One more than asked for, so "is there another page" needs no second count query.
+      .limit(limit + 1);
+
+    const wanted = page.slice(0, limit);
+    const last = wanted.at(-1);
+    const nextCursor =
+      page.length > limit && last
+        ? encodeCursor({
+            pinned: last.pinned,
+            recency: last.recency,
+            id: last.id,
+          })
+        : null;
+
+    if (wanted.length === 0) return { channels: [], nextCursor: null };
+
+    const rows = await database
+      .select({
+        id: channels.id,
+        name: conversationName,
+        agentId: channelAgents.agentId,
+        threadId: intelligenceChannelMappings.threadId,
+        deletedAt: agentProfiles.deletedAt,
+        channelSummary: conversationCalled,
+        opening: channels.opening,
+        lastMessage: channels.lastMessage,
+        lastMessageAt: channels.lastMessageAt,
+        lastMessageAgentId: channels.lastMessageAgentId,
+        createdAt: channels.createdAt,
+        pinnedAt: channelMemberships.pinnedAt,
+        lastReadAt: channelMemberships.lastReadAt,
+        canRename: sql<boolean>`${starterOf(channels.id)} = ${actor.id}`,
+        task: sql<boolean>`exists (select 1 from ${botTasks} where ${botTasks.channelId} = ${channels.id})`,
+      })
+      .from(channels)
+      .innerJoin(
+        channelMemberships,
+        and(
+          eq(channelMemberships.channelId, channels.id),
+          eq(channelMemberships.userId, actor.id),
+        ),
+      )
+      .innerJoin(
+        intelligenceChannelMappings,
+        and(
+          eq(intelligenceChannelMappings.channelId, channels.id),
+          eq(intelligenceChannelMappings.userId, actor.id),
+        ),
+      )
+      .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
+      .innerJoin(
+        agentProfiles,
+        eq(agentProfiles.agentId, channelAgents.agentId),
+      )
+      .where(
+        and(
+          inArray(
+            channels.id,
+            wanted.map((row) => row.id),
+          ),
+          // Repeated, not inherited from the query that chose the page: these are two statements
+          // on two snapshots, so a delete that commits between them would otherwise hand back a
+          // channel this person can no longer see.
+          isNull(channels.deletedAt),
+        ),
+      )
+      // The same order the page was chosen in, since the rows below are read in order.
+      .orderBy(...ROSTER_ORDER, asc(channelAgents.agentId));
+
+    // One row per channel-agent pair; the ordering above keeps each channel's rows together and
+    // its agents in the same lexicographic order `get` returns.
+    const summaries = new Map<string, ChannelSummary>();
+    for (const row of rows) {
+      const summary = summaries.get(row.id);
+      if (summary) {
+        summary.agentIds.push(row.agentId);
+        summary.active &&= row.deletedAt === null;
+        continue;
+      }
+      summaries.set(row.id, {
+        id: row.id,
+        name: row.name,
+        agentIds: [row.agentId],
+        threadId: row.threadId,
+        active: row.deletedAt === null,
+        summary: row.channelSummary,
+        opening: row.opening,
+        lastMessage: row.lastMessage,
+        lastMessageAt: row.lastMessageAt,
+        lastMessageAgentId: row.lastMessageAgentId,
+        createdAt: row.createdAt,
+        pinned: row.pinnedAt !== null,
+        lastReadAt: row.lastReadAt,
+        canRename: row.canRename,
+        task: row.task,
+      });
+    }
+    return { channels: [...summaries.values()], nextCursor };
+  };
+
   const store: ChannelStore = {
     create(actor, agentIds, transaction) {
       if (transaction) return makeChannel(transaction, actor, agentIds);
@@ -634,148 +943,56 @@ export function createChannelStore(
     },
 
     async list(actor, query = {}) {
-      const limit = Math.min(
-        Math.max(query.limit ?? DEFAULT_CHANNEL_PAGE, 1),
-        MAX_CHANNEL_PAGE,
-      );
-      const cursor = decodeChannelCursor(query.cursor);
+      return rosterPage(actor, {
+        limit: Math.min(
+          Math.max(query.limit ?? DEFAULT_CHANNEL_PAGE, 1),
+          MAX_CHANNEL_PAGE,
+        ),
+        cursor: decodeChannelCursor(query.cursor),
+        encodeCursor: encodeChannelCursor,
+      });
+    },
+
+    async search(actor, { query: raw, cursor: value, limit }) {
+      // Checked again here, not only at the route: the store is the boundary every caller shares.
+      const query = normalizeChannelSearch(raw);
+      const problem = channelSearchProblem(query);
+      if (problem) throw new ChannelSearchInputError(problem);
+      const cursor = value
+        ? decodeChannelSearchCursor(value, query)
+        : undefined;
+      if (value && !cursor) {
+        throw new ChannelSearchInputError(SEARCH_CURSOR_ERROR);
+      }
 
       /*
-       * The page of channels is chosen first, and the agents are joined to that page.
+       * The text the row shows, matched as a literal. `%`, `_` and `\` are escaped and the pattern
+       * is bound, so what somebody types is never SQL and never a wildcard. `ilike` ignores case by
+       * the database's collation, which folds non-ASCII letters too under the UTF-8 locale that
+       * OpenBot's PostgreSQL image initialises with.
        *
-       * The row set below is one row per channel-agent pair, so a limit on rows would cut a channel
-       * in half: its second Bot would arrive on the next page as a separate entry with the same id.
-       * Limiting the channels and then joining keeps a channel whole whatever it holds.
+       * The name is the one the row draws (`conversationName`, what its Bots are called now), and
+       * the summary is `conversationCalled`, the chosen name before the sweep's: matching the column
+       * underneath would find a conversation by words it no longer shows. The name goes last
+       * because it is the only part that is a subquery.
        */
-      const page = await database
-        .select({
-          id: channels.id,
-          /*
-           * To the microsecond, as text, for the cursor only: the audit reader's fix, for the same
-           * fault. The column keeps microseconds and a `Date` keeps milliseconds, so a cursor made
-           * from a `Date` named a moment just before its own row, and any channel later in that
-           * millisecond compared as newer than the cursor and was on no page at all.
-           */
-          recency: sql<string>`to_char(${RECENCY} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
-          pinned: sql<boolean>`${channelMemberships.pinnedAt} is not null`,
-        })
-        .from(channels)
-        .innerJoin(
-          channelMemberships,
-          and(
-            eq(channelMemberships.channelId, channels.id),
-            eq(channelMemberships.userId, actor.id),
-          ),
-        )
-        .where(
-          and(
-            isNull(channels.deletedAt),
-            // One row comparison over the whole sort key, which only reads as "everything after the
-            // cursor" because every part of that key descends. See ROSTER_ORDER.
-            cursor
-              ? sql`(${PINNED_RANK}, ${RECENCY}, ${channels.id}) < (${cursor.pinned ? 1 : 0}::int, ${cursor.recency}::timestamptz, ${cursor.id})`
-              : undefined,
-          ),
-        )
-        .orderBy(...ROSTER_ORDER)
-        // One more than asked for, so "is there another page" needs no second count query.
-        .limit(limit + 1);
-
-      const wanted = page.slice(0, limit);
-      const last = wanted.at(-1);
-      const nextCursor =
-        page.length > limit && last
-          ? encodeChannelCursor({
-              pinned: last.pinned,
-              recency: last.recency,
-              id: last.id,
-            })
-          : null;
-
-      if (wanted.length === 0) return { channels: [], nextCursor: null };
-
-      const rows = await database
-        .select({
-          id: channels.id,
-          name: conversationName,
-          agentId: channelAgents.agentId,
-          threadId: intelligenceChannelMappings.threadId,
-          deletedAt: agentProfiles.deletedAt,
-          channelSummary: conversationCalled,
-          opening: channels.opening,
-          lastMessage: channels.lastMessage,
-          lastMessageAt: channels.lastMessageAt,
-          lastMessageAgentId: channels.lastMessageAgentId,
-          createdAt: channels.createdAt,
-          pinnedAt: channelMemberships.pinnedAt,
-          lastReadAt: channelMemberships.lastReadAt,
-          canRename: sql<boolean>`${starterOf(channels.id)} = ${actor.id}`,
-          task: sql<boolean>`exists (select 1 from ${botTasks} where ${botTasks.channelId} = ${channels.id})`,
-        })
-        .from(channels)
-        .innerJoin(
-          channelMemberships,
-          and(
-            eq(channelMemberships.channelId, channels.id),
-            eq(channelMemberships.userId, actor.id),
-          ),
-        )
-        .innerJoin(
-          intelligenceChannelMappings,
-          and(
-            eq(intelligenceChannelMappings.channelId, channels.id),
-            eq(intelligenceChannelMappings.userId, actor.id),
-          ),
-        )
-        .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
-        .innerJoin(
-          agentProfiles,
-          eq(agentProfiles.agentId, channelAgents.agentId),
-        )
-        .where(
-          and(
-            inArray(
-              channels.id,
-              wanted.map((row) => row.id),
-            ),
-            // Repeated, not inherited from the query that chose the page: these are two statements
-            // on two snapshots, so a delete that commits between them would otherwise hand back a
-            // channel this person can no longer see.
-            isNull(channels.deletedAt),
-          ),
-        )
-        // The same order the page was chosen in, since the rows below are read in order.
-        .orderBy(...ROSTER_ORDER, asc(channelAgents.agentId));
-
-      // One row per channel-agent pair; the ordering above keeps each channel's rows together and
-      // its agents in the same lexicographic order `get` returns.
-      const summaries = new Map<string, ChannelSummary>();
-      for (const row of rows) {
-        const summary = summaries.get(row.id);
-        if (summary) {
-          summary.agentIds.push(row.agentId);
-          summary.active &&= row.deletedAt === null;
-          continue;
-        }
-        summaries.set(row.id, {
-          id: row.id,
-          name: row.name,
-          agentIds: [row.agentId],
-          threadId: row.threadId,
-          active: row.deletedAt === null,
-          summary: row.channelSummary,
-          opening: row.opening,
-          lastMessage: row.lastMessage,
-          lastMessageAt: row.lastMessageAt,
-          lastMessageAgentId: row.lastMessageAgentId,
-          createdAt: row.createdAt,
-          pinned: row.pinnedAt !== null,
-          lastReadAt: row.lastReadAt,
-          canRename: row.canRename,
-          task: row.task,
-        });
-      }
-      return { channels: [...summaries.values()], nextCursor };
+      const pattern = `%${likeLiteral(query)}%`;
+      const contains = (column: SQLWrapper) =>
+        sql`${column} ilike ${pattern} escape '\\'`;
+      return rosterPage(actor, {
+        limit: Math.min(
+          Math.max(limit ?? DEFAULT_SEARCH_PAGE, 1),
+          MAX_SEARCH_PAGE,
+        ),
+        cursor,
+        match: or(
+          contains(conversationCalled),
+          contains(channels.opening),
+          contains(channels.lastMessage),
+          contains(conversationName),
+        ),
+        encodeCursor: (position) => encodeChannelSearchCursor(position, query),
+      });
     },
 
     async setPinned(actor, channelId, pinned) {
@@ -1252,6 +1469,14 @@ export class ChannelNotOwnerError extends Error {
   }
 }
 
+/** A search the store will not run: too short, too long, or a cursor from another search. */
+export class ChannelSearchInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ChannelSearchInputError";
+  }
+}
+
 export class ChannelPackageOwnedError extends Error {
   constructor(id: string) {
     super(`Channel ${id} is defined by the deployment package.`);
@@ -1538,6 +1763,33 @@ export function createChannelRoutes(
     }
   });
 
+  /*
+   * The whole roster, searched by the database, a page at a time. Before `/:channelId`, or "search"
+   * is read as a channel id.
+   *
+   * The same rows `GET /` would hand this person, narrowed before the page is cut, so a match that
+   * is a thousand conversations old is on the first page here without anybody downloading the
+   * thousand in front of it.
+   */
+  routes.get("/search", requireUser, async (context) => {
+    const parsed = parseChannelSearchParams(
+      new URL(context.req.url).searchParams,
+    );
+    if (!parsed.ok) return context.json({ error: parsed.error }, 400);
+    try {
+      const page = await store.search(context.var.actor, parsed.value);
+      const work = await store.workIn(context.var.actor, page.channels);
+      return context.json({
+        channels: page.channels.map((channel) =>
+          channelSummaryDto(channel, work.get(channel.id) ?? []),
+        ),
+        nextCursor: page.nextCursor,
+      });
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
   routes.post("/:channelId/activity", requireUser, async (context) => {
     const parsed = parseActivityInput(
       await context.req.json().catch(() => null),
@@ -1724,6 +1976,10 @@ function mapStoreError(context: Context, error: unknown): Response {
       },
       403,
     );
+  }
+  if (error instanceof ChannelSearchInputError) {
+    // Its message is already the sentence for the person; see the SEARCH_*_ERROR constants.
+    return context.json({ error: error.message }, 400);
   }
   if (error instanceof ChannelPackageOwnedError) {
     return context.json(
