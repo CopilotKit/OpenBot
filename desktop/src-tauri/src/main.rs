@@ -8609,6 +8609,20 @@ fn local_eval_answer(
         return Ok(local_eval::Report::engine_not_answering());
     }
     let mut report = local_eval::run_installed(attempt, action, stack)?;
+    if action == local_eval::Action::Status
+        && backend_lost(
+            &report,
+            local_eval_state::read(root, None).as_ref(),
+            stack,
+            || local_eval::cluster_gone(stack),
+        )
+    {
+        log::warn!(
+            "[local eval] {}'s cluster is gone from OpenBot's engine; offering to start fresh",
+            stack.as_str()
+        );
+        report.reason = Some(local_eval::Reason::StackLost);
+    }
     // An Intelligence an older app installed, behind the release this app's CLI installs, or one
     // whose update did not finish: the window updates it before it starts OpenBot on it.
     if action == local_eval::Action::Status {
@@ -8625,6 +8639,28 @@ fn local_eval_answer(
         }
     }
     Ok(report)
+}
+
+/**
+Whether the backend OpenBot created for this installation is gone, so the window offers to start
+fresh rather than Retry (`local_eval::Reason::StackLost`).
+
+Box I: OpenBot's Podman machine was removed and made again, and the backend's cluster, with
+OpenBot's database, went with the old one. The installation still recorded the stack, so every
+status the CLI ran failed at its ownership check ("status 404"), answered `local_command_failed`
+with no stack, and the window said "Setup stopped partway through with an error. Retry." forever.
+Only for a stack OpenBot created and recorded here, asked about by its own id, and only when the
+engine answers and lists none of its cluster's containers.
+*/
+fn backend_lost(
+    report: &local_eval::Report,
+    recorded: Option<&local_eval_state::State>,
+    asked: &local_eval::StackId,
+    cluster_gone: impl FnOnce() -> Option<bool>,
+) -> bool {
+    local_eval::failed_without_stack(report)
+        && recorded.is_some_and(|state| state.tied_to_openbot() && state.stack_id() == *asked)
+        && cluster_gone() == Some(true)
 }
 
 /**
@@ -14396,6 +14432,52 @@ mod tests {
             error.said,
             "OpenBot couldn't start again after reconnecting to the internet. Try Start again."
         );
+    }
+
+    /// Box I: OpenBot's machine made again, the backend's cluster gone with the old one, and every
+    /// status "local-command-failed, no stack", which the window said as "Setup stopped partway
+    /// through with an error. Retry." for good. It is now said as a lost backend, with Start fresh,
+    /// but only for the stack OpenBot created and recorded here, asked about by its own id, once
+    /// the engine answers without its cluster.
+    #[test]
+    fn a_backend_whose_cluster_is_gone_is_said_lost_only_when_openbot_made_it() {
+        use local_eval::{Licence, Outcome, Readiness, Reason, Report, StackId};
+        let failed = |reason, stack: Option<local_eval::Stack>| Report {
+            outcome: Outcome::Failed,
+            stack,
+            reason,
+            readiness: Readiness::Unknown,
+            licence: Licence::Unknown,
+            licence_expires_at: None,
+            update_to: None,
+            checks_passed: false,
+            shortfall: None,
+        };
+        let asked = StackId::parse("local-1915a7aafba78d6207a561b0").unwrap();
+        let recorded = |ownership| local_eval_state::State {
+            stack: "local-1915a7aafba78d6207a561b0".into(),
+            ownership,
+            phase: local_eval_state::Phase::Installed,
+            connected: true,
+        };
+        let created = recorded(local_eval_state::Ownership::Created);
+        let lost = failed(Some(Reason::LocalCommandFailed), None);
+
+        assert!(backend_lost(&lost, Some(&created), &asked, || Some(true)));
+        // The cluster is there, or the engine couldn't say: an ordinary failure, with Retry.
+        assert!(!backend_lost(&lost, Some(&created), &asked, || Some(false)));
+        assert!(!backend_lost(&lost, Some(&created), &asked, || None));
+        // A stack OpenBot found and shares, none recorded, or another one asked about.
+        let shared = recorded(local_eval_state::Ownership::Shared);
+        assert!(!backend_lost(&lost, Some(&shared), &asked, || Some(true)));
+        assert!(!backend_lost(&lost, None, &asked, || Some(true)));
+        let other = StackId::parse("local-0000").unwrap();
+        assert!(!backend_lost(&lost, Some(&created), &other, || Some(true)));
+        // Any other answer: the engine isn't even asked.
+        let unavailable = failed(Some(Reason::DockerUnavailable), None);
+        assert!(!backend_lost(&unavailable, Some(&created), &asked, || {
+            panic!("asked the engine")
+        }));
     }
 
     /// The tester's Start: Docker Desktop 4.27.2 answered, and Compose v2.24.5 stopped at its first

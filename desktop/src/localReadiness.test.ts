@@ -34,6 +34,7 @@ const reasons: LocalReason[] = [
   "dashboard-unavailable",
   "browser-open-failed",
   "resources-short",
+  "stack-lost",
   "unrecognized",
 ];
 
@@ -65,6 +66,27 @@ function hasText(said: string, slug: string): boolean {
   return said.toLowerCase().includes(slug);
 }
 
+/**
+ * Box I: OpenBot's machine was made again and the backend went with the old one, so every status
+ * failed and the row said "Setup stopped partway through with an error. Retry." for good. A lost
+ * backend says what happened and what to do, honestly, and offers Start fresh instead of Retry.
+ */
+test("a lost backend says the saved data is gone and offers Start fresh", () => {
+  const row = localReadiness({
+    ...base,
+    intelligence: report({
+      outcome: "failed",
+      reason: "stack-lost",
+      stack: null,
+    }),
+  }).intelligence;
+  expect(row).toEqual({
+    state: "blocked",
+    said: "OpenBot's saved data on this computer is gone, with your Bots and conversations. Start fresh to set OpenBot up again. Your sign-in and AI connection stay.",
+    action: "start-fresh",
+  });
+});
+
 test("every reason gives a plain, non-empty sentence without its own name or Intelligence's", () => {
   for (const reason of reasons) {
     const rows = localReadiness({
@@ -93,7 +115,7 @@ test("every failure gives a plain, non-empty sentence without its own name or In
 });
 
 test("the reason and failure lists in this test match the source", () => {
-  expect(new Set(reasons).size).toBe(19);
+  expect(new Set(reasons).size).toBe(20);
   expect(localFailures.length).toBe(18);
 });
 

@@ -41,7 +41,8 @@ export type ReadinessAction =
   | "restart-intelligence"
   | "restart-openbot"
   | "sign-in"
-  | "repair";
+  | "repair"
+  | "start-fresh";
 
 export type ReadinessRow = {
   state: ReadinessState;
@@ -315,6 +316,12 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
       disk: false,
     }),
     "retry",
+  ),
+  // Box I: OpenBot's machine was made again, and the backend and its data went with the old one.
+  // Honest about what is gone, and the one way on.
+  "stack-lost": blocked(
+    "OpenBot's saved data on this computer is gone, with your Bots and conversations. Start fresh to set OpenBot up again. Your sign-in and AI connection stay.",
+    "start-fresh",
   ),
   unrecognized: couldNotStart,
 };
