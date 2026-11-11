@@ -5,7 +5,7 @@ import {
   IconDots,
   IconPlus,
 } from "@tabler/icons-react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { TEACH_A_BOT } from "@/components/browser/browser-nav-item";
@@ -49,6 +49,7 @@ import {
   type PluginsPage,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
+import { queryClient } from "@/query-client";
 import { EditSkill } from "./edit-skill";
 import { NewSkill } from "./new-skill";
 
@@ -78,7 +79,6 @@ export function SkillsSettingsPage({
   editing?: string;
 }) {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const paths = useManagePaths();
   const personal = paths.edition === "personal";
   const plugins = useQuery(pluginsPageQueryOptions());
