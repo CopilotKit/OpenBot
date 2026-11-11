@@ -241,7 +241,7 @@ test("deleting a schedule takes a second press", async () => {
   expect(confirm.textContent).toContain("Delete for good");
   fireEvent.click(confirm);
   await waitFor(() =>
-    expect(sent).toEqual([
+    expect(sent).toStrictEqual([
       { method: "DELETE", url: "/api/routines/routine-1", body: undefined },
     ]),
   );
