@@ -31,7 +31,9 @@ trail says so on every call, and an administrator connects it as the team, from 
 ## The key
 
 `COMPOSIO_API_KEY` is one key for the whole deployment, and it is optional. It is the only Composio
-setting there is — nothing per app, nothing per person. One key does not mean one shared account:
+setting most deployments need: nothing is set per person, and the one setting per app is the client
+an app on a server-to-server grant needs (see [the 56 that are not
+offered](#the-56-that-are-not-offered)). One key does not mean one shared account:
 Composio keeps people apart by a user id sent with every call, so one person's connections are never
 reachable from another's.
 
@@ -80,11 +82,12 @@ runtime receives only the provisioned project's key. That key is still deploymen
 not create a separate Composio project for each OpenBot organization or person. Enabling an app
 continues to create or reuse that project's app authorization config.
 
-**Source-checkout launch dependency:** publish a CopilotKit CLI supporting `integrations composio
-provision` and deploy its authenticated Ops provisioning backend before releasing this startup flow.
-Missing `npx`, an older CLI, expired sign-in, unavailable provisioning, or network errors stop local
-startup with a sanitized action to take. Sign in again and rerun `bun run setup:composio`; the saved
-identity is retained. Preparing `.env` with your own project key remains supported.
+The helper needs a CopilotKit CLI release that supports `integrations composio provision` and a
+CopilotKit deployment with the hosted provisioning service enabled. Missing `npx`, an older CLI,
+an expired sign-in, unavailable provisioning or a network error makes `bun run setup:composio`
+exit with a sanitized action to take, and `start.sh` then starts OpenBot with apps unavailable.
+Sign in again and rerun `bun run setup:composio`; the saved identity is retained. Preparing `.env`
+with your own project key remains supported.
 
 Direct server, container, and Helm launches do not run the laptop helper. Prepare the project key
 on an operator machine first and transfer `COMPOSIO_API_KEY` using your normal secret management
@@ -96,15 +99,14 @@ at boot to find out, so the first real request is what says whether it works. `c
 is how an operator asks that question deliberately rather than by watching somebody else fail.
 
 Unset is a supported state for launches without setup. What is on screen with no key is exactly
-one row, on `/admin/plugins` under the **More
-apps** heading, titled *Composio* and reading *Add your Composio key to enable a catalogue of tools.
-Set COMPOSIO_API_KEY on this deployment.* It has no chevron and it is not a link, because there is
-nowhere to go until the key is set. It names the setting rather than hiding the feature, so an
-administrator who has heard of Composio can find out what it wants — and because the heading above
-it stays too, the handful of reviewed connectors does not read as the whole story.
+one row, on `/admin/plugins` under the **More apps** heading, titled *Browse apps* and reading *Not
+set up. Set COMPOSIO_API_KEY on this deployment to browse its apps.* It has no chevron and it is not
+a link, because there is nowhere to go until the key is set. It names the setting rather than hiding
+the feature, so an administrator can find out what it wants, and because the heading above it stays
+too, the handful of reviewed connectors does not read as the whole story.
 
 That row is the whole of it. There is no directory to browse, no picker, no brokered app on
-anybody's connected-accounts page, and no Composio tool for a Bot to call.
+anybody's Connections page, and no Composio tool for a Bot to call.
 
 An app enabled while a key was set and then left without one keeps its row and its grants. Its page
 says the key is missing, and its calls refuse with a sentence saying the same — distinguished, as
@@ -152,7 +154,9 @@ It is all reads. It mints no connect link and starts no session, because a link 
 capability and a diagnostic that printed one would leave somebody's mailbox in a terminal scrollback.
 The key is never printed either: every line goes out through a redactor, including the vendor's own
 sentences, which are the only lines carrying text nobody here wrote. `--user` takes the id this
-deployment sends Composio as the person a call is for — the same id `composio_connections` records.
+deployment sends Composio as the person a call is for: the `vendor_user_id` on that person's
+`brokered_connections` row, which is their own user id except on a single-user deployment (see
+[Configuration](../configuration.md#authentication)).
 `--call` additionally runs one read-only action, `GMAIL_GET_PROFILE`, and only after checking
 Composio's own behaviour label at call time rather than trusting the name.
 
@@ -176,7 +180,9 @@ OAuth application registered by whoever runs this deployment are filtered out be
 runs: 56 of the 1540 apps Composio published on 2026-09-13, hidden because there is nowhere here to
 put a client id and secret, and an **Add** button that could only ever meet a refusal is worse than
 an app that is honestly absent. Every other kind is offered. What each of those kinds asks, and of
-whom, is the section after this one.
+whom, is the section after this one. Composio's own tooling, which its catalogue lists beside the
+apps (Composio, Composio Search and Browser Tool), is left out too, and a request to enable one is
+refused as not listed. One enabled before it was left out keeps working.
 
 Each row carries the app's **action count**, and that number is worth reading before pressing
 **Add**. Slack publishes 167 actions, 73 of them reads — several times more than a model handles
@@ -218,8 +224,10 @@ a grant nobody made is the one thing this codebase is most consistently careful 
 Enabling the app gives no Bot access to it. From the app's page at `/admin/plugins/composio-<slug>`,
 open one Bot to get a screen listing every action with a switch each — searchable, split into reads
 and writes, with *turn on every read-only action* as the one bulk action, which says how many tools
-that Bot will then carry before it does it. Every call then checks the grant, evaluates the action
-policy, and writes an audit row.
+that Bot will then carry before it does it. The same screen takes a sentence instead, such as
+"Reads everything and writes drafts, but never sends or deletes": **Choose actions** turns it into
+an exact set of the app's actions, shows which turn on and off, and changes nothing until **Save
+changes**. Every call then checks the grant, evaluates the action policy, and writes an audit row.
 
 A destructive action renders as danger, and asks before it runs, as deleting does (see
 [Approvals](../approvals.md)). Nothing renders as reassurance: an action that does not claim to be
@@ -289,9 +297,12 @@ key app does not leave OpenBot: it asks Composio what the app wants, draws those
 press after that carries what was typed in them.
 
 The boxes are the app's own. Their names, labels, help text, defaults and which of them are secret
-are published per app by Composio and used verbatim — one key for most apps, a key and a workspace
-subdomain for Shopify, two values for Firecrawl — and the names are sent back exactly as they came,
-because a name renamed on the way through is a box somebody filled in that no app ever reads. A
+are published per app by Composio (one key for most apps, a key and a workspace subdomain for
+Shopify, two values for Firecrawl), and the names are sent back exactly as they came, because a
+name renamed on the way through is a box somebody filled in that no app ever reads. Only the words
+a person reads change: a generic label is put in plain words ("Access token" for "Bearer Token",
+"Web address" for "Base URL"), help text that names Composio says OpenBot, and above the boxes the
+form says where the key comes from, with a link to the app's own page for it where one is known. A
 field Composio marks as not user-visible is not drawn. A field of any type other than text, or one
 with no name at all, is a refusal rather than a box drawn blind: somebody typing a path into a box
 labelled *Certificate* and being told they are connected is the failure that guard exists to stop.
@@ -300,8 +311,8 @@ connected with the half that still matches is an account every screen here draws
 
 **What is typed in is held by Composio and never by this deployment.** The values arrive on one
 request, travel to Composio in the next call, and are gone when the handler returns. They are not
-written to a table — `composio_connections` goes on being a row that names an app and a person and
-nothing else — not to a log line, not into an error body, and not into the audit row, which records
+written to a table (`brokered_connections` goes on being a row that names an app and a person and
+nothing else), not to a log line, not into an error body, and not into the audit row, which records
 the field *names* that were filled and never a value. The one rule this connector reverses for them
 is its own: everywhere else a vendor's thrown object is carried along as `cause` because it holds
 the request it was made for, and on this one call that request is somebody's key, so the adapter
@@ -335,49 +346,44 @@ and a person pressing **Re-check** on their own connection — and neither reads
 request body: the account probed is the session's own. The action is chosen by this deployment from
 recorded metadata and never from anything a request named, and it carries no arguments, which is
 also what leaves content inspection nothing to inspect. A probe that ran leaves an
-`mcp.connection_verified` row naming the action and the verdict, so the calls that happened are
-readable; the single exception is a bad key on a first connection, which is undone completely —
-no account, no row, nothing for anybody to do — and files nothing, so that the rows which do exist
-keep meaning *something is still standing here*. The consequence to accept knowingly is that this is
+`mcp.connection_verified` row naming the action and the verdict, and a connect files one even where
+nothing could be tried, with no action named, so the calls that happened are readable. The
+consequence to accept knowingly is that this is
 the first vendor call in this deployment attributable to a person rather than to a Bot, and queries
 over that trail were written assuming otherwise.
 
-What the page then says is the moment it last looked, never a present tense: *Connected with a key
-you provided, last checked 13 Sep.* Three outcomes are possible and the page keeps them apart. The
-probe ran and answered, and the row is verified as of that instant. The probe ran and the vendor
-refused, and the account this connect just made is deleted at Composio **by its id** — not by app,
-because ending every account somebody holds for an app is what disconnect means and the intent here
-is only to undo what just happened — and nothing is recorded. Or there was nothing to try — the app
-publishes no action that passes both conditions, or none at a version this deployment recorded — in
-which case the key is kept and the page says it was accepted without being checked, which is the
-honest sentence and not an apology for one. A person with a perfectly good key must not be told the
-vendor rejected it because an app's listing was thin.
+What the page then says is the moment it last looked, never a present tense: *Connected with your
+key. Last checked 13 Sep.* Three outcomes are possible and the page keeps them apart. The probe ran
+and answered, and the row is verified as of that instant. The probe ran and the app answered with a
+failure, and the account stays: the row is recorded unchecked under the action the check spent, and
+the press reports what the app said. Or there was nothing to try (the app publishes no action that
+passes both conditions, or none at a version this deployment recorded), in which case the key is
+kept and the page says so: *Connected with your key. It hasn't been checked with Perplexity. At the
+time, Perplexity had no safe way to check a key. That's about the app, not your key.* A person with
+a perfectly good key must not be told the vendor rejected it because an app's listing was thin. A
+connect whose check could not reach Composio at all is recorded the same unchecked way, with the
+attempt on the trail.
 
-There is one state worse than those, and it has a sentence of its own for that reason: a key the
-vendor refused, over an account that is still standing at Composio. Two paths arrive at it and they
-arrive for different reasons. A connect whose probe failed tried to withdraw the account it had just
-made and Composio would not take it back — and leaving no row then would not mean nothing was left
-behind, it would mean a live account nothing on any screen names and the person cannot disconnect,
-because disconnect works off the row. A re-check the vendor refuses never tried to withdraw
-anything, deliberately: that account predates the press and is the person's own, so taking it away
-in order to report a bad key would destroy the thing they came to repair.
+The failed check has a sentence of its own: a check that did not come back clean, over an account
+that is still standing at Composio. Two paths arrive at it. A connect whose check failed leaves the
+account it just made, because what Composio answers carries no status and no error code: a rate
+limit, a scope the key lacks for that one action and a key the vendor really rejected all look the
+same, and deleting the account of a good key would cost the person the key itself, which was never
+stored here. A re-check that fails never withdraws anything either: that account predates the press
+and is the person's own, so taking it away would destroy the thing they came to repair.
 
-Either way the row is written unverified and the person is told all three facts rather than left to
-conclude their key might be fine: *Your key was checked against Perplexity and rejected, and the
-account it was checked in still stands at Composio, so disconnect it here, or fix the key at
-Perplexity and press Re-check.* What the sentence does not do is say **why** the account stands,
-and the omission is deliberate rather than vague. Blaming a failed withdrawal is true on the connect
-path and false on the re-check, where nothing ever attempted a removal; the standing account is the
-actionable half on both, and which path wrote the row is not recoverable from it afterwards. Both
-ways out are named because neither is obvious from a row that still reads "Connected": the account
-ends with the button beside the line, and a key corrected at the vendor is worth a second check
-rather than a second connection. An audit row naming the action that was tried records the same
-state for whoever reads the trail a week later, because a sentence one person read once outlives
-nothing.
+Either way the row is written unverified and the person is told what is true rather than a verdict
+on their key: *Your key didn't pass a check with Perplexity. That may be the key, or Perplexity
+itself. Your account is still connected. Press Re-check to try again, or disconnect and connect with
+a new key.* Both ways out are named because neither is obvious from a row that still reads
+"Connected": the account ends with the button beside the line, and a check that failed for a
+passing reason is worth a second press rather than a second connection. An audit row naming the
+action that was tried records the same state for whoever reads the trail a week later, because a
+sentence one person read once outlives nothing.
 
 **Which of the three a row is in is a fact about the action a check actually spent, and the page
 keeps it across a reload.** The flag alone cannot say: `false` is both *this app published nothing
-safe to try a key on* and *your key was checked and rejected and the account is still standing*.
+safe to try a key on* and *your key failed a check and the account is still standing*.
 So the connections read carries two fields beside the flag and the date, and they answer two
 different questions. `probe` is the action the last check SPENT, written down by that check and read
 back off the row — a fact about the past, and what the row's sentence is drawn from. `checkable` is
@@ -387,8 +393,9 @@ spelling of the other, and a screen that asks either of them the other's questio
 the other field exists to prevent. A re-check or a key just handed over names the action it was
 actually spent on, and that answer wins over the recorded one, because an answer is a newer record
 of the same thing and a check that has just run must not be overruled by a read taken before it. A
-re-check the vendor refuses is not an answer at all: it is raised, and Composio's own sentence for
-it reaches the person as a refusal rather than as a row that quietly changed its wording.
+re-check that fails records the row unchecked under the action it spent and is answered as a
+refusal carrying the app's own sentence, so the person reads what came back and not only a row
+that changed its wording.
 
 While the name was derived on every read, an administrator's Refresh could rewrite what a check had
 found. Somebody connects a key to an app that publishes nothing safe to try it on, and the row
@@ -404,15 +411,15 @@ later reading of today's metadata can move it.
 **Nothing re-checks on page load.** That call is spent on the person's own account and against their
 own rate limit at the vendor, so verifying on every render would burn somebody's quota at Linear to
 redraw one word on a page they were passing through. **Re-check** is a button, and it runs the same
-probe against the account that already exists: it creates nothing, and a key the vendor rejects
-leaves their account alone — it is the key that is wrong, and taking the account away would destroy
-the thing they are trying to repair. It is drawn on a key connection and on nothing else, and the
+probe against the account that already exists: it creates nothing, and a check that fails leaves
+their account alone, because taking the account away would destroy the thing they are trying to
+repair. It is drawn on a key connection and on nothing else, and the
 one state it is withheld in is an app with nothing to check a key against today, where pressing it
 could only ask for the same answer again. That question is asked of the app and never of the record:
 a key accepted when the app published nothing records no action, permanently and correctly, and a
 button withheld on that record stays withheld even after a Refresh has given the app something to
 try — while pressing that button is the only thing in the product that could ever put an action into
-the record. A key the vendor has just rejected keeps its button, because that is the person most
+the record. A key that has just failed a check keeps its button, because that is the person most
 likely to have gone and fixed something.
 
 ### Disconnecting a key does not end it at the vendor
@@ -421,8 +428,8 @@ Disconnect promises that an account ends at Composio and not only here, and for 
 is the whole truth: the grant dies at the provider. For a key app there is nothing upstream to end.
 The account goes at Composio, and the key is still live at the vendor and still works for anyone
 holding it — including whoever else it was already pasted into. So the sentence differs and names
-the step this deployment cannot take: *Removed from Composio. Your key still works at Perplexity —
-rotate it there if you meant to end its access.*
+the step this deployment cannot take: *Disconnected. Your key still works at Perplexity. Change it
+there to stop all access.*
 
 The audit row says the same thing in its own half of the sentence. `vendorRevocationRequested` is
 `false` for a key connection by construction rather than by what the vendor found, because
@@ -435,12 +442,12 @@ asked for and nobody could have made.
 Thirty-four apps need no authentication at all, and Composio refuses to hold an authorization config
 for one of them — *"Cannot create an auth config for toolkit hackernews because it does not require
 authentication."* Enabling such an app is therefore the `mcp_servers` row and its actions and
-nothing else: no config, no consent, no account. Its row on a connected-accounts page says the app
+nothing else: no config, no consent, no account. Its row on the Connections page says the app
 needs none and carries no button, not even a disabled one, because there is no act to offer and a
 greyed control announces a step somebody is missing when they are not.
 
 **The call gate had to learn about this, and the alternative was worse than it looks.** A brokered
-call is decided on one row: `(toolkit, user_id)` in `composio_connections` is the whole of the
+call is decided on one row: the app and the person in `brokered_connections` are the whole of the
 permission. A no-auth app can never have one, so the gate reads the app's recorded scheme beside the
 row it already loads and lets a `NO_AUTH` app through with none. Writing a row anyway would have
 been the easy fix and would have poisoned the table: every row in it means *this person granted this
@@ -541,13 +548,17 @@ already holds, **Connect** goes nowhere: it opens a form and asks for it. The re
 is about the trip; the section above is about the form.
 
 **The address they come back to is built here, and a caller has no say in it.** It is this
-deployment's `OPENBOT_APP_URL` plus one of two known pages, so what a request can choose is which
+deployment's `OPENBOT_APP_URL` plus one of three known pages, so what a request can choose is which
 page and never which site: an address taken from a body or a query would be an open redirect with a
 consent screen in front of it, which is the same reason this deployment's own OAuth flow narrows its
-`returnTo` to a name. A deployment with no app URL configured has no absolute address to hand over
-— the consent screen is on Composio's origin, so a relative one resolves against theirs — and
-**Connect** refuses there, naming the setting, rather than minting a link that would strand somebody
-on Composio's page having just granted access to their mailbox.
+`returnTo` to a name. The third page is for OpenBot Desktop, whose window opens the consent screen in
+the person's browser: it comes back to `/desktop-return`, which records the account and brings the
+Desktop window forward, rather than leaving OpenBot open in a browser tab. A deployment with no app
+URL configured has no absolute address to hand over (the consent screen is on Composio's origin,
+so a relative one resolves against theirs), and **Connect** refuses there rather than minting a
+link that would strand somebody on Composio's page having just granted access to their mailbox. The
+person is told to ask an administrator to set OpenBot's address, and the server log names
+`OPENBOT_APP_URL`.
 
 **The link is yours alone.** It is minted for the session's own id and can be asked for on nobody
 else's behalf. It is a bearer capability — whoever opens it binds *their* account to the id it was
@@ -559,21 +570,27 @@ signed in it, so the row that lets calls through is written only after Composio 
 is live. The page asks on return, and asks again on load, so a row that drifted heals. Composio is
 the source of truth and the row here is a cache of it.
 
-**A failure at Composio arrives as Composio's own sentence.** A wrong key, a revoked one, an app
-whose authorization config was deleted at the dashboard: each of those comes back as the one
-sentence the vendor wrote — *Invalid API key provided.* — with everything that travelled beside it
-left where it was. The key never appears anywhere, nor the connect link, nor the vendor's thrown
-object, which is an entire HTTP response including headers and trace ids. Where the vendor reported
-a failure and said nothing about it, the sentence is this deployment's own and names the step to
-take rather than echoing a placeholder.
+**A failure at Composio arrives as the vendor's own sentence, unless it names Composio.** A wrong
+key, a revoked one, an app whose authorization config was deleted at the dashboard: each of those
+comes back as the one sentence the vendor wrote (*Invalid API key provided.*), with everything that
+travelled beside it left where it was. On the routes a person calls (connect, confirm, re-check,
+disconnect), a sentence that names Composio was written for an operator who can open Composio's
+dashboard, so the person reads the route's own sentence instead, saying what failed and who to ask,
+with the same status, and the original goes to the server log as a
+`broker-sentence-kept-from-person` line. The key never appears anywhere, nor the connect link, nor
+the vendor's thrown object, which is an entire HTTP response including headers and trace ids. Where
+the vendor reported a failure and said nothing about it, the sentence is this deployment's own and
+names the step to take rather than echoing a placeholder.
 
-**One account per person per app, and the second is refused.** Composio would happily hold several
-accounts for one person and one app, but the call that runs an action names the person and not the
-account — so with two Gmail accounts connected, which mailbox a Bot reads would be Composio's
-choice, and neither the table here nor the audit row could say which one it was. Connect therefore
-refuses while a live connection for that app already exists, and names the way to switch: *You
-already have an account connected to Slack. Disconnect it first if you want to connect a different
-one.* The app's own title, never the row's id. It is per app and nothing more — Gmail and Linear and Notion connected alongside each other are untouched.
+**A person can connect more than one account of an app.** Once an app is connected, its page under
+Connections (and, for an administrator's own account, the app's page under Plugins) offers
+**Connect another account**: two Gmail mailboxes, a work calendar beside a personal one. Composio
+files every account a person holds under one user id and tells them apart by a connected account
+id, and a call names which account it runs in, so which mailbox a Bot reads is never Composio's
+choice. The page lists each account by its address, with **Make default** beside each. A Bot uses
+the account a request names, and the default where none is named: the first one connected, until
+the person picks another. A Shared app's team account is one account; connecting a different one
+means disconnecting the one that stands first.
 
 ### Disconnecting
 
@@ -582,30 +599,33 @@ ends at Composio, not just here — which, for an app whose secret somebody type
 and the page says so rather than letting *disconnected* be read as *revoked*. Revoke-then-delete is
 the ordering everywhere in this connector, so a failure between the two leaves access dead rather
 than live and unreachable; pressing Disconnect again is the whole recovery. Audited as
-`mcp.account_disconnected`.
+`mcp.account_disconnected`. With several accounts connected, each has its own Disconnect that ends
+only that account, and the last one goes through the whole disconnect.
 
 ## What an app is for one person on one Bot
 
-Every app a Bot holds is in one of six states for the person looking, and the server decides which
+Every app a Bot holds is in one of eight states for the person looking, and the server decides which
 — from the app's row, the grants, the person's own connection and the team account — so the Bot's
 page and a card in a conversation say the same thing a call would find:
 
 | State                  | Means                                                                      | Next step                         |
 | ---------------------- | -------------------------------------------------------------------------- | --------------------------------- |
 | `ready`                | Usable now: their own account, a connected team account, or no account     | None                              |
-| `not_connected`        | Enabled and granted; used under each person's account, and theirs is not connected | **Connect**, the Settings flow |
+| `not_connected`        | Enabled and granted; used under each person's account, and theirs is not connected | **Connect**, the Connections flow |
 | `reconnect`            | Connected once; the credential was withdrawn, or the vendor refused the key at the last check | **Reconnect** |
 | `shared_not_connected` | A Shared app whose team account is not connected, or whose key was refused | **Request access**                |
+| `shared_not_approved`  | A Shared app whose team account is connected, on a Bot that reaches more people than an administrator approved for that account | None: only an administrator can approve it, and a refused call files that request itself |
 | `disabled`             | Switched off: no row, no `COMPOSIO_API_KEY`, or something only an administrator can supply is missing | **Request access** |
 | `not_granted`          | Enabled, and this Bot holds none of its actions                            | **Request access**                |
+| `owner_grantable`      | Enabled, this Bot holds none of its actions, and the person looking owns the Bot and the app lets owners give it | **Give** the app to the Bot, connecting first where needed |
 
-"Connected" is what this deployment last recorded — the same `verified` and probe columns the
-Connected accounts page reads. Nothing asks the vendor per page load, so an account ended in
+"Connected" is what this deployment last recorded: the same `verified` and probe columns the
+Connections page reads. Nothing asks the vendor per page load, so an account ended in
 Composio's dashboard reads as `ready` until the next call or re-check finds out — and the call that
 finds out is refused with a card offering **Reconnect** (below).
 
 On the Bot's page, Connect opens the app's consent screen in a new tab through the same connect route
-Settings uses, and the row turns ready once the connection is recorded. An app connected with a typed
+Connections uses, and the row turns ready once the connection is recorded. An app connected with a typed
 key, and Reconnect on a Composio app (whose row has to be disconnected before a new account can be
 attached), go to the app's own page under `/connections` instead.
 
@@ -629,7 +649,7 @@ the refusal ends that. The card is drawn in the transcript, never folded into th
 
 `GET /api/plugins/for/:agentId/apps` lists every app the Bot holds, including a grant whose app is
 gone; `GET /api/plugins/for/:agentId/apps/:app` answers for one app by key or by name, held or not.
-Both answer only for a Bot the person may use. Settings still lists only enabled apps, and the
+Both answer only for a Bot the person may use. Connections still lists only enabled apps, and the
 directory is never listed to anybody but an administrator: an app nobody enabled appears only where
 a Bot needs it.
 
@@ -675,9 +695,9 @@ told to rotate one, because nobody here is looking at the screen. Re-adding the 
 rather than silently restoring everybody who had connected before.
 
 **Removing the person** revokes each of their brokered connections at Composio before clearing the
-rows, and reports what was revoked. The `composio_connections` table is keyed on
-`(toolkit, user_id)` and outlives the user record for exactly this reason — so offboarding can still
-find the connection after the person is gone.
+rows, and reports what was revoked. The `brokered_connections` table has no key to the user record
+and outlives it for exactly this reason, so offboarding can still find the connection after the
+person is gone.
 
 ## What the grants narrow, and what they do not
 
@@ -703,12 +723,15 @@ ask-before-write rule are the narrowing.
 
 ## Not built yet
 
-**Every write through a Shared app asks alike.** Composio publishes no "write but not destructive"
-distinction, so the ask-before-write rule on a Shared app asks for every write alike.
+**Every write through a Shared app asks alike.** The ask-before-write rule on a Shared app asks
+before every write the same way, whatever Composio labels it.
 
-**No way to give a Bot a whole large app to search.** A Bot carries the actions somebody switched on
-for it, one at a time. There is no search-and-run path for an app too large to tick through, which
-is why an app's action count is worth reading before it is enabled rather than afterwards.
+**No way to give a Bot a whole large app to search.** A Bot carries only the actions granted to it.
+An administrator can pick many at once, by the read-only bulk action or by describing them in a
+sentence, and a built-in Bot whose run would carry more than 50 tools keeps its app tools behind a
+search over what it was granted. There is no path that lets a Bot search and run an app's actions
+without each one being granted, which is why an app's action count is worth reading before it is
+enabled rather than afterwards.
 
 ## See also
 

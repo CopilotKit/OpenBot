@@ -155,11 +155,12 @@ failure carrying its own reason; the second is a request that ran past the conne
 are worth retrying, and a persistent one is about the path between this deployment and Google rather
 than about the account.
 
-### "You have not connected your Google Drive account."
+### "You have not connected your Google Drive account. Connect it and ask again."
 
 The Bot was asked to read as somebody with no connection stored. Connect at
-`/connections/google-drive`. There is no fallback to a deployment-wide credential —
-by design, since a fallback would answer with somebody else's access.
+`/connections/google-drive`, or with **Connect** on the card the conversation shows. There is no
+fallback to a deployment-wide credential, by design, since a fallback would answer with somebody
+else's access.
 
 ### The connection worked and stopped about an hour later
 
