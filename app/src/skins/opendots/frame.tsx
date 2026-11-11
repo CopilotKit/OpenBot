@@ -207,10 +207,10 @@ function Rail({
           <IconPlus className="size-[19px]!" />
         </Link>
       </RailTip>
-      <RailTip label="Search and jump">
+      <RailTip label="Command palette">
         <button
           aria-keyshortcuts={COMMAND_MENU_KEYS}
-          aria-label="Search and jump"
+          aria-label="Command palette"
           className={railButton}
           onClick={openCommandMenu}
           type="button"

@@ -109,7 +109,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
               type="button"
             />
           }
-          title="Search and jump"
+          title="Command palette"
         />
         <div className="mt-3 flex items-center justify-between">
           <h2 className={museText.heading}>Conversations</h2>

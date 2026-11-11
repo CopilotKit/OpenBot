@@ -77,7 +77,7 @@ test("the modifiers are still exact on the physical key", () => {
   ).toBe(false);
 });
 
-test("Search and jump's Cmd/Ctrl+K is the K key on any layout, and exact about its modifier", () => {
+test("The command palette's Cmd/Ctrl+K is the K key on any layout, and exact about its modifier", () => {
   const menu = getHotkey("command-menu").combo;
   const mod = /Mac|iPhone|iPad/.test(
     typeof navigator === "undefined" ? "" : navigator.platform,

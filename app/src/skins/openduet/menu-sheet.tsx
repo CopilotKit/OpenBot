@@ -177,7 +177,7 @@ export function MenuSheet({
             </span>
             <RowText
               line="Open any page, Bot or conversation"
-              name="Search and jump"
+              name="Command palette"
             />
             <CommandMenuKeys className="ml-auto max-md:hidden" />
           </button>

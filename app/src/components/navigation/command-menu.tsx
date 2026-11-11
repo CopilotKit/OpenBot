@@ -32,7 +32,7 @@ import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
 /**
- * Search and jump: one box that opens any page, Bot or conversation, from anywhere signed in.
+ * The command palette: one box that opens any page, Bot or conversation, from anywhere signed in.
  *
  * NAVIGATION ONLY. Every result opens a page that already exists and does nothing on its own: a
  * Bot opens its profile, never a turn, and there is nothing here to delete, approve, send, run,
@@ -79,7 +79,7 @@ export function useBeforeCommandNavigate(handler: () => void) {
 }
 
 /**
- * The shortcut as keycaps, for a frame's "Search and jump" entry: ⌘K on a Mac, Ctrl K elsewhere.
+ * The shortcut as keycaps, for a frame's "Command palette" entry: ⌘K on a Mac, Ctrl K elsewhere.
  * Hidden from a screen reader, which reads the entry's name; the shortcut is in `aria-keyshortcuts`.
  */
 export function CommandMenuKeys({ className }: { className?: string }) {
@@ -301,7 +301,7 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
       finalFocus={() => !navigated.current}
       showCloseButton={false}
     >
-      <DialogTitle className="sr-only">Search and jump</DialogTitle>
+      <DialogTitle className="sr-only">Command palette</DialogTitle>
       <DialogDescription className="sr-only">
         Open a page, a Bot or a conversation. Conversations are searched by
         their names and recent messages.

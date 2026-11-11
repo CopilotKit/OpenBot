@@ -32,7 +32,7 @@ import { deploymentKeys } from "@/lib/deployment/queries";
 import { settleReactWork } from "./settle-react-work";
 
 /**
- * Search and jump: Cmd/Ctrl+K anywhere signed in, a box, and the pages, Bots and conversations it
+ * The command palette: Cmd/Ctrl+K anywhere signed in, a box, and the pages, Bots and conversations it
  * finds. Navigation only, and never a page this person can't open.
  */
 
@@ -197,7 +197,7 @@ const options = (name: string) => {
 async function openMenu() {
   const drawn = await draw();
   await pressShortcut();
-  await within(document.body).findByRole("dialog", { name: "Search and jump" });
+  await within(document.body).findByRole("dialog", { name: "Command palette" });
   return drawn;
 }
 
@@ -225,13 +225,13 @@ test("a member never sees Admin; an admin does; the personal edition has no Memo
 
   await draw({ role: "admin" });
   await pressShortcut();
-  await within(document.body).findByRole("dialog", { name: "Search and jump" });
+  await within(document.body).findByRole("dialog", { name: "Command palette" });
   expect(options("Pages")).toContain("Admin");
   cleanup();
 
   await draw({ edition: "personal" });
   await pressShortcut();
-  await within(document.body).findByRole("dialog", { name: "Search and jump" });
+  await within(document.body).findByRole("dialog", { name: "Command palette" });
   expect(options("Pages")).not.toContain("Memory");
   expect(options("Pages")).not.toContain("Admin");
   expect(options("Pages")).not.toContain("OpenBot for Business");
@@ -334,7 +334,7 @@ test("Escape closes it, focus goes back, and a draft in the message box is kept"
   await userEvent.setup({ document }).type(message, "Half a thought");
   // Pressed while typing: a modified shortcut isn't a character, so it opens over the draft.
   await pressShortcut(message);
-  await within(document.body).findByRole("dialog", { name: "Search and jump" });
+  await within(document.body).findByRole("dialog", { name: "Command palette" });
 
   fireEvent.keyDown(box(), { key: "Escape" });
   await waitFor(() =>

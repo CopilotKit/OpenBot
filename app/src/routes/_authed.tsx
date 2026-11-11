@@ -35,7 +35,7 @@ export const Route = createFileRoute("/_authed")({
       <SkinAccountSync />
       {/* Opened by the personal edition's "OpenBot for Business" entry, from whichever skin draws it. */}
       <TeamFeaturesDialog />
-      {/* Search and jump, from every skin's navigation and from Cmd/Ctrl+K. */}
+      {/* The command palette, from Cmd/Ctrl+K and from the skins' menus. */}
       <CommandMenu />
       <SkinBotLook>
         <Outlet />

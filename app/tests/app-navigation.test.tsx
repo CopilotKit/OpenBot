@@ -315,15 +315,9 @@ test("a single-person install has no Sign out, because nobody signed in", async 
   expect(within(menu).getAllByRole("menuitem").length).toBeGreaterThan(0);
 });
 
-test("the sidebar's Search and jump opens the menu, with its shortcut on the row", async () => {
-  const { view, user } = renderSidebar("user");
-  const entry = await view.findByRole("button", { name: /Search and jump/ });
-  expect(entry.getAttribute("aria-keyshortcuts")).toBe("Meta+K Control+K");
-  expect(entry.textContent).toMatch(/K$/);
-  await user.click(entry);
-  expect(
-    await within(document.body).findByRole("dialog", {
-      name: "Search and jump",
-    }),
-  ).toBeTruthy();
+test("the sidebar has no command palette row: Cmd/Ctrl+K opens it", async () => {
+  const { view } = renderSidebar("user");
+  await view.findByRole("link", { name: "Routines" });
+  expect(view.queryByRole("button", { name: /Command palette/ })).toBeNull();
+  expect(view.queryByRole("button", { name: /Search and jump/ })).toBeNull();
 });

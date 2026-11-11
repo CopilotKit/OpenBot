@@ -70,7 +70,7 @@ afterAll(() => {
   GlobalRegistrator.unregister();
 });
 
-/** Counts what reaches the Search and jump shortcut, as the command menu listens for it. */
+/** Counts what reaches the command palette's shortcut, as the command menu listens for it. */
 function MenuShortcut() {
   const [opened, setOpened] = useState(0);
   useHotkey("command-menu", () => setOpened((count) => count + 1));
@@ -192,7 +192,7 @@ test("the same shortcuts still work while nobody is driving", async () => {
   );
 });
 
-test("Ctrl+K and Cmd+K typed into the Bot's browser go to it, and open no Search and jump", async () => {
+test("Ctrl+K and Cmd+K typed into the Bot's browser go to it, and open no command palette", async () => {
   const screen = await renderDriving(true);
 
   screen.press({ key: "k", code: "KeyK", keyCode: 75, ctrlKey: true });
@@ -205,7 +205,7 @@ test("Ctrl+K and Cmd+K typed into the Bot's browser go to it, and open no Search
   ]);
 });
 
-test("Search and jump's shortcut still works while nobody is driving", async () => {
+test("The command palette's shortcut still works while nobody is driving", async () => {
   const screen = await renderDriving(false);
   screen.press({ key: "k", code: "KeyK", keyCode: 75, ctrlKey: true });
   screen.press({ key: "k", code: "KeyK", keyCode: 75, metaKey: true });

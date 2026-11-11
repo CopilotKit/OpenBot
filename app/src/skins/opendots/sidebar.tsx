@@ -564,7 +564,7 @@ function WorkspaceLinks({
       >
         <IconSearch />
         <span className="min-w-0 flex-1 truncate text-left">
-          Search and jump
+          Command palette
         </span>
       </button>
       {/* OpenBot's own destinations, from the one list every frame reads. */}
