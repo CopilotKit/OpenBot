@@ -110,7 +110,7 @@ function WhatYourBotsLearn() {
               <ItemContent>
                 <ItemTitle>Memory</ItemTitle>
                 <ItemDescription>
-                  What your Bots remember about you and your work.
+                  Your Bots remember facts about you and your work here.
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
