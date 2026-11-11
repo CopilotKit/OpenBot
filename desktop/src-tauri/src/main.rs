@@ -5319,6 +5319,16 @@ impl uninstall::Computer for ThisComputerAtUninstall {
         acquire::remove_machine_named(name)
     }
 
+    fn stop_containers(&mut self, name: &str) -> Result<(), String> {
+        acquire::stop_all_containers(name)
+    }
+
+    fn clear_port_rules(&mut self, name: &str) -> Result<(), String> {
+        acquire::clear_own_port_rules(name).map(|removed| {
+            log::info!("[uninstall] removed {removed} port rule(s) of {name}");
+        })
+    }
+
     fn remove_installation(&mut self, root: &Path) -> Result<(), String> {
         uninstall::remove_installation(root, dirs::home_dir().as_deref())
     }
