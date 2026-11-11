@@ -532,6 +532,44 @@ pub fn orphan_rules(
 }
 
 /**
+Every port rule of OpenBot's own networks in `listing`, held by a running container or not.
+
+Before OpenBot's machine is removed (`uninstall`): once it is gone none of its containers is left,
+and in WSL's shared network namespace each of its rules would outlive it, ahead of the next
+OpenBot machine's rules for the same ports. Box I's next install then failed at "Opening OpenBot".
+`dead_rules` can't be used there, since the containers may still be running. The same rules are
+found, only OpenBot's machine's own networks' DNAT rules, so another machine's and Docker's stay.
+*/
+pub fn own_rules(listing: &str, networks: &str) -> Result<Vec<Rule>, String> {
+    let mut networks: serde_json::Value = serde_json::from_str(networks)
+        .map_err(|error| format!("could not read podman network inspect: {error}"))?;
+    for network in networks.as_array_mut().into_iter().flatten() {
+        // As if nothing ran on it: every address on it is about to be dead.
+        network["containers"] = serde_json::json!({});
+    }
+    dead_rules(listing, &networks.to_string())
+}
+
+/// Remove every one of OpenBot's port rules on `machine` (`own_rules`), through `run` as `podman`
+/// runs, and say which. For a machine about to be removed.
+pub fn clear_own(
+    mut run: impl FnMut(&[&str]) -> Result<String, String>,
+    machine: &str,
+) -> Result<Vec<Rule>, String> {
+    let said = run(&["machine", "ssh", machine, &read_script()])?;
+    let (listing, rest) = said
+        .split_once(BETWEEN)
+        .ok_or_else(|| format!("the machine did not list its rules and networks: {said}"))?;
+    // The routes and the published ports follow the networks (`read_script`); not needed here.
+    let (networks, _) = rest.split_once(ROUTES).unwrap_or((rest, ""));
+    let own = own_rules(listing, networks)?;
+    if !own.is_empty() {
+        run(&["machine", "ssh", machine, &delete_script(&own)])?;
+    }
+    Ok(own)
+}
+
+/**
 The bug and the fix on real netavark, in WSL as a privileged container on Docker: its network
 namespace is the one every distro shares, and OpenBot's machine and the person's are two "distros",
 each a mount and PID namespace with a fresh `/run` and its own storage
