@@ -173,11 +173,12 @@ Connections, for apps). See [How OpenBot works](how-openbot-works.md).
 **Connections** is every way a Bot signs in to something, because adding an app and connecting your
 account are the same decision when one person makes both:
 
-- `/connections` is one searchable grid of the apps that connect in one press, plus your GitHub
-  account, connected ones first. **Connect** adds the app and goes straight to signing in; **Add**,
-  for an app with no account (a free search provider), turns it on. Apps that need a key or an OAuth
-  client typed first wait behind **Show apps that need setup**, and a search finds them too. With a
-  broker set up, the last tile browses its directory of more apps.
+- `/connections` has one search over two sections. **Your apps** lists the apps your Bots use and
+  your GitHub account. **Add an app** lists every other app: **Connect** adds the app and goes
+  straight to signing in, **Add** turns on an app with no account (a free search provider), and
+  **Set up** opens the page of an app that needs a key or an OAuth client typed first. With a broker
+  set up, the last tile browses its directory of more apps. Routines is not listed: it is on for
+  every Bot and has its own page in the main menu.
 - Connecting an app gives **every Bot every tool** it lists, including the ones that change things.
   Ordinary changes just happen. Deleting, sending, sharing, posting and paying ask first in the
   conversation, where you can allow each once, for the conversation, or always. Turn on **Ask before

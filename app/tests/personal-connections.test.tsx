@@ -210,17 +210,48 @@ const tile = (view: ReturnType<typeof draw>["view"], key: string) =>
   view.getByTestId(`account-${key}`);
 
 describe("Connections in the personal edition", () => {
-  test("is one searchable list of every app that connects in one press, with no apps-versus-accounts split", async () => {
+  test("lists every app you could add under Add an app, the ones that need setup included, with no count", async () => {
     const { view } = draw("personal");
     await view.findByTestId("account-notion");
-    for (const key of ["notion", "exa"]) expect(tile(view, key)).toBeTruthy();
     expect(
       view.getByRole("textbox", { name: "Search connections" }),
     ).toBeTruthy();
-    expect(view.queryByText("Your apps")).toBeNull();
-    expect(view.queryByText("Add an app")).toBeNull();
+    // Nothing is in use yet, so there is no Your apps.
+    expect(view.queryByRole("heading", { name: "Your apps" })).toBeNull();
+    const add = view.getByRole("heading", { name: "Add an app" })
+      .parentElement?.parentElement as HTMLElement;
+    for (const key of ["notion", "exa", "google-drive", "exa-authenticated"])
+      expect(within(add).getByTestId(`account-${key}`)).toBeTruthy();
     expect(within(tile(view, "notion")).getByText("Connect")).toBeTruthy();
     expect(within(tile(view, "exa")).getByText("Add")).toBeTruthy();
+    expect(
+      within(tile(view, "exa-authenticated")).getByText("Set up"),
+    ).toBeTruthy();
+    expect(view.queryByRole("button", { name: /need setup/ })).toBeNull();
+    expect(view.queryByText(/in use/)).toBeNull();
+  });
+
+  test("apps in use are under Your apps, apart from the ones you could add", async () => {
+    connected = ["notion"];
+    const { view } = draw("personal");
+    const yours = (
+      await view.findByRole("heading", { name: "Your apps" })
+    ).parentElement?.parentElement as HTMLElement;
+    await waitFor(() =>
+      expect(within(yours).getByTestId("account-notion")).toBeTruthy(),
+    );
+    expect(within(yours).queryByTestId("account-exa")).toBeNull();
+    const add = view.getByRole("heading", { name: "Add an app" })
+      .parentElement?.parentElement as HTMLElement;
+    expect(within(add).queryByTestId("account-notion")).toBeNull();
+    expect(within(add).getByTestId("account-exa")).toBeTruthy();
+  });
+
+  test("Routines is not listed: it is on for every Bot and has its own page", async () => {
+    servers = [server("notion"), server("routines")];
+    const { view } = draw("personal");
+    await view.findByTestId("account-notion");
+    expect(view.queryByTestId("account-routines")).toBeNull();
   });
 
   test("links to the Vault, where saved logins and keys live", async () => {
@@ -231,20 +262,6 @@ describe("Connections in the personal edition", () => {
     ).toBe("/settings/vault");
     expect(view.queryByRole("link", { name: /Saved logins/ })).toBeNull();
     expect(view.queryByRole("link", { name: /^Keys/ })).toBeNull();
-  });
-
-  test("apps that need something typed first wait behind one button, or a search", async () => {
-    const { view, user } = draw("personal");
-    await view.findByTestId("account-notion");
-    expect(view.queryByTestId("account-google-drive")).toBeNull();
-    expect(view.queryByTestId("account-exa-authenticated")).toBeNull();
-    await user.click(
-      view.getByRole("button", { name: "Show 2 apps that need setup" }),
-    );
-    expect(tile(view, "google-drive")).toBeTruthy();
-    expect(
-      within(tile(view, "exa-authenticated")).getByText("Set up"),
-    ).toBeTruthy();
   });
 
   test("searching finds an app that needs setup", async () => {
@@ -266,9 +283,6 @@ describe("Connections in the personal edition", () => {
 
   test("Connect on an app nobody added adds it first; one that needs a client set up then opens its page", async () => {
     const { view, user, history } = draw("personal");
-    await user.click(
-      await view.findByRole("button", { name: /apps that need setup/ }),
-    );
     await user.click(await view.findByTestId("account-google-drive"));
     await waitFor(() =>
       expect(history.location.pathname).toBe("/connections/google-drive"),
@@ -287,9 +301,6 @@ describe("Connections in the personal edition", () => {
 
   test("Set up opens the app's page, where its key is typed", async () => {
     const { view, user, history } = draw("personal");
-    await user.click(
-      await view.findByRole("button", { name: /apps that need setup/ }),
-    );
     await user.click(await view.findByTestId("account-exa-authenticated"));
     await waitFor(() =>
       expect(history.location.pathname).toBe("/connections/exa-authenticated"),

@@ -416,6 +416,9 @@ backup taken before the upgrade instead. Four things change for an existing depl
     because they are things you make and come back to. Settings keeps what you set once:
     Computer, Approvals and Activity. Teach a Bot is no longer in the main menu: open it from the
     Skills page.
+  - **Connections has two sections.** **Your apps** lists what your Bots use. **Add an app** lists
+    everything else, the apps that need a key included, and ends with Browse apps. The count and
+    **Show apps that need setup** are gone, and so is Routines, which every Bot already has.
   - **Skills** holds the skills you wrote, the skills learned from your recordings and the
     ones waiting for your review. It replaces Capabilities > Skills and Settings > Learning.
   - **Settings > Computer** is one page. Browsers and This computer are sections of it.
