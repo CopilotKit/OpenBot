@@ -28,7 +28,7 @@ Chrome or Edge first: the helper opens an isolated browser window for the deploy
 sign-in, lets you choose an accessible project, and creates or reuses `openbot` before minting
 its runtime key. Local development may use a loopback HTTP origin. Existing key-only setups
 use authenticated Intelligence administration to create a container and assign it in OpenBot Admin.
-There is no managed licence step. Then add `OPENAI_API_KEY`.
+There is no managed license step. Then add `OPENAI_API_KEY`.
 
 The same CLI sign-in also prepares Composio on the first `bash scripts/start.sh`;
 `bun run setup:composio` runs that step alone, independently of Learning. A failure
@@ -157,11 +157,13 @@ success over the tables they should have created. Nothing is applied; the refusa
 and recreate the database, which is almost always the right answer for a development one; see
 [deployment.md](deployment.md) for how to repair one you have to keep.
 
-**If `drizzle-kit migrate` hangs and then exits non-zero with no error**, the journal names a
-migration file that is not there. A rebase does this: `meta/_journal.json` is a checked-in file, so
-restoring it can reinstate entries for migrations that were renamed. `drizzle-kit check` reports
-"Everything's fine" in that state, because it compares schemas rather than checking that the journal
-and the directory agree. Compare `meta/_journal.json` against `ls server/drizzle/*.sql`.
+**If `db:migrate` stops with `ENOENT` naming a `server/drizzle/<tag>.sql` file**, the journal names
+a migration file that is not there. `db:migrate` reads every file the journal lists before it
+applies anything, so nothing has been applied. A rebase does this: `meta/_journal.json` is a
+checked-in file, so restoring it can reinstate entries for migrations that were renamed.
+`drizzle-kit check` reports "Everything's fine" in that state, because it compares schemas rather
+than checking that the journal and the directory agree. Compare `meta/_journal.json` against
+`ls server/drizzle/*.sql`.
 
 ## Quality checks
 
