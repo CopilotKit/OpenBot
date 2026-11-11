@@ -99,8 +99,11 @@ function RoutineItem({
         {routine.enabled ? <IconClock /> : <IconPlayerPause />}
       </ItemMedia>
       <ItemContent className={routine.enabled ? "" : "opacity-60"}>
-        <ItemTitle className="line-clamp-2">
-          {routine.title ?? routine.instruction}
+        {/* The clamp is on the words: on the title itself it undid the gap before the kind label. */}
+        <ItemTitle>
+          <span className="line-clamp-2">
+            {routine.title ?? routine.instruction}
+          </span>
           <span className="font-normal text-muted-foreground text-xs">
             Schedule
           </span>

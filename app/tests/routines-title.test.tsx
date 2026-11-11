@@ -104,7 +104,7 @@ const endsWith = (text: string) =>
 
 /** The row's heading, without the small kind label ("Schedule") beside it. */
 function titleOf(element: HTMLElement) {
-  return element.closest('[data-slot="item-title"]')?.childNodes[0]
+  return element.closest('[data-slot="item-title"]')?.firstElementChild
     ?.textContent;
 }
 
