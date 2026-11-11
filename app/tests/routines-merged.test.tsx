@@ -271,7 +271,10 @@ test("the empty state gives one example and one way in", async () => {
   const view = draw();
   expect(await view.findByText("No routines for this Bot yet")).toBeTruthy();
   expect(document.body.textContent ?? "").toContain(
-    "Make one with New routine, like “every weekday at 9, send me yesterday's new leads”. Or ask a Bot in a conversation.",
+    "Like “every weekday at 9, send me yesterday's new leads”. Or ask a Bot in a conversation.",
+  );
+  expect(document.body.textContent ?? "").not.toContain(
+    "Make one with New routine",
   );
   expect(
     view.getAllByRole("button", { name: "New routine" }).length,

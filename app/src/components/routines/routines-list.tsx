@@ -508,7 +508,7 @@ function GoalItem({
 }
 
 const EMPTY_BODY =
-  "Make one with New routine, like “every weekday at 9, send me yesterday's new leads”. Or ask a Bot in a conversation.";
+  "Like “every weekday at 9, send me yesterday's new leads”. Or ask a Bot in a conversation.";
 
 /**
  * Every routine a Bot has, in one list: its routines, its goals, and its check-ins, each row the
