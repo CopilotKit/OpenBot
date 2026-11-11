@@ -539,3 +539,15 @@ test("beginRun and repeatingGoals report what makes a goal repeat, and nothing f
   for (const value of [endsWithRoutine, endsWithEvent, endsWithTrigger, plain])
     expect(repeating.has(value.id)).toBe(false);
 });
+
+test("a completed goal is not among the goals that repeat", async () => {
+  const done = await store.create(ownerId, { ...valid, recurring: true });
+  const open = await store.create(ownerId, { ...valid, recurring: true });
+  expect((await store.repeatingGoals(ownerId, botId)).get(done.id)).toBe(
+    "recurring",
+  );
+  await store.transition(ownerId, done.id, "completed");
+  const repeating = await store.repeatingGoals(ownerId, botId);
+  expect(repeating.has(done.id)).toBe(false);
+  expect(repeating.get(open.id)).toBe("recurring");
+});

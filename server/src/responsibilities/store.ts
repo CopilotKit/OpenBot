@@ -392,13 +392,25 @@ export function createResponsibilityStore(
       );
     },
     async repeatingGoals(ownerUserId, agentId) {
+      // Only what `repeatsOf` reads, and not the completed ones: a completed goal stays completed
+      // (`transition`), so no run or turn can be asked whether it may complete one. They are never
+      // deleted, so reading them here would grow for as long as the Bot is used.
       const goals = await database
-        .select()
+        .select({
+          id: responsibilities.id,
+          ownerUserId: responsibilities.ownerUserId,
+          agentId: responsibilities.agentId,
+          title: responsibilities.title,
+          recurring: responsibilities.recurring,
+          endsWhenMet: responsibilities.endsWhenMet,
+          subscriptions: responsibilities.subscriptions,
+        })
         .from(responsibilities)
         .where(
           and(
             eq(responsibilities.ownerUserId, ownerUserId),
             eq(responsibilities.agentId, agentId),
+            ne(responsibilities.status, "completed"),
           ),
         );
       const ids = goals.map((goal) => goal.id);

@@ -1054,7 +1054,9 @@ export function createRoutineStore(database: Database): RoutineStore {
           });
         }
       }
-      // The owner's goals, capped at 100 by the goal store, to say which one each routine runs.
+      // The owner's goals, to say which one each routine runs. Every one, completed too: a routine
+      // that runs no open goal is still drawn under the completed one (`goalShownFor`). Four short
+      // columns, and not limited: the goal store's limit of 100 is on its own list, not on this.
       const goals =
         rows.length > 0
           ? await database
