@@ -45,7 +45,7 @@ There are three kinds of build:
 |---|---|---|---|---|
 | Internal build | **Internal build** workflow | Yes | No | Workflow artifacts, kept 30 days |
 | Release candidate or beta | **Create release PR**, then merge | Yes | After approval | GitHub prerelease |
-| Stable release | **Create release PR**, then merge | No: it installs the latest release | After approval | GitHub release, marked Latest once Mac and Windows signing have both attached their signed installers |
+| Stable release | **Create release PR**, then merge | No: it installs the latest release, or its own when that is newer | After approval | GitHub release, marked Latest once Mac and Windows signing have both attached their signed installers |
 
 A release is made only by merging its release PR. Do not push a `v*` tag by hand: that builds and
 publishes nothing. It only starts Mac signing, which then has no release to attach to.
@@ -151,7 +151,9 @@ Use a candidate to test what will become a release. The details are in
    gh workflow run release.yml -R CopilotKit/OpenBot --ref main -f kind=rc -f bump=minor
    ```
 
-   **Expected:** a branch `release/X.Y` and a release PR into it.
+   **Expected:** a branch `release/X.Y` and a release PR into it. If `release/X.Y` already exists
+   because the line has shipped (a patch such as `1.0.1`), run from that branch with `bump=patch`
+   instead. See [Release candidates and betas](releasing.md#release-candidates-and-betas).
 
 4. Review and merge the release PR. Merging publishes the candidate.
    **Expected:** a GitHub prerelease `vX.Y.Z-rc.1` with `container-images.json`, the source
@@ -177,8 +179,9 @@ Use a candidate to test what will become a release. The details are in
    approve both signing runs for it and they finish (step 5).
 
 A stable release from `main` (`kind=stable`) follows steps 1 to 5 without a release branch. Its
-installers are not pinned: they install the latest release. When it becomes Latest, the fixed
-addresses in [What an installer contains](#what-an-installer-contains) give its installers.
+installers are not pinned: they install the latest release, or their own when that is newer. When
+it becomes Latest, the fixed addresses in [What an installer contains](#what-an-installer-contains)
+give its installers.
 
 ## 3. Install and test
 
@@ -201,9 +204,11 @@ Start from a clean machine, or the result proves nothing about a first install.
 4. Ask a Bot a question. **Expected:** an answer.
 5. Record the time from the first click to the open OpenBot, and anything that went wrong.
 
-Web search and app connections need a Composio key in `~/OpenBot/.env`
-(`%USERPROFILE%\OpenBot\.env` on Windows) as `COMPOSIO_API_KEY=...`. Without one, they are
-unavailable. That is expected for now.
+Web search needs no setup: Parallel Search is on from the first start. App connections need no key
+either: once you are signed in, the app gets this installation's own Composio project from
+CopilotKit, on the Account step or at the next Start. A `COMPOSIO_API_KEY=...` in `~/OpenBot/.env`
+(`%USERPROFILE%\OpenBot\.env` on Windows) is used instead when there is one. See
+[Apps through Composio](desktop-install.md#apps-through-composio).
 
 ## 4. Check a build
 
@@ -334,5 +339,5 @@ results in the PR or the issue for the build.
 | Windows setup stops with a virtualization message | The machine cannot run WSL 2. Use an x64 PC or an x64 VM with nested virtualization. |
 | Setup returns to Install after sign-in | The saved sign-in no longer works. Sign in again. |
 | A step shows **Retry** | Select it once. If it fails again, open **Technical details** and copy them into the issue. |
-| Web search does not work | Add a Composio key to `~/OpenBot/.env`. See [Install and test](#3-install-and-test). |
+| Apps cannot be connected, and `.env` has no `COMPOSIO_API_KEY` | The installation's Composio project may not be provisioned yet. Start OpenBot again: every Start retries until it has a key. See [Install and test](#3-install-and-test). |
 | `copilotkit local delete` says the CLI is busy | The reset script tries again for up to 90 seconds. If it still fails, quit OpenBot and run the reset again. |

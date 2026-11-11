@@ -10,7 +10,7 @@ bun scripts/update.ts kubernetes plan \
   --candidate /srv/approved/release-manifest.json \
   --candidate-sha256 "$APPROVED_MANIFEST_SHA256" \
   --policy /srv/customer-update-policy.json \
-  --chart /srv/approved/openbot-0.1.4.tgz \
+  --chart /srv/approved/openbot-0.2.0.tgz \
   --namespace customer --release openbot \
   --values /srv/customer-values.yaml \
   --output /srv/promotions/openbot \
