@@ -79,7 +79,7 @@ async function startSigningIn() {
   );
 }
 
-/** OpenBot's own engine check: a Docker with a full disk is caught here, before Start fails on it. */
+/** OpenBot's own engine check: a Docker short of disk is caught here, before Start fails on it. */
 test("an engine short of disk says how to raise it, and Try again checks again", async () => {
   invokeHandler = alreadySignedIn(async ({ command }) => {
     if (command === "local_eval_terms")
@@ -96,8 +96,47 @@ test("an engine short of disk says how to raise it, and Try again checks again",
     <CopilotKitAccount root="/tmp/account-engine" onDone={() => {}} />,
   );
   await screen.findByText(
-    "Docker Desktop is out of disk space. OpenBot needs 40 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Try again.",
+    "Docker Desktop doesn't have enough free disk space. OpenBot needs 40 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Try again.",
   );
+  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() =>
+    expect(
+      invokeCalls.filter((call) => call.command === "local_eval_terms"),
+    ).toHaveLength(2),
+  );
+});
+
+/**
+ * What `local_eval_terms` answered on Windows F, filled to 15 GB free, once Install had made
+ * OpenBot's machine: 13.2 GiB free on C:. `local_eval.rs` measures F's engine and checks its answer
+ * is this.
+ */
+const windowsFShortOfDisk = JSON.parse(
+  readFileSync(
+    new URL(
+      "../src-tauri/test-fixtures/local-eval/local-eval-terms-windows-f-short-of-disk.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+);
+
+/**
+ * Windows F was told "OpenBot is out of disk space. It needs 40 GB free." with 13 GB free, and
+ * again on Try again. The step says what is free and what is needed, and Try again asks again.
+ */
+test("a disk too short for OpenBot says what is free and what it needs", async () => {
+  invokeHandler = alreadySignedIn(async ({ command }) => {
+    if (command === "local_eval_terms") return windowsFShortOfDisk;
+    throw new Error(`unexpected ${command}`);
+  });
+  const screen = render(
+    <CopilotKitAccount root="/tmp/account-windows-f" onDone={() => {}} />,
+  );
+  await screen.findByText(
+    "This computer has 13.2 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.",
+  );
+  expect(screen.queryByText(/out of disk space/)).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));
   await waitFor(() =>
     expect(

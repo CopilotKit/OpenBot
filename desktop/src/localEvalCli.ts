@@ -105,6 +105,8 @@ export type Shortfall = {
   wsl?: boolean;
   /** The drive that holds its machine's disk, `C:`. */
   drive?: string;
+  /** `diskGb` is what is free on `drive`, which ran short rather than the machine's own disk. */
+  freeOnDrive?: boolean;
 };
 
 export type LocalReport = {
