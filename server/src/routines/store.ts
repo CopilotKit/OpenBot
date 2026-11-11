@@ -34,6 +34,7 @@ import {
   isNull,
   lte,
   ne,
+  or,
   sql,
 } from "drizzle-orm";
 import {
@@ -1090,11 +1091,31 @@ export function createRoutineStore(database: Database): RoutineStore {
           });
         }
       }
-      // The owner's goals, to say which one each routine runs. Every one, completed too: a routine
-      // that runs no open goal is still drawn under the completed one (`goalShownFor`). Four short
-      // columns, and not limited: the goal store's limit of 100 is on its own list, not on this.
+      // The goals a routine can run, to say which one each does (`goalShownFor`): the goal a routine
+      // records, and every goal of a Bot with an older routine, which names its goals in its
+      // instruction (`goalByTitle`). Completed ones too: a routine that runs no open goal is still
+      // drawn under the completed one.
+      //
+      // FOUND IN REVIEW: this read every goal the owner had ever made, on every list, and matched
+      // each routine against all of them. A person who kept goals for years paid for that on every
+      // load of Routines. Now it reads only what a routine can point at, grouped by Bot, since a
+      // routine runs only its own Bot's goals.
+      const recorded = [
+        ...new Set(
+          rows.flatMap(({ routine }) =>
+            routine.goalId ? [routine.goalId] : [],
+          ),
+        ),
+      ];
+      const byTitle = [
+        ...new Set(
+          rows.flatMap(({ routine }) =>
+            !routine.goalId && routine.goalByTitle ? [routine.agentId] : [],
+          ),
+        ),
+      ];
       const goals =
-        rows.length > 0
+        recorded.length > 0 || byTitle.length > 0
           ? await database
               .select({
                 id: responsibilities.id,
@@ -1103,8 +1124,26 @@ export function createRoutineStore(database: Database): RoutineStore {
                 status: responsibilities.status,
               })
               .from(responsibilities)
-              .where(eq(responsibilities.ownerUserId, ownerUserId))
+              .where(
+                and(
+                  eq(responsibilities.ownerUserId, ownerUserId),
+                  or(
+                    recorded.length > 0
+                      ? inArray(responsibilities.id, recorded)
+                      : undefined,
+                    byTitle.length > 0
+                      ? inArray(responsibilities.agentId, byTitle)
+                      : undefined,
+                  ),
+                ),
+              )
           : [];
+      const goalsOfBot = new Map<string, (typeof goals)[number][]>();
+      for (const goal of goals)
+        goalsOfBot.set(goal.agentId, [
+          ...(goalsOfBot.get(goal.agentId) ?? []),
+          goal,
+        ]);
 
       return rows.map(
         ({
@@ -1136,7 +1175,9 @@ export function createRoutineStore(database: Database): RoutineStore {
                 }),
           channelDeleted: channelExists === null || channelDeletedAt !== null,
           lastRun: lastRuns.get(routine.id) ?? null,
-          goalId: goalShownFor(routine, goals)?.id ?? null,
+          goalId:
+            goalShownFor(routine, goalsOfBot.get(routine.agentId) ?? [])?.id ??
+            null,
         }),
       );
     },

@@ -10,6 +10,7 @@ import {
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useId, useState } from "react";
+import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { SharedAppNotice } from "@/components/plugins/shared-app-notice";
 import { Button } from "@/components/ui/button";
 import {
@@ -132,7 +133,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
 /** A value somebody copies into another product: a URL, an address, a key. */
 function Copyable({ children }: { children: string }) {
   return (
-    <code className="break-all rounded bg-background px-2 py-1 text-xs">
+    <code className="break-all rounded bg-muted px-2 py-1 text-xs">
       {children}
     </code>
   );
@@ -170,8 +171,8 @@ function describeFilter(config: TriggerConfig) {
 }
 
 /**
- * What starts a responsibility from outside: one muted row per trigger inside the responsibility's
- * dialog, and a stacked dialog to add one. A fresh key is held here, keyed by trigger, so it survives
+ * What starts a responsibility from outside: one row per trigger on the goal's page, and a dialog to
+ * add one. A fresh key is held here, keyed by trigger, so it survives
  * the list refetching after the write that produced it.
  */
 export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
@@ -182,9 +183,8 @@ export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
     secret: string;
   } | null>(null);
   return (
-    <section className="grid gap-2">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="font-medium text-sm">Triggers</h3>
+    <PageSection
+      action={
         <Button
           size="sm"
           variant="outline"
@@ -194,24 +194,27 @@ export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
           <IconPlus />
           Add trigger
         </Button>
-      </div>
+      }
+      title="Triggers"
+    >
       {goal.status !== "active" && (
-        <p className="text-muted-foreground text-xs">
+        <p className="mt-1 text-muted-foreground text-sm">
           This goal is {goal.status}. Its triggers won't start it.
         </p>
       )}
       {triggers.error && (
-        <p role="alert" className="text-destructive text-sm">
+        <p role="alert" className="mt-4 text-destructive text-sm">
           {triggers.error.message}
         </p>
       )}
       {triggers.data?.length === 0 && (
-        <p className="text-muted-foreground text-xs">
-          No triggers. It runs when you press Run now, or on the events above.
+        <p className="mt-4 text-muted-foreground text-sm">
+          No triggers. It runs when you press Run now, or on its schedules and
+          events.
         </p>
       )}
       {triggers.data?.length ? (
-        <div className="overflow-hidden rounded-lg">
+        <PageRows>
           {triggers.data.map((trigger, index) => (
             <Fragment key={trigger.id}>
               {index > 0 ? <Separator /> : null}
@@ -226,7 +229,7 @@ export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
               />
             </Fragment>
           ))}
-        </div>
+        </PageRows>
       ) : null}
       {adding ? (
         <NewTriggerDialog
@@ -243,7 +246,7 @@ export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
           }}
         />
       ) : null}
-    </section>
+    </PageSection>
   );
 }
 
@@ -288,7 +291,7 @@ function TriggerRow({
   const generated = trigger.kind === "webhook" || trigger.kind === "github";
   const Icon = KIND_ICON[trigger.kind];
   return (
-    <Item size="sm" variant="muted">
+    <Item size="sm">
       <ItemMedia variant="icon">
         <Icon />
       </ItemMedia>
@@ -525,9 +528,7 @@ function NewTriggerDialog({
   };
   return (
     <Dialog onOpenChange={(next) => !next && onClose()} open>
-      {/* The heavier backdrop, forced: this stacks over the responsibility's dialog, and Base UI
-          would otherwise render a nested dialog with no backdrop at all. */}
-      <DialogContent overlayClassName="bg-black/20 supports-backdrop-filter:backdrop-blur-sm">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>Add trigger</DialogTitle>
           <DialogDescription>

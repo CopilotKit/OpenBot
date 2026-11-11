@@ -157,10 +157,16 @@ export function createResponsibilityEngine(options: {
             signal: controller.signal,
           });
           if (lostLease) throw lostLease;
-          await store.settleRun(runId, {
-            status: "succeeded",
-            replyText: result.replyText,
-          });
+          // False when its goal was deleted while it ran: nothing to record, and nobody to tell.
+          if (
+            !(await store.settleRun(runId, {
+              status: "succeeded",
+              replyText: result.replyText,
+            }))
+          ) {
+            report.skipped.push(runId);
+            continue;
+          }
           report.succeeded.push(runId);
           if (onReply) {
             try {
@@ -174,12 +180,15 @@ export function createResponsibilityEngine(options: {
           }
         } catch (error) {
           if (error instanceof HeadlessToolSuspension) {
-            await store.settleRun(runId, {
-              status: "waiting",
-              waiting: error.waiting,
-              error: errorText(error),
-            });
-            report.waiting.push(runId);
+            if (
+              await store.settleRun(runId, {
+                status: "waiting",
+                waiting: error.waiting,
+                error: errorText(error),
+              })
+            )
+              report.waiting.push(runId);
+            else report.skipped.push(runId);
           } else if (isThreadBusy(error) && !lostLease) {
             /*
              * ANOTHER RUN HAS THE CONVERSATION, SO NOTHING RAN. The lock is taken before anything
@@ -193,8 +202,14 @@ export function createResponsibilityEngine(options: {
             const tries = Number.isFinite(waited) ? waited : 0;
             if (tries >= busyRetry.tries) {
               const reason = `This goal's conversation was busy for about ${waitedFor(busyRetry)}, so the run never started and nothing was done. Run the goal again when the conversation is free.`;
-              await store.settleRun(runId, { status: "failed", error: reason });
-              report.failed.push({ runId, error: reason });
+              if (
+                await store.settleRun(runId, {
+                  status: "failed",
+                  error: reason,
+                })
+              )
+                report.failed.push({ runId, error: reason });
+              else report.skipped.push(runId);
             } else if (!(await store.requeueRun(runId))) {
               report.skipped.push(runId);
             } else {
@@ -218,8 +233,11 @@ export function createResponsibilityEngine(options: {
             }
           } else {
             const reason = errorText(error);
-            await store.settleRun(runId, { status: "failed", error: reason });
-            report.failed.push({ runId, error: reason });
+            if (
+              await store.settleRun(runId, { status: "failed", error: reason })
+            )
+              report.failed.push({ runId, error: reason });
+            else report.skipped.push(runId);
           }
         } finally {
           stopped = true;

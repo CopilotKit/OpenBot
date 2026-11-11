@@ -53,6 +53,7 @@ import {
   decideApprovalMutationOptions,
   dismissPersonQuestionMutationOptions,
 } from "@/lib/approvals";
+import { readFailure } from "@/lib/read-failure";
 import { relativeTime } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -70,6 +71,7 @@ function useWaiting(agentId: string | undefined) {
   const ours = (botId: string) => agentId === undefined || botId === agentId;
   return {
     error: inbox.error,
+    failure: readFailure(inbox),
     questions: (inbox.data?.questions ?? []).filter((question) =>
       ours(question.conversationBotId ?? question.botId),
     ),
@@ -305,7 +307,7 @@ export function useWaitingByBot(agentId: string | undefined) {
       <RequestBoardRow key={`request-${request.id}`} request={request} />,
       request.createdAt,
     );
-  return { error: waiting.error, byBot };
+  return { error: waiting.error, failure: waiting.failure, byBot };
 }
 
 /**

@@ -102,6 +102,12 @@ export type CatalogueEntry = {
    */
   personalSummary?: string;
   /**
+   * Offered only in the team edition. The personal edition reaches these vendors through the
+   * broker's directory instead, so listing the built-in one too would put two of the same app side by
+   * side. One already added stays listed and keeps working: see {@link offeredHere}.
+   */
+  teamOnly?: true;
+  /**
    * The one host this server lives on. Null for a vendor that gives every customer their own
    * hostname, where {@link CatalogueEntry.hostPattern} decides instead.
    */
@@ -311,6 +317,7 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     vendor: "Google",
     summary: "Files in the Drive of whoever is asking.",
     personalSummary: "Files in your Drive.",
+    teamOnly: true,
     /*
      * Google publishes one MCP server per Workspace product, each on its own host: Gmail, Docs,
      * Sheets, Slides, Calendar, Chat and People have their own. Drive is here because it is the one
@@ -385,6 +392,7 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     vendor: "Notion",
     summary: "Pages and databases of whoever is asking.",
     personalSummary: "Your pages and databases.",
+    teamOnly: true,
     /*
      * The hosted MCP server Notion runs, on the default MCP transport — the first entry to use
      * it. Drive's REST adapter is a workaround for a preview-gated vendor; Notion's server is
@@ -549,6 +557,16 @@ export function tokenHeaderFor(
   return entry?.auth.kind === "deployment-bearer"
     ? entry.auth.header
     : undefined;
+}
+
+/**
+ * Whether this edition offers the entry to somebody who hasn't added it: every entry in the team
+ * edition, and every one not marked `teamOnly` in the personal edition. Not a refusal: an entry
+ * already added is still served, listed and called, so a connection nobody can see never keeps
+ * working behind the screen.
+ */
+export function offeredHere(entry: CatalogueEntry): boolean {
+  return !entry.teamOnly || currentEdition() !== "personal";
 }
 
 export function catalogueEntry(key: string): CatalogueEntry | null {

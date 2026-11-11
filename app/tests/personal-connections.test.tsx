@@ -99,10 +99,13 @@ let servers: PluginServer[] = [];
 let connected: string[] = [];
 let composio = false;
 const writes: string[] = [];
+/** Paths that answer 500, for the states a failed read leaves the page in. */
+let failing = new Set<string>();
+let catalogue = CATALOGUE;
 
 function page(): PluginsPage {
   return {
-    catalogue: CATALOGUE,
+    catalogue,
     servers,
     skills: [],
     botsMayCallBack: true,
@@ -118,6 +121,8 @@ beforeEach(() => {
   connected = [];
   composio = false;
   writes.length = 0;
+  failing = new Set();
+  catalogue = CATALOGUE;
   global.fetch = Object.assign(
     async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const path = String(input).split("?")[0] ?? "";
@@ -131,6 +136,8 @@ beforeEach(() => {
           return Response.json({ connected: true });
         return Response.json({ ok: true });
       }
+      if (failing.has(path))
+        return Response.json({ error: "Server error" }, { status: 500 });
       if (path === "/api/plugins") return Response.json(page());
       if (path === "/api/plugins/connections")
         return Response.json({
@@ -148,18 +155,29 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-function draw(edition: "team" | "personal", at = "/connections") {
+/**
+ * `edition: null` leaves the edition unread (its request fails), and `fetchApps` reads the apps
+ * through the fake API rather than starting with them in the cache.
+ */
+function draw(
+  edition: "team" | "personal" | null,
+  at = "/connections",
+  { fetchApps = false }: { fetchApps?: boolean } = {},
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  client.setQueryData(deploymentKeys.capabilities(), {
-    generativeUi: true,
-    selfHostBanner: false,
-    localEvaluation: edition === "personal",
-    edition,
-  });
-  client.setQueryData(pluginKeys.page(), page());
-  client.setQueryData(pluginKeys.connections(), { connections: [] });
+  if (edition)
+    client.setQueryData(deploymentKeys.capabilities(), {
+      generativeUi: true,
+      selfHostBanner: false,
+      localEvaluation: edition === "personal",
+      edition,
+    });
+  if (!fetchApps) {
+    client.setQueryData(pluginKeys.page(), page());
+    client.setQueryData(pluginKeys.connections(), { connections: [] });
+  }
   client.setQueryData(identityKeys.links(), []);
   client.setQueryData(identityKeys.providers(), {
     slack: false,
@@ -191,10 +209,19 @@ function draw(edition: "team" | "personal", at = "/connections") {
     path: "/connections/$key",
     getParentRoute: () => app,
   });
+  // Where a personal owner's recovery links go; drawn as nothing, it only has to exist.
+  const setup = createRoute({
+    path: "/settings/setup",
+    getParentRoute: () => authed,
+    component: () => null,
+  });
   const history = createMemoryHistory({ initialEntries: [at] });
   const router = createRouter({
     routeTree: root.addChildren([
-      authed.addChildren([app.addChildren([list as never, one as never])]),
+      authed.addChildren([
+        app.addChildren([list as never, one as never]),
+        setup,
+      ]),
     ]),
     history,
   });
@@ -430,4 +457,107 @@ test("the team edition's app under Connections is still only your account", asyn
   const { view } = draw("team", "/connections/notion");
   await view.findAllByText("Notion");
   expect(view.queryByText("Turned on")).toBeNull();
+});
+
+/** The notice a failed apps read leaves, found by its words: the page may hold other alerts. */
+async function appsAlert(view: ReturnType<typeof draw>["view"]) {
+  const words = await view.findByText(/^Couldn't load your connections\./);
+  return words.closest('[role="alert"]') as HTMLElement;
+}
+
+describe("when Connections can't list apps", () => {
+  test("a failed read in the personal edition offers Retry and Setup, and never names an admin", async () => {
+    failing = new Set(["/api/plugins"]);
+    const { view, user } = draw("personal", "/connections", {
+      fetchApps: true,
+    });
+    const alert = await appsAlert(view);
+    expect(alert.textContent).toContain("Couldn't load your connections.");
+    expect(alert.textContent).not.toMatch(/admin/i);
+    expect(
+      within(alert)
+        .getByRole("button", { name: "Open Setup" })
+        .getAttribute("href"),
+    ).toBe("/settings/setup");
+
+    failing = new Set();
+    await user.click(within(alert).getByRole("button", { name: "Retry" }));
+    expect(await view.findByTestId("account-notion")).toBeTruthy();
+    expect(view.queryByText(/Couldn't load your connections/)).toBeNull();
+  });
+
+  test("a failed read in the team edition keeps the admin guidance, with Retry and no Setup link", async () => {
+    failing = new Set(["/api/plugins/connections"]);
+    const { view } = draw("team", "/connections", { fetchApps: true });
+    const alert = await appsAlert(view);
+    expect(alert.textContent).toBe(
+      "Couldn't load your connections. Try again, or ask an admin if it keeps happening.Retry",
+    );
+    expect(
+      within(alert).queryByRole("button", { name: "Open Setup" }),
+    ).toBeNull();
+    // Nothing is listed as not connected while the connections are unknown.
+    expect(view.queryByTestId("account-notion")).toBeNull();
+  });
+
+  test("with the edition unread, a failed read says neither admin nor Setup", async () => {
+    failing = new Set(["/api/plugins", "/api/capabilities"]);
+    const { view } = draw(null, "/connections", { fetchApps: true });
+    const alert = await appsAlert(view);
+    expect(alert.textContent).toContain(
+      "Couldn't load your connections. Try again.",
+    );
+    expect(alert.textContent).not.toMatch(/admin|Setup/);
+  });
+
+  test("no apps in the personal edition points the owner at Setup, not an admin", async () => {
+    catalogue = [];
+    servers = [];
+    const { view } = draw("personal");
+    expect(await view.findByText("No apps yet")).toBeTruthy();
+    expect(
+      view.getByText("Apps show up here once OpenBot is set up to reach them."),
+    ).toBeTruthy();
+    expect(
+      view.getByRole("button", { name: "Open Setup" }).getAttribute("href"),
+    ).toBe("/settings/setup");
+    expect(view.queryByText(/admin/i)).toBeNull();
+  });
+
+  test("no apps in the team edition still says an admin turns them on", async () => {
+    catalogue = [];
+    servers = [];
+    const { view } = draw("team");
+    expect(
+      await view.findByText("Apps show up here once an admin turns them on."),
+    ).toBeTruthy();
+    expect(view.queryByRole("button", { name: "Open Setup" })).toBeNull();
+  });
+});
+
+test("while the apps and your accounts load, the page draws tiles' shape and no tile says Connect", async () => {
+  const served = global.fetch;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  global.fetch = Object.assign(
+    async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      await gate;
+      return served(input, init);
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  const { view } = draw("personal", "/connections", { fetchApps: true });
+  expect(
+    await view.findByRole("status", { name: "Loading your connections" }),
+  ).toBeTruthy();
+  expect(view.queryByTestId("account-notion")).toBeNull();
+  expect(view.queryByText("No apps yet")).toBeNull();
+
+  release();
+  expect(await view.findByTestId("account-notion")).toBeTruthy();
+  expect(
+    view.queryByRole("status", { name: "Loading your connections" }),
+  ).toBeNull();
 });

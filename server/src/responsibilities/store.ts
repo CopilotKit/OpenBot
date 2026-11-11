@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { routines } from "../db/schema/coworker";
 import {
@@ -221,6 +221,68 @@ export function createResponsibilityStore(
       .where(inArray(routines.id, ids));
   }
   /**
+   * The routines deleting this goal deletes with it, switched on or off: those that run it
+   * (`routineRunsGoal`), less an older routine that still runs another goal of its Bot that is not
+   * completed, as completion leaves one on (`switchOffRoutinesOf`). The page draws an older routine
+   * under the goal it still runs (`goalShownFor`), so that one moves to the other goal's row.
+   *
+   * FOUND IN REVIEW: delete removed only the routines whose `goal_id` named the goal. An older routine
+   * that runs it by its quoted title (`goalByTitle`) was drawn under the goal and named in the delete
+   * confirm, but stayed on after it, firing `run_goal` at a goal that was gone.
+   *
+   * Serialized per Bot with completion, so a goal deleted while another completes can't each read the
+   * other as still open and leave a routine behind that runs neither.
+   */
+  async function routinesDeletedWith(
+    transaction: Transaction,
+    goal: Pick<Responsibility, "id" | "ownerUserId" | "agentId" | "title">,
+  ): Promise<string[]> {
+    await transaction.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${`goal-completion-${goal.ownerUserId}-${goal.agentId}`}))`,
+    );
+    const candidates = await transaction
+      .select({
+        id: routines.id,
+        goalId: routines.goalId,
+        goalByTitle: routines.goalByTitle,
+        instruction: routines.instruction,
+      })
+      .from(routines)
+      .where(
+        and(
+          eq(routines.ownerUserId, goal.ownerUserId),
+          or(
+            eq(routines.goalId, goal.id),
+            and(
+              eq(routines.agentId, goal.agentId),
+              isNull(routines.goalId),
+              eq(routines.goalByTitle, true),
+            ),
+          ),
+        ),
+      );
+    const runs = candidates.filter((routine) => routineRunsGoal(routine, goal));
+    const stillOpen = runs.some((routine) => !routine.goalId)
+      ? await transaction
+          .select({ id: responsibilities.id, title: responsibilities.title })
+          .from(responsibilities)
+          .where(
+            and(
+              eq(responsibilities.ownerUserId, goal.ownerUserId),
+              eq(responsibilities.agentId, goal.agentId),
+              ne(responsibilities.status, "completed"),
+              ne(responsibilities.id, goal.id),
+            ),
+          )
+      : [];
+    return runs
+      .filter(
+        (routine) =>
+          !stillOpen.some((other) => routineRunsGoal(routine, other)),
+      )
+      .map((routine) => routine.id);
+  }
+  /**
    * Why this goal runs again and again (`GoalRepeats`), read where it already lives: its own flag,
    * its subscriptions, its enabled triggers, and the enabled routines that run it (`routinesRunning`).
    * A goal that ends when met (`endsWhenMet`) does not repeat, whatever runs it.
@@ -348,14 +410,12 @@ export function createResponsibilityStore(
     },
     async delete(ownerUserId, id) {
       await database.transaction(async (transaction) => {
-        await owned(transaction, ownerUserId, id, true);
+        const goal = await owned(transaction, ownerUserId, id, true);
         // Its routines exist to run it. Left behind, `goal_id` would clear and each would become a
         // routine of its own, firing `run_goal` at a goal that is gone.
-        await transaction
-          .delete(routines)
-          .where(
-            and(eq(routines.ownerUserId, ownerUserId), eq(routines.goalId, id)),
-          );
+        const ids = await routinesDeletedWith(transaction, goal);
+        if (ids.length > 0)
+          await transaction.delete(routines).where(inArray(routines.id, ids));
         // Its runs and triggers go with it, by foreign key.
         await transaction
           .delete(responsibilities)
@@ -700,12 +760,15 @@ export function createResponsibilityStore(
       });
     },
     async settleRun(runId, outcome) {
-      await database.transaction(async (transaction) => {
+      return database.transaction(async (transaction) => {
+        // FOUND IN REVIEW: deleting a goal deletes its runs, a running one too. That run's turn kept
+        // going, and settling it threw not found, which escaped the engine's dispatch and left the
+        // other runs it had claimed for the lease to time out. A run that is gone settles as gone.
         const [reference] = await transaction
           .select({ responsibilityId: responsibilityRuns.responsibilityId })
           .from(responsibilityRuns)
           .where(eq(responsibilityRuns.id, runId));
-        if (!reference) throw new ResponsibilityNotFoundError();
+        if (!reference) return false;
         await transaction
           .select({ id: responsibilities.id })
           .from(responsibilities)
@@ -716,7 +779,8 @@ export function createResponsibilityStore(
           .from(responsibilityRuns)
           .where(eq(responsibilityRuns.id, runId))
           .for("update");
-        if (run?.status !== "running")
+        if (!run) return false;
+        if (run.status !== "running")
           throw new ResponsibilityRefusedError(
             "This goal's run is no longer running.",
           );
@@ -740,6 +804,7 @@ export function createResponsibilityStore(
             .update(responsibilities)
             .set({ lastResult: replyText, updatedAt: new Date() })
             .where(eq(responsibilities.id, run.responsibilityId));
+        return true;
       });
     },
     async requeueRun(runId) {

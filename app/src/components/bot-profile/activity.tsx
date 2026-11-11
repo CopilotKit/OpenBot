@@ -41,7 +41,9 @@ import {
   botActivityQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import { relativeTime } from "@/lib/relative-time";
+import { routinesQueryOptions } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
@@ -340,10 +342,31 @@ export function isRoutine(item: ActivityItem): boolean {
 
 /**
  * What the row to the Bot's Routines says: how many of its routines are lined up, and how many wait
- * to be asked. It counts only what the Routines page lists.
+ * to be asked. It counts only what the Routines page lists, as that page lists it: a routine that
+ * runs a goal is one of the goal's starts (`goalRoutineIds`), not a second row, and each check-in
+ * that is on is lined up too (`checkIns`).
+ *
+ * FOUND IN REVIEW: a goal and the routine that runs it counted as "2 scheduled", and check-ins not
+ * at all, while the Routines page showed one row for the goal and one for the check-in.
  */
-export function routinesSummary(activity: BotActivity): string {
-  const scheduled = activity.scheduled.filter(isRoutine).length;
+export function routinesSummary(
+  activity: BotActivity,
+  routinesPage: {
+    /** The routines the Routines page draws under a goal (`goalId`). */
+    goalRoutineIds: ReadonlySet<string>;
+    /** How many of the Bot's check-ins are on. */
+    checkIns: number;
+  } = { goalRoutineIds: new Set(), checkIns: 0 },
+): string {
+  const scheduled =
+    activity.scheduled.filter(
+      (item) =>
+        isRoutine(item) &&
+        !(
+          item.kind === "routine" &&
+          routinesPage.goalRoutineIds.has(item.id.slice("routine:".length))
+        ),
+    ).length + routinesPage.checkIns;
   const onDemand = (activity.onDemand ?? []).filter(isRoutine).length;
   const parts = [
     scheduled ? `${scheduled} scheduled` : null,
@@ -360,6 +383,9 @@ export function routinesSummary(activity: BotActivity): string {
  */
 export function BotActivitySections({ agentId }: { agentId: string }) {
   const activity = useQuery(botActivityQueryOptions(agentId));
+  // What the Routines page reads, to count its rows as it draws them (`routinesSummary`).
+  const routines = useQuery(routinesQueryOptions());
+  const checkIns = useQuery(proactiveSettingsQueryOptions());
   if (activity.isPending) return null;
   if (activity.error)
     return (
@@ -402,7 +428,16 @@ export function BotActivitySections({ agentId }: { agentId: string }) {
             <ItemContent>
               <ItemTitle>Routines</ItemTitle>
               <ItemDescription>
-                {routinesSummary(activity.data)}
+                {routinesSummary(activity.data, {
+                  goalRoutineIds: new Set(
+                    (routines.data?.routines ?? [])
+                      .filter((routine) => routine.goalId)
+                      .map((routine) => routine.id),
+                  ),
+                  checkIns: (checkIns.data ?? []).filter(
+                    (checkIn) => checkIn.agentId === agentId && checkIn.enabled,
+                  ).length,
+                })}
               </ItemDescription>
             </ItemContent>
             <ItemActions>

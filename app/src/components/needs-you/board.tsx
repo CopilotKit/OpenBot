@@ -6,12 +6,14 @@ import { useWaitingByBot } from "@/components/approvals/waiting";
 import { PageSection } from "@/components/layout/page-shell";
 import { SuggestionRow } from "@/components/suggestions/suggestion-row";
 import { TaskBoardRow } from "@/components/tasks/task-row";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   type ProactiveSetting,
   proactiveSettingsQueryOptions,
 } from "@/lib/proactive";
+import type { ReadFailure } from "@/lib/read-failure";
 import { relativeTime } from "@/lib/relative-time";
 import { useNeedsYou } from "./needs-you";
 
@@ -49,16 +51,28 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
   for (const item of list.items)
     found.set(item.agentId, [...(found.get(item.agentId) ?? []), item]);
 
-  if (blocked.size === 0 && found.size === 0) {
-    const error = waiting.error ?? list.error;
-    return error ? (
-      <PageSection title="Needs you">
-        <p className="mt-4 text-destructive text-sm" role="alert">
-          {error.message}
-        </p>
-      </PageSection>
-    ) : null;
-  }
+  /*
+   * Each read that failed, said on its own whatever else loaded. A failed read is never "nothing
+   * waiting": the rows that did load stay, and the notice says which part may be missing.
+   */
+  const failures = [
+    {
+      key: "approvals",
+      what: "questions and approvals",
+      failure: waiting.failure,
+    },
+    { key: "tasks", what: "tasks", failure: list.failures.tasks },
+    {
+      key: "check-ins",
+      what: "check-in findings",
+      failure: list.failures.checkIns,
+    },
+  ].flatMap(({ failure, ...source }) =>
+    failure ? [{ ...source, failure }] : [],
+  );
+
+  if (blocked.size === 0 && found.size === 0 && failures.length === 0)
+    return null;
 
   const bot = (id: string) => agents.data?.find((agent) => agent.id === id);
   const settingOf = (id: string | null | undefined) =>
@@ -84,6 +98,13 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
       title="Needs you"
     >
       <div className="flex flex-col gap-5">
+        {failures.length ? (
+          <div className="flex flex-col gap-2">
+            {failures.map(({ key, what, failure }) => (
+              <ReadFailureNotice failure={failure} key={key} what={what} />
+            ))}
+          </div>
+        ) : null}
         {blocked.size ? (
           <Half title="Waiting on you">
             {[...blocked].map(([botId, group]) => (
@@ -131,6 +152,33 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
         ) : null}
       </div>
     </PageSection>
+  );
+}
+
+/** One source that didn't load: what may be missing, and Retry for that read alone. */
+function ReadFailureNotice({
+  what,
+  failure,
+}: {
+  what: string;
+  failure: ReadFailure;
+}) {
+  return (
+    <div
+      className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5"
+      data-needs-you-failure={what}
+      role="alert"
+    >
+      <p className="text-sm">Couldn't load {what}. Some may be missing here.</p>
+      <Button
+        disabled={failure.retrying}
+        onClick={failure.retry}
+        size="sm"
+        variant="outline"
+      >
+        {failure.retrying ? "Retrying…" : "Retry"}
+      </Button>
+    </div>
   );
 }
 

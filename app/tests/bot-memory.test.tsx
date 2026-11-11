@@ -1,10 +1,18 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { MemorySources } from "@/components/memory/sources";
+import { CheckInRoutePage } from "@/components/suggestions/check-in-page";
 import { ProactiveResearchSettings } from "@/components/suggestions/proactive-panel";
 import { settleReactWork } from "./settle-react-work";
 
@@ -107,12 +115,26 @@ function serving() {
   }) as unknown as typeof fetch;
 }
 
+/** Drawn under a router: a check-in's row is a link to its page. */
 function draw(node: ReactNode) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  const root = createRootRoute();
+  const router = createRouter({
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+    routeTree: root.addChildren([
+      createRoute({
+        getParentRoute: () => root,
+        path: "/",
+        component: () => node,
+      }),
+    ]),
+  });
   return render(
-    <QueryClientProvider client={client}>{node}</QueryClientProvider>,
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
   );
 }
 
@@ -172,19 +194,13 @@ test("reopening Add source after a failure keeps the draft but not the failure",
   expect(view.queryByRole("alert")).toBeNull();
 });
 
-test("reopening a research row after a failure starts without it", async () => {
+test("a refused Run now says why on the check-in's page", async () => {
   serving();
-  const view = draw(<ProactiveResearchSettings agentId="expenses" />);
+  const view = draw(<CheckInRoutePage checkInId="p1" />);
   const user = userEvent.setup({ document });
-  await user.click(await view.findByRole("button", { name: /Expenses/ }));
   refuseWrite = "Research is paused.";
-  await user.click(await view.findByRole("button", { name: "Run now" }));
+  await user.click(await view.findByRole("button", { name: /^Run now/ }));
   expect((await view.findByRole("alert")).textContent).toBe(
     "Research is paused.",
   );
-  await user.keyboard("{Escape}");
-  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
-  await user.click(view.getByRole("button", { name: /Expenses/ }));
-  await view.findByRole("button", { name: "Run now" });
-  expect(view.queryByRole("alert")).toBeNull();
 });
