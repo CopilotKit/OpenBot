@@ -158,6 +158,18 @@ function shortfallSaid(
       : "Raise them in Docker Desktop > Settings > Resources";
     return `${shortfall.podman ? "This computer doesn't give OpenBot" : "Docker Desktop doesn't give OpenBot"} enough CPUs, memory or disk space. ${fix}, then ${then}.`;
   }
+  // The drive under OpenBot's machine ran short, on Windows: said as the person sees it in File
+  // Explorer, and as the first screen says it. "OpenBot has 13.2 GB of free disk" read badly.
+  if (
+    short.length === 1 &&
+    shortfall.disk &&
+    shortfall.freeOnDrive &&
+    shortfall.drive &&
+    shortfall.diskGb &&
+    !shortfall.nearlyFull
+  ) {
+    return `This computer has ${shortfall.diskGb} GB of free space on drive ${shortfall.drive}, and OpenBot needs ${needed.disk}. Free up some space, then ${then}.`;
+  }
   const fix = shortfall.podman
     ? podmanFix(short, shortfall)
     : `Raise the ${short.length === 1 ? `${limitName[short[0]]} limit` : "limits"} in Docker Desktop > Settings > Resources${shortfall.disk ? ", or free space in Docker" : ""}`;
@@ -176,7 +188,7 @@ function shortfallSaid(
   const measured: Record<Resource, string | undefined> = {
     cpu: shortfall.cpus && `${shortfall.cpus} free CPUs`,
     memory: shortfall.memoryGb && `${shortfall.memoryGb} GB of free memory`,
-    disk: shortfall.diskGb && `${shortfall.diskGb} GB of free disk`,
+    disk: shortfall.diskGb && `${shortfall.diskGb} GB of free disk space`,
   };
   const has = short.map((resource) => measured[resource]);
   // After "OpenBot is nearly out of disk space.", OpenBot's own machine is "it".
@@ -225,7 +237,7 @@ const needed: Record<Resource, string> = {
 const neededFully: Record<Resource, string> = {
   cpu: "4 free CPUs",
   memory: "4 GB of free memory",
-  disk: "40 GB of free disk",
+  disk: "40 GB of free disk space",
 };
 
 /**

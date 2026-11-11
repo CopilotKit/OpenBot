@@ -260,6 +260,10 @@ struct Progress {
     /// The engine itself is being updated: see `engine::StepLine::updating`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     updating: bool,
+    /// The step holds until there is room on the disk (`early_downloads::wait_for_room`): the
+    /// window shows it paused, with no spinner and no time running on.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    paused: bool,
 }
 
 #[derive(Serialize)]
@@ -875,6 +879,7 @@ fn report_line<R: tauri::Runtime>(
             elsewhere: false,
             asks: false,
             updating: false,
+            paused: false,
         },
     );
 }
@@ -980,6 +985,28 @@ fn report_running_line<R: tauri::Runtime>(
     line: engine::StepLine,
     download_bytes: Option<u64>,
 ) {
+    report_running_row(app, step, line, download_bytes, false);
+}
+
+/// The images row while downloads hold for room: paused, until there is room and they carry on.
+fn report_holding_for_room<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    report_running_row(
+        app,
+        "images",
+        engine::StepLine::here(HOLDING_FOR_ROOM),
+        None,
+        true,
+    );
+}
+
+/// A running row, and whether it is paused.
+fn report_running_row<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    step: &str,
+    line: engine::StepLine,
+    download_bytes: Option<u64>,
+    paused: bool,
+) {
     RUNNING_SAID
         .lock()
         .unwrap_or_else(|held| held.into_inner())
@@ -1017,6 +1044,7 @@ fn report_running_line<R: tauri::Runtime>(
             elsewhere,
             asks,
             updating,
+            paused,
         },
     );
 }
@@ -1292,6 +1320,7 @@ fn report_running_downloads<R: tauri::Runtime>(
             elsewhere: line.elsewhere,
             asks: line.asks,
             updating: line.updating,
+            paused: false,
         },
     );
 }
@@ -1324,6 +1353,7 @@ fn report_downloads<R: tauri::Runtime>(
             elsewhere: false,
             asks: false,
             updating: false,
+            paused: false,
         },
     );
 }
@@ -2884,7 +2914,7 @@ async fn prepare_installation_inner(
         acquire::prepare_for_compose(&address)?;
         // The first screen may have started pulling these already: wait for it, showing its
         // download, and the pulls below find them there.
-        let holding = || report_running_plain(&handle, "images", HOLDING_FOR_ROOM);
+        let holding = || report_holding_for_room(&handle);
         let wanted = || attempt.require_current().is_ok();
         early_downloads::wait_for_images(
             |downloads| report_downloads(&handle, downloads.clone()),
@@ -4873,6 +4903,7 @@ impl QuitStatus {
             elsewhere: false,
             asks: false,
             updating: false,
+            paused: false,
         };
         match self.steps.iter_mut().find(|known| known.step == row.step) {
             Some(known) => *known = row,

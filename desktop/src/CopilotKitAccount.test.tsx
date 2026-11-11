@@ -134,7 +134,7 @@ test("a disk too short for OpenBot says what is free and what it needs", async (
     <CopilotKitAccount root="/tmp/account-windows-f" onDone={() => {}} />,
   );
   await screen.findByText(
-    "OpenBot has 13.2 GB of free disk. It needs 40 GB. Free up space on drive C:, then Try again.",
+    "This computer has 13.2 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.",
   );
   expect(screen.queryByText(/out of disk space/)).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));

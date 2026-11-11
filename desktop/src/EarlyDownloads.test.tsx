@@ -205,7 +205,9 @@ test("a disk too full to download to says what is free and what is needed, and I
   expect(install.disabled).toBe(true);
   await userEvent.click(install);
   expect(called("prepare_installation")).toEqual([]);
-  expect(view.getByRole("heading", { name: "Set up OpenBot (self-contained)" })).toBeTruthy();
+  expect(
+    view.getByRole("heading", { name: "Set up OpenBot (self-contained)" }),
+  ).toBeTruthy();
   // Space was freed: the download starts by itself, and Install is there again.
   await said({ state: "downloading", bytes: 0 });
   expect(install.disabled).toBe(false);
@@ -236,7 +238,9 @@ test("an Install pressed before the disk is looked at builds nothing on a disk t
     looked(WINDOWS_F_SHORT);
   });
   expect(called("prepare_installation")).toEqual([]);
-  expect(view.getByRole("heading", { name: "Set up OpenBot (self-contained)" })).toBeTruthy();
+  expect(
+    view.getByRole("heading", { name: "Set up OpenBot (self-contained)" }),
+  ).toBeTruthy();
   expect(
     view.getByRole("status").textContent?.replaceAll("\u00a0", " "),
   ).toContain("This computer has 15 GB of free space");
@@ -247,7 +251,7 @@ test("an Install pressed before the disk is looked at builds nothing on a disk t
  * Behind the account step the downloads pause while it asks the person to free space: the line says
  * so, and the background row gets no bar that stopped.
  */
-test("a download paused for space says so, with no bar", async () => {
+test("a download paused for space says so, with no bar and no time running on", async () => {
   const { earlyDownload } = await import("./EarlyDownloads");
   const paused = {
     state: "downloading" as const,
@@ -260,6 +264,53 @@ test("a download paused for space says so, with no bar", async () => {
   );
   expect(earlyDownload(paused)).toBeNull();
   expect(earlyDownload({ ...paused, paused: false })).not.toBeNull();
+
+  // Install's own pulls hold too: its images row is paused (`report_holding_for_room`). The
+  // background row says so in its badge, where it said "Step 2 of 4 · 0s elapsed".
+  const { installingBehind, SetupProgress } = await import("./SetupProgress");
+  const row = installingBehind({
+    steps: [
+      { step: "engine", ok: true, detail: "", running: false },
+      {
+        step: "images",
+        ok: true,
+        running: true,
+        paused: true,
+        detail: earlyDownloadsSaid(paused, false) ?? "",
+      },
+    ],
+    installing: true,
+    installed: false,
+    since: Date.now() - 95_000,
+    backEnd: {
+      at: null,
+      running: false,
+      stopped: false,
+      ready: false,
+      detail: null,
+      download: null,
+      since: null,
+    },
+    early: earlyDownload(paused),
+  });
+  expect(row?.paused).toBe(true);
+  expect(row?.downloads).toBeUndefined();
+  const view = render(
+    <SetupProgress steps={row ? [row] : []} label="Background install" />,
+  );
+  const item = within(
+    view.getByRole("listitem", {
+      name: "Installing OpenBot in the background",
+    }),
+  );
+  expect(item.getByText("Step 2 of 4 · Paused")).toBeTruthy();
+  expect(item.queryByText(/elapsed/)).toBeNull();
+  expect(view.container.querySelector(".step-spinner")).toBeNull();
+  expect(
+    item.getByText(
+      "The download is paused until there's enough free space. It carries on by itself.",
+    ),
+  ).toBeTruthy();
 });
 
 test("the line says what is known, and nothing once it is all downloaded", () => {

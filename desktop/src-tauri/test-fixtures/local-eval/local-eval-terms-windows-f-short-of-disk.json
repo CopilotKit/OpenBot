@@ -6,5 +6,6 @@
   "disk": true,
   "wsl": true,
   "drive": "C:",
-  "diskGb": "13.2"
+  "diskGb": "13.2",
+  "freeOnDrive": true
 }

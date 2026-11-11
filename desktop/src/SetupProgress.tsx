@@ -68,6 +68,11 @@ export type Progress = {
   /** The step waits on the person, not on work: no spinner, and its status says so. */
   waiting?: boolean;
   /**
+   * The step holds until there is room on the disk (`early_downloads::wait_for_room`): no spinner
+   * and no time running on, and its status says "Paused".
+   */
+  paused?: boolean;
+  /**
    * What its download's parts are doing once every byte is in, said with the part: "Unpacking
    * OpenBot" reads "Unpacking OpenBot (3 of 5)." Without it the row says its detail.
    */
@@ -322,32 +327,37 @@ function SetupProgressRow({
   showElapsed: boolean;
 }) {
   const waiting = step.waiting ?? false;
-  const running = !waiting && (step.running ?? false);
+  const paused = !waiting && (step.paused ?? false);
+  const running = !waiting && !paused && (step.running ?? false);
   const elapsed = useElapsed(running && showElapsed, step.startedAt);
   const downloads = running ? step.downloads : undefined;
   const where = useDownloadWhere(
     downloads && showsDownload(downloads) ? downloads : null,
   );
   const at =
-    step.position && (running || waiting)
+    step.position && (running || waiting || paused)
       ? `Step ${step.position.at} of ${step.position.of}`
       : null;
   const status = waiting
     ? at
       ? `${at} · Waiting for you`
       : "Waiting for you"
-    : running
-      ? (at ?? "In progress")
-      : step.ok
-        ? "Complete"
-        : "Failed";
+    : paused
+      ? at
+        ? `${at} · Paused`
+        : "Paused"
+      : running
+        ? (at ?? "In progress")
+        : step.ok
+          ? "Complete"
+          : "Failed";
   return (
     <li className="step" aria-label={label(step.step)}>
       <span
-        className={`mark ${waiting ? "waiting" : running ? "active" : step.ok ? "good" : "bad"}`}
+        className={`mark ${waiting || paused ? "waiting" : running ? "active" : step.ok ? "good" : "bad"}`}
         aria-hidden="true"
       >
-        {waiting ? (
+        {waiting || paused ? (
           <span className="step-waiting" />
         ) : running ? (
           <span className="step-spinner" />
@@ -359,7 +369,7 @@ function SetupProgressRow({
       </span>
       <span className="step-label">{label(step.step)}</span>
       <span
-        className={`step-status${running || waiting ? "" : step.ok ? " good" : " bad"}`}
+        className={`step-status${running || waiting || paused ? "" : step.ok ? " good" : " bad"}`}
       >
         {status}
         {running && showElapsed && (
@@ -651,6 +661,12 @@ export function installingBehind({
         startedAt: since ?? undefined,
       });
     }
+    // Held until there is room on the disk: said as paused, with no bar that stopped.
+    if (now?.paused)
+      return row(2, now.detail, {
+        paused: true,
+        startedAt: since ?? undefined,
+      });
     const downloads = meanwhile ?? own;
     return row(
       2,
