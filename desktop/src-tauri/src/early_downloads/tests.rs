@@ -455,8 +455,15 @@ fn with_too_little_free_disk_nothing_downloads_until_there_is_room() {
         deployment: true,
         ..Plan::default()
     });
-    // 40 GiB for the back end, and the machine image.
-    assert_eq!(needed, 40 * 1024 * 1024 * 1024 + 937_318_069);
+    // 40 GiB for the back end, the figure the account step's check asks for, and the machine image.
+    assert_eq!(
+        needed,
+        Needed {
+            back_end: crate::local_eval::MIN_ENGINE_FREE_DISK_BYTES,
+            downloads: 937_318_069,
+        }
+    );
+    assert_eq!(needed.back_end, 40 * 1024 * 1024 * 1024);
     run(
         vec![Job::file(
             "machine-image",
@@ -468,7 +475,11 @@ fn with_too_little_free_disk_nothing_downloads_until_there_is_room() {
             // Nothing is asked of the server while the disk is short.
             assert!(server.seen().is_empty());
             let look = looks.fetch_add(1, Ordering::SeqCst);
-            Some(if look < 2 { 12_000_000_000 } else { needed })
+            Some(if look < 2 {
+                12_000_000_000
+            } else {
+                needed.total()
+            })
         },
         &|summary| said.lock().unwrap().push(summary),
         Duration::ZERO,
@@ -479,7 +490,8 @@ fn with_too_little_free_disk_nothing_downloads_until_there_is_room() {
         Summary {
             state: State::Short,
             free: Some(12_000_000_000),
-            needed: Some(needed),
+            needed: Some(needed.back_end),
+            download: Some(937_318_069),
             ..Summary::default()
         }
     );
@@ -488,6 +500,131 @@ fn with_too_little_free_disk_nothing_downloads_until_there_is_room() {
     assert_eq!(last.bytes, body.len() as u64);
     assert_eq!(last.size, Some(body.len() as u64));
     assert_eq!(file_sha256(&cache.join("f")).unwrap(), sha);
+    let _ = std::fs::remove_dir_all(&cache);
+}
+
+/**
+Windows F, filled to 15.0 GB free. The first screen said OpenBot "needs about 44 GB", and the
+account step after Install said "It needs 40 GB free". Both were the back end's 40 GiB: the first
+screen added the downloads and counted in billions of bytes, the account step counted in GiB. The
+window is told the two figures apart now, the back end's being the account step's own constant.
+*/
+#[test]
+fn on_windows_f_the_first_screen_says_the_account_steps_40_and_the_download_apart() {
+    let _table = table_to_myself();
+    // F's plan, from its log: OpenBot's machine from the WSL image, Compose, and OpenBot's images
+    // downloaded before an engine answers.
+    let needed = needed_for(&Plan {
+        machine_image: machine_image_for("windows", "x86_64"),
+        compose: true,
+        deployment: true,
+        offline_images: true,
+        ..Plan::default()
+    });
+    // "[early downloads] 16096509952 bytes free, 44436190301 needed: waiting for space"
+    assert_eq!(needed.total(), 44_436_190_301);
+    let looks = AtomicUsize::new(0);
+    let said = Mutex::new(Vec::<Summary>::new());
+    run(
+        vec![Job {
+            key: "machine-image",
+            size: Some(0),
+            also: Vec::new(),
+            work: Box::new(|| Ok(())),
+        }],
+        needed,
+        || {
+            let look = looks.fetch_add(1, Ordering::SeqCst);
+            Some(if look == 0 {
+                16_096_509_952
+            } else {
+                needed.total()
+            })
+        },
+        &|summary| said.lock().unwrap().push(summary),
+        Duration::ZERO,
+    );
+    assert_eq!(
+        said.into_inner().unwrap()[0],
+        Summary {
+            state: State::Short,
+            free: Some(16_096_509_952),
+            needed: Some(crate::local_eval::MIN_ENGINE_FREE_DISK_BYTES),
+            download: Some(1_486_517_341),
+            ..Summary::default()
+        }
+    );
+}
+
+/**
+While the account step asks the person to free space, a download that is running holds: it asks for
+nothing more while the disk is short, says it is paused, and carries on from the bytes it has once
+there is room. On Windows F the downloads went on behind that step and took free space from 15.0 to
+11.0 GB.
+*/
+#[test]
+fn a_download_holds_while_the_disk_is_short_and_carries_on_from_its_bytes_once_there_is_room() {
+    if crate::test_support::isolated_process(
+        "early_downloads::tests::a_download_holds_while_the_disk_is_short_and_carries_on_from_its_bytes_once_there_is_room",
+    ) {
+        return;
+    }
+    let _table = table_to_myself();
+    let (body, sha) = file(900_000);
+    let served = body.clone();
+    let asked = Arc::new(AtomicUsize::new(0));
+    let server = {
+        let asked = asked.clone();
+        Server::start(move |request, _| {
+            asked.fetch_add(1, Ordering::SeqCst);
+            ranged(request, &served)
+        })
+    };
+    let cache = temp_root("early-holds");
+    let pin = pinned("f", &sha, body.len(), vec![server.url("/f")]);
+    let looks = Arc::new(AtomicUsize::new(0));
+    {
+        let (asked, looks) = (asked.clone(), looks.clone());
+        *FREE_FOR_TESTS.lock().unwrap() = Some(Box::new(move || {
+            // Nothing more is asked of the server while the disk is short.
+            assert_eq!(asked.load(Ordering::SeqCst), 1);
+            // F's 13.2 GiB on C:, twice, then room.
+            Some(if looks.fetch_add(1, Ordering::SeqCst) < 2 {
+                132 * 1024 * 1024 * 1024 / 10
+            } else {
+                97 * 1024 * 1024 * 1024
+            })
+        }));
+    }
+    /// How many bytes were in when the account step found the disk short.
+    static HELD_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    /// The account step finds the disk short once the first bytes are in.
+    struct ShortAfterTheFirstBytes;
+    impl Progress for ShortAfterTheFirstBytes {
+        fn size(&self, _size: u64) {}
+        fn bytes(&self, bytes: u64) {
+            if bytes > 0 && HELD_AT.load(Ordering::SeqCst) == 0 {
+                HELD_AT.store(bytes, Ordering::SeqCst);
+                table().state = State::Downloading;
+                hold_for_room();
+                // The window is told the download is paused, and no speed.
+                let now = summary();
+                assert!(now.paused && now.bytes_per_second.is_none(), "{now:?}");
+            }
+        }
+    }
+    let path =
+        fetch_waiting(&pin, &cache, &ShortAfterTheFirstBytes, &NO_WAIT).expect("the whole file");
+    assert_eq!(std::fs::read(&path).unwrap(), body);
+    assert_eq!(looks.load(Ordering::SeqCst), 3);
+    assert!(!held_for_room());
+    assert!(!summary().paused);
+    // It carried on from the bytes it had.
+    let held_at = HELD_AT.load(Ordering::SeqCst);
+    assert!(held_at > 0 && held_at < body.len() as u64, "{held_at}");
+    let seen = server.seen();
+    assert_eq!(seen.len(), 2, "{seen:?}");
+    assert_eq!(seen[1].range, Some(format!("bytes={held_at}-")));
     let _ = std::fs::remove_dir_all(&cache);
 }
 
@@ -528,7 +665,7 @@ fn a_download_that_fails_is_said_and_the_others_finish() {
                 cache.clone(),
             ),
         ],
-        0,
+        Needed::default(),
         || None,
         &|summary| said.lock().unwrap().push(summary),
         Duration::ZERO,
