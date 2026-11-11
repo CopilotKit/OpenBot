@@ -27,6 +27,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from typing import get_args
 
+import anyio
 from ag_ui.core import EventType, RunErrorEvent, RunFinishedEvent, RunStartedEvent
 from ag_ui_claude_sdk import ClaudeAgentAdapter
 from ag_ui_claude_sdk.utils import (
@@ -1057,7 +1058,15 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                         return
             finally:
                 if not released:
-                    await self.interrupt(thread_id)
+                    # Shielded, because this is how a run ends when the browser goes away (Stop, a
+                    # reload, another screen). Starlette then cancels the response's anyio scope,
+                    # and anyio cancels again at every await in it: unshielded, this stopped at its
+                    # first step, so the query was never interrupted, its worker never stopped, and
+                    # its Claude Code process ran on with nobody listening, a few hundred megabytes
+                    # and a busy CPU each until the harness restarted. `interrupt` is bounded: the
+                    # SDK's interrupt request and `SessionWorker.stop` both carry a deadline.
+                    with anyio.CancelScope(shield=True):
+                        await self.interrupt(thread_id)
 
     async def _follow_model_choice(self, thread_id, turn, input_data):
         """Move a running query to the model a tool result's run was sent with.
