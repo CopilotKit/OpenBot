@@ -354,7 +354,7 @@ test("a setup failure only a Windows restart fixes offers the restart, not Try a
     preparation.reject({
       said: "Windows needs to restart to finish setting up the software OpenBot runs on. Restart Windows, then open OpenBot again.",
       detail:
-        "user-mode networking is not working in the openbot VM: host.containers.internal did not resolve in the openbot VM within 60s: podman machine ssh openbot timeout 10 getent ahostsv4 host.containers.internal exited with status 124",
+        "user-mode networking is not working in the openbot VM: host.containers.internal did not resolve in the openbot VM within 30s: podman machine ssh openbot timeout 3 getent ahostsv4 host.containers.internal exited with status 124",
       restart_windows: true,
     }),
   );
@@ -2893,6 +2893,71 @@ test("relaunch with the engine machine stopped says it is starting it, in plain 
   expect(view.queryByText("Starting the software OpenBot runs on.")).toBeNull();
   await act(async () => machine.resolve(null));
   await view.findByRole("heading", { name: "OpenBot is running" });
+});
+
+test("relaunch while OpenBot sets its machine's network up again says so, before the backend starts", async () => {
+  // A live Windows run: for two minutes the screen said only "Checking OpenBot's settings" while
+  // OpenBot set its machine's network up again, and it did that after the backend had started.
+  // The wake does it now, before any CLI call, and says so on the journey.
+  setupConnectedLocalStack(
+    "/tmp/local-eval-machine-network",
+    localStatus("ready", "valid"),
+  );
+  const machine = deferred<unknown>();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) =>
+    command === "wake_engine" ? machine.promise : previous(command, args);
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "Starting OpenBot" });
+  // As `machine_before_back_end` reports it, once the network has not answered at once.
+  await emitProgress({
+    step: "start-machine",
+    ok: true,
+    running: true,
+    detail:
+      "Reconnecting OpenBot to the internet. This can take a minute or two.",
+  });
+  expectJourney(
+    view,
+    "Reconnecting OpenBot to the internet. This can take a minute or two.",
+  );
+  expect(localSequence()).toEqual([]);
+  await emitProgress({
+    step: "start-machine",
+    ok: true,
+    running: false,
+    detail: "The software OpenBot runs on is ready.",
+  });
+  await act(async () => machine.resolve(null));
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  expect(localSequence()[0]).toBe("run_local_eval");
+});
+
+test("relaunch whose machine's network only a Windows restart fixes offers the restart", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-machine-network-down",
+    localStatus("ready", "valid"),
+  );
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "wake_engine") {
+      throw {
+        said: "Windows needs to restart to finish setting up the software OpenBot runs on. Restart Windows, then open OpenBot again.",
+        detail:
+          "user-mode networking is not working in the openbot VM: host.containers.internal did not resolve in the openbot VM within 30s: podman machine ssh openbot timeout 3 getent ahostsv4 host.containers.internal exited with status 124",
+        restart_windows: true,
+      };
+    }
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  expect(
+    await view.findByRole("heading", { name: "Restart Windows to finish" }),
+  ).toBeTruthy();
+  expect(view.container.textContent).toContain(
+    "Windows needs to restart to finish setting up the software OpenBot runs on.",
+  );
+  expect(localSequence()).toEqual([]);
 });
 
 test("the running screen shows none of Start's own steps, and names the system tray on Windows", async () => {
