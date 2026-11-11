@@ -219,6 +219,12 @@ Desktop installation:
 
 ### Conversations
 
+- **A file you attach stays a file once the Bot answers.** On a Bot OpenBot runs in a harness, such
+  as the Personal Assistant on LangChain, a text file you sent turned into one giant block of its
+  own contents when the answer finished, and an image's thumbnail disappeared. A reload showed the
+  same. The message now keeps the file as you sent it, during the answer, after it and after a
+  reload, and the Bot still reads the whole file. Messages already turned into text stay as they
+  are.
 - **An answer that reaches the screen with pieces missing is put right, and the Bot carries on.**
   Sometimes a run's live stream reached the conversation out of shape while the run itself went
   fine: the answer drew with words missing mid-sentence until a reload, or a step that asked for
