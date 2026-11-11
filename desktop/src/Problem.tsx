@@ -19,6 +19,8 @@ export type Problem = {
   leftover_reset?: string[] | null;
   /** Stopped containers that still hold those volumes, removed first by the same reset. */
   leftover_containers?: string[] | null;
+  /** Only a Windows restart fixes this: the window offers one instead of Try again. */
+  restart_windows?: boolean | null;
 };
 
 /** Anything thrown, as a problem. A bare string keeps working and reads as it always did. */

@@ -35,6 +35,20 @@ of its disk free, the line where the kubelet starts removing images no container
 download takes at most half of what the computer's drive has free. Short of either, nothing
 downloads, the log says why, and the update downloads the images as it always did.
 
+AN INSTALLATION BEHIND THE APP. The app often updates itself at launch, before OpenBot runs, so
+nothing above had a chance: the app is then the release the feed names, and its installation is
+still on the one before, which the next Start moves (`upgrade::due`) and whose images that Start
+pulled with nobody able to use OpenBot. On 2026-11-10 a Mac moved from v1.0.0 to v1.0.1 that way:
+4.5 minutes of the back end's setup, then 4 more of the update's pulls, one after the other. So the
+app's own release is got ready the same way for an installation behind it (`behind`), as soon as
+its engine answers, whether OpenBot runs or not: during sign-in, the back end's setup, or the wait
+for an engine with room. It pulls OpenBot's images only; the back end's setup pulls its own.
+
+Its download never takes the engine below the 40 GiB free the back end's setup checks for
+(`local_eval::MIN_ENGINE_FREE_DISK_BYTES`, `Ahead::keep_free`), counted with `ON_DISK` and against
+the computer's drive as well, so a setup that would pass its check without the download still does.
+While the engine has less than that, nothing downloads, and the update pulls the images as before.
+
 KEPT FOR THE UPDATE. A container engine never removes an image by itself. The back end's kubelet
 does, from 85% used, so the node's images are pinned (`local_images::download_ahead`).
 */
@@ -195,6 +209,47 @@ pub fn room(download: u64, engine: Disk, computer_free: Option<u64>) -> Result<(
 }
 
 /**
+Whether a download of `download` bytes leaves `keep_free` bytes free: `ON_DISK` times it, taken from
+the engine's disk and from the computer's drive under it when that is measured. Nothing to keep
+always fits. Why not, for the log.
+*/
+pub fn keeps_free(
+    download: u64,
+    engine: Disk,
+    computer_free: Option<u64>,
+    keep_free: u64,
+) -> Result<(), String> {
+    if download == 0 || keep_free == 0 {
+        return Ok(());
+    }
+    let needed = download.saturating_mul(ON_DISK);
+    let free = computer_free.map_or(engine.free, |drive| drive.min(engine.free));
+    if free
+        .checked_sub(needed)
+        .is_some_and(|left| left >= keep_free)
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "it takes about {} on disk, and with {} free that leaves less than the {} the backend's setup needs",
+        gb(needed),
+        gb(free),
+        gb(keep_free)
+    ))
+}
+
+/**
+The release an installation in `root` moves to at its next Start because it is behind this app
+(`upgrade::due`), when that release's images can be got ready ahead: one with a version number, so
+it publishes `desktop-images.json`. None when nothing is due, when the installation is newer than
+the app, or for an internal build, named after its commit.
+*/
+pub fn behind(root: &std::path::Path, own: &crate::upgrade::Own) -> Option<Version> {
+    let planned = crate::upgrade::due(root, own)?;
+    Version::parse(planned.to.strip_prefix('v').unwrap_or(&planned.to)).ok()
+}
+
+/**
 Free space on the computer's own drive under the engine's disk, when the engine keeps its disk in a
 file there that grows as images arrive: on Windows the drive WSL keeps Podman's machine disk on
 (`windows::podman_machine_drive`, as the back end's start checks it), and on a Mac the volume of the
@@ -250,6 +305,9 @@ pub struct Ahead<'a> {
     /// The computer's drive under it (`computer_free`).
     pub computer_free: &'a dyn Fn() -> Option<u64>,
     pub limits: Limits,
+    /// Bytes the download must leave free (`keeps_free`): the back end's 40 GiB for an
+    /// installation behind the app, whose back end may be setting up meanwhile, and 0 otherwise.
+    pub keep_free: u64,
 }
 
 /// How a try at getting a release ready ended.
@@ -320,7 +378,10 @@ pub fn get_ready(
         let Some(disk) = (ahead.disk)() else {
             return Outcome::Skipped("the engine's free disk could not be measured".into());
         };
-        if let Err(why) = room(total, disk, (ahead.computer_free)()) {
+        let computer = (ahead.computer_free)();
+        if let Err(why) = room(total, disk, computer)
+            .and_then(|()| keeps_free(total, disk, computer, ahead.keep_free))
+        {
             return Outcome::Skipped(why);
         }
         progress(0, total);
@@ -537,6 +598,86 @@ mod tests {
         assert!(drive.contains("this computer's drive has free"), "{drive}");
         // Nothing to download always fits.
         assert_eq!(room(0, engine(0), Some(0)), Ok(()));
+    }
+
+    /// The engines of the 2026-11-10 Mac that moved from v1.0.0 to v1.0.1, as `[local check]`
+    /// measured them, and v1.0.1's 755 MB of new layers for the images it runs.
+    #[test]
+    fn the_download_for_an_installation_behind_never_takes_the_back_ends_disk() {
+        const GIB: u64 = 1 << 30;
+        let download = 755_000_000;
+        // Before Docker's disk was raised: 26.3 GiB free of 58.3, under the back end's 40 already.
+        let small = Disk {
+            size: 583 * GIB / 10,
+            free: 263 * GIB / 10,
+        };
+        let short = keeps_free(download, small, None, 40 * GIB).unwrap_err();
+        assert!(short.contains("the backend's setup needs"), "{short}");
+        // After: 441.2 GiB free of 496.1.
+        let raised = Disk {
+            size: 4961 * GIB / 10,
+            free: 4412 * GIB / 10,
+        };
+        assert_eq!(keeps_free(download, raised, None, 40 * GIB), Ok(()));
+        // Just enough for the setup's check, not for the download beside it: nothing downloads.
+        let at_the_line = Disk {
+            size: 100 * GIB,
+            free: 41 * GIB,
+        };
+        assert!(keeps_free(download, at_the_line, None, 40 * GIB).is_err());
+        // The computer's drive counts as well, when it is the smaller.
+        assert!(keeps_free(download, raised, Some(41 * GIB), 40 * GIB).is_err());
+        // A release got ready while OpenBot runs keeps nothing back, as before.
+        assert_eq!(keeps_free(download, at_the_line, None, 0), Ok(()));
+    }
+
+    /// An installation laid out at `version`, as Install leaves one.
+    fn laid_out(label: &str, version: &str) -> std::path::PathBuf {
+        let root = crate::test_support::temp_root(label);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            "services:\n  server: {}\n  worker: {}\n",
+        )
+        .unwrap();
+        std::fs::write(crate::deployment::images_path(&root), "{}").unwrap();
+        crate::deployment::record(&root, version, false).unwrap();
+        root
+    }
+
+    #[test]
+    fn an_installation_behind_the_app_gets_the_apps_release_ready() {
+        let released = |version: &str| crate::upgrade::Own {
+            version: version.into(),
+            pinned: false,
+        };
+        // The 1.0.0 installation the app updated itself away from, at launch.
+        let root = laid_out("ready-behind", "v1.0.0");
+        assert_eq!(behind(&root, &released("v1.0.1")), Some(v("1.0.1")));
+        // A candidate's own release has a list too.
+        let candidate = crate::upgrade::Own {
+            version: "v1.0.2-rc.1".into(),
+            pinned: true,
+        };
+        assert_eq!(behind(&root, &candidate), Some(v("1.0.2-rc.1")));
+        // An internal build is named after its commit, and publishes no list.
+        let internal = crate::upgrade::Own {
+            version: "internal-abc".into(),
+            pinned: true,
+        };
+        assert_eq!(behind(&root, &internal), None);
+        std::fs::remove_dir_all(root).unwrap();
+
+        // On the app's release, or newer than the app: nothing to move, nothing to get ready.
+        let current = laid_out("ready-current", "v1.0.1");
+        assert_eq!(behind(&current, &released("v1.0.1")), None);
+        std::fs::remove_dir_all(current).unwrap();
+        let newer = laid_out("ready-newer", "v1.0.2");
+        assert_eq!(behind(&newer, &released("v1.0.1")), None);
+        std::fs::remove_dir_all(newer).unwrap();
+        // No installation yet: Install lays the app's release out itself.
+        let fresh = crate::test_support::temp_root("ready-fresh");
+        assert_eq!(behind(&fresh, &released("v1.0.1")), None);
     }
 
     #[test]

@@ -70,9 +70,9 @@ function gigabytes(bytes: number): string {
  * The line for `downloads`, or null when there is nothing to say. In the words of the background
  * install's row: "Downloading OpenBot. About 3 minutes left.", the time left as that row works it
  * out (`left`, in seconds; null while it is not known, `slow` when it is taking longer than usual).
- * The first screen also says when everything is downloaded, or when something will download at
- * Install instead; later screens say only what is still going on, since Install's own rows take
- * over from there.
+ * The first screen also says when something will download at Install instead; later screens say only
+ * what is still going on, since Install's own rows take over from there. Nobody says when
+ * everything is downloaded: Install is the next step either way.
  */
 export function earlyDownloadsSaid(
   downloads: EarlyDownloads,
@@ -92,7 +92,7 @@ export function earlyDownloadsSaid(
         ? `This computer has ${gigabytes(free)} of free space, and OpenBot needs about ${gigabytes(needed)}. Free up some space and the download starts by itself.`
         : null;
     case "done":
-      return firstScreen ? "OpenBot is downloaded and ready to install." : null;
+      return null;
     case "failed":
       return firstScreen
         ? "Some downloads didn’t finish. Install tries them again."

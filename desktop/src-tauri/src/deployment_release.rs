@@ -1,6 +1,6 @@
 //! Choose a release for a deployment: the release a deployment already has, otherwise the exact
-//! build a pinned app was cut with, otherwise the latest public release. And where releases come
-//! from: the distribution this installation follows.
+//! build a pinned app was cut with, otherwise the latest public release, or the app's own when the
+//! app is newer. And where releases come from: the distribution this installation follows.
 
 use std::path::Path;
 
@@ -96,10 +96,12 @@ pub fn latest_url(policy: &Distribution) -> String {
 /// new deployment, one from before the server and worker were Compose services
 /// (`deployment::predates_containers`, which this app cannot run), or one of the other kind
 /// (pinned or followed) that never finished laying out gets a fresh release: the one a pinned build
-/// was cut with, otherwise the latest the distribution has published. The fetcher records the exact
-/// tag after the source and image manifest have both downloaded.
+/// was cut with, otherwise the latest the distribution has published, or this app's own release
+/// when the app is newer (`newer`). The fetcher records the exact tag after the source and image
+/// manifest have both downloaded.
 pub fn resolve_version(root: &Path) -> Result<String, String> {
-    resolve_version_with(root, deployment::pinned().as_ref(), || {
+    let own = crate::upgrade::app_release();
+    resolve_version_with(root, deployment::pinned().as_ref(), &own, || {
         let policy = distribution(root)?;
         // OpenBot's own releases: the app update feed on downloads.copilotkit.ai names the same
         // Latest release, and GitHub is asked only when it cannot be read.
@@ -137,10 +139,12 @@ fn feed_tag(body: &[u8]) -> Result<String, String> {
 }
 
 /// With an installed deployment of this build's kind, or one laid out completely, its own version.
-/// Otherwise the pin's version when there is one, and `latest` only when there is not.
+/// Otherwise the pin's version when there is one, and the newer of `latest` and `own` (the app's
+/// own release) only when there is not.
 fn resolve_version_with(
     root: &Path,
     pinned: Option<&deployment::Pin>,
+    own: &str,
     latest: impl FnOnce() -> Result<String, String>,
 ) -> Result<String, String> {
     match deployment::installed(root) {
@@ -153,8 +157,23 @@ fn resolve_version_with(
         }
         _ => match pinned {
             Some(pin) => Ok(pin.version.clone()),
-            None => latest(),
+            None => latest().map(|latest| newer(latest, own)),
         },
+    }
+}
+
+/// The latest release, or `own` when the app is newer than it.
+///
+/// A release laid out older than the app is moved to the app's own at the first Start
+/// (`upgrade::due`), which downloads every image a second time straight after setup. The latest
+/// release can be older than the app that asks: v1.0.1's installers were on GitHub's Latest release
+/// at 18:17 UTC on 2026-11-10, and the update feed named v1.0.0 until 18:25, and for its five-minute
+/// cache after. A tag that is not a version leaves the latest release as it is.
+fn newer(latest: String, own: &str) -> String {
+    let version = |tag: &str| semver::Version::parse(tag.strip_prefix('v').unwrap_or(tag)).ok();
+    match (version(&latest), version(own)) {
+        (Some(found), Some(app)) if app > found => own.to_string(),
+        _ => latest,
     }
 }
 
@@ -177,6 +196,9 @@ mod tests {
     use super::*;
     use crate::test_support::temp_root;
 
+    /// An app older than every release these tests name, so the latest release is what they get.
+    const OLDER: &str = "v0.0.1";
+
     fn scratch(label: &str) -> std::path::PathBuf {
         let root = temp_root(label);
         std::fs::create_dir_all(&root).unwrap();
@@ -195,10 +217,45 @@ mod tests {
     #[test]
     fn a_fresh_install_selects_latest_without_recording_an_unfinished_download() {
         let root = scratch("release-fresh");
-        let version = resolve_version_with(&root, None, || Ok("v0.0.9".into())).unwrap();
+        let version = resolve_version_with(&root, None, OLDER, || Ok("v0.0.9".into())).unwrap();
         assert_eq!(version, "v0.0.9");
         assert!(deployment::installed(&root).is_none());
         assert!(deployment::needs_fetch(&root, &version));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// v1.0.1's signed installers were on GitHub's Latest release from 18:17 UTC on 2026-11-10, and
+    /// the update feed went on naming v1.0.0 until its mirror sync finished at 18:25 (and its
+    /// five-minute cache after that). A 1.0.1 app installed in that window laid out v1.0.0 and
+    /// pulled its images, and Start then moved it to v1.0.1 and pulled a second set: "Downloading
+    /// the update · 284.5 MB of 949.1 MB" straight after setup.
+    #[test]
+    fn a_fresh_install_never_lays_out_a_release_older_than_the_app() {
+        let root = scratch("release-feed-behind");
+        let own = crate::upgrade::Own {
+            version: "v1.0.1".into(),
+            pinned: false,
+        };
+        let version =
+            resolve_version_with(&root, None, &own.version, || Ok("v1.0.0".into())).unwrap();
+        assert_eq!(version, "v1.0.1");
+        // Laid out as Install lays it out, Start has nothing to move.
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            "services:\n  server: {}\n  worker: {}\n",
+        )
+        .unwrap();
+        std::fs::write(deployment::images_path(&root), "{}").unwrap();
+        deployment::record(&root, &version, false).unwrap();
+        assert_eq!(crate::upgrade::due(&root, &own), None);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_fresh_install_still_takes_a_latest_release_newer_than_the_app() {
+        let root = scratch("release-app-behind");
+        let version = resolve_version_with(&root, None, "v1.0.0", || Ok("v1.0.1".into())).unwrap();
+        assert_eq!(version, "v1.0.1");
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -207,7 +264,8 @@ mod tests {
         let root = scratch("release-installed");
         deployment::record(&root, "v0.0.7", false).unwrap();
         std::fs::write(deployment::images_path(&root), "{}").unwrap();
-        let version = resolve_version_with(&root, None, || panic!("must work offline")).unwrap();
+        let version =
+            resolve_version_with(&root, None, OLDER, || panic!("must work offline")).unwrap();
         assert_eq!(version, "v0.0.7");
         assert!(!deployment::needs_fetch(&root, &version));
         std::fs::remove_dir_all(root).unwrap();
@@ -223,7 +281,7 @@ mod tests {
         .unwrap();
         std::fs::write(deployment::images_path(&root), "{}").unwrap();
         deployment::record(&root, "v0.0.15", false).unwrap();
-        let version = resolve_version_with(&root, None, || Ok("v0.0.16".into())).unwrap();
+        let version = resolve_version_with(&root, None, OLDER, || Ok("v0.0.16".into())).unwrap();
         assert_eq!(version, "v0.0.16");
         assert!(deployment::needs_fetch(&root, &version));
         std::fs::remove_dir_all(root).unwrap();
@@ -234,7 +292,7 @@ mod tests {
         let root = scratch("release-repair");
         deployment::record(&root, "v0.0.7", false).unwrap();
         let version =
-            resolve_version_with(&root, None, || panic!("keep the installed pin")).unwrap();
+            resolve_version_with(&root, None, OLDER, || panic!("keep the installed pin")).unwrap();
         assert_eq!(version, "v0.0.7");
         assert!(deployment::needs_fetch(&root, &version));
         std::fs::remove_dir_all(root).unwrap();
@@ -243,7 +301,7 @@ mod tests {
     #[test]
     fn a_failed_lookup_is_reported_without_recording_a_version() {
         let root = scratch("release-lookup-failed");
-        let error = resolve_version_with(&root, None, || Err("GitHub answered 403".into()))
+        let error = resolve_version_with(&root, None, OLDER, || Err("GitHub answered 403".into()))
             .expect_err("a failed lookup must not fall back to an old release");
         assert!(error.contains("403"));
         assert!(deployment::installed(&root).is_none());
@@ -263,7 +321,7 @@ mod tests {
         let root = scratch("release-pinned-keeps");
         deployment::record(&root, "v0.3.0", false).unwrap();
         std::fs::write(deployment::images_path(&root), "{}").unwrap();
-        let version = resolve_version_with(&root, Some(&pin("internal-abc")), || {
+        let version = resolve_version_with(&root, Some(&pin("internal-abc")), OLDER, || {
             panic!("a pinned build is offline")
         })
         .unwrap();
@@ -297,9 +355,10 @@ mod tests {
         let root = scratch("release-pinned-build");
         deployment::record(&root, "v0.0.7", false).unwrap();
         let pin = pin("internal-abc");
-        let version =
-            resolve_version_with(&root, Some(&pin), || panic!("a pinned build is offline"))
-                .unwrap();
+        let version = resolve_version_with(&root, Some(&pin), OLDER, || {
+            panic!("a pinned build is offline")
+        })
+        .unwrap();
         assert_eq!(version, "internal-abc");
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -308,7 +367,7 @@ mod tests {
     fn a_customer_build_moves_a_pinned_deployment_to_the_latest_release() {
         let root = scratch("release-unpin");
         deployment::record(&root, "internal-abc", true).unwrap();
-        let version = resolve_version_with(&root, None, || Ok("v0.2.0".into())).unwrap();
+        let version = resolve_version_with(&root, None, OLDER, || Ok("v0.2.0".into())).unwrap();
         assert_eq!(version, "v0.2.0");
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -317,8 +376,10 @@ mod tests {
     fn a_customer_build_keeps_its_own_release() {
         let root = scratch("release-keep");
         deployment::record(&root, "v0.2.0", false).unwrap();
-        let version =
-            resolve_version_with(&root, None, || panic!("must keep the followed release")).unwrap();
+        let version = resolve_version_with(&root, None, OLDER, || {
+            panic!("must keep the followed release")
+        })
+        .unwrap();
         assert_eq!(version, "v0.2.0");
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -355,7 +416,10 @@ mod tests {
             assert!(root.join(path).exists(), "missing {path}");
         }
         assert_eq!(
-            resolve_version_with(&root, None, || panic!("restart must not need GitHub")).unwrap(),
+            resolve_version_with(&root, None, OLDER, || panic!(
+                "restart must not need GitHub"
+            ))
+            .unwrap(),
             version
         );
         assert!(!deployment::needs_fetch(&root, &version));
