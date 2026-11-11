@@ -1,10 +1,11 @@
-import type { AttachmentsConfig } from "@copilotkit/react-core/v2";
+import type { Attachment, AttachmentsConfig } from "@copilotkit/react-core/v2";
 import {
   ACCEPTED_IMAGE_MIME,
   ACCEPTED_TEXT_MIME,
   attachmentUrl,
   MAX_IMAGE_BYTES,
 } from "@/lib/channels/attachments";
+import { newId } from "@/lib/new-id";
 
 /**
  * Uploads a picked file to this deployment and hands the composer a link to it, never the bytes.
@@ -257,6 +258,122 @@ export function attachmentsConfigFor(
     },
     onUploadFailed,
   };
+}
+
+/**
+ * `AttachmentsConfig` for a composer whose conversation does not exist yet: `/channel/new` and the
+ * home screen, where the first message is what creates the conversation.
+ *
+ * NOTHING IS UPLOADED HERE, because an upload belongs to a conversation and there is none to give
+ * it. The picked file is held in this tab instead, on the attachment's own metadata, and
+ * `uploadHeldFiles` sends it once the first message has made the conversation. Holding the file,
+ * and not creating the conversation at the first pick, is what keeps an abandoned screen clean:
+ * somebody who attaches a file and walks away leaves no empty conversation in their sidebar and no
+ * row on the server counting against their limit until the sweeper finds it a day later.
+ *
+ * The chip's preview is an object URL onto the file, never its bytes as base64 in React state.
+ * `onHeld` reports each one so the composer can revoke it once the chip has gone.
+ *
+ * Every file still reaches this through `screenPickedFiles` first, so kind, size and the per-message
+ * cap are refused here in the same words as in a conversation. The server is still the authority:
+ * it sniffs the bytes when `uploadHeldFiles` sends them, and its refusal comes back to the composer
+ * with the draft.
+ */
+export function heldAttachmentsConfig(
+  onUploadFailed: (error: AttachmentUploadError) => void,
+  onHeld: (previewUrl: string) => void,
+): AttachmentsConfig {
+  return {
+    enabled: true,
+    accept: "*/*",
+    maxSize: MAX_IMAGE_BYTES,
+    onUpload: async (file) => {
+      const previewUrl = URL.createObjectURL(file);
+      onHeld(previewUrl);
+      return {
+        type: "url",
+        value: previewUrl,
+        metadata: { heldFile: file, filename: file.name },
+      };
+    },
+    onUploadFailed,
+  };
+}
+
+/** The file a held composer is keeping for an attachment, or `undefined` for a stored one. */
+export function heldFileOf(
+  carrier: { metadata?: unknown } | undefined,
+): File | undefined {
+  const metadata = carrier?.metadata as { heldFile?: unknown } | undefined;
+  return metadata?.heldFile instanceof File ? metadata.heldFile : undefined;
+}
+
+/**
+ * Send the files a held composer kept, now that the first message has created the conversation.
+ *
+ * Each comes back as the conversation's own composer would have made it: a `url` source naming the
+ * stored row with the type the server sniffed, and `attachmentId` on its metadata. So the first
+ * message is sent, stamped and drawn exactly like every later one (`toMessageContent` in
+ * `channel-chat.tsx`). An attachment that already names a stored row is passed through untouched.
+ *
+ * ALL OR NOTHING. When one file is refused, the rows that did land are deleted before the refusal
+ * is thrown, and the deletes are awaited: the caller discards the conversation next, and a row
+ * whose conversation has gone can no longer be deleted by anybody but the sweeper. The draft goes
+ * back to the composer with its files, and the reason is the server's own sentence naming the file
+ * (`uploadToChannel`).
+ */
+export async function uploadHeldFiles(
+  channelId: string,
+  attachments: readonly Attachment[],
+): Promise<Attachment[]> {
+  // One group for one message: the set the server's per-message cap counts.
+  const upload = uploadToChannel(channelId, newId());
+  const created: string[] = [];
+  const settled = await Promise.allSettled(
+    attachments.map(async (attachment): Promise<Attachment> => {
+      const file = heldFileOf(attachment);
+      if (!file) return attachment;
+      const { metadata, ...source } = await upload(file);
+      const sent = { ...attachment, source, metadata };
+      const rowId = stagedRowId(sent);
+      if (rowId !== undefined) created.push(rowId);
+      return sent;
+    }),
+  );
+  const refused = settled.find((outcome) => outcome.status === "rejected");
+  if (refused) {
+    await Promise.all(created.map(discardStagedAttachment));
+    throw refused.reason;
+  }
+  return settled.map(
+    (outcome) => (outcome as PromiseFulfilledResult<Attachment>).value,
+  );
+}
+
+/**
+ * GIVE BACK A STAGED ROW NOTHING WILL SEND: a chip removed from the strip, or a file uploaded for a
+ * first message that was then refused.
+ *
+ * `removeAttachment` only filters client state, so until this existed, attach-then-change-your-mind
+ * left the row staged with `attachedAt IS NULL` for good. The upload handler counts exactly those
+ * rows per person per channel and refuses the ninth with "You already have 8 attachments waiting to
+ * send in this channel." — naming files that are on nobody's screen, with no way back.
+ *
+ * BEST-EFFORT, AND DELIBERATELY UNINSPECTED. The chip is gone from the strip before this is called,
+ * because that is what the person asked for; making that wait on a round trip, or reporting what
+ * comes back, would put an error in front of somebody for a request they never made. There are two
+ * such answers — 404 for a non-uploader, 409 for an attachment already sent — and neither is
+ * actionable. `cull-staged-attachments.ts` is the backstop for whatever this misses. It resolves
+ * either way, so a caller that has to wait for it can.
+ */
+export function discardStagedAttachment(attachmentId: string): Promise<void> {
+  return fetch(attachmentUrl(attachmentId), {
+    method: "DELETE",
+    credentials: "include",
+  }).then(
+    () => undefined,
+    () => undefined,
+  );
 }
 
 /**

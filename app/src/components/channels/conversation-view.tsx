@@ -35,6 +35,7 @@ export function ConversationView({
   agents = [],
   commands,
   channelId,
+  holdsFilesUntilSent = false,
   disabled = false,
   onSendHeld,
   pending = false,
@@ -69,10 +70,15 @@ export function ConversationView({
   commands?: readonly CommandOption[];
   /**
    * The channel this conversation belongs to, forwarded to the composer so it can upload
-   * attachments to it. Omitted by a caller with no channel yet — `/channel/new` creates one on
-   * first send — which leaves the composer exactly as it behaved before attachments existed.
+   * attachments to it. Omitted by a caller with no channel yet: `/channel/new` creates one on
+   * first send.
    */
   channelId?: string;
+  /**
+   * No channel yet, and files are still welcome: the composer holds them until the first message
+   * creates the conversation. See `Composer`.
+   */
+  holdsFilesUntilSent?: boolean;
   disabled?: boolean;
   /** Writing is open and sending waits on the caller; forwarded to the composer. */
   onSendHeld?: () => void;
@@ -528,6 +534,7 @@ export function ConversationView({
           agents={agents}
           autoFocus={autoFocus}
           {...(channelId ? { channelId } : {})}
+          holdsFilesUntilSent={holdsFilesUntilSent}
           {...(commands ? { commands } : {})}
           className="relative w-full mt-auto"
           compact

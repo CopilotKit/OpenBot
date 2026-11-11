@@ -51,6 +51,10 @@ import { newId } from "../../../../lib/new-id";
 /** What `GET /api/agents/:id` answers for a Bot this person cannot see. */
 const AGENT_NOT_FOUND = "Couldn't find that Bot.";
 
+/** Said when a draft holding files is sent to two or more Bots. */
+const GROUP_TAKES_NO_FILES =
+  "A conversation with more than one Bot can't take files yet. Remove them to send.";
+
 export const Route = createFileRoute("/_authed/_app/channel/new")({
   /*
    * The pending recipient's id, read as text whatever the router parsed it into (`searchText`):
@@ -203,8 +207,18 @@ function NewConversation({ composition }: { composition: string }) {
 
   const submit = async (draft: ComposerDraft) => {
     const recipient = recipients[0];
-    if (!recipient || !canSend(recipients, draft.text)) return;
+    if (
+      !recipient ||
+      !canSend(recipients, draft.text, draft.attachments.length)
+    )
+      return;
     if (group) {
+      // A group's messages carry words only, in this first message as in every later one. Files
+      // held before a second Bot was added are refused out loud and stay on the strip.
+      if (draft.attachments.length > 0) {
+        setError(GROUP_TAKES_NO_FILES);
+        throw new Error(GROUP_TAKES_NO_FILES);
+      }
       setError(null);
       try {
         // An `@` addresses one Bot, as it does in every later message of the group.
@@ -232,7 +246,13 @@ function NewConversation({ composition }: { composition: string }) {
       // home screen, and the trail has to say so for both.
       // A `/` skill stays at the start of the words, where the server finds it, as it does for
       // every later message.
-      await startChosen(recipient.id, draft.text, draftModel.requested);
+      await startChosen(
+        recipient.id,
+        draft.text,
+        draftModel.requested,
+        undefined,
+        draft.attachments,
+      );
     } catch (caught) {
       // Preserve the unsent draft when channel creation fails.
       setSent(null);
@@ -384,6 +404,11 @@ function NewConversation({ composition }: { composition: string }) {
         autoFocus={recipients.length > 0}
         // Commands must be loaded before the first channel message is sent.
         commands={skillCommands}
+        /*
+         * Files are held until the first message creates the conversation, then sent with it. Not
+         * for a group: its messages carry words only, so its composer offers no `+`.
+         */
+        holdsFilesUntilSent={!group}
         modelPicker={
           <ModelPicker
             catalogue={pickable ? models.data : undefined}
