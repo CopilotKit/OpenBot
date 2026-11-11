@@ -954,8 +954,15 @@ function accountSentence(input: {
 /**
  * Above the form: why this app asks for a key, what to do at the provider, and a link to its page.
  *
- * Most apps in the directory have no sign-in, and a person who pressed Connect expecting one meets
- * a form. This is what tells them that is expected and where the key comes from, before the boxes.
+ * Most apps in the directory connect here with a key, and a person who pressed Connect expecting a
+ * sign-in meets a form. This is what tells them that is expected and where the key comes from,
+ * before the boxes.
+ *
+ * THE SENTENCE IS ABOUT HOW OPENBOT CONNECTS, NEVER ABOUT THE APP. All this row knows is the scheme
+ * the broker connects the app with, and that says nothing about whether the app has a sign-in of
+ * its own. It said "{title} doesn't offer a sign-in here" and was read as a claim about the app:
+ * Fireflies, whose broker publishes only `API_KEY`, signs people in to its own MCP server with
+ * OAuth, and Pipedrive's broker row publishes `OAUTH2` beside the `API_KEY` this form is for.
  */
 function KeyGuideNote({
   guide,
@@ -967,8 +974,8 @@ function KeyGuideNote({
   return (
     <div className="mb-3 flex flex-col gap-1.5 text-sm" data-testid="key-guide">
       <p>
-        {title} doesn't offer a sign-in here, so it connects with a key from
-        your {title} account.
+        OpenBot connects to {title} with a key from your {title} account, not a
+        sign-in.
       </p>
       {guide ? <p className="text-muted-foreground">{guide.steps}</p> : null}
       {guide?.url ? (

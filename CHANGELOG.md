@@ -317,6 +317,10 @@ every deployment:
 
 ### Smaller changes
 
+- Connecting an app that takes a key no longer says the app has no sign-in. The dialog said
+  "Fireflies doesn't offer a sign-in here", and Fireflies does have one, just not through the way
+  OpenBot connects it. It now reads "OpenBot connects to Fireflies with a key from your Fireflies
+  account, not a sign-in." for every such app. How the app connects is unchanged.
 - "Backend" is one word everywhere OpenBot shows it: OpenBot Desktop's Status window, tray and
   messages, the app, the server's messages and the Recorder. Desktop's Status window heads its card
   "Backend" where it said "Back end".

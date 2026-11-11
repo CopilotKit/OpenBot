@@ -25,7 +25,8 @@ import captured from "../../server/tests/fixtures/composio-key-apps.json";
  *
  * The rows are Composio's own catalogue answer, captured read-only on 2026-11-08. Each one's
  * `connection` is the server's verdict for that exact row, which `server/tests/key-only-apps.test.ts`
- * pins against `connectionOf`: HubSpot and Gmail sign in, 1Password and PostHog take a key.
+ * pins against `connectionOf`: HubSpot and Gmail sign in, 1Password, PostHog, Fireflies and
+ * Pipedrive take a key.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -42,6 +43,8 @@ const VERDICT: Record<string, ComposioApp["connection"]["kind"]> = {
   gmail: "consent",
   _1password: "fields",
   posthog: "fields",
+  fireflies: "fields",
+  pipedrive: "fields",
 };
 
 /** The captured rows, as the directory route answers them: the server's own projection. */
@@ -173,6 +176,8 @@ test("apps you sign in to are listed ahead of apps that need a key", async () =>
       "directory-gmail",
       "directory-hubspot",
       "directory-_1password",
+      "directory-fireflies",
+      "directory-pipedrive",
       "directory-posthog",
     ]);
   });
