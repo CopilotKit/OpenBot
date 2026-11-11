@@ -7024,8 +7024,9 @@ mod app_page_tests {
                     "--test-threads=1",
                 ])
                 .env(CHILD, &home)
+                // The installation folder's home (`stack::default_root` reads HOME first). Not
+                // USERPROFILE: Windows finds the app's local data folder through the real profile.
                 .env("HOME", &home)
-                .env("USERPROFILE", &home)
                 .output()
                 .unwrap();
             let _ = std::fs::remove_dir_all(&home);
