@@ -233,9 +233,20 @@ export function SkillsSettingsPage({
         <LearningSharing
           action={
             <Button
-              render={(props) => (
-                <Link {...props} search={{ new: true }} to="/settings/skills" />
-              )}
+              render={(props) =>
+                // The personal edition's skills each have a switch per Bot, so a new one is written
+                // on the page that leads to those switches. Elsewhere a person's own skill is
+                // written in the panel beside the list.
+                personal ? (
+                  <Link {...props} {...paths.newSkill()} />
+                ) : (
+                  <Link
+                    {...props}
+                    search={{ new: true }}
+                    to="/settings/skills"
+                  />
+                )
+              }
               size="sm"
               variant="ghost"
             >

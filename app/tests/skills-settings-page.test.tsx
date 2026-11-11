@@ -174,6 +174,14 @@ test("New skill opens the side panel, and Teach a Bot is a row where a browser c
   ).toBe("/browser");
 });
 
+test("in the personal edition, New skill opens the form whose skill has a switch per Bot", async () => {
+  const view = draw("personal");
+  await view.findByRole("heading", { name: "Skills" });
+  expect(view.getByText("New skill").closest("a")?.getAttribute("href")).toBe(
+    "/settings/skills/new",
+  );
+});
+
 test("no Teach a Bot row where OpenBot can't run a browser for you", async () => {
   const view = draw("team");
   await view.findByRole("heading", { name: "Skills" });
