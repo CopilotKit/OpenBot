@@ -1,5 +1,10 @@
-import type { Message, RunAgentInput } from "@ag-ui/client";
-import { type AbstractAgent, HttpAgent } from "@ag-ui/client";
+import type {
+  BaseEvent,
+  Message,
+  MessagesSnapshotEvent,
+  RunAgentInput,
+} from "@ag-ui/client";
+import { type AbstractAgent, EventType, HttpAgent } from "@ag-ui/client";
 import type {
   BuiltInAgentConfiguration,
   CopilotRuntimeHooks,
@@ -52,7 +57,7 @@ import {
   stopRecorder,
 } from "@openbot/toolkit/run-stop";
 import { historyOrEmpty } from "@openbot/toolkit/thread-history";
-import { defer, from, switchMap } from "rxjs";
+import { defer, from, map, switchMap } from "rxjs";
 import { z } from "zod";
 import {
   type ActorAgentResolver,
@@ -1299,6 +1304,58 @@ async function inlineAttachments(
   return inlined;
 }
 
+/**
+ * The person's messages that carry a file, by id, as they sent them: what
+ * {@link withAttachmentsAsSent} puts back.
+ */
+function attachedAsSent(
+  messages: readonly Message[],
+): ReadonlyMap<string, Message["content"]> {
+  return new Map(
+    messages.flatMap((message) =>
+      message.role === "user" && attachmentIdsIn(message.content).length > 0
+        ? [[message.id, message.content] as const]
+        : [],
+    ),
+  );
+}
+
+/**
+ * An endpoint's snapshot of the thread, with each message a person attached a file to put back as
+ * they sent it.
+ *
+ * FOUND ON OPENBOT DESKTOP 1.0.2. {@link inlineAttachments} puts a file's contents in front of the
+ * model on the way to a Bot's endpoint, and an endpoint that ends its run with a MESSAGES_SNAPSHOT
+ * (ag-ui-langgraph does, on every run) hands the thread back as it was sent to it: the file's text,
+ * or an image's base64, where the person's reference to the file was. The browser replaces its
+ * messages with that snapshot and Intelligence stores it as the thread. So a text file turned into
+ * one giant block of its own contents the moment the answer finished, an image's thumbnail
+ * vanished, and a reload showed the same.
+ *
+ * The contents were for the model. The thread keeps what the person sent, and the next turn inlines
+ * it again from the reference, the way every turn treats the history behind it.
+ *
+ * Matched by id, and only a person's message that carried a file: everything else in the snapshot is
+ * the endpoint's own account of the thread, and is passed on as it came.
+ */
+function withAttachmentsAsSent(
+  event: BaseEvent,
+  asSent: ReadonlyMap<string, Message["content"]>,
+): BaseEvent {
+  if (event.type !== EventType.MESSAGES_SNAPSHOT || asSent.size === 0)
+    return event;
+  const snapshot = event as MessagesSnapshotEvent;
+  let restored = false;
+  const messages = snapshot.messages.map((message) => {
+    const content =
+      message.role === "user" ? asSent.get(message.id) : undefined;
+    if (content === undefined || content === message.content) return message;
+    restored = true;
+    return { ...message, content } as Message;
+  });
+  return restored ? ({ ...snapshot, messages } as BaseEvent) : event;
+}
+
 /** Who refuses this deployment's model calls, as a person knows them. See `provider-refusal.ts`. */
 function refusingProvider(model: RuntimeModel): RefusingProvider {
   return {
@@ -2381,7 +2438,11 @@ function remoteAgentWithStandingRole(
      *
      * Then the images a tool handed back, for the same endpoint that cannot open a storage link
      * either; see `tool-images.ts`.
+     *
+     * The files as the person sent them are kept, for the snapshot the endpoint hands back; see
+     * `withAttachmentsAsSent`.
      */
+    const asSent = attachedAsSent(history);
     return from(
       Promise.all([
         (loadAttachment
@@ -2512,6 +2573,11 @@ function remoteAgentWithStandingRole(
           initiator,
         ).run(prepared, next);
       }),
+      /*
+       * Last, over every step's stream, so no snapshot the endpoint ends a step with reaches the
+       * browser or the stored thread with a file's contents where the person's file was.
+       */
+      map((event) => withAttachmentsAsSent(event, asSent)),
     );
   };
 
