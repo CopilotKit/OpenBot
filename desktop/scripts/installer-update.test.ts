@@ -193,10 +193,20 @@ test("the old uninstaller runs on the Installing page, silently and as an update
     "ExecWait '$OpenBotOldUninstaller /UPDATE /S _?=$OpenBotOldFolder' $0",
   );
   const stopped = at("!insertmacro OPENBOT_PROGRESS_MOVING 0");
+  // Box I: ExecWait writes its own "Execute: ...uninstall.exe /UPDATE /S _?=..." to the page's
+  // status line, over the plain one, for as long as the old uninstaller ran. Around the wait the
+  // details go to the list only, so the plain line stays on screen.
+  const listOnly = at("SetDetailsPrint listonly");
+  const both = at("SetDetailsPrint both");
   expect(asked).toBeLessThan(said);
   expect(said).toBeLessThan(moving);
-  expect(moving).toBeLessThan(run);
-  expect(run).toBeLessThan(stopped);
+  expect(moving).toBeLessThan(listOnly);
+  expect(listOnly).toBeLessThan(run);
+  expect(run).toBeLessThan(both);
+  expect(both).toBeLessThan(stopped);
+  expect(
+    old.slice(said + 1, run).filter((line) => line.startsWith("DetailPrint")),
+  ).toEqual([]);
   expect(old).not.toContain("HideWindow");
 
   // The Installing page's own progress bar (control 1004, as MUI2's InstallFiles.nsh reads it)

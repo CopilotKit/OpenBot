@@ -122,7 +122,11 @@ Var OpenBotRunning
     DetailPrint "Removing the previous version of OpenBot. Your Bots and data stay."
     !insertmacro OPENBOT_PROGRESS_MOVING 1
     ClearErrors
+    ; ExecWait says "Execute: <the command>" on the page's status line, over the plain line, for as
+    ; long as it waits (box I). Said to the details list only, so the plain line stays on screen.
+    SetDetailsPrint listonly
     ExecWait '$OpenBotOldUninstaller /UPDATE /S _?=$OpenBotOldFolder' $0
+    SetDetailsPrint both
     ${IfThen} ${Errors} ${|} StrCpy $0 2 ${|}
     !insertmacro OPENBOT_PROGRESS_MOVING 0
     ${If} $0 <> 0
