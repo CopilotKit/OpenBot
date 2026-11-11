@@ -434,14 +434,18 @@ export function StartJourney({
   const elapsed = Math.floor(seconds(sequence.runSince, now));
   // The journey's lines are phrases: the native side's one sentence is said as one too. A line of
   // several sentences, like Docker Desktop's hand-off, stays as it is.
+  const handingOff = happening?.slice(0, -1).includes(". ") === true;
   const said =
     happening === null
       ? view.said
-      : happening.slice(0, -1).includes(". ")
+      : handingOff
         ? happening
         : happening.replace(/\.$/, "");
   return (
-    <section className="journey" aria-label="How far along">
+    <section
+      className={`journey${handingOff ? " handing-off" : ""}`}
+      aria-label="How far along"
+    >
       <div className="journey-head">
         <span className="step-spinner" aria-hidden="true" />
         <span className="journey-said">{said}</span>
@@ -455,10 +459,13 @@ export function StartJourney({
               {view.bytes}
             </span>
           )}
-          <span aria-hidden="true">
-            {" · "}
-            {formatElapsed(elapsed)} so far
-          </span>
+          {/* Not beside "Taking longer than usual, still working": the line stays one line. */}
+          {view.left !== null && (
+            <span aria-hidden="true">
+              {" · "}
+              {formatElapsed(elapsed)} so far
+            </span>
+          )}
         </span>
       </div>
       <progress
