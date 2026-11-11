@@ -190,7 +190,7 @@ export const ALWAYS_ON_APP = "routines";
 
 /**
  * The personal edition's tiles: every app in the catalogue, whether or not it has been added, and
- * the same brokered apps as {@link connectionRows}.
+ * the same brokered apps and GitHub link as {@link connectionRows}.
  *
  * One person adds an app and connects their account, so the two are one press: a tile says what
  * that press does. An app reached as you is Connect. An app with no account at all (a free search
@@ -198,17 +198,15 @@ export const ALWAYS_ON_APP = "routines";
  * once added with it.
  *
  * Routines is left out: it is on for every Bot and has its own page in the main menu, so there is
- * nothing to add or connect.
- *
- * So are the account links, GitHub's and Slack's. They only recognise a person, and in this edition
- * nobody else signs in to be told apart from them: the list is the search providers and the broker's
- * apps. A brokered GitHub app the link would have spoken for is then a row of its own.
+ * nothing to add or connect. Slack is left out too: the personal edition has no Slack.
  */
 export function personalConnectionRows(input: {
   catalogue: CatalogueItem[];
   added: ReadonlySet<string>;
   brokered: PluginServer[];
   connected: ReadonlySet<string>;
+  links: LinkedAccount[];
+  providers: IdentityProviders | undefined;
 }): ConnectionRow[] {
   const apps = input.catalogue
     .filter((entry) => entry.key !== ALWAYS_ON_APP)
@@ -218,9 +216,9 @@ export function personalConnectionRows(input: {
     brokered: input.brokered,
     shared: [],
     connected: input.connected,
-    links: [],
-    providers: undefined,
-  });
+    links: input.links,
+    providers: input.providers,
+  }).filter((row) => row.key !== "slack");
   const rows = [...apps, ...rest];
   const inUse = (row: ConnectionRow) => row.state !== "available";
   return [...rows.filter(inUse), ...rows.filter((row) => !inUse(row))];

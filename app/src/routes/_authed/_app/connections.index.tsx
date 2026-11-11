@@ -369,6 +369,8 @@ function RouteComponent() {
         added,
         brokered: brokeredAccountsListedOn(listed),
         connected,
+        links: links.data ?? [],
+        providers: providers.data,
       })
     : connectionRows({
         catalogue: yours,
@@ -390,14 +392,13 @@ function RouteComponent() {
   const toAdd = matching.filter((row) => row.state === "available");
   /*
    * The apps decide whether there is a list at all, and the account links only add to it: a failed
-   * links read costs the GitHub and Slack rows and says so, not the whole page. The personal edition
-   * lists no account links, so it waits for neither read.
+   * links read costs the GitHub and Slack rows and says so, not the whole page.
    */
-  const accountLinks = !personal;
   const loading =
     plugins.isPending ||
     connections.isPending ||
-    (accountLinks && (links.isPending || providers.isPending)) ||
+    links.isPending ||
+    providers.isPending ||
     // Which rows there are depends on the edition, so the team list never flashes before the personal one.
     capabilities.isPending;
 
@@ -563,7 +564,7 @@ function RouteComponent() {
             ) : null}
           </>
         )}
-        {accountLinks && (links.error || providers.error) ? (
+        {links.error || providers.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
             Couldn't load GitHub and Slack, so they aren't listed. Reload the
             page.
