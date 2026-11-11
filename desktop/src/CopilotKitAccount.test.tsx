@@ -367,9 +367,16 @@ test("the sign-in leads with OpenBot, while it waits and once stopped", async ()
     screen.getByRole("heading", { name: "Get your free license key" }),
   ).toBeTruthy();
   expect(screen.getByText(/needs a free license key/)).toBeTruthy();
+  // What signing in does, and where OpenBot keeps what you make: never "only", and never that
+  // conversations stay on this computer (the AI provider gets them).
   expect(
-    screen.getByText(/does NOT send traffic data to OpenBot by CopilotKit\./),
+    screen.getByText(
+      "Signing in gets your free license key and sets up your apps. OpenBot keeps your conversations and files on this computer.",
+    ),
   ).toBeTruthy();
+  expect(
+    screen.queryByText(/traffic data|\bonly\b|stay on this computer/),
+  ).toBeNull();
   expect(screen.getByText("by CopilotKit")).toBeTruthy();
   expect(screen.queryByRole("img", { name: "CopilotKit" })).toBeNull();
 

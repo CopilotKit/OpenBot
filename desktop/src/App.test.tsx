@@ -812,7 +812,9 @@ test("a signed-out first run signs in and accepts the agreement as its own step,
   await view.findByRole("heading", { name: "Get your free license key" });
   await view.findByText("Finish signing in to OpenBot in your browser…");
   expect(
-    view.getByText(/Your conversations and files stay on this computer/),
+    view.getByText(
+      /OpenBot keeps your conversations and files on this computer/,
+    ),
   ).toBeTruthy();
   expect(stepLabel(view)).toBe("Account");
   await waitFor(() =>
