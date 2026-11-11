@@ -154,7 +154,12 @@ async function routinesPage(owner: AgentActor) {
   const response = await app.request("http://openbot.test/");
   expect(response.status).toBe(200);
   return (await response.json()) as {
-    routines: Array<{ id: string; title: string | null; instruction: string }>;
+    routines: Array<{
+      id: string;
+      title: string | null;
+      instruction: string;
+      goalId: string | null;
+    }>;
   };
 }
 
@@ -302,7 +307,11 @@ describe("a routine a Bot makes to run one of its goals", () => {
     expect(result.text).toContain('"Track OpenBot releases", instruction');
     const page = await routinesPage(owner);
     expect(page.routines).toEqual([
-      expect.objectContaining({ title: "Track OpenBot releases", instruction }),
+      expect.objectContaining({
+        title: "Track OpenBot releases",
+        instruction,
+        goalId,
+      }),
     ]);
     const scheduled = (await activity.forBot(owner.id, agentId)).scheduled;
     expect(scheduled.find((item) => item.kind === "routine")?.title).toBe(
@@ -346,6 +355,24 @@ describe("a routine a Bot makes to run one of its goals", () => {
     );
 
     expect((await routinesPage(owner)).routines[0]?.title).toBeNull();
+    expect((await routinesPage(owner)).routines[0]?.goalId).toBeNull();
+  });
+
+  test("made before routines recorded their goal, reports the goal its instruction names", async () => {
+    const { owner, connection, goalId } = await withGoal();
+    await callTool(connection, "create_routine", {
+      instruction,
+      goalId,
+      cron: "0 8 * * *",
+      timezone: "UTC",
+    });
+    // As a routine from before 0.3.3 is stored: no goal recorded, read from its instruction.
+    await database
+      .update(routines)
+      .set({ goalId: null, goalByTitle: true })
+      .where(eq(routines.ownerUserId, owner.id));
+
+    expect((await routinesPage(owner)).routines[0]?.goalId).toBe(goalId);
   });
 });
 

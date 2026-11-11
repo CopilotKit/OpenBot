@@ -8,6 +8,7 @@ import {
   IconPlayerPlay,
   IconProgress,
   IconTarget,
+  IconTrash,
   IconWebhook,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -24,7 +25,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   Item,
@@ -38,8 +44,12 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { GoalSchedules } from "@/components/routines/goal-schedules";
 import { markdownComponents } from "@/lib/markdown";
+import { goalStarts } from "@/lib/routines/merged";
+import type { RoutineRecord } from "@/lib/routines/queries";
 import {
+  deleteResponsibilityMutationOptions,
   type ResponsibilityRecord,
   responsibilityActionMutationOptions,
   responsibilityRunsQueryOptions,
@@ -63,7 +73,7 @@ export const STATUS: Record<
   completed: { label: "Completed", icon: IconCircleCheck },
 };
 
-const SOURCE_LABEL: Record<Source, string> = {
+export const SOURCE_LABEL: Record<Source, string> = {
   manual: "Manual",
   slack: "Slack",
   github: "GitHub",
@@ -80,50 +90,65 @@ const SOURCE_LABEL: Record<Source, string> = {
  * What a responsibility's row says under its title: its state, and while it is active, what starts
  * it. Computed from the queries on every render so it follows whatever the dialog just changed.
  *
+ * The starts are the Routines list's own (`goalStarts`): the schedule of each enabled routine, then
+ * its events, then its enabled triggers. A schedule that is switched off starts nothing, so a goal
+ * with only that reads "Schedule off", as it does on the list.
+ *
  * `triggers` is undefined until they load, and then nothing is said about what starts it rather than
- * "Runs when asked", which would be a claim about triggers nobody has read yet.
+ * "Runs when asked", which would be a claim about triggers nobody has read yet. An enabled schedule
+ * is already known, so it is named at once.
  */
 export function summaryFor(
   goal: ResponsibilityRecord,
   triggers: TriggerRecord[] | undefined,
+  routines: readonly RoutineRecord[] = [],
 ): string {
   const status = STATUS[goal.status].label;
   if (goal.status === "completed") return status;
   if (goal.status === "paused")
     return `${status} · Nothing starts it until you resume it`;
-  const starts = [
-    ...goal.subscriptions.map(
-      (subscription) =>
-        `${SOURCE_LABEL[subscription.source]} ${subscription.eventType}`,
-    ),
-    ...(triggers ?? [])
-      .filter((trigger) => trigger.enabled)
+  const starts = goalStarts(
+    goal,
+    triggers
+      ?.filter((trigger) => trigger.enabled)
       .map((trigger) => `${KIND_LABEL[trigger.kind]} trigger`),
-  ];
-  if (starts.length) return `${status} · Starts on ${starts.join(", ")}`;
-  return triggers ? `${status} · Runs when asked` : status;
+    routines,
+    (subscription) =>
+      `${SOURCE_LABEL[subscription.source]} ${subscription.eventType}`,
+  );
+  if (starts === null) return status;
+  return `${status} · ${starts === "When you ask" ? "Runs when asked" : starts}`;
 }
 
 /**
  * Everything about one responsibility, opened from its row: what can be done to it now (pause, run,
  * complete — each immediate), its wording (a draft, saved by the footer), where it stands, what
- * starts it, and its runs.
+ * starts it (its schedules, events and triggers), and its runs.
  */
 export function ResponsibilityDialog({
   goal,
   onClose,
+  routines = [],
 }: {
   goal: ResponsibilityRecord;
   onClose: () => void;
+  /** The routines that run it: on the Routines list they are its starts, changed here. */
+  routines?: readonly RoutineRecord[];
 }) {
   const formId = useId();
   const [showRuns, setShowRuns] = useState(false);
   const [title, setTitle] = useState(goal.title);
   const [instruction, setInstruction] = useState(goal.instruction);
   const [successCriteria, setSuccessCriteria] = useState(goal.successCriteria);
+  const [criteriaMissing, setCriteriaMissing] = useState(false);
   const triggers = useQuery(triggersQueryOptions(goal.id));
   const action = useMutation(responsibilityActionMutationOptions(queryClient));
   const edit = useMutation(updateResponsibilityMutationOptions(queryClient));
+  const remove = useMutation(deleteResponsibilityMutationOptions(queryClient));
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const starters = routines.some((routine) => routine.enabled)
+    ? "schedules, events and triggers"
+    : "events and triggers";
   const standing = [
     goal.progress
       ? {
@@ -149,7 +174,7 @@ export function ResponsibilityDialog({
         <DialogHeader>
           <DialogTitle>{goal.title}</DialogTitle>
           <DialogDescription>
-            {summaryFor(goal, triggers.data)}
+            {summaryFor(goal, triggers.data, routines)}
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 overflow-y-auto">
@@ -164,8 +189,8 @@ export function ResponsibilityDialog({
                     <ItemTitle>Active</ItemTitle>
                     <ItemDescription>
                       {goal.status === "active"
-                        ? "Its events and triggers start it."
-                        : "Paused. Its triggers won't start it."}
+                        ? `Its ${starters} start it.`
+                        : `Paused. Its ${starters} won't start it.`}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
@@ -276,6 +301,12 @@ export function ResponsibilityDialog({
             id={formId}
             onSubmit={(event) => {
               event.preventDefault();
+              // A goal that ends when met has nothing to meet without an outcome. Other goals may
+              // have none, so the field is only required for this one.
+              if (goal.endsWhenMet && !successCriteria.trim()) {
+                setCriteriaMissing(true);
+                return;
+              }
               edit.mutate(
                 {
                   id: goal.id,
@@ -308,17 +339,26 @@ export function ResponsibilityDialog({
                   maxLength={6000}
                 />
               </Field>
-              <Field>
+              <Field data-invalid={criteriaMissing ? true : undefined}>
                 <FieldLabel htmlFor={`${formId}-criteria`}>
                   Success criteria
                 </FieldLabel>
                 <Textarea
                   id={`${formId}-criteria`}
                   value={successCriteria}
-                  onChange={(event) => setSuccessCriteria(event.target.value)}
-                  required
+                  onChange={(event) => {
+                    setSuccessCriteria(event.target.value);
+                    setCriteriaMissing(false);
+                  }}
+                  aria-invalid={criteriaMissing ? true : undefined}
+                  aria-required={goal.endsWhenMet ? true : undefined}
                   maxLength={3000}
                 />
+                {criteriaMissing ? (
+                  <FieldError>
+                    It ends when this is met, so say what done looks like.
+                  </FieldError>
+                ) : null}
               </Field>
             </FieldGroup>
           </form>
@@ -363,6 +403,10 @@ export function ResponsibilityDialog({
             </div>
           ) : null}
 
+          <GoalSchedules
+            paused={goal.status === "paused"}
+            routines={routines}
+          />
           <Triggers goal={goal} />
           <Runs
             channelId={goal.channelId}
@@ -372,6 +416,22 @@ export function ResponsibilityDialog({
           />
         </DialogBody>
         <DialogFooter className="mt-4">
+          {/* As a routine's row deletes: a ghost Delete, confirmed in a dialog of its own. Apart
+              from Cancel and Save, which are about the wording. */}
+          <Button
+            aria-label={`Delete the goal ${goal.title}`}
+            className="mr-auto"
+            onClick={() => {
+              remove.reset();
+              setConfirmingDelete(true);
+            }}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <IconTrash />
+            Delete
+          </Button>
           <Button onClick={onClose} size="sm" type="button" variant="outline">
             Cancel
           </Button>
@@ -385,6 +445,51 @@ export function ResponsibilityDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+      <Dialog
+        onOpenChange={(next) => {
+          if (!next) setConfirmingDelete(false);
+        }}
+        open={confirmingDelete}
+      >
+        {/* The heavier backdrop, forced: this stacks over the goal's dialog, and Base UI would
+            otherwise render a nested dialog with no backdrop at all. */}
+        <DialogContent overlayClassName="bg-black/20 supports-backdrop-filter:backdrop-blur-sm">
+          <DialogHeader>
+            <DialogTitle>Delete "{goal.title}"?</DialogTitle>
+            <DialogDescription>
+              {routines.length > 0
+                ? "This goal stops for good, with its schedules and its runs. You can't undo this."
+                : "This goal stops for good, with its runs. You can't undo this."}
+            </DialogDescription>
+          </DialogHeader>
+          {remove.error ? (
+            <DialogBody className="mt-4">
+              <p className="text-destructive text-sm" role="alert">
+                {remove.error.message}
+              </p>
+            </DialogBody>
+          ) : null}
+          <DialogFooter className="mt-4">
+            <Button
+              onClick={() => setConfirmingDelete(false)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={remove.isPending}
+              onClick={() => remove.mutate(goal.id, { onSuccess: onClose })}
+              size="sm"
+              type="button"
+              variant="destructive"
+            >
+              {remove.isPending ? "Deleting…" : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }

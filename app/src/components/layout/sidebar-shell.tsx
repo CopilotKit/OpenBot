@@ -13,9 +13,9 @@ import {
 import {
   applySidebarOpen,
   parseStoredSidebarOpen,
-  parseStoredSidebarWidth,
   SIDEBAR_STORAGE_KEY,
-  SIDEBAR_WIDTH_STORAGE_PREFIX,
+  SIDEBAR_WIDTH_STORAGE_KEY,
+  storedSidebarWidth,
 } from "@/lib/sidebar";
 import { cn } from "@/lib/utils";
 
@@ -34,34 +34,22 @@ const SIDEBAR_GUTTER = "[&_[data-sidebar=menu-button]]:px-2.5";
  * `defaultOpen` to true). Driving it as controlled state is a dozen lines, and three copies of a
  * dozen lines is three chances for one shell to forget the preference the other two remember.
  *
- * `width` is what differs between the shells before anybody resizes one. The app's roster earns
- * 340px because its rows are two-line message previews; admin and settings hold short nav labels and
- * earn 300px. Dragging the sidebar's edge (`SidebarRail`) changes it, and each shell remembers its
- * own under its `name`.
+ * The three shells share one width (`SIDEBAR_WIDTH`), so the sidebar's edge stays put going between
+ * them. Dragging it (`SidebarRail`) in any shell changes it for all three.
  */
 export function SidebarShell({
   children,
   className,
-  name,
-  width: defaultWidth,
 }: {
   children: ReactNode;
   className?: string;
-  /** Whose width this is: each shell remembers its own, under this name. */
-  name: string;
-  /** The width before anybody drags the sidebar's edge. */
-  width: string;
 }) {
   // Read before the first paint, so a shell somebody left collapsed never flashes open.
   const [open, setOpen] = useState(() =>
     parseStoredSidebarOpen(window.localStorage.getItem(SIDEBAR_STORAGE_KEY)),
   );
-  const widthKey = `${SIDEBAR_WIDTH_STORAGE_PREFIX}${name}`;
   const [width, setWidth] = useState(() =>
-    parseStoredSidebarWidth(
-      window.localStorage.getItem(widthKey),
-      defaultWidth,
-    ),
+    storedSidebarWidth((key) => window.localStorage.getItem(key)),
   );
   // While the edge is dragged, the sidebar follows the pointer instead of easing after it.
   const [resizing, setResizing] = useState(false);
@@ -69,10 +57,10 @@ export function SidebarShell({
     () => ({
       setWidth: (pixels: number) => setWidth(`${pixels}px`),
       commitWidth: (pixels: number) =>
-        window.localStorage.setItem(widthKey, String(pixels)),
+        window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(pixels)),
       setResizing,
     }),
-    [widthKey],
+    [],
   );
 
   useEffect(() => {

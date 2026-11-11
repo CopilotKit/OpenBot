@@ -1,8 +1,10 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { NewSkillPage } from "@/components/manage/new-skill-page";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
+/** The form for a skill written for every Bot is under Skills now, in the main menu. */
 export const Route = createFileRoute("/_authed/settings/_personal/skills_/new")(
   {
-    component: NewSkillPage,
+    beforeLoad: () => {
+      throw redirect({ to: "/skills/new", replace: true });
+    },
   },
 );

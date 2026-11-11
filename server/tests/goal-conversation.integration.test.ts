@@ -29,7 +29,7 @@ import { createRoutineStore } from "../src/routines/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
- * A goal asked for in a conversation, from the Bot's tool to the goal on the Bot's Goals page.
+ * A goal asked for in a conversation, from the Bot's tool to the goal on the Bot's Routines page.
  *
  * FOUND ON WINDOWS: asked for a goal, the Personal Assistant said it had no goals tool and set up a
  * routine instead. A goal's tools were only handed to a goal's own run; a conversation held the

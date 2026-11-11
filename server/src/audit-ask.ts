@@ -1191,7 +1191,7 @@ export function createAuditAskRoutes(options: {
         return context.json(
           {
             error:
-              "OpenBot needs a model key to answer a question. Add one on the Credentials page, or set the filters yourself.",
+              "OpenBot needs a model key to answer a question. Add one in the Vault, or set the filters yourself.",
           },
           503,
         );

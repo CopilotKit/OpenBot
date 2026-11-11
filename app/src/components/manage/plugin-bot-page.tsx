@@ -14,12 +14,12 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { DescribeGrants } from "@/components/manage/describe-grants";
 import {
   SharedApprovalFields,
   sharedSectionSentence,
 } from "@/components/plugins/shared-approval-fields";
 import { SkippedToolsNotice } from "@/components/plugins/skipped-tools-notice";
-import { DescribeGrants } from "@/components/manage/describe-grants";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -51,12 +51,12 @@ import {
   type PluginTool,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
-import { toolsListError } from "@/lib/plugins/tools-error";
 import {
   botSharedAppsQueryOptions,
   type SharedUseApproval,
   sharedUseKeys,
 } from "@/lib/plugins/shared-use";
+import { toolsListError } from "@/lib/plugins/tools-error";
 
 /**
  * One Bot and one app: every action the app offers, and which of them this Bot holds.
@@ -234,10 +234,10 @@ export function PluginBotPage({
     return (
       <PageShell
         backButton={{ label: paths.pluginsLabel, linkProps: paths.plugins() }}
-        title="Plugins"
+        title={paths.pluginsLabel}
       >
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load plugins. Reload the page.
+          Couldn't load apps. Reload the page.
         </p>
       </PageShell>
     );

@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 import { MemoryList, RememberFact } from "@/components/memory/memories";
 import { settleReactWork } from "./settle-react-work";
 
-/** Settings → Memory: what the person's Bots know about them, and which Bot learned it. */
+/** Memory: what the person's Bots know about them, and which Bot learned it. */
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);

@@ -19,9 +19,9 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, within } from "@testing-library/react";
 import type { ComponentType } from "react";
+import { ThisComputerSections } from "@/components/settings/this-computer-sections";
 import type { DesktopStatus } from "@/lib/desktop/queries";
 import { queryClient } from "@/query-client";
-import { Route as ThisComputerRoute } from "@/routes/_authed/settings/this-computer";
 
 const STATUS: DesktopStatus = {
   openbotRunning: true,
@@ -64,7 +64,7 @@ afterAll(async () => {
 });
 
 test("OpenBot's services say what they keep without mentioning memory", async () => {
-  const Page = ThisComputerRoute.options.component as ComponentType;
+  const Page: ComponentType = ThisComputerSections;
   const view = render(
     <QueryClientProvider client={queryClient}>
       <Page />

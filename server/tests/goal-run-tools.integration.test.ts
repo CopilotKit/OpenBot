@@ -92,6 +92,7 @@ const goalRunTools = responsibilityTools({
   agentId: BOT,
   channelId: "goal-conversation",
   responsibilityRunId: "goal-run",
+  repeatedWhenRunBegan: new Map(),
 }).map((tool) => ({
   name: tool.name,
   description: tool.description,

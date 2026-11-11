@@ -194,7 +194,7 @@ test("an approval the server cannot complete says why, on the request, and leave
       status: 409,
       body: {
         error:
-          "The shared Gmail account is not connected yet. Connect it on Gmail's page under Plugins, then approve this request.",
+          "The shared Gmail account is not connected yet. Connect it on Gmail's page under Apps, then approve this request.",
       },
     },
   });

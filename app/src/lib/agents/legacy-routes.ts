@@ -20,13 +20,12 @@ export function legacyAgentsTarget(search: { new?: boolean; agent?: string }) {
 
 /**
  * The pages that left the sidebar, and where their contents went. What was about one Bot is on that
- * Bot's page; what was the person's own is in Settings.
+ * Bot's page; what was the person's own is in Settings, or on Routines.
  */
 export const LEGACY_PAGES = {
   "/approvals": "/settings/approvals",
-  "/memory": "/capabilities/memory",
   "/reachability": "/settings/notifications",
-  "/responsibilities": "/bots",
+  "/responsibilities": "/routines",
   // A group is started from the new-conversation screen by putting two or more Bots in To:.
   "/group/new": "/channel/new",
 } as const;

@@ -1,37 +1,12 @@
 import type { RecorderActivity } from "@openbot/shared/recorder-api";
-import { IconChalkboardTeacher } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
-import { SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 import { toast } from "@/components/ui/toast";
 import { browserStateQueryOptions } from "@/lib/browser/queries";
 import type { RecorderStore } from "@/lib/recorder/bridge";
 import { elapsed, RecordingMark, useSecondsSince } from "./recording";
 
-const BUTTON_CLASS = "hover:bg-foreground/5 h-10";
-/** What the sidebar and the page call the place where a person teaches their Bots a task. */
+/** What the page and the Skills page call the place where a person teaches their Bots a task. */
 export const TEACH_A_BOT = "Teach a Bot";
-
-/**
- * The sidebar's Teach a Bot link, beside Bots, Capabilities and Connections. It takes the person to the page where they
- * open their own browser, with the Recorder in it, and record a task. The click opens nothing itself: the page has Open.
- *
- * While any of the person's Recorders records (`activity`: the OpenBot browser's, or one in their everyday browser), the
- * link carries a red dot, named for the recording.
- *
- * Drawn only once the server has said OpenBot can run a browser for this person (`available`). While that is asked, and
- * when the server cannot be asked, there is no link, rather than one to a page saying there is nothing there.
- */
-export function BrowserNavItem() {
-  const state = useQuery(browserStateQueryOptions());
-  if (state.isPending || !state.data?.available) return null;
-  return (
-    <SidebarMenuItem>
-      <BrowserPageLink activity={state.data.activity} />
-    </SidebarMenuItem>
-  );
-}
 
 /** The one toast that says the Recorder's store page opened. */
 const STORE_TOAST = "browser-store-opened";
@@ -55,51 +30,23 @@ export function noteStoreTabOpened(store: RecorderStore): void {
   toast.add({ id: STORE_TOAST, title: storeTabSentence(store), type: "info" });
 }
 
-/** A link to the Teach a Bot page. */
-function BrowserPageLink({ activity }: { activity?: RecorderActivity }) {
-  const recording = useRecordingLabel(activity);
-  return (
-    <SidebarMenuButton
-      className={BUTTON_CLASS}
-      render={(props) => (
-        <Link
-          {...props}
-          to="/browser"
-          activeProps={{ className: "bg-foreground/5" }}
-        />
-      )}
-      tooltip={recordingTooltip(recording)}
-    >
-      <BrowserLabel>
-        {recording ? <RecordingDot {...recording} /> : null}
-      </BrowserLabel>
-    </SidebarMenuButton>
-  );
-}
-
-/** The icon and the name every item in this part of the sidebar has, and what goes at the end of the row. */
-function BrowserLabel({ children }: { children?: ReactNode }) {
-  return (
-    <>
-      <div className="size-[28px] flex items-center justify-center">
-        <IconChalkboardTeacher />
-      </div>
-      <span className="text-sm">{TEACH_A_BOT}</span>
-      {children}
-    </>
-  );
-}
-
-type RecordingLabel = { label: string; live: boolean };
+export type RecordingLabel = { label: string; live: boolean };
 
 /**
- * What the recording running in one of the person's browsers is called on the Teach a Bot link, from its Recorder's own
- * report as the server passes it on: "Recording: Submit the receipt, 1:23", ticking while it runs. Null while nothing is
- * being recorded. `live` while it records, rather than starting or stopping, as the page's own mark has it.
+ * The recording running in one of the person's browsers, as the main menu's Skills entry names it: "Recording: Submit
+ * the receipt, 1:23", ticking while it runs. Teaching a Bot a task is how a skill is recorded, so Skills is where the
+ * menu says one is live.
+ *
+ * Read from the server's `activity`, which folds in every Recorder the person has (the OpenBot browser's, or one in
+ * their everyday browser), and only where OpenBot can run a browser for them (`available`). The read polls every
+ * second while something records, so Stop takes the dot away as quickly (`browserStateQueryOptions`). Null while
+ * nothing records. `live` while it records, as opposed to starting or stopping, as the Teach a Bot page's mark has it.
  */
-function useRecordingLabel(
-  activity: RecorderActivity | undefined,
-): RecordingLabel | null {
+export function useLiveRecording(): RecordingLabel | null {
+  const state = useQuery(browserStateQueryOptions());
+  const activity: RecorderActivity | undefined = state.data?.available
+    ? state.data.activity
+    : undefined;
   const phase = activity?.phase ?? "idle";
   const seconds = useSecondsSince(
     phase === "recording" ? activity?.startedAt : undefined,
@@ -121,19 +68,22 @@ function useRecordingLabel(
 }
 
 /**
- * The tooltip naming the recording, shown beside the link whether or not the sidebar is collapsed. Always given, and
- * hidden while nothing records, so the link is never remounted (and never loses the keyboard's focus) as a recording
+ * The tooltip naming the recording, shown beside the entry whether or not the sidebar is collapsed. Always given, and
+ * hidden while nothing records, so the entry is never remounted (and never loses the keyboard's focus) as a recording
  * starts and stops.
  */
-function recordingTooltip(recording: RecordingLabel | null) {
+export function recordingTooltip(
+  recording: RecordingLabel | null,
+  name: string,
+) {
   return {
-    children: recording?.label ?? TEACH_A_BOT,
+    children: recording?.label ?? name,
     hidden: recording === null,
   };
 }
 
 /** The recording's red dot at the end of the row, named as the tooltip names it (Base UI's tooltip is never read out). */
-function RecordingDot({ label, live }: RecordingLabel) {
+export function RecordingDot({ label, live }: RecordingLabel) {
   return (
     <span aria-label={label} className="ml-auto" role="img">
       <RecordingMark live={live} />

@@ -83,6 +83,19 @@ async function event(id: string, externalId = randomUUID()) {
   return result;
 }
 
+test("a goal can be made with no success criteria", async () => {
+  const base = {
+    agentId: botId,
+    channelId,
+    title: "Tidy the inbox",
+    instruction: "Archive what is read",
+  };
+  const empty = await store.create(ownerId, { ...base, successCriteria: "" });
+  const omitted = await store.create(ownerId, base);
+  expect(empty.successCriteria).toBe("");
+  expect(omitted.successCriteria).toBe("");
+});
+
 test("owned lifecycle survives reads and rejects another owner", async () => {
   const value = await goal();
   await expect(store.get(strangerId, value.id)).rejects.toBeInstanceOf(

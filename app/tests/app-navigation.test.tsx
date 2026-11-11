@@ -195,12 +195,14 @@ test.each(["user", "admin"] as const)(
         to,
       })),
     ).toEqual(expected(role, "primary"));
-    // Scheduled work has its own place beside Bots, where somebody looking for it looks first.
-    expect(
-      within(footer)
-        .getByRole("link", { name: "Routines" })
-        .getAttribute("href"),
-    ).toBe("/routines");
+    // What a person makes and comes back to, beside Bots, in the order of the eight.
+    expect(links(footer).map(({ to }) => to)).toEqual([
+      "/bots",
+      "/routines",
+      "/memory",
+      "/skills",
+      "/connections",
+    ]);
     // Bots keeps its count of what waits on the person, and only Bots has one.
     const badge = within(footer).getByRole("img", {
       name: "1 thing needs you",
@@ -255,23 +257,25 @@ test("Admin is in the list for admins only", () => {
   expect(ids("user")).toEqual([
     "bots",
     "routines",
-    "capabilities",
+    "memory",
+    "skills",
     "connections",
     "settings",
   ]);
 });
 
-test("the personal edition has no Admin or Capabilities, and a feature list in Admin's place", () => {
+test("the personal edition has no Admin, and a feature list in Admin's place", () => {
   const personal = navigationFor("admin", "personal");
   expect(
     personal.some((item) => item.kind !== "dialog" && item.to === "/admin"),
   ).toBe(false);
   const dialogs = personal.filter((item) => item.kind === "dialog");
   expect(dialogs.map((item) => item.id)).toEqual(["team-features"]);
-  // Skills and Memory open from the Bots page instead.
+  // Routines and Skills are in the main menu, as in the team edition. Memory isn't offered.
   expect(personal.map((item) => item.id)).toEqual([
     "bots",
     "routines",
+    "skills",
     "connections",
     "team-features",
     "settings",

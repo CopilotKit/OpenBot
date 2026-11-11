@@ -281,7 +281,7 @@ const NOT_SAVED: Record<NonNullable<Stopped["kept"]>, string> = {
     "It's kept in this browser until you connect it to OpenBot again.",
 };
 
-/** What the page says once Stop ended a recording, naming it. The sidebar's Browser button says the same. */
+/** What the page says once Stop ended a recording, naming it. */
 export function stoppedSentence(stopped: Stopped): string {
   if (stopped.discarded) return `Discarded “${stopped.title}”.`;
   if (stopped.empty)
@@ -381,7 +381,7 @@ export function StoppedNotice({ stopped }: { stopped: Stopped }) {
 }
 
 /** The red dot a recording carries, as a recording mark rather than a warning, in an icon's box so it lines up with
- * the icons of the rows around it. The sidebar's Browser button carries the same one. */
+ * the icons of the rows around it. */
 export function RecordingMark({ live }: { live: boolean }) {
   return (
     <span

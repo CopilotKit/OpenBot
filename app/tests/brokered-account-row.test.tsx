@@ -1063,7 +1063,7 @@ const REFUSED = "Composio rejected that key: invalid API key for perplexityai.";
  * it — on a page that has to be redrawn before that button is there to press.
  */
 const STRANDED =
-  "What you entered for gmail did not work — Composio rejected that key: invalid API key for perplexityai. — and Composio would not take the account back either, so it is recorded here as unchecked rather than left somewhere nothing could name it. Disconnect it on the Plugins page and try again.";
+  "What you entered for gmail did not work — Composio rejected that key: invalid API key for perplexityai. — and Composio would not take the account back either, so it is recorded here as unchecked rather than left somewhere nothing could name it. Disconnect it on the Apps page and try again.";
 
 test("a key the broker refuses says so inside the dialog, not only behind it", async () => {
   installDeployment({

@@ -1,14 +1,14 @@
 # OpenBot docs
 
-Start with the root [README](../README.md), then use these references:
+Start with [How OpenBot works](how-openbot-works.md): what a Bot has, and where you set each part for one Bot, every Bot or everyone. Then the root [README](../README.md), and these references:
 
 - [Architecture](architecture.md): services, ports, browser governance, computers, components, plugins, knowledge, and security boundaries.
 - [Configuration](configuration.md): environment variables and tenant package YAML.
 - [Personal edition](personal-edition.md): OpenBot for one person, with no sign-in and no Admin.
 - [Development](development.md): local setup, migrations, ports, and quality checks.
-- [Coworkers](coworkers.md): durable Bot profiles, channels, visibility, deletion, and external AG-UI registration.
+- [Bots](coworkers.md): durable Bot profiles, conversations, visibility, deletion, and external AG-UI registration.
 - [Approvals](approvals.md): which actions a Bot asks before, the order that decides it, and what an admin can close.
-- [Routines](routines.md): standing instructions a Bot runs on a schedule, the worker that fires them, and who they run as.
+- [Routines](routines.md): the one list of routines, goals and check-ins, the worker that fires them, and who they run as.
 - [Automatic Learning](automatic-learning.md): which Bots contribute conversations to a Learning container, and receive its published skills.
 - [Public-web research](web-research.md): search and page reading through Parallel, Exa or Firecrawl.
 - Plugins, one connector per page — what an administrator registers, what each person consents to, and what the failures mean:

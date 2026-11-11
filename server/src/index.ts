@@ -304,6 +304,7 @@ import { createResponsibilityBindingStore } from "./responsibilities/bindings";
 import {
   useGoalTools,
   withoutGoalCopiesInGoalRun,
+  withRepeatingGoalsPinned,
 } from "./responsibilities/chat-tools";
 import {
   createEmailTriggerRoutes,
@@ -318,7 +319,7 @@ import {
   useSlackTriggerIngest,
 } from "./responsibilities/slack";
 import { createResponsibilityStore } from "./responsibilities/store";
-import { responsibilityTools } from "./responsibilities/tools";
+import { answerTurnTools } from "./responsibilities/tools";
 import { createTriggerIngressRoutes } from "./responsibilities/trigger-routes";
 import { useTriggerTools } from "./responsibilities/trigger-tools";
 import { createTriggerStore } from "./responsibilities/triggers";
@@ -2220,10 +2221,15 @@ const actorAgentResolver = createActorAgentResolver({
     restrictToolsForRun(
       initiator,
       actorId,
-      // A goal's run holds the goal's own tools; the Routines copies would be a second set.
-      withoutGoalCopiesInGoalRun(
+      // A turn the person did not send reads the goals that repeat as it begins.
+      withRepeatingGoalsPinned(
         initiator,
-        loadToolsForActor(actorId, initiator),
+        actorId,
+        // A goal's run holds the goal's own tools; the Routines copies would be a second set.
+        withoutGoalCopiesInGoalRun(
+          initiator,
+          loadToolsForActor(actorId, initiator),
+        ),
       ),
       checkInScope,
     ),
@@ -2346,14 +2352,13 @@ const responsibilityAnswerTurn = ({
     kind: "responsibility",
     id: responsibility.id,
   };
-  const tools = responsibilityTools({
+  const goal = {
     store: responsibilityStore,
     engine: responsibilityEngine,
     ownerUserId: responsibility.ownerUserId,
     agentId: responsibility.agentId,
     channelId: responsibility.channelId,
-    ...(responsibilityRunId ? { responsibilityRunId } : {}),
-  });
+  };
   return createTurnRunner({
     prepareRunInput: prepareProductRunInput,
     onKnownStop: productTelemetry.stopKnown,
@@ -2362,21 +2367,25 @@ const responsibilityAnswerTurn = ({
     runner: routineAgentRunner,
     components: componentCatalog,
     buildAgentFor: (input) => buildAgentFor({ ...input, initiator }),
-    toolsForTurn: async () => [
-      ...(await approvalComputerTools(
-        responsibility.ownerUserId,
-        responsibility.agentId,
-        initiator,
-      )),
-      ...tools.map((tool) => ({
-        definition: {
-          name: tool.name,
-          description: tool.description,
-          parameters: z.toJSONSchema(tool.parameters),
-        },
-        execute: (args: unknown) => tool.execute(args),
-      })),
-    ],
+    toolsForTurn: async () => {
+      // Before the model has any tool, so what repeats is read as this turn begins.
+      const tools = await answerTurnTools({ ...goal, responsibilityRunId });
+      return [
+        ...(await approvalComputerTools(
+          responsibility.ownerUserId,
+          responsibility.agentId,
+          initiator,
+        )),
+        ...tools.map((tool) => ({
+          definition: {
+            name: tool.name,
+            description: tool.description,
+            parameters: z.toJSONSchema(tool.parameters),
+          },
+          execute: (args: unknown) => tool.execute(args),
+        })),
+      ];
+    },
     learningContainerForThread: (input) =>
       copilotRuntime.learning?.containerForThread(input) ??
       Promise.resolve(undefined),

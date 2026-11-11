@@ -210,42 +210,57 @@ const tile = (view: ReturnType<typeof draw>["view"], key: string) =>
   view.getByTestId(`account-${key}`);
 
 describe("Connections in the personal edition", () => {
-  test("is one searchable list of every app that connects in one press, with no apps-versus-accounts split", async () => {
+  test("lists every app you could add under Add an app, the ones that need setup included, with no count", async () => {
     const { view } = draw("personal");
     await view.findByTestId("account-notion");
-    for (const key of ["notion", "exa"]) expect(tile(view, key)).toBeTruthy();
     expect(
       view.getByRole("textbox", { name: "Search connections" }),
     ).toBeTruthy();
-    expect(view.queryByText("Your apps")).toBeNull();
-    expect(view.queryByText("Add an app")).toBeNull();
+    // Nothing is in use yet, so there is no Your apps.
+    expect(view.queryByRole("heading", { name: "Your apps" })).toBeNull();
+    const add = view.getByRole("heading", { name: "Add an app" }).parentElement
+      ?.parentElement as HTMLElement;
+    for (const key of ["notion", "exa", "google-drive", "exa-authenticated"])
+      expect(within(add).getByTestId(`account-${key}`)).toBeTruthy();
     expect(within(tile(view, "notion")).getByText("Connect")).toBeTruthy();
     expect(within(tile(view, "exa")).getByText("Add")).toBeTruthy();
-  });
-
-  test("links to saved logins and keys, which live under Settings", async () => {
-    const { view } = draw("personal");
-    await view.findByTestId("account-notion");
-    expect(
-      view.getByRole("link", { name: /Saved logins/ }).getAttribute("href"),
-    ).toBe("/settings/passwords");
-    expect(view.getByRole("link", { name: /^Keys/ }).getAttribute("href")).toBe(
-      "/settings/credentials",
-    );
-  });
-
-  test("apps that need something typed first wait behind one button, or a search", async () => {
-    const { view, user } = draw("personal");
-    await view.findByTestId("account-notion");
-    expect(view.queryByTestId("account-google-drive")).toBeNull();
-    expect(view.queryByTestId("account-exa-authenticated")).toBeNull();
-    await user.click(
-      view.getByRole("button", { name: "Show 2 apps that need setup" }),
-    );
-    expect(tile(view, "google-drive")).toBeTruthy();
     expect(
       within(tile(view, "exa-authenticated")).getByText("Set up"),
     ).toBeTruthy();
+    expect(view.queryByRole("button", { name: /need setup/ })).toBeNull();
+    expect(view.queryByText(/in use/)).toBeNull();
+  });
+
+  test("apps in use are under Your apps, apart from the ones you could add", async () => {
+    connected = ["notion"];
+    const { view } = draw("personal");
+    const yours = (await view.findByRole("heading", { name: "Your apps" }))
+      .parentElement?.parentElement as HTMLElement;
+    await waitFor(() =>
+      expect(within(yours).getByTestId("account-notion")).toBeTruthy(),
+    );
+    expect(within(yours).queryByTestId("account-exa")).toBeNull();
+    const add = view.getByRole("heading", { name: "Add an app" }).parentElement
+      ?.parentElement as HTMLElement;
+    expect(within(add).queryByTestId("account-notion")).toBeNull();
+    expect(within(add).getByTestId("account-exa")).toBeTruthy();
+  });
+
+  test("Routines is not listed: it is on for every Bot and has its own page", async () => {
+    servers = [server("notion"), server("routines")];
+    const { view } = draw("personal");
+    await view.findByTestId("account-notion");
+    expect(view.queryByTestId("account-routines")).toBeNull();
+  });
+
+  test("links to the Vault, where saved logins and keys live", async () => {
+    const { view } = draw("personal");
+    await view.findByTestId("account-notion");
+    expect(
+      view.getByRole("link", { name: /^Vault/ }).getAttribute("href"),
+    ).toBe("/settings/vault");
+    expect(view.queryByRole("link", { name: /Saved logins/ })).toBeNull();
+    expect(view.queryByRole("link", { name: /^Keys/ })).toBeNull();
   });
 
   test("searching finds an app that needs setup", async () => {
@@ -267,9 +282,6 @@ describe("Connections in the personal edition", () => {
 
   test("Connect on an app nobody added adds it first; one that needs a client set up then opens its page", async () => {
     const { view, user, history } = draw("personal");
-    await user.click(
-      await view.findByRole("button", { name: /apps that need setup/ }),
-    );
     await user.click(await view.findByTestId("account-google-drive"));
     await waitFor(() =>
       expect(history.location.pathname).toBe("/connections/google-drive"),
@@ -288,9 +300,6 @@ describe("Connections in the personal edition", () => {
 
   test("Set up opens the app's page, where its key is typed", async () => {
     const { view, user, history } = draw("personal");
-    await user.click(
-      await view.findByRole("button", { name: /apps that need setup/ }),
-    );
     await user.click(await view.findByTestId("account-exa-authenticated"));
     await waitFor(() =>
       expect(history.location.pathname).toBe("/connections/exa-authenticated"),
@@ -318,6 +327,70 @@ test("with a broker set up, the last tile browses its directory of more apps", a
   expect(within(browse).getByText("Browse apps")).toBeTruthy();
   expect(browse.textContent).not.toMatch(/composio/i);
   expect(browse.getAttribute("href")).toBe("/connections/browse/composio");
+});
+
+/** The section a heading titles. */
+const sectionOf = (heading: HTMLElement) =>
+  heading.closest("section") as HTMLElement;
+
+test("Your apps and Add an app are sections of the page itself, spaced as every section is", async () => {
+  connected = ["notion"];
+  const { view } = draw("personal");
+  const yours = sectionOf(
+    await view.findByRole("heading", { name: "Your apps" }),
+  );
+  const add = sectionOf(view.getByRole("heading", { name: "Add an app" }));
+  for (const section of [yours, add]) {
+    // Not a section inside another, and no spacing of its own.
+    expect(section.parentElement?.closest("section")).toBeNull();
+    expect(section.className.split(/\s+/)).toEqual(["mt-12"]);
+  }
+  // The search is at the top of the page's first section, above them both.
+  const search = view.getByRole("textbox", { name: "Search connections" });
+  const first = sectionOf(search);
+  expect(first.parentElement?.closest("section")).toBeNull();
+  expect(first.parentElement?.querySelector("section")).toBe(first);
+  expect(
+    first.compareDocumentPosition(yours) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
+test("a search that matches nothing says No matches, with no sections and no directory tile under it", async () => {
+  composio = true;
+  connected = ["notion"];
+  const { view, user } = draw("personal");
+  await view.findByTestId("account-browse");
+  await user.type(
+    view.getByRole("textbox", { name: "Search connections" }),
+    "zzzz",
+  );
+  expect(await view.findByText("No matches")).toBeTruthy();
+  expect(view.getByText("Nothing matches “zzzz”.")).toBeTruthy();
+  expect(
+    view.container.querySelector(".tabler-icon-search:not([aria-hidden])"),
+  ).not.toBeNull();
+  expect(view.queryByTestId("account-browse")).toBeNull();
+  expect(view.queryByRole("heading", { name: "Your apps" })).toBeNull();
+  expect(view.queryByRole("heading", { name: "Add an app" })).toBeNull();
+
+  // Cleared, everything is back.
+  await user.type(
+    view.getByRole("textbox", { name: "Search connections" }),
+    "{Backspace>4/}",
+  );
+  expect(await view.findByTestId("account-browse")).toBeTruthy();
+  expect(view.queryByText("No matches")).toBeNull();
+});
+
+test("in the team edition, a search that matches nothing says No matches", async () => {
+  const { view, user } = draw("team");
+  await view.findByTestId("account-notion");
+  await user.type(
+    view.getByRole("textbox", { name: "Search connections" }),
+    "zzzz",
+  );
+  expect(await view.findByText("No matches")).toBeTruthy();
+  expect(view.queryByTestId("account-notion")).toBeNull();
 });
 
 describe("an app under Connections in the personal edition", () => {

@@ -82,7 +82,7 @@ test("create_trigger is attributed to the connection and never echoes the key", 
   expect(result.text).toContain(
     `https://openbot.example.test/api/events/triggers/${TRIGGER_ID}`,
   );
-  expect(result.text).toContain("Goals page");
+  expect(result.text).toContain("Routines page");
   expect(calls.find((call) => call[0] === "create")).toEqual([
     "create",
     "owner-1",

@@ -65,7 +65,7 @@ export const TRIGGER_TOOLS: readonly McpToolShape[] = Object.freeze([
       "`fieldPath`/`fieldEquals` pair such as `data.team.key` = `ENG`.",
       "",
       "You never see or handle a secret. The result gives the URL (or address); tell the person to open",
-      "the goal's card on the Bot's Goals page to copy the key, or to paste the vendor's",
+      "the goal's card on the Bot's Routines page to copy the key, or to paste the vendor's",
       "signing secret there for Linear, Sentry and PagerDuty. Never ask them to paste a secret into chat.",
       "",
       "Slack needs `teamId` and `mode` (`mention`, `phrase` with `phrases`, `reaction` with optional",
@@ -247,10 +247,10 @@ export async function callTriggerTool(
     );
     const next =
       trigger.kind === "webhook" || trigger.kind === "github"
-        ? "Ask the person to open this goal's card on the Bot's Goals page to copy the key (and, for a webhook, the Authorization header). Do not ask for the key in chat."
+        ? "Ask the person to open this goal's card on the Bot's Routines page to copy the key (and, for a webhook, the Authorization header). Do not ask for the key in chat."
         : trigger.kind === "email" || trigger.kind === "slack"
           ? "It is ready."
-          : "Ask the person to paste the provider's signing secret on this goal's card on the Bot's Goals page. Until then deliveries are refused. Do not ask for the secret in chat.";
+          : "Ask the person to paste the provider's signing secret on this goal's card on the Bot's Routines page. Until then deliveries are refused. Do not ask for the secret in chat.";
     return `Added a ${trigger.kind} trigger to "${goal.title}" (id: ${trigger.id}). ${where(deps, trigger)}. ${next}`;
   }
   if (name === "pause_trigger" || name === "resume_trigger") {

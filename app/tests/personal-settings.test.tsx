@@ -18,7 +18,6 @@ import {
 import { cleanup, render, within } from "@testing-library/react";
 import { ComputersPage } from "@/components/manage/computers-page";
 import { PluginToolPage } from "@/components/manage/plugin-tool-page";
-import { SkillsPage } from "@/components/manage/skills-page";
 import { settingsSidebarItems } from "@/components/settings/settings-sidebar";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import {
@@ -61,9 +60,6 @@ function clientFor(edition: "team" | "personal" | undefined) {
 }
 
 const PERSONAL_ENTRIES = [
-  ["Saved logins", "/settings/passwords"],
-  ["Keys", "/settings/credentials"],
-  ["Skills", "/settings/skills"],
   ["Computer", "/settings/computer"],
   ["Activity", "/settings/activity"],
 ] as const;
@@ -89,27 +85,41 @@ describe("the Settings sidebar", () => {
     ).toBe(false);
   });
 
-  test("keeps saved logins and keys, named as on Connections", () => {
-    const titles = settingsSidebarItems("personal").map((item) => item.title);
-    expect(titles).not.toContain("Passwords");
-    expect(titles).not.toContain("Credentials");
-    expect(settingsSidebarItems("team").map((item) => item.title)).toContain(
-      "Passwords",
+  test("keeps saved logins and keys in one Vault, in both editions", () => {
+    for (const edition of ["personal", "team"] as const) {
+      const titles = settingsSidebarItems(edition).map((item) => item.title);
+      expect(titles).toContain("Vault");
+      for (const retired of [
+        "Passwords",
+        "Saved logins",
+        "Keys",
+        "Credentials",
+      ])
+        expect(titles).not.toContain(retired);
+    }
+  });
+
+  test("Skills is in neither edition's settings, and Learning opens the Skills page", () => {
+    for (const edition of ["personal", "team"] as const) {
+      const titles = settingsSidebarItems(edition).map((item) => item.title);
+      expect(titles).not.toContain("Skills");
+      expect(titles).not.toContain("Learning");
+    }
+    let thrown: unknown;
+    try {
+      (LearningRoute.options.beforeLoad as unknown as () => void)();
+    } catch (error) {
+      thrown = error;
+    }
+    expect((thrown as { options?: { to?: string } }).options?.to).toBe(
+      "/skills",
     );
   });
 
-  test("Learning shows in the personal edition's settings", () => {
-    for (const edition of ["personal", "team"] as const) {
-      expect(settingsSidebarItems(edition).map((item) => item.title)).toContain(
-        "Learning",
-      );
-    }
-    expect(LearningRoute.options.beforeLoad).toBeUndefined();
-  });
-
-  test("lists none of it in the team edition", () => {
+  test("keeps Computer in the team edition, for the Recorder's browsers, and leaves Activity to Admin", () => {
     const titles = settingsSidebarItems("team").map((item) => item.title);
-    for (const [title] of PERSONAL_ENTRIES) expect(titles).not.toContain(title);
+    expect(titles).toContain("Computer");
+    expect(titles).not.toContain("Activity");
   });
 });
 
@@ -150,30 +160,6 @@ describe("the personal pages under Settings", () => {
     }
   });
 
-  test("call the skills page Skills, with nothing about every Bot", async () => {
-    const client = clientFor("personal");
-    client.setQueryData(["plugins", "page"], {
-      catalogue: [],
-      servers: [],
-      skills: [],
-      botsMayCallBack: true,
-      redirectUri: null,
-      composioConfigured: false,
-      authorizesPerAction: false,
-    } satisfies PluginsPage);
-    const router = createRouter({
-      history: createMemoryHistory({ initialEntries: ["/"] }),
-      routeTree: createRootRoute({ component: () => <SkillsPage /> }),
-    });
-    const view = render(
-      <QueryClientProvider client={client}>
-        <RouterProvider router={router as never} />
-      </QueryClientProvider>,
-    );
-    expect(await view.findByRole("heading", { name: "Skills" })).toBeTruthy();
-    expect(view.container.textContent).not.toContain("every Bot");
-  });
-
   test("link to each other under Settings, not Admin", async () => {
     const client = clientFor("personal");
     const page: PluginsPage = {
@@ -200,7 +186,7 @@ describe("the personal pages under Settings", () => {
       </QueryClientProvider>,
     );
     // The page's back button: an anchor drawn as a button.
-    const back = await view.findByRole("button", { name: /Plugin/ });
+    const back = await view.findByRole("button", { name: /App/ });
     expect(back.getAttribute("href")).toBe("/connections/notion");
   });
 });

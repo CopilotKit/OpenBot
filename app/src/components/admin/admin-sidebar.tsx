@@ -1,24 +1,7 @@
-import {
-  IconArrowLeft,
-  IconBrain,
-  IconBuildingBank,
-  IconBulb,
-  IconChecks,
-  IconCode,
-  IconDeviceDesktop,
-  IconKey,
-  IconLayoutGrid,
-  IconListDetails,
-  IconLockAccess,
-  IconPuzzle,
-  IconRadar,
-  IconShieldCheck,
-  IconSlash,
-  IconUsers,
-  IconZoomQuestion,
-} from "@tabler/icons-react";
+import { IconArrowLeft } from "@tabler/icons-react";
 import { Link, type LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
+import { ADMIN_SECTIONS } from "@/components/admin/admin-sections";
 import {
   Sidebar,
   SidebarContent,
@@ -30,128 +13,15 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import { managePaths } from "@/lib/manage-paths";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
 const adminLinkOptions = { to: "/admin" } satisfies LinkOptions;
 
 /**
- * The same four groups, in the same order, as the admin index.
- *
- * A rail that lists ten things flat asks somebody to know which of them is the one they want. The
- * grouping is the only navigation help this screen offers, so it has to agree with the page it
- * navigates to — two different orderings of the same ten links is worse than either ordering.
+ * Admin's rail: Overview, then the same groups, in the same order, as the overview page. Both draw
+ * `ADMIN_SECTIONS`, because the grouping is the only navigation help this screen offers, and two
+ * orderings of the same links is worse than either one.
  */
-const GROUPS: {
-  label: string;
-  items: {
-    icon: React.ComponentType<{ className?: string }>;
-    linkOptions: LinkOptions;
-    title: string;
-  }[];
-}[] = [
-  {
-    label: "What Bots can reach",
-    items: [
-      {
-        title: "Credentials",
-        icon: IconKey,
-        linkOptions: { to: "/admin/credentials" },
-      },
-      {
-        title: "Boundaries",
-        icon: IconShieldCheck,
-        linkOptions: { to: "/admin/boundaries" },
-      },
-      {
-        title: "Approvals",
-        icon: IconChecks,
-        linkOptions: { to: "/admin/approvals" },
-      },
-      {
-        title: "Computers",
-        icon: IconDeviceDesktop,
-        linkOptions: { to: "/admin/computers" },
-      },
-    ],
-  },
-  {
-    label: "What Bots can do",
-    items: [
-      {
-        title: "Plugins",
-        icon: IconPuzzle,
-        linkOptions: { to: "/admin/plugins" },
-      },
-      {
-        title: "Providers",
-        icon: IconBrain,
-        linkOptions: { to: "/admin/providers" },
-      },
-      {
-        title: "Skills",
-        icon: IconSlash,
-        linkOptions: { to: "/admin/skills" },
-      },
-      {
-        title: "Automatic learning",
-        icon: IconBulb,
-        linkOptions: { to: "/admin/learning" },
-      },
-      {
-        title: "Check-ins",
-        icon: IconRadar,
-        linkOptions: { to: "/admin/proactive" },
-      },
-      {
-        title: "UI components",
-        icon: IconLayoutGrid,
-        linkOptions: { to: "/admin/components" },
-      },
-      {
-        title: "Playground",
-        icon: IconCode,
-        linkOptions: { to: "/admin/playground" },
-      },
-    ],
-  },
-  {
-    label: "Who can get in",
-    items: [
-      {
-        title: "People",
-        icon: IconUsers,
-        linkOptions: { to: "/admin/people" },
-      },
-      {
-        title: "Permissions",
-        icon: IconLockAccess,
-        linkOptions: { to: "/admin/permissions" },
-      },
-      {
-        title: "Identity providers",
-        icon: IconBuildingBank,
-        linkOptions: { to: "/admin/identity-providers" },
-      },
-    ],
-  },
-  {
-    label: "What happened",
-    items: [
-      {
-        title: managePaths("team").auditLabel,
-        icon: IconListDetails,
-        linkOptions: { to: "/admin/audit" },
-      },
-      {
-        title: "What would happen",
-        icon: IconZoomQuestion,
-        linkOptions: { to: "/admin/what-if" },
-      },
-    ],
-  },
-];
-
 export function AdminSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar>) {
@@ -203,9 +73,9 @@ export function AdminSidebar({
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
-        {GROUPS.map((group) => (
-          <SidebarGroup key={group.label}>
-            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+        {ADMIN_SECTIONS.map((group) => (
+          <SidebarGroup key={group.title}>
+            <SidebarGroupLabel>{group.title}</SidebarGroupLabel>
             <SidebarMenu className="gap-px">
               {group.items.map((item) => (
                 <SidebarMenuItem key={item.title}>
