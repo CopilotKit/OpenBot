@@ -115,7 +115,44 @@ function redirectOf(route: { options: { beforeLoad?: unknown } }) {
 test.each([
   ["/settings/passwords", PasswordsRoute, "/settings/vault"],
   ["/settings/credentials", CredentialsRoute, "/settings/vault"],
-  ["/settings/credentials/new", NewCredentialRoute, "/settings/vault/new"],
 ])("%s opens the Vault", (_from, route, to) => {
   expect(redirectOf(route as never)).toBe(to);
+});
+
+/** Where `/settings/credentials/new` goes, for an edition (`null`: the edition could not be read). */
+async function newKeyGoesTo(edition: "team" | "personal" | null) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  if (edition)
+    client.setQueryData(deploymentKeys.capabilities(), {
+      generativeUi: true,
+      selfHostBanner: false,
+      localEvaluation: edition === "personal",
+      edition,
+    });
+  try {
+    await (
+      NewCredentialRoute.options.beforeLoad as unknown as (input: {
+        context: { queryClient: QueryClient };
+      }) => Promise<void>
+    )({ context: { queryClient: client } });
+  } catch (thrown) {
+    return (thrown as { options?: { to?: string } }).options?.to;
+  }
+  return undefined;
+}
+
+test("the old address for adding a key opens the Vault's form, or the Vault where there is no form", async () => {
+  const originalFetch = global.fetch;
+  global.fetch = (async () =>
+    new Response(null, { status: 500 })) as unknown as typeof fetch;
+  try {
+    expect(await newKeyGoesTo("personal")).toBe("/settings/vault/new");
+    expect(await newKeyGoesTo("team")).toBe("/settings/vault");
+    // Not known: the Vault, which every edition has.
+    expect(await newKeyGoesTo(null)).toBe("/settings/vault");
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
