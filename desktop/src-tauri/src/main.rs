@@ -4801,6 +4801,19 @@ fn stop_for_uninstall(asked: uninstall::Asked) -> i32 {
     i32::from(!failures.is_empty())
 }
 
+/// Tauri's `app_local_data_dir`, for a process with no app around it.
+fn headless_local_data_dir() -> Option<PathBuf> {
+    None
+}
+
+/// Tauri's `app_log_dir`, for a process with no app around it.
+fn headless_log_dir() -> Option<PathBuf> {
+    None
+}
+
+/// What the app's setup gives every engine command, given to the uninstaller's stop.
+fn prepare_for_uninstall() {}
+
 /// `uninstall::Computer` on this computer, with what Stop and Quit use.
 struct ThisComputerAtUninstall;
 
@@ -6741,6 +6754,77 @@ mod app_page_tests {
         }
         assert_eq!(open(true, None), None);
         assert_eq!(open(false, Some("/bots")), None);
+    }
+
+    /// The uninstaller's stop (`stop_for_uninstall`) runs with no app around it, so it works out the
+    /// app's folders itself. They are Tauri's own: the local data folder that holds OpenBot's Docker
+    /// configuration, and the log folder.
+    #[test]
+    fn the_uninstallers_stop_finds_the_folders_the_app_uses() {
+        let (app, _) = app();
+        assert!(app.path().app_local_data_dir().is_ok());
+        assert_eq!(
+            headless_local_data_dir(),
+            app.path().app_local_data_dir().ok()
+        );
+        assert_eq!(headless_log_dir(), app.path().app_log_dir().ok());
+    }
+
+    /// Box I: the uninstaller's stop ran `podman compose` with none of what the app sets up when it
+    /// starts. Podman found no Compose provider ("looking up compose provider failed", exit 125),
+    /// since OpenBot's `docker-compose.exe` is only in `~\OpenBot\openbot-engine\bin`, and OpenBot's
+    /// containers were left to the machine's stop. Run in a process of its own, with a home of its
+    /// own, since what the app sets up is set once per process: after the stop's preparation every
+    /// engine command has that folder first on its PATH, and OpenBot's own Docker configuration, as
+    /// in the running app.
+    #[test]
+    fn the_uninstallers_stop_runs_engine_commands_as_the_app_does() {
+        const CHILD: &str = "OPENBOT_TEST_UNINSTALL_ENGINE_CHILD";
+        let Some(home) = std::env::var_os(CHILD).map(PathBuf::from) else {
+            let home = std::env::temp_dir().join(format!(
+                "openbot-uninstall-engine-{}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&home).unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "app_page_tests::the_uninstallers_stop_runs_engine_commands_as_the_app_does",
+                    "--exact",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env(CHILD, &home)
+                .env("HOME", &home)
+                .env("USERPROFILE", &home)
+                .output()
+                .unwrap();
+            let _ = std::fs::remove_dir_all(&home);
+            let said = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(output.status.success(), "{said}");
+            assert!(said.contains("1 passed"), "{said}");
+            return;
+        };
+        prepare_for_uninstall();
+        let command =
+            engine::Address::new(engine::Engine::Podman, Some("openbot-root".into())).command();
+        let path = command
+            .get_envs()
+            .find(|(name, _)| *name == "PATH")
+            .and_then(|(_, value)| value)
+            .expect("engine commands get a PATH");
+        assert_eq!(
+            std::env::split_paths(path).next(),
+            Some(home.join("OpenBot").join("openbot-engine").join("bin"))
+        );
+        let data = headless_local_data_dir().expect("a local data folder");
+        assert_eq!(
+            docker_config::owned(),
+            Some(data.join("docker-config").as_path())
+        );
     }
 
     /// A toast from an app Windows did not install from a package is shown under the app whose
