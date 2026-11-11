@@ -92,6 +92,9 @@ $installer = $installers[0].FullName
 
 Assert-True (-not (Test-Path -LiteralPath $uninstallKey)) 'OpenBot is already installed here. This test installs and uninstalls it, so it will not run.'
 $runBefore = Get-Value $runKey $product
+# A fresh Windows account may have no Run key at all until something starts at sign-in.
+$runKeyMade = -not (Test-Path -LiteralPath $runKey)
+if ($runKeyMade) { New-Item -Path $runKey -Force | Out-Null }
 $dataFolders = @((Join-Path $env:APPDATA $bundleId), (Join-Path $env:LOCALAPPDATA $bundleId))
 $dataBefore = @($dataFolders | Where-Object { Test-Path -LiteralPath $_ })
 $installDir = $null
@@ -152,7 +155,10 @@ finally {
     if ($installDir -and (Test-Path -LiteralPath $installDir)) {
         Remove-Item -LiteralPath $installDir -Recurse -Force -ErrorAction SilentlyContinue
     }
-    if ($null -eq $runBefore) {
+    if ($runKeyMade) {
+        Remove-Item -LiteralPath $runKey -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    elseif ($null -eq $runBefore) {
         Remove-ItemProperty -LiteralPath $runKey -Name $product -ErrorAction SilentlyContinue
     }
     else {

@@ -208,12 +208,6 @@ jobs:
         shell: pwsh
         timeout-minutes: 30
         run: ./desktop/scripts/test-windows-installer-update.ps1
-      - name: Time the 1.0.1 uninstaller (one-off measurement)
-        if: always() && matrix.platform == 'windows'
-        continue-on-error: true
-        shell: pwsh
-        timeout-minutes: 20
-        run: ./desktop/scripts/time-old-uninstaller.ps1
       # Say what this installer is, on the run's page, so nobody has to unpack it to find out.
       - name: Summarize the build
         shell: bash
