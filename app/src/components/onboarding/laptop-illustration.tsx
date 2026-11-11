@@ -1,5 +1,6 @@
 import { motion, useReducedMotion } from "motion/react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
+import { BrandName } from "@/components/edition/brand-name";
 import { appConfig } from "@/lib/generated/application-config";
 
 /**
@@ -33,7 +34,7 @@ export function LaptopIllustration() {
           >
             <AgentOrb size="44px" />
             <span className="text-xs font-semibold tracking-tight">
-              {appConfig.brand.productName}
+              <BrandName>{appConfig.brand.productName}</BrandName>
             </span>
           </motion.div>
         </div>

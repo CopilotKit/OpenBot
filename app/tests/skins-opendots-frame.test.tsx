@@ -668,7 +668,10 @@ describe("OpenDots skin wears the deployment's brand", () => {
     await view.findByRole("navigation", { name: "Your Bots" });
     await view.findByRole("heading", { name: "Ada" });
     const productName = appConfig.brand.productName;
-    expect(view.getByTestId("opendots-wordmark").textContent).toBe(productName);
+    // The name as a brand mark: OpenBot's wordmark carries the trademark sign, as on open.bot.
+    expect(view.getByTestId("opendots-wordmark").textContent).toBe(
+      `${productName}™`,
+    );
     expect(
       view.getAllByRole("link", { name: `${productName} home` }).length,
     ).toBe(2);
