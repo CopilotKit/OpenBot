@@ -37,6 +37,18 @@ export type RoutineInput = {
   channelId: string;
 };
 
+/** What a person reads when a routine could not be made and the server said nothing of its own. */
+const CREATE_FALLBACK = "Couldn't set up that routine. Try again.";
+
+/** `POST /api/routines`: a routine, or with `goalId` the routine that runs that goal on a schedule. */
+function createRoutine(body: RoutineInput & { goalId?: string }) {
+  return client("/api/routines", {
+    method: "POST",
+    body,
+    fallback: CREATE_FALLBACK,
+  });
+}
+
 /** The goal exists but its routine or first run did not happen, or may not have: the screen must not offer to create it again. */
 export class SavedButRefused extends Error {}
 
@@ -105,11 +117,7 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
           routine.channelId,
           routine.title?.trim() || routine.instruction.trim(),
           async (channelId, saved) => {
-            await client("/api/routines", {
-              method: "POST",
-              body: { ...routine, channelId },
-              fallback: "Couldn't set up that routine. Try again.",
-            });
+            await createRoutine({ ...routine, channelId });
             saved();
           },
         );
@@ -142,21 +150,17 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
 
           if (schedule) {
             try {
-              await client("/api/routines", {
-                method: "POST",
-                body: {
-                  agentId: input.agentId,
-                  channelId,
-                  goalId: id,
-                  instruction: runGoalInstruction(goal.title, id),
-                  cron: schedule.cron,
-                  timezone: schedule.timezone,
-                  // The routine store refuses a title over 100 characters.
-                  ...(Array.from(goal.title).length <= 100
-                    ? { title: goal.title }
-                    : {}),
-                },
-                fallback: "Couldn't set up that routine. Try again.",
+              await createRoutine({
+                agentId: input.agentId,
+                channelId,
+                goalId: id,
+                instruction: runGoalInstruction(goal.title, id),
+                cron: schedule.cron,
+                timezone: schedule.timezone,
+                // The routine store refuses a title over 100 characters.
+                ...(Array.from(goal.title).length <= 100
+                  ? { title: goal.title }
+                  : {}),
               });
             } catch (error) {
               /*
