@@ -9188,7 +9188,11 @@ fn main() {
     person read "Something went wrong". One read of the folder's parent through a container made
     Docker Desktop look again. Start now does that read itself, with an image already there, and
     goes on. When that does not clear it, the person is told to restart Docker Desktop.
+
+    Unix only: the fake names the folder as Docker Desktop on a Mac does, `/host_mnt` and the Mac's
+    path, which a Windows temporary folder (`C:\...`) cannot be.
     */
+    #[cfg(unix)]
     #[test]
     fn up_refreshes_docker_desktops_view_of_a_folder_that_went_to_the_trash() {
         if crate::test_support::isolated_process(
