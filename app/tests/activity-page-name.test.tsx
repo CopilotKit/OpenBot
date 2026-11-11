@@ -81,12 +81,12 @@ test("the personal edition's page is titled as its Settings entry, and says noth
   expect(header.textContent).toContain("See what your Bots did");
 });
 
-test("Admin keeps Audit, the name an admin reviews policy under", async () => {
+test("Admin calls the trail Activity too, the name it has everywhere", async () => {
   const view = await renderAs(
     "team",
     AdminAuditRoute.options.component as ComponentType,
   );
-  expect(view.getByRole("heading", { level: 1 }).textContent).toBe("Audit");
+  expect(view.getByRole("heading", { level: 1 }).textContent).toBe("Activity");
 });
 
 test("pages that send a person to the trail call it what the trail is called", () => {

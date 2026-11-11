@@ -505,6 +505,22 @@ describe("a site that asks for a verification code after the password", () => {
     return { ...context, request };
   }
 
+  test("a login the site accepted but that could not be saved says to save it again from the Vault", async () => {
+    const { service, store, request } = await asked();
+    store.saveLogin = async () => {
+      throw new Error("the vault is unavailable");
+    };
+    await expect(
+      service.submit("owner", request.id, actor, {
+        username: USERNAME,
+        password: PASSWORD,
+        save: true,
+      }),
+    ).rejects.toThrow(
+      "The site accepted the password, but the login could not be saved. Enter the code to finish, then save it again from the Vault.",
+    );
+  });
+
   test("submit the login, then the code: code_required, then signed in, and the Bot told once", async () => {
     const { service, computer, trail, store, resolved, request } =
       await asked();
@@ -949,7 +965,9 @@ describe("a sign-in that is being entered", () => {
         password: PASSWORD,
         save: true,
       }),
-    ).rejects.toThrow(/could not be saved/);
+    ).rejects.toThrow(
+      "You are signed in, but the login could not be saved. Save it again from the Vault.",
+    );
     expect((await context.service.get("owner", request.id)).status).toBe(
       "signed_in",
     );

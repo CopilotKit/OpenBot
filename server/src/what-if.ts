@@ -20,7 +20,6 @@ import {
   labelsFor,
   missingFrom,
   WHAT_IF_DETAIL_LIMIT,
-  whatIfExplainable,
   WHAT_IF_IN_THE_BROWSER,
   WHAT_IF_INITIATORS,
   WHAT_IF_INTENTS,
@@ -31,6 +30,7 @@ import {
   type WhatIfLayerId,
   type WhatIfRecorded,
   type WhatIfVocabulary,
+  whatIfExplainable,
 } from "@openbot/shared/what-if";
 import type { AuditInitiator } from "@openbot/toolkit/initiator";
 import { asc, eq, isNull } from "drizzle-orm";
@@ -255,7 +255,7 @@ export function parsePrompt(
     '- surface: "app" for a call to one of the apps below, "computer" for something the Bot does in its browser or on its computer.',
     '- For an app: app is one app id from APPS, and tool is one tool name from that app\'s line, the one the question describes. Leave intent, host, label, command and file "".',
     `- For the computer: intent is what it does. ${WHAT_IF_INTENTS.map((intent) => `"${intent}" is ${INTENT_MEANINGS[intent]}`).join("; ")}. host is the web site's host name, such as "www.linkedin.com", for anything in the browser; "" for a file or a command. label is the button's or field's label when the question names one. command is the command when it names one. file is the file's path when it names one. Leave app and tool "".`,
-    'If the question names a Bot, a person, a group, an app or a tool that is not listed below, nothing here can stand for it: understood is "no", and "unclear" says it isn\'t in this OpenBot. If it asks about something that already happened, understood is "no" and "unclear" says to find it on the Audit page, where "Why did this happen?" explains a row. If it asks about something that is not one action a Bot takes, understood is "no" and "unclear" says what to ask instead.',
+    'If the question names a Bot, a person, a group, an app or a tool that is not listed below, nothing here can stand for it: understood is "no", and "unclear" says it isn\'t in this OpenBot. If it asks about something that already happened, understood is "no" and "unclear" says to find it on the Activity page, where "Why did this happen?" explains a row. If it asks about something that is not one action a Bot takes, understood is "no" and "unclear" says what to ask instead.',
     "",
     "BOTS (id: name)",
     ...(vocabulary.bots.length > 0
@@ -1060,7 +1060,7 @@ export function createWhatIfRoutes(options: {
         return context.json(
           {
             error:
-              "OpenBot needs a model key to read a question. Add one on the Credentials page, or set the action yourself.",
+              "OpenBot needs a model key to read a question. Add one in the Vault, or set the action yourself.",
           },
           503,
         );

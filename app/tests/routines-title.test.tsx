@@ -14,7 +14,8 @@ import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
 /**
- * A routine the person named heads its row with their name, and one they didn't keeps its schedule.
+ * A routine the person named heads its row with their name, and one they didn't is headed by what it
+ * does, its instruction. Its schedule is under it either way: what it is, then when it starts.
  *
  * Found on Windows: the Bot was asked for "a daily routine called Morning briefing" and said its tool
  * couldn't take a title. The tool takes one now, and this is where the person reads it.
@@ -76,10 +77,15 @@ const PAGE: RoutinesPage = {
 };
 
 function draw() {
-  global.fetch = (async (input: RequestInfo | URL) =>
-    String(input).startsWith("/api/routines")
-      ? Response.json(PAGE)
-      : Response.json({})) as unknown as typeof fetch;
+  global.fetch = (async (input: RequestInfo | URL) => {
+    const path = String(input);
+    if (path.startsWith("/api/routines")) return Response.json(PAGE);
+    if (path === "/api/responsibilities")
+      return Response.json({ responsibilities: [] });
+    if (path === "/api/proactive/settings")
+      return Response.json({ settings: [], allowed: true });
+    return Response.json({});
+  }) as unknown as typeof fetch;
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({ component: () => <RoutinesList /> }),
@@ -100,16 +106,18 @@ test("a named routine is headed by its name, with its schedule under it", async 
 
   const named = await view.findByText("Morning briefing");
   expect(titleOf(named)).toBe("Morning briefing");
-  expect(view.getByText("Every day at 08:00 · Europe/Madrid")).toBeTruthy();
+  expect(
+    view.getByText("Every day at 08:00 · Europe/Madrid · Acts"),
+  ).toBeTruthy();
   expect(
     view.getByText("Summarise my unread mail and today's meetings."),
   ).toBeTruthy();
 });
 
-test("a routine with no name is still headed by its schedule", async () => {
+test("a routine with no name is headed by its instruction, with its schedule under it", async () => {
   const view = draw();
 
-  const unnamed = await view.findByText("Weekdays at 18:00");
-  expect(titleOf(unnamed)).toBe("Weekdays at 18:00UTC");
-  expect(view.getByText("Post the day's open pull requests.")).toBeTruthy();
+  const unnamed = await view.findByText("Post the day's open pull requests.");
+  expect(titleOf(unnamed)).toBe("Post the day's open pull requests.");
+  expect(view.getByText("Weekdays at 18:00 · UTC · Acts")).toBeTruthy();
 });

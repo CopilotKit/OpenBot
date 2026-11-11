@@ -14,12 +14,17 @@
  * held to the same rules. Not `report_goal_progress`: progress is recorded by the run working on a
  * goal, against that run.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { currentApprovalContext } from "@openbot/toolkit/continuation";
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import type { AuditInitiator } from "../audit";
 import type { ResponsibilityEngine } from "./engine";
-import { responsibilityTools } from "./tools";
-import { type ResponsibilityStore, responsibilitySources } from "./types";
+import { repeatingAsItBegins, responsibilityTools } from "./tools";
+import {
+  type GoalRepeats,
+  type ResponsibilityStore,
+  responsibilitySources,
+} from "./types";
 
 type McpToolShape = {
   name: string;
@@ -93,6 +98,11 @@ const goalFields = {
     description:
       "True when the person wants it done again and again, such as every morning or each time something happens. Its runs never complete it.",
   },
+  endsWhenMet: {
+    type: "boolean",
+    description:
+      "True when the goal has an outcome that ends it even though it runs on a schedule or on an event. A run that meets the success criteria may then complete it. Never with recurring.",
+  },
 } as const;
 const goalId = {
   type: "object",
@@ -111,7 +121,7 @@ export const GOAL_TOOLS: readonly McpToolShape[] = Object.freeze([
       "you carry on with over time and report on in a conversation. Use it whenever they ask for a goal.",
       "",
       "A goal has no schedule of its own. It runs when somebody asks (Run now on its card on the Bot's",
-      "Goals page, or `run_goal`) and when an event wakes it: a trigger you add with `create_trigger`, or",
+      "Routines page, or `run_goal`) and when an event wakes it: a trigger you add with `create_trigger`, or",
       "one of its `subscriptions`. Work done at set times is a routine (`create_routine`); a goal and a",
       "routine can work together. Say which it is when you tell the person what you set up.",
       "",
@@ -120,7 +130,9 @@ export const GOAL_TOOLS: readonly McpToolShape[] = Object.freeze([
       "",
       "Set `recurring` when the person wants it done again and again: every morning, each time something",
       "happens. A goal that repeats, because it is `recurring`, a routine runs it or an event wakes it, is",
-      "never completed by one of its runs. Each run reports its result, and only the person ends it.",
+      "never completed by one of its runs. Each run reports its result, and only the person ends it. Set",
+      "`endsWhenMet` instead when a goal a routine runs or an event wakes has an outcome that ends it: it",
+      "doesn't repeat, and the run that meets its success criteria completes it.",
       "",
       "Its runs post into this conversation. Leave `channelId` out, or empty, for this conversation, and",
       "pass one only when the person asks for a different conversation you share. It takes no owner and",
@@ -151,7 +163,7 @@ export const GOAL_TOOLS: readonly McpToolShape[] = Object.freeze([
   {
     name: "update_goal",
     description:
-      "Change one of the person's goals that you carry out: its title, instruction, success criteria, event subscriptions or whether it is recurring. Give the id from `list_goals` and, in `patch`, only what changes; an empty field is left as it is.",
+      "Change one of the person's goals that you carry out: its title, instruction, success criteria, event subscriptions, or whether it is `recurring` or `endsWhenMet`. Give the id from `list_goals` and, in `patch`, only what changes; an empty field is left as it is.",
     inputSchema: {
       type: "object",
       properties: {
@@ -181,7 +193,7 @@ export const GOAL_TOOLS: readonly McpToolShape[] = Object.freeze([
   {
     name: "complete_goal",
     description:
-      "End one of the person's goals for good, when the person says it is done, or when a one-off goal's success criteria are met. A goal that repeats (recurring, run by a routine or woken by an event) ends only when the person asks: one good run doesn't finish it. A completed goal can't be resumed.",
+      "End one of the person's goals for good, when the person says it is done, or when the success criteria of a one-off goal, or of one made with endsWhenMet, are met. A goal that repeats (recurring, or run by a routine or woken by an event without endsWhenMet) ends only when the person asks: one good run doesn't finish it. A completed goal can't be resumed.",
     inputSchema: goalId,
   },
 ]);
@@ -217,10 +229,66 @@ export function withoutGoalCopiesInGoalRun(
 ): (botId: string) => Promise<GrantedTool[]> {
   if (initiator?.kind !== "responsibility") return load;
   return async (botId) =>
-    (await load(botId)).filter((tool) => {
-      const [app, name] = tool.ref.split("/");
-      return !(app === ROUTINES_APP && name !== undefined && isGoalTool(name));
+    (await load(botId)).filter((tool) => !isRoutinesGoalTool(tool));
+}
+
+/** One of the goal tools the Routines app serves, by its ref (`routines/complete_goal`). */
+function isRoutinesGoalTool(tool: GrantedTool) {
+  const [app, name] = tool.ref.split("/");
+  return app === ROUTINES_APP && name !== undefined && isGoalTool(name);
+}
+
+/**
+ * Whether this turn was sent by somebody other than the person. A person's carries `person`, or
+ * nothing on a remote Bot's run, which names no initiator for the person's own request. Every other
+ * turn names what fired it (`run-turn.ts`, `handoffInitiator`, memory's ingestion), and only the
+ * person ends a goal that repeats (`repeatsInRun`).
+ */
+const notSentByPerson = (initiator: AuditInitiator | undefined) =>
+  initiator !== undefined && initiator.kind !== "person";
+
+/** The Bot's goals that repeated as this turn began, for its goal tools' calls. */
+const repeatedWhenTurnBegan = new AsyncLocalStorage<
+  ReadonlyMap<string, GoalRepeats>
+>();
+
+/**
+ * A Bot's tools for a turn the person did not send, with the goals that repeat read as the turn
+ * begins, as a goal's run reads them (`goalRunTools`): this runs where the turn's tools are loaded
+ * (`loadTools` in copilot.ts), before the model holds any tool. The turn's calls then carry that
+ * reading to `callGoalTool`, so `complete_goal` refuses a goal that repeated then, whatever changed
+ * since.
+ *
+ * FOUND IN REVIEW: read only when the turn asked, a routine's own turn could switch off or delete its
+ * goal's routine or trigger with the Routines app (`update_routine`, `delete_routine`,
+ * `pause_trigger`, `delete_trigger`), and then complete the goal. Held only in memory, for the turn.
+ */
+export function withRepeatingGoalsPinned(
+  initiator: AuditInitiator | undefined,
+  ownerUserId: string,
+  load: (botId: string) => Promise<GrantedTool[]>,
+): (botId: string) => Promise<GrantedTool[]> {
+  if (!notSentByPerson(initiator)) return load;
+  return async (botId) => {
+    const tools = await load(botId);
+    const deps = installed;
+    if (!deps || !tools.some(isRoutinesGoalTool)) return tools;
+    const pinned = await repeatingAsItBegins({
+      store: deps.store,
+      ownerUserId,
+      agentId: botId,
     });
+    /*
+     * Every tool of the turn carries it, not only the goal tools: a turn's app calls wait in one
+     * queue (`run-calls.ts`), and a call that waited there runs in the context of the call it waited
+     * behind, which may be `update_routine`.
+     */
+    return tools.map((tool) => ({
+      ...tool,
+      execute: (args, execution) =>
+        repeatedWhenTurnBegan.run(pinned, () => tool.execute(args, execution)),
+    }));
+  };
 }
 
 /** The fields that were given. A blank string is not a value, as for a routine's arguments. */
@@ -254,21 +322,38 @@ export async function callGoalTool(
     });
     input = rest;
   }
-  const tool = responsibilityTools({
+  const initiator = currentApprovalContext()?.initiator;
+  const goal = {
     store: deps.store,
     engine: deps.engine,
     ownerUserId,
     agentId,
     channelId,
-  }).find((candidate) => candidate.name === name);
+  };
+  const tool = (
+    notSentByPerson(initiator)
+      ? responsibilityTools({
+          ...goal,
+          notByPerson: true,
+          /*
+           * As the turn began (`withRepeatingGoalsPinned`). A call with no turn begun in this process,
+           * an approved action carried out later or a remote Bot's callback, is read as it asks.
+           */
+          repeatedWhenRunBegan:
+            repeatedWhenTurnBegan.getStore() ??
+            (await repeatingAsItBegins(goal)),
+        })
+      : responsibilityTools(goal)
+  ).find((candidate) => candidate.name === name);
   if (!tool || name === "report_goal_progress")
     return `Refused. ${name} is not a goal tool here.`;
   const answer = String(await tool.execute(input));
   /*
    * A routine's firing that runs a goal is that goal's routine. One made before routines recorded
-   * their goal, or made without `goalId`, is linked here the first time it runs one.
+   * their goal, or made without `goalId`, is linked here the first time it runs one, unless it is an
+   * older routine that names an open goal other than this one: it keeps running the goals it names
+   * (`RoutineStore.linkGoal`).
    */
-  const initiator = currentApprovalContext()?.initiator;
   if (
     name === "run_goal" &&
     !answer.startsWith("Refused.") &&

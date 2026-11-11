@@ -1133,7 +1133,7 @@ describe("an administrator's one press on a card", () => {
   test("names the page apps are set up on, for the edition", async () => {
     const said = async () =>
       (await json<{ error: string }>(await press("google-drive"))).error;
-    expect(await said()).toContain("on its page under Plugins");
+    expect(await said()).toContain("on its page under Apps");
     setEdition("personal");
     try {
       const personal = await said();
@@ -1155,7 +1155,7 @@ describe("an administrator's one press on a card", () => {
       expect(response.status).toBe(409);
       const { error } = await json<{ error: string }>(response);
       expect(error).toBe(
-        "Notion has no tools to give yet. Open its page under Plugins to see why, then try again.",
+        "Notion has no tools to give yet. Open its page under Apps to see why, then try again.",
       );
       expect(eventsOf("app_access.refused").at(-1)?.payload).toMatchObject({
         reason: "no_tools",

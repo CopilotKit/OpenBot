@@ -63,6 +63,7 @@ const responsibility: Responsibility = {
   successCriteria: "Lunch choice recorded",
   subscriptions: [],
   recurring: false,
+  endsWhenMet: false,
   status: "active",
   progress: "",
   lastResult: null,
@@ -135,14 +136,18 @@ test("an answer to a responsibility's question resumes it with its own tools, ru
     responsibilities: store,
     // The same construction the process uses: the responsibility's tools bound to its latest run.
     responsibilityTurn: ({ responsibility: goal, responsibilityRunId }) => {
-      const tools = responsibilityTools({
+      const base = {
         store,
         engine: { ingest: async () => ({}) as never },
         ownerUserId: goal.ownerUserId,
         agentId: goal.agentId,
         channelId: goal.channelId,
-        ...(responsibilityRunId ? { responsibilityRunId } : {}),
-      });
+      };
+      const tools = responsibilityTools(
+        responsibilityRunId
+          ? { ...base, responsibilityRunId, repeatedWhenRunBegan: new Map() }
+          : base,
+      );
       return async (input) => {
         turn = input;
         const report = tools.find(

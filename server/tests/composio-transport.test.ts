@@ -1423,7 +1423,7 @@ describe("listing an app's actions", () => {
      * whatever sits there — below, two words naming nothing, in place of a remedy.
      */
     const authored =
-      'Composio refuses a call whose toolkit version is "latest", and that is the version travelling with this one, so gmail\'s action list was not refreshed and the tools already held are untouched. A dated version is recorded when an app\'s actions are listed, so refreshing gmail\'s tools on its Plugins page replaces "latest" with a version Composio will accept.';
+      'Composio refuses a call whose toolkit version is "latest", and that is the version travelling with this one, so gmail\'s action list was not refreshed and the tools already held are untouched. A dated version is recorded when an app\'s actions are listed, so refreshing gmail\'s tools on its page under Apps replaces "latest" with a version Composio will accept.';
 
     useComposioClient(
       recording({
@@ -2298,7 +2298,7 @@ describe("calling one action", () => {
     // refresh writes the same nothing back and the reader presses the button again. The sentence
     // has to make the remedy conditional on the vendor, which is the part nobody here controls.
     expect(result.text).not.toContain(
-      "Refresh this app's tools on its Plugins page and try again.",
+      "Refresh this app's tools on its page under Apps and try again.",
     );
     expect(result.text).toMatch(/only if Composio publishes/i);
   });
@@ -3453,7 +3453,7 @@ describe("calling one action", () => {
      * that clears it, replaced by three words naming nothing.
      */
     const authored =
-      'Composio refuses a call whose toolkit version is "latest", and that is the version travelling with this one, so GMAIL_FETCH_EMAILS was not run. A dated version is recorded when an app\'s actions are listed, so refreshing gmail\'s tools on its Plugins page replaces "latest" with a version Composio will accept.';
+      'Composio refuses a call whose toolkit version is "latest", and that is the version travelling with this one, so GMAIL_FETCH_EMAILS was not run. A dated version is recorded when an app\'s actions are listed, so refreshing gmail\'s tools on its page under Apps replaces "latest" with a version Composio will accept.';
 
     useComposioClient(
       recording({

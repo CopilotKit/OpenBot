@@ -20,7 +20,6 @@ import { Separator } from "@/components/ui/separator";
 import { grantRoster } from "@/lib/agents/grant-roster";
 import { grantSummary } from "@/lib/agents/grant-summary";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
 
@@ -42,9 +41,6 @@ export function SkillsPage() {
   const plugins = useQuery(pluginsPageQueryOptions());
   const { data: agents } = useQuery(agentListQueryOptions());
   const { data: hiddenAgents } = useQuery(agentListQueryOptions(true));
-  // In the personal edition this sits under Settings, beside the person's own skills on Capabilities.
-  const personal =
-    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
 
   const skills = plugins.data?.skills ?? [];
   const newSkill = (size: "lg" | "sm") => (
@@ -61,11 +57,7 @@ export function SkillsPage() {
   return (
     <PageShell
       action={newSkill("lg")}
-      description={
-        personal
-          ? "Write instructions your Bots follow when you pick a skill from the / menu. A skill only uses what a Bot can already do."
-          : "Write instructions a Bot follows when someone picks a skill from the / menu. A skill only uses what a Bot can already do, and you choose which Bots offer it."
-      }
+      description="Write instructions a Bot follows when someone picks a skill from the / menu. A skill only uses what a Bot can already do, and you choose which Bots offer it."
       title="Skills"
     >
       {/* One section, so no title: the page title already names it. */}
@@ -81,9 +73,7 @@ export function SkillsPage() {
             icon={IconFileText}
             title="No skills yet"
           >
-            {personal
-              ? "Write one. Your Bots offer it as soon as you save."
-              : "Write one, then choose which Bots offer it."}
+            Write one, then choose which Bots offer it.
           </PageEmpty>
         ) : (
           <PageRows>

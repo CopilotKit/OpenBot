@@ -5246,7 +5246,7 @@ test("a version a model supplied cannot stand in for an action with none recorde
   // one-click fix that cannot work sends an operator round a loop.
   expect(result.isError).toBe(true);
   expect(result.text).toMatch(
-    /Refreshing this app's tools on its Plugins page recovers it only if/,
+    /Refreshing this app's tools on its page under Apps recovers it only if/,
   );
   expect(result.text).toMatch(
     /Where Composio publishes none, no refresh will make it callable/,

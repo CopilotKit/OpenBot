@@ -57,6 +57,16 @@ export function tryClient(
   return send(path, options);
 }
 
+/** The server answered, and said no. `status` tells a refusal (4xx) from a server that broke (5xx). */
+export class ClientError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ClientError";
+    this.status = status;
+  }
+}
+
 /**
  * A request that throws when the server says no, carrying the server's own message.
  *
@@ -93,7 +103,10 @@ export async function client<T>(
       .json()
       .then((body: { error?: string }) => body.error)
       .catch(() => undefined);
-    throw new Error(message ?? options.fallback ?? "That request failed.");
+    throw new ClientError(
+      message ?? options.fallback ?? "That request failed.",
+      response.status,
+    );
   }
 
   if (key === undefined) return response;

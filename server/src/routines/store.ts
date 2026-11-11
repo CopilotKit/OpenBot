@@ -53,6 +53,7 @@ import {
   routineSweeps,
   routines,
 } from "../db/schema";
+import { goalShownFor, routineRunsGoal } from "../responsibilities/types";
 import { describeCron, nextOccurrence, ScheduleRefusedError } from "./schedule";
 
 const SWEEP_ID = "routines";
@@ -66,11 +67,22 @@ export class RoutineNotFoundError extends Error {
 
 /** The floor, the cap, a bad zone, a channel that is not the caller's. Carries the sentence verbatim. */
 export class RoutineRefusedError extends Error {
-  constructor(message: string) {
+  /**
+   * Which refusal this is, for the ones whose sentence is written for a model. The HTTP routes
+   * switch on it to say the same thing to a person; the message stays as the Bot's tools read it.
+   */
+  readonly code?: RoutineRefusalCode;
+  constructor(message: string, code?: RoutineRefusalCode) {
     super(message);
     this.name = "RoutineRefusedError";
+    this.code = code;
   }
 }
+
+export type RoutineRefusalCode =
+  | "goal_not_found"
+  | "goal_complete"
+  | "unknown_timezone";
 
 /** A person may keep this many routines switched on. A constant with a reason, not a setting. */
 export const MAX_ENABLED_ROUTINES = 20;
@@ -156,6 +168,13 @@ export type RoutineSummary = {
   channelDeleted: boolean;
   /** The most recent firing, or null when it has never fired. */
   lastRun: { status: RoutineRunOutcome | null; finishedAt: Date | null } | null;
+  /**
+   * The goal it runs, or null when it runs none. Resolved by `routineRunsGoal`, the rule the goal
+   * store and Activity read, so a routine made before routines recorded their goal reports the one
+   * its instruction names, one not completed first (`goalShownFor`). The Routines page draws such a
+   * routine as a start of that goal's row.
+   */
+  goalId: string | null;
 };
 
 export type RoutineInput = {
@@ -249,7 +268,8 @@ export type RoutineStore = {
   remove(ownerUserId: string, id: string): Promise<void>;
   /**
    * Record that this routine runs this goal, when it records none yet: its firing ran the goal with
-   * `run_goal`. False when it is not this owner's and Bot's routine, or already records a goal.
+   * `run_goal`. False when it is not this owner's and Bot's routine, already records a goal, or is an
+   * older routine whose instruction names a goal of its Bot that is not completed besides this one.
    */
   linkGoal(
     ownerUserId: string,
@@ -398,7 +418,10 @@ function nextRunFor(cron: string, timezone: string, after: Date): Date {
     return nextOccurrence(cron, timezone, after);
   } catch (error) {
     if (error instanceof ScheduleRefusedError) {
-      throw new RoutineRefusedError(error.message);
+      throw new RoutineRefusedError(
+        error.message,
+        error.code === "unknown_timezone" ? "unknown_timezone" : undefined,
+      );
     }
     throw error;
   }
@@ -680,10 +703,12 @@ export function createRoutineStore(database: Database): RoutineStore {
       if (!goal)
         throw new RoutineRefusedError(
           "There is no goal of yours with that id for me. Take its id from list_goals.",
+          "goal_not_found",
         );
       if (goal.status === "completed")
         throw new RoutineRefusedError(
           `"${goal.title}" is complete, so a routine can't run it. Ask the person whether to set it up again as a new goal.`,
+          "goal_complete",
         );
       return goal;
     }
@@ -692,6 +717,38 @@ export function createRoutineStore(database: Database): RoutineStore {
         (goal) => goal.status !== "completed" && instruction.includes(goal.id),
       ) ?? null
     );
+  }
+
+  /**
+   * Refuses when the goal a routine records is complete, read under a share lock on the goal's
+   * row inside the routine's own transaction. Completing a goal locks that row for update and
+   * then switches off the routines that run it (`switchOffRoutinesOf` in the goal store), so the
+   * two can't interleave: this either waits for a completion and reads it, or commits first and
+   * is switched off by the completion that was waiting.
+   */
+  async function refuseCompletedGoal(
+    transaction: Transaction,
+    ownerUserId: string,
+    goalId: string,
+  ): Promise<void> {
+    const [goal] = await transaction
+      .select({
+        title: responsibilities.title,
+        status: responsibilities.status,
+      })
+      .from(responsibilities)
+      .where(
+        and(
+          eq(responsibilities.id, goalId),
+          eq(responsibilities.ownerUserId, ownerUserId),
+        ),
+      )
+      .for("share");
+    if (goal?.status === "completed")
+      throw new RoutineRefusedError(
+        `"${goal.title}" is complete, so a routine can't run it. Ask the person whether to set it up again as a new goal.`,
+        "goal_complete",
+      );
   }
 
   /** A goal's title as a routine's, which is capped shorter, or null when it cannot be one. */
@@ -779,6 +836,47 @@ export function createRoutineStore(database: Database): RoutineStore {
       if (patch.enabled !== undefined) values.enabled = patch.enabled;
 
       const enabling = patch.enabled === true && !existing.enabled;
+      // The goal it will record after this write: the patch's, or the one it already has.
+      const recordedGoalId =
+        values.goalId !== undefined ? values.goalId : existing.goalId;
+      if (enabling && recordedGoalId)
+        await refuseCompletedGoal(transaction, ownerUserId, recordedGoalId);
+      if (enabling && !recordedGoalId && existing.goalByTitle) {
+        // Older schedules record no goal id. Match their instruction by the same rule that
+        // completion uses, and allow one to run while any named goal is still open.
+        // Share locks keep a concurrent completion from finishing before this enable commits.
+        const goals = await transaction
+          .select({
+            id: responsibilities.id,
+            title: responsibilities.title,
+            status: responsibilities.status,
+          })
+          .from(responsibilities)
+          .where(
+            and(
+              eq(responsibilities.ownerUserId, ownerUserId),
+              eq(responsibilities.agentId, existing.agentId),
+            ),
+          )
+          .for("share");
+        const named = goals.filter((goal) =>
+          routineRunsGoal(
+            {
+              ...existing,
+              instruction: values.instruction ?? existing.instruction,
+            },
+            goal,
+          ),
+        );
+        if (
+          named.length > 0 &&
+          named.every((goal) => goal.status === "completed")
+        )
+          throw new RoutineRefusedError(
+            "The goals this routine runs are complete, so it can't run them again. Ask the person whether to set it up again as a new goal.",
+            "goal_complete",
+          );
+      }
 
       const cron = patch.cron ?? existing.cron;
       const timezone = patch.timezone ?? existing.timezone;
@@ -824,20 +922,59 @@ export function createRoutineStore(database: Database): RoutineStore {
     conversationFor: (ownerUserId, agentId, wanted) =>
       resolveChannel(ownerUserId, agentId, wanted),
 
+    /*
+     * FOUND IN REVIEW: an older routine (`goalByTitle`) whose instruction names two goals of its Bot
+     * was linked to whichever one its firing ran first. A routine that records a goal runs that goal
+     * alone (`routineRunsGoal`), so the other stopped repeating and a run could then complete it, and
+     * completing the first switched the routine off while the other was still open
+     * (`switchOffRoutinesOf`). Such a routine is left unlinked, read from its instruction as before.
+     * So is one that names one goal and whose firing ran another: linked, it would stop running the
+     * goal it names.
+     *
+     * Counted among the goals that are not completed, as `switchOffRoutinesOf` counts them: a
+     * completed goal can't be resumed and its `run_goal` is refused, so linking a routine that also
+     * names one changes nothing it runs.
+     */
     async linkGoal(ownerUserId, agentId, routineId, goalId) {
-      const linked = await database
-        .update(routines)
-        .set({ goalId })
-        .where(
-          and(
-            eq(routines.id, routineId),
-            eq(routines.ownerUserId, ownerUserId),
-            eq(routines.agentId, agentId),
-            isNull(routines.goalId),
-          ),
-        )
-        .returning({ id: routines.id });
-      return linked.length > 0;
+      return database.transaction(async (transaction) => {
+        const [routine] = await transaction
+          .select({
+            goalId: routines.goalId,
+            goalByTitle: routines.goalByTitle,
+            instruction: routines.instruction,
+          })
+          .from(routines)
+          .where(
+            and(
+              eq(routines.id, routineId),
+              eq(routines.ownerUserId, ownerUserId),
+              eq(routines.agentId, agentId),
+              isNull(routines.goalId),
+            ),
+          )
+          .for("update");
+        if (!routine) return false;
+        if (routine.goalByTitle) {
+          const open = await transaction
+            .select({ id: responsibilities.id, title: responsibilities.title })
+            .from(responsibilities)
+            .where(
+              and(
+                eq(responsibilities.ownerUserId, ownerUserId),
+                eq(responsibilities.agentId, agentId),
+                ne(responsibilities.status, "completed"),
+              ),
+            );
+          // Linked only when the goal it ran is the one open goal it names, or it names none.
+          const runs = open.filter((goal) => routineRunsGoal(routine, goal));
+          if (runs.some((goal) => goal.id !== goalId)) return false;
+        }
+        await transaction
+          .update(routines)
+          .set({ goalId })
+          .where(eq(routines.id, routineId));
+        return true;
+      });
     },
 
     async create(input) {
@@ -864,6 +1001,9 @@ export function createRoutineStore(database: Database): RoutineStore {
       const [row] = await withEnabledCapLock(
         input.ownerUserId,
         async (transaction) => {
+          // Read again under the lock: the goal may have completed since `goalItRuns` read it.
+          if (goal)
+            await refuseCompletedGoal(transaction, input.ownerUserId, goal.id);
           if (
             (await countEnabled(transaction, input.ownerUserId)) >=
             MAX_ENABLED_ROUTINES
@@ -950,6 +1090,21 @@ export function createRoutineStore(database: Database): RoutineStore {
           });
         }
       }
+      // The owner's goals, to say which one each routine runs. Every one, completed too: a routine
+      // that runs no open goal is still drawn under the completed one (`goalShownFor`). Four short
+      // columns, and not limited: the goal store's limit of 100 is on its own list, not on this.
+      const goals =
+        rows.length > 0
+          ? await database
+              .select({
+                id: responsibilities.id,
+                title: responsibilities.title,
+                agentId: responsibilities.agentId,
+                status: responsibilities.status,
+              })
+              .from(responsibilities)
+              .where(eq(responsibilities.ownerUserId, ownerUserId))
+          : [];
 
       return rows.map(
         ({
@@ -981,6 +1136,7 @@ export function createRoutineStore(database: Database): RoutineStore {
                 }),
           channelDeleted: channelExists === null || channelDeletedAt !== null,
           lastRun: lastRuns.get(routine.id) ?? null,
+          goalId: goalShownFor(routine, goals)?.id ?? null,
         }),
       );
     },

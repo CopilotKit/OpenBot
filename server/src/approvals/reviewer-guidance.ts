@@ -460,7 +460,7 @@ export function createReviewerGuidanceRoutes(options: {
         return {
           status: 503,
           error:
-            "OpenBot needs a model key to check guidance, and auto-review needs one to run. Add one on the Credentials page.",
+            "OpenBot needs a model key to check guidance, and auto-review needs one to run. Add one in the Vault.",
         };
       if (error instanceof PolicyTranslationError)
         return { status: 502, error: error.message };
@@ -549,7 +549,7 @@ export function createReviewerGuidanceRoutes(options: {
       return context.json(
         {
           error:
-            "OpenBot needs a model key to run auto-review. Add one on the Credentials page.",
+            "OpenBot needs a model key to run auto-review. Add one in the Vault.",
         },
         503,
       );

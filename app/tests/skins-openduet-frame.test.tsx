@@ -352,7 +352,6 @@ describe("the frame reaches every OpenBot surface", () => {
       "/channel/new",
       "/s/tasks",
       "/bots",
-      "/capabilities",
       "/connections",
       "/admin",
       "/settings",

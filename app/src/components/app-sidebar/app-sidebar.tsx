@@ -38,14 +38,22 @@ import {
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
-import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
+import {
+  isNavigationLink,
+  type NavigationLink,
+  useNavigationItems,
+} from "@/lib/navigation";
 import { relativeTimeShort } from "@/lib/relative-time";
 import {
   type MessageListEmphasis,
   useMessageListEmphasis,
 } from "@/lib/settings/message-list";
 import { BotsNavBadge } from "../bot-profile/attention";
-import { BrowserNavItem } from "../browser/browser-nav-item";
+import {
+  RecordingDot,
+  recordingTooltip,
+  useLiveRecording,
+} from "../browser/browser-nav-item";
 import { navigationRender } from "../edition/team-features-dialog";
 import { OpenBotVersion } from "../layout/openbot-version";
 import { Button } from "../ui/button";
@@ -206,6 +214,55 @@ function ChannelRow({
   );
 }
 
+/** One of the main menu's own destinations, in the sidebar's footer, with what goes at the end of its row. */
+function PrimaryNavItem({
+  item,
+  tooltip,
+  children,
+}: {
+  item: NavigationLink;
+  tooltip?: React.ComponentProps<typeof SidebarMenuButton>["tooltip"];
+  children?: React.ReactNode;
+}) {
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        className="hover:bg-foreground/5 h-10"
+        render={(props) => (
+          <Link
+            {...props}
+            to={item.to}
+            activeProps={{ className: "bg-foreground/5" }}
+          />
+        )}
+        tooltip={tooltip}
+      >
+        <div className="size-[28px] flex items-center justify-center">
+          <item.icon />
+        </div>
+        <span className="text-sm">{item.label}</span>
+        {children}
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
+/**
+ * The Skills entry. While any of the person's Recorders records, it carries a red dot named for the recording, and a
+ * tooltip saying the same, as the Teach a Bot entry once did. Nothing extra otherwise.
+ */
+function SkillsNavItem({ item }: { item: NavigationLink }) {
+  const recording = useLiveRecording();
+  return (
+    <PrimaryNavItem
+      item={item}
+      tooltip={recordingTooltip(recording, item.label)}
+    >
+      {recording ? <RecordingDot {...recording} /> : null}
+    </PrimaryNavItem>
+  );
+}
+
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const emphasis = useMessageListEmphasis();
   const { data: currentUser } = useQuery(currentUserQueryOptions());
@@ -341,29 +398,17 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           {navigation
             .filter(isNavigationLink)
             .filter((item) => item.section === "primary")
-            .map((item) => (
-              <SidebarMenuItem key={item.id}>
-                <SidebarMenuButton
-                  className="hover:bg-foreground/5 h-10"
-                  render={(props) => (
-                    <Link
-                      {...props}
-                      to={item.to}
-                      activeProps={{ className: "bg-foreground/5" }}
-                    />
-                  )}
-                >
-                  <div className="size-[28px] flex items-center justify-center">
-                    <item.icon />
-                  </div>
-                  <span className="text-sm">{item.label}</span>
+            .map((item) =>
+              // Skills says when a recording is live: teaching a Bot a task is how a skill is recorded.
+              item.id === "skills" ? (
+                <SkillsNavItem item={item} key={item.id} />
+              ) : (
+                <PrimaryNavItem item={item} key={item.id}>
                   {/* What waits on you across every Bot; Bots lists them first. */}
                   {item.id === "bots" ? <BotsNavBadge /> : null}
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
-          {/* Your own browser, with the Recorder in it. Drawn only where OpenBot can run one for you. */}
-          <BrowserNavItem />
+                </PrimaryNavItem>
+              ),
+            )}
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger

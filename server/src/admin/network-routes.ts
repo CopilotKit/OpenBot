@@ -114,7 +114,7 @@ export function createNetworkAllowlistRoutes(options: {
         return context.json(
           {
             error:
-              "OpenBot needs a model key to write a list from a description. Add one on the Credentials page, or type the list yourself.",
+              "OpenBot needs a model key to write a list from a description. Add one in the Vault, or type the list yourself.",
           },
           503,
         );

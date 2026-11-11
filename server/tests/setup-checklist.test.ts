@@ -138,7 +138,7 @@ describe("setup rows", () => {
       kind: "env",
       names: ["OPENAI_API_KEY"],
       docsUrl: "https://github.com/CopilotKit/openbot#quick-start",
-      page: { label: "Credentials", path: "/admin/credentials" },
+      page: { label: "Vault", path: "/admin/credentials" },
     });
 
     expect(row(rows, "computer").fix).toMatchObject({

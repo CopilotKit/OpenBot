@@ -10,7 +10,7 @@ export type Section =
   | "routines"
   | "memories"
   | "bots"
-  | "capabilities"
+  | "skills"
   | "connections"
   | "other";
 
@@ -45,12 +45,15 @@ type Parsed = Omit<Place, "label" | "botId" | "watching" | "coworkerHome"> & {
 
 const BOT_TABS: Record<string, string> = {
   setup: "Setup",
-  access: "Access",
+  access: "Apps",
   activity: "Activity",
   approvals: "Approvals",
+  apps: "Apps",
+  computer: "Computer",
   memory: "Memory",
+  skills: "Skills",
   reach: "Reach",
-  responsibilities: "Goals",
+  responsibilities: "Routines",
   routines: "Routines",
   sharing: "Sharing",
 };
@@ -109,11 +112,11 @@ export function parsePlace(
   if (path === "/s/routines" || path === "/routines") {
     return { section: "routines", label: "Routines", ownsWatch: false };
   }
-  if (path === "/s/memories" || path === "/capabilities/memory") {
+  if (path === "/s/memories" || path === "/memory") {
     return { section: "memories", label: "Memories", ownsWatch: false };
   }
-  if (path.startsWith("/capabilities")) {
-    return { section: "capabilities", label: "Capabilities", ownsWatch: false };
+  if (path === "/skills" || path.startsWith("/skills/")) {
+    return { section: "skills", label: "Skills", ownsWatch: false };
   }
   if (path.startsWith("/connections")) {
     return { section: "connections", label: "Connections", ownsWatch: false };

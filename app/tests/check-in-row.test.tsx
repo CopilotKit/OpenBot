@@ -142,12 +142,12 @@ function draw() {
   );
 }
 
-test("the row leads with how often and when, whatever the focus, and the focus follows on one line", async () => {
+test("the row leads with how often, that it tells you, and when, whatever the focus, and the focus follows on one line", async () => {
   settings = [setting({ focus: FOCUS })];
   const view = draw();
   const row = await view.findByRole("button", { name: /Expenses/ });
   const lines = [...row.querySelectorAll("[data-slot=item-description]")];
-  expect(lines[0]?.textContent).toMatch(/^Every hour · Next /);
+  expect(lines[0]?.textContent).toMatch(/^Every hour · Tells you · Next /);
   const focus = lines.find((line) => line.textContent?.includes(FOCUS));
   expect(focus?.textContent).toBe(`Looks for: ${FOCUS}`);
   expect(focus?.className).toContain("line-clamp-1");

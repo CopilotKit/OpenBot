@@ -87,7 +87,7 @@ const TABLE = {
     new RegExp(`where the page to send this person to for ${at} belongs`),
   /** `authorize`: this deployment holds no config for the app at all. */
   noConfigRemedy: () =>
-    /removing the app on its Plugins page and adding it again creates one/,
+    /removing the app on its page under Apps and adding it again creates one/,
   /** `authorize`: a config of this deployment's exists and Composio calls it disabled. */
   disabledRemedy: () => /can enable it in Composio's dashboard/,
   /** `authorize`: the app is connected by entering a credential, so there is no page to visit. */

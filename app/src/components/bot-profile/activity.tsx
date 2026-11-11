@@ -4,6 +4,7 @@ import {
   IconCalendarRepeat,
   IconChecks,
   IconChevronRight,
+  IconClock,
   IconClockPlay,
   IconHelpCircle,
   IconHistory,
@@ -73,7 +74,7 @@ function linkFor(item: ActivityItem, agentId: string) {
     case "question":
       return <Link params={{ agentId }} to="/bots/$agentId" />;
     case "responsibility":
-      return <Link params={{ agentId }} to="/bots/$agentId/responsibilities" />;
+      return <Link params={{ agentId }} to="/bots/$agentId/routines" />;
     case "routine":
       return <Link params={{ agentId }} to="/bots/$agentId/routines" />;
     default:
@@ -324,7 +325,39 @@ export function activitySummary(activity: BotActivity): string {
     : "No tasks, routines or goals yet";
 }
 
-/** In progress, Scheduled and Completed, read from the ledgers the work already lives in. */
+/**
+ * Whether a lined-up item is one of the Bot's routines (a goal and a check-in are routines too), so
+ * its Routines page lists it. A follow-up the Bot scheduled for itself, a queued run of a goal and a
+ * delegated task waiting its turn are not on that page; they stay on this one, under Scheduled.
+ */
+export function isRoutine(item: ActivityItem): boolean {
+  return (
+    item.kind === "routine" ||
+    (item.kind === "responsibility" &&
+      !item.id.startsWith("responsibility-run:"))
+  );
+}
+
+/**
+ * What the row to the Bot's Routines says: how many of its routines are lined up, and how many wait
+ * to be asked. It counts only what the Routines page lists.
+ */
+export function routinesSummary(activity: BotActivity): string {
+  const scheduled = activity.scheduled.filter(isRoutine).length;
+  const onDemand = (activity.onDemand ?? []).filter(isRoutine).length;
+  const parts = [
+    scheduled ? `${scheduled} scheduled` : null,
+    onDemand ? `${onDemand} on demand` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "No routines yet.";
+}
+
+/**
+ * In progress, Scheduled and Completed, read from the ledgers the work already lives in, and the
+ * Bot's actions in the trail. Scheduled lists what the Bot lined up outside its routines (its own
+ * follow-ups, queued runs, delegated tasks), each with its Cancel, and ends on a row to the Bot's
+ * Routines for the rest.
+ */
 export function BotActivitySections({ agentId }: { agentId: string }) {
   const activity = useQuery(botActivityQueryOptions(agentId));
   if (activity.isPending) return null;
@@ -345,21 +378,39 @@ export function BotActivitySections({ agentId }: { agentId: string }) {
         live
         title="In progress"
       />
-      <ActivitySection
-        agentId={agentId}
-        empty="Nothing is scheduled."
-        items={activity.data.scheduled}
-        title="Scheduled"
-      />
-      {/* Only when there is one: most Bots have no goal waiting to be asked. */}
-      {activity.data.onDemand?.length ? (
-        <ActivitySection
-          agentId={agentId}
-          empty=""
-          items={activity.data.onDemand}
-          title="On demand"
-        />
-      ) : null}
+      <PageSection title="Scheduled">
+        <PageRows>
+          {activity.data.scheduled
+            .filter((item) => !isRoutine(item))
+            .map((item) => (
+              <Fragment key={item.id}>
+                <ActivityRow agentId={agentId} item={item} />
+                <Separator />
+              </Fragment>
+            ))}
+          {/*
+           * The Bot's routines have one page, its Routines. This row goes there instead of listing
+           * them a second time.
+           */}
+          <Item
+            render={<Link params={{ agentId }} to="/bots/$agentId/routines" />}
+            size="sm"
+          >
+            <ItemMedia variant="icon">
+              <IconClock />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Routines</ItemTitle>
+              <ItemDescription>
+                {routinesSummary(activity.data)}
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <IconChevronRight className="size-4 text-muted-foreground" />
+            </ItemActions>
+          </Item>
+        </PageRows>
+      </PageSection>
       <ActivitySection
         agentId={agentId}
         empty="No tasks, routines or goals have finished yet."
