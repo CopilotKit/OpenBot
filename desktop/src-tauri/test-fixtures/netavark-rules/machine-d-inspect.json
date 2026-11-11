@@ -1,0 +1,197 @@
+[
+  {
+    "name": "k3d-local-332935aef16d652dc13a272b",
+    "id": "f13ce6464851cdd7e5e93114baabb3d6c75f14c1823a39bcb7828f8eeb76b455",
+    "driver": "bridge",
+    "network_interface": "podman3",
+    "created": "2026-11-10T22:30:41.118604552Z",
+    "subnets": [
+      {
+        "subnet": "10.89.0.0/24",
+        "gateway": "10.89.0.1"
+      }
+    ],
+    "ipv6_enabled": false,
+    "internal": false,
+    "dns_enabled": true,
+    "ipam_options": {
+      "driver": "host-local"
+    },
+    "containers": {
+      "b97130182d098bbc3c2955441d5212d5a48509529884a88bd9a2c1e42c347e83": {
+        "name": "k3d-local-332935aef16d652dc13a272b-server-0",
+        "interfaces": {
+          "eth0": {
+            "subnets": [
+              {
+                "ipnet": "10.89.0.2/24",
+                "gateway": "10.89.0.1"
+              }
+            ],
+            "mac_address": "8d:27:2f:67:f8:42"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "openbot-desktop_data",
+    "id": "16b4b24d902c4355834dcaa150670e3e01b5770b326e27e8f64a693f5e9ab743",
+    "driver": "bridge",
+    "network_interface": "podman2",
+    "created": "2026-11-10T22:24:12.010029864Z",
+    "subnets": [
+      {
+        "subnet": "10.89.1.0/24",
+        "gateway": "10.89.1.1"
+      }
+    ],
+    "ipv6_enabled": false,
+    "internal": false,
+    "dns_enabled": true,
+    "ipam_options": {
+      "driver": "host-local"
+    },
+    "containers": {
+      "3827390a45a6e4f6b071ee974a1a55327636444efadfae12a7ab1990ef86c90c": {
+        "name": "openbot-desktop-postgres-1",
+        "interfaces": {
+          "eth0": {
+            "subnets": [
+              {
+                "ipnet": "10.89.1.2/24",
+                "gateway": "10.89.1.1"
+              }
+            ],
+            "mac_address": "be:76:72:3f:af:e5"
+          }
+        }
+      },
+      "20bab11ab9f49ff29d2e7053f4c73153b19808bd2a7b5f3d7384fa0110ffda58": {
+        "name": "openbot-desktop-worker-1",
+        "interfaces": {
+          "eth0": {
+            "subnets": [
+              {
+                "ipnet": "10.89.1.3/24",
+                "gateway": "10.89.1.1"
+              }
+            ],
+            "mac_address": "de:f7:05:0d:a3:40"
+          }
+        }
+      },
+      "41849f888dc82f67a97ca24dbd440d253d1116c9caeb825072463161cad4dfdc": {
+        "name": "openbot-desktop-server-1",
+        "interfaces": {
+          "eth0": {
+            "subnets": [
+              {
+                "ipnet": "10.89.1.4/24",
+                "gateway": "10.89.1.1"
+              }
+            ],
+            "mac_address": "4c:ea:ec:9c:29:20"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "openbot-desktop_default",
+    "id": "22540cfde2b40565bcfdde2809e940b4bc766e827e60797a12d2b01931c78ee7",
+    "driver": "bridge",
+    "network_interface": "podman1",
+    "created": "2026-11-10T22:24:12.058335918Z",
+    "subnets": [
+      {
+        "subnet": "10.89.2.0/24",
+        "gateway": "10.89.2.1"
+      }
+    ],
+    "ipv6_enabled": false,
+    "internal": false,
+    "dns_enabled": true,
+    "ipam_options": {
+      "driver": "host-local"
+    },
+    "containers": {
+      "cc71e4e7625912ebfde2a198b12f2b266098afa1b4a378368f5787365158aa74": {
+        "name": "openbot-desktop-agent-harness-1",
+        "interfaces": {
+          "eth0": {
+            "subnets": [
+              {
+                "ipnet": "10.89.2.2/24",
+                "gateway": "10.89.2.1"
+              }
+            ],
+            "mac_address": "30:76:e9:6e:eb:9a"
+          }
+        }
+      },
+      "ac439969410ea07ef805b05d85af55aecc9a77427f44ca2a342b297c93e65c84": {
+        "name": "openbot-desktop-agent-computer-1",
+        "interfaces": {
+          "eth0": {
+            "subnets": [
+              {
+                "ipnet": "10.89.2.3/24",
+                "gateway": "10.89.2.1"
+              }
+            ],
+            "mac_address": "fa:5c:ae:9d:6f:0e"
+          }
+        }
+      },
+      "02d16ac8773090d2dc0bc89ac53fb8d2bc0f3388c55730f189e0ccb13add1421": {
+        "name": "mockllm",
+        "interfaces": {
+          "eth0": {
+            "subnets": [
+              {
+                "ipnet": "10.89.2.4/24",
+                "gateway": "10.89.2.1"
+              }
+            ],
+            "mac_address": "75:b4:7f:11:68:6b"
+          }
+        }
+      },
+      "41849f888dc82f67a97ca24dbd440d253d1116c9caeb825072463161cad4dfdc": {
+        "name": "openbot-desktop-server-1",
+        "interfaces": {
+          "eth1": {
+            "subnets": [
+              {
+                "ipnet": "10.89.2.5/24",
+                "gateway": "10.89.2.1"
+              }
+            ],
+            "mac_address": "4c:ea:ec:9c:29:20"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "podman",
+    "id": "2f259bab93aaaaa2542ba43ef33eb990d0999ee1b9924b557b7be53c0b7a1bb9",
+    "driver": "bridge",
+    "network_interface": "podman0",
+    "created": "2026-11-10T22:23:40.402118734Z",
+    "subnets": [
+      {
+        "subnet": "10.88.0.0/16",
+        "gateway": "10.88.0.1"
+      }
+    ],
+    "ipv6_enabled": false,
+    "internal": false,
+    "dns_enabled": false,
+    "ipam_options": {
+      "driver": "host-local"
+    },
+    "containers": {}
+  }
+]
