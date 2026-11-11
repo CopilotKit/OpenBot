@@ -260,6 +260,10 @@ struct Progress {
     /// The engine itself is being updated: see `engine::StepLine::updating`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     updating: bool,
+    /// The step holds until there is room on the disk (`early_downloads::wait_for_room`): the
+    /// window shows it paused, with no spinner and no time running on.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    paused: bool,
 }
 
 #[derive(Serialize)]
@@ -875,6 +879,7 @@ fn report_line<R: tauri::Runtime>(
             elsewhere: false,
             asks: false,
             updating: false,
+            paused: false,
         },
     );
 }
@@ -980,6 +985,28 @@ fn report_running_line<R: tauri::Runtime>(
     line: engine::StepLine,
     download_bytes: Option<u64>,
 ) {
+    report_running_row(app, step, line, download_bytes, false);
+}
+
+/// The images row while downloads hold for room: paused, until there is room and they carry on.
+fn report_holding_for_room<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    report_running_row(
+        app,
+        "images",
+        engine::StepLine::here(HOLDING_FOR_ROOM),
+        None,
+        true,
+    );
+}
+
+/// A running row, and whether it is paused.
+fn report_running_row<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    step: &str,
+    line: engine::StepLine,
+    download_bytes: Option<u64>,
+    paused: bool,
+) {
     RUNNING_SAID
         .lock()
         .unwrap_or_else(|held| held.into_inner())
@@ -1017,6 +1044,7 @@ fn report_running_line<R: tauri::Runtime>(
             elsewhere,
             asks,
             updating,
+            paused,
         },
     );
 }
@@ -1292,6 +1320,7 @@ fn report_running_downloads<R: tauri::Runtime>(
             elsewhere: line.elsewhere,
             asks: line.asks,
             updating: line.updating,
+            paused: false,
         },
     );
 }
@@ -1324,6 +1353,7 @@ fn report_downloads<R: tauri::Runtime>(
             elsewhere: false,
             asks: false,
             updating: false,
+            paused: false,
         },
     );
 }
@@ -2749,6 +2779,21 @@ fn early_downloads_now() -> early_downloads::Summary {
     early_downloads::summary()
 }
 
+/// Where the early downloads are once they have looked at the free disk, for Install: nothing is
+/// built on a disk too full for OpenBot, even by an Install clicked before they had looked.
+#[tauri::command]
+async fn early_downloads_measured() -> early_downloads::Summary {
+    tauri::async_runtime::spawn_blocking(|| {
+        early_downloads::measured(std::time::Duration::from_secs(30))
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// The images row while downloads hold for room (`early_downloads::wait_for_room`).
+const HOLDING_FOR_ROOM: &str =
+    "The download is paused until there's enough free space. It carries on by itself.";
+
 /// Complete all local software acquisition before either authentication screen is available.
 #[tauri::command]
 async fn prepare_installation(
@@ -2869,7 +2914,15 @@ async fn prepare_installation_inner(
         acquire::prepare_for_compose(&address)?;
         // The first screen may have started pulling these already: wait for it, showing its
         // download, and the pulls below find them there.
-        early_downloads::wait_for_images(|downloads| report_downloads(&handle, downloads.clone()));
+        let holding = || report_holding_for_room(&handle);
+        let wanted = || attempt.require_current().is_ok();
+        early_downloads::wait_for_images(
+            |downloads| report_downloads(&handle, downloads.clone()),
+            holding,
+        );
+        // Nothing more goes onto a disk the person is asked to free space on.
+        early_downloads::wait_for_room(&holding, &wanted);
+        attempt.require_current()?;
         // Downloaded before the engine answered: loaded into it now, so the pulls below find them.
         early_downloads::load_offline_images(&address, |downloads| {
             report_downloads(&handle, downloads)
@@ -2890,6 +2943,9 @@ async fn prepare_installation_inner(
             pull_metrics::IMAGE_PULLS_AT_ONCE,
             sizes,
             |_, image, on_layer| {
+                // No pull starts while the disk is short; one already running finishes.
+                early_downloads::wait_for_room(&holding, &wanted);
+                attempt.require_current()?;
                 pull_metrics::pull_image(&address, image, on_layer, |metrics| {
                     desktop_telemetry::pull_completed(&handle, metrics)
                 })
@@ -4847,6 +4903,7 @@ impl QuitStatus {
             elsewhere: false,
             asks: false,
             updating: false,
+            paused: false,
         };
         match self.steps.iter_mut().find(|known| known.step == row.step) {
             Some(known) => *known = row,
@@ -10587,6 +10644,7 @@ fn main() {
             back_end_wait_ended,
             start_early_downloads,
             early_downloads_now,
+            early_downloads_measured,
             record_setup_event,
             bring_setup_to_front,
             allow_podman_install,

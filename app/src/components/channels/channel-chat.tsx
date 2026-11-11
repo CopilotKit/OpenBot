@@ -61,6 +61,7 @@ import {
   whileObserved,
 } from "@/lib/copilot/approval-context";
 import { offerItsOwnTools } from "@/lib/copilot/bot-offer";
+import { isBrokenStream, STREAM_BROKE } from "@/lib/copilot/broken-stream";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
 import {
@@ -231,11 +232,27 @@ export function channelHistoryNotice({
  * stayed the reply until the conversation was opened again. Only a reply the stored copy carries on
  * from is replaced, so a read can lengthen what is on screen and never cut it short or change it.
  *
+ * READING BACK A BROKEN RUN (`readBack`), MORE OF IT, NOT ONLY MORE AFTER IT. A run whose live stream
+ * broke kept some pieces of its reply and not others ("ows httpbin's JSON echo of the second other
+ * fields are empty."), while the store holds every piece in order (`broken-stream.ts`). What the
+ * stream delivered is always some of the stored pieces, so a longer stored copy is the whole of it
+ * even when the screen's is not its beginning. And the same broken stream drew one of the three
+ * browser steps a run asked for, its arguments cut short, so a message whose calls the store holds
+ * every one of, and more of, takes the stored calls.
+ *
  * Exported for its tests.
  */
 export function mergeStoredMessages(
   local: Message[],
   stored: Message[],
+  /**
+   * Reading back a run whose live stream broke (`broken-stream.ts`): the store's copy of what that
+   * stream drew is the whole of it. Only then does a longer stored reply win when the screen's is not
+   * its beginning, and a stored message with more of a step's calls take the place of the one drawn.
+   * Otherwise the screen's copy stands: a store a beat behind holds an older version of a message
+   * this tab is still writing.
+   */
+  { readBack = false }: { readBack?: boolean } = {},
 ): Message[] {
   const localIds = new Set(local.map((message) => message.id));
   /*
@@ -249,17 +266,25 @@ export function mergeStoredMessages(
     for (const call of message.toolCalls ?? [])
       localByCall.set(call.id, message.id);
   }
+  /*
+   * One the live turn holds some of the calls of is that message too: a broken stream drew only the
+   * first of a step's calls. Two live messages sharing its calls is not one message, and is left be.
+   */
   const heldAs = (message: Message): string | undefined => {
     if (localIds.has(message.id)) return message.id;
     if (message.role !== "assistant" || !message.toolCalls?.length) return;
     const holders = new Set(
-      message.toolCalls.map((call) => localByCall.get(call.id)),
+      message.toolCalls
+        .map((call) => localByCall.get(call.id))
+        .filter((holder) => !readBack || holder !== undefined),
     );
     const [holder] = holders;
     return holders.size === 1 ? holder : undefined;
   };
   const seenStored = new Set<string>();
   const before = new Map<string, Message[]>();
+  /** The stored copy of each local message the store holds, by the local id. */
+  const storedFor = new Map<string, Message>();
   let pending: Message[] = [];
   for (const message of stored) {
     if (seenStored.has(message.id)) continue;
@@ -268,25 +293,34 @@ export function mergeStoredMessages(
     if (held !== undefined) {
       if (pending.length > 0) before.set(held, pending);
       pending = [];
+      if ((readBack || held === message.id) && !storedFor.has(held))
+        storedFor.set(held, message);
     } else {
       pending.push(message);
     }
   }
-  const storedById = new Map(stored.map((message) => [message.id, message]));
   let lengthened = false;
   const current = local.map((message) => {
-    const later = storedById.get(message.id);
-    if (
-      message.role !== "assistant" ||
-      later?.role !== "assistant" ||
-      typeof message.content !== "string" ||
-      typeof later.content !== "string" ||
-      later.content.length <= message.content.length ||
-      !later.content.startsWith(message.content)
-    )
+    const later = storedFor.get(message.id);
+    if (message.role !== "assistant" || later?.role !== "assistant")
       return message;
+    const content =
+      typeof message.content === "string" &&
+      typeof later.content === "string" &&
+      later.content.length > message.content.length &&
+      (readBack || later.content.startsWith(message.content))
+        ? later.content
+        : undefined;
+    const toolCalls = readBack
+      ? moreCalls(message.toolCalls, later.toolCalls)
+      : undefined;
+    if (content === undefined && toolCalls === undefined) return message;
     lengthened = true;
-    return { ...message, content: later.content };
+    return {
+      ...message,
+      ...(content !== undefined ? { content } : {}),
+      ...(toolCalls !== undefined ? { toolCalls } : {}),
+    };
   });
   if (!lengthened && before.size === 0 && pending.length === 0) return local;
   return [
@@ -296,6 +330,57 @@ export function mergeStoredMessages(
     ]),
     ...pending,
   ];
+}
+
+type ToolCalls = Extract<Message, { role: "assistant" }>["toolCalls"];
+
+/**
+ * The stored calls, when they are more of the live ones: every live call is among them, and the
+ * store has another, or more of one's arguments. Otherwise nothing, and the live calls stand.
+ */
+function moreCalls(live: ToolCalls, stored: ToolCalls): ToolCalls {
+  if (!stored?.length) return undefined;
+  const storedById = new Map(stored.map((call) => [call.id, call]));
+  const calls = live ?? [];
+  if (!calls.every((call) => storedById.has(call.id))) return undefined;
+  const longer = calls.some(
+    (call) =>
+      (storedById.get(call.id)?.function.arguments.length ?? 0) >
+      call.function.arguments.length,
+  );
+  return stored.length > calls.length || longer ? stored : undefined;
+}
+
+/** How long a read-back waits before each read of the stored thread. */
+const READ_BACK_DELAYS_MS = [250, 750, 1500, 3000];
+
+/**
+ * Whether the store holds this drawn Bot message, and no less of it than was drawn: its words, and
+ * each of its calls with its arguments.
+ */
+function holdsWhole(stored: readonly Message[], drawn: Message): boolean {
+  if (drawn.role !== "assistant") return true;
+  const calls = drawn.toolCalls ?? [];
+  const copy = stored.find(
+    (message) =>
+      message.role === "assistant" &&
+      (message.id === drawn.id ||
+        (calls.length > 0 &&
+          (message.toolCalls ?? []).some((call) => call.id === calls[0]?.id))),
+  );
+  if (copy?.role !== "assistant") return false;
+  const words = typeof drawn.content === "string" ? drawn.content.length : 0;
+  const storedWords =
+    typeof copy.content === "string" ? copy.content.length : 0;
+  if (storedWords < words) return false;
+  const storedCalls = new Map(
+    (copy.toolCalls ?? []).map((call) => [call.id, call]),
+  );
+  return calls.every(
+    (call) =>
+      (storedCalls.get(call.id)?.function.arguments.length ?? -1) >=
+      call.function.arguments.length,
+  );
 }
 
 /**
@@ -849,6 +934,8 @@ export function ChannelChat({
    * handle that `copilotkit.runAgent` does not hand back.
    */
   const turnFailure = useRef<string | null>(null);
+  /** A run of the turn going here failed because its stream reached this browser out of shape. */
+  const streamBroke = useRef(false);
   const assistantMessagesBeforeRun = useRef<Set<string>>(new Set());
   /** The reply this turn last told the roster about, so a later run of the turn says only what's new. */
   const reportedReply = useRef<string | null>(null);
@@ -943,6 +1030,46 @@ export function ChannelChat({
   };
   const reportRef = useRef(report);
   reportRef.current = report;
+
+  /**
+   * Read a run whose stream broke here back from the stored thread, and say whether it was there.
+   *
+   * The server's run goes on after the browser's copy of it fails, so the store can be a moment
+   * behind: read again, a little later each time, until it holds every Bot message this turn drew
+   * and none of them shorter than drawn here. A read that never gets there still merges what it has.
+   */
+  const readBackFromThread = async (
+    target: typeof agent,
+    before: ReadonlySet<string>,
+  ): Promise<boolean> => {
+    for (const delayMs of READ_BACK_DELAYS_MS) {
+      await afterMs(delayMs);
+      const stored = await readThreadMessages(channel.threadId, runtimeAgentId);
+      if (stored.availability !== "ready") continue;
+      const merged = mergeStoredMessages(target.messages, stored.messages, {
+        readBack: true,
+      });
+      if (merged !== target.messages) target.setMessages(merged);
+      const drawn = merged.filter(
+        (message) => message.role === "assistant" && !before.has(message.id),
+      );
+      if (drawn.every((message) => holdsWhole(stored.messages, message)))
+        return true;
+    }
+    return false;
+  };
+
+  /** The reply a read-back put right, for the roster, as a run's end would have told it. */
+  const reportReadBack = (target: typeof agent) => {
+    const reply = runReply(
+      target.messages,
+      assistantMessagesBeforeRun.current,
+      authoredComponents(),
+    );
+    if (!reply || reply.id === reportedReply.current) return;
+    reportedReply.current = reply.id;
+    reportRef.current(reply.text, runtimeAgentId);
+  };
 
   /**
    * Everything `say` does once it has something worth sending, split out so the counter it is
@@ -1071,11 +1198,38 @@ export function ChannelChat({
         started = true;
       },
     });
+    streamBroke.current = false;
     setRunsInFlight((count) => count + 1);
     try {
-      await withVoiceContext(copilotkit, target.agentId, voiceHistory, () =>
-        whileObserved(target, () => copilotkit.runAgent({ agent: target })),
-      );
+      /*
+       * A RUN WHOSE STREAM BROKE HERE IS READ BACK FROM THE THREAD, AND CARRIED ON ONCE. The run
+       * went fine on the server and the thread holds it whole; only what reached this browser was
+       * out of shape (`broken-stream.ts`). Its reply drew with pieces missing, and the browser steps
+       * it asked for were never taken, so the turn stopped on "Not completed" with nothing said.
+       * The stored copy puts the reply right, and steps never taken are answered as not run and the
+       * Bot asked again, as a person typing "carry on" did. Never more than once: a second break
+       * says so under the turn rather than looping.
+       */
+      for (let carriedOn = false; ; carriedOn = true) {
+        await withVoiceContext(copilotkit, target.agentId, voiceHistory, () =>
+          whileObserved(target, () => copilotkit.runAgent({ agent: target })),
+        );
+        if (!streamBroke.current || turnFailure.current !== null) break;
+        streamBroke.current = false;
+        awaitingReply.current = false;
+        const whole = await readBackFromThread(target, existingMessageIds);
+        if (whole) reportReadBack(target);
+        const unrun = unansweredToolCalls(target.messages).size > 0;
+        if (whole && !unrun) break;
+        if (whole && !carriedOn) {
+          const answered = repairUnansweredToolCalls(target.messages);
+          if (answered !== target.messages)
+            target.setMessages(answered as typeof target.messages);
+          continue;
+        }
+        setRunError(STREAM_BROKE);
+        break;
+      }
     } finally {
       watching.unsubscribe();
       setRunsInFlight((count) => count - 1);
@@ -1205,7 +1359,22 @@ export function ChannelChat({
       // Both surfaces fall back to the same sentence, from the same place, so a person who uses
       // both is not told two different things about the same silence.
       onRunErrorEvent: ({ event }) => fail(stoppedReason(event?.message), true),
-      onRunFailed: ({ error }) => fail(stoppedReason(error)),
+      onRunFailed: ({ error }) => {
+        /*
+         * Not the Bot failing: the run's stream reached this browser out of shape, in any run of a
+         * turn going here. The turn reads it back from the thread once its runs are over (`deliver`).
+         * Passed to `fail` it was the AG-UI rule's own words under the turn, and in a run after the
+         * turn's first, nothing at all.
+         */
+        if (
+          isBrokenStream(error) &&
+          (awaitingReply.current || turnsRef.current > 0)
+        ) {
+          streamBroke.current = true;
+          return;
+        }
+        fail(stoppedReason(error));
+      },
       onRunFinishedEvent: ({ event }) => {
         /*
          * A run the server stopped to ask the person (an app's call OpenBot asks about) draws its
