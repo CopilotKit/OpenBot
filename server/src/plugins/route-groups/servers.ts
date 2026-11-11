@@ -2,7 +2,7 @@ import { requireAdmin } from "../../auth/guards";
 import { reasonWithoutStatement } from "../../db/query-failure";
 import { BROKERED_PROFILE } from "../access";
 import { brokerSentence, schemeKind } from "../broker";
-import { CATALOGUE, summaryFor } from "../catalogue";
+import { CATALOGUE, offeredHere, summaryFor } from "../catalogue";
 import { vendorSentence } from "../composio";
 import { redirectUriFor } from "../oauth";
 import { ALWAYS_ON_REFUSAL, isAlwaysOn } from "../personal-defaults";
@@ -31,9 +31,17 @@ export function mountServerRoutes({
   skillActor,
 }: PluginRouteContext) {
   /** Everything the Plugins page draws: the catalogue, what is added, and the skills. */
-  routes.get("/", requireUser, async (context) =>
-    context.json({
-      catalogue: CATALOGUE.map((entry) => ({
+  routes.get("/", requireUser, async (context) => {
+    const servers = await store.listServers();
+    const added = new Set(servers.map((server) => server.id));
+    return context.json({
+      /*
+       * What this edition offers, and anything already added whatever the edition: the personal
+       * edition leaves out the apps its broker carries too (`teamOnly`), but never one in use.
+       */
+      catalogue: CATALOGUE.filter(
+        (entry) => offeredHere(entry) || added.has(entry.key),
+      ).map((entry) => ({
         key: entry.key,
         title: entry.title,
         vendor: entry.vendor,
@@ -116,7 +124,7 @@ export function mountServerRoutes({
        * the name this page shows and the parser those routes use cannot come apart.
        */
       provider: activeProvider,
-      servers: await store.listServers(),
+      servers,
       // Scoped: the deployment's skills plus this person's own. An administrator sees them all.
       skills: await store.listSkills(skillActor(context)),
       /*
@@ -131,8 +139,8 @@ export function mountServerRoutes({
       redirectUri: connect?.publicUrl
         ? redirectUriFor(connect.publicUrl)
         : null,
-    }),
-  );
+    });
+  });
 
   /** Add a curated server. The URL comes from the catalogue, never from the request. */
   routes.post("/servers", requireUser, async (context) => {

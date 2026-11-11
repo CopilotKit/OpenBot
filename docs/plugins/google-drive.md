@@ -11,6 +11,10 @@ Program; the REST API underneath has been generally available since 2015, so thi
 "no dependency on a preview", which for a connector people rely on is the better side of the trade.
 The tool names match Google's MCP server exactly, so a later swap back to it would keep every grant.
 
+This built-in connector is in the team edition only. OpenBot Personal doesn't list it on
+Connections: it reaches Google Drive through Composio's directory instead, so the same app isn't listed twice.
+An install that already added this connector keeps it listed and working.
+
 Setting it up takes two people, and neither can do the other's half:
 
 | Who               | Does                                                    | Where                                    |

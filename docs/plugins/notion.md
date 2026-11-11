@@ -7,6 +7,10 @@ open themselves. Unlike Google Drive, this connector ships both read and write t
 tools are named in the catalogue, and the action policy governs every call the same as any other
 plugin tool.
 
+This built-in connector is in the team edition only. OpenBot Personal doesn't list it on
+Connections: it reaches Notion through Composio's directory instead, so the same app isn't listed twice.
+An install that already added this connector keeps it listed and working.
+
 Setting it up takes two people, and neither can do the other's half:
 
 | Who               | Does                                       | Where                        |
