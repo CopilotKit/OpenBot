@@ -51,3 +51,35 @@ test("a pick that cannot be saved discards the conversation, opens nothing, and 
   ).rejects.toThrow("That model isn't available. Pick another one.");
   expect(run.calls).toEqual(["create", "save c-1 gpt-4o null", "discard c-1"]);
 });
+
+test("files held for the first message are uploaded after the pick is saved and before it opens", async () => {
+  const run = steps();
+  await startWithModel({
+    pick: { model: "gpt-4o", effort: null },
+    ...run,
+    upload: async (channelId) => {
+      run.calls.push(`upload ${channelId}`);
+    },
+  });
+  expect(run.calls).toEqual([
+    "create",
+    "save c-1 gpt-4o null",
+    "upload c-1",
+    "open c-1",
+  ]);
+});
+
+test("a file that cannot be uploaded discards the conversation, opens nothing, and says why", async () => {
+  const run = steps();
+  await expect(
+    startWithModel({
+      pick: null,
+      ...run,
+      upload: async (channelId) => {
+        run.calls.push(`upload ${channelId}`);
+        throw new Error("'blob.bin' isn't a file type OpenBot can read.");
+      },
+    }),
+  ).rejects.toThrow("'blob.bin' isn't a file type OpenBot can read.");
+  expect(run.calls).toEqual(["create", "upload c-1", "discard c-1"]);
+});

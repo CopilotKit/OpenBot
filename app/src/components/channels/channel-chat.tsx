@@ -533,7 +533,18 @@ export function ChannelChat({
    */
   const [first] = useState(() => {
     const pending = takeFirstMessage(channel.id);
-    return pending ? { seed: seedMessage(pending.text, newId()) } : null;
+    if (!pending) return null;
+    const attachments = [...pending.attachments];
+    // Drawn with its files, as `deliver` will send it, so they do not appear only once it runs.
+    const seed: Message =
+      attachments.length > 0
+        ? {
+            id: newId(),
+            role: "user",
+            content: toMessageContent(pending.text.trim(), attachments),
+          }
+        : seedMessage(pending.text, newId());
+    return { seed, text: pending.text, attachments };
   });
   const seed = first?.seed ?? null;
 
@@ -1534,9 +1545,7 @@ export function ChannelChat({
     // away. The transcript keeps the seeded message and the notice under it says what happened.
     // A `/` skill is still at the start of its words, where the server finds it.
     void sayRef
-      .current(
-        typeof pending.seed.content === "string" ? pending.seed.content : "",
-      )
+      .current(pending.text, pending.attachments)
       .catch(() => undefined);
 
     // Keep `seed` in state; transcriptMessages gives it up once the agent holds a user turn.

@@ -62,7 +62,12 @@ export function startedChannelFor(id: string): string | null {
  * gone by the time a start fails behind its placeholder, so the words and the reason are kept here
  * for the next home page to take, once.
  */
-export type FailedStart = { text: string; error: string };
+export type FailedStart = {
+  text: string;
+  error: string;
+  /** The files the message carried, put back on the strip with its words. */
+  files?: readonly File[];
+};
 
 let failedStart: FailedStart | null = null;
 
