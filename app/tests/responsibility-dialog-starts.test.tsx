@@ -55,6 +55,8 @@ beforeEach(() => {
         });
         return Response.json({});
       }
+      if (url === "/api/routines/routine-1/runs")
+        return Response.json({ runs: [scheduledRun] });
       return Response.json({ triggers: [], runs: [] });
     },
     { preconnect: originalFetch.preconnect },
@@ -77,8 +79,19 @@ const goal: ResponsibilityRecord = {
   progress: "",
   lastResult: null,
   subscriptions: [],
+  recurring: false,
   endsWhenMet: false,
   updatedAt: "2026-11-10T10:00:00Z",
+};
+
+/** One firing of the goal's schedule, as `GET /api/routines/:id/runs` lists it. */
+const scheduledRun = {
+  id: "run-1",
+  status: "failed",
+  startedAt: "2026-11-10T09:00:00Z",
+  finishedAt: "2026-11-10T09:01:00Z",
+  error: "The queue couldn't be read.",
+  source: "schedule",
 };
 
 const routine = (overrides: Partial<RoutineRecord> = {}): RoutineRecord => ({
@@ -99,6 +112,7 @@ const routine = (overrides: Partial<RoutineRecord> = {}): RoutineRecord => ({
 function open(
   routines: RoutineRecord[],
   status: ResponsibilityRecord["status"] = "active",
+  onClose: () => void = () => {},
 ) {
   const root = createRootRoute();
   const router = createRouter({
@@ -110,7 +124,7 @@ function open(
         component: () => (
           <ResponsibilityDialog
             goal={{ ...goal, status }}
-            onClose={() => {}}
+            onClose={onClose}
             routines={routines}
           />
         ),
@@ -151,10 +165,10 @@ test("a goal with no routines and no events still runs when asked", async () => 
   expect(await header(view)).toBe("Active · Runs when asked");
 });
 
-test("a goal whose only schedule is off runs when asked", async () => {
-  // An off schedule starts nothing, the same as on the Routines list, where it is left out of the row.
+test("a goal whose only schedule is off says the schedule is off", async () => {
+  // An off schedule starts nothing, the same as on the Routines list, where the row says so too.
   const view = open([routine({ enabled: false })]);
-  expect(await header(view)).toBe("Active · Runs when asked");
+  expect(await header(view)).toBe("Active · Schedule off");
 });
 
 test("the Active row says schedules start it when the goal has them", async () => {
@@ -171,7 +185,7 @@ test("the Active row says events and triggers start it when the goal has no sche
 
 test("the Active row leaves schedules out when the only schedule is off", async () => {
   const view = open([routine({ enabled: false })]);
-  expect(await header(view)).toBe("Active · Runs when asked");
+  expect(await header(view)).toBe("Active · Schedule off");
   await view.findByText("Its events and triggers start it.");
   expect(view.queryByText(/schedules, events/)).toBeNull();
 });
@@ -267,4 +281,70 @@ test("a refused change is said under the schedules", async () => {
   expect((await view.findByRole("alert")).textContent).toBe(
     "You have 20 routines switched on.",
   );
+});
+
+test("each schedule says how its last run went, and opens its history", async () => {
+  const view = open([
+    routine({ lastRun: { status: "failed", at: new Date().toISOString() } }),
+  ]);
+  await triggersLoaded();
+  // The chip its own row on the Routines list had.
+  await view.findByText(/^Failed /);
+  const history = view.getByRole("button", {
+    name: "Run history for the schedule Weekdays at 09:00",
+  });
+  expect(history.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(history);
+  await view.findByText("The queue couldn't be read.");
+  expect(view.getByText(/^Scheduled · /)).toBeTruthy();
+  expect(history.getAttribute("aria-expanded")).toBe("true");
+});
+
+test("Delete asks first, then deletes the goal and closes its dialog", async () => {
+  let closed = false;
+  const view = open([routine()], "active", () => {
+    closed = true;
+  });
+  await triggersLoaded();
+  fireEvent.click(
+    view.getByRole("button", { name: "Delete the goal Watch the queue" }),
+  );
+  // The first press only asks.
+  await view.findByText('Delete "Watch the queue"?');
+  await view.findByText(
+    "This goal stops for good, with its schedules and its runs. You can't undo this.",
+  );
+  expect(sent).toEqual([]);
+  fireEvent.click(view.getByRole("button", { name: "Delete" }));
+  await waitFor(() => expect(closed).toBe(true));
+  expect(sent).toStrictEqual([
+    { method: "DELETE", url: "/api/responsibilities/goal-1", body: undefined },
+  ]);
+});
+
+test("a refused delete is said in the confirmation, and the dialog stays", async () => {
+  const answered = global.fetch;
+  global.fetch = Object.assign(
+    async (path: Parameters<typeof fetch>[0], init?: RequestInit) =>
+      (init?.method ?? "GET") === "GET"
+        ? answered(path, init)
+        : new Response(null, { status: 500 }),
+    { preconnect: originalFetch.preconnect },
+  );
+  let closed = false;
+  const view = open([], "active", () => {
+    closed = true;
+  });
+  await triggersLoaded();
+  fireEvent.click(
+    view.getByRole("button", { name: "Delete the goal Watch the queue" }),
+  );
+  await view.findByText(
+    "This goal stops for good, with its runs. You can't undo this.",
+  );
+  fireEvent.click(view.getByRole("button", { name: "Delete" }));
+  expect((await view.findByRole("alert")).textContent).toBe(
+    "Couldn't delete the goal. Try again.",
+  );
+  expect(closed).toBe(false);
 });

@@ -55,6 +55,7 @@ import {
   triggersQueryOptions,
 } from "@/lib/responsibilities";
 import {
+  goalCanEnd,
   goalStarts,
   type MergedRoutine,
   mergeRoutines,
@@ -67,179 +68,12 @@ import {
 import {
   nothingIsFiring,
   type RoutineRecord,
-  type RoutineRunRecord,
-  routineRunsQueryOptions,
   routinesQueryOptions,
 } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import { NewRoutineButton } from "./new-routine-button";
-
-/**
- * What the last-run cell says, and in what tone.
- *
- * `lastRun === null` and `lastRun.status === null` are different facts, and saying the wrong one
- * invents news: the first is "this routine has never finished a run," the second is "one is open
- * right now" — which is also what a run stuck open after repeated dispatch failures looks like from
- * here. Neither is a failure, so neither gets the destructive tone; only `status: "failed"` does.
- */
-function lastRunLabel(lastRun: RoutineRecord["lastRun"]): {
-  text: string;
-  className: string;
-  /** The chip's dot, which carries the tone so the text can stay readable. */
-  dot: string;
-} {
-  if (lastRun === null) {
-    return {
-      text: "Hasn't run yet",
-      className: "text-muted-foreground",
-      dot: "bg-muted-foreground/40",
-    };
-  }
-  if (lastRun.status === null) {
-    return {
-      text: "Running…",
-      className: "text-muted-foreground",
-      dot: "animate-pulse bg-muted-foreground",
-    };
-  }
-  const when = lastRun.at ? relativeTime(lastRun.at) : "recently";
-  if (lastRun.status === "failed") {
-    return {
-      text: `Failed ${when}`,
-      className: "text-destructive",
-      dot: "bg-destructive",
-    };
-  }
-  if (lastRun.status === "skipped") {
-    return {
-      text: `Skipped ${when}`,
-      className: "text-amber-600 dark:text-amber-500",
-      dot: "bg-amber-500",
-    };
-  }
-  if (lastRun.status === "succeeded") {
-    return {
-      text: `Ran ${when}`,
-      className: "text-muted-foreground",
-      dot: "bg-emerald-500",
-    };
-  }
-  // An outcome this DTO doesn't recognise degrades to a neutral label rather than an invented
-  // success — the contract typing (`RoutineRunOutcome | null`) makes a fourth outcome a build-time
-  // error, but this is the runtime fallback if that ever slips through.
-  return {
-    text: `Finished ${when}`,
-    className: "text-muted-foreground",
-    dot: "bg-muted-foreground/40",
-  };
-}
-
-/**
- * One fact about a routine, worn as a small pill so the footer reads as a row of states rather
- * than a sentence.
- */
-function Chip({
-  className,
-  children,
-}: {
-  className?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border border-border bg-background/60 px-2 py-0.5 text-xs",
-        className,
-      )}
-    >
-      {children}
-    </span>
-  );
-}
-
-const RUN_STATUS: Record<
-  RoutineRunRecord["status"],
-  { text: string; dot: string; className: string }
-> = {
-  running: {
-    text: "Running",
-    dot: "animate-pulse bg-muted-foreground",
-    className: "",
-  },
-  succeeded: { text: "Succeeded", dot: "bg-emerald-500", className: "" },
-  failed: {
-    text: "Failed",
-    dot: "bg-destructive",
-    className: "text-destructive",
-  },
-  skipped: {
-    text: "Skipped",
-    dot: "bg-amber-500",
-    className: "text-amber-600 dark:text-amber-500",
-  },
-  waiting: { text: "Waiting for you", dot: "bg-sky-500", className: "" },
-};
-
-/** Every firing of one routine, newest first, each linking to the thread it ran in. */
-function RoutineRuns({ routine }: { routine: RoutineRecord }) {
-  const runs = useQuery(routineRunsQueryOptions(routine.id));
-  // Pending renders nothing: "No runs yet." would otherwise flash for the fetch.
-  if (runs.isPending) return null;
-  if (runs.error)
-    return (
-      <p className="text-destructive text-xs" role="alert">
-        {runs.error.message}
-      </p>
-    );
-  if (!runs.data?.length)
-    return <p className="text-muted-foreground text-xs">No runs yet.</p>;
-  return (
-    <ul className="flex w-full flex-col gap-1.5">
-      {runs.data.map((run) => {
-        const status = RUN_STATUS[run.status] ?? RUN_STATUS.skipped;
-        return (
-          <li
-            className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs"
-            key={run.id}
-          >
-            <span
-              className={cn(
-                "inline-flex items-center gap-1.5",
-                status.className,
-              )}
-            >
-              <span className={cn("size-1.5 rounded-full", status.dot)} />
-              {status.text}
-            </span>
-            <span className="text-muted-foreground">
-              {run.source === "run_now"
-                ? "Run now"
-                : run.source === "trigger"
-                  ? "Triggered"
-                  : "Scheduled"}{" "}
-              · {relativeTime(run.startedAt)}
-            </span>
-            {routine.channel.gone ? null : (
-              <Link
-                className="text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                params={{ channelId: routine.channel.id }}
-                to="/channel/$channelId"
-              >
-                Open conversation
-              </Link>
-            )}
-            {run.error ? (
-              <span className="basis-full text-muted-foreground">
-                {run.error}
-              </span>
-            ) : null}
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
+import { Chip, LastRunChip, RoutineRuns } from "./routine-runs";
 
 type BotDirectory = Map<string, AgentProfile>;
 
@@ -281,7 +115,6 @@ function RoutineItem({
 }) {
   const setEnabled = useMutation(setRoutineEnabledMutationOptions(queryClient));
   const runNow = useMutation(runRoutineNowMutationOptions(queryClient));
-  const lastRun = lastRunLabel(routine.lastRun);
   return (
     <Item size="sm">
       <ItemMedia variant="icon">
@@ -342,10 +175,7 @@ function RoutineItem({
               </Chip>
             </Link>
           )}
-          <Chip className={lastRun.className}>
-            <span className={cn("size-1.5 rounded-full", lastRun.dot)} />
-            {lastRun.text}
-          </Chip>
+          <LastRunChip lastRun={routine.lastRun} />
           {/*
            * Enabled only: the store recomputes nextRunAt on cron/timezone change or re-enable, so a
            * disabled routine's stamp is frozen in the past. Paused takes its place, so the switch's
@@ -489,7 +319,8 @@ function GoalItem({
           </span>
         </ItemTitle>
         <ItemDescription>{line}</ItemDescription>
-        {goal.successCriteria ? (
+        {/* Until only on a goal that can end: one that repeats never reaches it. */}
+        {goal.successCriteria && goalCanEnd(goal, routines, triggers.data) ? (
           <ItemDescription className="line-clamp-1">
             Until: {goal.successCriteria}
           </ItemDescription>

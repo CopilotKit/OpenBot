@@ -8,6 +8,7 @@ import {
   IconPlayerPlay,
   IconProgress,
   IconTarget,
+  IconTrash,
   IconWebhook,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -48,6 +49,7 @@ import { markdownComponents } from "@/lib/markdown";
 import { goalStarts } from "@/lib/routines/merged";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import {
+  deleteResponsibilityMutationOptions,
   type ResponsibilityRecord,
   responsibilityActionMutationOptions,
   responsibilityRunsQueryOptions,
@@ -90,7 +92,7 @@ export const SOURCE_LABEL: Record<Source, string> = {
  *
  * The starts are the Routines list's own (`goalStarts`): the schedule of each enabled routine, then
  * its events, then its enabled triggers. A schedule that is switched off starts nothing, so a goal
- * with only that reads "Runs when asked", as it does on the list.
+ * with only that reads "Schedule off", as it does on the list.
  *
  * `triggers` is undefined until they load, and then nothing is said about what starts it rather than
  * "Runs when asked", which would be a claim about triggers nobody has read yet. An enabled schedule
@@ -142,6 +144,8 @@ export function ResponsibilityDialog({
   const triggers = useQuery(triggersQueryOptions(goal.id));
   const action = useMutation(responsibilityActionMutationOptions(queryClient));
   const edit = useMutation(updateResponsibilityMutationOptions(queryClient));
+  const remove = useMutation(deleteResponsibilityMutationOptions(queryClient));
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const starters = routines.some((routine) => routine.enabled)
     ? "schedules, events and triggers"
     : "events and triggers";
@@ -412,6 +416,22 @@ export function ResponsibilityDialog({
           />
         </DialogBody>
         <DialogFooter className="mt-4">
+          {/* As a routine's row deletes: a ghost Delete, confirmed in a dialog of its own. Apart
+              from Cancel and Save, which are about the wording. */}
+          <Button
+            aria-label={`Delete the goal ${goal.title}`}
+            className="mr-auto"
+            onClick={() => {
+              remove.reset();
+              setConfirmingDelete(true);
+            }}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <IconTrash />
+            Delete
+          </Button>
           <Button onClick={onClose} size="sm" type="button" variant="outline">
             Cancel
           </Button>
@@ -425,6 +445,51 @@ export function ResponsibilityDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+      <Dialog
+        onOpenChange={(next) => {
+          if (!next) setConfirmingDelete(false);
+        }}
+        open={confirmingDelete}
+      >
+        {/* The heavier backdrop, forced: this stacks over the goal's dialog, and Base UI would
+            otherwise render a nested dialog with no backdrop at all. */}
+        <DialogContent overlayClassName="bg-black/20 supports-backdrop-filter:backdrop-blur-sm">
+          <DialogHeader>
+            <DialogTitle>Delete "{goal.title}"?</DialogTitle>
+            <DialogDescription>
+              {routines.length > 0
+                ? "This goal stops for good, with its schedules and its runs. You can't undo this."
+                : "This goal stops for good, with its runs. You can't undo this."}
+            </DialogDescription>
+          </DialogHeader>
+          {remove.error ? (
+            <DialogBody className="mt-4">
+              <p className="text-destructive text-sm" role="alert">
+                {remove.error.message}
+              </p>
+            </DialogBody>
+          ) : null}
+          <DialogFooter className="mt-4">
+            <Button
+              onClick={() => setConfirmingDelete(false)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={remove.isPending}
+              onClick={() => remove.mutate(goal.id, { onSuccess: onClose })}
+              size="sm"
+              type="button"
+              variant="destructive"
+            >
+              {remove.isPending ? "Deleting…" : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }

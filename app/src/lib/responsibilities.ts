@@ -32,6 +32,8 @@ export type ResponsibilityRecord = {
       | "email";
     eventType: string;
   }[];
+  /** Runs again and again with no end. Refused alongside `endsWhenMet`. */
+  recurring: boolean;
   endsWhenMet: boolean;
   updatedAt: string;
 };
@@ -63,7 +65,7 @@ export function responsibilitiesQueryOptions() {
     queryKey: responsibilityKeys.all,
     queryFn: (): Promise<ResponsibilityRecord[]> =>
       client("/api/responsibilities", "responsibilities", {
-        fallback: "Could not load goals",
+        fallback: "Couldn't load your goals. Reload the page.",
       }),
     refetchInterval: 10_000,
   });
@@ -73,7 +75,7 @@ export function responsibilityRunsQueryOptions(id: string) {
     queryKey: responsibilityKeys.runs(id),
     queryFn: (): Promise<ResponsibilityRunRecord[]> =>
       client(`/api/responsibilities/${encodeURIComponent(id)}/runs`, "runs", {
-        fallback: "Could not load goal runs",
+        fallback: "Couldn't load this goal's runs. Reload the page.",
       }),
     refetchInterval: 10_000,
   });
@@ -103,7 +105,7 @@ export function createResponsibility(input: {
     {
       method: "POST",
       body: input,
-      fallback: "Could not create goal",
+      fallback: "Couldn't save the goal. Try again.",
     },
   );
 }
@@ -114,16 +116,33 @@ export function updateResponsibility(
   return client(`/api/responsibilities/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: patch,
-    fallback: "Could not update goal",
+    fallback: "Couldn't save your changes to the goal. Try again.",
   });
 }
+/**
+ * What a person reads when a goal could not be changed and the server said nothing of its own. A
+ * sentence each, since a create from the New routine screen quotes it inside its own message.
+ */
+export const GOAL_ACTION_FALLBACK = {
+  pause: "Couldn't pause the goal. Try again.",
+  resume: "Couldn't resume the goal. Try again.",
+  complete: "Couldn't complete the goal. Try again.",
+  run: "Couldn't start the goal. Try again.",
+} as const;
 export function responsibilityAction(
   id: string,
-  action: "pause" | "resume" | "complete" | "run",
+  action: keyof typeof GOAL_ACTION_FALLBACK,
 ) {
   return client(`/api/responsibilities/${encodeURIComponent(id)}/${action}`, {
     method: "POST",
-    fallback: "Could not change goal",
+    fallback: GOAL_ACTION_FALLBACK[action],
+  });
+}
+/** Delete a goal, and on the server the routines that run it. */
+export function deleteResponsibility(id: string) {
+  return client(`/api/responsibilities/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    fallback: "Couldn't delete the goal. Try again.",
   });
 }
 export function createGithubBinding(repository: string, secret: string) {
@@ -310,6 +329,20 @@ export function responsibilityActionMutationOptions(queryClient: QueryClient) {
         queryClient.invalidateQueries({ queryKey: routineKeys.all }),
       ]);
     },
+  });
+}
+
+/**
+ * Delete a goal. The server deletes the routines that run it too, so both lists are refreshed.
+ */
+export function deleteResponsibilityMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (id: string) => deleteResponsibility(id),
+    onSuccess: () =>
+      Promise.all([
+        settleResponsibilities(queryClient)(),
+        queryClient.invalidateQueries({ queryKey: routineKeys.all }),
+      ]),
   });
 }
 

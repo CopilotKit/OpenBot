@@ -122,9 +122,34 @@ export function intervalLabel(minutes: number): string {
 }
 
 /**
+ * Whether a goal can end, so its row may say until when. One that ends when met can. Any other goal
+ * ends only if nothing makes it run again and again: it isn't recurring, it listens for no events,
+ * and no enabled schedule or trigger runs it. The server's `repeatsOf` reads the same four.
+ *
+ * `routines` and `triggers` are what runs it as far as they are known; unknown counts as nothing.
+ */
+export function goalCanEnd(
+  goal: Pick<
+    ResponsibilityRecord,
+    "endsWhenMet" | "recurring" | "subscriptions"
+  >,
+  routines: readonly Pick<RoutineRecord, "enabled">[] | undefined,
+  triggers: readonly { enabled: boolean }[] | undefined,
+): boolean {
+  if (goal.endsWhenMet) return true;
+  return (
+    !goal.recurring &&
+    goal.subscriptions.length === 0 &&
+    !(routines ?? []).some((routine) => routine.enabled) &&
+    !(triggers ?? []).some((trigger) => trigger.enabled)
+  );
+}
+
+/**
  * A goal's starts, in words: the events it listens for, its enabled triggers, and the schedule of
- * each routine that runs it. "When you ask" when it has none, once its triggers and its routines are
- * both known; before then, or when either couldn't be read, nothing is claimed.
+ * each routine that runs it. With none of those, "Schedule off" when it has schedules that are all
+ * switched off, else "When you ask", once its triggers and its routines are both known; before
+ * then, or when either couldn't be read, nothing is claimed.
  */
 export function goalStarts(
   goal: ResponsibilityRecord,
@@ -142,5 +167,6 @@ export function goalStarts(
     ...(triggerWords ?? []),
   ];
   if (starts.length) return starts.join(", ");
-  return triggerWords && routines ? "When you ask" : null;
+  if (!triggerWords || !routines) return null;
+  return routines.length > 0 ? "Schedule off" : "When you ask";
 }
