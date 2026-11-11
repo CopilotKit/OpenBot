@@ -31,6 +31,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { groupRoster } from "@/lib/agents/roster";
+import { shownSubtitle } from "@/lib/agents/subtitle";
 import {
   type BotAttention,
   botAttentionQueryOptions,
@@ -208,7 +209,9 @@ function RosterRow({
       </ItemMedia>
       <ItemContent>
         <ItemTitle>{agent.name}</ItemTitle>
-        <ItemDescription>{summary || agent.title}</ItemDescription>
+        <ItemDescription>
+          {summary || shownSubtitle(agent.title)}
+        </ItemDescription>
       </ItemContent>
       <ItemActions>
         {waiting > 0 ? (

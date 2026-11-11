@@ -21,6 +21,7 @@ type ProgressEvent = {
   running?: boolean;
   elsewhere?: boolean;
   asks?: boolean;
+  updating?: boolean;
   downloadBytes?: number;
   downloads?: {
     done: number;
@@ -285,6 +286,68 @@ test("installation shows its active stage immediately, with its time so far", as
   );
 });
 
+/*
+ * The rest of OpenBot downloads alongside OpenBot's own download, once the software OpenBot runs on
+ * answers. On a live Windows run the Install step showed both at once, "Downloading OpenBot ·
+ * Step 2 of 4" and "Downloading the rest of OpenBot · Step 3 of 4", each with its spinner, which
+ * read as two steps at the same time. The step says one step at a time: the third once the
+ * second is done, with as much of its download as has come in meanwhile.
+ */
+test("the Install step shows one step in progress at a time while both downloads run", async () => {
+  setupRootConfiguration("/tmp/one-step", async () => emptyConfiguration());
+  const preparation = deferred<void>();
+  withLocalCli({
+    prepare_installation: () => preparation.promise,
+    set_up_local_eval: () => new Promise(() => {}),
+    local_eval_download: () => ({ done: 400_000_000, total: 1_600_000_000 }),
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByRole("heading", { name: "Installing OpenBot" });
+  await emitProgress({
+    step: "engine",
+    ok: true,
+    running: false,
+    detail: "The software OpenBot runs on is ready.",
+  });
+  await emitProgress({
+    step: "images",
+    ok: true,
+    running: true,
+    detail: "Downloading local software.",
+    downloads: {
+      done: 1,
+      total: 5,
+      bytes: 1_200_000_000,
+      size: 3_400_000_000,
+      bytesPerSecond: 9_000_000,
+    },
+  });
+  // The rest of OpenBot is downloading too, and the window has heard how far it has got.
+  await waitFor(() =>
+    expect(
+      invokeCalls.some((call) => call.command === "local_eval_download"),
+    ).toBe(true),
+  );
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
+  const inProgress = () =>
+    [...view.container.querySelectorAll(".step")]
+      .filter((row) => row.querySelector(".mark.active"))
+      .map(
+        (row) =>
+          `${row.getAttribute("aria-label")} | ${row.querySelector(".step-status")?.textContent?.replace(/ · [\dms ]+ elapsed$/, "")}`,
+      );
+  expect(inProgress()).toEqual(["Downloading OpenBot | Step 2 of 4"]);
+  expect(view.container.textContent).not.toContain("Step 3 of 4");
+  // Step 2 done: the third step is the one in progress, its download as far as it has got.
+  await act(async () => preparation.resolve());
+  await view.findByRole("heading", { name: "Connect your AI" });
+  expect(inProgress()).toEqual([
+    "Installing OpenBot in the background | Step 3 of 4",
+  ]);
+  expect(view.container.textContent).toContain("400.0 MB of 1.6 GB");
+});
+
 test("installation failure stops active indicators and retry begins fresh", async () => {
   const { view, preparation, retry } = await beginPendingInstallation();
   await emitProgress({
@@ -525,15 +588,15 @@ test("the first screen is Install, with nothing to choose", async () => {
   expect(localCliCalls()).toEqual([]);
 });
 
-test("the first screen says what usage data OpenBot sends, before the CopilotKit sign-in links it", async () => {
+test("the first screen says what usage data OpenBot sends, before the sign-in links it", async () => {
   setupRootConfiguration("/tmp/local-eval-welcome-usage", async () =>
     emptyConfiguration(),
   );
   withLocalCli({});
   const view = await renderApp();
-  const notice = view.getByText(/OpenBot sends CopilotKit usage data/);
+  const notice = view.getByText(/OpenBot sends usage data/);
   expect(notice.textContent).toBe(
-    "OpenBot sends CopilotKit usage data, linked to your CopilotKit account. It never sends your conversations, files or keys. You can turn this off in Settings. What OpenBot sends",
+    "OpenBot sends usage data, linked to your OpenBot account. It never sends your conversations, files or keys. You can turn this off in Settings. What OpenBot sends",
   );
   const link = view.getByRole("link", { name: "What OpenBot sends" });
   expect(link.getAttribute("href")).toBe(
@@ -695,7 +758,7 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
   );
 });
 
-test("a signed-out first run signs in to CopilotKit and accepts the agreement as its own step, before choosing an AI", async () => {
+test("a signed-out first run signs in and accepts the agreement as its own step, before choosing an AI", async () => {
   setupRootConfiguration("/tmp/local-eval-account", async () =>
     emptyConfiguration(),
   );
@@ -716,12 +779,10 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   await installLocal(view);
   // The first step. OpenBot needs no account, so it installs behind it, exactly once; nothing
   // of Intelligence's runs before the agreement. The browser sign-in starts without a click.
-  await view.findByRole("heading", { name: "Sign in to CopilotKit" });
-  await view.findByText("Finish signing in to CopilotKit in your browser…");
+  await view.findByRole("heading", { name: "Self-contained OpenBot" });
+  await view.findByText("Finish signing in to OpenBot in your browser…");
   expect(
-    view.getByText(
-      "Your conversations and files are stored on this computer. Signing in does not send them to CopilotKit.",
-    ),
+    view.getByText(/Your conversations and files stay on this computer/),
   ).toBeTruthy();
   expect(stepLabel(view)).toBe("Account");
   await waitFor(() =>
@@ -734,7 +795,7 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   await view.findByRole("heading", { name: "Accept the license agreement" });
   expect(
     view.getByText(
-      "To run OpenBot on this computer, accept the CopilotKit license agreement.",
+      "To run OpenBot on this computer, accept the OpenBot by CopilotKit license agreement.",
     ),
   ).toBeTruthy();
   expect(
@@ -747,7 +808,7 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
   await userEvent.click(view.getByRole("button", { name: "Accept" }));
   await view.findByRole("heading", { name: "Connect your AI" });
   expect(stepLabel(view)).toBe("AI");
-  expect(view.queryByText(/needs your CopilotKit account/)).toBeNull();
+  expect(view.queryByText(/Sign in to finish setting up OpenBot/)).toBeNull();
   // Signed in, this installation's apps were connected before moving on.
   expect(
     invokeCalls
@@ -771,7 +832,7 @@ test("a signed-out first run signs in to CopilotKit and accepts the agreement as
 });
 
 /**
- * A new Mac sat on "Checking your CopilotKit account…" for the whole of Podman's install, and no
+ * A new Mac sat on "Checking your OpenBot account…" for the whole of Podman's install, and no
  * browser opened: the check ran the CLI's `onboard local-terms`, which checks the engine first. The
  * CLI's `login` needs no engine. So the sign-in starts the moment the step opens, and the engine is
  * waited for only after it, for the agreement.
@@ -802,7 +863,7 @@ test("the account step opens the CopilotKit sign-in at once, without waiting for
 
   // The browser sign-in, first, with nothing asked of the engine before it. Under it, what is
   // installing meanwhile.
-  await view.findByText("Finish signing in to CopilotKit in your browser…");
+  await view.findByText("Finish signing in to OpenBot in your browser…");
   expect(view.getByText("WXYZ-2345")).toBeTruthy();
   expectBehind(view, 1, DOWNLOADING_SOFTWARE);
   const accountCalls = () =>
@@ -855,7 +916,7 @@ test("macOS's password prompt is explained and comes without a click, and a clos
   });
   const view = await renderApp();
   await installLocal(view);
-  await view.findByText("Checking your CopilotKit account…");
+  await view.findByText("Checking your OpenBot account…");
 
   // Downloaded while the person signs in, then said before the prompt, with nothing to click.
   await emitProgress({
@@ -912,6 +973,72 @@ test("macOS's password prompt is explained and comes without a click, and a clos
   expectBehind(view, 1, PODMAN_PROMPTING);
 });
 
+// What Install says on a Mac whose own Podman OpenBot can't use (`own_machine::PAUSE_OFFER`).
+const PAUSE_OFFER =
+  "Your Podman is set up in a way OpenBot can't use. OpenBot will use its own, and pause yours while OpenBot is running. Yours starts again when you quit OpenBot.";
+
+/**
+ * David's decision for 1.0.2: on a Mac, where Podman runs one machine at a time, OpenBot says it
+ * needs its own and offers to pause the person's while it runs. Pausing theirs is their choice:
+ * the card says so with one button, and nothing is paused until it is pressed. The password card is
+ * not shown for it, and the background row says what it waits for.
+ */
+test("a Mac whose own Podman OpenBot can't use is offered a pause, and nothing is paused until the person says yes", async () => {
+  setupRootConfiguration("/tmp/local-eval-pause-podman", async () =>
+    emptyConfiguration(),
+  );
+  const browser = deferred<{ signedIn: boolean }>();
+  withLocalCli({
+    prepare_installation: () => new Promise(() => {}),
+    local_eval_terms: () => ({ status: "engine-not-ready" }),
+    sign_in_to_copilotkit: () => browser.promise,
+    copilotkit_sign_in_page: () => null,
+    allow_pause_podman: () => true,
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByText("Checking your OpenBot account…");
+  await emitProgress({
+    step: "pause-podman",
+    ok: true,
+    running: true,
+    asks: true,
+    detail: PAUSE_OFFER,
+  });
+  // Said before and after signing in, on whichever part of the step the person is on.
+  const offered = () =>
+    view.findByRole("region", { name: "OpenBot needs its own Podman" });
+  expect((await offered()).textContent).toContain(PAUSE_OFFER);
+  expectBehind(view, 1, "Waiting for you to pause your Podman.", {
+    waiting: true,
+  });
+  await act(async () => browser.resolve({ signedIn: true }));
+  await view.findByRole("heading", { name: "Setting up this computer" });
+  const card = await offered();
+  expect(card.textContent).toContain(PAUSE_OFFER);
+  expect(
+    view.queryByRole("region", { name: "Your password is needed" }),
+  ).toBeNull();
+  expect(view.queryByRole("alert")).toBeNull();
+  const paused = () =>
+    invokeCalls.filter((call) => call.command === "allow_pause_podman");
+  expect(paused()).toHaveLength(0);
+
+  await userEvent.click(view.getByRole("button", { name: "Pause my Podman" }));
+  expect(paused()).toHaveLength(1);
+
+  // Paused: the card goes, and the row says so.
+  await emitProgress({
+    step: "pause-podman",
+    ok: true,
+    running: false,
+    detail: "Your Podman is paused while OpenBot runs.",
+  });
+  expect(
+    view.queryByRole("region", { name: "OpenBot needs its own Podman" }),
+  ).toBeNull();
+});
+
 test("the account step waits for a container engine Install is still setting up, rather than failing", async () => {
   // A new Windows computer installs Podman while the person signs in, and until an engine answers
   // the CLI says nothing about the account ("engine-not-ready"). That was shown as "Couldn't check
@@ -932,12 +1059,166 @@ test("the account step waits for a container engine Install is still setting up,
   await installLocal(view);
   await view.findByRole(
     "button",
-    { name: "Sign in to CopilotKit" },
+    { name: "Sign in for a free local license key" },
     { timeout: 6000 },
   );
   expect(asked).toBe(2);
-  expect(view.queryByText(/Couldn.t check your CopilotKit account/)).toBeNull();
+  expect(view.queryByText(/Couldn.t check your OpenBot account/)).toBeNull();
 }, 15000);
+
+/*
+ * A live Windows run: the install behind the account step updated the person's Podman, and its
+ * machine stopped answering. The step showed the failure with nothing to press, and once signed in
+ * it said "Preparing this computer…" under it forever, waiting for an engine nothing was bringing
+ * up. Try again runs the install again, its engine check and its restart included.
+ */
+test("an install that failed behind the account step offers Try again, which runs it again", async () => {
+  setupRootConfiguration("/tmp/account-install-retry", async () =>
+    emptyConfiguration(),
+  );
+  let preparation = deferred<void>();
+  let engineAnswers = false;
+  withLocalCli({
+    prepare_installation: () => preparation.promise,
+    local_eval_terms: () =>
+      engineAnswers ? ACCEPTED_TERMS : { status: "engine-not-ready" },
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await view.findByRole("heading", { name: "Setting up this computer" });
+
+  await act(async () =>
+    preparation.reject({
+      said: "OpenBot updated Podman, but Podman isn't answering. Try again.",
+      detail:
+        "npipe:////./pipe/podman-machine-default: The system cannot find the file specified. (os error 2)",
+    }),
+  );
+  const card = await view.findByRole("alert");
+  expect(card.textContent).toContain("Podman isn't answering");
+  // Nothing says the engine is still coming while the install that brings it has stopped.
+  expect(view.queryByText("Preparing this computer…")).toBeNull();
+  expect(
+    installationCalls().filter(
+      (call) => call.command === "prepare_installation",
+    ),
+  ).toHaveLength(1);
+
+  preparation = deferred<void>();
+  await userEvent.click(
+    within(card).getByRole("button", { name: "Try again" }),
+  );
+  expect(
+    installationCalls().filter(
+      (call) => call.command === "prepare_installation",
+    ),
+  ).toHaveLength(2);
+  expect(view.queryByRole("alert")).toBeNull();
+
+  // This time the engine answers, and setup goes on from the account step by itself.
+  engineAnswers = true;
+  await act(async () => preparation.resolve());
+  await view.findByRole(
+    "heading",
+    { name: "Connect your AI" },
+    { timeout: 6000 },
+  );
+}, 15000);
+
+/**
+ * What `local_eval_terms` answered on a Windows tester's Docker Desktop 4.31.1, whose engine
+ * (26.1.4) reports its OperatingSystem as "Docker Desktop (containerized)": the CLI's sentence, in
+ * the shape `local_eval.rs` gives the window (as `local-eval-terms-orbstack.json`).
+ */
+const OLD_DOCKER_DESKTOP_REFUSED = {
+  status: "blocked",
+  reason: "unsupported-engine",
+  said: "Docker Desktop or rootful Podman is required on Windows. This machine runs Docker Desktop (containerized).",
+  switchEngine: true,
+};
+const DOCKER_UPDATING =
+  "The Docker Desktop on this computer is too old for OpenBot, so OpenBot is updating it. About 9 minutes left.";
+
+/*
+ * The same tester: the account's licence check ran while Install was updating that Docker Desktop,
+ * and the step said "Switch to Docker Desktop or Podman" on a computer running Docker Desktop.
+ * Under it the update's failure card had a second Try again. Until Install has the engine new
+ * enough, a refusal of it waits for Install, and the step says what Install is doing.
+ */
+test("an old engine refused while Install updates it shows the update, and one Try again", async () => {
+  setupRootConfiguration("/tmp/account-old-docker", async () =>
+    emptyConfiguration(),
+  );
+  let preparation = deferred<void>();
+  let updated = false;
+  withLocalCli({
+    prepare_installation: () => preparation.promise,
+    local_eval_terms: () =>
+      updated ? ACCEPTED_TERMS : OLD_DOCKER_DESKTOP_REFUSED,
+  });
+  const view = await renderApp();
+  await installLocal(view);
+  await emitProgress({
+    step: "engine",
+    ok: true,
+    running: true,
+    updating: true,
+    detail: DOCKER_UPDATING,
+  });
+  await view.findByRole("heading", { name: "Setting up this computer" });
+  const askedBeforeTheUpdate = invokeCalls.filter(
+    (call) => call.command === "local_eval_terms",
+  ).length;
+  expectBehind(view, 1, DOCKER_UPDATING);
+  expect(
+    view.queryByRole("heading", { name: "Switch to Docker Desktop or Podman" }),
+  ).toBeNull();
+  expect(view.queryByText("docker context use desktop-linux")).toBeNull();
+  // Not asked at all while the update runs: the old engine would only refuse it. On the tester's
+  // computer it answered "(containerized)" fourteen times in forty seconds.
+  await act(async () => new Promise((settle) => setTimeout(settle, 2500)));
+  expect(askedBeforeTheUpdate).toBeLessThanOrEqual(1);
+  expect(
+    invokeCalls.filter((call) => call.command === "local_eval_terms"),
+  ).toHaveLength(askedBeforeTheUpdate);
+  expect(
+    view.queryByRole("heading", { name: "Switch to Docker Desktop or Podman" }),
+  ).toBeNull();
+
+  // The update stops: one card, one Try again, which runs the install and the check again.
+  await act(async () =>
+    preparation.reject({
+      said: "The Docker update OpenBot downloaded could not be checked, so it has not been run. Try again.",
+    }),
+  );
+  await view.findByRole("alert");
+  expect(view.getAllByRole("button", { name: "Try again" })).toHaveLength(1);
+  expect(
+    view.queryByRole("heading", { name: "Switch to Docker Desktop or Podman" }),
+  ).toBeNull();
+  preparation = deferred<void>();
+  await userEvent.click(view.getByRole("button", { name: "Try again" }));
+  expect(
+    installationCalls().filter(
+      (call) => call.command === "prepare_installation",
+    ),
+  ).toHaveLength(2);
+
+  // Updated this time: Docker Desktop 4.98 is not "containerized", and the account goes on.
+  updated = true;
+  await emitProgress({
+    step: "engine",
+    ok: true,
+    running: false,
+    detail: "OpenBot updated Docker.",
+  });
+  await act(async () => preparation.resolve());
+  await view.findByRole(
+    "heading",
+    { name: "Connect your AI" },
+    { timeout: 6000 },
+  );
+}, 20000);
 
 // What the native side says as it opens Docker Desktop: `docker_desktop::HAND_OFF`.
 const DOCKER_HAND_OFF =
@@ -949,7 +1230,7 @@ function broughtToFront() {
 
 test("the account step says Docker Desktop is starting while Install waits on it, until Docker answers", async () => {
   // Dogfooding 0.3.3: Install opened Docker Desktop, whose window came to the front. OpenBot's,
-  // behind it on the account step, said only "Checking your CopilotKit account…" for minutes.
+  // behind it on the account step, said only "Checking your OpenBot account…" for minutes.
   setupRootConfiguration("/tmp/hand-off-docker", async () =>
     emptyConfiguration(),
   );
@@ -971,7 +1252,7 @@ test("the account step says Docker Desktop is starting while Install waits on it
   });
   expectBehind(view, 1, DOCKER_HAND_OFF);
   // One line, saying what the wait is for.
-  expect(view.queryByText("Checking your CopilotKit account…")).toBeNull();
+  expect(view.queryByText("Checking your OpenBot account…")).toBeNull();
   expect(view.getAllByText(DOCKER_HAND_OFF)).toHaveLength(1);
 
   // Docker answers: the line goes. Until the account check hears the engine, the step says what
@@ -1011,14 +1292,14 @@ test("the install behind the account step is said on every part of it, signing i
   });
   // What the account check waits on, in Install's own words, said once.
   expectBehind(view, 1, "Installing the software OpenBot runs on.");
-  expect(view.queryByText("Checking your CopilotKit account…")).toBeNull();
+  expect(view.queryByText("Checking your OpenBot account…")).toBeNull();
   expect(view.queryAllByRole("status")).toHaveLength(0);
 
   // Signed out, the step is about signing in, and the install behind it is still said.
   engineAnswers = true;
   await view.findByRole(
     "button",
-    { name: "Sign in to CopilotKit" },
+    { name: "Sign in for a free local license key" },
     { timeout: 5000 },
   );
   expectBehind(view, 1, "Installing the software OpenBot runs on.");
@@ -1036,7 +1317,7 @@ test("the install behind the account step is said on every part of it, signing i
  * technical words beside it, and the back end's releases by `log_update_due`.
  */
 
-/** Words a person setting OpenBot up doesn't know, and the back end's versions. */
+/** Words a person setting OpenBot up doesn't know, the back end's versions, and CopilotKit alone. */
 const TECHNICAL = [
   /Podman/i,
   /\bWSL\b/,
@@ -1051,6 +1332,10 @@ const TECHNICAL = [
   /\bCLI\b/,
   /\bCompose\b/,
   /0\.16\.0/,
+  // The company alone. It is named only as OpenBot by CopilotKit, which the Account step's header
+  // reads as "OpenBot™by CopilotKit" here: two spans, set apart by the stylesheet, the first with
+  // its trademark sign.
+  /(?<!OpenBot™?\s*by\s+)CopilotKit/,
 ];
 
 /** The native side's lines while it prepares this computer (`engine.rs`, `install.rs`). */
@@ -1137,7 +1422,7 @@ async function walkFirstRun(platform: "macOS" | "Windows"): Promise<Beat[]> {
   seen("welcome");
 
   await installLocal(view);
-  await view.findByText("Finish signing in to CopilotKit in your browser…");
+  await view.findByText("Finish signing in to OpenBot in your browser…");
   seen("signing in");
   await running("install-engine", NATIVE.looking);
   seen("signing in, looking");
@@ -1527,9 +1812,19 @@ test("every failure screen says what happened and what to do, in plain words", a
     });
     const view = await renderApp();
     await installLocal(view);
-    await view.findByRole("heading", {
-      name: "Switch to Docker Desktop or Podman",
+    // OrbStack's Docker answers and is new enough: Install has settled the engine, so a refusal
+    // of it is the person's to act on (until then the step waits for Install).
+    await emitProgress({
+      step: "engine",
+      ok: true,
+      running: false,
+      detail: "Docker is answering.",
     });
+    await view.findByRole(
+      "heading",
+      { name: "Switch to Docker Desktop or Podman" },
+      { timeout: 6000 },
+    );
     seen("account, refused", readable(view));
     cleanup();
     invokeCalls = [];
@@ -1567,7 +1862,7 @@ test("every failure screen says what happened and what to do, in plain words", a
       if (command === "last_local_eval_stop_failure")
         return {
           said: NATIVE_FAILURE.lastQuit,
-          detail: "the back end stack did not stop when OpenBot last quit",
+          detail: "the backend stack did not stop when OpenBot last quit",
         };
       return previous(command, args);
     };
@@ -1799,7 +2094,7 @@ function intelligenceCalls() {
   );
 }
 
-test("a first local run offers the back end dashboard to the app page and opens OpenBot", async () => {
+test("a first local run offers the backend dashboard to the app page and opens OpenBot", async () => {
   setupRootConfiguration("/tmp/local-eval-view", async () =>
     emptyConfiguration(),
   );
@@ -3072,7 +3367,7 @@ async function startedOnKeptRelease(
  * record. Nothing in the cluster had changed and every check passed, but the CLI said `degraded`,
  * and the window said "OpenBot is running but not working properly. Retry to start it again." and stopped OpenBot.
  */
-test("an update that did not finish opens OpenBot on the release the back end runs, and says so", async () => {
+test("an update that did not finish opens OpenBot on the release the backend runs, and says so", async () => {
   const after = pinnedCli.updateDidNotFinish;
   // The same stack before the update: ready on rc.5, with rc.9 to install.
   const before = {
@@ -3095,7 +3390,7 @@ test("an update that did not finish opens OpenBot on the release the back end ru
   expect(localActions()).toEqual(["status", "update", "status"]);
 });
 
-test("the next Start tries the update again on a back end that is still running", async () => {
+test("the next Start tries the update again on a backend that is still running", async () => {
   withUnfinishedUpdate("/tmp/local-eval-update-again-running", [
     pinnedCli.updateDidNotFinish,
   ]);
@@ -3118,7 +3413,7 @@ test("the next Start after Quit tries the update again, and never asks the CLI t
   expect(localActions()).toEqual(["status", "update", "status"]);
 });
 
-test("a back end whose check fails is still not healthy, with an update on record or not", async () => {
+test("a backend whose check fails is still not healthy, with an update on record or not", async () => {
   withUnfinishedUpdate("/tmp/local-eval-update-check-fails", [
     pinnedCli.apiCheckFails,
   ]);
@@ -3445,7 +3740,7 @@ test.each(["model", "intelligence"])(
           said:
             connection === "model"
               ? "That saved OpenAI API key is no longer available."
-              : "OpenBot's connection to its back end on this computer is no longer available. Set up the back end again.",
+              : "OpenBot's connection to its backend on this computer is no longer available. Set up the backend again.",
           connection,
         };
       return previous(command, args);
@@ -3690,7 +3985,7 @@ test("a local Intelligence stack left running at Quit is shown without holding a
   useInterruptedShutdownSetup();
   const notice = {
     said: "When OpenBot last quit, some of its services didn't stop. They may still be running. Stopping OpenBot again asks them to stop.",
-    detail: "Back end stop failed: the CLI timed out",
+    detail: "Backend stop failed: the CLI timed out",
   };
   const previous = invokeHandler;
   invokeHandler = async (command, args) => {
@@ -3713,7 +4008,7 @@ test("Stop that fails only for the local Intelligence stack still stops OpenBot"
   invokeHandler = async (command, args) => {
     if (command === "last_failure") return null;
     if (command === "stop_stack")
-      throw "Back end stop failed: the CLI timed out";
+      throw "Backend stop failed: the CLI timed out";
     return previous(command, args);
   };
   const view = await renderApp();
@@ -3734,7 +4029,7 @@ test("Stop that fails for OpenBot itself keeps OpenBot running", async () => {
   invokeHandler = async (command, args) => {
     if (command === "last_failure") return null;
     if (command === "stop_stack")
-      throw "Compose down failed: busy\nBack end stop failed: the CLI timed out";
+      throw "Compose down failed: busy\nBackend stop failed: the CLI timed out";
     return previous(command, args);
   };
   const view = await renderApp();

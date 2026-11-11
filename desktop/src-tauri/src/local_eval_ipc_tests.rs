@@ -41,7 +41,9 @@ mod local_eval_ipc {
         if entry.is_file() {
             return entry;
         }
-        let download = cache.with_extension("download");
+        // Each test process downloads into its own folder: two tests fetching the same pin at once
+        // must not delete each other's tarball. The first to finish keeps its copy.
+        let download = cache.with_extension(format!("download-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&download);
         std::fs::create_dir_all(&download).unwrap();
         let packed = std::process::Command::new("npm")
@@ -64,8 +66,14 @@ mod local_eval_ipc {
             .status()
             .unwrap();
         assert!(unpacked.success(), "the pinned CLI did not unpack");
-        let _ = std::fs::remove_dir_all(&cache);
-        std::fs::rename(&download, &cache).unwrap();
+        // A complete copy is never removed: the rename fails over a folder another process filled.
+        // One left without its entry by an interrupted run is.
+        if !entry.is_file() {
+            let _ = std::fs::remove_dir_all(&cache);
+        }
+        let moved = std::fs::rename(&download, &cache);
+        let _ = std::fs::remove_dir_all(&download);
+        assert!(entry.is_file(), "the pinned CLI was not kept: {moved:?}");
         entry
     }
 
@@ -418,6 +426,216 @@ process.stdout.write(JSON.stringify({{ token, keys: JSON.stringify({{ [kid]: key
             "the window's answers changed:\n{}",
             serde_json::to_string_pretty(&actual).unwrap()
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /**
+    CONNECTING THE SAME FOLDER AGAIN AFTER OPENBOT TOOK UP ITS CONNECTION.
+
+    `local connect` writes the stack's addresses at `localhost`. OpenBot then writes them at
+    `127.0.0.1` (`numeric_loopback`) and moves the key to the credential store. Connecting the same
+    folder again, which setup Retry, Back and forward through setup, and a reinstall over an
+    existing install all do, got "App settings changed after connection was planned" from the CLI
+    pinned at f5c45eb, every time, and the person could not get past setup.
+
+    The real CLI this app pins, through the window's own `connect_local_eval`, over a ready stack
+    recorded for the installation (connect only changes files, so no engine is needed): it connects,
+    Start writes the `.env` its own way, it connects again, and Start still finds the key and the
+    stack's own addresses. An address changed to another port is still refused.
+    */
+    #[test]
+    fn connecting_again_after_openbot_took_up_the_connection_succeeds() {
+        if crate::test_support::isolated_process(
+            "tests::local_eval_ipc::connecting_again_after_openbot_took_up_the_connection_succeeds",
+        ) {
+            return;
+        }
+        const READY: &str = "local-0123456789abcdef01234567";
+        let entry = pinned_cli();
+        let node = on_path("node");
+        let root = crate::test_support::temp_root("local-eval-connect-again");
+        std::fs::create_dir_all(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let home = root.join("home");
+        let installation = home.join("OpenBot");
+        std::fs::create_dir_all(installation.join(".copilotkit")).unwrap();
+        std::fs::write(installation.join(".env"), "SERVER_PORT=3001\n").unwrap();
+
+        // The CLI's own record of a ready stack for the installation, as `local setup` leaves it,
+        // with its private files (synthetic) and the installation's reference to it.
+        let configuration = if cfg!(target_os = "macos") {
+            home.join("Library/Preferences/copilotkit-config-nodejs")
+        } else {
+            home.join(".config/copilotkit-config-nodejs")
+        };
+        let record = serde_json::json!({
+            "id": READY,
+            "appPaths": [installation],
+            "release": release("0.16.0-rc.10", "42", "41"),
+            "ports": { "api": 51796, "dashboard": 51798, "gateway": 51797, "kubernetes": 46443 },
+            "step": "ready",
+            "project": { "organizationId": ORGANIZATION, "projectId": "42", "projectSlug": "local-app" },
+        });
+        let stack_folder = configuration.join("local-evaluation").join(READY);
+        std::fs::create_dir_all(&stack_folder).unwrap();
+        std::fs::write(
+            configuration.join("config.json"),
+            serde_json::json!({ "localStacks": { READY: record } }).to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            stack_folder.join("setup.json"),
+            r#"{"licenseToken":"synthetic"}"#,
+        )
+        .unwrap();
+        let mut secrets: serde_json::Map<String, serde_json::Value> = [
+            "database",
+            "databaseAdmin",
+            "redis",
+            "oidcClient",
+            "session",
+            "serviceToken",
+            "learningToken",
+            "objectAccess",
+            "objectSecret",
+            "gatewayRunner",
+            "gatewaySession",
+            "beamCookie",
+            "channelEncryption",
+        ]
+        .into_iter()
+        .map(|name| (name.to_owned(), serde_json::json!("e".repeat(64))))
+        .collect();
+        secrets.insert(
+            "apiKey".into(),
+            serde_json::json!(format!("cpk-local_1111111111111111_{}", "e".repeat(64))),
+        );
+        std::fs::write(
+            stack_folder.join("secrets.json"),
+            serde_json::Value::Object(secrets).to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            installation.join(".copilotkit/local.json"),
+            serde_json::json!({ "stackId": READY, "appPath": installation }).to_string(),
+        )
+        .unwrap();
+        local_eval_state::begin(
+            &installation,
+            &local_eval::StackId::parse(READY).unwrap(),
+            local_eval_state::Ownership::Created,
+            LOCAL_EVAL_PIN,
+        )
+        .unwrap();
+        // The runtime key `local connect` writes for project 42 from that stack key.
+        let key = format!("cpk-42_1111111111111111_{}", "e".repeat(64));
+
+        let program = root.join("node");
+        std::fs::write(
+            &program,
+            format!("#!/bin/sh\nexec '{}' \"$@\"\n", node.display()),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_PROGRAM", &program);
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_PROGRAM_SHA256", sha256(&program));
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_ENTRY", &entry);
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_ENTRY_SHA256", sha256(&entry));
+        std::env::remove_var("OPENBOT_DEV_LOCAL_EVAL_INTELLIGENCE");
+        std::env::set_var("HOME", &home);
+        std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
+        std::env::set_var("DO_NOT_TRACK", "1");
+        std::env::set_var("COPILOTKIT_TELEMETRY_DISABLED", "1");
+
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .manage(desktop_telemetry::DesktopTelemetry::for_tests(
+                crate::test_support::temp_root("local-eval-connect-again-telemetry"),
+                false,
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let env_file = installation.join(".env");
+        let connect = |label: &str| {
+            tauri::async_runtime::block_on(connect_local_eval(
+                app.handle().clone(),
+                format!("local-eval-connect-again-{label}"),
+                installation.display().to_string(),
+            ))
+            .unwrap_or_else(|error| panic!("{label}: {error:?}"))
+        };
+        // What Start takes: the key from the credential store, and the stack's own addresses at
+        // 127.0.0.1, each once, with no key and no `localhost` left in the file.
+        let start_takes_the_connection = |label: &str| {
+            let env = std::fs::read_to_string(&env_file).unwrap();
+            for line in [
+                "INTELLIGENCE_API_URL=http://127.0.0.1:51796",
+                "INTELLIGENCE_GATEWAY_WS_URL=ws://127.0.0.1:51797",
+                "SERVER_PORT=3001",
+            ] {
+                assert_eq!(
+                    env.lines().filter(|found| *found == line).count(),
+                    1,
+                    "{label}: {line}\n{env}"
+                );
+            }
+            assert!(!env.contains("localhost"), "{label}:\n{env}");
+            assert!(!env.contains("CPK_INTELLIGENCE_API_KEY"), "{label}:\n{env}");
+            assert!(local_eval_state::read(&installation, None).unwrap().connected);
+            let kept = intelligence_key_for_start(&installation, |root, name| {
+                Ok(openbot_desktop_lib::vault::recall(root, name)?.unwrap_or_default())
+            })
+            .unwrap_or_else(|problem| panic!("{label}: {problem:?}"));
+            assert_eq!(kept, key, "{label}");
+        };
+
+        let connection = connect("first");
+        assert_eq!(
+            connection.outcome,
+            local_eval::Outcome::Completed,
+            "{connection:?}"
+        );
+        start_takes_the_connection("first");
+
+        // Start writes the file its own way: the addresses as settings, the key purged.
+        let (settings, purged) = openbot_desktop_lib::vault::split(
+            [
+                ("INTELLIGENCE_API_URL", "http://127.0.0.1:51796"),
+                ("INTELLIGENCE_GATEWAY_WS_URL", "ws://127.0.0.1:51797"),
+                ("INTELLIGENCE_API_KEY", key.as_str()),
+                ("SERVER_PORT", "3001"),
+            ]
+            .into_iter()
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .collect(),
+        );
+        openbot_env::write(&env_file, &settings, &purged).unwrap();
+
+        // Retry, Back and forward, or a reinstall: the same folder connected again.
+        for label in ["again", "and again"] {
+            let connection = connect(label);
+            assert_eq!(
+                connection.outcome,
+                local_eval::Outcome::Completed,
+                "{label}: {connection:?}"
+            );
+            assert!(!connection.conflicted, "{label}: {connection:?}");
+            start_takes_the_connection(label);
+        }
+
+        // Another port is a change somebody made, not the connection: still refused, file kept.
+        let changed = std::fs::read_to_string(&env_file)
+            .unwrap()
+            .replace("http://127.0.0.1:51796", "http://127.0.0.1:9999");
+        std::fs::write(&env_file, &changed).unwrap();
+        let connection = connect("changed");
+        assert_eq!(
+            connection.outcome,
+            local_eval::Outcome::Failed,
+            "{connection:?}"
+        );
+        assert_eq!(std::fs::read_to_string(&env_file).unwrap(), changed);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -169,7 +169,7 @@ pub fn bundle(facts: &Facts, home: Option<&str>) -> String {
         }
     };
     file(&mut out, "OpenBot Desktop log (end)", &facts.desktop_log);
-    file(&mut out, "Back end CLI log (end)", &facts.cli_log);
+    file(&mut out, "Backend CLI log (end)", &facts.cli_log);
     redact(&out, home).into_owned()
 }
 
@@ -509,7 +509,7 @@ mod tests {
         let facts = Facts {
             desktop: "OpenBot Desktop 1.0.0 (Built 2026-11-08 06:40 UTC from 52ea4b5)".into(),
             system: "macos aarch64".into(),
-            failure: Some("The back end could not start.\nexit 1".into()),
+            failure: Some("The backend could not start.\nexit 1".into()),
             engine: Some(full_engine()),
             desktop_log: Some((
                 PathBuf::from(
@@ -524,11 +524,11 @@ mod tests {
         };
         let text = bundle(&facts, Some("/Users/dana"));
         assert!(text.starts_with(
-            "# OpenBot troubleshooting logs\n\nSummary: OpenBot Desktop 1.0.0 (Built 2026-11-08 06:40 UTC from 52ea4b5) on macos aarch64.\nFailed: The back end could not start. / exit 1\nContainer engine: docker 28.5.1. 8 CPUs and 7.7 GiB of memory, 0.0 GiB free of 58.4 GiB in a container; short of disk (nearly full).\n\nRedacted on this computer"
+            "# OpenBot troubleshooting logs\n\nSummary: OpenBot Desktop 1.0.0 (Built 2026-11-08 06:40 UTC from 52ea4b5) on macos aarch64.\nFailed: The backend could not start. / exit 1\nContainer engine: docker 28.5.1. 8 CPUs and 7.7 GiB of memory, 0.0 GiB free of 58.4 GiB in a container; short of disk (nearly full).\n\nRedacted on this computer"
         ), "{text}");
         for expected in [
             "System: macos aarch64",
-            "## What failed\n\nThe back end could not start.\nexit 1\n",
+            "## What failed\n\nThe backend could not start.\nexit 1\n",
             "## Container engine\n\ndocker 28.5.1\nMeasured: 8 CPUs",
             "$ docker system df\nTYPE",
             "~/Library/Logs/ai.copilotkit.openbot.desktop/openbot-desktop.log",

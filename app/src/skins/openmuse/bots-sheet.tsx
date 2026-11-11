@@ -13,6 +13,7 @@ import {
 } from "@/components/bot-profile/attention";
 import { Item, ItemContent, ItemTitle } from "@/components/ui/item";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { shownSubtitle } from "@/lib/agents/subtitle";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
@@ -92,7 +93,9 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
                     <span className={cn(museText.small, "line-clamp-1")}>
                       {asks
                         ? `Needs you · ${summary}`
-                        : summary || agent.title || agent.roleDescription}
+                        : summary ||
+                          (agent.title && shownSubtitle(agent.title)) ||
+                          agent.roleDescription}
                     </span>
                   </ItemContent>
                   {selected ? (

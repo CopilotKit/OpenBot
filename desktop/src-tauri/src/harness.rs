@@ -137,6 +137,10 @@ fn byo_remote_ag_ui_url(value: &str) -> Result<String, String> {
     }
 }
 
+/// The Bot a first setup installs, as the setup window names it (`DEFAULT_HARNESS` in
+/// desktop/src/harness.ts). The early downloads pull its images before Install is clicked.
+pub const DEFAULT_HARNESS: &str = "langgraph";
+
 /// The list, ranked as the build doc ranks it: stars first, with downloads as the sanity check,
 /// because each misleads alone.
 ///
@@ -301,6 +305,20 @@ where
 #[cfg(test)]
 mod tests {
     use crate::test_support::temp_root;
+
+    /// The window installs this Bot on Install's click, and the early downloads pull its images
+    /// before that click: the two must name the same one.
+    #[test]
+    fn the_default_bot_is_the_one_the_setup_window_installs() {
+        let window = include_str!("../../src/harness.ts");
+        assert!(
+            window.contains(&format!("DEFAULT_HARNESS = \"{}\"", super::DEFAULT_HARNESS)),
+            "desktop/src/harness.ts DEFAULT_HARNESS must equal harness::DEFAULT_HARNESS"
+        );
+        assert!(super::catalogue()
+            .iter()
+            .any(|row| row.id == super::DEFAULT_HARNESS && row.image.is_some()));
+    }
 
     /// Both plans name a Bot that exists and can actually use them.
     #[test]

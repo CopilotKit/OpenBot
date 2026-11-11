@@ -8,6 +8,237 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+**Before upgrading.** No migrations run in this release: the database stays at
+`0088_approval_reviewer_guidance`, and a 1.0.1 database is used as it is. Upgrading from 1.0.0 or
+0.3.x runs the migrations listed under 1.0.1, and a database that has run them does not go back:
+restore the backup taken before the upgrade instead. Three things change for an existing OpenBot
+Desktop installation:
+- On Windows OpenBot now always runs in a Podman machine of its own, `openbot`, beside any of
+  yours, and on a Mac it does when yours is rootless, after asking to pause it (below). An
+  installation that ran in a machine of yours starts fresh in `openbot`, and its earlier data stays
+  in your machine.
+- At setup and at every Start, a Docker Desktop or Podman too old to run OpenBot is updated
+  (below). Docker Desktop quits while it updates, which stops its containers; the ones that were
+  running are started again afterwards.
+- OpenBot Desktop's bundled CLI moves to `copilotkit@2e1c519` (below). The back end stays on
+  CopilotKit Intelligence 0.16.0-rc.10.
+
+### OpenBot Desktop
+
+- **OpenBot uses its own Podman machine when yours can't run it, and leaves yours as it is.** A
+  Podman machine made with `podman machine init` is rootless, and OpenBot used it and stopped at
+  "Change this computer's setup" because local Intelligence needs rootful Podman. On Windows even a
+  rootful machine of yours left chat unable to reach OpenBot's back end. OpenBot now makes and uses
+  its own rootful machine, `openbot`, as on a computer with none. On Windows it runs beside yours,
+  which keeps running untouched, and never takes Docker's default pipe (`docker_engine`), so your
+  Docker tools and Docker Desktop keep reaching what they did. On a Mac, where Podman runs one
+  machine at a time, OpenBot asks before it pauses your rootless machine while it runs (**Pause my
+  Podman**), and Quit starts yours again with its containers. Docker, and a rootful machine of
+  yours on a Mac, are used as before. Your default Podman connection is never changed. An
+  installation that ran in your own machine starts fresh in `openbot`; its old data stays in your
+  machine.
+- **OpenBot updates Docker Desktop or Podman when it is too old to run OpenBot.** A computer with
+  Docker Desktop 4.27 got through setup and then stopped at Start with "Compose config exited with
+  exit status: 15", an error nobody could act on. OpenBot now checks the engine at setup and at
+  every Start, before Compose reads anything, and updates one that is too old for you: Docker
+  Compose before 2.27.2 (Docker Desktop before 4.32), or Podman before 6.1. Docker Desktop's update
+  comes from Docker's own update feed, is checked against Docker's checksums and signature, and
+  installs over the one you have, keeping its images, containers and volumes; the containers that
+  were running before are started again once it is back. Podman's is OpenBot's own pinned
+  installer over the old one, and every Podman machine that was running before, yours included, is
+  running afterwards with its containers. A Mac asks for your password, and an all-users Docker
+  Desktop on Windows for Windows' approval. The row for what's installing in the background says
+  why it is updating and shows the update's own lines in full, and the Account step waits for the
+  update and says so. Where an update can't be done for you, such as a Mac or PC too old for the
+  newest Docker Desktop, or an Intel Mac with an old Podman (Podman publishes its Mac package for
+  Apple silicon only), one plain step says what to do. Separately, the Compose file now starts on
+  an older Compose too: with no harness Bot picked, Compose 2.25 and older refused the whole
+  project.
+- **A Podman machine that stops answering is restarted.** A Podman machine OpenBot uses that had
+  lost its Docker API failed setup and Start until you restarted it yourself, and Quit could not
+  stop the back end, so the next launch said "OpenBot had trouble shutting down last time." At every
+  check, including Start and Retry after a relaunch, and before Stop and Quit, such a machine is now
+  stopped and started once, your default machine included. A failure while setup runs behind the
+  Account step now has Try again.
+- **Start says in the log what it is waiting on, and why it gave up.** A Start that waited five
+  minutes for OpenBot's services and then said "OpenBot didn't get ready in time" left nothing in
+  the log in between. Each wait now writes what it asked (the address or the back end's status),
+  each new answer and the same one again once a minute, and why it ended, with how long it took and
+  the last answer.
+- **The big downloads start on the first screen, before you click Install.** Nothing used to
+  download until Install, and then one thing at a time: on a new Mac, Podman, then the 937 MB
+  engine image with no progress shown, then 1.1 GB of OpenBot's software. Now the engine image,
+  Podman's installer, the deployment and, when Docker or Podman already runs, OpenBot's software
+  start downloading as soon as the first screen shows, side by side, while you sign in and enter
+  your Mac password. The first screen says how far they are ("Downloading OpenBot. About 3 minutes
+  left.", with the bytes under a bar), and the row for what's installing in the background carries
+  on with it. A download stopped by quitting carries on from where it stopped next time,
+  and every file is checked against its pinned digest before it is used. Podman builds its machine
+  from the downloaded image instead of fetching its own. With less free disk than OpenBot needs,
+  the first screen says how much is free and how much is needed, and the downloads start once
+  there is room. Nothing is installed before you are asked.
+- **OpenBot's own software downloads on the first screen too, before there is anything to run it.**
+  On a new Mac or PC, or with Docker Desktop not running, OpenBot's images (about 1.1 GB for the
+  default Bot) waited for the engine to start, then downloaded behind it. They now download from
+  the first screen with everything else, into the same cache, checked against their digests and
+  carried on after a quit. Once the engine answers, Install loads them into it, so the step after
+  it no longer downloads them. Anything that didn't download or load is downloaded then, as before.
+- **An update downloads before you click Update.** As soon as a new version of OpenBot is out,
+  OpenBot Desktop downloads what it runs in the background while you keep working: the parts for
+  the Bots you use, and the back end's when it changes too, kept until you update. Clicking Update
+  then stops OpenBot, backs it up, updates it and starts it again, with nothing big left to
+  download. The update offer, Settings › This computer and the setup window say the new version
+  "is downloading in the background (40%).", then that it "is ready to install. It takes a few
+  minutes." It downloads one part at a time, waits while OpenBot starts, stops or updates, never
+  stops or restarts anything you are using, and downloads nothing when the disk is short of room
+  (the Desktop log says why, and the update downloads as before). Candidates and internal builds,
+  which do not update themselves, download nothing ahead.
+- **downloads.copilotkit.ai serves each release's `desktop-images.json`.** It answered 403, so the
+  list of a release's images could only come from GitHub.
+- **The Status window, Settings > This computer and the Install step say what's running in plain
+  words.** The Status window, opened from the menu bar or the system tray, and Settings > This
+  computer said "Back end", "Container engine", "Podman" or "Docker" and the build's commit and
+  time. Both now name each part by what it does: App, OpenBot's services, and Software OpenBot runs
+  on, with "App and Bots" for what was "Front end and Bots". They show the version on its own, and
+  the engine, the build and Docker's container names stay in Copy diagnostics and the logs. A
+  stopped app on This computer says it isn't using memory, where it said its memory couldn't be
+  measured. On the Install step, the rest of OpenBot downloads alongside OpenBot's own download,
+  and both said they were in progress at once ("Step 2 of 4" and "Step 3 of 4"). The step now shows
+  one step at a time: the rest of OpenBot is step 3, shown once step 2 is done, as far along as it
+  got meanwhile.
+- **Windows setup no longer opens Microsoft's "Welcome to Windows Subsystem for Linux" window, and
+  the installer asks plainly to close a running OpenBot.** The welcome window opened partway
+  through setup, the first time OpenBot's Podman machine was made on a computer with no Linux
+  distribution. It isn't OpenBot's and isn't needed, so OpenBot now marks it as already seen for
+  you before it makes the machine. Installing over a running OpenBot said "OpenBot is running!
+  Click OK to kill it". It now says "OpenBot is open. Click OK to close it and continue."
+- **OpenBot stays behind your browser while you sign in, and opens where you left it.** On
+  Windows, OpenBot came in front of the browser partway through setup while you were typing your
+  email to sign in. While the browser sign-in is open it now stays where it is, and comes forward
+  once when the sign-in ends, since the license agreement is next (flashing in the taskbar if
+  Windows won't bring it forward). A reopened window showed blank at Windows' default place for a
+  moment and then jumped to where you left it; it now opens at its saved size and place from the
+  first frame, and in the middle of the main screen when the screen it was on is gone.
+- **The Account step leads with OpenBot.** Its header reads "OpenBot by CopilotKit" and its
+  heading "Self-contained OpenBot". It says this version of OpenBot runs self-contained on this
+  computer and needs a free license key, and that your conversations and files stay on this
+  computer. The button reads "Sign in for a free local license key", and CopilotKit's logo no
+  longer heads the step.
+- **Setup says OpenBot, not CopilotKit.** Signing in, the license agreement and the usage-data
+  notice named CopilotKit on its own: "Sign in to CopilotKit", "Checking your CopilotKit
+  account…", "accept the CopilotKit license agreement", "OpenBot sends CopilotKit usage data". They
+  now say OpenBot ("Sign in to OpenBot", "your OpenBot account"), and "OpenBot by CopilotKit" where
+  the company is named: the license agreement, what signing in sends, and the copyright in the
+  Windows installer and the Mac About box. The sign-in a stopped setup asks for is headed by
+  OpenBot by CopilotKit instead of CopilotKit's logo, and Settings > General > Share usage data
+  says the same as the first screen.
+- **Usage data also says when setup looks stuck, or its window stops answering.** A hang is not a
+  failure, so `setup_failed` never said it. A step of the back end's setup or update, OpenBot's own
+  start, or OpenBot updating itself that runs three times as long as it usually takes, and two
+  minutes over at least, now sends one `setup_stalled` with the step, its usual time and how long it
+  has run. A setup window that stops taking what OpenBot sends it for over 30 seconds while it is on
+  screen (as one did on Windows until a click or Alt+Tab) sends one `ui_stalled` with how long it
+  lasted, and the Desktop log says `[ui] the window stopped answering for 42s during
+  start_machine`. Minimised, hidden or covered windows never count. Step names and seconds only,
+  and nothing at all when usage data is off.
+- **A CopilotKit back end set up in your home folder no longer takes over OpenBot's.** Someone who
+  once ran `copilotkit local setup` in their home folder, or any folder above `~/OpenBot`, had that
+  back end resumed for OpenBot: the CLI looks for a back end in the folder it runs in and in every
+  folder above it. It then wrote OpenBot's connection settings into that folder's `.env`, and Start
+  stopped with "The connection settings do not match the backend that was set up". OpenBot now
+  tells the CLI to use exactly `~/OpenBot`, so it sets up a back end of its own and connects
+  `~/OpenBot/.env`, and the other folder's back end and `.env` are left alone. OpenBot also counts
+  a back end as its own, to stop with Stop and Quit, only when the CLI records it for `~/OpenBot`;
+  one it was handed for another folder is never stopped.
+- **Connecting the back end a second time no longer stops setup.** Setup Retry, going Back and
+  forward through setup, and reinstalling over an existing install connect `~/OpenBot` to its back
+  end again. After the first connection OpenBot writes the back end's addresses at `127.0.0.1`
+  where the CLI wrote `localhost`, and the CLI then refused every later connection with "App
+  settings changed after connection was planned", so setup could not finish. The CLI now treats
+  `localhost`, `127.0.0.1` and `[::1]` with the same port as the same address, connects again, and
+  leaves OpenBot's addresses as they are. An address changed to another port or host is still
+  refused.
+- **CopilotKit CLI `copilotkit@2e1c519`.** OpenBot Desktop's bundled CLI moves to the production
+  build of Intelligence `2e1c51900`: `6bfaa0f5c`, which added `telemetry link`, with `--app-path`
+  added to its `local` commands and a second `local connect` accepted after OpenBot rewrote its
+  addresses to `127.0.0.1`. It keeps Intelligence 0.16.0-rc.10 and CopilotKit v1.85.0 templates.
+
+### Conversations
+
+- **A new conversation's first message starts one run.** Every first message started a second run
+  on the Bot about a second after yours: the CopilotKit runtime named the new conversation by
+  running the same Bot again on a title prompt. On a Bot OpenBot runs in a harness, such as the
+  Personal Assistant, that was two runs at once, and where they overlapped the answer could come
+  back garbled. The runtime no longer names conversations. OpenBot still titles them itself, as
+  before, so the sidebar is unchanged, and no model run nobody asked for is spent on each new
+  conversation.
+- **A Bot draws a chart or a table only from results it has read, and a form stops at the first
+  field that fails.** A model that calls tools in parallel, such as Claude Opus, asked for its
+  searches and the chart and table meant to show them in one step, so they were drawn with figures
+  it hadn't read, and it then said so under them. A chart, table, card or approval asked for in the
+  same step as another tool is no longer shown, not even for a moment, and the Bot draws it again
+  from the results. One on its own, or beside other components, draws as before. A Bot's computer
+  actions in one step run one at a time, in the order asked for, and stop at the first that fails:
+  the rest are reported to the Bot as not run, and it looks at the page again. Every Bot is told to
+  batch only tool calls that don't depend on each other. This follows Anthropic's guidance for
+  parallel tool use and holds whichever model a Bot runs on, in conversations and in routines.
+- **A Claude Agent SDK Bot answers the first question of a conversation however many apps it
+  holds.** Asked one question, a Personal Assistant on the Claude Agent SDK searched the web and
+  Notion and then stopped with "Claude turned down the request because this conversation is too
+  long for the model". The harness's Claude Code did not know the Claude 5.5 models and held them to
+  a 200K window (they have 1M), and it sent every one of the Bot's app tools' definitions with every
+  request, which took a Bot holding a few apps most of the way there before any result came back.
+  The provider's window now decides, the Bot looks its app tools up when it needs them (about a
+  fifth of the size for 128 tools), no tool result is replayed longer than 100,000 characters, and a
+  turn the model still refuses as too long is tried once more with every tool result cut to its
+  start, each saying how to ask for the rest. A built-in Bot on a Claude plan gets the same window
+  and limits. The message still appears for a conversation that really is too long.
+- **Talk to OpenBot without a transcription provider.** The message box shows a microphone on
+  every OpenBot, not only where `TRANSCRIPTION_PROVIDER` is set. Click it and your words appear in
+  the box as you speak; the microphone turns into Stop. Stop, or Enter, stops listening and keeps
+  the words in the box without sending them, and the next Enter sends. Typing while it listens
+  stops it too. In OpenBot Desktop the words come from your computer's own speech recognition, on
+  the device (Apple's Speech framework on a Mac, the Windows speech recognizer on Windows), and a
+  Mac asks once for the microphone and speech recognition. In a browser they come from the
+  browser's speech recognition, and a browser without one (Firefox) shows no microphone. Chrome's
+  speech recognition sends the audio to Google's speech service. With `TRANSCRIPTION_PROVIDER` set
+  nothing changes: OpenBot records and your server transcribes, as before.
+- **Picking a model closes the picker and puts you back in the message box.** The model picker
+  stayed open after a model was picked, so the next click, meant for the message box, could land
+  on another model in the list. Picking a model now closes the picker and puts the cursor in the
+  message box. A model with thinking levels keeps the picker open on its levels alone, with the
+  other models and the search gone, and picking a level closes it.
+
+### Smaller changes
+
+- "Backend" is one word everywhere OpenBot shows it: OpenBot Desktop's Status window, tray and
+  messages, the app, the server's messages and the Recorder. Desktop's Status window heads its card
+  "Backend" where it said "Back end".
+- The Personal Assistant on a framework picked in setup reads "Everyday life agent. (powered by a
+  LangChain agent; you can bring your own agent from any stack.)" under its name (with its own
+  framework's name), on a new install and on an existing one that kept "Powered by LangChain
+  (LangGraph)" after an upgrade. Any other Bot OpenBot subtitled under LangChain's earlier names
+  reads "Powered by LangChain". Only what a person sees changes: nothing stored changes, a Bot is
+  told its subtitle as before, and words a person wrote stay theirs. A Bot's page shows a long
+  subtitle on up to three lines.
+- The "Always ask before making changes" switch is called "Extra vigilant", on Welcome, in
+  Settings → Approvals and on a Bot's Tools section in the personal edition. Its description,
+  behaviour and default are unchanged.
+- Welcome's permissions section is shorter: "Choose when Bots ask", one sentence saying Bots ask
+  before they delete, send, share, post or pay in your apps or on websites, the Extra vigilant
+  switch, and where to change it later. Allowing an action always, passwords and a Bot's own
+  workspace are still explained in Settings → Approvals.
+- In the dark theme, the Bot's orb at the top of a conversation no longer has a light ring around
+  it or its pattern showing through it, and its glow is no longer cut off at the edge of the
+  conversation.
+- In OpenBot Desktop's setup, the row for what's installing in the background keeps one height
+  whatever it says, so the step's button under it (such as Continue on the AI step) no longer moves
+  up and back on its own.
+- OpenBot and OpenBot for Business carry a small trademark sign (™) where they stand as a brand:
+  the name beside the logo in the sidebar and in each skin, the onboarding header, the OpenBot for
+  Business title and menu entry, and the OpenBot Desktop setup window. Mentions in sentences stay
+  plain, a deployment with its own product name shows none, and screen readers read the name once.
+
 ## 1.0.1
 
 **Before upgrading.** Three migrations run at start, and the database moves to

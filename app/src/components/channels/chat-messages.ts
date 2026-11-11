@@ -1,4 +1,5 @@
 import type { ActivityMessage, Message, ToolCall } from "@ag-ui/core";
+import { leftOutOfTranscript } from "@openbot/shared/tool-steps";
 import { classifyAttachment } from "@/lib/channels/attachments";
 
 /**
@@ -363,6 +364,11 @@ function isToolResult(
 
 export function toVisibleChatItems(
   messages: ReadonlyArray<Readonly<Message>>,
+  /**
+   * Which calls draw a component. Given, a component its step asked for beside another kind of call
+   * is left out (`leftOutOfTranscript` in `shared/tool-steps.ts`).
+   */
+  isComponent?: (name: string) => boolean,
 ): VisibleChatItem[] {
   // Gather results first so calls render with their current completion state in the same pass.
   const results = new Map<string, string | undefined>();
@@ -399,12 +405,28 @@ export function toVisibleChatItems(
         });
       }
       // A `toolCalls` that is not a list is not iterable, and `for...of` reports that by throwing.
-      for (const toolCall of Array.isArray(message.toolCalls)
-        ? message.toolCalls
-        : []) {
+      const calls = Array.isArray(message.toolCalls)
+        ? message.toolCalls.filter(isReadableToolCall)
+        : [];
+      for (const toolCall of calls) {
         // Read three fields deep off something nothing has validated: a hole in the array, or a
         // call with no `function`, threw before a single row could be drawn.
         if (!isReadableToolCall(toolCall)) continue;
+        /*
+         * A component asked for in the same step as another kind of call is not drawn: not while it
+         * streams, not as an empty card, and not when the conversation is opened again. The Bot
+         * draws it again from the results. See `shared/tool-steps.ts`.
+         */
+        if (
+          isComponent &&
+          leftOutOfTranscript(
+            calls,
+            toolCall,
+            results.get(toolCall.id),
+            isComponent,
+          )
+        )
+          continue;
         /*
          * The call that draws an interface is not a row of its own; the interface is.
          *

@@ -73,8 +73,8 @@ export function CopilotKitSignInWait({
             <ExternalLink href={page.url}>Open the sign-in page</ExternalLink>
           </p>
           <p className="footnote">
-            If your browser shows the CopilotKit dashboard after you choose an
-            organization, open the sign-in page again.
+            If your browser shows a dashboard after you choose an organization,
+            open the sign-in page again.
           </p>
         </>
       )}

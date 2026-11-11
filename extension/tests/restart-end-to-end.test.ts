@@ -66,7 +66,7 @@ const parked = () =>
   Response.json(
     {
       code: "INTELLIGENCE_RUNTIME_REQUIRED",
-      message: "OpenBot's back end is not configured.",
+      message: "OpenBot's backend is not configured.",
     },
     { status: 503 },
   );

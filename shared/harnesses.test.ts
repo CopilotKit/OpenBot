@@ -1,5 +1,10 @@
 import { expect, test } from "bun:test";
-import { HARNESSES, WEB_HARNESSES } from "./harnesses";
+import {
+  HARNESSES,
+  starterSubtitle,
+  WEB_HARNESSES,
+  withCurrentFrameworkNames,
+} from "./harnesses";
 
 test("carries every row the desktop picker offers, in its order", () => {
   expect(HARNESSES.map((h) => h.id)).toEqual([
@@ -102,5 +107,48 @@ test("gives every row a credential the type actually names", () => {
   const known = ["any-provider", "anthropic", "google", "their-endpoint"];
   for (const harness of HARNESSES) {
     expect(known).toContain(harness.credential);
+  }
+});
+
+/**
+ * The Personal Assistant on an install seeded before LangChain was renamed still read "Everyday life.
+ * Powered by LangChain (LangGraph)." on its profile, because a starter's subtitle is written once
+ * and a Bot whose connection the person saved is never moved again. Its seed now reads the way the
+ * starter is seeded today; other subtitles OpenBot wrote read by the current name; the person's own
+ * words are not touched.
+ */
+test("reads a subtitle OpenBot wrote under earlier names the way it writes it now", () => {
+  const langchain =
+    "Everyday life agent. (powered by a LangChain agent; you can bring your own agent from any stack.)";
+  expect(starterSubtitle("LangChain")).toBe(langchain);
+  expect(starterSubtitle("AWS Strands")).toBe(
+    "Everyday life agent. (powered by an AWS Strands agent; you can bring your own agent from any stack.)",
+  );
+  for (const seeded of [
+    "Everyday life. Powered by LangChain (LangGraph).",
+    "Everyday life. Powered by LangGraph.",
+    "Everyday life. Powered by LangChain.",
+  ]) {
+    expect(withCurrentFrameworkNames(seeded)).toBe(langchain);
+  }
+  expect(
+    withCurrentFrameworkNames("Everyday life. Powered by Claude Agent SDK."),
+  ).toBe(starterSubtitle("Claude Agent SDK"));
+  expect(withCurrentFrameworkNames("Powered by LangChain (LangGraph)")).toBe(
+    "Powered by LangChain",
+  );
+  expect(withCurrentFrameworkNames("Errands. Powered by LangGraph.")).toBe(
+    "Errands. Powered by LangChain.",
+  );
+  // Already current, a Bot that runs here, or the person's own words: left as they are.
+  for (const title of [
+    langchain,
+    "Everyday life. Powered by OpenBot.",
+    "Everyday life.",
+    "Errands. Powered by LangChain.",
+    "I like LangGraph for research.",
+    "",
+  ]) {
+    expect(withCurrentFrameworkNames(title)).toBe(title);
   }
 });

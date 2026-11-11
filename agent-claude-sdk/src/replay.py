@@ -64,6 +64,28 @@ IMAGE_TOKENS = 4_784
 # What is kept of an earlier turn's tool result when the thread is over the budget; see
 # `fit_to_budget`. Enough for the head of a listing or a document and the ids in it.
 OLD_RESULT_CHARS = 4_000
+# The most of one tool result a model is shown, in characters: what Claude Code keeps inline for one
+# of OpenBot's tools (`INLINE_RESULT_CHARS` in the adapter). In a running query Claude Code saves a
+# larger result to a file and shows a preview; a replay is one prompt, and a result in it was sent
+# whole, however large. One larger than the model's window refused the turn as too long.
+RESULT_CHARS = 100_000
+
+
+def cut_note(cut):
+    """What ends a tool result that was cut, written for the model that called the tool."""
+    return (
+        f"\n[{cut} more characters of this result were left out to fit the context window. To "
+        "read them, call the tool again asking for less: a narrower search, fewer results or "
+        "fields, or the next page.]"
+    )
+
+
+def _cut_result(message, keep):
+    """A tool message with its result cut to its first `keep` characters, saying so."""
+    content = message.content
+    if message.role != "tool" or not isinstance(content, str) or len(content) <= keep:
+        return message
+    return message.model_copy(update={"content": content[:keep] + cut_note(len(content) - keep)})
 
 
 def is_server_instruction(message):
@@ -74,7 +96,7 @@ def is_server_instruction(message):
     )
 
 
-def conversation_content(messages, model_only=True):
+def conversation_content(messages, model_only=True, fit_results=False):
     """Replay completed history as labelled data; keep attached images as images.
 
     ClaudeSDKClient.query accepts user input, not an arbitrary assistant history.
@@ -91,6 +113,11 @@ def conversation_content(messages, model_only=True):
     says so where they were. The person's first message is always kept: it is the request a long
     task is being carried out under, and a few short replies later ("skip that one, go on") are
     meaningless without it.
+
+    No tool result is replayed longer than `RESULT_CHARS`. `fit_results` is the retry after the
+    model refused the turn as too long (see `OpenBotClaudeAgentAdapter._pump`): every tool result
+    is cut to its first `OLD_RESULT_CHARS`, this turn's included, because the window that refused
+    it was smaller than the budget assumes.
     """
     kept = [
         message
@@ -99,7 +126,10 @@ def conversation_content(messages, model_only=True):
         or not (model_only or is_server_instruction(message))
     ]
     entries = fit_to_budget(
-        kept, [_entry_blocks(message, strict=model_only) for message in kept]
+        kept,
+        [_entry_blocks(_cut_result(message, RESULT_CHARS), strict=model_only) for message in kept],
+        budget=0 if fit_results else None,
+        current_turn=fit_results,
     )
     content = [
         {
@@ -201,7 +231,7 @@ def _latest_request(messages):
     return users[-1] if users else len(messages)
 
 
-def fit_to_budget(messages, entries, budget=None):
+def fit_to_budget(messages, entries, budget=None, current_turn=False):
     """The replay's entries, with the results of earlier turns' tool calls cut to fit `budget`.
 
     A tool result is the largest thing in a thread by far: a page of email, an app's tool list, a
@@ -210,13 +240,14 @@ def fit_to_budget(messages, entries, budget=None):
     task it was half-way through. So the results of earlier turns are cut first, oldest first
     and only as far as the budget needs, each to its first `OLD_RESULT_CHARS` characters and a
     line saying how much was left out. The current turn's results (from the latest user message
-    on) are never cut: they are what the Bot is working from now.
+    on) are cut only with `current_turn`, after every earlier one: they are what the Bot is working
+    from now, and are cut only when the model refused the turn as too long without it.
     """
     budget = REPLAY_BUDGET_TOKENS if budget is None else budget
     entries = list(entries)
     costs = [estimated_tokens(blocks) for blocks in entries]
     total = sum(costs)
-    for index in range(_latest_request(messages)):
+    for index in range(len(messages) if current_turn else _latest_request(messages)):
         if total <= budget:
             break
         message = messages[index]
@@ -224,14 +255,7 @@ def fit_to_budget(messages, entries, budget=None):
             continue
         if len(message.content) <= OLD_RESULT_CHARS:
             continue
-        cut = len(message.content) - OLD_RESULT_CHARS
-        shortened = message.model_copy(
-            update={
-                "content": message.content[:OLD_RESULT_CHARS]
-                + f"\n[{cut} more characters of this result were left out to fit the context window.]"
-            }
-        )
-        entries[index] = _entry_blocks(shortened, strict=False)
+        entries[index] = _entry_blocks(_cut_result(message, OLD_RESULT_CHARS), strict=False)
         cost = estimated_tokens(entries[index])
         total += cost - costs[index]
         costs[index] = cost
@@ -333,7 +357,7 @@ def system_prompt_in_file(options):
     return path
 
 
-async def run_replayed_query(adapter, input_data):
+async def run_replayed_query(adapter, input_data, fit_results=False):
     thread, run = input_data.thread_id, input_data.run_id
     model_only = adapter._model_only
     # The model endpoint is stateless by contract; the full harness keeps AG-UI shared state.
@@ -364,7 +388,7 @@ async def run_replayed_query(adapter, input_data):
             "message": {
                 "role": "user",
                 "content": conversation_content(
-                    input_data.messages, model_only=model_only
+                    input_data.messages, model_only=model_only, fit_results=fit_results
                 ),
             },
             "parent_tool_use_id": None,

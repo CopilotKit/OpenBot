@@ -638,7 +638,7 @@ describe("reviewing proposed skills in Admin, against Intelligence's project-key
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({
       error:
-        "The back end has no Learning model yet. Give its Learning agent a model and key, then try again.",
+        "The backend has no Learning model yet. Give its Learning agent a model and key, then try again.",
     });
     const overview = (await (await app.request("/overview")).json()) as {
       overview: LearningOverview;
@@ -716,7 +716,7 @@ describe("reviewing proposed skills in Admin, against Intelligence's project-key
       const response = await app.request(path);
       expect(response.status).toBe(409);
       expect(((await response.json()) as { error: string }).error).toContain(
-        "Learning is switched off in the back end",
+        "Learning is switched off in the backend",
       );
     }
   });

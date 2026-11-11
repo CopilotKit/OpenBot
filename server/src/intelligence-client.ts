@@ -143,7 +143,7 @@ export async function runtimeEntitlementStatus(
   } catch (error) {
     throw Object.assign(
       new Error(
-        `The back end did not answer (${error instanceof Error ? error.message : String(error)})`,
+        `The backend did not answer (${error instanceof Error ? error.message : String(error)})`,
       ),
       { retryable: true },
     );

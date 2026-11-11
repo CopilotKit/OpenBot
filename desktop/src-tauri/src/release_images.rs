@@ -15,6 +15,8 @@ it cannot name one image fewer than the app pulls:
   (`repository:release`, then the index that tag serves). And the cluster's own images, which the
   host's engine pulls when the CLI has k3d create the cluster (`local_images::cli_cluster_images`):
   the k3s node image and k3d's proxy and tools, each at the digest the CLI gives k3d.
+- The engine machine images on quay.io that the first setup screen downloads before Install, so
+  Podman builds OpenBot's machine from a local file (`early_downloads::machine_image_references`).
 
 The release publishes the list as `desktop-images.json` (`examples/release_images.rs`).
 */
@@ -124,6 +126,7 @@ pub fn release_images(compose: &Path, manifest: &Path, cli: &str) -> Result<Rele
     }
     images.extend(back_end.fixed.iter().cloned());
     images.extend(cluster);
+    images.extend(crate::early_downloads::machine_image_references());
 
     Ok(ReleaseImages {
         openbot: pinned.version,
@@ -177,6 +180,9 @@ mod tests {
             "docker.io/rancher/k3s@sha256:53cf744fe2fabf140cee240d2db70d13a4f2d98f1a13c98f58f457f423096917",
             "ghcr.io/k3d-io/k3d-proxy@sha256:d43e6ffd27c216d0b21815c1226c8aeac2e07086ac5a988eb39bd7e308f6e370",
             "ghcr.io/k3d-io/k3d-tools@sha256:c5ceb2b9e8ff2cf55917b0bee8bc9c54fe1483a16366b734117e2cfac1417bed",
+            // The engine machine images the first screen downloads, by their artifact manifests.
+            "quay.io/podman/machine-os@sha256:e4b416b1758cb94b477d0c27e265b9180e8d52ee529df9276d726206ea69b883",
+            "quay.io/podman/machine-os@sha256:b3f5e2810eecb8778a6dc09283868c1255a06d7c156312c387616d41500d4175",
         ] {
             assert!(has(image), "missing {image} in {:#?}", found.images);
         }

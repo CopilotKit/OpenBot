@@ -68,7 +68,7 @@ test("an administrator excludes a Bot and saves without losing the default or pa
       }
       if (path.includes("/api/agents")) return Response.json({ agents: [] });
       return Response.json(
-        { error: "Learning in the back end is unavailable." },
+        { error: "Learning in the backend is unavailable." },
         { status: 502 },
       );
     },
@@ -947,7 +947,7 @@ describe("reviewing proposed skills", () => {
         : undefined,
     );
     const view = shared();
-    await view.findByText("The back end has no model set up for Learning yet.");
+    await view.findByText("The backend has no model set up for Learning yet.");
     expect(view.getByText("The run failed.")).not.toBeNull();
     expect(view.queryByText("LEARNING_MODEL_NOT_CONFIGURED")).toBeNull();
     cleanup();
@@ -1174,11 +1174,11 @@ describe("reviewing proposed skills", () => {
     );
     const view = shared();
     await view.findByText("Analysis runs");
-    await view.findByText("The back end has no model set up for Learning yet.");
+    await view.findByText("The backend has no model set up for Learning yet.");
     expect(view.queryByText("LEARNING_MODEL_NOT_CONFIGURED")).toBeNull();
     expect(view.getByText("Finished · Manual")).not.toBeNull();
     expect(view.getByText("Failed · Automatic")).not.toBeNull();
-    await view.findByText("Manage Learning in the back end dashboard");
+    await view.findByText("Manage Learning in the backend dashboard");
     const anchors = Array.from(view.container.querySelectorAll("a"));
     expect(anchors.some((a) => a.getAttribute("href") === runsLink)).toBe(
       false,
@@ -1204,7 +1204,7 @@ describe("reviewing proposed skills", () => {
     const without = shared();
     await without.findByText("OpenBot (openbot)");
     expect(
-      without.queryByText("Manage Learning in the back end dashboard"),
+      without.queryByText("Manage Learning in the backend dashboard"),
     ).toBeNull();
     expect(without.queryByText("Threads ready")).toBeNull();
     expect(without.getByText("Candidates to review")).not.toBeNull();
@@ -1224,7 +1224,7 @@ describe("reviewing proposed skills", () => {
     const managed = shared();
     expect(
       (
-        await managed.findByText("Manage Learning in the back end dashboard")
+        await managed.findByText("Manage Learning in the backend dashboard")
       ).getAttribute("href"),
     ).toBe("https://app.intelligence.example/o/acme/support/learning");
     expect(managed.getByText("Threads ready")).not.toBeNull();
@@ -1237,10 +1237,10 @@ test("an Intelligence with Learning switched off says so, not that it can't be r
     automatic: { state: "learning_off" },
   });
   const view = page();
-  await view.findByText("Learning is switched off in the back end", {
+  await view.findByText("Learning is switched off in the backend", {
     exact: false,
   });
   expect(
-    view.queryByText("Couldn't reach the back end", { exact: false }),
+    view.queryByText("Couldn't reach the backend", { exact: false }),
   ).toBeNull();
 });

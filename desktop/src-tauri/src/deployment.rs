@@ -593,6 +593,11 @@ const WAITS: &[std::time::Duration] = &RETRY_DELAYS;
 #[cfg(test)]
 const WAITS: &[std::time::Duration] = &[std::time::Duration::ZERO; RETRY_DELAYS.len()];
 
+/// The waits between attempts at a download: `RETRY_DELAYS`, or none in this crate's tests.
+pub fn retry_waits() -> &'static [std::time::Duration] {
+    WAITS
+}
+
 /// How long connecting to the server may take, before anything is asked of it.
 const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 

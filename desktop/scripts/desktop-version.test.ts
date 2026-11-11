@@ -136,6 +136,17 @@ test("macOS signing uses the audio-input entitlement for microphone capture", ()
   );
 });
 
+test("macOS can ask Docker Desktop to quit while OpenBot updates it", () => {
+  // Without both, macOS refuses the Apple event without asking (docker_desktop_update::quit).
+  const native = resolve(import.meta.dir, "../src-tauri");
+  expect(readFileSync(join(native, "Info.plist"), "utf8")).toMatch(
+    /<key>NSAppleEventsUsageDescription<\/key>\s*<string>\s*[^<\s][^<]*<\/string>/,
+  );
+  expect(readFileSync(join(native, "Entitlements.plist"), "utf8")).toMatch(
+    /<key>com\.apple\.security\.automation\.apple-events<\/key>\s*<true\s*\/>/,
+  );
+});
+
 test("sync changes only the desktop package versions and check rejects drift", () => {
   const f = fixture();
   f.write("package.json", '{"version":"0.0.11"}');

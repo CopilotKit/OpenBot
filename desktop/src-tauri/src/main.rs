@@ -7,6 +7,7 @@ use std::sync::Mutex;
 mod desktop_connection;
 mod desktop_host_access;
 mod desktop_page;
+mod desktop_stall;
 mod desktop_status;
 mod desktop_telemetry;
 mod intelligence_bridge;
@@ -18,18 +19,19 @@ mod zoom;
 mod test_support;
 
 use openbot_desktop_lib::{
-    acquire, app_update, deployment, deployment_release, docker_config, engine, env as openbot_env,
-    harness, host_access, install, local_eval, local_eval_state, logging, preparation,
+    acquire, app_update, deployment, deployment_release, docker_config, early_downloads, engine,
+    engine_versions, env as openbot_env, harness, host_access, install, local_eval,
+    local_eval_state, logging, own_machine, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
-    telemetry, tray, troubleshooting, upgrade, windows as win,
+    telemetry, tray, troubleshooting, update_ready, upgrade, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
 /// Kept apart from the quit cleanup notice, whose presence alone means OpenBot needs recovery.
 const LOCAL_EVAL_STOP_NOTICE_FILE: &str = ".openbot-local-eval-stop-notice";
 /// How an Intelligence failure starts, so Stop and Quit can tell it from OpenBot's own.
-const INTELLIGENCE_STOP_FAILED: &str = "Back end stop failed: ";
+const INTELLIGENCE_STOP_FAILED: &str = "Backend stop failed: ";
 const QUIT_MENU_ACCELERATOR: &str = "CmdOrCtrl+KeyQ";
 const QUIT_CLEANUP_NOTICE_LIMIT: usize = 16 * 1024;
 use serde::{Deserialize, Serialize};
@@ -119,6 +121,8 @@ struct Shell {
     waiting_notice_page: Mutex<Option<String>>,
     /// A newer OpenBot Desktop, as the feed last said, and an install of it under way.
     app_update: app_update::Known,
+    /// Wakes the thread that gets a newer version ready when the feed names one.
+    update_ready: update_ready::Nudge,
 }
 
 /// The deployment whose Compose up may have created containers, including a partial failure.
@@ -253,6 +257,9 @@ struct Progress {
     /// The step waits for the person's go-ahead in this window: see `install::GoAhead`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     asks: bool,
+    /// The engine itself is being updated: see `engine::StepLine::updating`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    updating: bool,
 }
 
 #[derive(Serialize)]
@@ -361,6 +368,26 @@ fn wake_saved_engine(
     }
 }
 
+/// What Start does to the engine before Compose reads the project, in this order: bring the
+/// installation's engine up (`wake_saved_engine`), then make sure it is new enough to run OpenBot,
+/// updating it for the person when it is not (`engine_new_enough`).
+///
+/// Before Compose, because an old Compose stops at its first look at the project ("Compose config
+/// exited with exit status: 15"). Not while OpenBot's own containers are up: the caller skips this,
+/// so Docker Desktop is never quit from under a running OpenBot. An engine still not answering is
+/// left to the check after this one, which says so.
+async fn engine_before_compose(
+    wake: impl AsyncFnOnce() -> Result<(), Problem>,
+    answering: impl AsyncFnOnce() -> Option<engine::Address>,
+    new_enough: impl AsyncFnOnce(engine::Address) -> Result<(), Problem>,
+) -> Result<(), Problem> {
+    wake().await?;
+    match answering().await {
+        Some(address) => new_enough(address).await,
+        None => Ok(()),
+    }
+}
+
 /// `wake_saved_engine` on this machine, each line said on the setup window's rows. Opening Docker
 /// Desktop says the hand-off and brings OpenBot back once Docker answers: see
 /// `docker_desktop::start`.
@@ -369,6 +396,10 @@ async fn wake_installation_engine<R: tauri::Runtime>(
     saved: Option<engine::Engine>,
 ) -> Result<(), Problem> {
     let progress_app = app.clone();
+    let ticket = app
+        .state::<Shell>()
+        .start_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
     tauri::async_runtime::spawn_blocking(move || {
         wake_saved_engine(
             saved,
@@ -401,13 +432,15 @@ async fn wake_installation_engine<R: tauri::Runtime>(
             },
             || acquire::machine_exists().unwrap_or(false),
             || {
-                report_running_line(
-                    &progress_app,
-                    "start-machine",
-                    engine::starting_machine_line(),
-                    None,
-                );
-                let started = acquire::start_machine();
+                // On a Mac where the person's own Podman machine is running again, only once they
+                // said yes to pausing it. Stop or Quit while that waits ends it, said on its row.
+                let started = start_own_machine(&progress_app, &|| {
+                    progress_app
+                        .state::<Shell>()
+                        .start_generation
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                        != ticket
+                })?;
                 report(
                     &progress_app,
                     "start-machine",
@@ -447,9 +480,79 @@ async fn wake_engine(app: tauri::AppHandle, root: String) -> Result<(), Problem>
         return Ok(());
     }
     let asked = std::time::Instant::now();
-    let woken = wake_installation_engine(&app, preparation::saved_engine(&root)).await;
+    let saved = preparation::saved_engine(&root);
+    let woken = match wake_installation_engine(&app, saved).await {
+        Ok(()) => heal_installation_engine(&app, saved).await,
+        failed => failed,
+    };
     logging::outcome("wake engine", asked, &woken);
     woken
+}
+
+/**
+A Podman machine that answers `podman` while its Docker API has gone, stopped and started once
+before the back end is asked (`engine_versions::answering_now`).
+
+The back end's own check reaches the engine through that API and says only "docker_unavailable",
+and setup then waited on it. Setup and Start heal it in their own check (`engine_new_enough`); this
+is the same for a relaunch, and for Retry after it, which runs this again. Said on the machine's row.
+*/
+async fn heal_installation_engine<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    saved: Option<engine::Engine>,
+) -> Result<(), Problem> {
+    if !cfg!(any(target_os = "macos", target_os = "windows"))
+        || saved == Some(engine::Engine::Docker)
+    {
+        return Ok(());
+    }
+    let progress_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let found = engine::detect_saved(saved);
+        let Some(address) = found.address.filter(|_| found.responding) else {
+            return Ok(());
+        };
+        let engine = address.engine;
+        let back = || {};
+        let cancelled = || false;
+        let mut updates = engine_versions::OnThisMachine {
+            address,
+            cache: stack::default_root(),
+            back: &back,
+            cancelled: &cancelled,
+        };
+        let mut said = false;
+        let healed = engine_versions::answering_now(
+            engine,
+            std::env::consts::OS,
+            &mut updates,
+            &mut |line| {
+                said = true;
+                report_running_line(&progress_app, "start-machine", line, None)
+            },
+        );
+        if said {
+            match &healed {
+                Ok(_) => report_plain(
+                    &progress_app,
+                    "start-machine",
+                    true,
+                    engine::engine_ready_line().said,
+                ),
+                Err(problem) => {
+                    report_plain(&progress_app, "start-machine", false, problem.said.clone())
+                }
+            }
+        }
+        healed.map(|_| ())
+    })
+    .await
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot could not start the software it runs on. Try again.",
+            error.to_string(),
+        )
+    })?
 }
 
 /// Return a responding engine only after Compose is present too.
@@ -602,6 +705,7 @@ fn report_line<R: tauri::Runtime>(
         log::error!("[step {step}] failed: {entry}");
     }
     forget_running_logged();
+    desktop_stall::row_done(app, step);
     if !ok {
         // The row's step, and a class from the step or, where the step says nothing, its words.
         // Only the two enums are recorded, never the words.
@@ -614,8 +718,8 @@ fn report_line<R: tauri::Runtime>(
             ),
         );
     }
-    let _ = app.emit(
-        "setup:progress",
+    emit_progress(
+        app,
         Progress {
             step: step.into(),
             ok,
@@ -625,8 +729,30 @@ fn report_line<R: tauri::Runtime>(
             downloads: None,
             elsewhere: false,
             asks: false,
+            updating: false,
         },
     );
+}
+
+/// A row's progress to the setup page, numbered: the page's heartbeat says back the highest number
+/// it has taken, so a page that stops taking them is noticed (`desktop_stall`).
+fn emit_progress<R: tauri::Runtime>(app: &tauri::AppHandle<R>, progress: Progress) {
+    #[derive(Serialize, Clone)]
+    struct Numbered {
+        seq: u64,
+        #[serde(flatten)]
+        progress: Progress,
+    }
+    let seq = desktop_stall::sent(app, &progress.step);
+    let _ = app.emit("setup:progress", Numbered { seq, progress });
+}
+
+/// The setup page's heartbeat, every few seconds while its setup, start or update screens show and
+/// as soon as a row's progress reaches it: the highest progress number it has taken, and whether it
+/// has just loaded. Off the main thread, and it waits on nothing.
+#[tauri::command]
+async fn setup_heartbeat(app: tauri::AppHandle, seen: u64, fresh: bool) {
+    desktop_stall::heartbeat(&app, seen, fresh);
 }
 
 /// The running step last written to the log, so a step that says the same thing on every poll
@@ -663,6 +789,10 @@ fn forget_running_logged() {
         .lock()
         .unwrap_or_else(|held| held.into_inner()) = None;
 }
+
+/// Each running step's latest line, so a download added to its row keeps what the row says.
+static RUNNING_SAID: Mutex<std::collections::BTreeMap<String, engine::StepLine>> =
+    Mutex::new(std::collections::BTreeMap::new());
 
 fn report_running<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
@@ -705,15 +835,21 @@ fn report_running_line<R: tauri::Runtime>(
     line: engine::StepLine,
     download_bytes: Option<u64>,
 ) {
+    RUNNING_SAID
+        .lock()
+        .unwrap_or_else(|held| held.into_inner())
+        .insert(step.to_owned(), line.clone());
     // The window shows the plain line; the log keeps the technical detail beside it.
     let entry = line.log_entry();
     let engine::StepLine {
         said: detail,
         elsewhere,
         asks,
+        updating,
         detail: _,
     } = line;
     setup_phase(step);
+    desktop_stall::row_running(app, step, &detail);
     {
         let mut logged = RUNNING_LOGGED
             .lock()
@@ -724,8 +860,8 @@ fn report_running_line<R: tauri::Runtime>(
             *logged = Some(now);
         }
     }
-    let _ = app.emit(
-        "setup:progress",
+    emit_progress(
+        app,
         Progress {
             step: step.into(),
             ok: true,
@@ -735,6 +871,7 @@ fn report_running_line<R: tauri::Runtime>(
             downloads: None,
             elsewhere,
             asks,
+            updating,
         },
     );
 }
@@ -760,6 +897,9 @@ fn report_running_line<R: tauri::Runtime>(
 /// machine is prepared" with the browser in front. `set_focus` does nothing to a hidden or
 /// minimised window, hence `show` and `unminimize` first.
 fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
+    if held_back(why) {
+        return;
+    }
     log::info!("[front] {why}");
     #[cfg(target_os = "macos")]
     let _ = app.show();
@@ -800,6 +940,51 @@ fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
     let _ = window.set_focus();
 }
 
+/// The browser sign-in is open (`sign_in_to_copilotkit`): the person is in their browser.
+static SIGN_IN_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/**
+Whether `bring_to_front` holds OpenBot back, and says so in the log: while the browser sign-in is
+open, nothing setup does is the person's next step. On Windows F, "[front] the engine machine is
+prepared" brought OpenBot in front of the browser while the person typed their email to sign in.
+When the sign-in ends, OpenBot comes forward once (`while_signing_in`): the license agreement is
+the person's next step then.
+*/
+fn held_back(why: &str) -> bool {
+    let held = SIGN_IN_OPEN.load(std::sync::atomic::Ordering::SeqCst);
+    if held {
+        log::info!("[front] held back: sign-in open in the browser ({why})");
+    }
+    held
+}
+
+/// Marks the browser sign-in open while it lives, and closed when it is dropped, however the
+/// sign-in ends.
+struct SignInOpen;
+
+impl SignInOpen {
+    fn begin() -> Self {
+        SIGN_IN_OPEN.store(true, std::sync::atomic::Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for SignInOpen {
+    fn drop(&mut self) {
+        SIGN_IN_OPEN.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Run the browser sign-in, with OpenBot held back from the front meanwhile, then bring it forward
+/// once, whatever the sign-in's outcome: what comes next is the person's.
+fn while_signing_in<T>(sign_in: impl FnOnce() -> T, come_forward: impl FnOnce()) -> T {
+    let open = SignInOpen::begin();
+    let ended = sign_in();
+    drop(open);
+    come_forward();
+    ended
+}
+
 /// How OpenBot's window came forward on Windows (`bring_to_front`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -829,6 +1014,92 @@ fn bring_setup_to_front(app: tauri::AppHandle, why: String) {
     bring_to_front(&app, &why);
 }
 
+/// The person said yes to pausing their Podman while OpenBot runs. See `own_machine`. False when
+/// nothing was waiting for it.
+#[tauri::command]
+fn allow_pause_podman() -> bool {
+    let waiting = own_machine::allow_pause();
+    log::info!(
+        "[engine] the go-ahead to pause the person's Podman{}",
+        if waiting {
+            ""
+        } else {
+            ", with nothing waiting for it"
+        }
+    );
+    waiting
+}
+
+/**
+OpenBot's own machine started, as setup and a relaunch start it, each line said on the window's rows.
+
+On a Mac, where Podman runs one machine at a time, a machine of the person's that is running keeps
+it from starting. The window then says why on its `own_machine::PAUSE_STEP` row and waits for the
+person's yes, and only then is theirs paused. Quit starts it again (`give_back_paused_podman`).
+`cancelled` (Stop or Quit) ends that wait with nothing paused. Elsewhere it simply starts.
+*/
+fn start_own_machine<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<acquire::StepOutcome, Problem> {
+    let paused = std::cell::Cell::new(false);
+    let started = own_machine::start_own_with(
+        &mut own_machine::ThisComputer,
+        &own_machine::record_path(),
+        own_machine::one_machine_at_a_time(std::env::consts::OS),
+        acquire::MACHINE,
+        &mut |theirs| {
+            let offer = own_machine::pause_offer(theirs);
+            let given = own_machine::PAUSE_GATE.wait(
+                || {
+                    report_running_line(app, own_machine::PAUSE_STEP, offer, None);
+                    bring_to_front(app, "OpenBot asks to pause the person's Podman");
+                },
+                cancelled,
+            );
+            if let Err(problem) = &given {
+                report_plain(app, own_machine::PAUSE_STEP, false, problem.said.clone());
+            }
+            given
+        },
+        &mut |line| {
+            paused.set(true);
+            report_running_line(app, own_machine::PAUSE_STEP, line, None)
+        },
+        &mut || {
+            report_running_line(app, "start-machine", engine::starting_machine_line(), None);
+            acquire::start_machine()
+        },
+    );
+    match &started {
+        Ok(_) if paused.get() => {
+            report_plain(app, own_machine::PAUSE_STEP, true, own_machine::PAUSED)
+        }
+        Err(problem) if paused.get() => {
+            report_plain(app, own_machine::PAUSE_STEP, false, problem.said.clone())
+        }
+        _ => {}
+    }
+    started
+}
+
+/// Quit's last part on a Mac whose Podman OpenBot paused: OpenBot's machine stopped, and the
+/// person's started again with its containers. See `own_machine::give_back_with`. Nothing at all
+/// when OpenBot paused nothing.
+fn give_back_paused_podman(progress: &mut dyn FnMut(QuitStep, QuitStepState)) {
+    let record = own_machine::record_path();
+    if !own_machine::has_paused(&record) {
+        return;
+    }
+    progress(QuitStep::GiveBackPodman, QuitStepState::Running);
+    let given =
+        own_machine::give_back_with(&mut own_machine::ThisComputer, &record, acquire::MACHINE);
+    if let Err(error) = &given {
+        log::warn!("[quit] could not start the person's Podman again: {error}");
+    }
+    progress(QuitStep::GiveBackPodman, QuitStepState::of(&given));
+}
+
 /// The person chose Try again after closing the password prompt, so Install asks again now rather
 /// than after its short wait. See `install::GoAhead`. False when nothing was waiting for it.
 #[tauri::command]
@@ -847,12 +1118,57 @@ fn allow_podman_install() -> bool {
 
 /// Install's running image downloads: the step's sentence, the overall bytes as `downloadBytes`
 /// for anything that reads only that, and the per-image detail.
+/// A running step's download, on the row it is already showing: the engine machine image while
+/// Install waits for it. The row keeps its line; only the download is added.
+fn report_running_downloads<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    step: &str,
+    downloads: pull_metrics::Downloads,
+) {
+    let line = RUNNING_SAID
+        .lock()
+        .unwrap_or_else(|held| held.into_inner())
+        .get(step)
+        .cloned()
+        .unwrap_or_else(|| engine::StepLine::here(""));
+    // Bytes moving restart the step's clock, so a long download is not a step that looks stuck.
+    if downloads_moved(step, downloads.bytes) {
+        desktop_stall::moved(app, step);
+    }
+    emit_progress(
+        app,
+        Progress {
+            step: step.into(),
+            ok: true,
+            detail: line.said,
+            running: true,
+            download_bytes: (downloads.bytes > 0).then_some(downloads.bytes),
+            downloads: Some(downloads),
+            elsewhere: line.elsewhere,
+            asks: line.asks,
+            updating: line.updating,
+        },
+    );
+}
+
+/// Whether `step`'s download has more bytes than the last time it said.
+fn downloads_moved(step: &str, bytes: u64) -> bool {
+    static SEEN: Mutex<std::collections::BTreeMap<String, u64>> =
+        Mutex::new(std::collections::BTreeMap::new());
+    let mut seen = SEEN.lock().unwrap_or_else(|held| held.into_inner());
+    let before = seen.insert(step.to_owned(), bytes);
+    before.is_none_or(|before| bytes > before)
+}
+
 fn report_downloads<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     downloads: pull_metrics::Downloads,
 ) {
-    let _ = app.emit(
-        "setup:progress",
+    if downloads_moved("images", downloads.bytes) {
+        desktop_stall::moved(app, "images");
+    }
+    emit_progress(
+        app,
         Progress {
             step: "images".into(),
             ok: true,
@@ -862,6 +1178,7 @@ fn report_downloads<R: tauri::Runtime>(
             downloads: Some(downloads),
             elsewhere: false,
             asks: false,
+            updating: false,
         },
     );
 }
@@ -1464,6 +1781,9 @@ fn watch_for_app_updates<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Some(feed) = app_update_feed(app) else {
         let version = &app.package_info().version;
         log::info!("[app update] {version} is offered no updates; no update check");
+        if let Some(folder) = app_update_test_feed(app) {
+            watch_test_feed(app, folder);
+        }
         return;
     };
     let handle = app.clone();
@@ -1487,11 +1807,222 @@ fn watch_for_app_updates<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
                         }
                     }
                     handle.state::<Shell>().app_update.record(&answer);
+                    if matches!(answer, Ok(Some(_))) {
+                        handle.state::<Shell>().update_ready.nudge();
+                    }
                 },
             )
         });
     if let Err(error) = watching {
         log::error!("[app update] could not start checking for updates: {error}");
+    }
+}
+
+/**
+Get the newer version the feed names ready while this one runs (`update_ready`), on a thread of its
+own: a try as soon as the feed names one, and every `app_update::TICK` after, until it is ready. A
+try waits while OpenBot is not running, or while something the person started needs the engine
+(`update_ready_paused`), so the first one after a launch comes once Start is done. Once ready, each
+try only checks that it still is. A build that is offered no updates never starts it.
+*/
+fn get_updates_ready<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    // An internal build pointed at a test feed reads its list from there.
+    let test = app_update_test_feed(app);
+    if app_update_feed(app).is_none() && test.is_none() {
+        return;
+    }
+    let handle = app.clone();
+    let getting = std::thread::Builder::new()
+        .name("openbot-update-ready".into())
+        .spawn(move || {
+            let mut lists: Option<(semver::Version, update_ready::Announced)> = None;
+            let mut said: Option<String> = None;
+            loop {
+                handle.state::<Shell>().update_ready.wait(app_update::TICK);
+                try_getting_update_ready(&handle, test.as_deref(), &mut lists, &mut said);
+            }
+        });
+    if let Err(error) = getting {
+        log::error!("[update ready] could not start getting updates ready: {error}");
+    }
+}
+
+/// Whether a try at getting an update ready waits, or stops before its next image: OpenBot is not
+/// running, or is starting, stopping, updating or quitting.
+fn update_ready_paused<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    use std::sync::atomic::Ordering::SeqCst;
+    let shell = app.state::<Shell>();
+    shell.starting.load(SeqCst)
+        || shell.updating.load(SeqCst)
+        || shell.app_update.installing()
+        || !matches!(*shell.quit.phase.lock().unwrap(), QuitPhase::Idle)
+        || shell.root.lock().unwrap().is_none()
+        || shell.containers.lock().unwrap().is_none()
+}
+
+/// One try at getting the newer version ready, said in the log once per change of outcome.
+fn try_getting_update_ready<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    test: Option<&Path>,
+    lists: &mut Option<(semver::Version, update_ready::Announced)>,
+    said: &mut Option<String>,
+) {
+    let mut say = |line: String, warn: bool| {
+        if said.as_deref() != Some(line.as_str()) {
+            if warn {
+                log::warn!("{line}");
+            } else {
+                log::info!("{line}");
+            }
+            *said = Some(line);
+        }
+    };
+    let shell = app.state::<Shell>();
+    let Some(version) = shell.app_update.newer() else {
+        shell.app_update.not_ready();
+        return;
+    };
+    if update_ready_paused(app) {
+        return;
+    }
+    let Some((root, address)) = shell
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|running| (running.root.clone(), running.address.clone()))
+    else {
+        return;
+    };
+    let list = match lists.as_ref().filter(|(listed, _)| *listed == version) {
+        Some((_, list)) => list.clone(),
+        None => {
+            let repository = deployment_release::distribution(&root)
+                .map(|policy| policy.repository)
+                .unwrap_or_else(|_| "CopilotKit/OpenBot".into());
+            let read = match test {
+                Some(folder) => update_ready::read_test_list(folder),
+                None => deployment::get(&update_ready::list_url(&repository, &version))
+                    .and_then(|body| update_ready::read_list(&body, &version)),
+            };
+            match read {
+                Ok(list) => {
+                    *lists = Some((version.clone(), list.clone()));
+                    list
+                }
+                Err(error) => {
+                    say(
+                        format!("[update ready] could not read what {version} downloads: {error}"),
+                        true,
+                    );
+                    return;
+                }
+            }
+        }
+    };
+    let installed = preparation::installed_images(&root).unwrap_or_default();
+    let engine = local_eval::node_engine();
+    let node = local_eval_state::read(&root, None)
+        .map(|state| openbot_desktop_lib::local_images::Node::for_stack(&engine, &state.stack));
+    let current = local_eval::bundled_cli_images();
+    let ahead = update_ready::Ahead {
+        version: &version,
+        list: &list,
+        engine: &address,
+        installed: &installed,
+        back_end: node.as_ref().zip(current.as_ref()),
+        disk: &|| local_eval::engine_disk(&address),
+        computer_free: &|| update_ready::computer_free(&address),
+        limits: openbot_desktop_lib::local_images::Limits::standard(),
+    };
+    // Stopped when OpenBot needs the engine, or the feed names another version meanwhile.
+    let stop = || update_ready_paused(app) || shell.app_update.newer().as_ref() != Some(&version);
+    let outcome = update_ready::get_ready(&ahead, &stop, &mut |done, total| {
+        shell
+            .app_update
+            .readying(&version, app_update::Readiness::Preparing { done, total })
+    });
+    match outcome {
+        update_ready::Outcome::Ready => {
+            shell
+                .app_update
+                .readying(&version, app_update::Readiness::Ready);
+            say(
+                format!("[update ready] {version} is ready to install"),
+                false,
+            );
+        }
+        update_ready::Outcome::Skipped(why) => {
+            shell.app_update.not_ready();
+            say(
+                format!(
+                    "[update ready] not downloading {version} ahead of the update: {why}; the update downloads it"
+                ),
+                true,
+            );
+        }
+        update_ready::Outcome::Stopped => {
+            shell.app_update.not_ready();
+            log::info!("[update ready] stopped getting {version} ready; it goes on later");
+        }
+        update_ready::Outcome::NotYet(why) => {
+            shell.app_update.not_ready();
+            say(
+                format!("[update ready] {version} is not ready yet: {why}; trying again later"),
+                true,
+            );
+        }
+    }
+}
+
+/// The test feed an internal build was pointed at (`app_update::TEST_FEED`), from the environment
+/// the app was started in. None on a stable or candidate build, whatever the environment says.
+fn app_update_test_feed<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
+    app_update::test_feed(&app.package_info().version, |name| std::env::var_os(name))
+}
+
+/**
+Read an internal build's test feed (`app_update::TEST_FEED`) at launch and every `app_update::TICK`,
+as a release build reads its update feed, and keep what it names newer, so the background download
+(`get_updates_ready`) runs for it. Nothing installs from it: an internal build has no updater.
+*/
+fn watch_test_feed<R: tauri::Runtime>(app: &tauri::AppHandle<R>, folder: PathBuf) {
+    log::info!("[update ready] using a test feed from {}", folder.display());
+    let handle = app.clone();
+    let watching = std::thread::Builder::new()
+        .name("openbot-test-feed".into())
+        .spawn(move || {
+            let current = handle.package_info().version.clone();
+            let mut said: Option<String> = None;
+            app_update::watch(
+                app_update::Schedule::new(app_update::TICK),
+                std::time::SystemTime::now,
+                |tick| {
+                    std::thread::sleep(tick);
+                    true
+                },
+                || {
+                    let answer = app_update::test_newer(&current, &folder);
+                    let line = match &answer {
+                        Ok(Some(newer)) => format!("[update ready] the test feed names {newer}"),
+                        Ok(None) => "[update ready] the test feed names nothing newer".into(),
+                        Err(error) => {
+                            format!("[update ready] could not read the test feed: {error}")
+                        }
+                    };
+                    if said.as_deref() != Some(line.as_str()) {
+                        log::info!("{line}");
+                        said = Some(line);
+                    }
+                    handle.state::<Shell>().app_update.record(&answer);
+                    if matches!(answer, Ok(Some(_))) {
+                        handle.state::<Shell>().update_ready.nudge();
+                    }
+                },
+            )
+        });
+    if let Err(error) = watching {
+        log::error!("[update ready] could not start reading the test feed: {error}");
     }
 }
 
@@ -1509,17 +2040,22 @@ fn app_update_feed<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<app_u
 async fn check_app_update_now<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<app_update::Asked, String> {
+    let handle = app.clone();
     let asked = tauri::async_runtime::spawn_blocking(move || {
         app_update::ask(
-            app_update_feed(&app).as_ref(),
-            &app.package_info().version,
-            &app.state::<Shell>().app_update,
+            app_update_feed(&handle).as_ref(),
+            &handle.package_info().version,
+            &handle.state::<Shell>().app_update,
         )
     })
     .await
     .map_err(|error| error.to_string())?;
     if let Ok(found) = &asked {
         log::info!("[app update] checked when asked: {found:?}");
+    }
+    // Got ready at once, rather than at the next tick.
+    if let Ok(app_update::Asked::Available { .. }) = &asked {
+        app.state::<Shell>().update_ready.nudge();
     }
     asked
 }
@@ -1904,6 +2440,30 @@ async fn prepare_engine(app: tauri::AppHandle) -> Result<engine::EngineStatus, P
     Ok(engine::detect_saved(Some(ready?.engine)))
 }
 
+/// The first setup screen is showing: start the big downloads now, before Install is clicked, for
+/// the installation in `root`. Once per run of the app. See `early_downloads`.
+#[tauri::command]
+fn start_early_downloads(app: tauri::AppHandle, root: String) {
+    let telemetry_app = app.clone();
+    early_downloads::start(
+        stack::root_from(&root),
+        early_downloads::Hooks {
+            said: Box::new(move |summary| {
+                let _ = app.emit("setup:downloads", summary);
+            }),
+            pulled: Box::new(move |metrics| {
+                desktop_telemetry::pull_completed(&telemetry_app, metrics)
+            }),
+        },
+    );
+}
+
+/// Where the early downloads are now, for a window that opens after they started.
+#[tauri::command]
+fn early_downloads_now() -> early_downloads::Summary {
+    early_downloads::summary()
+}
+
 /// Complete all local software acquisition before either authentication screen is available.
 #[tauri::command]
 async fn prepare_installation(
@@ -2019,6 +2579,13 @@ async fn prepare_installation_inner(
             "images",
             "Checking what OpenBot needs to download.",
         );
+        // The first screen may have started pulling these already: wait for it, showing its
+        // download, and the pulls below find them there.
+        early_downloads::wait_for_images(|downloads| report_downloads(&handle, downloads.clone()));
+        // Downloaded before the engine answered: loaded into it now, so the pulls below find them.
+        early_downloads::load_offline_images(&address, |downloads| {
+            report_downloads(&handle, downloads)
+        });
         // Only what this installation runs: see `installation_pull_set`.
         let images = preparation::installation_pull_set(&address, &root, &root, harness.as_ref())?;
         // Several pulls run at once. Stop is checked before each pull starts; running pulls finish.
@@ -2092,10 +2659,113 @@ async fn prepare_installation_inner(
 /// nothing moving in it reads as a hang.
 /// `saved` is the engine the installation was set up on: only that one is looked at, started or
 /// installed. With none saved, `install::install_engine_with` chooses.
+///
+/// Answering is not enough: the engine is then checked for versions new enough to run OpenBot,
+/// and updated for the person when it is not (`engine_new_enough`).
 async fn engine_ready(
     app: &tauri::AppHandle,
     saved: Option<engine::Engine>,
 ) -> Result<engine::Address, Problem> {
+    let (address, answering) = engine_answering(app, saved).await?;
+    // The row is said done once the engine is also new enough, not when it first answers. The
+    // window starts the account's licence check and Intelligence's setup on it, and an engine about
+    // to be updated refuses both: Docker Desktop 4.31 calls itself "Docker Desktop (containerized)",
+    // which the CLI does not run on, and a Windows tester was told to switch to Docker Desktop
+    // while OpenBot was updating it.
+    if !engine_new_enough(app, address.clone()).await? {
+        report_line(app, "engine", true, answering);
+    }
+    Ok(address)
+}
+
+/**
+The engine at `address` new enough to run OpenBot, updated for the person when it is not.
+
+At setup and at every Start, before Compose reads the project: an older Compose stops there with
+"Compose config exited with exit status: 15", which nobody can act on. Docker Desktop and OpenBot's
+Podman are updated here; only what cannot be updated for them is one plain step on the row. Said on
+the `engine` row, and nothing is said when nothing needed doing: whether the row was said, which
+`engine_ready` needs to know. See `engine_versions`.
+*/
+async fn engine_new_enough<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    address: engine::Address,
+) -> Result<bool, Problem> {
+    let engine = address.engine;
+    let progress_app = app.clone();
+    let back_app = app.clone();
+    // Stop and Quit move the ticket on: a wait for the person ends with them.
+    let watching = app.clone();
+    let ticket = app
+        .state::<Shell>()
+        .start_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let checked = tauri::async_runtime::spawn_blocking(move || {
+        let back = || {
+            bring_to_front(
+                &back_app,
+                "the engine update no longer needs another window",
+            )
+        };
+        let cancelled = || {
+            watching
+                .state::<Shell>()
+                .start_generation
+                .load(std::sync::atomic::Ordering::SeqCst)
+                != ticket
+        };
+        let mut updates = engine_versions::OnThisMachine {
+            address,
+            cache: stack::default_root(),
+            back: &back,
+            cancelled: &cancelled,
+        };
+        engine_versions::ensure(
+            engine,
+            std::env::consts::OS,
+            win::machine_arch(),
+            &mut updates,
+            &mut |line| report_running_line(&progress_app, "engine", line, None),
+        )
+    })
+    .await
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot could not check the software it runs on. Try again.",
+            format!("the engine version check did not run: {error}"),
+        )
+    })?;
+    match checked {
+        Ok(engine_versions::Checked::NewEnough(readings)) => {
+            log::info!("[engine] versions: {}", readings.said(engine));
+            Ok(false)
+        }
+        // Its machine was stopped and started on the row: the row ends, saying it is ready.
+        Ok(engine_versions::Checked::Restarted(readings)) => {
+            log::info!(
+                "[engine] versions: {}; answering after its machine restarted",
+                readings.said(engine)
+            );
+            report_plain(app, "engine", true, engine::engine_ready_line().said);
+            Ok(true)
+        }
+        Ok(engine_versions::Checked::Updated { said, .. }) => {
+            report_plain(app, "engine", true, said);
+            Ok(true)
+        }
+        Err(problem) => {
+            report_plain(app, "engine", false, problem.said.clone());
+            Err(problem)
+        }
+    }
+}
+
+/// The engine answering, and the `engine` row's line for when it is also new enough, which
+/// `engine_ready` says once it is.
+async fn engine_answering(
+    app: &tauri::AppHandle,
+    saved: Option<engine::Engine>,
+) -> Result<(engine::Address, engine::StepLine), Problem> {
     report_running_plain(app, "engine", "Checking the software OpenBot needs.");
     let found = engine::detect_saved(saved);
     desktop_telemetry::observe_engine(app, &found);
@@ -2139,8 +2809,8 @@ async fn engine_ready(
                 })??;
             }
             local_eval::use_engine(&ready.address);
-            report(app, "engine", true, ready.detail);
-            return Ok(ready.address);
+            let line = unregistered_line("engine", true, false, ready.detail);
+            return Ok((ready.address, line));
         }
         Ok(None) => {}
         Err(problem) => {
@@ -2227,8 +2897,8 @@ async fn engine_ready(
     if let Some(address) = answering_after_install(&after, engine::Address::composes)? {
         desktop_telemetry::observe_engine(app, &after);
         local_eval::use_engine(&address);
-        report(app, "engine", true, after.detail);
-        return Ok(address);
+        let line = unregistered_line("engine", true, false, after.detail);
+        return Ok((address, line));
     }
 
     // One at a time, and each only if the last one worked. Written as a loop over an array once,
@@ -2241,7 +2911,39 @@ async fn engine_ready(
         engine::preparing_machine_line(std::env::consts::OS),
         None,
     );
-    let created = acquire::create_machine(4, 6144, 60);
+    // The machine image the first screen started downloading: waited for with its download shown
+    // on this row, and the machine built from it. Without one, Podman pulls its own. On a blocking
+    // thread, as the deployment's download is: a blocking HTTP client must not be dropped here.
+    let progress_app = app.clone();
+    let image = tauri::async_runtime::spawn_blocking(move || {
+        early_downloads::machine_image_for_init(|downloads| {
+            report_running_downloads(&progress_app, "create-machine", downloads)
+        })
+    })
+    .await
+    .unwrap_or_else(|error| {
+        log::warn!("[early downloads] the machine image wait did not run: {error}");
+        None
+    });
+    log::info!(
+        "[early downloads] creating the machine {}",
+        image.as_deref().map_or_else(
+            || "with the image Podman pulls itself".to_string(),
+            |image| format!("from {}", image.display())
+        )
+    );
+    // Downloaded: the row says the machine's own line again, without the download, since that line
+    // is what a Windows prompt during `machine init` needs said.
+    report_running_line(
+        app,
+        "create-machine",
+        engine::preparing_machine_line(std::env::consts::OS),
+        None,
+    );
+    let created = acquire::create_machine(4, 6144, 60, image.as_deref());
+    if created.ok && image.is_some() {
+        early_downloads::forget_machine_image();
+    }
     if cfg!(target_os = "windows") {
         bring_to_front(app, "the engine machine is prepared");
     }
@@ -2250,8 +2952,30 @@ async fn engine_ready(
         return Err(created.problem());
     }
 
-    report_running_line(app, "start-machine", engine::starting_machine_line(), None);
-    let started = acquire::start_machine();
+    // On a Mac where the person's own Podman machine is running, only once they said yes to
+    // pausing it. A wait ended by Stop or Quit, or a pause that failed, is said on its own row.
+    let watching = app.clone();
+    let ticket = app
+        .state::<Shell>()
+        .start_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let starting = app.clone();
+    let started = tauri::async_runtime::spawn_blocking(move || {
+        start_own_machine(&starting, &|| {
+            watching
+                .state::<Shell>()
+                .start_generation
+                .load(std::sync::atomic::Ordering::SeqCst)
+                != ticket
+        })
+    })
+    .await
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot couldn't start the software it runs on. Try again.",
+            format!("the machine start did not run: {error}"),
+        )
+    })??;
     report(app, "start-machine", started.ok, started.said.clone());
     if !started.ok {
         return Err(started.problem());
@@ -2277,8 +3001,7 @@ async fn engine_ready(
             )
         })?;
     local_eval::use_engine(&address);
-    report_line(app, "engine", true, engine::engine_ready_line());
-    Ok(address)
+    Ok((address, engine::engine_ready_line()))
 }
 
 /// Called while holding startup so Quit cannot retire the service during its acquisition.
@@ -2346,6 +3069,8 @@ async fn deployment_ready<R: tauri::Runtime>(
     let target = root.to_path_buf();
     let handle = app.clone();
     let version = tauri::async_runtime::spawn_blocking(move || {
+        // The first screen may be laying the same deployment out: one at a time.
+        let _laying_out = early_downloads::hold_deployment();
         let version = deployment_release::resolve_version(&target)?;
         if deployment::needs_fetch(&target, &version) {
             report_running_line(
@@ -3047,8 +3772,23 @@ async fn start_stack_inner<R: tauri::Runtime>(
     let saved = preparation::saved_engine(&root);
     let owned = shell.containers.lock().unwrap().is_some();
     if !owned {
-        wake_installation_engine(&app, saved).await?;
-        attempt.require_current()?;
+        engine_before_compose(
+            async || {
+                wake_installation_engine(&app, saved).await?;
+                attempt.require_current()
+            },
+            async || {
+                tauri::async_runtime::spawn_blocking(move || engine::detect_saved(saved))
+                    .await
+                    .ok()
+                    .and_then(|status| status.address.filter(|_| status.responding))
+            },
+            async |address| {
+                engine_new_enough(&app, address).await?;
+                attempt.require_current()
+            },
+        )
+        .await?;
     }
 
     // Minted before Compose, because the server is a container now and Compose is how it gets its
@@ -3637,30 +4377,51 @@ fn stop_for_update<R: tauri::Runtime>(
 /// Stop as the button and the menu bar run it.
 fn stop_everything_for(shell: &Shell, fallback_root: &Path) -> Stopped {
     let root = root_for_stop(shell, fallback_root);
+    let (down, intelligence) = healed_once_before(
+        |root: &Path| {
+            if let Some(address) = engine_for_stop(shell, root) {
+                answering_before_stop(&address);
+            }
+        },
+        |root: &Path| down_owned_containers(shell, root),
+        intelligence_step(Shutdown::Stop),
+    );
     stop_everything_then(
         shell,
         &root,
         stack::stop_processes_under,
-        |root| down_owned_containers(shell, root),
-        intelligence_step(Shutdown::Stop),
+        down,
+        intelligence,
     )
 }
 
 /// Quit's cleanup as the exit handler runs it, telling `progress` as each part starts and ends.
-fn quit_cleanup<P>(shell: &Shell, progress: P) -> Stopped
+fn quit_cleanup<P>(shell: &Shell, mut progress: P) -> Stopped
 where
     P: FnMut(QuitStep, QuitStepState),
 {
     // A ChatGPT sign-in left waiting would keep its container, and the callback port, after Quit.
     openbot_desktop_lib::plan::release_chatgpt_callback_port();
-    exit_cleanup_reporting(
+    let (down, intelligence) = healed_once_before(
+        |root: &Path| {
+            if let Some(address) = engine_for_stop(shell, root) {
+                answering_before_stop(&address);
+            }
+        },
+        |root: &Path| down_containers_on_quit(shell, root),
+        intelligence_step(Shutdown::Quit),
+    );
+    let stopped = exit_cleanup_reporting(
         shell,
         &stack::default_root(),
         stack::stop_processes_under,
-        |root| down_containers_on_quit(shell, root),
-        intelligence_step(Shutdown::Quit),
-        progress,
-    )
+        down,
+        intelligence,
+        &mut progress,
+    );
+    // Last, once nothing of OpenBot's runs in its machine: the person's Podman OpenBot paused.
+    give_back_paused_podman(&mut progress);
+    stopped
 }
 
 /**
@@ -3671,6 +4432,8 @@ The window only listens. Nothing here waits for it: with no window, or a page th
 the same cleanup runs in the same order and the exit follows.
 */
 fn quit_cleanup_shown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Vec<String> {
+    // A setup window that stopped answering and still has not: said before the flush below.
+    desktop_stall::at_quit(app);
     show_shutting_down(app);
     desktop_telemetry::shutdown(app);
     let shell = app.state::<Shell>();
@@ -3702,6 +4465,9 @@ enum QuitStep {
     OpenBot,
     /// The local Intelligence stack OpenBot created.
     Intelligence,
+    /// On a Mac, the person's Podman that OpenBot paused while it ran, started again. See
+    /// `own_machine`.
+    GiveBackPodman,
 }
 
 impl QuitStep {
@@ -3710,6 +4476,7 @@ impl QuitStep {
             QuitStep::FinishUpdate => "finish-update",
             QuitStep::OpenBot => "stop-openbot",
             QuitStep::Intelligence => "stop-intelligence",
+            QuitStep::GiveBackPodman => "start-your-podman",
         }
     }
 
@@ -3717,7 +4484,10 @@ impl QuitStep {
     /// says why ("Finishing the update so nothing is left half done").
     fn running_detail(self) -> &'static str {
         match self {
-            QuitStep::FinishUpdate | QuitStep::OpenBot | QuitStep::Intelligence => "",
+            QuitStep::FinishUpdate
+            | QuitStep::OpenBot
+            | QuitStep::Intelligence
+            | QuitStep::GiveBackPodman => "",
         }
     }
 }
@@ -3770,6 +4540,7 @@ impl QuitStatus {
             downloads: None,
             elsewhere: false,
             asks: false,
+            updating: false,
         };
         match self.steps.iter_mut().find(|known| known.step == row.step) {
             Some(known) => *known = row,
@@ -3991,7 +4762,7 @@ where
         return Ok(());
     };
     let not_stopped =
-        |why: String| format!("the back end's command-line tool did not stop the back end ({why})");
+        |why: String| format!("the backend's command-line tool did not stop the backend ({why})");
     match stop(&state.stack_id()) {
         Ok(report) => match report.outcome {
             local_eval::Outcome::Completed => Ok(()),
@@ -4001,7 +4772,7 @@ where
             })),
         },
         Err(local_eval::Failure::Unavailable) => {
-            Err("this build has no command-line tool to stop the back end OpenBot created".into())
+            Err("this build has no command-line tool to stop the backend OpenBot created".into())
         }
         Err(failure) => Err(not_stopped(wire_name(failure))),
     }
@@ -4053,6 +4824,108 @@ fn down_owned_containers(shell: &Shell, root: &Path) -> Result<(), String> {
 /// Start records ownership before Compose up, including partial failures. Quit must still
 /// retire those runs, but an old Compose file alone is not a failed shutdown by this session.
 /// Explicit Stop keeps the unknown-runtime error so it cannot claim an unverified cleanup.
+/**
+A Podman machine whose Docker API has gone, stopped and started once before Stop or Quit stops
+anything (`engine_versions::answering_now`). Both stops reach the engine through that API:
+OpenBot's `compose down`, and the back end's `local stop`, which the CLI refuses as
+"docker_unavailable" without it. The containers that were running in the machine, OpenBot's and the
+back end's among them, are started with it, and the two stops then stop them as they always do.
+
+On a live Windows run, with the machine's `win-sshproxy` gone, Quit failed both, and the next launch
+opened on "When OpenBot last quit, some of its services didn't stop". What still fails after this
+is reported as before.
+*/
+fn answering_before_stop(address: &engine::Address) {
+    // Only a machine that answers `podman` while its API has gone. One that does not answer at all
+    // may have been stopped by the person, and Quit never starts it.
+    if address.engine != engine::Engine::Podman || !address.responds() {
+        return;
+    }
+    let back = || {};
+    let cancelled = || false;
+    let mut updates = engine_versions::OnThisMachine {
+        address: address.clone(),
+        cache: stack::default_root(),
+        back: &back,
+        cancelled: &cancelled,
+    };
+    match engine_versions::answering_now(
+        address.engine,
+        std::env::consts::OS,
+        &mut updates,
+        &mut |line| log::info!("[stop] {}", line.log_entry()),
+    ) {
+        Ok(true) => log::info!("[stop] the engine answers again after its machine restarted"),
+        Ok(false) => {}
+        Err(problem) => log::warn!(
+            "[stop] the engine does not answer: {}",
+            problem.detail.as_deref().unwrap_or(&problem.said)
+        ),
+    }
+}
+
+/// The engine Stop and Quit stop things on: OpenBot's own containers' while they run, otherwise
+/// the one the installation at `root` was set up on, when it answers.
+fn engine_for_stop(shell: &Shell, root: &Path) -> Option<engine::Address> {
+    // Only a Podman machine on a Mac or a PC has an API of its own to lose.
+    if !cfg!(any(target_os = "macos", target_os = "windows")) {
+        return None;
+    }
+    let owned = shell
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|owned| owned.address.clone());
+    // Without OpenBot's own containers, only an installation on Podman is asked about: nothing else
+    // has a machine to restart, and a Stop with nothing to stop runs no engine command.
+    owned.or_else(|| {
+        if preparation::saved_engine(root) != Some(engine::Engine::Podman) {
+            return None;
+        }
+        let found = engine::detect_saved(Some(engine::Engine::Podman));
+        found.address.filter(|_| found.responding)
+    })
+}
+
+/// `down` and `intelligence`, the two stops, each after one `heal` shared between them: whichever
+/// runs first heals, and the other finds it done. Both stops need the engine's API, and a machine
+/// is restarted at most once for the two.
+/// One of Stop's stops, as `stop_everything_then` and `exit_cleanup_reporting` take it.
+type StopStep<'a> = Box<dyn FnOnce(&Path) -> Result<(), String> + 'a>;
+
+fn healed_once_before<'a, H, D, I>(
+    heal: H,
+    down: D,
+    intelligence: I,
+) -> (StopStep<'a>, StopStep<'a>)
+where
+    H: FnOnce(&Path) + 'a,
+    D: FnOnce(&Path) -> Result<(), String> + 'a,
+    I: FnOnce(&Path) -> Result<(), String> + 'a,
+{
+    let heal = std::rc::Rc::new(std::cell::RefCell::new(Some(heal)));
+    let once = {
+        let heal = heal.clone();
+        move |root: &Path| {
+            if let Some(heal) = heal.borrow_mut().take() {
+                heal(root);
+            }
+        }
+    };
+    let again = once.clone();
+    (
+        Box::new(move |root: &Path| {
+            once(root);
+            down(root)
+        }),
+        Box::new(move |root: &Path| {
+            again(root);
+            intelligence(root)
+        }),
+    )
+}
+
 fn down_containers_on_quit(shell: &Shell, root: &Path) -> Result<(), String> {
     if shell.containers.lock().unwrap().is_none() {
         return Ok(());
@@ -4279,7 +5152,7 @@ fn write_quit_cleanup_notice(root: &Path, lines: &[String]) -> Result<(), String
         .and_then(|()| std::fs::write(&path, br#"{"version":1}"#))
         .map_err(|error| {
             format!(
-                "{}: could not write the back end shutdown notice: {error}",
+                "{}: could not write the backend shutdown notice: {error}",
                 path.display()
             )
         })
@@ -4297,7 +5170,7 @@ fn take_local_eval_stop_notice(root: &Path) -> Option<Problem> {
     Some(Problem::with(
         "When OpenBot last quit, some of its services didn't stop. They may still be running. \
          Stopping OpenBot again asks them to stop.",
-        "the back end stack did not stop when OpenBot last quit",
+        "the backend stack did not stop when OpenBot last quit",
     ))
 }
 
@@ -4940,13 +5813,21 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
     #[cfg(target_os = "macos")]
     let builder = builder.traffic_light_position(TRAFFIC_LIGHTS);
     /*
-     * Built visible, as the configured window always was. It was built hidden and shown once it
-     * was in place (to spare a reopened window a moment at the system's default spot), and on
-     * Windows that froze setup: the WebView2 page under a window first created hidden stopped
-     * taking native updates a few seconds after a download line appeared, for minutes, until the
-     * window was activated or clicked. `tauri_plugin_window_state` puts it back at the size and
-     * place it had as it is built, and `fit_main_window_to_screen` brings it onto a screen.
+     * Built visible, as the configured window always was, and built where it was last: the size
+     * and place `tauri_plugin_window_state` saved go to the builder, so the first frame is already
+     * there. Built at the system's default spot and moved after, a reopened window showed blank at
+     * 104,104 for about 230 ms on Windows, then jumped to its saved 400,90. The plugin's own restore
+     * then finds it already in place. Never built hidden to avoid that: on Windows a WebView2 page
+     * under a window first created hidden stopped taking native updates mid-setup, for minutes,
+     * until the window was activated or clicked.
      */
+    let builder = match saved_main_window(app) {
+        Some(place) => builder
+            .position(place.x, place.y)
+            .inner_size(place.width, place.height)
+            .maximized(place.maximized),
+        None => builder,
+    };
     let window = builder
         .on_new_window(move |destination, _features| {
             outside_links::new_window(&destination, |to| {
@@ -4960,6 +5841,128 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
     let _ = window.set_zoom(saved_zoom(app));
     fit_main_window_to_screen(app);
     Ok(())
+}
+
+/// A window's state as `tauri_plugin_window_state` saves it (its `WindowState`): the outer
+/// position and the inner size in physical pixels, and where it was before it was maximized.
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Deserialize)]
+#[serde(default)]
+struct SavedWindow {
+    width: u32,
+    height: u32,
+    x: i32,
+    y: i32,
+    prev_x: i32,
+    prev_y: i32,
+    maximized: bool,
+}
+
+/// A monitor as placing a window needs it: its whole area and work area in physical pixels, and
+/// its scale.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Screen {
+    position: (i32, i32),
+    size: (u32, u32),
+    work: (i32, i32, u32, u32),
+    scale: f64,
+}
+
+/// Where to build a window, in logical pixels, as the builder takes it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Place {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    maximized: bool,
+}
+
+/**
+Where to build the main window from its saved state, on `screens` (the primary first): where it
+was, on the screen it was on, in that screen's logical pixels; or, when no screen it was on is
+there any more, the middle of the primary screen's work area. None when nothing is saved.
+*/
+fn place_saved_window(saved: SavedWindow, screens: &[Screen]) -> Option<Place> {
+    if saved == SavedWindow::default() || saved.width == 0 || saved.height == 0 {
+        return None;
+    }
+    let (x, y) = if saved.maximized {
+        (saved.prev_x, saved.prev_y)
+    } else {
+        (saved.x, saved.y)
+    };
+    // The screen the window's top-left area is on, as the plugin checks it.
+    let on = screens.iter().find(|screen| {
+        let (left, top) = screen.position;
+        let (width, height) = screen.size;
+        let right = left + width as i32;
+        let bottom = top + height as i32;
+        x + saved.width as i32 > left && x < right && y + saved.height as i32 > top && y < bottom
+    });
+    match on {
+        Some(screen) => Some(Place {
+            x: f64::from(x) / screen.scale,
+            y: f64::from(y) / screen.scale,
+            width: f64::from(saved.width) / screen.scale,
+            height: f64::from(saved.height) / screen.scale,
+            maximized: saved.maximized,
+        }),
+        None => {
+            let primary = screens.first()?;
+            let (left, top, width, height) = primary.work;
+            let fit_width = saved.width.min(width);
+            let fit_height = saved.height.min(height);
+            Some(Place {
+                x: f64::from(left + (width - fit_width) as i32 / 2) / primary.scale,
+                y: f64::from(top + (height - fit_height) as i32 / 2) / primary.scale,
+                width: f64::from(fit_width) / primary.scale,
+                height: f64::from(fit_height) / primary.scale,
+                maximized: saved.maximized,
+            })
+        }
+    }
+}
+
+/// The main window's saved place (`place_saved_window`), from the window-state plugin's file.
+fn saved_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<Place> {
+    // Tests build the window on Tauri's mock runtime, which has no monitors, and must not read
+    // the developer's own saved window: `place_saved_window` is tested on its own.
+    if cfg!(test) {
+        return None;
+    }
+    let file = app
+        .path()
+        .app_config_dir()
+        .ok()?
+        .join(tauri_plugin_window_state::DEFAULT_FILENAME);
+    let saved: std::collections::HashMap<String, SavedWindow> =
+        serde_json::from_slice(&std::fs::read(file).ok()?).ok()?;
+    let saved = *saved.get("main")?;
+    let primary = app.primary_monitor().ok().flatten();
+    let mut monitors = app.available_monitors().unwrap_or_default();
+    if let Some(primary) = &primary {
+        monitors.sort_by_key(|monitor| monitor.name() != primary.name());
+    }
+    let screens: Vec<Screen> = monitors
+        .iter()
+        .map(|monitor| {
+            let work = monitor.work_area();
+            Screen {
+                position: (monitor.position().x, monitor.position().y),
+                size: (monitor.size().width, monitor.size().height),
+                work: (
+                    work.position.x,
+                    work.position.y,
+                    work.size.width,
+                    work.size.height,
+                ),
+                scale: monitor.scale_factor(),
+            }
+        })
+        .collect();
+    let place = place_saved_window(saved, &screens);
+    log::info!("[window] built at its saved place: {place:?}");
+    place
 }
 
 fn window_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) -> WindowPage {
@@ -6880,9 +7883,41 @@ async fn run_local_eval<R: tauri::Runtime>(
     {
         desktop_telemetry::setup_failed(&app, failure);
     }
+    if action == local_eval::Action::Status {
+        for line in
+            local_eval::status_waited(&mut back_end_wait(), std::time::Instant::now(), &report)
+        {
+            log::info!("{line}");
+        }
+    }
     let report = report?;
     learn_dashboards(&app, report.stack.iter());
     Ok(report)
+}
+
+/// The window's wait for the back end to report ready, as the log says it (`logging::WaitLog`):
+/// every `local status` answer as it changes, and why the wait ended. A Start on Windows waited
+/// five minutes and gave up with nothing in the log between.
+static BACK_END_WAIT: Mutex<Option<openbot_desktop_lib::logging::WaitLog>> = Mutex::new(None);
+
+fn back_end_wait() -> std::sync::MutexGuard<'static, Option<openbot_desktop_lib::logging::WaitLog>>
+{
+    BACK_END_WAIT
+        .lock()
+        .unwrap_or_else(|held| held.into_inner())
+}
+
+/// The window stopped waiting for the back end, and why: the sentence it shows (`waitForReady`),
+/// such as "OpenBot didn't get ready in time. Retry to check again." Written with how long it
+/// waited and the last status, so the log says why Start gave up.
+#[tauri::command]
+fn back_end_wait_ended(why: String) {
+    let mut wait = back_end_wait();
+    let now = std::time::Instant::now();
+    match wait.take() {
+        Some(waited) => log::warn!("{}", waited.ended(now, &format!("gave up: {why}"))),
+        None => log::warn!("[wait] the backend: gave up before any status answered: {why}"),
+    }
 }
 
 /// The back end update last written to the log, so a status polled every few seconds says it once.
@@ -6903,7 +7938,7 @@ fn log_update_due(from: &str, to: &str, stopped_at: Option<&str>) {
 }
 
 fn update_due_entry(from: &str, to: &str, stopped_at: Option<&str>) -> String {
-    let mut entry = format!("[local update] the back end is on {from}, due an update to {to}");
+    let mut entry = format!("[local update] the backend is on {from}, due an update to {to}");
     if let Some(step) = stopped_at {
         entry.push_str(&format!("; the last update stopped at {step}"));
     }
@@ -6956,6 +7991,49 @@ fn know_cli_engine(root: &Path) {
     if let Some(address) = found.address.filter(|_| found.responding) {
         local_eval::use_engine(&address);
     }
+}
+
+/**
+Whether the person's own Podman machine answers while OpenBot's is still on its way, so the CLI must
+not be asked yet.
+
+The CLI, told no engine, takes the Podman machine that answers, and that is the person's. On a live
+Windows run it refused theirs ("Rootless Podman is not supported. Switch to rootful Podman ...") and
+the account step showed that as a change the person had to make. OpenBot passes theirs over and
+makes its own (`engine::passed_over_machine`), so until that answers, the account step waits as it
+waits for any engine coming up. Asked only while no engine is known, after `know_cli_engine`.
+*/
+fn own_machine_on_its_way(root: &Path) -> bool {
+    own_machine_on_its_way_with(
+        local_eval::engine_known(),
+        preparation::saved_engine(root),
+        || engine::passed_over_machine(&engine::Address::new(engine::Engine::Podman, None)),
+    )
+}
+
+/// `own_machine_on_its_way`, with what it reads passed in: whether an engine is known, the engine
+/// the installation saved, and the person's machine behind Podman's default connection that OpenBot
+/// passes over, if any.
+fn own_machine_on_its_way_with(
+    engine_known: bool,
+    saved: Option<engine::Engine>,
+    passed_over: impl FnOnce() -> Option<String>,
+) -> bool {
+    !engine_known && saved != Some(engine::Engine::Docker) && passed_over().is_some()
+}
+
+/// The account step's check: the CLI's own answer, or, while OpenBot's machine is on its way, that
+/// the engine is not ready yet, without asking the CLI.
+fn account_terms(
+    on_its_way: bool,
+    ask_the_cli: impl FnOnce() -> Result<local_eval::Terms, local_eval::Failure>,
+) -> Result<local_eval::Terms, local_eval::Failure> {
+    if on_its_way {
+        return Ok(local_eval::Terms::EngineNotReady {
+            cause: "own_machine",
+        });
+    }
+    ask_the_cli()
 }
 
 /// Keep the dashboard address of every stack a CLI report described, for `Dashboards`.
@@ -7070,7 +8148,10 @@ async fn sign_in_to_copilotkit<R: tauri::Runtime>(
         log::info!("[account] browser sign-in started");
         desktop_telemetry::sign_in_started(&started_app);
         let asked = std::time::Instant::now();
-        let signed_in = local_eval::account_sign_in_installed(&attempt);
+        let signed_in = while_signing_in(
+            || local_eval::account_sign_in_installed(&attempt),
+            || bring_to_front(&started_app, "the browser sign-in ended"),
+        );
         let took = asked.elapsed();
         match &signed_in {
             Ok(said) => log::info!(
@@ -7134,10 +8215,14 @@ async fn local_eval_terms(
         // The CLI checks its engine before it answers. See `know_cli_engine`.
         know_cli_engine(&root);
         // An engine too small for local setup is said here, before Start fails on it.
-        let terms = match local_eval::engine_size_terms() {
-            Some(too_small) => Ok(too_small),
-            None => local_eval::terms_installed(&attempt),
-        };
+        let terms =
+            account_terms(
+                own_machine_on_its_way(&root),
+                || match local_eval::engine_size_terms() {
+                    Some(too_small) => Ok(too_small),
+                    None => local_eval::terms_installed(&attempt),
+                },
+            );
         // What the step waits on, said in the log when it changes. See `AccountWait`.
         let step = RUNNING_LOGGED
             .lock()
@@ -7212,8 +8297,10 @@ fn apps_unavailable() -> Problem {
 /**
 Run `setup` in `root` and record what it made.
 
-A stack set up here was made for OpenBot, so it starts and stops with it. The one exception is a
-record that already calls the same stack shared: setting up again resumes that stack, it does not
+A stack set up here was made for OpenBot, so it starts and stops with it. It is OpenBot's only when
+the CLI records it for `root` itself (`appPaths`): a stack recorded for another folder is another
+app's, whatever setup reported, and is kept as shared, so Stop and Quit never stop it. A record that
+already calls the same stack shared stays shared: setting up again resumes that stack, it does not
 make OpenBot its owner.
 */
 fn set_up_local_eval_at<S>(root: &Path, setup: S) -> Result<local_eval::Report, SetupError>
@@ -7228,11 +8315,19 @@ where
     else {
         return Ok(report);
     };
+    let ours = stack.lists_folder(root);
     let stack = local_eval::StackId::parse(&stack.id).map_err(SetupError::Failure)?;
     let ownership = match local_eval_state::read(root, None) {
+        _ if !ours => local_eval_state::Ownership::Shared,
         Some(state) if state.stack_id() == stack => state.ownership,
         _ => local_eval_state::Ownership::Created,
     };
+    if !ours {
+        log::warn!(
+            "[local setup] {} is recorded for another folder; OpenBot keeps it as shared and never stops it",
+            stack.as_str()
+        );
+    }
     local_eval_state::begin(root, &stack, ownership, &cli_sha256)
         .map_err(SetupError::Unrecorded)?;
     Ok(report)
@@ -7318,7 +8413,7 @@ where
 {
     let unconnected = |said: &str| ConnectError::Unconnected(Problem::plain(said));
     let recorded = local_eval_state::read(root, None)
-        .ok_or_else(|| unconnected("Set up the back end before connecting OpenBot to it."))?;
+        .ok_or_else(|| unconnected("Set up the backend before connecting OpenBot to it."))?;
     let connection = connect(root).map_err(ConnectError::Failure)?;
     if connection.outcome != local_eval::Outcome::Completed || connection.conflicted {
         return Ok(connection);
@@ -7329,7 +8424,7 @@ where
         .filter(|stack| stack.id == recorded.stack)
     else {
         return Err(unconnected(
-            "A different back end was connected. OpenBot did not use it.",
+            "A different backend was connected. OpenBot did not use it.",
         ));
     };
     let env_file = root.join(".env");
@@ -7343,7 +8438,7 @@ where
     )
     .map_err(|error| {
         ConnectError::Unconnected(Problem::with(
-            "OpenBot could not read the connection settings for its back end.",
+            "OpenBot could not read the connection settings for its backend.",
             format!("{}: {}", env_file.display(), error.kind()),
         ))
     })?;
@@ -7370,7 +8465,7 @@ where
             != Some(reported)
     }) {
         return Err(unconnected(
-            "The connection settings do not match the back end that was set up. OpenBot did not use them.",
+            "The connection settings do not match the backend that was set up. OpenBot did not use them.",
         ));
     }
     match written
@@ -7387,7 +8482,7 @@ where
             let purge = [(LOCAL_EVAL_CONNECTED_KEY.to_owned(), String::new())].into();
             openbot_env::write(&env_file, &settings, &purge).map_err(|error| {
                 ConnectError::Unconnected(Problem::with(
-                    "OpenBot kept the back end's key but could not remove it from its settings file.",
+                    "OpenBot kept the backend's key but could not remove it from its settings file.",
                     format!("{}: {}", env_file.display(), error.kind()),
                 ))
             })?;
@@ -7399,7 +8494,7 @@ where
                     .is_some_and(|key| !key.trim().is_empty());
             if !kept {
                 return Err(unconnected(
-                    "The back end connected, but OpenBot has no key for it.",
+                    "The backend connected, but OpenBot has no key for it.",
                 ));
             }
         }
@@ -7861,7 +8956,7 @@ fn publish_connection_failure<R: tauri::Runtime>(
     }
     let said = match connection {
         openbot_desktop_lib::problem::Connection::Model => "Your AI connection was refused. Refresh it to continue using your existing OpenBot.",
-        openbot_desktop_lib::problem::Connection::Intelligence => "Your CopilotKit connection was refused. Refresh it to continue using your existing OpenBot.",
+        openbot_desktop_lib::problem::Connection::Intelligence => "Your OpenBot account connection was refused. Refresh it to continue using your existing OpenBot.",
         openbot_desktop_lib::problem::Connection::Installation => "Part of OpenBot has to be installed again. OpenBot does that, then you can continue using your existing OpenBot.",
     };
     mark_recovery_required(&shell, root, generation);
@@ -9183,9 +10278,13 @@ fn main() {
         .plugin(outside_links_guard())
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
+            back_end_wait_ended,
+            start_early_downloads,
+            early_downloads_now,
             record_setup_event,
             bring_setup_to_front,
             allow_podman_install,
+            allow_pause_podman,
             wake_engine,
             detect_engine,
             windows_blocker,
@@ -9231,6 +10330,7 @@ fn main() {
             local_eval_download,
             local_eval_steps,
             local_eval_update_step,
+            setup_heartbeat,
             local_eval_terms,
             connect_copilotkit_apps,
             connect_local_eval,
@@ -9250,6 +10350,11 @@ fn main() {
         // no such setting, and Tauri has no configuration option for it either, so the page is
         // asked to refuse. Every navigation, because the window navigates to OpenBot and back.
         .on_page_load(|window, payload| {
+            // A new page in the main window is not the setup page until it sends a heartbeat.
+            if window.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started
+            {
+                desktop_stall::page_loaded(window);
+            }
             let _ = window
                 .eval("document.addEventListener('contextmenu', e => e.preventDefault(), true)");
             let page = window_page(window.app_handle(), payload.url());
@@ -9355,7 +10460,9 @@ fn main() {
             }
             // The banner and the setup window's offer both read this, never the network.
             watch_for_app_updates(app.handle());
+            get_updates_ready(app.handle());
             desktop_telemetry::initialize(app.handle());
+            desktop_stall::initialize(app.handle());
             if let Some(root) = app
                 .path()
                 .app_config_dir()
@@ -9605,6 +10712,47 @@ mod check_for_updates_tests {
         .map(|body| body.deserialize().unwrap())
     }
 
+    /// The test feed reaches only an internal build, through the start the app itself makes: a
+    /// stable build started with `OPENBOT_TEST_UPDATE_FEED` set is offered nothing from it, and an
+    /// internal build started the same way is offered what it names.
+    #[test]
+    fn only_an_internal_build_is_offered_what_the_test_feed_names() {
+        let folder = crate::test_support::temp_root("test-feed-wiring");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("latest.json"), r#"{"version": "9.9.9"}"#).unwrap();
+        std::env::set_var(app_update::TEST_FEED, &folder);
+        let started = |version: &str| {
+            let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+            context.package_info_mut().version = semver::Version::parse(version).unwrap();
+            let app = tauri::test::mock_builder()
+                .manage(Shell::default())
+                .build(context)
+                .unwrap();
+            watch_for_app_updates(app.handle());
+            app
+        };
+        let stable = started("1.0.1");
+        let candidate = started("1.0.1-rc.2");
+        let internal = started("1.0.1-internal.731.gabc123456789");
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while internal.state::<Shell>().app_update.newer().is_none() {
+            assert!(
+                std::time::Instant::now() < until,
+                "the internal build read its test feed"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        std::env::remove_var(app_update::TEST_FEED);
+        assert_eq!(
+            internal.state::<Shell>().app_update.newer(),
+            Some(semver::Version::parse("9.9.9").unwrap())
+        );
+        assert_eq!(stable.state::<Shell>().app_update.newer(), None);
+        assert_eq!(candidate.state::<Shell>().app_update.newer(), None);
+        assert_eq!(app_update_status(stable.handle()).version, None);
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+
     /// The bug: on a signed 0.3.2, the setup window's Check desktop shell update asked an old
     /// mechanism release builds do not carry, and said "Signed desktop shell updates are not
     /// configured." A release build now answers from the feed its updater installs from.
@@ -9618,7 +10766,9 @@ mod check_for_updates_tests {
         let (app, window) = app(Some(&feed_at("0.3.3")));
         assert_eq!(
             check(&window),
-            Ok(serde_json::json!({ "found": "available", "version": "0.3.3", "current": "0.1.0" }))
+            Ok(
+                serde_json::json!({ "found": "available", "version": "0.3.3", "current": "0.1.0", "ready": null })
+            )
         );
         // Kept, so the banner offers the same version.
         assert_eq!(
@@ -9922,12 +11072,12 @@ mod tests {
     fn the_log_keeps_the_back_end_releases_and_the_step_an_update_stopped_at() {
         assert_eq!(
             update_due_entry("0.16.0-rc.9", "0.16.0-rc.10", Some("update-quiesce")),
-            "[local update] the back end is on 0.16.0-rc.9, due an update to 0.16.0-rc.10; the last \
+            "[local update] the backend is on 0.16.0-rc.9, due an update to 0.16.0-rc.10; the last \
              update stopped at update-quiesce"
         );
         assert_eq!(
             update_due_entry("0.16.0-rc.9", "0.16.0-rc.10", None),
-            "[local update] the back end is on 0.16.0-rc.9, due an update to 0.16.0-rc.10"
+            "[local update] the backend is on 0.16.0-rc.9, due an update to 0.16.0-rc.10"
         );
     }
 
@@ -12367,6 +13517,66 @@ mod tests {
         assert_eq!(run(Some(Podman), false, false, true), none);
     }
 
+    /// The tester's Start: Docker Desktop 4.27.2 answered, and Compose v2.24.5 stopped at its first
+    /// look at the project. The engine is now woken, then checked and updated, before Compose.
+    #[test]
+    fn start_wakes_the_engine_then_makes_it_new_enough_before_compose() {
+        use std::cell::RefCell;
+        let docker = || engine::Address::new(engine::Engine::Docker, None);
+        let run = |answers: bool, wake: Result<(), Problem>, check: Result<(), Problem>| {
+            let done = RefCell::new(Vec::new());
+            let result = tauri::async_runtime::block_on(engine_before_compose(
+                async || {
+                    done.borrow_mut().push("wake");
+                    wake
+                },
+                async || {
+                    done.borrow_mut().push("look");
+                    answers.then(docker)
+                },
+                async |address| {
+                    assert_eq!(
+                        address,
+                        docker(),
+                        "the engine that answered is the one checked"
+                    );
+                    done.borrow_mut().push("new enough");
+                    check
+                },
+            ));
+            (result, done.into_inner())
+        };
+
+        let (result, done) = run(true, Ok(()), Ok(()));
+        assert!(result.is_ok());
+        assert_eq!(done, ["wake", "look", "new enough"]);
+
+        // An update that could not be made stops Start there, with its own words, before Compose.
+        let (result, done) = run(
+            true,
+            Ok(()),
+            Err(Problem::plain(
+                "Docker on this computer is too old to run OpenBot. Update Docker, then start \
+                 OpenBot again.",
+            )),
+        );
+        assert!(result
+            .unwrap_err()
+            .said
+            .starts_with("Docker on this computer is too old"));
+        assert_eq!(done, ["wake", "look", "new enough"]);
+
+        // A wake that failed is the failure; nothing is checked.
+        let (result, done) = run(true, Err(Problem::plain("machine did not start")), Ok(()));
+        assert_eq!(result.unwrap_err().said, "machine did not start");
+        assert_eq!(done, ["wake"]);
+
+        // Nothing answering: the check after this one says so, and no update is tried.
+        let (result, done) = run(false, Ok(()), Ok(()));
+        assert!(result.is_ok());
+        assert_eq!(done, ["wake", "look"]);
+    }
+
     #[test]
     fn a_machine_that_fails_to_start_stops_start_with_its_own_words() {
         let problem = wake_saved_engine(
@@ -12882,6 +14092,7 @@ mod tests {
             update_in_progress: false,
             unfinished_update: None,
             observed: None,
+            app_paths: Vec::new(),
         }
     }
 
@@ -13042,7 +14253,7 @@ mod tests {
             "podman",
             "wsl",
             "engine",
-            "back end",
+            "backend",
             "backend",
             "container",
             "compose",
@@ -13209,6 +14420,153 @@ mod tests {
         for input in ["SendInput", "keybd_event", "VK_MENU"] {
             assert!(!main[..tests].contains(input), "{input}");
         }
+    }
+
+    /// A reopened window showed blank at Windows' default spot (104,104) for about 230 ms, then
+    /// jumped to its saved 400,90. It is built at its saved place now, in that screen's logical
+    /// pixels, and never hidden.
+    #[test]
+    fn the_main_window_is_built_at_its_saved_place_and_never_hidden() {
+        let screen = |x: i32, width: u32, scale: f64| Screen {
+            position: (x, 0),
+            size: (width, 1080),
+            work: (x, 0, width, 1032),
+            scale,
+        };
+        let saved = SavedWindow {
+            width: 1016,
+            height: 839,
+            x: 400,
+            y: 90,
+            ..SavedWindow::default()
+        };
+        // Where it was, on the primary screen.
+        assert_eq!(
+            place_saved_window(saved, &[screen(0, 1920, 1.0)]),
+            Some(Place {
+                x: 400.0,
+                y: 90.0,
+                width: 1016.0,
+                height: 839.0,
+                maximized: false,
+            })
+        );
+        // On a screen at 150%, in its logical pixels.
+        assert_eq!(
+            place_saved_window(saved, &[screen(0, 2880, 1.5)]),
+            Some(Place {
+                x: 400.0 / 1.5,
+                y: 60.0,
+                width: 1016.0 / 1.5,
+                height: 839.0 / 1.5,
+                maximized: false,
+            })
+        );
+        // On a second screen that is still there.
+        let left = SavedWindow { x: -1500, ..saved };
+        assert_eq!(
+            place_saved_window(left, &[screen(0, 1920, 1.0), screen(-1920, 1920, 1.0)])
+                .map(|place| (place.x, place.y)),
+            Some((-1500.0, 90.0))
+        );
+        // That screen unplugged: the middle of the primary one's work area.
+        assert_eq!(
+            place_saved_window(left, &[screen(0, 1920, 1.0)]).map(|place| (place.x, place.y)),
+            Some((452.0, 96.0))
+        );
+        // Maximized: where it was before, and maximized again.
+        let maximized = SavedWindow {
+            x: -8,
+            y: -8,
+            prev_x: 300,
+            prev_y: 80,
+            maximized: true,
+            ..saved
+        };
+        assert_eq!(
+            place_saved_window(maximized, &[screen(0, 1920, 1.0)]).map(|place| (
+                place.x,
+                place.y,
+                place.maximized
+            )),
+            Some((300.0, 80.0, true))
+        );
+        // Nothing saved: the configured window as it is.
+        assert_eq!(
+            place_saved_window(SavedWindow::default(), &[screen(0, 1920, 1.0)]),
+            None
+        );
+        // The plugin's own file reads as saved here.
+        let file: std::collections::HashMap<String, SavedWindow> = serde_json::from_str(
+            r#"{"main":{"width":1016,"height":839,"x":400,"y":90,"prev_x":400,"prev_y":90,"maximized":false,"visible":true,"decorated":true,"fullscreen":false}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            file["main"],
+            SavedWindow {
+                prev_x: 400,
+                prev_y: 90,
+                ..saved
+            }
+        );
+        // The builder takes the saved place, and the window is never built hidden.
+        let main = include_str!("main.rs");
+        let body = &main[main.find("fn build_main_window").unwrap()..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        assert!(body.contains("match saved_main_window(app)"), "{body}");
+        assert!(
+            body.contains(".position(place.x, place.y)")
+                && body.contains(".inner_size(place.width, place.height)"),
+            "{body}"
+        );
+        assert!(!body.contains(".visible(false)"), "{body}");
+        assert!(!body.contains(".show()"), "{body}");
+    }
+
+    /// Windows F: "[front] the engine machine is prepared" brought OpenBot in front of the
+    /// browser while the person typed their email to sign in. While the sign-in is open, setup's
+    /// own moments hold back; when it ends, OpenBot comes forward once.
+    #[test]
+    fn nothing_comes_forward_while_the_browser_sign_in_is_open_and_once_when_it_ends() {
+        if crate::test_support::isolated_process(
+            "tests::nothing_comes_forward_while_the_browser_sign_in_is_open_and_once_when_it_ends",
+        ) {
+            return;
+        }
+        let forward = std::cell::Cell::new(0);
+        let during = while_signing_in(
+            || {
+                // Setup's moments while the person is in the browser.
+                [
+                    "the engine machine is prepared",
+                    "Docker Desktop answers",
+                    "the engine no longer needs another app's window",
+                ]
+                .map(held_back)
+            },
+            || forward.set(forward.get() + 1),
+        );
+        assert_eq!(during, [true, true, true]);
+        assert_eq!(forward.get(), 1);
+        // Signed in: the next moment comes forward as before.
+        assert!(!held_back("the engine machine is prepared"));
+        // However the sign-in ends, the hold ends with it.
+        let failed = std::panic::catch_unwind(|| {
+            while_signing_in(|| panic!("the sign-in failed"), || {});
+        });
+        assert!(failed.is_err());
+        assert!(!held_back("OpenBot is showing"));
+        // `bring_to_front` asks before it does anything, and the sign-in runs inside the hold.
+        let main = include_str!("main.rs");
+        let body = &main[main.find("fn bring_to_front<").unwrap()..];
+        assert!(body.starts_with(
+            "fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {\n    if held_back(why) {\n        return;\n    }"
+        ));
+        let sign_in = &main[main.find("async fn sign_in_to_copilotkit<").unwrap()..];
+        let sign_in = &sign_in[..sign_in.find("\n}\n").unwrap()];
+        assert!(sign_in.contains(
+            "while_signing_in(\n            || local_eval::account_sign_in_installed(&attempt),\n            || bring_to_front(&started_app, \"the browser sign-in ended\"),"
+        ));
     }
 
     /// Windows cascades a window with no position of its own down and right on every launch. On
@@ -13400,6 +14758,42 @@ mod tests {
         }
     }
 
+    /// The live Windows run: the person's own `podman-machine-default` answered, the CLI was told no
+    /// engine and took it, and the account step showed its refusal ("Rootless Podman is not
+    /// supported. Switch to rootful Podman ...") as a change the person had to make, with Try again
+    /// repeating it. While OpenBot's own machine is on its way the step waits instead, as it waits
+    /// for any engine coming up, and the CLI is not asked. Once an engine is known, or on an
+    /// installation that is on Docker, the CLI is asked as before.
+    #[test]
+    fn the_account_step_waits_for_openbots_own_machine_without_asking_the_cli() {
+        let theirs = || Some("podman-machine-default".to_string());
+        assert!(own_machine_on_its_way_with(false, None, theirs));
+        assert!(own_machine_on_its_way_with(
+            false,
+            Some(engine::Engine::Podman),
+            theirs
+        ));
+        assert!(!own_machine_on_its_way_with(true, None, theirs));
+        assert!(!own_machine_on_its_way_with(
+            false,
+            Some(engine::Engine::Docker),
+            theirs
+        ));
+        assert!(!own_machine_on_its_way_with(false, None, || None));
+
+        let waiting = account_terms(true, || panic!("the CLI is not asked yet"));
+        assert!(matches!(
+            waiting,
+            Ok(local_eval::Terms::EngineNotReady {
+                cause: "own_machine"
+            })
+        ));
+        assert!(matches!(
+            account_terms(false, || Ok(local_eval::Terms::SignedOut)),
+            Ok(local_eval::Terms::SignedOut)
+        ));
+    }
+
     #[test]
     fn nothing_is_ever_written_in_the_menu_bar() {
         // The status title widened the tray item behind the camera notch, and on macOS
@@ -13450,13 +14844,13 @@ mod tests {
             stopped,
             Stopped {
                 openbot: vec!["Compose down failed: compose refused".into()],
-                intelligence: Some("Back end stop failed: the CLI timed out".into()),
+                intelligence: Some("Backend stop failed: the CLI timed out".into()),
             }
         );
         assert_eq!(
             stopped.into_result(),
             Err("Compose down failed: compose refused\n\
-                 Back end stop failed: the CLI timed out"
+                 Backend stop failed: the CLI timed out"
                 .into())
         );
         let _ = std::fs::remove_dir_all(active);
@@ -13504,7 +14898,7 @@ mod tests {
             failures,
             Stopped {
                 openbot: vec!["Compose down failed: compose down refused".into()],
-                intelligence: Some("Back end stop failed: the CLI timed out".into()),
+                intelligence: Some("Backend stop failed: the CLI timed out".into()),
             }
         );
         let _ = std::fs::remove_dir_all(active);
@@ -13565,6 +14959,58 @@ mod tests {
         }
     }
 
+    /// D's Quit: the machine's API pipe had gone, so OpenBot's compose down and the back end's
+    /// local stop both failed ("docker_unavailable") and the next launch said some services didn't
+    /// stop. Now one heal comes first, shared by both stops: the machine is restarted once, both
+    /// stops succeed, and there is no failure to record.
+    #[test]
+    fn quit_with_the_api_gone_heals_once_then_both_stops_succeed() {
+        let root = local_eval_root(
+            "openbot-quit-heals-first",
+            Some(local_eval_state::Ownership::Created),
+        );
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(root.clone());
+        let api = std::cell::Cell::new(false);
+        let restarts = std::cell::Cell::new(0);
+        let needs_api = |which: &str| {
+            if api.get() {
+                Ok(())
+            } else {
+                Err(format!("{which}: blocked, docker_unavailable"))
+            }
+        };
+        let (down, intelligence) = healed_once_before(
+            |_: &Path| {
+                restarts.set(restarts.get() + 1);
+                api.set(true);
+            },
+            |_: &Path| needs_api("compose down"),
+            |_: &Path| needs_api("local stop"),
+        );
+        let stopped =
+            exit_cleanup_reporting(&shell, &root, |_| Ok(0), down, intelligence, |_, _| {});
+        assert_eq!(restarts.get(), 1);
+        assert_eq!(stopped.lines(), Vec::<String>::new());
+
+        // OpenBot already stopped, as on D: the back end's stop still comes after the heal.
+        api.set(false);
+        restarts.set(0);
+        let (down, intelligence) = healed_once_before(
+            |_: &Path| {
+                restarts.set(restarts.get() + 1);
+                api.set(true);
+            },
+            |_: &Path| Ok(()),
+            |_: &Path| needs_api("local stop"),
+        );
+        let stopped =
+            exit_cleanup_reporting(&shell, &root, |_| Ok(0), down, intelligence, |_, _| {});
+        assert_eq!(restarts.get(), 1);
+        assert_eq!(stopped.lines(), Vec::<String>::new());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn quit_marks_failed_rows_and_still_records_each_failure_in_the_notice() {
         let root = local_eval_root(
@@ -13600,7 +15046,7 @@ mod tests {
             stopped,
             Stopped {
                 openbot: vec!["Compose down failed: compose down refused".into()],
-                intelligence: Some("Back end stop failed: the CLI timed out".into()),
+                intelligence: Some("Backend stop failed: the CLI timed out".into()),
             }
         );
         report_exit_cleanup_failures(stopped.lines(), |lines| {
@@ -13810,7 +15256,7 @@ mod tests {
         assert!(stopped.openbot.is_empty(), "{stopped:?}");
         assert_eq!(
             stopped.into_result(),
-            Err("Back end stop failed: the CLI timed out".into()),
+            Err("Backend stop failed: the CLI timed out".into()),
             "an Intelligence failure is not a silent success"
         );
         assert!(!recovery_required(&shell, &active));
@@ -13828,10 +15274,7 @@ mod tests {
             |_| Ok(()),
             |_| Err("the CLI timed out".to_string()),
         );
-        assert_eq!(
-            failures.lines(),
-            ["Back end stop failed: the CLI timed out"]
-        );
+        assert_eq!(failures.lines(), ["Backend stop failed: the CLI timed out"]);
         assert!(!recovery_required(&shell, &active));
         let _ = std::fs::remove_dir_all(active);
     }
@@ -13899,22 +15342,22 @@ mod tests {
 
         assert_eq!(
             failed(Err(local_eval::Failure::Unavailable)),
-            "this build has no command-line tool to stop the back end OpenBot created"
+            "this build has no command-line tool to stop the backend OpenBot created"
         );
         assert_eq!(
             failed(Err(local_eval::Failure::Timeout)),
-            "the back end's command-line tool did not stop the back end (timeout)"
+            "the backend's command-line tool did not stop the backend (timeout)"
         );
         assert_eq!(
             failed(Ok(local_eval_report(
                 local_eval::Outcome::Blocked,
                 Some(local_eval::Reason::LocalCommandBusy)
             ))),
-            "the back end's command-line tool did not stop the back end (blocked: local-command-busy)"
+            "the backend's command-line tool did not stop the backend (blocked: local-command-busy)"
         );
         assert_eq!(
             failed(Ok(local_eval_report(local_eval::Outcome::Failed, None))),
-            "the back end's command-line tool did not stop the back end (failed)"
+            "the backend's command-line tool did not stop the backend (failed)"
         );
         let _ = std::fs::remove_dir_all(root);
     }
@@ -13940,7 +15383,7 @@ mod tests {
             failures.lines(),
             [
                 "Compose down failed: compose down refused",
-                "Back end stop failed: this build has no command-line tool to stop the back end \
+                "Backend stop failed: this build has no command-line tool to stop the backend \
                  OpenBot created"
             ]
         );
@@ -13948,7 +15391,7 @@ mod tests {
     }
 
     const NO_CLI_LINE: &str =
-        "Back end stop failed: this build has no command-line tool to stop the back end OpenBot created";
+        "Backend stop failed: this build has no command-line tool to stop the backend OpenBot created";
 
     #[test]
     fn an_intelligence_failure_on_quit_is_shown_next_launch_without_recovery() {
@@ -14218,12 +15661,22 @@ mod tests {
     }
 
     fn local_eval_completed(stack: &str) -> local_eval::Report {
+        local_eval_completed_for(stack, &[])
+    }
+
+    /// `local_eval_completed`, for a stack the CLI records for `folders` (`appPaths`).
+    fn local_eval_completed_for(stack: &str, folders: &[&Path]) -> local_eval::Report {
+        let app_paths: Vec<_> = folders
+            .iter()
+            .map(|folder| serde_json::json!({ "path": folder, "missing": false }))
+            .collect();
         let listing = serde_json::json!({
             "version": 1,
             "command": "local list",
             "status": "completed",
             "stacks": [{
                 "id": stack,
+                "appPaths": app_paths,
                 "installedRelease": "0.13.14",
                 "step": "ready",
                 "urls": {
@@ -14246,7 +15699,7 @@ mod tests {
         let report = set_up_local_eval_at(&root, |folder| {
             assert_eq!(folder, root.as_path(), "setup runs in the installation");
             Ok((
-                local_eval_completed("local-67db320bed3f3e893a4f8122"),
+                local_eval_completed_for("local-67db320bed3f3e893a4f8122", &[&root]),
                 LOCAL_EVAL_PIN.to_owned(),
             ))
         })
@@ -14289,7 +15742,7 @@ mod tests {
         );
         set_up_local_eval_at(&root, |_| {
             Ok((
-                local_eval_completed("local-abc123"),
+                local_eval_completed_for("local-abc123", &[&root]),
                 LOCAL_EVAL_PIN.to_owned(),
             ))
         })
@@ -14298,6 +15751,65 @@ mod tests {
             .unwrap()
             .tied_to_openbot());
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /**
+    A stack `local setup` reported that the CLI records for another folder is never OpenBot's.
+
+    Found with a CLI that resumed the stack someone set up in their home folder for `~/OpenBot`:
+    Desktop recorded it as one it created, so Stop and Quit would have stopped another app's
+    stack. It is kept as shared, even over an earlier record that called it OpenBot's, and a stack
+    recorded for OpenBot's folder alongside others is still OpenBot's.
+    */
+    #[test]
+    fn a_stack_recorded_for_another_folder_is_never_recorded_as_openbots() {
+        let home = temp_root("openbot-local-eval-setup-foreign");
+        let root = home.join("OpenBot");
+        std::fs::create_dir_all(&root).unwrap();
+        let foreign = local_eval_completed_for("local-abc123", &[&home]);
+        set_up_local_eval_at(&root, |_| Ok((foreign.clone(), LOCAL_EVAL_PIN.to_owned()))).unwrap();
+        let state = local_eval_state::read(&root, None).unwrap();
+        assert_eq!(state.stack, "local-abc123");
+        assert!(!state.tied_to_openbot());
+
+        // An earlier OpenBot recorded it as its own: setting up again takes that back.
+        local_eval_state::begin(
+            &root,
+            &local_eval::StackId::parse("local-abc123").unwrap(),
+            local_eval_state::Ownership::Created,
+            LOCAL_EVAL_PIN,
+        )
+        .unwrap();
+        set_up_local_eval_at(&root, |_| Ok((foreign, LOCAL_EVAL_PIN.to_owned()))).unwrap();
+        assert!(!local_eval_state::read(&root, None)
+            .unwrap()
+            .tied_to_openbot());
+
+        // A report that names no folder is not OpenBot's either.
+        set_up_local_eval_at(&root, |_| {
+            Ok((
+                local_eval_completed("local-abc123"),
+                LOCAL_EVAL_PIN.to_owned(),
+            ))
+        })
+        .unwrap();
+        assert!(!local_eval_state::read(&root, None)
+            .unwrap()
+            .tied_to_openbot());
+
+        // OpenBot's own folder among the stack's folders: OpenBot's.
+        local_eval_state::clear(&root).unwrap();
+        set_up_local_eval_at(&root, |_| {
+            Ok((
+                local_eval_completed_for("local-def456", &[&home, &root]),
+                LOCAL_EVAL_PIN.to_owned(),
+            ))
+        })
+        .unwrap();
+        let state = local_eval_state::read(&root, None).unwrap();
+        assert_eq!(state.stack, "local-def456");
+        assert!(state.tied_to_openbot());
+        let _ = std::fs::remove_dir_all(home);
     }
 
     #[test]
@@ -16599,6 +18111,285 @@ fn main() {
         app.state::<desktop_telemetry::DesktopTelemetry>().deliver();
         assert!(sink.next(std::time::Duration::from_secs(2)).is_none());
         let _ = std::fs::remove_dir_all(&cli.dir);
+    }
+
+    /// A CLI that finds a folder's stack as the CopilotKit CLI does: `.copilotkit/local.json` in the
+    /// folder it runs in, then in every folder above it, or with `--app-path <folder>` only in that
+    /// folder. `local setup` resumes the stack it finds, else the stack recorded for the folder, else
+    /// makes one for the folder; `local connect` writes the `.env` of the folder whose reference it
+    /// found. Its JSON is the CLI's, as it printed `local setup`, `local connect` and `local list` for
+    /// these stacks. Stacks are kept in `stacks` beside it, one per line: id, app folder, API port;
+    /// the gateway and dashboard ports follow the API's. Every call goes to `calls`.
+    #[cfg(unix)]
+    const FOLDER_CLI: &str = r##"
+use std::path::{Path, PathBuf};
+
+const MADE: &str = "local-eeeeeeeeeeeeeeeeeeeeeeee";
+
+fn main() {
+    let dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--warm") {
+        return;
+    }
+    let mut calls = std::fs::read_to_string(dir.join("calls")).unwrap_or_default();
+    calls.push_str(&args.join(" "));
+    calls.push('\n');
+    std::fs::write(dir.join("calls"), calls).unwrap();
+    let named = args
+        .iter()
+        .position(|arg| arg == "--app-path")
+        .map(|at| PathBuf::from(&args[at + 1]));
+    let folder = named
+        .clone()
+        .unwrap_or_else(|| std::env::current_dir().unwrap())
+        .canonicalize()
+        .unwrap();
+    let reference = folder
+        .ancestors()
+        .take(if named.is_some() { 1 } else { usize::MAX })
+        .find_map(|at| {
+            let text = std::fs::read_to_string(at.join(".copilotkit/local.json")).ok()?;
+            Some((at.to_path_buf(), field(&text, "stackId")))
+        });
+    let mut stacks: Vec<(String, PathBuf, u16)> = std::fs::read_to_string(dir.join("stacks"))
+        .unwrap_or_default()
+        .lines()
+        .map(|line| {
+            let parts: Vec<&str> = line.split('\t').collect();
+            (parts[0].to_owned(), PathBuf::from(parts[1]), parts[2].parse().unwrap())
+        })
+        .collect();
+    let described = |stacks: &[(String, PathBuf, u16)], id: &str| {
+        let (_, app, api) = stacks.iter().find(|stack| stack.0 == id).unwrap();
+        format!(
+            r#"{{"id":"{id}","appPaths":[{{"path":"{}","missing":false}}],"installedRelease":"0.16.0-rc.10","step":"ready","engine":"docker-desktop","urls":{{"api":"http://localhost:{api}","dashboard":"http://localhost:{}","gateway":"ws://localhost:{}"}},"failedStep":null,"update":null}}"#,
+            escaped(app),
+            api + 2,
+            api + 1
+        )
+    };
+    match args.get(1).map(String::as_str) {
+        Some("list") => {
+            let listed: Vec<String> = stacks.iter().map(|stack| described(&stacks, &stack.0)).collect();
+            println!(
+                r#"{{"version":1,"command":"local list","status":"completed","stacks":[{}],"nextAction":null,"error":null,"diagnostics":[]}}"#,
+                listed.join(",")
+            );
+        }
+        Some("setup") => {
+            let id = match reference {
+                Some((_, id)) => id,
+                None => {
+                    let id = match stacks.iter().find(|stack| stack.1 == folder) {
+                        Some(stack) => stack.0.clone(),
+                        None => {
+                            stacks.push((MADE.to_owned(), folder.clone(), 51796));
+                            let kept: Vec<String> = stacks
+                                .iter()
+                                .map(|(id, app, api)| format!("{id}\t{}\t{api}", app.display()))
+                                .collect();
+                            std::fs::write(dir.join("stacks"), kept.join("\n")).unwrap();
+                            MADE.to_owned()
+                        }
+                    };
+                    std::fs::create_dir_all(folder.join(".copilotkit")).unwrap();
+                    std::fs::write(
+                        folder.join(".copilotkit/local.json"),
+                        format!(r#"{{"stackId":"{id}","appPath":"{}"}}"#, escaped(&folder)),
+                    )
+                    .unwrap();
+                    id
+                }
+            };
+            println!(
+                r#"{{"version":1,"command":"local setup","status":"completed","stack":{},"learning":{{"configuration":"incomplete","verified":false}},"samples":null,"samplesError":null,"nextAction":{{"reason":"confirmation_required","summary":"The stack is ready. Review and approve this app connection separately.","instructions":["Run local connect to review the app settings that will change. Prior settings are saved privately before replacement.","Run npx --prefer-offline --yes https://pkg.pr.new/CopilotKit/Intelligence/copilotkit@f5c45eb local login --stack {id} to open the dashboard signed in."],"resumeCommand":"copilotkit local connect --approve-connection","url":null,"linkLabel":null,"linkFile":null,"caveats":[],"requiredEnvVars":[],"artifacts":[]}},"error":null,"diagnostics":[]}}"#,
+                described(&stacks, &id)
+            );
+        }
+        Some("connect") => {
+            let Some((at, id)) = reference else {
+                println!(r#"{{"version":1,"command":"local connect","status":"failed","error":{{"code":"LOCAL_COMMAND_FAILED","message":"No recorded local stack was found. Run `copilotkit local list` or start local setup."}},"nextAction":{{"reason":"local_command_failed","summary":"The local command did not finish. Check local status for the recorded failed step, then resume the command. No automatic rollback was requested.","instructions":[],"resumeCommand":"copilotkit local connect --json","url":null,"linkLabel":null,"linkFile":null,"caveats":[],"requiredEnvVars":[],"artifacts":[]}},"diagnostics":[]}}"#);
+                std::process::exit(1);
+            };
+            let api = stacks.iter().find(|stack| stack.0 == id).unwrap().2;
+            let written = [
+                format!("INTELLIGENCE_API_URL=http://localhost:{api}"),
+                format!("INTELLIGENCE_GATEWAY_WS_URL=ws://localhost:{}", api + 1),
+                format!("CPK_INTELLIGENCE_API_KEY=cpk-42_1111111111111111_{}", "e".repeat(64)),
+                "SL_ENABLED=true".to_owned(),
+            ];
+            let mut env: Vec<String> = std::fs::read_to_string(at.join(".env"))
+                .unwrap_or_default()
+                .lines()
+                .filter(|line| !written.iter().any(|set| set.split('=').next() == line.split('=').next()))
+                .map(str::to_owned)
+                .collect();
+            env.extend(written);
+            std::fs::write(at.join(".env"), env.join("\n") + "\n").unwrap();
+            println!(
+                r#"{{"version":1,"command":"local connect","status":"completed","stack":{},"conflicts":[],"nextAction":null,"error":null,"diagnostics":[]}}"#,
+                described(&stacks, &id)
+            );
+        }
+        _ => std::process::exit(3),
+    }
+}
+
+fn field(json: &str, name: &str) -> String {
+    let start = json.find(&format!("\"{name}\":\"")).unwrap() + name.len() + 4;
+    json[start..start + json[start..].find('"').unwrap()].to_owned()
+}
+
+fn escaped(path: &Path) -> String {
+    path.display().to_string().replace('\\', "\\\\").replace('"', "\\\"")
+}
+"##;
+
+    /**
+    Someone who once ran `copilotkit local setup` in their home folder, then started OpenBot
+    Desktop, which keeps its installation in `~/OpenBot`.
+
+    The CLI found `~/.copilotkit/local.json` above `~/OpenBot` and resumed the home folder's stack
+    for it; `local connect` then wrote the home folder's `.env`, and Start stopped with "The
+    connection settings do not match the backend that was set up". Desktop also recorded the home
+    folder's stack as one it created, so Stop and Quit would have stopped it.
+
+    Through the window's own `set_up_local_eval` and `connect_local_eval`, against a CLI that finds
+    stacks as the real one does: OpenBot passes `--app-path`, gets a stack of its own, recorded as
+    its own, `~/OpenBot/.env` names it, and Start takes its key. The home folder's stack, reference
+    and `.env` are left alone.
+    */
+    #[cfg(unix)]
+    #[test]
+    fn a_backend_set_up_in_a_folder_above_openbots_never_becomes_openbots() {
+        if crate::test_support::isolated_process(
+            "tests::a_backend_set_up_in_a_folder_above_openbots_never_becomes_openbots",
+        ) {
+            return;
+        }
+        const HOME_STACK: &str = "local-dddddddddddddddddddddddd";
+        const OPENBOT_STACK: &str = "local-eeeeeeeeeeeeeeeeeeeeeeee";
+        let empty = temp_root("openbot-parent-stack-path");
+        std::fs::create_dir_all(&empty).unwrap();
+        std::env::set_var("PATH", &empty);
+        let cli = temp_root("openbot-parent-stack-cli");
+        std::fs::create_dir_all(&cli).unwrap();
+        std::fs::write(cli.join("cli.rs"), FOLDER_CLI).unwrap();
+        let program = cli.join("cli");
+        crate::test_support::compile_fixture(&cli.join("cli.rs"), &program);
+        assert!(std::process::Command::new(&program)
+            .arg("--warm")
+            .status()
+            .unwrap()
+            .success());
+        use sha2::Digest;
+        let digest: String = sha2::Sha256::digest(std::fs::read(&program).unwrap())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_PROGRAM", &program);
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_PROGRAM_SHA256", digest);
+        std::env::remove_var("OPENBOT_DEV_LOCAL_EVAL_ENTRY");
+
+        // The home folder, where `copilotkit local setup` once ran, and OpenBot's folder in it.
+        let home = temp_root("openbot-parent-stack-home");
+        std::fs::create_dir_all(home.join(".copilotkit")).unwrap();
+        let home = home.canonicalize().unwrap();
+        std::env::set_var("HOME", &home);
+        std::env::remove_var("XDG_CONFIG_HOME");
+        let reference = format!(
+            r#"{{"stackId":"{HOME_STACK}","appPath":"{}"}}"#,
+            home.display()
+        );
+        std::fs::write(home.join(".copilotkit/local.json"), &reference).unwrap();
+        std::fs::write(
+            cli.join("stacks"),
+            format!("{HOME_STACK}\t{}\t52796", home.display()),
+        )
+        .unwrap();
+        let root = home.join("OpenBot");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(".env"),
+            "INTELLIGENCE_API_URL=https://hosted.example\nSERVER_PORT=3001\n",
+        )
+        .unwrap();
+
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .manage(desktop_telemetry::DesktopTelemetry::for_tests(
+                temp_root("openbot-parent-stack-telemetry"),
+                false,
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let calls = || std::fs::read_to_string(cli.join("calls")).unwrap_or_default();
+
+        let report = tauri::async_runtime::block_on(set_up_local_eval(
+            app.handle().clone(),
+            "openbot-parent-stack-setup".into(),
+            root.display().to_string(),
+            None,
+        ))
+        .unwrap_or_else(|error| panic!("{error:?}\n{}", calls()));
+        let stack = report.stack.as_ref().expect("setup reported its stack");
+        assert_eq!(stack.id, OPENBOT_STACK, "{}", calls());
+        assert!(stack.lists_folder(&root));
+        let state = local_eval_state::read(&root, None).unwrap();
+        assert_eq!(state.stack, OPENBOT_STACK);
+        assert!(state.tied_to_openbot());
+
+        let connection = tauri::async_runtime::block_on(connect_local_eval(
+            app.handle().clone(),
+            "openbot-parent-stack-connect".into(),
+            root.display().to_string(),
+        ))
+        .unwrap_or_else(|error| panic!("{error:?}\n{}", calls()));
+        assert_eq!(connection.outcome, local_eval::Outcome::Completed);
+        let env = std::fs::read_to_string(root.join(".env")).unwrap();
+        for line in [
+            "INTELLIGENCE_API_URL=http://127.0.0.1:51796",
+            "INTELLIGENCE_GATEWAY_WS_URL=ws://127.0.0.1:51797",
+            "SERVER_PORT=3001",
+        ] {
+            assert!(env.lines().any(|found| found == line), "{line}\n{env}");
+        }
+        assert!(!env.contains("CPK_INTELLIGENCE_API_KEY"), "{env}");
+        assert!(local_eval_state::read(&root, None).unwrap().connected);
+
+        // Start takes the key `local connect` gave OpenBot's own stack.
+        let key = intelligence_key_for_start(&root, |root, name| {
+            Ok(openbot_desktop_lib::vault::recall(root, name)?.unwrap_or_default())
+        })
+        .unwrap();
+        assert_eq!(key, format!("cpk-42_1111111111111111_{}", "e".repeat(64)));
+
+        // The home folder's stack is as it was.
+        assert!(!home.join(".env").exists());
+        assert_eq!(
+            std::fs::read_to_string(home.join(".copilotkit/local.json")).unwrap(),
+            reference
+        );
+        // Both calls name OpenBot's folder exactly.
+        assert!(
+            calls().contains(&format!(
+                "local setup --defer-model --json --app-path {}",
+                root.display()
+            )),
+            "{}",
+            calls()
+        );
+        assert!(
+            calls().contains(&format!(
+                "local connect --approve-connection --json --app-path {}",
+                root.display()
+            )),
+            "{}",
+            calls()
+        );
+        let _ = std::fs::remove_dir_all(&cli);
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     /// A CLI that answers each `local` command it is asked with what the pinned CLI (6bfaa0f)
