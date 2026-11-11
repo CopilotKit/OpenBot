@@ -45,6 +45,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { GoalSchedules } from "@/components/routines/goal-schedules";
 import { markdownComponents } from "@/lib/markdown";
+import { describeEvent, eventDetail } from "@/lib/routines/events";
 import { goalStarts } from "@/lib/routines/merged";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import {
@@ -59,7 +60,6 @@ import { queryClient } from "@/query-client";
 import { KIND_LABEL, Triggers } from "./triggers";
 
 type Status = ResponsibilityRecord["status"];
-type Source = ResponsibilityRecord["subscriptions"][number]["source"];
 
 /** A responsibility's state, as a word and as the mark its row leads with. */
 export const STATUS: Record<
@@ -69,19 +69,6 @@ export const STATUS: Record<
   active: { label: "Active", icon: IconTarget },
   paused: { label: "Paused", icon: IconPlayerPause },
   completed: { label: "Completed", icon: IconCircleCheck },
-};
-
-export const SOURCE_LABEL: Record<Source, string> = {
-  manual: "Manual",
-  slack: "Slack",
-  github: "GitHub",
-  schedule: "Schedule",
-  connector: "Connected app",
-  webhook: "Webhook",
-  linear: "Linear",
-  sentry: "Sentry",
-  pagerduty: "PagerDuty",
-  email: "Email",
 };
 
 /**
@@ -111,8 +98,7 @@ export function summaryFor(
       ?.filter((trigger) => trigger.enabled)
       .map((trigger) => `${KIND_LABEL[trigger.kind]} trigger`),
     routines,
-    (subscription) =>
-      `${SOURCE_LABEL[subscription.source]} ${subscription.eventType}`,
+    describeEvent,
   );
   if (starts === null) return status;
   return `${status} · ${starts === "When you ask" ? "Runs when asked" : starts}`;
@@ -388,12 +374,8 @@ export function ResponsibilityDialog({
                     <ItemContent>
                       <ItemTitle>Events</ItemTitle>
                       <ItemDescription className="line-clamp-none">
-                        {goal.subscriptions
-                          .map(
-                            (subscription) =>
-                              `${SOURCE_LABEL[subscription.source]} · ${subscription.eventType}`,
-                          )
-                          .join(", ")}
+                        {/* The words, then the exact identifier: this is where a person checks it. */}
+                        {goal.subscriptions.map(eventDetail).join(", ")}
                       </ItemDescription>
                     </ItemContent>
                   </Item>

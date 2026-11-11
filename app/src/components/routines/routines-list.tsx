@@ -18,7 +18,6 @@ import {
 } from "@/components/layout/page-shell";
 import {
   ResponsibilityDialog,
-  SOURCE_LABEL,
   STATUS,
 } from "@/components/responsibilities/responsibility-dialog";
 import { KIND_LABEL } from "@/components/responsibilities/triggers";
@@ -49,6 +48,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { describeEvent } from "@/lib/routines/events";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import { relativeTime } from "@/lib/relative-time";
 import {
@@ -464,8 +464,7 @@ function GoalItem({
             ?.filter((trigger) => trigger.enabled)
             .map((trigger) => `${KIND_LABEL[trigger.kind]} trigger`),
           routines,
-          (subscription) =>
-            `${SOURCE_LABEL[subscription.source]} ${subscription.eventType}`,
+          describeEvent,
         )
       : null;
   const line = [
