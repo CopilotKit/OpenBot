@@ -53,6 +53,7 @@ import {
   recordSetupEvent,
   type SetupStep,
 } from "./telemetry";
+import { UsageDataChoice } from "./UsageDataChoice";
 import { Welcome } from "./Welcome";
 import { type Blocker, WindowsBlocker, WindowsRestart } from "./WindowsBlocker";
 
@@ -104,6 +105,10 @@ function comeForward(why: string) {
  * 54 px up and 139 px taller on "Connect your AI". A step taller than the window scrolls inside its
  * card instead (`main > .sheet` in styles.css).
  */
+/** The restart screen's words when setup found that only a Windows restart lets it carry on. */
+const SETUP_NEEDS_RESTART =
+  "Windows needs to restart to finish setting up the software OpenBot runs on. OpenBot opens again after you sign back in.";
+
 export function App() {
   return <Setup />;
 }
@@ -112,6 +117,8 @@ function Setup() {
   const [blocker, setBlocker] = useState<Blocker | null>(null);
   // A Windows fix made earlier that only counts once Windows has restarted, and it has not.
   const [restartPending, setRestartPending] = useState(false);
+  // Said on the restart screen when setup, not a Windows feature, is what needs the restart.
+  const [restartLede, setRestartLede] = useState<string | undefined>();
   const [blockerFailure, setBlockerFailure] = useState<Problem | null>(null);
   const [instruction, setInstruction] = useState("");
   const [root, setRoot] = useState("");
@@ -232,6 +239,11 @@ function Setup() {
     // Start was refused until Install runs again: an earlier app's deployment this app cannot
     // start. Install does that by itself, as the person would otherwise be told to.
     if (problem.connection === "installation") setReinstall(true);
+    // Only a Windows restart fixes this one: the restart screen, not a Try again that can't work.
+    if (problem.restart_windows) {
+      setRestartLede(SETUP_NEEDS_RESTART);
+      setRestartPending(true);
+    }
   }, []);
   const [reinstall, setReinstall] = useState(false);
   // A local Intelligence stack OpenBot could not stop. Shown, but it never holds a start.
@@ -488,6 +500,11 @@ function Setup() {
       setSteps((current) => settleProgress(current, problem));
       setPreparation({ key: installationKey, status: "failed" });
       setFailure(problem);
+      // Only a Windows restart fixes this one: the restart screen, not a Try again that can't work.
+      if (problem.restart_windows) {
+        setRestartLede(SETUP_NEEDS_RESTART);
+        setRestartPending(true);
+      }
       // The failure is the person's to act on, wherever they went while it installed.
       comeForward("the installation failed");
       return false;
@@ -822,7 +839,7 @@ function Setup() {
     );
   }
 
-  if (restartPending) return <WindowsRestart />;
+  if (restartPending) return <WindowsRestart lede={restartLede} />;
 
   if (blocker) {
     return (
@@ -964,13 +981,12 @@ function Setup() {
           pauseOffer={pauseOffer}
           // No slot once the install has failed: its failure is in the card, and nothing will
           // come into the slot until the person starts it again.
+          // The step says what the rest of the install waits on: it knows whether the person is
+          // signed in.
           behind={
             preparation?.status === "failed"
               ? undefined
-              : behind({
-                  waitingFor:
-                    "The rest of the install starts after you sign in and accept the license agreement.",
-                })
+              : (waitingFor) => behind({ waitingFor })
           }
           onDone={(acceptedVersion) => {
             if (acceptedVersion) local.acceptTerms(acceptedVersion);
@@ -1110,7 +1126,10 @@ function Setup() {
           <h1>{localStarting ? "Starting OpenBot" : "OpenBot is stopped"}</h1>
           <p className="lede">
             {localStarting
-              ? "OpenBot is getting ready and opens by itself. This usually takes a minute or two."
+              ? // No time of its own: the card under it says how long is left, from how long each
+                // part takes. "This usually takes a minute or two" sat over "About 3 minutes left"
+                // on Windows G, and the start took four.
+                "OpenBot is getting ready and opens by itself."
               : "Your installation and saved connections are ready to reopen."}
           </p>
           <LocalIntelligence
@@ -1179,6 +1198,29 @@ function Setup() {
     return (
       <main>
         <div className="sheet connection-sheet">
+          {!returningToInstallation && <Sections at="Start" />}
+          {/* Not "Getting ready" over a "Getting OpenBot ready" row: Windows F read them as one. */}
+          <h1>Finishing setup</h1>
+          <p className="lede">
+            {leftoverVolumes.length > 0
+              ? "OpenBot starts once you choose what happens to the data a previous installation left."
+              : "OpenBot is setting up on this computer and starts by itself when it’s ready. This can take a few minutes."}
+          </p>
+          <LocalIntelligence
+            sequence={local}
+            offerStart
+            handOff={handOff}
+            open={steps}
+            releaseDue={releaseDue}
+            // A choice for the person, not a failure: the step waits on it, with no Retry.
+            waitingOn={
+              leftoverVolumes.length > 0
+                ? "Choose below what happens to the previous installation’s data."
+                : null
+            }
+          />
+          {/* In the card under its rows, as every other choice the step waits on. On Windows F it
+              sat above the card's own header and pushed "Finishing setup" down 300 px. */}
           {leftoverVolumes.length > 0 && (
             <StartFresh
               key={`${root}:${leftoverVolumes.join(",")}:${leftoverContainers.join(",")}`}
@@ -1189,20 +1231,6 @@ function Setup() {
               onStartFresh={startFresh}
             />
           )}
-          {!returningToInstallation && <Sections at="Start" />}
-          {/* Not "Getting ready" over a "Getting OpenBot ready" row: Windows F read them as one. */}
-          <h1>Finishing setup</h1>
-          <p className="lede">
-            OpenBot is setting up on this computer and starts by itself when
-            it’s ready. This can take a few minutes.
-          </p>
-          <LocalIntelligence
-            sequence={local}
-            offerStart
-            handOff={handOff}
-            open={steps}
-            releaseDue={releaseDue}
-          />
           {goAhead && <PodmanGoAhead asking={goAhead} />}
           {pauseCard}
           {updatingLine}
@@ -1225,6 +1253,8 @@ function Setup() {
               </button>
             </div>
           )}
+          {/* The last thing setup asks, at the foot of its last screen: whether to share usage data. */}
+          {!returningToInstallation && <UsageDataChoice />}
         </div>
       </main>
     );

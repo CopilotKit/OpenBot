@@ -860,9 +860,15 @@ export function LocalIntelligence({
   handOff = null,
   open = [],
   releaseDue = false,
+  waitingOn = null,
 }: {
   sequence: LocalSequence;
   offerStart?: boolean;
+  /**
+   * What the person has to choose before the sequence can go on, when it stopped for that: its
+   * row waits on them, with no Failed and no Retry (leftover data, `StartFresh`).
+   */
+  waitingOn?: string | null;
   /** Start updates OpenBot itself (`upgrade_due`): the journey counts it from the start. */
   releaseDue?: boolean;
   /** What Docker Desktop's window may want while the engine wakes: see `handOffNow`. */
@@ -886,7 +892,11 @@ export function LocalIntelligence({
             }
           : row,
       )
-    : sequence.steps;
+    : waitingOn && stopped
+      ? sequence.steps.map((row) =>
+          row.ok ? row : { ...row, ok: true, waiting: true, detail: waitingOn },
+        )
+      : sequence.steps;
 
   return (
     <section aria-label="OpenBot on this computer">
@@ -901,14 +911,24 @@ export function LocalIntelligence({
       <SetupProgress steps={rows} showElapsed={!journeying} />
       {handOff && !journeying && <StatusLine>{handOff}</StatusLine>}
       <LocalNeeds sequence={sequence} />
-      {stopped && problem && <Failure problem={problem} />}
+      {stopped && problem && !waitingOn && <Failure problem={problem} />}
       <div className="row">
         {running && at !== "start" && (
           <button type="button" className="quiet" onClick={sequence.cancel}>
             Cancel
           </button>
         )}
-        {stopped && (
+        {/* Cancel stops the setup's own calls. The last step is OpenBot starting, or updating and
+            starting, which can't be stopped partway. Said where Cancel was, in its height: on
+            Windows G Cancel went at step 4 and the card shrank under the rows. */}
+        {running && at === "start" && (
+          <p className="cannot-cancel">
+            {releasing || releaseDue
+              ? "You can't cancel this last step. Stopping it partway could leave the update half done."
+              : "You can't cancel this last step. Stopping it partway could leave OpenBot half started."}
+          </p>
+        )}
+        {stopped && !waitingOn && (
           <button type="button" onClick={sequence.retry}>
             Retry
           </button>

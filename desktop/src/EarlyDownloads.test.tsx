@@ -107,7 +107,7 @@ test("the big downloads start when the first screen shows, before Install is cli
   await act(async () => {
     view = render(<App />);
   });
-  await view.findByRole("heading", { name: "Set up OpenBot" });
+  await view.findByRole("heading", { name: "Set up OpenBot (self-contained)" });
 
   // Nothing was clicked: the first screen alone started them, for the installation's folder.
   expect(called("start_early_downloads")).toEqual([
@@ -140,7 +140,8 @@ test("the big downloads start when the first screen shows, before Install is cli
   // Install moves on to the CopilotKit sign-in. The row for what is installing in the background
   // carries the download on, in the same words, and its bar goes on from where it was.
   await userEvent.click(view.getByRole("button", { name: "Install" }));
-  await view.findByRole("heading", { name: "Self-contained OpenBot" });
+  // The account step, checking the sign-in, which here never answers.
+  await view.findByRole("heading", { name: "Your OpenBot account" });
   const account = { ...welcome, bytes: 2.0 * GB };
   await said(account);
   await steadied(account);
@@ -164,7 +165,7 @@ test("a disk too full to download to is said plainly, with what is free and what
   await act(async () => {
     view = render(<App />);
   });
-  await view.findByRole("heading", { name: "Set up OpenBot" });
+  await view.findByRole("heading", { name: "Set up OpenBot (self-contained)" });
   await said({
     state: "short",
     bytes: 0,
@@ -180,7 +181,7 @@ test("a disk too full to download to is said plainly, with what is free and what
   expect(view.queryByRole("progressbar")).toBeNull();
 });
 
-test("the line says what is known, and only the first screen says when it is all downloaded", () => {
+test("the line says what is known, and nothing once it is all downloaded", () => {
   const downloading = {
     state: "downloading" as const,
     bytes: GB,
@@ -196,8 +197,9 @@ test("the line says what is known, and only the first screen says when it is all
   expect(
     earlyDownloadsSaid(downloading, false, { left: null, slow: true }),
   ).toBe("Downloading OpenBot. Taking longer than usual, still working.");
+  // Done says nothing, on the first screen too: Install is the next step either way.
   expect(earlyDownloadsSaid({ state: "done", bytes: GB, size: GB }, true)).toBe(
-    "OpenBot is downloaded and ready to install.",
+    null,
   );
   expect(
     earlyDownloadsSaid({ state: "done", bytes: GB, size: GB }, false),

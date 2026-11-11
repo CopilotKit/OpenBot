@@ -175,6 +175,7 @@ impl Installation {
             disk,
             computer_free: &|| computer_free(&self.engine),
             limits: test_limits(),
+            keep_free: 0,
         };
         get_ready(&ahead, stop, &mut |done, total| seen.push((done, total)))
     }
@@ -435,4 +436,73 @@ fn a_disk_short_of_room_downloads_nothing() {
     let outcome = installation.get_ready(&|| None, &|| false, &mut seen);
     assert!(matches!(outcome, Outcome::Skipped(_)), "{outcome:?}");
     assert!(!installation.present(&installation.server_next));
+}
+
+/**
+An installation behind the app, which the next Start moves to the app's release (`behind`), with
+OpenBot not running, as during sign-in or the back end's setup. Its release's OpenBot images arrive
+only while the engine keeps the back end's 40 GiB free beside them, and then the update's own pull of
+them (`pull_metrics::pull_image`, as `upgrade` makes it) downloads nothing. On 2026-11-10 a Mac
+moving from v1.0.0 to v1.0.1 pulled them in the update, after 4.5 minutes of the back end's setup.
+*/
+#[test]
+#[ignore = "runs a privileged k3s node, a registry and a proxy on Docker"]
+fn an_installation_behind_gets_its_release_ready_before_the_update() {
+    const GIB: u64 = 1 << 30;
+    let installation = Installation::new("4m");
+    // OpenBot is not running.
+    assert!(docker(&["rm", "-f", &installation.running]).0);
+    let behind = |disk: &dyn Fn() -> Option<Disk>| {
+        let ahead = Ahead {
+            version: &installation.version,
+            list: &installation.list,
+            engine: &installation.engine,
+            installed: &installation.installed,
+            // The back end's setup pulls its own.
+            back_end: None,
+            disk,
+            computer_free: &|| None,
+            limits: test_limits(),
+            keep_free: crate::local_eval::MIN_ENGINE_FREE_DISK_BYTES,
+        };
+        get_ready(&ahead, &|| false, &mut |_, _| {})
+    };
+    let from = installation.lab.requests().len();
+
+    // Room for the back end's setup, not for the download beside it: nothing downloads. Well
+    // above the kubelet's 15% line, so it is the back end's 40 GiB that stops it.
+    let outcome = behind(&|| {
+        Some(Disk {
+            size: 100 * GIB,
+            free: 40 * GIB + 1_000_000,
+        })
+    });
+    let Outcome::Skipped(why) = outcome else {
+        panic!("{outcome:?}");
+    };
+    assert!(why.contains("the backend's setup needs"), "{why}");
+    assert!(!installation.present(&installation.server_next));
+    assert_eq!(installation.blobs_fetched(from), Vec::<String>::new());
+
+    // With room, the release's image of what it runs arrives, and not a Bot it never picked.
+    let outcome = behind(&|| {
+        Some(Disk {
+            size: 400 * GIB,
+            free: 300 * GIB,
+        })
+    });
+    assert_eq!(outcome, Outcome::Ready);
+    assert!(installation.present(&installation.server_next));
+    assert!(!installation.present(&installation.other_bot));
+
+    // The update's pull finds it there and downloads nothing.
+    let from = installation.lab.requests().len();
+    crate::pull_metrics::pull_image(
+        &installation.engine,
+        &installation.server_next,
+        |_| {},
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(installation.blobs_fetched(from), Vec::<String>::new());
 }
