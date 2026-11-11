@@ -98,10 +98,18 @@ export function describeEvent(subscription: {
   return `When ${withArticle(label)} event arrives`;
 }
 
-/** The same event for a goal's details: the words, and the exact identifier after them. */
+/** The exact identifier an event arrives with, after its source's name: "GitHub issues.opened". */
+export function eventIdentifier(subscription: {
+  source: Source;
+  eventType: string;
+}): string {
+  return `${EVENT_SOURCE_LABEL[subscription.source] ?? subscription.source} ${subscription.eventType}`;
+}
+
+/** The same event in one line: the words, and the exact identifier after them. */
 export function eventDetail(subscription: {
   source: Source;
   eventType: string;
 }): string {
-  return `${describeEvent(subscription)} (${EVENT_SOURCE_LABEL[subscription.source] ?? subscription.source} ${subscription.eventType})`;
+  return `${describeEvent(subscription)} (${eventIdentifier(subscription)})`;
 }

@@ -4,6 +4,7 @@ import {
   IconPlayerPause,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
 import { LoadingRows } from "@/components/layout/loading-rows";
 import {
@@ -11,10 +12,7 @@ import {
   PageRows,
   PageSection,
 } from "@/components/layout/page-shell";
-import {
-  ResponsibilityDialog,
-  STATUS,
-} from "@/components/responsibilities/responsibility-dialog";
+import { STATUS } from "@/components/responsibilities/goal-page";
 import { KIND_LABEL } from "@/components/responsibilities/triggers";
 import {
   SettingRow,
@@ -49,11 +47,7 @@ import {
   responsibilitiesQueryOptions,
   triggersQueryOptions,
 } from "@/lib/responsibilities";
-import {
-  goalStarts,
-  type MergedRoutine,
-  mergeRoutines,
-} from "@/lib/routines/merged";
+import { goalStarts, mergeRoutines } from "@/lib/routines/merged";
 import { deleteRoutineMutationOptions } from "@/lib/routines/mutations";
 import {
   nothingIsFiring,
@@ -136,23 +130,25 @@ function RoutineItem({
 /**
  * A goal's row: what it is (its title), when it starts (its schedules, events and triggers, or
  * when you ask), that it acts, and until when (its outcome). Its status and progress are on the
- * row. It opens the goal's dialog, where its schedules are switched and deleted too.
+ * row. It opens the goal's own page, where its schedules are switched and deleted too: a link, so
+ * it can be opened in a new tab and the back button returns to this list.
  *
- * A chevron rather than a Switch, although pausing is binary: the row opens a dialog, and a Switch
- * inside a row that is itself a button would be a control nested in a control.
+ * A chevron rather than a Switch, although pausing is binary: the row opens a page, and a Switch
+ * inside a row that is itself a link would be a control nested in a control.
  */
 function GoalItem({
   goal,
   routines,
   botName,
-  onOpen,
+  agentId,
 }: {
   goal: ResponsibilityRecord;
   /** Undefined when the routines read failed: its starts are then not known. */
   routines: readonly RoutineRecord[] | undefined;
   /** Absent on one Bot's own list. */
   botName?: string;
-  onOpen: () => void;
+  /** The Bot whose own list this is, so the goal's back link returns to it. */
+  agentId?: string;
 }) {
   const triggers = useQuery(triggersQueryOptions(goal.id));
   const Icon = STATUS[goal.status].icon;
@@ -179,7 +175,16 @@ function GoalItem({
     .filter(Boolean)
     .join(" · ");
   return (
-    <Item render={<button onClick={onOpen} type="button" />} size="sm">
+    <Item
+      render={
+        <Link
+          params={{ goalId: goal.id }}
+          search={agentId ? { agentId } : {}}
+          to="/routines/goals/$goalId"
+        />
+      }
+      size="sm"
+    >
       <ItemMedia variant="icon">
         <Icon />
       </ItemMedia>
@@ -250,8 +255,6 @@ export function RoutinesList({
   const [routineId, setRoutineId] = useState<string | null>(null);
   /** The routine a delete is being confirmed for, or null. Its own dialog rather than one per row. */
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
-  /** The goal whose dialog is open. Looked up from the query, so it follows every refetch. */
-  const [goalId, setGoalId] = useState<string | null>(null);
 
   const rows = mergeRoutines({
     routines: routines.data?.routines ?? [],
@@ -273,10 +276,6 @@ export function RoutinesList({
   // Gone once it is deleted, which closes its details with it.
   const openRoutine =
     routines.data?.routines.find((row) => row.id === routineId) ?? null;
-  const openGoal = rows.find(
-    (row): row is Extract<MergedRoutine, { kind: "goal" }> =>
-      row.kind === "goal" && row.id === goalId,
-  );
   const pending = routines.isPending || goals.isPending || checkIns.isPending;
   const failed = [
     routines.error ? "routines" : null,
@@ -344,8 +343,8 @@ export function RoutinesList({
                       ? (bots.get(row.agentId)?.name ?? "A Bot")
                       : undefined
                   }
+                  agentId={agentId}
                   goal={row.goal}
-                  onOpen={() => setGoalId(row.id)}
                   routines={routines.error ? undefined : row.routines}
                 />
               ) : (
@@ -379,15 +378,6 @@ export function RoutinesList({
             setConfirmingId(openRoutine.id);
           }}
           routine={openRoutine}
-        />
-      ) : null}
-
-      {openGoal ? (
-        <ResponsibilityDialog
-          goal={openGoal.goal}
-          key={openGoal.id}
-          onClose={() => setGoalId(null)}
-          routines={openGoal.routines}
         />
       ) : null}
 

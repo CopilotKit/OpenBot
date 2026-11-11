@@ -108,6 +108,7 @@ import { Route as AuthedAppBotsAgentIdSharingRouteImport } from './routes/_authe
 import { Route as AuthedAppBotsAgentIdSkillsRouteImport } from './routes/_authed/_app/bots.$agentId.skills'
 import { Route as AuthedAppConnectionsBrowseArcadeRouteImport } from './routes/_authed/_app/connections.browse.arcade'
 import { Route as AuthedAppConnectionsBrowseComposioRouteImport } from './routes/_authed/_app/connections.browse.composio'
+import { Route as AuthedAppRoutinesGoalsGoalIdRouteImport } from './routes/_authed/_app/routines_.goals.$goalId'
 import { Route as AuthedSettingsPersonalPluginsSplatRouteImport } from './routes/_authed/settings/_personal/plugins.$'
 import { Route as AuthedSettingsPersonalSkillsSlugRouteImport } from './routes/_authed/settings/_personal/skills_.$slug'
 import { Route as AuthedSettingsPersonalSkillsNewRouteImport } from './routes/_authed/settings/_personal/skills_.new'
@@ -650,6 +651,12 @@ const AuthedAppConnectionsBrowseComposioRoute =
     path: '/connections/browse/composio',
     getParentRoute: () => AuthedAppRoute,
   } as any)
+const AuthedAppRoutinesGoalsGoalIdRoute =
+  AuthedAppRoutinesGoalsGoalIdRouteImport.update({
+    id: '/routines_/goals/$goalId',
+    path: '/routines/goals/$goalId',
+    getParentRoute: () => AuthedAppRoute,
+  } as any)
 const AuthedSettingsPersonalPluginsSplatRoute =
   AuthedSettingsPersonalPluginsSplatRouteImport.update({
     id: '/plugins/$',
@@ -795,6 +802,7 @@ export interface FileRoutesByFullPath {
   '/bots/$agentId/skills': typeof AuthedAppBotsAgentIdSkillsRoute
   '/connections/browse/arcade': typeof AuthedAppConnectionsBrowseArcadeRoute
   '/connections/browse/composio': typeof AuthedAppConnectionsBrowseComposioRoute
+  '/routines/goals/$goalId': typeof AuthedAppRoutinesGoalsGoalIdRoute
   '/settings/plugins/$': typeof AuthedSettingsPersonalPluginsSplatRoute
   '/settings/skills/$slug': typeof AuthedSettingsPersonalSkillsSlugRoute
   '/settings/skills/new': typeof AuthedSettingsPersonalSkillsNewRoute
@@ -899,6 +907,7 @@ export interface FileRoutesByTo {
   '/bots/$agentId/skills': typeof AuthedAppBotsAgentIdSkillsRoute
   '/connections/browse/arcade': typeof AuthedAppConnectionsBrowseArcadeRoute
   '/connections/browse/composio': typeof AuthedAppConnectionsBrowseComposioRoute
+  '/routines/goals/$goalId': typeof AuthedAppRoutinesGoalsGoalIdRoute
   '/settings/plugins/$': typeof AuthedSettingsPersonalPluginsSplatRoute
   '/settings/skills/$slug': typeof AuthedSettingsPersonalSkillsSlugRoute
   '/settings/skills/new': typeof AuthedSettingsPersonalSkillsNewRoute
@@ -1009,6 +1018,7 @@ export interface FileRoutesById {
   '/_authed/_app/bots/$agentId/skills': typeof AuthedAppBotsAgentIdSkillsRoute
   '/_authed/_app/connections/browse/arcade': typeof AuthedAppConnectionsBrowseArcadeRoute
   '/_authed/_app/connections/browse/composio': typeof AuthedAppConnectionsBrowseComposioRoute
+  '/_authed/_app/routines_/goals/$goalId': typeof AuthedAppRoutinesGoalsGoalIdRoute
   '/_authed/settings/_personal/plugins/$': typeof AuthedSettingsPersonalPluginsSplatRoute
   '/_authed/settings/_personal/skills_/$slug': typeof AuthedSettingsPersonalSkillsSlugRoute
   '/_authed/settings/_personal/skills_/new': typeof AuthedSettingsPersonalSkillsNewRoute
@@ -1117,6 +1127,7 @@ export interface FileRouteTypes {
     | '/bots/$agentId/skills'
     | '/connections/browse/arcade'
     | '/connections/browse/composio'
+    | '/routines/goals/$goalId'
     | '/settings/plugins/$'
     | '/settings/skills/$slug'
     | '/settings/skills/new'
@@ -1221,6 +1232,7 @@ export interface FileRouteTypes {
     | '/bots/$agentId/skills'
     | '/connections/browse/arcade'
     | '/connections/browse/composio'
+    | '/routines/goals/$goalId'
     | '/settings/plugins/$'
     | '/settings/skills/$slug'
     | '/settings/skills/new'
@@ -1330,6 +1342,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/bots/$agentId/skills'
     | '/_authed/_app/connections/browse/arcade'
     | '/_authed/_app/connections/browse/composio'
+    | '/_authed/_app/routines_/goals/$goalId'
     | '/_authed/settings/_personal/plugins/$'
     | '/_authed/settings/_personal/skills_/$slug'
     | '/_authed/settings/_personal/skills_/new'
@@ -2041,6 +2054,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAppConnectionsBrowseComposioRouteImport
       parentRoute: typeof AuthedAppRoute
     }
+    '/_authed/_app/routines_/goals/$goalId': {
+      id: '/_authed/_app/routines_/goals/$goalId'
+      path: '/routines/goals/$goalId'
+      fullPath: '/routines/goals/$goalId'
+      preLoaderRoute: typeof AuthedAppRoutinesGoalsGoalIdRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
     '/_authed/settings/_personal/plugins/$': {
       id: '/_authed/settings/_personal/plugins/$'
       path: '/plugins/$'
@@ -2289,6 +2309,7 @@ interface AuthedAppRouteChildren {
   AuthedAppBotsAgentIdSkillsRoute: typeof AuthedAppBotsAgentIdSkillsRoute
   AuthedAppConnectionsBrowseArcadeRoute: typeof AuthedAppConnectionsBrowseArcadeRoute
   AuthedAppConnectionsBrowseComposioRoute: typeof AuthedAppConnectionsBrowseComposioRoute
+  AuthedAppRoutinesGoalsGoalIdRoute: typeof AuthedAppRoutinesGoalsGoalIdRoute
   AuthedAppBotsAgentIdIndexRoute: typeof AuthedAppBotsAgentIdIndexRoute
   AuthedAppConnectionsKeyBotsAgentIdRoute: typeof AuthedAppConnectionsKeyBotsAgentIdRoute
   AuthedAppConnectionsKeyToolsToolRoute: typeof AuthedAppConnectionsKeyToolsToolRoute
@@ -2337,6 +2358,7 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppConnectionsBrowseArcadeRoute: AuthedAppConnectionsBrowseArcadeRoute,
   AuthedAppConnectionsBrowseComposioRoute:
     AuthedAppConnectionsBrowseComposioRoute,
+  AuthedAppRoutinesGoalsGoalIdRoute: AuthedAppRoutinesGoalsGoalIdRoute,
   AuthedAppBotsAgentIdIndexRoute: AuthedAppBotsAgentIdIndexRoute,
   AuthedAppConnectionsKeyBotsAgentIdRoute:
     AuthedAppConnectionsKeyBotsAgentIdRoute,

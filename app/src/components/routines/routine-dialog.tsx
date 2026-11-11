@@ -266,7 +266,7 @@ export function RoutineDialog({
               : "Paused. Nothing starts it until you turn it on."}
           </DialogDescription>
         </DialogHeader>
-        {/* Each section keeps its height and the body scrolls, as the goal's dialog does. */}
+        {/* Each section keeps its height and the body scrolls: a rounded section would otherwise shrink and clip. */}
         <DialogBody className="mt-4 overflow-y-auto [&>*]:shrink-0">
           <div className="overflow-hidden rounded-lg">
             <Item size="sm" variant="muted">

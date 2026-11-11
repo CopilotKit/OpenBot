@@ -185,7 +185,7 @@ test("only this Bot's goals are listed, each as a goal with its outcome", async 
   serving();
   const view = draw();
   const title = await view.findByText("Reconcile receipts");
-  const row = title.closest("button") as HTMLElement;
+  const row = title.closest("a, button") as HTMLElement;
   expect(within(row).getByText("Goal")).toBeTruthy();
   expect(
     within(row).getByText("Until: The receipts match the bank."),
@@ -211,7 +211,7 @@ test("a routine, a goal and a check-in are one list, each in four parts", async 
   // A check-in: what it watches, how often, and that it only tells you.
   const checkInRow = view
     .getByText("The launch brief")
-    .closest("button") as HTMLElement;
+    .closest("a, button") as HTMLElement;
   expect(within(checkInRow).getByText("Check-in")).toBeTruthy();
   expect(checkInRow.textContent).toContain("Once a day · Tells you");
   // One list: no heading names a kind.
@@ -230,7 +230,7 @@ test("a routine that runs a goal is one of that goal's starts, not a row of its 
   });
   const view = draw();
   const row = (await view.findByText("Reconcile receipts")).closest(
-    "button",
+    "a, button",
   ) as HTMLElement;
   expect(row.textContent).toContain("Every day at 08:00");
   expect(view.queryByText("Run the goal.")).toBeNull();
@@ -250,7 +250,7 @@ test("a goal's row claims no start when routines couldn't be read", async () => 
   serving({ routinesFail: true });
   const view = draw();
   const row = (await view.findByText("Reconcile receipts")).closest(
-    "button",
+    "a, button",
   ) as HTMLElement;
   await view.findByText("Couldn't load your routines. Reload the page.");
   expect(row.textContent).not.toContain("When you ask");
@@ -354,19 +354,33 @@ test("while the list loads it draws the list's shape, never the empty state", as
   ).toBeNull();
 });
 
+test("a goal's row is a link to the goal's own page, back to the Bot's list it came from", async () => {
+  serving();
+  const view = draw();
+  const row = (await view.findByText("Reconcile receipts")).closest(
+    "a",
+  ) as HTMLAnchorElement;
+  expect(row).not.toBeNull();
+  const href = new URL(row.href, "http://localhost");
+  expect(href.pathname).toMatch(/^\/routines\/goals\/[^/]+$/);
+  expect(href.searchParams.get("agentId")).toBe("expenses");
+  // A page, not a dialog over the list.
+  expect(within(document.body).queryByRole("dialog")).toBeNull();
+});
+
 /*
  * One row shape for every kind: a schedule opens its details as a goal and a check-in do, and
  * everything its row used to carry inline is there.
  */
 async function openSchedule(view: ReturnType<typeof draw>) {
   const row = (await view.findByText("Post the standup summary.")).closest(
-    "button",
+    "a, button",
   ) as HTMLElement;
   fireEvent.click(row);
   return within(document.body).findByRole("dialog");
 }
 
-test("every kind of row is one button with a chevron, with no control inside it", async () => {
+test("every kind of row is one link or button with a chevron, with no control inside it", async () => {
   serving({
     routines: [routine("r1", "expenses")],
     checkIns: [checkIn("c1", "expenses", "The launch brief")],
@@ -378,7 +392,7 @@ test("every kind of row is one button with a chevron, with no control inside it"
     "Reconcile receipts",
     "The launch brief",
   ]) {
-    const row = view.getByText(text).closest("button") as HTMLElement;
+    const row = view.getByText(text).closest("a, button") as HTMLElement;
     expect(row).not.toBeNull();
     expect(row.querySelector("button, a, input, [role=switch]")).toBeNull();
     expect(row.querySelector(".tabler-icon-chevron-right")).not.toBeNull();
@@ -493,12 +507,12 @@ test("a skipped last run is on the row, and a quiet success is not", async () =>
   });
   const view = draw();
   const skipped = (await view.findByText("Post the standup summary.")).closest(
-    "button",
+    "a, button",
   ) as HTMLElement;
   expect(within(skipped).getByText(/^Skipped /)).toBeTruthy();
   const quiet = view
     .getByText("Send the digest.")
-    .closest("button") as HTMLElement;
+    .closest("a, button") as HTMLElement;
   expect(within(quiet).queryByText(/^Ran /)).toBeNull();
 });
 

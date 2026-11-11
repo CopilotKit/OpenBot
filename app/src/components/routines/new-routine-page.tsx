@@ -178,8 +178,8 @@ const EVENT_SOURCE_LABEL: Record<RoutineEventSource, string> = {
   connector: "Connected app",
 };
 
-/** A Bot's Routines list, or every Bot's in Settings when there is no Bot. */
-function routinesOf(agentId: string | undefined) {
+/** The Routines list a page came from: one Bot's, or every Bot's. */
+export function routinesOf(agentId: string | undefined) {
   return agentId
     ? linkOptions({ to: "/bots/$agentId/routines", params: { agentId } })
     : linkOptions({ to: "/routines" });

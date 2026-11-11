@@ -16,7 +16,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { ResponsibilityDialog } from "@/components/responsibilities/responsibility-dialog";
+import { GoalPage } from "@/components/responsibilities/goal-page";
 import {
   type ResponsibilityRecord,
   triggersQueryOptions,
@@ -109,9 +109,9 @@ function open(
         getParentRoute: () => root,
         path: "/",
         component: () => (
-          <ResponsibilityDialog
+          <GoalPage
+            back={{ to: "/" }}
             goal={{ ...goal, ...overrides, status }}
-            onClose={() => {}}
             routines={routines}
           />
         ),
@@ -125,7 +125,7 @@ function open(
   );
 }
 
-/** Resolves once the goal's triggers request has been answered, so nothing below reads a half-loaded dialog. */
+/** Resolves once the goal's triggers request has been answered, so nothing below reads a half-loaded page. */
 async function triggersLoaded() {
   await waitFor(() =>
     expect(
@@ -270,7 +270,7 @@ test("a refused change is said under the schedules", async () => {
   );
 });
 
-test("every section of a long goal stays in the dialog's one scrolling body", async () => {
+test("a long goal is a page of sections, not a dialog, with nothing started by opening it", async () => {
   const view = open([routine()], "active", {
     progress: Array.from({ length: 12 }, (_, i) => `Step ${i + 1} done.`).join(
       "\n\n",
@@ -282,21 +282,26 @@ test("every section of a long goal stays in the dialog's one scrolling body", as
     ],
   });
   await triggersLoaded();
-  const body = view.baseElement.querySelector('[data-slot="dialog-body"]');
-  if (!body) throw new Error("no dialog body");
-  // Layout isn't measurable here. What clipped Run now and the last result was a rounded section
-  // shrinking inside the body's flex column, so each section must keep its own height.
-  expect(body.className).toContain("[&>*]:shrink-0");
-  for (const name of [/Run now/, /Complete/, /Open conversation/]) {
-    expect(body.contains(view.getAllByText(name)[0] ?? null)).toBe(true);
-  }
-  for (const label of ["Progress", "Last result", "Triggers", "Runs"]) {
-    expect(body.contains(view.getByText(label))).toBe(true);
-  }
-  expect(body.contains(view.getByLabelText("Title"))).toBe(true);
-  // The footer sits outside the body, so it is never scrolled away or painted over.
-  const save = view.getByRole("button", { name: "Save" });
-  expect(body.contains(save)).toBe(false);
+  // A dialog's scrolling body clipped its rounded sections on a short screen; a page has none.
+  expect(view.queryByRole("dialog")).toBeNull();
+  expect(view.getByRole("heading", { level: 1 }).textContent).toBe(
+    "Watch the queue",
+  );
+  expect(
+    view.getAllByRole("heading", { level: 2 }).map((h) => h.textContent),
+  ).toEqual([
+    "Details",
+    "Where it stands",
+    "Schedules",
+    "Events",
+    "Triggers",
+    "Runs",
+  ]);
+  for (const name of [/Run now/, /Complete/, /Open conversation/])
+    expect(view.getAllByText(name).length).toBeGreaterThan(0);
+  // Each event in words, with the identifier it arrives with under it.
+  expect(view.getByText("When a GitHub issue opens")).toBeTruthy();
+  expect(view.getByText("GitHub check_run.completed")).toBeTruthy();
   // Opening it starts nothing and saves nothing.
   expect(sent).toEqual([]);
 });
