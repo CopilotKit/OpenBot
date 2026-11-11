@@ -261,3 +261,57 @@ test("the uninstaller deletes the data only when it is not an update", () => {
   expect(remove).toContain('RmDir /r "$APPDATA\\${BUNDLEID}"');
   expect(remove).toContain('RmDir /r "$LOCALAPPDATA\\${BUNDLEID}"');
 });
+
+/**
+ * Box H: after an in-app update the new OpenBot opened behind the maximised Edge that Windows put in
+ * front as the old one closed, and Starting OpenBot ran there unseen for four minutes. Every OpenBot
+ * the installer starts, after an update (/R) and from its last page, is started the same way: the
+ * installer first passes on its right to bring a window to the front (AllowSetForegroundWindow with
+ * ASFW_ANY, -1), then starts OpenBot with the flag that has it come forward as its window first shows
+ * (STARTED_BY_INSTALLER in src-tauri/src/main.rs), added once to the arguments an update hands on.
+ */
+test("every OpenBot the installer starts may come to the front and is told the installer started it", () => {
+  expect(hooks()).toContain(
+    '!define OPENBOT_STARTED_BY_INSTALLER "--started-by-installer"',
+  );
+  const run = code(
+    between(hooks(), "!macro OPENBOT_RUN_AFTER_INSTALL args\n", "!macroend"),
+  );
+  const at = (line: string) => {
+    const index = run.indexOf(line);
+    expect(index).toBeGreaterThan(-1);
+    return index;
+  };
+  const allowed = at("System::Call 'user32::AllowSetForegroundWindow(i -1)'");
+  const given = at('StrCpy $OpenBotRunArgs "${args}"');
+  const looked = at(
+    '${StrLoc} $OpenBotFlagAt "$OpenBotRunArgs" "${OPENBOT_STARTED_BY_INSTALLER}" ">"',
+  );
+  const started = at(
+    'nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" "$OpenBotRunArgs"',
+  );
+  expect(allowed).toBeLessThan(started);
+  expect(given).toBeLessThan(looked);
+  expect(looked).toBeLessThan(started);
+  // Exactly one launch in the macro.
+  expect(run.filter((line) => line.includes("RunAsUser"))).toHaveLength(1);
+
+  // After an update: the arguments the updater handed on (/ARGS), then nothing of Tauri's runs.
+  const success = code(
+    between(template(), "Function .onInstSuccess", "FunctionEnd"),
+  );
+  const handed = success.indexOf('${GetOptions} $CMDLINE "/ARGS" $R0');
+  expect(handed).toBeGreaterThan(-1);
+  expect(success.slice(handed + 1, handed + 3)).toEqual([
+    '!insertmacro OPENBOT_RUN_AFTER_INSTALL "$R0"',
+    "Return",
+  ]);
+  // From the last page: no arguments, then nothing of Tauri's runs.
+  const finish = code(
+    between(template(), "Function RunMainBinary", "FunctionEnd"),
+  );
+  expect(finish.slice(0, 2)).toEqual([
+    '!insertmacro OPENBOT_RUN_AFTER_INSTALL ""',
+    "Return",
+  ]);
+});

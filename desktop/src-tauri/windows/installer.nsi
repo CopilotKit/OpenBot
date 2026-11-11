@@ -19,6 +19,10 @@
 ; that left nothing on screen for minutes. No hook could change the page, and no setting changes
 ; what it runs. Uninstalling from Windows' Apps runs the uninstaller on its own and is unchanged, so
 ; the person can still delete the data there.
+;
+; And every OpenBot this installer starts, after an in-app update and from the last page, is started
+; by OPENBOT_RUN_AFTER_INSTALL (windows/hooks.nsh), so it comes to the front as its window first
+; shows rather than behind the window Windows put in front when the old version closed.
 ; <<< OpenBot
 Unicode true
 ManifestDPIAware true
@@ -454,6 +458,12 @@ Var AppStartMenuFolder
 !insertmacro MUI_PAGE_FINISH
 
 Function RunMainBinary
+  ; >>> OpenBot
+  ; Started as every OpenBot the installer starts: free to come to the front, and told the
+  ; installer started it (OPENBOT_RUN_AFTER_INSTALL in windows/hooks.nsh).
+  !insertmacro OPENBOT_RUN_AFTER_INSTALL ""
+  Return
+  ; <<< OpenBot
   nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
 FunctionEnd
 
@@ -785,6 +795,13 @@ Function .onInstSuccess
     ${GetOptions} $CMDLINE "/R" $R0
     ${IfNot} ${Errors}
       ${GetOptions} $CMDLINE "/ARGS" $R0
+      ; >>> OpenBot
+      ; After an in-app update: the new version, free to come to the front, and told the installer
+      ; started it (OPENBOT_RUN_AFTER_INSTALL in windows/hooks.nsh), with the arguments the updater
+      ; handed on.
+      !insertmacro OPENBOT_RUN_AFTER_INSTALL "$R0"
+      Return
+      ; <<< OpenBot
       nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" "$R0"
     ${EndIf}
   ${EndIf}
