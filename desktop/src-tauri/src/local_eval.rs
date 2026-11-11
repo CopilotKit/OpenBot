@@ -1895,6 +1895,10 @@ the CLI enforces that only at a first setup. After a call that failed, it is che
 back end's node asked whether it is short of disk, and anything short becomes the report's reason
 with its numbers, so the card names it and says where to raise or free it. A failure the CLI already
 named, or one OpenBot stopped, keeps its own words.
+
+On OpenBot's own machine on Windows, its dead port rules are cleared before the call, so the back end
+it starts is not reached through rules for its containers' addresses from before
+(`acquire::readied_for_backend`).
 */
 fn checked_call(
     command: &str,
@@ -1905,7 +1909,7 @@ fn checked_call(
         return call();
     };
     log_check(&format!("before {command}"), &EngineCheck::of(&address));
-    let result = call();
+    let result = crate::acquire::readied_for_backend(Some(&address), call);
     let unexplained = match &result {
         Ok(report) => {
             report.outcome == Outcome::Failed

@@ -4,7 +4,6 @@
     "id": "f13ce6464851cdd7e5e93114baabb3d6c75f14c1823a39bcb7828f8eeb76b455",
     "driver": "bridge",
     "network_interface": "podman3",
-    "created": "2026-11-10T22:30:41.118604552Z",
     "subnets": [
       {
         "subnet": "10.89.0.0/24",
@@ -179,7 +178,6 @@
     "id": "2f259bab93aaaaa2542ba43ef33eb990d0999ee1b9924b557b7be53c0b7a1bb9",
     "driver": "bridge",
     "network_interface": "podman0",
-    "created": "2026-11-10T22:23:40.402118734Z",
     "subnets": [
       {
         "subnet": "10.88.0.0/16",

@@ -677,6 +677,32 @@ fn saying_once<N>(
     }
 }
 
+/**
+OpenBot's own machine readied for the back end, then `start`: the call that starts it (`local start`
+or `local update`), or nothing, when OpenBot is only about to ask it (a relaunch's wake).
+
+OpenBot uses machines it did not start: one Quit left running, or that an older OpenBot, a crash or
+a kill left behind, with the port rules of containers from before still ahead of the ones the back
+end's start makes. On the Windows test machine, `local start` then waited 4m50s on 127.0.0.1:55059
+and gave up, the k3d rules for an address from before ahead of the live one. So OpenBot's dead port
+rules are cleared first, on Windows and on OpenBot's own machine only. See `netavark_rules`.
+*/
+pub fn readied_for_backend<T>(address: Option<&Address>, start: impl FnOnce() -> T) -> T {
+    readied_for_backend_with(address, podman, cfg!(target_os = "windows"), start)
+}
+
+fn readied_for_backend_with<T>(
+    address: Option<&Address>,
+    mut run: impl FnMut(&[&str]) -> Result<String, String>,
+    target_is_windows: bool,
+    start: impl FnOnce() -> T,
+) -> T {
+    if address.is_some_and(|address| owned_windows_podman_address(address, target_is_windows)) {
+        clear_dead_port_rules(&mut run);
+    }
+    start()
+}
+
 fn owned_windows_podman_address(address: &Address, target_is_windows: bool) -> bool {
     target_is_windows
         && address.engine == Engine::Podman
@@ -1977,6 +2003,13 @@ mod tests {
         include_str!("../test-fixtures/netavark-rules/podman-6.1.3-nftables.nft");
     const PODMAN_6_1_3_NETWORKS: &str =
         include_str!("../test-fixtures/netavark-rules/podman-6.1.3-nftables-inspect.json");
+    /// Machine D at the first launch of a build with the cleanup (D90 NV-12): left running by the
+    /// release before it, with nothing of OpenBot's running and every rule of its containers from
+    /// before still there, the k3d network's for `local start` among them. NV-12's own rules and
+    /// handles; the live k3d rules it also lists came after the wake, from `local start`.
+    const MACHINE_D_WAKE: &str = include_str!("../test-fixtures/netavark-rules/machine-d-wake.nft");
+    const MACHINE_D_WAKE_NETWORKS: &str =
+        include_str!("../test-fixtures/netavark-rules/machine-d-wake-inspect.json");
 
     /// OpenBot's WSL machine as `podman machine ssh` answers for it. A rule deleted by handle is
     /// gone from the listing, as nft does it, and one that is not there fails, as nft fails.
@@ -2251,6 +2284,64 @@ mod tests {
         assert!(started.ok, "{started:?}");
         assert_eq!(older.reads, 1);
         assert_eq!(older.listing, MACHINE_D);
+
+        // Readied for the back end, an engine that is not OpenBot's own machine is not touched:
+        // Docker, or a machine of the person's.
+        for address in [
+            Address::new(Engine::Docker, None),
+            Address::new(Engine::Podman, Some("podman-machine-default-root".into())),
+        ] {
+            let mut theirs = WslMachine::new(MACHINE_D_WAKE, MACHINE_D_WAKE_NETWORKS);
+            readied_for_backend_with(Some(&address), |args| theirs.run(args), true, || ());
+            assert_eq!(theirs.reads, 0, "{address:?}");
+        }
+    }
+
+    /// The gap machine D found (D90 NV-12): the release before left OpenBot's machine running, so
+    /// the next launch only woke it, nothing started it, and nothing cleared its dead rules. `local
+    /// start` then waited 4m50s on 127.0.0.1:55059 behind the k3d rules for 10.89.0.4 and gave up.
+    /// The back end's start is now readied first: the machine is not stopped or started, and when
+    /// `local start` runs, none of OpenBot's dead rules is left, the k3d network's included, while
+    /// the person's machine's rule on the shared default network stays.
+    #[test]
+    fn a_running_machine_openbot_did_not_start_loses_its_dead_port_rules_before_the_back_end_starts(
+    ) {
+        let machine =
+            std::cell::RefCell::new(WslMachine::new(MACHINE_D_WAKE, MACHINE_D_WAKE_NETWORKS));
+        let mut calls = Vec::<String>::new();
+        let address = Address::new(Engine::Podman, Some("openbot-root".into()));
+        let mut at_local_start = None;
+        readied_for_backend_with(
+            Some(&address),
+            |args: &[&str]| {
+                calls.push(args.join(" "));
+                machine.borrow_mut().run(args)
+            },
+            true,
+            || at_local_start = Some(machine.borrow().listing.clone()),
+        );
+
+        assert!(
+            !calls
+                .iter()
+                .any(|call| call.contains("machine start") || call.contains("machine stop")),
+            "{calls:#?}"
+        );
+        let at_local_start = at_local_start.expect("the back end was started");
+        for port in [55059, 55060, 55061, 55063, 3010, 3001, 4206, 4100, 5432] {
+            assert_eq!(reaches(&at_local_start, port), None, "127.0.0.1:{port}");
+        }
+        let ip = |address: &str| address.parse::<std::net::IpAddr>().unwrap();
+        assert_eq!(reaches(&at_local_start, 8081), Some(ip("10.88.0.2")));
+        let before = crate::netavark_rules::rules(MACHINE_D_WAKE);
+        let after = crate::netavark_rules::rules(&at_local_start);
+        let removed: Vec<u64> = before
+            .iter()
+            .filter(|rule| !after.contains(rule))
+            .map(|rule| rule.handle)
+            .collect();
+        // NV-12's eleven stale rules, by handle, and nothing else.
+        assert_eq!(removed, [111, 115, 127, 130, 86, 89, 92, 95, 107, 119, 122]);
     }
 
     /// The network check's own restart (`host_gateway_restarting_once`): OpenBot's machine's
