@@ -133,6 +133,9 @@ async function newKeyLeadsTo(edition: "team" | "personal") {
 test.each([
   ["personal", "/settings/vault/new"],
   ["team", "/settings/vault"],
-] as const)("/settings/credentials/new in the %s edition leads to %s", async (edition, to) => {
-  expect(await newKeyLeadsTo(edition)).toBe(to);
-});
+] as const)(
+  "/settings/credentials/new in the %s edition leads to %s",
+  async (edition, to) => {
+    expect(await newKeyLeadsTo(edition)).toBe(to);
+  },
+);

@@ -123,7 +123,10 @@ function renderPage(
 
 /** The page's description, under its title. */
 async function descriptionOf(view: ReturnType<typeof render>) {
-  const title = await view.findByRole("heading", { level: 1, name: "Computer" });
+  const title = await view.findByRole("heading", {
+    level: 1,
+    name: "Computer",
+  });
   return title.closest("header")?.textContent ?? "";
 }
 

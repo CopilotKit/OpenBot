@@ -163,9 +163,7 @@ test("Scheduled keeps the follow-ups and queued runs Routines doesn't list, with
     return fetchActivity(input, init);
   }) as typeof fetch;
 
-  expect(
-    await view.findByRole("heading", { name: "Scheduled" }),
-  ).toBeTruthy();
+  expect(await view.findByRole("heading", { name: "Scheduled" })).toBeTruthy();
   const followUpRow = view
     .getByText("Chase the invoice reply")
     .closest("[data-slot=item]") as HTMLElement;

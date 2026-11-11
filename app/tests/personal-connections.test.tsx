@@ -218,8 +218,8 @@ describe("Connections in the personal edition", () => {
     ).toBeTruthy();
     // Nothing is in use yet, so there is no Your apps.
     expect(view.queryByRole("heading", { name: "Your apps" })).toBeNull();
-    const add = view.getByRole("heading", { name: "Add an app" })
-      .parentElement?.parentElement as HTMLElement;
+    const add = view.getByRole("heading", { name: "Add an app" }).parentElement
+      ?.parentElement as HTMLElement;
     for (const key of ["notion", "exa", "google-drive", "exa-authenticated"])
       expect(within(add).getByTestId(`account-${key}`)).toBeTruthy();
     expect(within(tile(view, "notion")).getByText("Connect")).toBeTruthy();
@@ -234,15 +234,14 @@ describe("Connections in the personal edition", () => {
   test("apps in use are under Your apps, apart from the ones you could add", async () => {
     connected = ["notion"];
     const { view } = draw("personal");
-    const yours = (
-      await view.findByRole("heading", { name: "Your apps" })
-    ).parentElement?.parentElement as HTMLElement;
+    const yours = (await view.findByRole("heading", { name: "Your apps" }))
+      .parentElement?.parentElement as HTMLElement;
     await waitFor(() =>
       expect(within(yours).getByTestId("account-notion")).toBeTruthy(),
     );
     expect(within(yours).queryByTestId("account-exa")).toBeNull();
-    const add = view.getByRole("heading", { name: "Add an app" })
-      .parentElement?.parentElement as HTMLElement;
+    const add = view.getByRole("heading", { name: "Add an app" }).parentElement
+      ?.parentElement as HTMLElement;
     expect(within(add).queryByTestId("account-notion")).toBeNull();
     expect(within(add).getByTestId("account-exa")).toBeTruthy();
   });

@@ -250,9 +250,9 @@ test("nothing recording, or OpenBot unable to run a browser, puts nothing extra 
   const { view, queryClient } = renderSidebar();
   const footer = await footerOf(view);
   await waitFor(() =>
-    expect(
-      queryClient.getQueryState(["browser", "state"])?.status,
-    ).toBe("success"),
+    expect(queryClient.getQueryState(["browser", "state"])?.status).toBe(
+      "success",
+    ),
   );
   expect(dots(footer)).toEqual([]);
   expect(within(footer).getByRole("link", { name: "Skills" })).toBeTruthy();
