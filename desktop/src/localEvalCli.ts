@@ -245,6 +245,26 @@ export function setUpLocalEval(
 }
 
 /**
+ * While a setup waits for room on a drive that is short: that drive's shortfall now, or null once
+ * there is room (`local_eval::drive_short`). Null too when it can't say: the setup measures again.
+ */
+export function localEvalRoom(): Promise<Shortfall | null> {
+  return invoke<Shortfall | null>("local_eval_room").catch(() => null);
+}
+
+/**
+ * A setup the native side did not start, because the drive that holds the engine's disk is short
+ * of what OpenBot needs (`local_eval::checked_call`). Not a failure: it waits for room.
+ */
+export function heldForRoom(report: LocalReport): Shortfall | null {
+  return report.reason === "resources-short" &&
+    report.shortfall?.freeOnDrive === true &&
+    report.shortfall.disk
+    ? report.shortfall
+    : null;
+}
+
+/**
  * Signs in to CopilotKit, which local Intelligence needs for its evaluation licence. The CLI opens
  * the approval page in the browser; this settles once the person approved it there (true) or it
  * did not finish (false).

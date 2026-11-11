@@ -1252,6 +1252,12 @@ a:hover {
   min-height: 132px;
 }
 
+/* A row paused for room says what to free and offers Try again: it may be taller too. */
+.behind-slot:has(.step-action) {
+  height: auto;
+  min-height: 132px;
+}
+
 .behind-slot > .steps {
   margin-top: 0;
 }
@@ -1303,6 +1309,13 @@ a:hover {
 
 .step .detail:empty {
   display: none;
+}
+
+/* A paused row's Try again, under what its line says to do first (`Progress.onTryAgain`). */
+.step .step-action {
+  grid-column: 2 / -1;
+  justify-self: start;
+  margin-top: 4px;
 }
 
 .step .downloads {

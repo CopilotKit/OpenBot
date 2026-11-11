@@ -12,7 +12,9 @@ import {
   type LocalReason,
   type LocalReport,
   type LocalTerms,
+  heldForRoom,
   localEvalDownload,
+  localEvalRoom,
   localEvalSteps,
   localEvalTerms,
   localEvalUpdateStep,
@@ -23,7 +25,11 @@ import {
   updateStepSaid,
   wakeEngine,
 } from "./localEvalCli";
-import { localReadiness, onInstalledReleaseSaid } from "./localReadiness";
+import {
+  engineTooSmallSaid,
+  localReadiness,
+  onInstalledReleaseSaid,
+} from "./localReadiness";
 import {
   asProblem,
   Failure,
@@ -70,6 +76,12 @@ const POLL_DELAYS: number[] = [2_000, 4_000, 8_000, ...Array(12).fill(15_000)];
 
 /** How often a running setup or update asks how far its download has got. */
 const DOWNLOAD_EVERY_MS = 1_000;
+
+/**
+ * How often a setup paused for room on its drive looks again, as the downloads behind it do
+ * (`early_downloads::wait_for_room`).
+ */
+export const ROOM_EVERY_MS = 10_000;
 
 const unreadable: Problem = {
   said: "OpenBot got an answer it couldn't read. Retry. If it happens again, copy the logs below.",
@@ -157,6 +169,13 @@ type State = {
   updating: boolean;
   /** Of the back end's services, how many the last status said were ready. */
   services: { ready: number; total: number } | null;
+  /**
+   * The setup is paused until the drive that holds the engine's disk has room, in the account
+   * step's words. Not a stop: it looks again every few seconds and on Try again, and sets up by
+   * itself once there is room. On Windows G it was said as a red "Setup stopped" with logs, and
+   * waited for Retry after the space was freed.
+   */
+  held: string | null;
 };
 
 const idle: State = {
@@ -176,6 +195,7 @@ const idle: State = {
   trailSince: null,
   updating: false,
   services: null,
+  held: null,
 };
 
 /** The row an update that failed is said on, under the back end's. */
@@ -214,6 +234,8 @@ export type LocalSequence = State & {
   /** The go-ahead: runs what is left and starts OpenBot once Intelligence is ready. */
   start: () => void;
   retry: () => void;
+  /** While the setup is paused for room: look again now. */
+  tryAgain: () => void;
   /** The person accepted this agreement version in the window: set up again with it. */
   acceptTerms: (version: string) => void;
   /** Stops the running CLI call and says so. */
@@ -240,6 +262,7 @@ export function useLocalSequence({
   onStart,
   onRecorded = () => {},
   pollDelays = POLL_DELAYS,
+  roomEveryMs = ROOM_EVERY_MS,
 }: {
   root: string;
   stack: string | null;
@@ -250,6 +273,8 @@ export function useLocalSequence({
   /** A stack was set up, or connected. */
   onRecorded?: (stack: string, connected: boolean) => void;
   pollDelays?: number[];
+  /** How often a setup paused for room looks again (`ROOM_EVERY_MS`). */
+  roomEveryMs?: number;
 }): LocalSequence {
   const [state, setState] = useState<State>(idle);
   const now = useRef(state);
@@ -259,6 +284,8 @@ export function useLocalSequence({
   const generation = useRef(0);
   const attempt = useRef<string | null>(null);
   const wake = useRef<(() => void) | null>(null);
+  /** While the setup is paused for room: ends the wait before the next look, for Try again. */
+  const lookNow = useRef<(() => void) | null>(null);
   const queued = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startable = useRef<LocalStartable | null>(null);
   // Start OpenBot once Intelligence is ready. Spent when it starts.
@@ -274,6 +301,7 @@ export function useLocalSequence({
   function halt() {
     generation.current += 1;
     wake.current?.();
+    lookNow.current?.();
     if (queued.current !== null) clearTimeout(queued.current);
     queued.current = null;
     const inFlight = attempt.current;
@@ -408,6 +436,29 @@ export function useLocalSequence({
         resolve(false);
       };
     });
+  }
+
+  /**
+   * Until the drive that holds the engine's disk has room for a setup it did not start: looks every
+   * `ROOM_EVERY_MS`, or at once on Try again, and says the newest figures meanwhile. False when the
+   * run was stopped.
+   */
+  async function waitForRoom(token: number): Promise<boolean> {
+    for (;;) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, roomEveryMs);
+        lookNow.current = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+      });
+      lookNow.current = null;
+      if (generation.current !== token) return false;
+      const short = await localEvalRoom();
+      if (generation.current !== token) return false;
+      if (!short) return true;
+      update({ held: engineTooSmallSaid(short) });
+    }
   }
 
   /**
@@ -632,6 +683,7 @@ export function useLocalSequence({
       detail: null,
       download: null,
       updateFailed: null,
+      held: null,
     });
     const { root } = latest.current;
     let id = latest.current.stack;
@@ -687,17 +739,28 @@ export function useLocalSequence({
       });
       if (phase === "setup") {
         const carried = accepted.current;
-        const started = setUpLocalEval(root, carried);
-        const unfollowTrail = followSteps(started.attempt, token, "setup");
-        // A setup that resumes a stack downloads the images it still needs first.
-        const unfollow = followDownload(started.attempt, token);
-        const report = await call(
-          { attempt: started.attempt, answer: started.report },
-          token,
-        ).finally(() => {
-          unfollow();
-          unfollowTrail();
-        });
+        let report: LocalReport | null = null;
+        for (;;) {
+          const started = setUpLocalEval(root, carried);
+          const unfollowTrail = followSteps(started.attempt, token, "setup");
+          // A setup that resumes a stack downloads the images it still needs first.
+          const unfollow = followDownload(started.attempt, token);
+          report = await call(
+            { attempt: started.attempt, answer: started.report },
+            token,
+          ).finally(() => {
+            unfollow();
+            unfollowTrail();
+          });
+          if (!report) return stop();
+          // Not started for a drive that is short: paused, not stopped, until there is room.
+          const short = heldForRoom(report);
+          if (!short) break;
+          update({ held: engineTooSmallSaid(short), download: null });
+          const room = await waitForRoom(token);
+          if (generation.current === token) update({ held: null });
+          if (!room) return stop();
+        }
         if (!report) return stop();
         update({
           refused:
@@ -782,6 +845,10 @@ export function useLocalSequence({
     if (at) void run(at);
   }
 
+  function tryAgain() {
+    lookNow.current?.();
+  }
+
   function acceptTerms(version: string) {
     accepted.current = version;
     retry();
@@ -815,21 +882,31 @@ export function useLocalSequence({
       const row: Progress =
         index < reached
           ? { step: label, ok: true, detail: "" }
-          : state.running
+          : state.running && state.held
             ? {
                 step: label,
                 ok: true,
                 running: true,
-                // What is happening now and how long is left is the journey's (`StartJourney`): the
-                // row says only what is particular to it, such as an update's download.
-                detail: state.detail ?? "",
-                downloads: state.download ?? undefined,
-                startedAt: state.since ?? undefined,
+                paused: true,
+                detail: state.held,
+                onTryAgain: tryAgain,
                 position: { at: index + 1, of: PHASES.length },
               }
-            : stopped
-              ? { step: label, ok: false, detail: state.blocked?.said ?? "" }
-              : { step: label, ok: true, detail: "" };
+            : state.running
+              ? {
+                  step: label,
+                  ok: true,
+                  running: true,
+                  // What is happening now and how long is left is the journey's (`StartJourney`): the
+                  // row says only what is particular to it, such as an update's download.
+                  detail: state.detail ?? "",
+                  downloads: state.download ?? undefined,
+                  startedAt: state.since ?? undefined,
+                  position: { at: index + 1, of: PHASES.length },
+                }
+              : stopped
+                ? { step: label, ok: false, detail: state.blocked?.said ?? "" }
+                : { step: label, ok: true, detail: "" };
       return phase === "wait" && state.updateFailed
         ? [row, { step: UPDATING, ok: false, detail: state.updateFailed }]
         : [row];
@@ -844,6 +921,7 @@ export function useLocalSequence({
     prepare,
     start,
     retry,
+    tryAgain,
     acceptTerms,
     cancel,
     reset,
@@ -879,7 +957,8 @@ export function LocalIntelligence({
   const { at, running, stopped, problem } = sequence;
   // While it runs, one journey says what is happening and how far along the whole Start is. The
   // rows then say which part is done and which is left, and nothing twice.
-  const journeying = offerStart && running && !stopped;
+  // Paused for room: its row says so, with Try again, and no time left counts down.
+  const journeying = offerStart && running && !stopped && !sequence.held;
   // Its download's bar is the journey's too: the running row keeps only what is particular to it.
   const releasing = open.some((row) => row.step === "release" && row.running);
   const rows = journeying
