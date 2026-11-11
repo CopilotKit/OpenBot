@@ -604,7 +604,7 @@ fn back_end_started_again(
 ) -> Result<(), Problem> {
     let failed = |detail: String| {
         Problem::with(
-            "OpenBot reconnected to the internet, but its backend didn't start again. Try Start again.",
+            "OpenBot couldn't start again after reconnecting to the internet. Try Start again.",
             detail,
         )
     };
@@ -13948,7 +13948,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             error.said,
-            "OpenBot reconnected to the internet, but its backend didn't start again. Try Start again."
+            "OpenBot couldn't start again after reconnecting to the internet. Try Start again."
         );
     }
 
