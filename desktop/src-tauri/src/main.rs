@@ -577,6 +577,16 @@ fn reconnected<R: tauri::Runtime, T>(app: &tauri::AppHandle<R>, checked: &Result
     }
 }
 
+/// The host ports an installation publishes, recorded for `netavark_rules::orphan_rules`.
+fn remember_own_ports(ports: &openbot_env::Ports) {
+    openbot_desktop_lib::netavark_rules::remember_own_ports(
+        ports
+            .settings()
+            .values()
+            .filter_map(|port| port.parse::<u16>().ok()),
+    );
+}
+
 /// Start's network check, then the back end started again when that check restarted OpenBot's
 /// machine under it. In this order, before Compose: a restart stops the back end's cluster, and
 /// OpenBot's services connect to the back end as they start.
@@ -4243,6 +4253,11 @@ async fn start_stack_inner<R: tauri::Runtime>(
         }
         #[cfg(target_os = "linux")]
         let status = found.status();
+        // The installation's own ports, as its last run recorded them or as they start out, for
+        // the port rules a removed machine of OpenBot's left (`netavark_rules::orphan_rules`).
+        if let Ok(ports) = openbot_env::Ports::read(&root) {
+            remember_own_ports(&ports);
+        }
         network_then_back_end(
             || {
                 let mut said = false;
@@ -4441,6 +4456,10 @@ async fn start_stack_inner<R: tauri::Runtime>(
             root: root.clone(),
             address: found.clone(),
         });
+        // The ports this run publishes are known now: rules a removed machine of OpenBot's left on
+        // them go before Compose publishes them again.
+        remember_own_ports(&ports);
+        acquire::readied_for_backend(Some(&found), || ());
         let requested_services = stack::up(&found, &root, installed_harness, &secrets)?;
         // The migrations ran with that: `migrate` is the dependency Compose completes before it
         // starts `server`, once, and a failed one fails the `up`.
