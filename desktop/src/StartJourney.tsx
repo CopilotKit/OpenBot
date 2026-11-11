@@ -259,6 +259,13 @@ export type JourneyClock = {
   best: number;
   /** The time left last shown. */
   shown: { left: number; at: number } | null;
+  /**
+   * When the time left last said runs out, in milliseconds. Held while a part runs long, so the
+   * card counts down what it said and says it is taking longer only once that time has passed.
+   */
+  due: number | null;
+  /** A part was running long at the last tick. */
+  overran: boolean;
 };
 
 /** What the journey shows at a moment. */
@@ -303,6 +310,8 @@ export function journeyTick(
           parts: null,
           best: 0,
           shown: null,
+          due: null,
+          overran: false,
         };
   if (next.leg !== leg)
     next = {
@@ -345,7 +354,8 @@ export function journeyTick(
       steady,
     }),
   );
-  const slow = plans.left === null;
+  // A part is well past when it typically ends (`position`, `downloadWhere`).
+  const overrun = plans.left === null;
   const so = seconds(sequence.runSince, now);
   // The first seconds learn what the run holds (an update due, a download's size): the time left
   // settles on that before it is held steady.
@@ -353,6 +363,27 @@ export function journeyTick(
     so < SETTLING
       ? { left: plans.remaining, at: now }
       : steadyLeft(next.shown, plans.remaining, now);
+  /*
+   * "Taking longer than usual" only once the time the card said has run out. While a part runs
+   * long, the time left counts down from what was last said instead. On Windows G the card said
+   * "About 2 minutes left" at 1m 32s, then "Taking longer than usual" at 2m 48s while the last part
+   * of the update was still unpacking, inside the time it had given.
+   */
+  const promised =
+    next.due === null ? null : Math.max(0, (next.due - now) / 1000);
+  let left: number | null;
+  if (overrun && promised !== null) left = promised >= 1 ? promised : null;
+  else {
+    // A part that ran long has ended: carry on from what the card was saying, never a jump up.
+    if (next.overran && promised !== null && promised >= 1)
+      next.shown = {
+        left: Math.min(next.shown.left, promised),
+        at: now,
+      };
+    left = next.shown.left;
+    next.due = now + left * 1000;
+  }
+  next.overran = overrun;
   const fraction = so + next.shown.left > 0 ? so / (so + next.shown.left) : 0;
   next.best = Math.max(next.best, Math.min(0.99, fraction));
   return {
@@ -361,7 +392,7 @@ export function journeyTick(
       // Every leg done, for the moment before the screen moves on.
       said: plans.said || "Opening OpenBot",
       fraction: next.best,
-      left: slow ? null : Math.round(next.shown.left),
+      left: left === null ? null : Math.round(left),
       bytes: download ? measured(download.downloads) : null,
     },
   };
