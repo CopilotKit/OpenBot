@@ -188,7 +188,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
               size="lg"
               onClick={() => {
                 const origin = new URL(openAddress);
-                openTab(`${origin.origin}/settings/computer#browsers`);
+                openTab(`${origin.origin}/settings/browsers`);
               }}
             >
               Open {new URL(openAddress).host}

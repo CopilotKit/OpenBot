@@ -22,7 +22,7 @@ export function VaultPage() {
       description={
         personal
           ? "Your saved logins and keys are kept here. Bots never see them."
-          : "Your saved logins are kept here. Bots never see them."
+          : "Your saved website logins are kept here. Bots never see them, and you approve each use."
       }
       title="Vault"
     >
