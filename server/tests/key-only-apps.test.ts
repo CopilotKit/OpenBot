@@ -81,6 +81,58 @@ describe("an app with a sign-in never asks for a key", () => {
   });
 });
 
+/**
+ * The key form is how OpenBot connects an app, and says nothing about whether the app has a sign-in.
+ *
+ * Reported from OpenBot 1.0.2: the Fireflies dialog said "Fireflies doesn't offer a sign-in here",
+ * and Fireflies does offer one, with OAuth, on its own MCP server (docs.fireflies.ai,
+ * "MCP configuration"). Composio publishes only `API_KEY` for it, and Arcade only a
+ * `FIREFLIES_API_KEY` secret, so the key form is right and the claim about the app was not.
+ * Pipedrive is the same form for an app whose broker row itself lists `OAUTH2`, with no client held
+ * for it. `app/tests/brokered-account-row.test.tsx` pins the dialog's sentence for these rows.
+ */
+describe("an app OpenBot connects with a key may still have a sign-in of its own", () => {
+  test("Fireflies, which publishes only API_KEY, is the key form", () => {
+    expect(row("fireflies").auth_schemes).toEqual(["API_KEY"]);
+    expect(row("fireflies").composio_managed_auth_schemes).toEqual([]);
+    expect(connectionOf(row("fireflies"))).toEqual({
+      kind: "fields",
+      authScheme: "API_KEY",
+    });
+  });
+
+  test("Pipedrive, which also lists OAUTH2, is the key form too", () => {
+    expect(row("pipedrive").auth_schemes).toEqual(["OAUTH2", "API_KEY"]);
+    expect(row("pipedrive").composio_managed_auth_schemes).toEqual([]);
+    expect(connectionOf(row("pipedrive"))).toEqual({
+      kind: "fields",
+      authScheme: "API_KEY",
+    });
+  });
+
+  test("the Fireflies form asks for its API key, as a secret, in words naming OpenBot", async () => {
+    const { broker } = buildComposioClient(
+      vendorAnswering(captured.details) as never,
+    );
+    const shown = fieldsForPerson(
+      "fireflies",
+      await broker.connectionFields({
+        toolkit: "fireflies",
+        authScheme: "API_KEY",
+      }),
+    );
+    expect(shown).toEqual([
+      {
+        name: "generic_api_key",
+        label: "API key",
+        help: "Your Fireflies API key — a secret token that lets OpenBot access your meetings and transcripts. Find it at app.fireflies.ai → Integrations → Fireflies API.",
+        required: true,
+        secret: true,
+      },
+    ]);
+  });
+});
+
 describe("a key-only app's form says where the key comes from", () => {
   const { broker } = buildComposioClient(
     vendorAnswering(captured.details) as never,
