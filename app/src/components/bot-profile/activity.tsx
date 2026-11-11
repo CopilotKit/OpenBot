@@ -325,19 +325,38 @@ export function activitySummary(activity: BotActivity): string {
     : "No tasks, routines or goals yet";
 }
 
-/** What the row to the Bot's Routines says: what is lined up, and what waits to be asked. */
-function lineUpSummary(activity: BotActivity): string {
-  const onDemand = activity.onDemand?.length ?? 0;
-  const parts = [
-    activity.scheduled.length ? `${activity.scheduled.length} scheduled` : null,
-    onDemand ? `${onDemand} on demand` : null,
-  ].filter(Boolean);
-  return parts.length ? parts.join(" · ") : "Nothing is scheduled.";
+/**
+ * Whether a lined-up item is one of the Bot's routines (a goal and a check-in are routines too), so
+ * its Routines page lists it. A follow-up the Bot scheduled for itself, a queued run of a goal and a
+ * delegated task waiting its turn are not on that page; they stay on this one, under Scheduled.
+ */
+export function isRoutine(item: ActivityItem): boolean {
+  return (
+    item.kind === "routine" ||
+    (item.kind === "responsibility" &&
+      !item.id.startsWith("responsibility-run:"))
+  );
 }
 
 /**
- * In progress and Completed, read from the ledgers the work already lives in, with a row to the
- * Bot's Routines for what is lined up, and the Bot's actions in the trail.
+ * What the row to the Bot's Routines says: how many of its routines are lined up, and how many wait
+ * to be asked. It counts only what the Routines page lists.
+ */
+export function routinesSummary(activity: BotActivity): string {
+  const scheduled = activity.scheduled.filter(isRoutine).length;
+  const onDemand = (activity.onDemand ?? []).filter(isRoutine).length;
+  const parts = [
+    scheduled ? `${scheduled} scheduled` : null,
+    onDemand ? `${onDemand} on demand` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "No routines yet.";
+}
+
+/**
+ * In progress, Scheduled and Completed, read from the ledgers the work already lives in, and the
+ * Bot's actions in the trail. Scheduled lists what the Bot lined up outside its routines (its own
+ * follow-ups, queued runs, delegated tasks), each with its Cancel, and ends on a row to the Bot's
+ * Routines for the rest.
  */
 export function BotActivitySections({ agentId }: { agentId: string }) {
   const activity = useQuery(botActivityQueryOptions(agentId));
@@ -359,12 +378,20 @@ export function BotActivitySections({ agentId }: { agentId: string }) {
         live
         title="In progress"
       />
-      {/*
-       * What is lined up is the Bot's routines, and they have one page: its Routines. This row goes
-       * there instead of listing them a second time.
-       */}
-      <PageSection>
+      <PageSection title="Scheduled">
         <PageRows>
+          {activity.data.scheduled
+            .filter((item) => !isRoutine(item))
+            .map((item) => (
+              <Fragment key={item.id}>
+                <ActivityRow agentId={agentId} item={item} />
+                <Separator />
+              </Fragment>
+            ))}
+          {/*
+           * The Bot's routines have one page, its Routines. This row goes there instead of listing
+           * them a second time.
+           */}
           <Item
             render={<Link params={{ agentId }} to="/bots/$agentId/routines" />}
             size="sm"
@@ -374,7 +401,9 @@ export function BotActivitySections({ agentId }: { agentId: string }) {
             </ItemMedia>
             <ItemContent>
               <ItemTitle>Routines</ItemTitle>
-              <ItemDescription>{lineUpSummary(activity.data)}</ItemDescription>
+              <ItemDescription>
+                {routinesSummary(activity.data)}
+              </ItemDescription>
             </ItemContent>
             <ItemActions>
               <IconChevronRight className="size-4 text-muted-foreground" />

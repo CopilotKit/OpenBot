@@ -7,7 +7,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import {
   activitySummary,
   BotActivityGlance,
@@ -106,9 +106,82 @@ test("a goal that runs only when asked is counted as on demand, never as schedul
   const routines = (await sections.findByText("Routines")).closest("a");
   expect(routines?.getAttribute("href")).toBe("/bots/scout/routines");
   expect(routines?.textContent).toContain("1 scheduled · 1 on demand");
-  expect(sections.queryByRole("heading", { name: "Scheduled" })).toBeNull();
   expect(sections.queryByRole("heading", { name: "On demand" })).toBeNull();
   expect(sections.queryByText("Watch OpenBot releases")).toBeNull();
+  expect(sections.queryByText("Check releases 1")).toBeNull();
+});
+
+/*
+ * The Bot's own follow-ups, a queued run of a goal and a delegated task waiting its turn are lined
+ * up too, and the Routines page does not list them. They stay under Scheduled, a follow-up with its
+ * Cancel, and the row to Routines counts only the routines.
+ */
+test("Scheduled keeps the follow-ups and queued runs Routines doesn't list, with their Cancel", async () => {
+  const [routine] = items(1, "Check releases");
+  const base = routine as ActivityItem;
+  const followUp: ActivityItem = {
+    ...base,
+    id: "wake-up:42",
+    kind: "follow_up",
+    title: "Chase the invoice reply",
+    status: "scheduled",
+    cancellable: true,
+  };
+  const queuedRun: ActivityItem = {
+    ...base,
+    id: "responsibility-run:7",
+    kind: "responsibility",
+    title: "Run of Watch OpenBot releases",
+    status: "queued",
+  };
+  const goal: ActivityItem = {
+    ...base,
+    id: "responsibility:watch",
+    kind: "responsibility",
+    title: "Watch OpenBot releases",
+    status: "active",
+  };
+  const data: BotActivity = {
+    inProgress: [],
+    scheduled: [
+      { ...base, id: "routine:r1", status: "scheduled" },
+      goal,
+      followUp,
+      queuedRun,
+    ],
+    onDemand: [],
+    completed: [],
+  };
+  const cancelled: string[] = [];
+  const view = glance(data, BotActivitySections);
+  const fetchActivity = global.fetch;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith("/follow-ups/cancel")) {
+      cancelled.push(String(init?.body));
+      return Response.json({ ok: true });
+    }
+    return fetchActivity(input, init);
+  }) as typeof fetch;
+
+  expect(
+    await view.findByRole("heading", { name: "Scheduled" }),
+  ).toBeTruthy();
+  const followUpRow = view
+    .getByText("Chase the invoice reply")
+    .closest("[data-slot=item]") as HTMLElement;
+  expect(followUpRow).toBeTruthy();
+  expect(view.getByText("Run of Watch OpenBot releases")).toBeTruthy();
+  // The routine and the goal are on the Routines page, so not here.
+  expect(view.queryByText("Check releases 1")).toBeNull();
+  expect(view.queryByText("Watch OpenBot releases")).toBeNull();
+  const routines = view.getByText("Routines").closest("a");
+  expect(routines?.textContent).toContain("2 scheduled");
+  expect(routines?.textContent).not.toContain("4 scheduled");
+
+  const cancel = followUpRow.querySelector("button") as HTMLButtonElement;
+  expect(cancel.textContent).toBe("Cancel");
+  fireEvent.click(cancel);
+  await waitFor(() => expect(cancelled).toEqual(['{"id":"wake-up:42"}']));
 });
 
 test("the newest three suggestions show, and the rest open in place", async () => {
