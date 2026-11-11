@@ -324,6 +324,8 @@ const PERSON_REFUSALS: Record<
       "OpenBot doesn't know that time zone. Choose another one.",
   },
   enable: {
+    goal_complete:
+      "Its goal is complete, so this schedule can't be switched on. To do it again, make a new routine.",
     unknown_timezone:
       "This routine's time zone isn't one OpenBot knows. Ask its Bot to change its schedule.",
   },

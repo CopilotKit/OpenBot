@@ -21,7 +21,7 @@ import {
 } from "../src/db/schema";
 import { createRoutineRoutes } from "../src/routines/routes";
 import { createRoutineRunner } from "../src/routines/runner";
-import { createRoutineStore } from "../src/routines/store";
+import { createRoutineStore, RoutineRefusedError } from "../src/routines/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -284,6 +284,62 @@ describe("New routine from the Routines page", () => {
     expect(((await refused.json()) as { error: string }).error).toBe(
       "That goal is complete, so a routine can't run it. Choose another one.",
     );
+  });
+
+  test("a schedule can't be switched back on once its goal is complete", async () => {
+    const owner = await createUser();
+    const bot = await createBot(owner, "Lead Desk");
+    const channel = await createChannel(owner, [bot]);
+    const goal = await createGoal(owner, bot, channel);
+    const app = appFor(owner, async () => ({ replyText: "ok" }));
+    const created = await post(app, {
+      agentId: bot,
+      instruction: "Tidy the leads list",
+      cron: "0 9 * * 1-5",
+      timezone: "UTC",
+      channelId: channel.id,
+      goalId: goal.id,
+    });
+    expect(created.status).toBe(201);
+    const { routine } = (await created.json()) as { routine: { id: string } };
+    const switchedOff = await app.request(
+      `http://openbot.test/api/routines/${routine.id}/enabled`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: false }),
+      },
+    );
+    expect(switchedOff.status).toBe(200);
+    await database
+      .update(responsibilities)
+      .set({ status: "completed" })
+      .where(eq(responsibilities.id, goal.id));
+
+    const refused = await app.request(
+      `http://openbot.test/api/routines/${routine.id}/enabled`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: true }),
+      },
+    );
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { error: string }).error).toBe(
+      "Its goal is complete, so this schedule can't be switched on. To do it again, make a new routine.",
+    );
+    const [row] = await database
+      .select({ enabled: routines.enabled })
+      .from(routines)
+      .where(eq(routines.id, routine.id));
+    expect(row?.enabled).toBe(false);
+
+    // A Bot's tools get the store's own sentence, with its code.
+    const thrown = await store
+      .setEnabled(owner.id, routine.id, true)
+      .catch((error: unknown) => error);
+    expect(thrown).toBeInstanceOf(RoutineRefusedError);
+    expect((thrown as RoutineRefusedError).code).toBe("goal_complete");
   });
 
   test("a time zone OpenBot doesn't know is refused in words a person can read", async () => {

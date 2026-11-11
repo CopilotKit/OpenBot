@@ -719,6 +719,38 @@ export function createRoutineStore(database: Database): RoutineStore {
     );
   }
 
+  /**
+   * Refuses when the goal a routine records is complete, read under a share lock on the goal's
+   * row inside the routine's own transaction. Completing a goal locks that row for update and
+   * then switches off the routines that run it (`switchOffRoutinesOf` in the goal store), so the
+   * two can't interleave: this either waits for a completion and reads it, or commits first and
+   * is switched off by the completion that was waiting.
+   */
+  async function refuseCompletedGoal(
+    transaction: Transaction,
+    ownerUserId: string,
+    goalId: string,
+  ): Promise<void> {
+    const [goal] = await transaction
+      .select({
+        title: responsibilities.title,
+        status: responsibilities.status,
+      })
+      .from(responsibilities)
+      .where(
+        and(
+          eq(responsibilities.id, goalId),
+          eq(responsibilities.ownerUserId, ownerUserId),
+        ),
+      )
+      .for("share");
+    if (goal?.status === "completed")
+      throw new RoutineRefusedError(
+        `"${goal.title}" is complete, so a routine can't run it. Ask the person whether to set it up again as a new goal.`,
+        "goal_complete",
+      );
+  }
+
   /** A goal's title as a routine's, which is capped shorter, or null when it cannot be one. */
   function titleFromGoal(title: string): string | null {
     // A goal's title may run to 160 characters and a routine's to 100, so a longer one is cut. Cut on
@@ -804,6 +836,11 @@ export function createRoutineStore(database: Database): RoutineStore {
       if (patch.enabled !== undefined) values.enabled = patch.enabled;
 
       const enabling = patch.enabled === true && !existing.enabled;
+      // The goal it will record after this write: the patch's, or the one it already has.
+      const recordedGoalId =
+        values.goalId !== undefined ? values.goalId : existing.goalId;
+      if (enabling && recordedGoalId)
+        await refuseCompletedGoal(transaction, ownerUserId, recordedGoalId);
 
       const cron = patch.cron ?? existing.cron;
       const timezone = patch.timezone ?? existing.timezone;
@@ -928,6 +965,9 @@ export function createRoutineStore(database: Database): RoutineStore {
       const [row] = await withEnabledCapLock(
         input.ownerUserId,
         async (transaction) => {
+          // Read again under the lock: the goal may have completed since `goalItRuns` read it.
+          if (goal)
+            await refuseCompletedGoal(transaction, input.ownerUserId, goal.id);
           if (
             (await countEnabled(transaction, input.ownerUserId)) >=
             MAX_ENABLED_ROUTINES
