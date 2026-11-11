@@ -124,55 +124,111 @@ test("the template is Tauri's, with only OpenBot's marked lines added", () => {
   );
 });
 
-test("installing over OpenBot runs the old uninstaller silently, as an update", () => {
-  const leave = between(
-    template(),
-    "Function PageLeaveReinstall",
-    "FunctionEnd",
-  );
-  // Tauri's own NSIS branch: the old uninstaller's command, built up, then run and waited for.
-  const uninstall = leave.slice(leave.indexOf("reinst_uninstall:"));
-  const nsis = between(uninstall, "${Else}", "${EndIf}");
-  const lines = nsis
+const hooks = () => readFileSync(join(tauri, "windows", "hooks.nsh"), "utf8");
+
+/** The code lines of `text`, trimmed, without comments or blank lines. */
+const code = (text: string) =>
+  text
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith(";"));
-  const read = lines.indexOf(
-    'ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"',
-  );
-  const flags = lines.indexOf('StrCpy $R1 "$R1 /UPDATE /S"');
-  const folder = lines.indexOf(
-    'StrCpy $R1 "$R1 _?=$4" ; append uninstall directory',
-  );
-  const run = lines.indexOf("ExecWait '$R1' $0");
-  expect(read).toBeGreaterThan(-1);
-  // After the command is read, and before `_?=`, which NSIS takes only as the last parameter.
-  expect(flags).toBeGreaterThan(read);
-  expect(folder).toBeGreaterThan(flags);
-  expect(run).toBeGreaterThan(folder);
-});
 
-test("a running OpenBot is asked about before the old uninstaller closes it", () => {
+/**
+ * The page never runs the old uninstaller itself. Tauri's page hides the installer's window
+ * (HideWindow) and waits for the old uninstaller there. Run silently, that left nothing on screen:
+ * on a live update from 1.0.1, OpenBot had closed and no window showed for two and a half minutes.
+ * So for an NSIS install the page only notes the choice and goes on, and the old version is
+ * uninstalled on the Installing page.
+ */
+test("leaving the Already Installed page never hides the installer to run the old uninstaller", () => {
   const leave = between(
     template(),
     "Function PageLeaveReinstall",
     "FunctionEnd",
   );
-  const uninstall = leave.slice(leave.indexOf("reinst_uninstall:"));
-  const ask = uninstall.indexOf("!insertmacro OPENBOT_BEFORE_OLD_UNINSTALLER");
-  expect(ask).toBeGreaterThan(-1);
-  expect(uninstall.indexOf("HideWindow")).toBeGreaterThan(ask);
+  // A choice made on an earlier visit to the page never carries over.
+  expect(code(leave)[0]).toBe("StrCpy $OpenBotUninstallFirst 0");
+  const uninstall = code(leave.slice(leave.indexOf("reinst_uninstall:")));
+  const hidden = uninstall.indexOf("HideWindow");
+  expect(hidden).toBeGreaterThan(-1);
+  // Before Tauri's HideWindow, an NSIS install (not WiX) notes the choice and leaves the page.
+  expect(uninstall.slice(0, hidden)).toEqual([
+    "reinst_uninstall:",
+    "${If} $WixMode <> 1",
+    "!insertmacro OPENBOT_BEFORE_OLD_UNINSTALLER",
+    "StrCpy $OpenBotUninstallFirst 1",
+    "Goto reinst_done",
+    "${EndIf}",
+  ]);
+});
 
-  const hooks = readFileSync(join(tauri, "windows", "hooks.nsh"), "utf8");
+test("the old uninstaller runs on the Installing page, silently and as an update, with a line and moving progress", () => {
+  const preinstall = code(
+    between(hooks(), "!macro NSIS_HOOK_PREINSTALL\n", "!macroend"),
+  );
+  expect(preinstall.slice(0, 3)).toEqual([
+    "${If} $OpenBotUninstallFirst = 1",
+    "!insertmacro OPENBOT_UNINSTALL_OLD_VERSION",
+    "${EndIf}",
+  ]);
+  const old = code(
+    between(hooks(), "!macro OPENBOT_UNINSTALL_OLD_VERSION\n", "!macroend"),
+  );
+  const at = (line: string) => {
+    const index = old.indexOf(line);
+    expect(index).toBeGreaterThan(-1);
+    return index;
+  };
+  // Asked first if OpenBot was opened again since the page, before anything is removed.
+  const asked = at(
+    '!insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"',
+  );
+  const said = at(
+    'DetailPrint "Removing the previous version of OpenBot. Your Bots and data stay."',
+  );
+  const moving = at("!insertmacro OPENBOT_PROGRESS_MOVING 1");
+  // /UPDATE keeps the data and shows no box, /S shows no window of its own, and `_?=` comes last,
+  // as NSIS reads it, so the installer waits for the uninstaller.
+  const run = at(
+    "ExecWait '$OpenBotOldUninstaller /UPDATE /S _?=$OpenBotOldFolder' $0",
+  );
+  const stopped = at("!insertmacro OPENBOT_PROGRESS_MOVING 0");
+  expect(asked).toBeLessThan(said);
+  expect(said).toBeLessThan(moving);
+  expect(moving).toBeLessThan(run);
+  expect(run).toBeLessThan(stopped);
+  expect(old).not.toContain("HideWindow");
+
+  // The Installing page's own progress bar (control 1004, as MUI2's InstallFiles.nsh reads it)
+  // moves on its own while the installer waits: a marquee, which needs a window that is shown.
+  const progress = code(
+    between(hooks(), "!macro OPENBOT_PROGRESS_MOVING on\n", "!macroend"),
+  );
+  expect(progress).toContain("${IfNot} ${Silent}");
+  expect(progress).toContain(
+    'FindWindow $OpenBotProgress "#32770" "" $HWNDPARENT',
+  );
+  expect(progress).toContain(
+    "GetDlgItem $OpenBotProgress $OpenBotProgress 1004",
+  );
+  expect(progress).toContain("${NSD_AddStyle} $OpenBotProgress ${PBS_MARQUEE}");
+  expect(progress).toContain(
+    "SendMessage $OpenBotProgress ${PBM_SETMARQUEE} 1 50",
+  );
+});
+
+test("a running OpenBot is asked about and closed when the person leaves the page", () => {
   const macro = between(
-    hooks,
+    hooks(),
     "!macro OPENBOT_BEFORE_OLD_UNINSTALLER\n",
     "!macroend",
   );
-  // The words a running OpenBot gets everywhere else (#1428), and Cancel stays on the page.
+  // The words a running OpenBot gets everywhere else (#1428). Cancel stays on the page.
   expect(macro).toContain('"$(appRunningOkKill)"');
   expect(macro).toContain("MB_OKCANCEL");
   expect(macro).toMatch(/IDCANCEL`\n\s*Abort/);
+  // OK closes it there and then, as the words say, before the next page.
+  expect(macro).toContain("nsis_tauri_utils::KillProcessCurrentUser");
   // Passive installs ask nothing, as Tauri's own check doesn't.
   expect(macro).toContain("${If} $PassiveMode <> 1");
 });
