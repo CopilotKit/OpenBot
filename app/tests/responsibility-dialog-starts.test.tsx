@@ -15,7 +15,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { ResponsibilityDialog } from "@/components/responsibilities/responsibility-dialog";
 import {
   type ResponsibilityRecord,
@@ -191,4 +191,80 @@ test("an active goal's enabled schedule still starts it on a schedule", async ()
   await triggersLoaded();
   await view.findByText("Starts it on a schedule · UTC");
   await view.findByText("Its schedules, events and triggers start it.");
+});
+
+test("switching a schedule off asks the server to switch that routine off", async () => {
+  const view = open([routine()]);
+  await triggersLoaded();
+  fireEvent.click(
+    view.getByRole("switch", { name: "Start it Weekdays at 09:00" }),
+  );
+  await waitFor(() =>
+    expect(sent).toEqual([
+      {
+        method: "PUT",
+        url: "/api/routines/routine-1/enabled",
+        body: { enabled: false },
+      },
+    ]),
+  );
+});
+
+test("switching an off schedule on asks the server to switch it on", async () => {
+  const view = open([routine({ enabled: false })]);
+  await triggersLoaded();
+  fireEvent.click(
+    view.getByRole("switch", { name: "Start it Weekdays at 09:00" }),
+  );
+  await waitFor(() =>
+    expect(sent).toEqual([
+      {
+        method: "PUT",
+        url: "/api/routines/routine-1/enabled",
+        body: { enabled: true },
+      },
+    ]),
+  );
+});
+
+test("deleting a schedule takes a second press", async () => {
+  const view = open([routine()]);
+  await triggersLoaded();
+  fireEvent.click(
+    view.getByRole("button", { name: "Delete the schedule Weekdays at 09:00" }),
+  );
+  // The first press only asks.
+  expect(sent).toEqual([]);
+  const confirm = await view.findByRole("button", {
+    name: "Confirm deleting the schedule Weekdays at 09:00",
+  });
+  expect(confirm.textContent).toContain("Delete for good");
+  fireEvent.click(confirm);
+  await waitFor(() =>
+    expect(sent).toEqual([
+      { method: "DELETE", url: "/api/routines/routine-1", body: undefined },
+    ]),
+  );
+});
+
+test("a refused change is said under the schedules", async () => {
+  const answered = global.fetch;
+  global.fetch = Object.assign(
+    async (path: Parameters<typeof fetch>[0], init?: RequestInit) =>
+      (init?.method ?? "GET") === "GET"
+        ? answered(path, init)
+        : Response.json(
+            { error: "You have 20 routines switched on." },
+            { status: 400 },
+          ),
+    { preconnect: originalFetch.preconnect },
+  );
+  const view = open([routine({ enabled: false })]);
+  await triggersLoaded();
+  fireEvent.click(
+    view.getByRole("switch", { name: "Start it Weekdays at 09:00" }),
+  );
+  expect((await view.findByRole("alert")).textContent).toBe(
+    "You have 20 routines switched on.",
+  );
 });
