@@ -54,9 +54,11 @@ const COULD_NOT_CHECK = "Couldn’t check your OpenBot account. Try again.";
  */
 const WHAT_SIGNING_IN_SENDS =
   "Your conversations and files stay on this computer. Signing in gets your free local license key and does NOT send traffic data to OpenBot by CopilotKit.";
-/** The signed-out step's lede, in Atai's words, less the name of what the license key is for. */
-const SELF_CONTAINED =
-  "This version of OpenBot runs self-contained on this computer. It requires a free license key.";
+/**
+ * The signed-out step's lede. The first screen says this OpenBot is self-contained, so this one says
+ * only what the step is for: the license key, and that signing in gets it.
+ */
+const LICENSE_KEY = "OpenBot needs a free license key. Sign in to get one.";
 const SIGN_IN_DID_NOT_FINISH = "Sign-in didn’t finish. Try again.";
 const SETTING_UP_ENGINE =
   "You're signed in. OpenBot is setting up the software it runs on. The license agreement comes next.";
@@ -430,7 +432,7 @@ export function CopilotKitAccount({
                   ? "Setting up this computer"
                   : checkingAccount
                     ? "Your OpenBot account"
-                    : "Self-contained OpenBot"}
+                    : "Get your free license key"}
       </h1>
       {!checkingAccount && (
         <p className="lede">
@@ -444,7 +446,7 @@ export function CopilotKitAccount({
                 ? refused.said
                 : waitingForEngine
                   ? SETTING_UP_ENGINE
-                  : SELF_CONTAINED}
+                  : LICENSE_KEY}
         </p>
       )}
       {refused?.switchEngine && (

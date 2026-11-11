@@ -439,7 +439,7 @@ describe.skipIf(!asked)("a setup step's foot", () => {
           .getByRole("button", { name: "Install", exact: true })
           .click();
         await account
-          .getByRole("heading", { name: "Self-contained OpenBot" })
+          .getByRole("heading", { name: "Get your free license key" })
           .waitFor();
         await account.waitForTimeout(600);
         await background(account);
@@ -692,7 +692,7 @@ describe.skipIf(!asked)("the background row under the step's button", () => {
         }, name);
       };
       const scenes: Array<[string, string, string]> = [
-        ["#signin", "Self-contained OpenBot", "Cancel"],
+        ["#signin", "Get your free license key", "Cancel"],
         ["#licence", "Accept the license agreement", "Accept"],
         ["", "Connect your AI", "Continue"],
       ];
@@ -718,31 +718,28 @@ describe.skipIf(!asked)("the background row under the step's button", () => {
 
 /*
  * Seen on Windows F: on the first screen the download line shrank about 40px when the download
- * finished ("Downloading OpenBot." with its bar and bytes, then "OpenBot is downloaded and ready to
- * install."), and the usage-data text under it moved up. The line holds its tallest height in every
- * state, and before it says anything.
+ * finished ("Downloading OpenBot." with its bar and bytes, then a line saying it was downloaded),
+ * and the text under it moved up. The line holds its tallest height in every state, and before it
+ * says anything, so the card's bottom edge stays where it is.
  */
 describe.skipIf(!asked)("the first screen while its downloads run", () => {
   for (const [width, height] of [
     [1000, 800],
     [720, 560],
   ] as const) {
-    test(`at ${width}x${height}, the text under the download line stays where it is`, async () => {
+    test(`at ${width}x${height}, the card holds its height under the download line`, async () => {
       const page = await browser.newPage({ viewport: { width, height } });
       try {
         await open(page);
-        await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+        await page
+          .getByRole("heading", { name: "Set up OpenBot (self-contained)" })
+          .waitFor();
         await page.waitForTimeout(400);
-        const usage = async () =>
-          Math.round(
-            (
-              await page
-                .getByText("OpenBot sends usage data", {
-                  exact: false,
-                })
-                .boundingBox()
-            )?.y ?? -1,
-          );
+        // The card's bottom edge: nothing under the line moves, and the card does not shrink.
+        const usage = async () => {
+          const box = await page.locator("main > .sheet").boundingBox();
+          return Math.round(box ? box.y + box.height : -1);
+        };
         const say = async (payload: Record<string, unknown>) => {
           await page.evaluate((sent) => {
             (

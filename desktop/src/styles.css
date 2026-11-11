@@ -296,6 +296,12 @@ h2 {
   text-wrap: pretty;
 }
 
+/* A product's name in a lede: the heading's ink and weight, so it reads as a name. */
+.lede strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
 .lede.big {
   font-size: var(--text-lg);
   line-height: 26px;
@@ -1912,4 +1918,45 @@ main > .sheet > .step-footer > .row:first-child:empty:has(+ .behind-slot) {
     margin-bottom: -24px;
     padding-bottom: 24px;
   }
+}
+
+/*
+ * Usage data, at the foot of the last screen of setup: a small checkbox and a line or two beside
+ * it, in the footnote's size and colour. No card: it is a choice, not a step.
+ */
+.usage-choice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  align-items: start;
+  margin-top: 20px;
+  font-size: var(--text-xs);
+  line-height: 16px;
+  color: var(--text-secondary);
+}
+
+.usage-choice p {
+  margin: 0;
+  text-wrap: pretty;
+}
+
+/* The app's `Checkbox`: 14px, its primary fill when checked. */
+.usage-choice input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  margin: 1px 0 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.usage-choice input[type="checkbox"]:disabled {
+  cursor: default;
+}
+
+.usage-choice label {
+  cursor: pointer;
+}
+
+.usage-choice .usage-choice-failed {
+  grid-column: 2;
 }

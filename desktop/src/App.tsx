@@ -53,6 +53,7 @@ import {
   recordSetupEvent,
   type SetupStep,
 } from "./telemetry";
+import { UsageDataChoice } from "./UsageDataChoice";
 import { Welcome } from "./Welcome";
 import { type Blocker, WindowsBlocker, WindowsRestart } from "./WindowsBlocker";
 
@@ -1252,6 +1253,8 @@ function Setup() {
               </button>
             </div>
           )}
+          {/* The last thing setup asks, at the foot of its last screen: whether to share usage data. */}
+          {!returningToInstallation && <UsageDataChoice />}
         </div>
       </main>
     );

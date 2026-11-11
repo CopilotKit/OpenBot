@@ -601,12 +601,22 @@ test("the first screen is Install, with nothing to choose", async () => {
   );
   withLocalCli({});
   const view = await renderApp();
-  expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
   expect(
-    view.getByText(
-      "This installs OpenBot on this computer. The first setup takes about 10 minutes.",
-    ),
+    view.getByRole("heading", { name: "Set up OpenBot (self-contained)" }),
   ).toBeTruthy();
+  // Three short paragraphs: what it is, how long setup takes, and production, in that order.
+  expect(
+    [...view.container.querySelectorAll(".lede")].map((p) => p.textContent),
+  ).toEqual([
+    "This version of OpenBot is fully self-contained and runs entirely on your computer, including the OpenBot backend.",
+    "Depending on your internet speed, setup can take between 1 and 10 minutes.",
+    "In production, OpenBot for Business runs on your own infrastructure with Kubernetes, or on OpenBot Cloud. Book a demo for early access.",
+  ]);
+  expect(view.getByText("OpenBot for Business").tagName).toBe("STRONG");
+  // The one booking link, never a scheduling page of its own.
+  expect(
+    view.getByRole("link", { name: "Book a demo" }).getAttribute("href"),
+  ).toBe("https://open.bot/business");
   expect(buttons(view)).toEqual(["Install"]);
   expect(view.queryByRole("radio")).toBeNull();
   expect(view.queryByText(/hosted/i)).toBeNull();
@@ -614,22 +624,16 @@ test("the first screen is Install, with nothing to choose", async () => {
   expect(localCliCalls()).toEqual([]);
 });
 
-test("the first screen says what usage data OpenBot sends, before the sign-in links it", async () => {
+test("the first screen says nothing about usage data: that is the last screen's choice", async () => {
   setupRootConfiguration("/tmp/local-eval-welcome-usage", async () =>
     emptyConfiguration(),
   );
   withLocalCli({});
   const view = await renderApp();
-  const notice = view.getByText(/OpenBot sends usage data/);
-  expect(notice.textContent).toBe(
-    "OpenBot sends usage data, linked to your OpenBot account. It never sends your conversations, files or keys. You can turn this off in Settings. What OpenBot sends",
-  );
-  const link = view.getByRole("link", { name: "What OpenBot sends" });
-  expect(link.getAttribute("href")).toBe(
-    "https://github.com/CopilotKit/OpenBot/blob/main/desktop/TELEMETRY.md",
-  );
-  // Before anything is installed or signed in to: the notice comes first.
-  expect(localCliCalls()).toEqual([]);
+  await view.findByRole("heading", { name: "Set up OpenBot (self-contained)" });
+  expect(view.queryByText(/usage/i)).toBeNull();
+  expect(view.queryByRole("checkbox")).toBeNull();
+  expect(view.queryByRole("link", { name: "What OpenBot sends" })).toBeNull();
 });
 
 test("Install prepares the default Bot in the default folder, with no Bot or folder screen", async () => {
@@ -805,7 +809,7 @@ test("a signed-out first run signs in and accepts the agreement as its own step,
   await installLocal(view);
   // The first step. OpenBot needs no account, so it installs behind it, exactly once; nothing
   // of Intelligence's runs before the agreement. The browser sign-in starts without a click.
-  await view.findByRole("heading", { name: "Self-contained OpenBot" });
+  await view.findByRole("heading", { name: "Get your free license key" });
   await view.findByText("Finish signing in to OpenBot in your browser…");
   expect(
     view.getByText(/Your conversations and files stay on this computer/),
@@ -1401,9 +1405,12 @@ function behindNow(view: ReturnType<typeof render>): string | null {
 
 function technicalOn(beats: Beat[]) {
   return beats.flatMap(({ beat, text }) =>
-    TECHNICAL.filter((word) => word.test(text)).map(
-      (word) => `${beat}: ${text.match(word)?.[0]}`,
-    ),
+    TECHNICAL.filter(
+      // The first screen says the backend runs on this computer too: that is what
+      // self-contained means. Every later screen is held to plain words.
+      (word) =>
+        word.test(text) && !(beat === "welcome" && word.test("backend")),
+    ).map((word) => `${beat}: ${text.match(word)?.[0]}`),
   );
 }
 
@@ -2110,6 +2117,65 @@ test("Continue during setup shows Finishing setup, which starts and opens OpenBo
   expect(
     invokeCalls.filter((call) => call.command === "start_stack"),
   ).toHaveLength(1);
+});
+
+/*
+ * The usage-data choice is the last thing setup asks, as a small checkbox, and it is Settings' own
+ * setting: the same `usage_data` and `set_usage_data` that Settings > General > Privacy > Share
+ * usage data asks. Checked by default, as sharing always was; unchecked turns usage data off there
+ * too.
+ */
+test("Finishing setup has a usage-data checkbox, checked by default, that turns Settings' usage data off", async () => {
+  setupRootConfiguration("/tmp/local-eval-usage-checkbox", async () =>
+    emptyConfiguration(),
+  );
+  // The desktop's setting, as `usage_data.rs` keeps it: shared until it is turned off.
+  let shared = true;
+  withLocalCli({
+    set_up_local_eval: () => new Promise(() => {}),
+    "plugin:openbot-desktop|usage_data": () => ({
+      shared,
+      offByEnvironment: false,
+    }),
+    "plugin:openbot-desktop|set_usage_data": (args: { share: boolean }) => {
+      shared = args.share;
+      return { shared, offByEnvironment: false };
+    },
+  });
+  const view = await renderApp();
+  // Not before the last screen.
+  expect(view.queryByRole("checkbox")).toBeNull();
+  await installLocal(view);
+  await chooseOpenAi(view);
+  await view.findByRole("heading", { name: "Finishing setup" });
+  const box = (await view.findByRole("checkbox", {
+    name: /^Help make OpenBot better by sharing diagnostics/,
+  })) as HTMLInputElement;
+  expect(box.checked).toBe(true);
+  expect(box.labels?.[0]?.textContent).toBe(
+    "Help make OpenBot better by sharing diagnostics like errors, hangs, updates and available memory, never any content. OpenBot is built to respect your privacy.",
+  );
+  expect(
+    view.getByRole("link", { name: "What OpenBot sends" }).getAttribute("href"),
+  ).toBe(
+    "https://github.com/CopilotKit/OpenBot/blob/main/desktop/TELEMETRY.md",
+  );
+  // Never called anonymous: once signed in, it is joined to the account.
+  expect(view.container.textContent).not.toMatch(/anonymi[sz]ed|anonymous/i);
+
+  await userEvent.click(box);
+  await waitFor(() => expect(box.checked).toBe(false));
+  expect(shared).toBe(false);
+  expect(
+    invokeCalls.filter(
+      (call) => call.command === "plugin:openbot-desktop|set_usage_data",
+    ),
+  ).toEqual([
+    {
+      command: "plugin:openbot-desktop|set_usage_data",
+      args: { share: false },
+    },
+  ]);
 });
 
 function intelligenceCalls() {
@@ -3666,7 +3732,7 @@ test("an installation an earlier app connected to hosted Intelligence starts at 
   );
   withLocalCli(readyLocal());
   const view = await renderApp();
-  await view.findByRole("heading", { name: "Set up OpenBot" });
+  await view.findByRole("heading", { name: "Set up OpenBot (self-contained)" });
   expect(buttons(view)).toEqual(["Install"]);
   await new Promise((resolve) => setTimeout(resolve, 20));
   // Nothing hosted is started, and nothing local either, until Install.
@@ -3707,7 +3773,7 @@ test("a previously hosted installation of another Bot installs the default Bot",
   );
   withLocalCli(readyLocal());
   const view = await renderApp();
-  await view.findByRole("heading", { name: "Set up OpenBot" });
+  await view.findByRole("heading", { name: "Set up OpenBot (self-contained)" });
   expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
     false,
   );

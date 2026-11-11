@@ -25,6 +25,14 @@ Desktop installation:
 
 ### OpenBot Desktop
 
+- **Setup says what self-contained means up front, and asks about usage data last.** The first
+  screen, "Set up OpenBot (self-contained)", says this version runs entirely on your computer,
+  backend included, that setup takes between 1 and 10 minutes depending on your internet speed,
+  and that in production OpenBot for Business runs on your own infrastructure with Kubernetes, or on
+  OpenBot Cloud, with a link to book a demo. The usage-data notice moved off
+  it to the foot of the last screen, Finishing setup, as a small checkbox, checked by default as
+  before: it is the same setting as Settings > General > Privacy > Share usage data. The Account
+  step's heading is now "Get your free license key".
 - **OpenBot uses its own Podman machine when yours can't run it, and leaves yours as it is.** A
   Podman machine made with `podman machine init` is rootless, and OpenBot used it and stopped at
   "Change this computer's setup" because local Intelligence needs rootful Podman. On Windows even a
