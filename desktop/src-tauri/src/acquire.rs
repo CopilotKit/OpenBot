@@ -21,6 +21,7 @@
 use crate::quiet::said as command_said;
 use std::net::Ipv4Addr;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -435,24 +436,46 @@ fn owned_machine_networking(listing: &str) -> Result<MachineNetworking, String> 
     })
 }
 
+/// How the machine resolves the name its containers reach this computer by.
+const HOST_GATEWAY_LOOKUP: [&str; 6] = [
+    "machine",
+    "ssh",
+    MACHINE,
+    "getent",
+    "ahostsv4",
+    "host.containers.internal",
+];
+/// How long a machine that has just started gets for that name to resolve.
+const HOST_GATEWAY_WAIT: Duration = Duration::from_secs(60);
+const HOST_GATEWAY_RETRY_EVERY: Duration = Duration::from_secs(1);
+
 fn configure_host_gateway_after_start(
     run: &mut impl FnMut(&[&str]) -> Result<String, String>,
     target_is_windows: bool,
     rootful: bool,
 ) -> Result<(), String> {
+    let started = Instant::now();
+    configure_host_gateway_after_start_with(
+        run,
+        target_is_windows,
+        rootful,
+        || started.elapsed(),
+        std::thread::sleep,
+    )
+}
+
+fn configure_host_gateway_after_start_with(
+    run: &mut impl FnMut(&[&str]) -> Result<String, String>,
+    target_is_windows: bool,
+    rootful: bool,
+    elapsed: impl Fn() -> Duration,
+    pause: impl FnMut(Duration),
+) -> Result<(), String> {
     if !target_is_windows {
         return Ok(());
     }
 
-    let resolved = run(&[
-        "machine",
-        "ssh",
-        MACHINE,
-        "getent",
-        "ahostsv4",
-        "host.containers.internal",
-    ])?;
-    let ip = first_valid_host_gateway_ip(&resolved)?;
+    let ip = wait_for_host_gateway(run, elapsed, pause)?;
     let script = if rootful {
         rootful_host_gateway_config_script(ip)
     } else {
@@ -493,15 +516,73 @@ fn owned_windows_podman_address(address: &Address, target_is_windows: bool) -> b
             .is_some_and(|connection| machine_of(connection) == MACHINE)
 }
 
-fn first_valid_host_gateway_ip(raw: &str) -> Result<Ipv4Addr, String> {
-    for field in raw.split_whitespace() {
-        if let Ok(ip) = field.parse::<Ipv4Addr>() {
-            return validate_host_gateway_ip(ip);
+/// The address `host.containers.internal` resolves to in the machine, once it resolves.
+///
+/// On a machine that has only just started it may not resolve yet. With user-mode networking the
+/// machine's DNS server is gvproxy, at 192.168.127.1, and the machine reaches it through a network
+/// device that gvforwarder sets up and then asks DHCP for an address on, in the background, after
+/// `podman machine start` has returned: Podman's own start script waits one second and checks only
+/// that gvforwarder is running. Nothing reports when the device is up, so this asks for the name
+/// itself until it answers. A brand-new Windows Server failed setup here once, and Retry then
+/// resolved it at once.
+///
+/// Only getent's own "no answer yet" is waited out (see `getent_not_answered_yet`), or an answer
+/// with no IPv4 address in it. Any other failure (the machine gone or stopped, ssh or podman itself
+/// failing) is not one waiting fixes, and is returned as it is.
+fn wait_for_host_gateway(
+    run: &mut impl FnMut(&[&str]) -> Result<String, String>,
+    elapsed: impl Fn() -> Duration,
+    mut pause: impl FnMut(Duration),
+) -> Result<Ipv4Addr, String> {
+    let mut retries = 0u32;
+    loop {
+        let not_yet = match run(&HOST_GATEWAY_LOOKUP) {
+            Ok(resolved) => match first_ipv4(&resolved) {
+                Some(ip) => {
+                    let ip = validate_host_gateway_ip(ip)?;
+                    log::info!(
+                        "[engine] host.containers.internal resolved in {MACHINE} after {retries} retries"
+                    );
+                    return Ok(ip);
+                }
+                None => format!(
+                    "could not resolve host.containers.internal in the {MACHINE} VM as IPv4"
+                ),
+            },
+            Err(error) if getent_not_answered_yet(&error) => error,
+            Err(error) => return Err(error),
+        };
+        if elapsed() >= HOST_GATEWAY_WAIT {
+            return Err(format!(
+                "host.containers.internal did not resolve in the {MACHINE} VM within {}s: {not_yet}",
+                HOST_GATEWAY_WAIT.as_secs()
+            ));
         }
+        retries += 1;
+        log::info!("[engine] host.containers.internal not resolvable yet, retrying ({retries})");
+        pause(HOST_GATEWAY_RETRY_EVERY);
     }
-    Err(format!(
-        "could not resolve host.containers.internal in the {MACHINE} VM as IPv4"
-    ))
+}
+
+/// Whether the lookup failed in getent itself, with nothing found or the DNS server not answering
+/// yet, as `command_failure` words it. `podman machine ssh` passes the remote command's status
+/// through.
+///
+/// getent says 2 for "not found", and up to glibc 2.43 for every lookup failure. From glibc 2.44 a
+/// lookup that may succeed later ("temporary failure in name resolution", `EAI_AGAIN`) is 13.
+fn getent_not_answered_yet(error: &str) -> bool {
+    let failed = format!(
+        "podman {} exited with status ",
+        HOST_GATEWAY_LOOKUP.join(" ")
+    );
+    error.strip_prefix(&failed).is_some_and(|rest| {
+        let status = rest.split(';').next().unwrap_or_default();
+        status == "2" || status == "13"
+    })
+}
+
+fn first_ipv4(raw: &str) -> Option<Ipv4Addr> {
+    raw.split_whitespace().find_map(|field| field.parse().ok())
 }
 
 fn validate_host_gateway_ip(ip: Ipv4Addr) -> Result<Ipv4Addr, String> {
@@ -1752,6 +1833,113 @@ mod tests {
         .expect("owned Windows Podman health gate should prepare host-gateway config");
 
         assert_eq!(calls.len(), 3);
+    }
+
+    /// What `podman machine ssh openbot getent ...` returned on a brand-new Windows Server right
+    /// after the machine's first start: getent's "not found".
+    const HOST_NAME_NOT_FOUND_YET: &str =
+        "podman machine ssh openbot getent ahostsv4 host.containers.internal exited with status 2";
+
+    /// A clock that moves only when the wait pauses, so a minute's wait takes no time.
+    fn paused_clock() -> std::cell::Cell<std::time::Duration> {
+        std::cell::Cell::new(std::time::Duration::ZERO)
+    }
+
+    /// The live Windows Server run: setup failed at the license step because the name did not
+    /// resolve yet right after the first start, and Retry resolved it at once.
+    #[test]
+    fn a_machine_that_has_just_started_is_waited_for_until_the_host_name_resolves() {
+        let clock = paused_clock();
+        let mut lookups = 0;
+        let mut calls = Vec::<Vec<String>>::new();
+        configure_host_gateway_after_start_with(
+            &mut |args: &[&str]| {
+                calls.push(args.iter().map(|arg| (*arg).to_string()).collect());
+                match args {
+                    ["machine", "ssh", "openbot", "getent", "ahostsv4", "host.containers.internal"] => {
+                        lookups += 1;
+                        if lookups <= 3 {
+                            Err(HOST_NAME_NOT_FOUND_YET.into())
+                        } else {
+                            Ok("192.168.127.254 STREAM host.containers.internal\n".into())
+                        }
+                    }
+                    ["machine", "ssh", "openbot", script]
+                        if script.contains("host_containers_internal_ip=\"192.168.127.254\"") =>
+                    {
+                        Ok(String::new())
+                    }
+                    _ => Err(format!("unexpected args: {args:?}")),
+                }
+            },
+            true,
+            true,
+            || clock.get(),
+            |pause| clock.set(clock.get() + pause),
+        )
+        .expect("a name that resolves within the wait is not a failed setup");
+
+        assert_eq!(lookups, 4);
+        assert_eq!(clock.get(), 3 * HOST_GATEWAY_RETRY_EVERY);
+        assert_eq!(
+            calls.last().unwrap().last().unwrap(),
+            &rootful_host_gateway_config_script("192.168.127.254".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn a_host_name_that_never_resolves_gives_up_at_the_deadline() {
+        let clock = paused_clock();
+        let mut lookups = 0u32;
+        let error = configure_host_gateway_after_start_with(
+            &mut |args: &[&str]| match args {
+                ["machine", "ssh", "openbot", "getent", "ahostsv4", "host.containers.internal"] => {
+                    lookups += 1;
+                    Err(HOST_NAME_NOT_FOUND_YET.into())
+                }
+                _ => panic!("nothing is written without an address: {args:?}"),
+            },
+            true,
+            true,
+            || clock.get(),
+            |pause| clock.set(clock.get() + pause),
+        )
+        .expect_err("a name that never resolves fails the step");
+
+        assert_eq!(clock.get(), HOST_GATEWAY_WAIT);
+        assert_eq!(
+            lookups,
+            (HOST_GATEWAY_WAIT.as_secs() / HOST_GATEWAY_RETRY_EVERY.as_secs()) as u32 + 1
+        );
+        assert!(error.contains("within 60s"), "{error}");
+        assert!(error.ends_with(HOST_NAME_NOT_FOUND_YET), "{error}");
+
+        // A machine that is not running is not waited for: Podman's own error, at once.
+        let stopped = "podman machine ssh openbot getent ahostsv4 host.containers.internal exited \
+                       with status 125; stderr: Error: vm \"openbot\" is not running";
+        let clock = paused_clock();
+        let mut lookups = 0;
+        let error = configure_host_gateway_after_start_with(
+            &mut |_args: &[&str]| {
+                lookups += 1;
+                Err(stopped.to_string())
+            },
+            true,
+            true,
+            || clock.get(),
+            |pause| clock.set(clock.get() + pause),
+        )
+        .expect_err("a stopped machine fails the step");
+        assert_eq!((lookups, clock.get()), (1, std::time::Duration::ZERO));
+        assert_eq!(error, stopped);
+
+        // A newer glibc's "temporary failure in name resolution" is waited out like "not found".
+        assert!(getent_not_answered_yet(
+            &HOST_NAME_NOT_FOUND_YET.replace("status 2", "status 13")
+        ));
+        assert!(!getent_not_answered_yet(
+            &HOST_NAME_NOT_FOUND_YET.replace("status 2", "status 255")
+        ));
     }
 
     #[test]

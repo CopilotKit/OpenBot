@@ -112,6 +112,11 @@ Desktop installation:
   distribution. It isn't OpenBot's and isn't needed, so OpenBot now marks it as already seen for
   you before it makes the machine. Installing over a running OpenBot said "OpenBot is running!
   Click OK to kill it". It now says "OpenBot is open. Click OK to close it and continue."
+- **Setup on a new Windows computer no longer fails right after OpenBot's Podman machine first
+  starts.** Accepting the license agreement could stop at "OpenBot couldn't prepare this computer
+  to run it. Try again.", because the machine's network was still coming up and it couldn't yet
+  find this computer by name. Try again worked. OpenBot now waits up to a minute for it, and
+  fails at once for a machine that has stopped.
 - **OpenBot stays behind your browser while you sign in, and opens where you left it.** On
   Windows, OpenBot came in front of the browser partway through setup while you were typing your
   email to sign in. While the browser sign-in is open it now stays where it is, and comes forward
