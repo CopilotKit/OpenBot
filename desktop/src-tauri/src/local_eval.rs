@@ -204,6 +204,12 @@ pub enum Reason {
     ResourcesShort,
     /// A reason this build does not know. Treated as blocking, never as success.
     Unrecognized,
+    /// Not the CLI's: OpenBot's own finding, behind a status the CLI could only fail
+    /// (`local_command_failed` with no stack, its ownership check answering 404 in its log). The
+    /// backend OpenBot created is recorded but its cluster is gone from the engine, with everything
+    /// in it, as when OpenBot's Podman machine was removed and made again (`stack_lost`). Waiting or
+    /// Retry can't bring it back; setting it up again starts over.
+    StackLost,
 }
 
 impl Reason {
@@ -4586,6 +4592,18 @@ fn lost_stack(
                 ""
             }
         );
+        let gone = (files == PrivateFiles::Present && !shared)
+            .then(|| cluster_gone(&stack))
+            .flatten();
+        if gone == Some(true) {
+            log::warn!(
+                "[local setup] {}'s cluster is gone from OpenBot's engine; setting it up again",
+                stack.as_str()
+            );
+        }
+        if forgettable(&files, shared, gone) {
+            return Ok(Some(Lost::Forgettable(stack)));
+        }
         return Ok(match files {
             PrivateFiles::Present => None,
             PrivateFiles::Missing if !shared => Some(Lost::Forgettable(stack)),
@@ -4610,6 +4628,70 @@ fn lost_stack(
         });
     }
     Ok(None)
+}
+
+/// The shape of a status or setup the CLI could only fail on a stack whose cluster is gone: its
+/// ownership check answered 404 (box I's `cli.log`: `"step":"ownership-check","outcome":"failed",
+/// "reason":"status 404"`), and the answer is `local_command_failed` with no stack.
+pub fn failed_without_stack(report: &Report) -> bool {
+    report.reason == Some(Reason::LocalCommandFailed) && report.stack.is_none()
+}
+
+/// Whether `stack`'s cluster is gone from the engine OpenBot runs on (`use_engine`): k3d names every
+/// container of a cluster `k3d-<cluster>-…`, and the CLI names the cluster after the stack. None
+/// when that can't be said (`cluster_gone_at`): then nothing is said to be gone.
+pub fn cluster_gone(stack: &StackId) -> Option<bool> {
+    cluster_gone_at(cli_engine().as_ref(), stack, |address| {
+        let listed = address
+            .command()
+            .args(["ps", "--all", "--format", "{{.Names}}"])
+            .output()
+            .ok()?;
+        listed
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&listed.stdout).into_owned())
+    })
+}
+
+/**
+`cluster_gone`, with the engine and its container listing passed in.
+
+Only in OpenBot's own Podman machine (`acquire::MACHINE`). Nothing but OpenBot runs a cluster there,
+and a cluster that isn't there went with the machine, as on box I. Anywhere else, Docker or a
+machine of the person's, the stack may live in an engine OpenBot isn't asking: a test's process on a
+Mac found the computer's own Docker, saw no cluster in it, and setup would have deleted a stack whose
+files were all there. So there it can't be said, and nothing is.
+*/
+pub fn cluster_gone_at(
+    address: Option<&crate::engine::Address>,
+    stack: &StackId,
+    list: impl FnOnce(&crate::engine::Address) -> Option<String>,
+) -> Option<bool> {
+    let address = address?;
+    let ours = address.engine == crate::engine::Engine::Podman
+        && address.connection.as_deref().is_some_and(|connection| {
+            crate::acquire::machine_of(connection) == crate::acquire::MACHINE
+        });
+    if !ours {
+        return None;
+    }
+    Some(cluster_gone_in(&list(address)?, stack))
+}
+
+/// `cluster_gone`, from the container names the engine listed, one per line.
+pub fn cluster_gone_in(names: &str, stack: &StackId) -> bool {
+    let prefix = format!("k3d-{}-", stack.as_str());
+    !names.lines().any(|name| name.trim().starts_with(&prefix))
+}
+
+/// Whether setup forgets `stack` and sets the backend up again: this folder's alone, and either its
+/// private files are gone or its cluster is (`cluster_gone`). Another app's stack, or one whose
+/// files are only damaged, is never forgotten here.
+fn forgettable(files: &PrivateFiles, shared: bool, gone: Option<bool>) -> bool {
+    !shared
+        && (*files == PrivateFiles::Missing
+            || (*files == PrivateFiles::Present && gone == Some(true)))
 }
 
 /// `local delete --stack <stack> --confirm-delete <stack> --json`: the CLI's own way to forget a
@@ -5690,6 +5772,98 @@ mod tests {
         // Not a leap year.
         let report = status(&canonical("ready", "valid", json!("2026-02-29T00:00:00Z"))).unwrap();
         assert_eq!(report.licence, Licence::Unknown);
+    }
+
+    /// Box I, after OpenBot's machine was made again: `local status` for the recorded stack failed
+    /// at its ownership check (`cli.log`: `"step":"ownership-check","outcome":"failed","reason":
+    /// "status 404"`), and OpenBot read "local-command-failed, no stack". That answer, and only that
+    /// one, is the shape of a lost stack.
+    #[test]
+    fn a_status_that_failed_with_no_stack_is_the_shape_of_a_lost_stack() {
+        let failed = json!({
+            "version": 1,
+            "command": "local status",
+            "status": "failed",
+            "error": {
+                "code": "LOCAL_COMMAND_FAILED",
+                "message": "The local command did not finish."
+            },
+            "nextAction": { "reason": "local_command_failed", "resumeCommand": null },
+            "diagnostics": []
+        });
+        let report = normalize(Action::Status, 1, failed.to_string().as_bytes()).unwrap();
+        assert_eq!(report.reason, Some(Reason::LocalCommandFailed));
+        assert!(report.stack.is_none());
+        assert!(failed_without_stack(&report));
+
+        let mut blocked = canonical("ready", "valid", Value::Null);
+        blocked["status"] = json!("blocked");
+        blocked["nextAction"] = json!({ "reason": "docker_unavailable" });
+        let report = normalize(Action::Status, 2, blocked.to_string().as_bytes()).unwrap();
+        assert!(!failed_without_stack(&report));
+    }
+
+    /// Box I's engine before and after: `podman ps` on OpenBot's old machine listed the backend's
+    /// node, `k3d-local-1915a7aafba78d6207a561b0-server-0`, beside OpenBot's containers; the machine
+    /// made again listed nothing.
+    #[test]
+    fn a_stack_whose_cluster_left_with_the_old_machine_is_found_gone() {
+        let stack = StackId::parse("local-1915a7aafba78d6207a561b0").unwrap();
+        let before = "k3d-local-1915a7aafba78d6207a561b0-server-0\n\
+                      openbot-desktop-postgres-1\n\
+                      openbot-desktop-server-1\n";
+        assert!(!cluster_gone_in(before, &stack));
+        assert!(cluster_gone_in("", &stack));
+        // Another stack's cluster, or a container that only mentions the id, is not this one's.
+        assert!(cluster_gone_in("k3d-local-0000-server-0\nmy-web\n", &stack));
+        assert!(cluster_gone_in("local-1915a7aafba78d6207a561b0\n", &stack));
+    }
+
+    /// Only OpenBot's own machine is ever asked, and only there can a cluster be found gone.
+    #[test]
+    fn a_cluster_is_found_gone_only_in_openbots_own_machine() {
+        use crate::engine::{Address, Engine};
+        let stack = StackId::parse("local-1915a7aafba78d6207a561b0").unwrap();
+        let ours = Address::new(Engine::Podman, Some("openbot-root".into()));
+        assert_eq!(
+            cluster_gone_at(Some(&ours), &stack, |_| Some(String::new())),
+            Some(true)
+        );
+        assert_eq!(
+            cluster_gone_at(Some(&ours), &stack, |_| Some(
+                "k3d-local-1915a7aafba78d6207a561b0-server-0\n".into()
+            )),
+            Some(false)
+        );
+        // The engine couldn't list its containers: nothing is said.
+        assert_eq!(cluster_gone_at(Some(&ours), &stack, |_| None), None);
+        // Docker, the person's machine, or no engine known: never even listed.
+        for elsewhere in [
+            Some(Address::new(Engine::Docker, None)),
+            Some(Address::new(Engine::Podman, Some("mine-root".into()))),
+            Some(Address::new(Engine::Podman, None)),
+            None,
+        ] {
+            assert_eq!(
+                cluster_gone_at(elsewhere.as_ref(), &stack, |_| panic!("listed")),
+                None,
+                "{elsewhere:?}"
+            );
+        }
+    }
+
+    /// Setup forgets a stack and sets it up again only when it is this folder's alone and its
+    /// files or its cluster are gone. Damaged files, a cluster that is there or can't be asked
+    /// about, and another app's stack are never forgotten.
+    #[test]
+    fn setup_forgets_a_stack_whose_cluster_is_gone_only_when_it_is_this_folders() {
+        assert!(forgettable(&PrivateFiles::Present, false, Some(true)));
+        assert!(forgettable(&PrivateFiles::Missing, false, None));
+        assert!(!forgettable(&PrivateFiles::Present, false, Some(false)));
+        assert!(!forgettable(&PrivateFiles::Present, false, None));
+        assert!(!forgettable(&PrivateFiles::Present, true, Some(true)));
+        assert!(!forgettable(&PrivateFiles::Missing, true, None));
+        assert!(!forgettable(&PrivateFiles::Damaged, false, Some(true)));
     }
 
     #[test]

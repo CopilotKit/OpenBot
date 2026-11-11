@@ -349,17 +349,116 @@ pub fn clear_dead(
     let (networks, rest) = rest.split_once(ROUTES).unwrap_or((rest, ""));
     let (routes, published) = rest.split_once(PUBLISHED).unwrap_or((rest, ""));
     let mut dead = dead_rules(listing, networks)?;
+    let mut orphans = Vec::new();
     if !routes.trim().is_empty() {
-        for orphan in orphan_rules(listing, networks, routes, published, &remembered_ports())? {
-            if !dead.contains(&orphan) {
-                dead.push(orphan);
+        orphans = orphan_rules(listing, networks, routes, published, &remembered_ports())?;
+        for orphan in &orphans {
+            if !dead.contains(orphan) {
+                dead.push(orphan.clone());
             }
         }
     }
+    let chains = emptied_chains(listing, networks, &orphans)?;
     if !dead.is_empty() {
-        run(&["machine", "ssh", machine, &delete_script(&dead)])?;
+        run(&[
+            "machine",
+            "ssh",
+            machine,
+            &format!(
+                "{} {}",
+                delete_script(&dead).trim_end_matches(" exit $failed"),
+                chains_script(listing, &chains)
+            ),
+        ])?;
     }
     Ok(dead)
+}
+
+/// A chain, as `nft` names it: family, table and chain.
+pub type Chain = (String, String, String);
+
+/**
+The forwarding chains a removed machine left that `orphans` empties of DNAT rules: every DNAT rule
+in them is an orphan, and no network on OpenBot's machine maps to them. Box I after #1482's cleanup
+kept `nv_9251097f_…_dnat` and `nv_6bd7ac84_…_dnat` at the top of `NETAVARK-HOSTPORT-DNAT`, with only
+netavark's SETMARK jumps left in them, and traffic fell through them. A chain one of OpenBot's
+networks maps to stays, empty or not: netavark adds to it again.
+*/
+pub fn emptied_chains(
+    listing: &str,
+    networks: &str,
+    orphans: &[Rule],
+) -> Result<Vec<Chain>, String> {
+    if orphans.is_empty() {
+        return Ok(Vec::new());
+    }
+    let networks: Vec<Network> = serde_json::from_str(networks)
+        .map_err(|error| format!("could not read podman network inspect: {error}"))?;
+    let mut mapped: HashSet<Chain> = HashSet::new();
+    for network in &networks {
+        let chain = iptables_chain(&network.name);
+        for family in ["ip", "ip6"] {
+            mapped.insert((family.into(), "nat".into(), chain.clone()));
+        }
+        for subnet in &network.subnets {
+            mapped.insert((
+                "inet".into(),
+                "netavark".into(),
+                nftables_chain(&network.id, &subnet.subnet),
+            ));
+        }
+    }
+    let all = rules(listing);
+    let mut chains: Vec<Chain> = Vec::new();
+    for orphan in orphans {
+        let chain = (
+            orphan.family.clone(),
+            orphan.table.clone(),
+            orphan.chain.clone(),
+        );
+        if chains.contains(&chain) || mapped.contains(&chain) {
+            continue;
+        }
+        let emptied = all
+            .iter()
+            .filter(|rule| {
+                rule.to.is_some()
+                    && rule.family == chain.0
+                    && rule.table == chain.1
+                    && rule.chain == chain.2
+            })
+            .all(|rule| orphans.contains(rule));
+        if emptied {
+            chains.push(chain);
+        }
+    }
+    Ok(chains)
+}
+
+/// Run in the machine, after the DNAT rules are deleted, to delete each of `chains`: the rules that
+/// jump to it first, then what is left in it, then the chain, as nft requires. Each on its own, with
+/// `failed=1` for any that fails, as `delete_script`'s rules are.
+pub fn chains_script(listing: &str, chains: &[Chain]) -> String {
+    let mut script = String::new();
+    let all = rules(listing);
+    for (family, table, chain) in chains {
+        for jump in all.iter().filter(|rule| {
+            rule.family == *family
+                && rule.table == *table
+                && rule.text.rsplit_once("jump ").map(|(_, to)| to.trim()) == Some(chain.as_str())
+        }) {
+            script.push_str(&format!(
+                " sudo nft delete rule {family} {table} {} handle {} || failed=1;",
+                jump.chain, jump.handle
+            ));
+        }
+        script.push_str(&format!(
+            " sudo nft flush chain {family} {table} {chain} || failed=1; \
+             sudo nft delete chain {family} {table} {chain} || failed=1;"
+        ));
+    }
+    script.push_str(" exit $failed");
+    script
 }
 
 /// A container on OpenBot's machine as `podman ps -a --format json` lists it: only its ports.
@@ -529,6 +628,44 @@ pub fn orphan_rules(
         })
         .flat_map(|(_, rules)| rules)
         .collect())
+}
+
+/**
+Every port rule of OpenBot's own networks in `listing`, held by a running container or not.
+
+Before OpenBot's machine is removed (`uninstall`): once it is gone none of its containers is left,
+and in WSL's shared network namespace each of its rules would outlive it, ahead of the next
+OpenBot machine's rules for the same ports. Box I's next install then failed at "Opening OpenBot".
+`dead_rules` can't be used there, since the containers may still be running. The same rules are
+found, only OpenBot's machine's own networks' DNAT rules, so another machine's and Docker's stay.
+*/
+pub fn own_rules(listing: &str, networks: &str) -> Result<Vec<Rule>, String> {
+    let mut networks: serde_json::Value = serde_json::from_str(networks)
+        .map_err(|error| format!("could not read podman network inspect: {error}"))?;
+    for network in networks.as_array_mut().into_iter().flatten() {
+        // As if nothing ran on it: every address on it is about to be dead.
+        network["containers"] = serde_json::json!({});
+    }
+    dead_rules(listing, &networks.to_string())
+}
+
+/// Remove every one of OpenBot's port rules on `machine` (`own_rules`), through `run` as `podman`
+/// runs, and say which. For a machine about to be removed.
+pub fn clear_own(
+    mut run: impl FnMut(&[&str]) -> Result<String, String>,
+    machine: &str,
+) -> Result<Vec<Rule>, String> {
+    let said = run(&["machine", "ssh", machine, &read_script()])?;
+    let (listing, rest) = said
+        .split_once(BETWEEN)
+        .ok_or_else(|| format!("the machine did not list its rules and networks: {said}"))?;
+    // The routes and the published ports follow the networks (`read_script`); not needed here.
+    let (networks, _) = rest.split_once(ROUTES).unwrap_or((rest, ""));
+    let own = own_rules(listing, networks)?;
+    if !own.is_empty() {
+        run(&["machine", "ssh", machine, &delete_script(&own)])?;
+    }
+    Ok(own)
 }
 
 /**

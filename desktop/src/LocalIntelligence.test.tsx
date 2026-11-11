@@ -125,6 +125,7 @@ type Props = {
   /** Shows the status card another screen shows, whatever runs. */
   status?: boolean;
   onStart?: (startable: Startable) => Promise<StartOutcome>;
+  onForgotten?: () => void;
   pollDelays?: number[];
   roomEveryMs?: number;
 };
@@ -136,6 +137,7 @@ function Holder(props: Props) {
     stack: props.stack ?? null,
     connected: props.connected ?? false,
     onStart: props.onStart ?? (async () => "started"),
+    onForgotten: props.onForgotten,
     pollDelays: props.pollDelays ?? [0, 0, 0],
     roomEveryMs: props.roomEveryMs,
   });
@@ -841,6 +843,77 @@ test("a setup whose download stopped offers Retry, which continues where it left
   await userEvent.click(screen.getByRole("button", { name: "Retry" }));
   await waitFor(() => expect(started).toEqual([startableUrls]));
   expect(setups).toBe(2);
+});
+
+/**
+ * Box I: OpenBot's machine was made again, and the backend went with the old one. Every status
+ * failed, the card said "Setup stopped partway through with an error. Retry.", and Retry did the
+ * same. The native side now says the backend is lost (`stack-lost`, from the CLI's
+ * "local-command-failed, no stack" with the backend's cluster gone). The card says so in plain
+ * words, offers Start fresh in place of Retry, and Start fresh sets OpenBot up again, connects it,
+ * waits for it and opens it.
+ */
+test("a lost backend offers Start fresh, which sets OpenBot up again and opens it", async () => {
+  const lost = report({ outcome: "failed", stack: null, reason: "stack-lost" });
+  invokeHandler = answers({
+    run_local_eval: [lost, ready],
+    set_up_local_eval: [report()],
+    connect_local_eval: [connection()],
+  });
+  const started: Startable[] = [];
+  let forgotten = 0;
+  const screen = view({
+    stack: "local-1915a7aafba78d6207a561b0",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+    onForgotten: () => {
+      forgotten += 1;
+    },
+  });
+  await screen.findByText(
+    "OpenBot's saved data on this computer is gone, with your Bots and conversations. Start fresh to set OpenBot up again. Your sign-in and AI connection stay.",
+  );
+  // Retry would only ask again about what is gone.
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  expect(commands()).toEqual(["run_local_eval:status"]);
+
+  await userEvent.click(screen.getByRole("button", { name: "Start fresh" }));
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(forgotten).toBe(1);
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "set_up_local_eval",
+    "connect_local_eval",
+    "run_local_eval:status",
+  ]);
+});
+
+/** The same stop on a screen about something else: its card says what is gone and offers Start fresh. */
+test("a lost backend is said on the status card too, with Start fresh", async () => {
+  invokeHandler = answers({
+    run_local_eval: [
+      report({ outcome: "failed", stack: null, reason: "stack-lost" }),
+    ],
+  });
+  const screen = view({
+    stack: "local-1915a7aafba78d6207a561b0",
+    connected: true,
+    status: true,
+  });
+  const card = await screen.findByRole("alert", { name: "Setup" });
+  await waitFor(() =>
+    expect(card.textContent).toContain(
+      "OpenBot's saved data on this computer is gone, with your Bots and conversations.",
+    ),
+  );
+  expect(within(card).getByRole("heading").textContent).toBe("Setup needs you");
+  expect(
+    within(card).getByRole("button", { name: "Start fresh" }),
+  ).toBeTruthy();
+  expect(within(card).queryByRole("button", { name: "Retry" })).toBeNull();
 });
 
 const blockedOnSignIn = report({

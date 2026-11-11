@@ -4040,6 +4040,89 @@ test("a saved sign-in refused after the install sends the person to refresh it",
   expect(startsMade()).toHaveLength(2);
 });
 
+/**
+ * Box I, step E: OpenBot's machine was made again, and the backend went with the old one. Start
+ * fresh set the backend up again, then Start was refused, because the new machine had none of
+ * OpenBot's own software: "Finish installing OpenBot's local software…", an ERROR in the log, and
+ * the window went back from Starting OpenBot to Installing OpenBot before it carried on by itself.
+ * Start fresh now installs first, then sets up and starts: one journey forward, Install's rows and
+ * then Starting's, with nothing refused and no going back.
+ */
+test("Start fresh after a lost backend installs OpenBot's software first, then sets up and starts, never going back", async () => {
+  const root = "/tmp/lost-backend";
+  setupConnectedLocalStack(root, localStatus("ready", "valid"));
+  const lost = {
+    ...localStatus("unknown", "unknown"),
+    outcome: "failed",
+    stack: null,
+    reason: "stack-lost",
+  };
+  const installed = deferred<null>();
+  let installedNow = false;
+  let statuses = 0;
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "run_local_eval")
+      return ++statuses === 1 ? lost : previous(command, args);
+    if (command === "prepare_installation") {
+      await installed.promise;
+      installedNow = true;
+      return null;
+    }
+    // As the native side does: the new machine has none of OpenBot's software until Install.
+    if (command === "start_stack" && !installedNow) throw INSTALL_AGAIN;
+    return previous(command, args);
+  };
+  const headings = new Set<string>();
+  const watch = new MutationObserver(() => {
+    for (const heading of document.querySelectorAll("h1"))
+      headings.add(heading.textContent ?? "");
+  });
+  watch.observe(document.body, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+  });
+  const view = await renderApp();
+  await userEvent.click(
+    await view.findByRole("button", { name: "Start fresh" }),
+  );
+  // Install's rows first, on the screen the person was on.
+  await view.findByText("Preparing this computer");
+  expect(view.getByRole("heading", { name: "Starting OpenBot" })).toBeTruthy();
+  expect(localCliCalls().map((call) => call.command)).toEqual([
+    "run_local_eval",
+  ]);
+
+  await act(async () => installed.resolve(null));
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  watch.disconnect();
+  expect(
+    invokeCalls
+      .map((call) => call.command)
+      .filter((command) =>
+        [
+          "prepare_installation",
+          "set_up_local_eval",
+          "connect_local_eval",
+          "run_local_eval",
+          "start_stack",
+          "show_openbot",
+        ].includes(command),
+      ),
+  ).toEqual([
+    "run_local_eval",
+    "prepare_installation",
+    "set_up_local_eval",
+    "connect_local_eval",
+    "run_local_eval",
+    "start_stack",
+    "show_openbot",
+  ]);
+  expect([...headings]).not.toContain("Installing OpenBot");
+  expect(view.queryByRole("alert")).toBeNull();
+});
+
 test("a Start refused again straight after its install says so, and does not install round in a loop", async () => {
   const { view, installed } = await reopenAfterUpdate(
     "/tmp/installed-upgrade-refused-again",
