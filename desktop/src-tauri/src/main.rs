@@ -1099,7 +1099,8 @@ fn report_running_row<R: tauri::Runtime>(
 
 /// OpenBot's window in front of whatever is there, at a moment setup needs the person: Docker
 /// Desktop has answered, the system's password prompt has closed, the installation failed or is
-/// done, OpenBot has started. `why` goes in the log.
+/// done, OpenBot has started, a launch the installer started first shows (`forward_at_first_show`).
+/// `why` goes in the log.
 ///
 /// On macOS that means activating the app, not only ordering its window to the front. A window an
 /// inactive app orders front stays behind the active app's. Tauri's `set_focus` does both: tao
@@ -1233,6 +1234,70 @@ fn come_forward(set_foreground: impl FnOnce() -> bool, flash: impl FnOnce()) -> 
 #[tauri::command]
 fn bring_setup_to_front(app: tauri::AppHandle, why: String) {
     bring_to_front(&app, &why);
+}
+
+/// The argument OpenBot's installer starts it with, after an in-app update and from the installer's
+/// last page (`OPENBOT_RUN_AFTER_INSTALL` in `windows/hooks.nsh`).
+const STARTED_BY_INSTALLER: &str = "--started-by-installer";
+
+/// Whether OpenBot's installer started this launch, from the program's arguments (the program
+/// first).
+fn started_by_installer(args: &[std::ffi::OsString]) -> bool {
+    args.iter().skip(1).any(|arg| arg == STARTED_BY_INSTALLER)
+}
+
+/**
+The window's first show, for a launch OpenBot's installer started (`started_by_installer`): after an
+in-app update, or from the installer's last page. OpenBot comes in front once (`come_forward`, which
+is `bring_to_front`), so the person sees Starting OpenBot and its progress. On box H (Windows Server
+2022, an in-app update from 1.0.1 to 1.0.2) Windows put the maximised Edge in front as 1.0.1 closed,
+1.0.2 opened behind it, and the person saw only Edge for the four minutes of Starting OpenBot, until
+"[front] OpenBot is showing" at home. That one came forward because it came four and a half minutes
+after the person's last input, the click on Update and restart: past the foreground lock time-out,
+the time after input during which Windows keeps apps from coming forward
+(`SPI_GETFOREGROUNDLOCKTIMEOUT`, 200 seconds by default).
+
+Windows lets a window come to the front only from a process it allows ("SetForegroundWindow
+function", Remarks, Microsoft Learn). The right comes from the updating version, which passes it on
+while its window is still up (`pass_the_foreground_on`), and the installer, which passes it on again
+before it starts OpenBot. Where Windows still refuses, as after an update from a version before
+this or once the person has typed or clicked elsewhere, `bring_to_front` flashes the taskbar button.
+
+Any other launch is left to Windows: from the Start menu or the taskbar it is in front already. Held
+back, as every moment is, while the browser sign-in is open (`held_back`).
+*/
+fn forward_at_first_show(started_by_installer: bool, come_forward: impl FnOnce(&str)) {
+    if started_by_installer {
+        come_forward("the installer started OpenBot");
+    }
+}
+
+/**
+Windows, as the updater is about to start the installer: pass OpenBot's right to set the foreground
+window on to every process, so the installer and the new version it starts may come to the front
+(`forward_at_first_show`). Called while OpenBot's window is still up, just before the updater's
+cleanup takes it down: until then OpenBot holds the foreground, from the person's click on Update and
+restart. Once the window is gone, Windows activates the one behind it, and nothing started after that
+may take the foreground from it by itself.
+
+"A process that can set the foreground window can enable another process to set the foreground
+window by calling AllowSetForegroundWindow", and with `ASFW_ANY` "all processes will be enabled". The
+right lasts until "the user generates input" or another process calls it ("AllowSetForegroundWindow
+function", Microsoft Learn). So if the person types or clicks in another window meanwhile, Windows
+keeps that window in front, as it means to, and the new version flashes its taskbar button instead.
+*/
+#[cfg(windows)]
+fn pass_the_foreground_on() {
+    use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
+    // SAFETY: takes no pointers; it only widens which processes may set the foreground window.
+    match unsafe { AllowSetForegroundWindow(ASFW_ANY) } {
+        Ok(()) => log::info!(
+            "[app update] passed the foreground on, for the installer and the new version"
+        ),
+        Err(error) => log::info!(
+            "[app update] could not pass the foreground on ({error}); OpenBot was no longer in front"
+        ),
+    }
 }
 
 /// The person said yes to pausing their Podman while OpenBot runs. See `own_machine`. False when
@@ -2746,6 +2811,9 @@ fn stop_before_installer<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         // The installer runs either way: the new version's Start finds whatever is left running.
         log::warn!("[app update] stopping OpenBot before the installer: {error}");
     }
+    // While the window is still up and in front: the new version comes forward as it first shows.
+    #[cfg(windows)]
+    pass_the_foreground_on();
     app.cleanup_before_exit();
 }
 
@@ -10953,6 +11021,8 @@ fn main() {
     // The local time's offset from UTC, for the log's first line. Read now, while this is the only
     // thread: on macOS and Linux the time crate refuses to read it once there are others.
     let local_offset = time::UtcOffset::current_local_offset().ok();
+    // After an in-app update, or from the installer's last page: in front as the window first shows.
+    let from_installer = started_by_installer(&args);
     let context = tauri::generate_context!();
     // A `shell-updater` build with compiled trust supplies `plugins.updater` when no bundled block
     // (such as the signed Mac overlay) already does. Registration itself happens once, in `setup`.
@@ -11138,6 +11208,9 @@ fn main() {
         .setup(move |app| {
             build_main_window(app.handle())?;
             log_launch(app.handle(), local_offset);
+            // The window is built visible, so this is its first show: a launch the installer
+            // started comes forward now, while Starting OpenBot is what it shows.
+            forward_at_first_show(from_installer, |why| bring_to_front(app.handle(), why));
             // Built by `generate_context!`, so the permissions OpenBot's page is granted are
             // compiled in. First, before anything that could trust an app and open it.
             know_app_page_grants(app.handle());
@@ -15530,6 +15603,101 @@ mod tests {
         assert!(sign_in.contains(
             "while_signing_in(\n            || local_eval::account_sign_in_installed(&attempt),\n            || bring_to_front(&started_app, \"the browser sign-in ended\"),"
         ));
+    }
+
+    /// Box H, an in-app update from 1.0.1 to 1.0.2 on Windows Server 2022 with a maximised Edge
+    /// open: Windows put Edge in front as 1.0.1 closed, and 1.0.2 opened behind it. The person saw
+    /// only Edge through the four minutes of Starting OpenBot, until "[front] OpenBot is showing"
+    /// at home. The updating version passes the foreground on before its window goes, the
+    /// installer passes it on again and starts the new version saying so, and the new version
+    /// comes forward once, as its window first shows. Never while the browser sign-in is open.
+    #[test]
+    fn a_launch_the_installer_started_comes_forward_once_as_its_window_first_shows() {
+        if crate::test_support::isolated_process(
+            "tests::a_launch_the_installer_started_comes_forward_once_as_its_window_first_shows",
+        ) {
+            return;
+        }
+        let args = |given: &[&str]| -> Vec<std::ffi::OsString> {
+            std::iter::once("openbot-desktop.exe")
+                .chain(given.iter().copied())
+                .map(std::ffi::OsString::from)
+                .collect()
+        };
+        // The installer's launch, after an update or from its last page. An update hands the old
+        // version's own arguments on (/ARGS), and the installer adds the flag when they lack it.
+        assert!(started_by_installer(&args(&[STARTED_BY_INSTALLER])));
+        assert!(started_by_installer(&args(&[
+            "--kept",
+            STARTED_BY_INSTALLER
+        ])));
+        // The Start menu, sign-in to Windows, a notification's link: Windows' own rules.
+        assert!(!started_by_installer(&args(&[])));
+        assert!(!started_by_installer(&args(&["openbot://open?path=/"])));
+        assert!(!started_by_installer(&[std::ffi::OsString::from(
+            STARTED_BY_INSTALLER
+        )]));
+
+        // Started by the installer: it asks for the front once, and nothing holds it back.
+        let asked = std::cell::RefCell::new(Vec::new());
+        forward_at_first_show(true, |why| {
+            asked.borrow_mut().push((why.to_owned(), held_back(why)))
+        });
+        assert_eq!(
+            *asked.borrow(),
+            [("the installer started OpenBot".to_owned(), false)]
+        );
+        // Any other launch asks nothing.
+        forward_at_first_show(false, |why| {
+            asked.borrow_mut().push((why.to_owned(), held_back(why)))
+        });
+        assert_eq!(asked.borrow().len(), 1);
+        // While the browser sign-in is open it is held back, as every other moment is.
+        let held = while_signing_in(
+            || {
+                let mut held = None;
+                forward_at_first_show(true, |why| held = Some(held_back(why)));
+                held
+            },
+            || {},
+        );
+        assert_eq!(held, Some(true));
+
+        let main = include_str!("main.rs");
+        // In setup, once, as the window is first built, through `bring_to_front`, which asks
+        // `held_back` first.
+        let setup = &main[main.find(".setup(move |app| {\n").unwrap()..];
+        assert!(
+            setup.starts_with(
+                ".setup(move |app| {\n            build_main_window(app.handle())?;\n            log_launch(app.handle(), local_offset);\n"
+            ),
+            "{}",
+            &setup[..400]
+        );
+        let first_show = &setup[setup.find("log_launch(").unwrap()..];
+        let first_show = &first_show[first_show.find('\n').unwrap() + 1..];
+        let first_show = &first_show[..first_show.find("know_app_page_grants").unwrap()];
+        assert!(
+            first_show.contains(
+                "forward_at_first_show(from_installer, |why| bring_to_front(app.handle(), why));"
+            ),
+            "{first_show}"
+        );
+        let launch = &main[main.find("\nfn main() {\n").unwrap()..];
+        let launch = &launch[..launch.find(".setup(move |app| {\n").unwrap()];
+        assert!(launch.contains("let from_installer = started_by_installer(&args);"));
+        // The updating version passes the foreground on while its window is still up: before the
+        // updater's cleanup takes the windows down and Windows activates the one behind.
+        let before = &main[main.find("fn stop_before_installer<").unwrap()..];
+        let before = &before[..before.find("\n}\n").unwrap()];
+        let passed = before
+            .find("pass_the_foreground_on();")
+            .expect("the foreground passed on before the installer starts");
+        assert!(passed < before.find("app.cleanup_before_exit();").unwrap());
+        // The installer starts OpenBot with the flag read here.
+        assert!(include_str!("../windows/hooks.nsh").contains(&format!(
+            "!define OPENBOT_STARTED_BY_INSTALLER \"{STARTED_BY_INSTALLER}\""
+        )));
     }
 
     /// Windows cascades a window with no position of its own down and right on every launch. On
