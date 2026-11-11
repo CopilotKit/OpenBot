@@ -7,8 +7,15 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { NewRoutineButton } from "@/components/routines/new-routine-button";
+import { scheduleWords } from "@/components/routines/routine-dialog";
 import { RoutinesList } from "@/components/routines/routines-list";
 import { mergeRoutines } from "@/lib/routines/merged";
 import type { RoutineRecord } from "@/lib/routines/queries";
@@ -150,7 +157,9 @@ function serving({
   }) as unknown as typeof fetch;
 }
 
-function draw(agentId: string | undefined = "expenses") {
+/** `null` is the every-Bot Routines page. */
+function draw(scope: string | null = "expenses") {
+  const agentId = scope ?? undefined;
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -192,7 +201,11 @@ test("a routine, a goal and a check-in are one list, each in four parts", async 
   const view = draw();
   // A routine: what it does, when it starts, and that it acts.
   expect(await view.findByText("Post the standup summary.")).toBeTruthy();
-  expect(view.getByText("Weekdays at 09:00 · UTC · Acts")).toBeTruthy();
+  expect(
+    view.getByText(
+      `${scheduleWords({ schedule: "Weekdays at 09:00", timezone: "UTC" })} · Acts`,
+    ),
+  ).toBeTruthy();
   // A goal, as above.
   expect(view.getByText("Reconcile receipts")).toBeTruthy();
   // A check-in: what it watches, how often, and that it only tells you.
@@ -339,4 +352,162 @@ test("while the list loads it draws the list's shape, never the empty state", as
   expect(
     view.queryByRole("status", { name: "Loading your routines" }),
   ).toBeNull();
+});
+
+/*
+ * One row shape for every kind: a schedule opens its details as a goal and a check-in do, and
+ * everything its row used to carry inline is there.
+ */
+async function openSchedule(view: ReturnType<typeof draw>) {
+  const row = (await view.findByText("Post the standup summary.")).closest(
+    "button",
+  ) as HTMLElement;
+  fireEvent.click(row);
+  return within(document.body).findByRole("dialog");
+}
+
+test("every kind of row is one button with a chevron, with no control inside it", async () => {
+  serving({
+    routines: [routine("r1", "expenses")],
+    checkIns: [checkIn("c1", "expenses", "The launch brief")],
+  });
+  const view = draw();
+  await view.findByText("Post the standup summary.");
+  for (const text of [
+    "Post the standup summary.",
+    "Reconcile receipts",
+    "The launch brief",
+  ]) {
+    const row = view.getByText(text).closest("button") as HTMLElement;
+    expect(row).not.toBeNull();
+    expect(row.querySelector("button, a, input, [role=switch]")).toBeNull();
+    expect(row.querySelector(".tabler-icon-chevron-right")).not.toBeNull();
+  }
+  expect(view.queryByRole("switch")).toBeNull();
+  expect(view.queryByRole("button", { name: /^Delete/ })).toBeNull();
+});
+
+test("a schedule's details pause it, run it, show its runs and delete it", async () => {
+  serving({ routines: [routine("r1", "expenses")] });
+  const view = draw();
+  const details = within(await openSchedule(view));
+  expect(details.getByText("UTC")).toBeTruthy();
+
+  fireEvent.click(
+    details.getByRole("switch", {
+      name: "Enable the routine scheduled Weekdays at 09:00",
+    }),
+  );
+  await waitFor(() =>
+    expect(writes).toContainEqual({
+      request: "PUT /api/routines/r1/enabled",
+      body: { enabled: false },
+    }),
+  );
+
+  fireEvent.click(
+    details.getByRole("button", {
+      name: "Run the routine scheduled Weekdays at 09:00 now",
+    }),
+  );
+  await waitFor(() =>
+    expect(writes.map((write) => write.request)).toContain(
+      "POST /api/routines/r1/run",
+    ),
+  );
+  // Run now opens the runs, so the one it started is there to watch.
+  expect(
+    details
+      .getByRole("button", {
+        name: "Run history for the routine scheduled Weekdays at 09:00",
+      })
+      .getAttribute("aria-expanded"),
+  ).toBe("true");
+
+  fireEvent.click(
+    details.getByRole("button", {
+      name: "Delete the routine scheduled Weekdays at 09:00",
+    }),
+  );
+  // Delete still asks first.
+  const confirm = await within(document.body).findByRole("dialog", {
+    name: 'Delete "Weekdays at 09:00"?',
+  });
+  expect(writes.map((write) => write.request)).not.toContain(
+    "DELETE /api/routines/r1",
+  );
+  fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
+  await waitFor(() =>
+    expect(writes.map((write) => write.request)).toContain(
+      "DELETE /api/routines/r1",
+    ),
+  );
+});
+
+test("a refused delete is said in its confirmation, and Delete can be pressed again", async () => {
+  serving({ routines: [routine("r1", "expenses")] });
+  const served = global.fetch;
+  let refuse = true;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "DELETE" && refuse)
+      return Response.json({ error: "Couldn't delete it." }, { status: 500 });
+    return served(input, init);
+  }) as typeof fetch;
+  const view = draw();
+  const details = within(await openSchedule(view));
+  fireEvent.click(
+    details.getByRole("button", {
+      name: "Delete the routine scheduled Weekdays at 09:00",
+    }),
+  );
+  const confirm = within(
+    await within(document.body).findByRole("dialog", {
+      name: 'Delete "Weekdays at 09:00"?',
+    }),
+  );
+  fireEvent.click(confirm.getByRole("button", { name: "Delete" }));
+  expect((await confirm.findByRole("alert")).textContent).toBe(
+    "Couldn't delete it.",
+  );
+
+  refuse = false;
+  fireEvent.click(confirm.getByRole("button", { name: "Delete" }));
+  await waitFor(() =>
+    expect(writes.map((write) => write.request)).toContain(
+      "DELETE /api/routines/r1",
+    ),
+  );
+});
+
+test("a skipped last run is on the row, and a quiet success is not", async () => {
+  serving({
+    routines: [
+      routine("r1", "expenses", {
+        lastRun: { status: "skipped", at: new Date().toISOString() },
+      }),
+      routine("r2", "expenses", {
+        instruction: "Send the digest.",
+        lastRun: { status: "succeeded", at: new Date().toISOString() },
+      }),
+    ],
+  });
+  const view = draw();
+  const skipped = (await view.findByText("Post the standup summary.")).closest(
+    "button",
+  ) as HTMLElement;
+  expect(within(skipped).getByText(/^Skipped /)).toBeTruthy();
+  const quiet = view
+    .getByText("Send the digest.")
+    .closest("button") as HTMLElement;
+  expect(within(quiet).queryByText(/^Ran /)).toBeNull();
+});
+
+test("on the every-Bot list a schedule's row names its Bot, and its details lead to that Bot", async () => {
+  serving({ goals: [], routines: [routine("r1", "expenses")] });
+  const view = draw(null);
+  expect(await view.findByText(/^Expenses · Weekdays at 09:00/)).toBeTruthy();
+  const details = within(await openSchedule(view));
+  expect(
+    details.getByRole("link", { name: /Expenses/ }).getAttribute("href"),
+  ).toBe("/bots/expenses/routines");
 });

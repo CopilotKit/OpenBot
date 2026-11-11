@@ -7,7 +7,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import type * as React from "react";
 import { RoutineComposerButton } from "@/components/routines/new-routine-button";
 import { RoutinesConnectionPage } from "@/components/routines/routines-connection-page";
@@ -134,6 +134,11 @@ test("the Routines page says which Bot each routine belongs to", async () => {
     routines: [routine({})],
     sweep: SWEEP,
   });
+  // On the row, by name; in its details, as the way to that Bot's routines.
+  const row = (await view.findByText(/^Lead Desk · /)).closest(
+    "button",
+  ) as HTMLElement;
+  fireEvent.click(row);
   const bot = await view.findByRole("link", { name: /Lead Desk/ });
   expect(bot.getAttribute("href")).toBe("/bots/lead-desk/routines");
 });

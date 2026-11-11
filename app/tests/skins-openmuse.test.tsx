@@ -915,8 +915,14 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
   test("a routine is paused from Routines through OpenBot's own switch", async () => {
     const calls = serve();
     renderAt("/s/goals");
+    // The switch is in the routine's details, opened from its row.
     fireEvent.click(
-      await page().findByRole("switch", {
+      (await page().findByText("Send me the headlines")).closest(
+        "button",
+      ) as HTMLElement,
+    );
+    fireEvent.click(
+      await within(document.body).findByRole("switch", {
         name: "Enable the routine scheduled Every weekday at 9:00",
       }),
     );

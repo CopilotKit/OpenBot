@@ -7,7 +7,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import { RoutinesList } from "@/components/routines/routines-list";
 import type { RoutinesPage } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
@@ -98,9 +98,24 @@ function draw() {
 test("each routine names its conversation by the sidebar's title, not by its Bot", async () => {
   const view = draw();
 
+  // Where it posts is in its details, opened from the row.
+  fireEvent.click(
+    (
+      await view.findByText(
+        "Reply with the current UTC time and the words 'routine check from EKS'.",
+      )
+    ).closest("button") as HTMLElement,
+  );
   const eks = (await view.findByText("15-Minute EKS UTC Routine")).closest("a");
   expect(eks?.getAttribute("href")).toBe("/channel/conversation-eks");
-  const fresh = view.getByText("New conversation").closest("a");
+  fireEvent.click(view.getByRole("button", { name: "Done" }));
+
+  fireEvent.click(
+    view
+      .getByText("Post the morning summary.")
+      .closest("button") as HTMLElement,
+  );
+  const fresh = (await view.findByText("New conversation")).closest("a");
   expect(fresh?.getAttribute("href")).toBe("/channel/conversation-new");
   expect(view.queryByText("General Assistant")).toBeNull();
 });

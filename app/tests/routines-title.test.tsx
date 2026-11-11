@@ -8,6 +8,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
+import { scheduleWords } from "@/components/routines/routine-dialog";
 import { RoutinesList } from "@/components/routines/routines-list";
 import type { RoutinesPage } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
@@ -97,8 +98,14 @@ function draw() {
   );
 }
 
+/** A line ending in `text`: on the every-Bot list it opens with the Bot's name. */
+const endsWith = (text: string) =>
+  new RegExp(`${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+
+/** The row's heading, without the small kind label ("Schedule") beside it. */
 function titleOf(element: HTMLElement) {
-  return element.closest('[data-slot="item-title"]')?.textContent;
+  return element.closest('[data-slot="item-title"]')?.childNodes[0]
+    ?.textContent;
 }
 
 test("a named routine is headed by its name, with its schedule under it", async () => {
@@ -106,8 +113,13 @@ test("a named routine is headed by its name, with its schedule under it", async 
 
   const named = await view.findByText("Morning briefing");
   expect(titleOf(named)).toBe("Morning briefing");
+  // The zone is said where it isn't the reader's own; the details always say it.
   expect(
-    view.getByText("Every day at 08:00 · Europe/Madrid · Acts"),
+    view.getByText(
+      endsWith(
+        `${scheduleWords({ schedule: "Every day at 08:00", timezone: "Europe/Madrid" })} · Acts`,
+      ),
+    ),
   ).toBeTruthy();
   expect(
     view.getByText("Summarise my unread mail and today's meetings."),
@@ -119,5 +131,19 @@ test("a routine with no name is headed by its instruction, with its schedule und
 
   const unnamed = await view.findByText("Post the day's open pull requests.");
   expect(titleOf(unnamed)).toBe("Post the day's open pull requests.");
-  expect(view.getByText("Weekdays at 18:00 · UTC · Acts")).toBeTruthy();
+  expect(
+    view.getByText(
+      endsWith(
+        `${scheduleWords({ schedule: "Weekdays at 18:00", timezone: "UTC" })} · Acts`,
+      ),
+    ),
+  ).toBeTruthy();
+});
+
+test("a schedule names its time zone only where it isn't the reader's own", () => {
+  const madrid = { schedule: "Every day at 08:00", timezone: "Europe/Madrid" };
+  expect(scheduleWords(madrid, "Europe/Madrid")).toBe("Every day at 08:00");
+  expect(scheduleWords(madrid, "America/New_York")).toBe(
+    "Every day at 08:00 · Europe/Madrid",
+  );
 });
