@@ -46,11 +46,15 @@ const goalFields = {
    */
   endsWhenMet: z.boolean(),
 };
+/** Shown to the person, and to the model as a refusal: "repeat" is `recurring`. */
 export const RECURS_AND_ENDS =
-  "A goal that recurs has no outcome that ends it.";
-/** A run may complete a goal that ends when met by checking its success criteria, so it needs some. */
+  "A goal can't both repeat and end when it's met. Turn one of them off.";
+/**
+ * A run may complete a goal that ends when met by checking its success criteria, so it needs some.
+ * Shown to the person, who knows them as Done when, and to the model, which knows `successCriteria`.
+ */
 export const ENDS_WITHOUT_OUTCOME =
-  "A goal that ends when met needs to say what done looks like.";
+  "A goal that ends when it's met needs a Done when, its success criteria. Add one, or let it keep going.";
 export const responsibilityInputSchema = z
   .object({
     agentId: text(128),

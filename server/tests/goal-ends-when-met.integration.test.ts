@@ -11,6 +11,7 @@ import {
   ENDS_WITHOUT_OUTCOME,
   goalShownFor,
   parseResponsibilityInput,
+  RECURS_AND_ENDS,
 } from "../src/responsibilities/types";
 import { createRoutineStore, RoutineRefusedError } from "../src/routines/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
@@ -185,14 +186,24 @@ test("a goal can't both recur and end when met", () => {
       recurring: true,
       endsWhenMet: true,
     }),
-  ).toThrow("A goal that recurs has no outcome that ends it.");
+  ).toThrow(RECURS_AND_ENDS);
+});
+
+// The person reads both refusals: what happened, then what to do.
+test("the refusals about ending when met say what to do", () => {
+  expect(RECURS_AND_ENDS).toBe(
+    "A goal can't both repeat and end when it's met. Turn one of them off.",
+  );
+  expect(ENDS_WITHOUT_OUTCOME).toBe(
+    "A goal that ends when it's met needs a Done when, its success criteria. Add one, or let it keep going.",
+  );
 });
 
 test("a goal that ends when met can't be made to recur", async () => {
   const value = await goal(true);
   await expect(
     store.update(ownerId, value.id, { recurring: true }),
-  ).rejects.toThrow("A goal that recurs has no outcome that ends it.");
+  ).rejects.toThrow(RECURS_AND_ENDS);
   const reread = await store.get(ownerId, value.id);
   expect(reread.recurring).toBe(false);
   expect(reread.endsWhenMet).toBe(true);
@@ -202,7 +213,7 @@ test("a goal that recurs can't be made to end when met", async () => {
   const value = await store.create(ownerId, { ...valid, recurring: true });
   await expect(
     store.update(ownerId, value.id, { endsWhenMet: true }),
-  ).rejects.toThrow("A goal that recurs has no outcome that ends it.");
+  ).rejects.toThrow(RECURS_AND_ENDS);
   const reread = await store.get(ownerId, value.id);
   expect(reread.recurring).toBe(true);
   expect(reread.endsWhenMet).toBe(false);
