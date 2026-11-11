@@ -25,6 +25,14 @@ Desktop installation:
 
 ### OpenBot Desktop
 
+- **Setup says what self-contained means up front, and asks about usage data last.** The first
+  screen, "Set up OpenBot (self-contained)", says this version runs entirely on your computer,
+  backend included, that setup takes between 1 and 10 minutes depending on your internet speed,
+  and that in production OpenBot for Business runs on your own infrastructure with Kubernetes, or on
+  OpenBot Cloud, with a link to book a demo. The usage-data notice moved off
+  it to the foot of the last screen, Finishing setup, as a small checkbox, checked by default as
+  before: it is the same setting as Settings > General > Privacy > Share usage data. The Account
+  step's heading is now "Get your free license key".
 - **OpenBot uses its own Podman machine when yours can't run it, and leaves yours as it is.** A
   Podman machine made with `podman machine init` is rootless, and OpenBot used it and stopped at
   "Change this computer's setup" because local Intelligence needs rootful Podman. On Windows even a
@@ -112,6 +120,19 @@ Desktop installation:
   distribution. It isn't OpenBot's and isn't needed, so OpenBot now marks it as already seen for
   you before it makes the machine. Installing over a running OpenBot said "OpenBot is running!
   Click OK to kill it". It now says "OpenBot is open. Click OK to close it and continue."
+- **Setup on a new Windows computer waits for OpenBot's Podman machine's network, sets it up again
+  when it doesn't come up, and asks for a Windows restart when only that fixes it.** On the first
+  boot after Windows Subsystem for Linux was turned on, the machine's network could fail to come
+  up. Accepting the license agreement stopped at "OpenBot couldn't prepare this computer to run it.
+  Try again.", and Try again then failed the downloads, again and again, until Windows restarted.
+  OpenBot now waits up to half a minute for the machine's network, checks it again before the
+  downloads, and restarts its own machine once when it is still down, which sets the network up
+  from scratch. A Podman machine of yours that shares that network is never stopped. If it is still
+  down, setup shows "Restart Windows to finish", with Restart now, instead of Try again. OpenBot
+  checks the network every time it opens or starts, before its backend starts, so restarting the
+  machine never stops a running backend, and the screen says "Reconnecting OpenBot to the
+  internet" while it waits. If Start still has to restart the machine, it starts the backend again
+  and waits for it before it starts OpenBot.
 - **OpenBot stays behind your browser while you sign in, and opens where you left it.** On
   Windows, OpenBot came in front of the browser partway through setup while you were typing your
   email to sign in. While the browser sign-in is open it now stays where it is, and comes forward
@@ -165,6 +186,13 @@ Desktop installation:
 
 ### Conversations
 
+- **An answer that reaches the screen with pieces missing is put right, and the Bot carries on.**
+  Sometimes a run's live stream reached the conversation out of shape while the run itself went
+  fine: the answer drew with words missing mid-sentence until a reload, or a step that asked for
+  several browser actions at once showed "Not completed", took none of them, and the conversation
+  stopped there with nothing said. The conversation now reads such a run back from its stored copy,
+  so the answer shows whole, and browser actions that never ran are retried once. If that breaks
+  again, it says so under the turn.
 - **A new conversation's first message starts one run.** Every first message started a second run
   on the Bot about a second after yours: the CopilotKit runtime named the new conversation by
   running the same Bot again on a title prompt. On a Bot OpenBot runs in a harness, such as the

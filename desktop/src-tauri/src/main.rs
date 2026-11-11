@@ -481,12 +481,157 @@ async fn wake_engine(app: tauri::AppHandle, root: String) -> Result<(), Problem>
     }
     let asked = std::time::Instant::now();
     let saved = preparation::saved_engine(&root);
-    let woken = match wake_installation_engine(&app, saved).await {
-        Ok(()) => heal_installation_engine(&app, saved).await,
-        failed => failed,
-    };
+    let woken = engine_then_machine(
+        async || wake_installation_engine(&app, saved).await,
+        async || heal_installation_engine(&app, saved).await,
+        async || machine_before_back_end(&app, saved).await,
+    )
+    .await;
     logging::outcome("wake engine", asked, &woken);
     woken
+}
+
+/// The engine woken, then healed, then OpenBot's own machine made ready for the back end, in that
+/// order: the machine has to be up before it can be prepared, and the window asks the CLI to set up,
+/// update or start the back end only after all three.
+async fn engine_then_machine(
+    wake: impl AsyncFnOnce() -> Result<(), Problem>,
+    heal: impl AsyncFnOnce() -> Result<(), Problem>,
+    machine: impl AsyncFnOnce() -> Result<(), Problem>,
+) -> Result<(), Problem> {
+    wake().await?;
+    heal().await?;
+    machine().await
+}
+
+/**
+OpenBot's own Podman machine on Windows, made ready before the back end starts in it. The one place
+for that: the window wakes the engine (`wake_engine`) before every run that sets up, updates or
+starts the back end, so whatever runs here runs before the back end does.
+
+First its network, checked and set up again when it is down (`acquire::machine_before_back_end`),
+said on the machine's row while it waits. Setting it up again restarts the machine, which stops
+whatever runs in it: run only at Start, after the back end had started, it stopped the back end's
+cluster on a live Windows run, and OpenBot then couldn't reach its backend. Anything else the
+machine needs before the back end goes after the network, which it may need.
+*/
+async fn machine_before_back_end<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    saved: Option<engine::Engine>,
+) -> Result<(), Problem> {
+    if !cfg!(target_os = "windows") || saved == Some(engine::Engine::Docker) {
+        return Ok(());
+    }
+    let progress_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let found = engine::detect_saved(saved);
+        let Some(address) = found.address.filter(|_| found.responding) else {
+            return Ok(());
+        };
+        let mut said = false;
+        let checked = acquire::machine_before_back_end(&address, || {
+            said = true;
+            report_running_plain(&progress_app, "start-machine", acquire::RECONNECTING);
+        });
+        if said {
+            reconnected(&progress_app, &checked);
+        }
+        checked.map(|_| ())
+    })
+    .await
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot could not start the software it runs on. Try again.",
+            error.to_string(),
+        )
+    })?
+}
+
+/// The machine's row, done, once `acquire::RECONNECTING` was said on it.
+fn reconnected<R: tauri::Runtime, T>(app: &tauri::AppHandle<R>, checked: &Result<T, Problem>) {
+    match checked {
+        Ok(_) => report_plain(app, "start-machine", true, engine::engine_ready_line().said),
+        Err(problem) => report_plain(app, "start-machine", false, problem.said.clone()),
+    }
+}
+
+/// Start's network check, then the back end started again when that check restarted OpenBot's
+/// machine under it. In this order, before Compose: a restart stops the back end's cluster, and
+/// OpenBot's services connect to the back end as they start.
+///
+/// The window makes OpenBot's machine ready before it starts the back end (`machine_before_back_end`), so a
+/// restart here is rare: a network that went down after that, or a back end that was already
+/// running when Start was asked.
+fn network_then_back_end(
+    network: impl FnOnce() -> Result<acquire::Network, Problem>,
+    back_end_again: impl FnOnce() -> Result<(), Problem>,
+) -> Result<(), Problem> {
+    if network()? == acquire::Network::RestartedMachine {
+        log::warn!("[engine] the machine restarted under the backend; starting the backend again");
+        back_end_again()?;
+    }
+    Ok(())
+}
+
+/// How often, and how many times, Start asks whether the back end is ready again after OpenBot's
+/// machine restarted under it: five minutes, as the window waits for it.
+const BACK_END_AGAIN_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
+const BACK_END_AGAIN_POLLS: usize = 100;
+
+/// The back end OpenBot set up, started again and waited for. Nothing for a back end that is not
+/// OpenBot's: OpenBot never starts one it didn't set up.
+fn back_end_after_machine_restart(root: &Path) -> Result<(), Problem> {
+    let Some(stack) = local_eval_state::read(root, None)
+        .filter(|state| state.tied_to_openbot())
+        .map(|state| state.stack_id())
+    else {
+        return Ok(());
+    };
+    back_end_started_again(
+        |action| {
+            let attempt = format!("after-machine-restart-{:016x}", rand::random::<u64>());
+            local_eval::run_installed(&attempt, action, &stack)
+        },
+        &mut || std::thread::sleep(BACK_END_AGAIN_EVERY),
+        BACK_END_AGAIN_POLLS,
+    )
+}
+
+fn back_end_started_again(
+    mut call: impl FnMut(local_eval::Action) -> Result<local_eval::Report, local_eval::Failure>,
+    pause: &mut dyn FnMut(),
+    polls: usize,
+) -> Result<(), Problem> {
+    let failed = |detail: String| {
+        Problem::with(
+            "OpenBot couldn't start again after reconnecting to the internet. Try Start again.",
+            detail,
+        )
+    };
+    let started = call(local_eval::Action::Start)
+        .map_err(|failure| failed(format!("local start: {failure:?}")))?;
+    if started.outcome != local_eval::Outcome::Completed {
+        return Err(failed(format!(
+            "local start: {:?} {:?}",
+            started.outcome, started.reason
+        )));
+    }
+    let mut last = String::from("no status yet");
+    for _ in 0..polls {
+        match call(local_eval::Action::Status) {
+            Ok(report)
+                if report.readiness == local_eval::Readiness::Ready
+                    && report.licence == local_eval::Licence::Valid =>
+            {
+                log::info!("[engine] the backend is ready again after the machine restarted");
+                return Ok(());
+            }
+            Ok(report) => last = format!("{:?}", report.readiness),
+            Err(failure) => last = format!("{failure:?}"),
+        }
+        pause();
+    }
+    Err(failed(format!("local status: not ready, last {last}")))
 }
 
 /**
@@ -1823,23 +1968,33 @@ Get the newer version the feed names ready while this one runs (`update_ready`),
 own: a try as soon as the feed names one, and every `app_update::TICK` after, until it is ready. A
 try waits while OpenBot is not running, or while something the person started needs the engine
 (`update_ready_paused`), so the first one after a launch comes once Start is done. Once ready, each
-try only checks that it still is. A build that is offered no updates never starts it.
+try only checks that it still is. A build that is offered no updates makes no such try.
+
+The same thread gets this app's own release ready for an installation behind it
+(`update_ready::behind`), which any build can have, first, and every `BEHIND_TICK` while that
+release is due and not ready, so it starts soon after the engine answers.
 */
 fn get_updates_ready<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     // An internal build pointed at a test feed reads its list from there.
     let test = app_update_test_feed(app);
-    if app_update_feed(app).is_none() && test.is_none() {
-        return;
-    }
+    let fed = app_update_feed(app).is_some() || test.is_some();
     let handle = app.clone();
     let getting = std::thread::Builder::new()
         .name("openbot-update-ready".into())
         .spawn(move || {
             let mut lists: Option<(semver::Version, update_ready::Announced)> = None;
+            let mut own: Option<(semver::Version, update_ready::Announced)> = None;
             let mut said: Option<String> = None;
+            let mut own_said: Option<String> = None;
+            // The first try once launch has remembered the installation's folder.
+            let mut next = BEHIND_TICK;
             loop {
-                handle.state::<Shell>().update_ready.wait(app_update::TICK);
-                try_getting_update_ready(&handle, test.as_deref(), &mut lists, &mut said);
+                handle.state::<Shell>().update_ready.wait(next);
+                let behind = try_getting_own_release_ready(&handle, &mut own, &mut own_said);
+                if fed {
+                    try_getting_update_ready(&handle, test.as_deref(), &mut lists, &mut said);
+                }
+                next = behind.unwrap_or(app_update::TICK);
             }
         });
     if let Err(error) = getting {
@@ -1858,6 +2013,134 @@ fn update_ready_paused<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
         || !matches!(*shell.quit.phase.lock().unwrap(), QuitPhase::Idle)
         || shell.root.lock().unwrap().is_none()
         || shell.containers.lock().unwrap().is_none()
+}
+
+/// How soon the next try at getting this app's own release ready comes while it is due and its
+/// engine does not answer yet, or is busy: it may answer at any moment of sign-in or the back
+/// end's setup.
+const BEHIND_TICK: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// How soon the next try comes after one that measured the engine short of room, or could not
+/// download: each measures the disk with a container and reads the images' sizes.
+const BEHIND_RETRY: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Whether a try at getting this app's own release ready waits, or stops before its next image:
+/// OpenBot is starting, updating (the update pulls the rest itself), or quitting, or the app is
+/// installing its own update. Unlike `update_ready_paused`, it goes on while OpenBot is not
+/// running: that is when it is needed.
+fn own_release_paused<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    use std::sync::atomic::Ordering::SeqCst;
+    let shell = app.state::<Shell>();
+    shell.starting.load(SeqCst)
+        || shell.updating.load(SeqCst)
+        || shell.app_update.installing()
+        || !matches!(*shell.quit.phase.lock().unwrap(), QuitPhase::Idle)
+}
+
+/**
+One try at getting this app's own release ready for the installation in the selected folder when it
+is behind the app (`update_ready::behind`): OpenBot's images for it, into the engine the
+installation was set up on, once that engine answers, so the Start that moves it finds them there.
+Never started by itself: an engine that does not answer is left alone. The download keeps the back
+end's 40 GiB free (`update_ready::keeps_free`). Said in the log once per change of outcome. When the
+release is due and not ready yet, how soon the next try comes.
+*/
+fn try_getting_own_release_ready<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    lists: &mut Option<(semver::Version, update_ready::Announced)>,
+    said: &mut Option<String>,
+) -> Option<std::time::Duration> {
+    let mut say = |line: String, warn: bool| {
+        if said.as_deref() != Some(line.as_str()) {
+            if warn {
+                log::warn!("{line}");
+            } else {
+                log::info!("{line}");
+            }
+            *said = Some(line);
+        }
+    };
+    let root = selected_root_or_default(app);
+    let version = update_ready::behind(&root, &upgrade::own())?;
+    // The images its last install pulled say which of the release's it runs. Without them there
+    // is nothing to go by, and the update pulls what it needs.
+    let installed = preparation::installed_images(&root).unwrap_or_default();
+    if installed.is_empty() {
+        return None;
+    }
+    if own_release_paused(app) {
+        return Some(BEHIND_TICK);
+    }
+    let status = engine::detect_saved(preparation::saved_engine(&root));
+    let Some(address) = status
+        .address
+        .filter(|_| status.responding)
+        .and_then(|address| address.pin().ok())
+    else {
+        return Some(BEHIND_TICK);
+    };
+    let list = match lists.as_ref().filter(|(listed, _)| *listed == version) {
+        Some((_, list)) => list.clone(),
+        None => {
+            let repository = deployment_release::distribution(&root)
+                .map(|policy| policy.repository)
+                .unwrap_or_else(|_| "CopilotKit/OpenBot".into());
+            match deployment::get(&update_ready::list_url(&repository, &version))
+                .and_then(|body| update_ready::read_list(&body, &version))
+            {
+                Ok(list) => {
+                    *lists = Some((version.clone(), list.clone()));
+                    list
+                }
+                Err(error) => {
+                    say(
+                        format!("[update ready] could not read what v{version} downloads: {error}"),
+                        true,
+                    );
+                    return Some(BEHIND_RETRY);
+                }
+            }
+        }
+    };
+    let ahead = update_ready::Ahead {
+        version: &version,
+        list: &list,
+        engine: &address,
+        installed: &installed,
+        // The back end's setup or update pulls its own.
+        back_end: None,
+        disk: &|| local_eval::engine_disk(&address),
+        computer_free: &|| update_ready::computer_free(&address),
+        limits: openbot_desktop_lib::local_images::Limits::standard(),
+        keep_free: local_eval::MIN_ENGINE_FREE_DISK_BYTES,
+    };
+    let stop = || own_release_paused(app);
+    match update_ready::get_ready(&ahead, &stop, &mut |_, _| {}) {
+        update_ready::Outcome::Ready => {
+            say(
+                format!("[update ready] v{version}'s images are here for the update to it"),
+                false,
+            );
+            None
+        }
+        update_ready::Outcome::Skipped(why) => {
+            say(
+                format!(
+                    "[update ready] not downloading v{version} before the update to it: {why}; the update downloads it"
+                ),
+                true,
+            );
+            Some(BEHIND_RETRY)
+        }
+        update_ready::Outcome::Stopped => Some(BEHIND_TICK),
+        update_ready::Outcome::NotYet(why) => {
+            say(
+                format!("[update ready] v{version} is not ready yet: {why}; trying again"),
+                true,
+            );
+            Some(BEHIND_RETRY)
+        }
+    }
 }
 
 /// One try at getting the newer version ready, said in the log once per change of outcome.
@@ -1934,6 +2217,8 @@ fn try_getting_update_ready<R: tauri::Runtime>(
         disk: &|| local_eval::engine_disk(&address),
         computer_free: &|| update_ready::computer_free(&address),
         limits: openbot_desktop_lib::local_images::Limits::standard(),
+        // OpenBot runs, so its back end is set up already.
+        keep_free: 0,
     };
     // Stopped when OpenBot needs the engine, or the feed names another version meanwhile.
     let stop = || update_ready_paused(app) || shell.app_update.newer().as_ref() != Some(&version);
@@ -2579,6 +2864,9 @@ async fn prepare_installation_inner(
             "images",
             "Checking what OpenBot needs to download.",
         );
+        // On OpenBot's own machine on Windows the downloads go through the machine's network, which
+        // a Retry reaches without starting the machine again: checked, and set up again, first.
+        acquire::prepare_for_compose(&address)?;
         // The first screen may have started pulling these already: wait for it, showing its
         // download, and the pulls below find them there.
         early_downloads::wait_for_images(|downloads| report_downloads(&handle, downloads.clone()));
@@ -3861,7 +4149,25 @@ async fn start_stack_inner<R: tauri::Runtime>(
         }
         #[cfg(target_os = "linux")]
         let status = found.status();
-        acquire::prepare_for_compose(&found)?;
+        network_then_back_end(
+            || {
+                let mut said = false;
+                let checked = acquire::prepare_for_compose_saying(&found, || {
+                    said = true;
+                    report_running_plain(&app, "start-machine", acquire::RECONNECTING);
+                });
+                // After a restart the line stays until the back end is ready again.
+                if said && !matches!(checked, Ok(acquire::Network::RestartedMachine)) {
+                    reconnected(&app, &checked);
+                }
+                checked
+            },
+            || {
+                let again = back_end_after_machine_restart(&root);
+                reconnected(&app, &again);
+                again
+            },
+        )?;
         preparation::require(&root, Some(&requested_harness), &found)?;
         // An installation from before engines were saved is pinned to the one its images were
         // just found on. Best effort: Start does not fail over a hint for next time.
@@ -13515,6 +13821,135 @@ mod tests {
         assert_eq!(run(None, true, false, false), none);
         // Linux runs Podman natively: there is no machine to start.
         assert_eq!(run(Some(Podman), false, false, true), none);
+    }
+
+    /// A live Windows run: the machine's network was checked only at Start, after the back end had
+    /// started, and setting it up again restarted the machine under the back end. The window wakes
+    /// the engine before every CLI call that sets up, updates or starts the back end, and the wake
+    /// now makes OpenBot's machine ready last, after the engine is up.
+    #[test]
+    fn the_wake_makes_openbots_machine_ready_after_the_engine_and_before_the_back_end() {
+        use std::cell::RefCell;
+        let run = |wake: Result<(), Problem>| {
+            let done = RefCell::new(Vec::new());
+            let result = tauri::async_runtime::block_on(engine_then_machine(
+                async || {
+                    done.borrow_mut().push("wake");
+                    wake
+                },
+                async || {
+                    done.borrow_mut().push("heal");
+                    Ok(())
+                },
+                async || {
+                    done.borrow_mut().push("machine before the back end");
+                    Ok(())
+                },
+            ));
+            (result, done.into_inner())
+        };
+        let (result, done) = run(Ok(()));
+        assert!(result.is_ok());
+        assert_eq!(done, ["wake", "heal", "machine before the back end"]);
+        // An engine that did not come up is said as it was, and its machine is not touched.
+        let (result, done) = run(Err(Problem::plain("Docker Desktop didn't start.")));
+        assert!(result.is_err());
+        assert_eq!(done, ["wake"]);
+    }
+
+    fn back_end_report(
+        outcome: local_eval::Outcome,
+        readiness: local_eval::Readiness,
+    ) -> local_eval::Report {
+        local_eval::Report {
+            outcome,
+            stack: None,
+            reason: None,
+            readiness,
+            licence: local_eval::Licence::Valid,
+            licence_expires_at: None,
+            update_to: None,
+            checks_passed: readiness == local_eval::Readiness::Ready,
+            shortfall: None,
+        }
+    }
+
+    /// The same run, when Start is where the network is set up again (it went down after the
+    /// wake, or the back end was already running): the back end is started again, and waited for
+    /// until it is ready, before Compose starts OpenBot's services.
+    #[test]
+    fn a_machine_restarted_at_start_starts_the_back_end_again_before_compose() {
+        use local_eval::{Action, Outcome, Readiness};
+        use std::cell::RefCell;
+        let done = RefCell::new(Vec::<String>::new());
+        let mut statuses =
+            vec![Readiness::Stopped, Readiness::Starting, Readiness::Ready].into_iter();
+        let mut pauses = 0;
+        let result = network_then_back_end(
+            || {
+                done.borrow_mut().push("network".into());
+                Ok(acquire::Network::RestartedMachine)
+            },
+            || {
+                back_end_started_again(
+                    |action| {
+                        done.borrow_mut()
+                            .push(format!("local {action:?}").to_lowercase());
+                        Ok(match action {
+                            Action::Start => {
+                                back_end_report(Outcome::Completed, Readiness::Starting)
+                            }
+                            _ => back_end_report(Outcome::Completed, statuses.next().unwrap()),
+                        })
+                    },
+                    &mut || pauses += 1,
+                    BACK_END_AGAIN_POLLS,
+                )
+            },
+        );
+        done.borrow_mut().push("compose".into());
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(
+            done.into_inner(),
+            [
+                "network",
+                "local start",
+                "local status",
+                "local status",
+                "local status",
+                "compose"
+            ]
+        );
+        assert_eq!(pauses, 2);
+
+        // A network that answered restarted nothing, and the back end is left as it is.
+        let mut asked = Vec::new();
+        network_then_back_end(
+            || Ok(acquire::Network::Answered),
+            || {
+                asked.push("back end again");
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(asked.is_empty());
+
+        // A back end that never gets ready again stops Start with a sentence, not Compose.
+        let error = back_end_started_again(
+            |action| {
+                Ok(match action {
+                    Action::Start => back_end_report(Outcome::Completed, Readiness::Starting),
+                    _ => back_end_report(Outcome::Completed, Readiness::Starting),
+                })
+            },
+            &mut || {},
+            3,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.said,
+            "OpenBot couldn't start again after reconnecting to the internet. Try Start again."
+        );
     }
 
     /// The tester's Start: Docker Desktop 4.27.2 answered, and Compose v2.24.5 stopped at its first
