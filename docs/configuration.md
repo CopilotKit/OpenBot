@@ -189,14 +189,14 @@ To rotate the secret, do one of these:
   `(OpenBot)` config for the app and replace the client secret. The shared account, its grants and
   every Bot that uses it stay as they are. Set the new value in the environment as well, so a config
   created later carries it.
-- **Turn the app off and on again.** Set the new values, restart, then on the app's Plugins page
+- **Turn the app off and on again.** Set the new values, restart, then on the app's page under Apps
   turn **Enable for this deployment** off and back on. Turning it off deletes the config at Composio
   and ends the shared account and every Bot's grant on the app. Turning it on creates a new config
   with the new client. Then make the app shared, connect the team account and grant it to Bots again.
 
 An app on its own client connects only as one shared account. Because the credential is this
 deployment's client, a personal account would give anyone who can see the app its full access, so
-**Connect** refuses one and the screens don't offer it. Make the app shared on its Plugins page, and
+**Connect** refuses one and the screens don't offer it. Make the app shared on its page under Apps, and
 an administrator connects it there.
 
 ## The provider spec file
@@ -561,7 +561,7 @@ where `<provider>` is `google`, `microsoft` or `okta`.
 
 `OPENBOT_PUBLIC_URL` and `OPENBOT_APP_URL` matter only for a connector each person connects their own account to, such as Google Drive.
 
-`OPENBOT_PUBLIC_URL` builds the redirect URI the vendor sends somebody back to after they consent, which has to match what an administrator registered with that vendor character for character — so it comes from configuration rather than from the incoming request. Most deployments never set it, because `BETTER_AUTH_URL` is already the same public address. With neither, the Plugins page says the deployment cannot complete a consent flow, and no account can be connected.
+`OPENBOT_PUBLIC_URL` builds the redirect URI the vendor sends somebody back to after they consent, which has to match what an administrator registered with that vendor character for character — so it comes from configuration rather than from the incoming request. Most deployments never set it, because `BETTER_AUTH_URL` is already the same public address. With neither, the Apps page says the deployment cannot complete a consent flow, and no account can be connected.
 
 `OPENBOT_APP_URL` is where the callback sends the person afterwards. It is a separate setting because the app and the API are separate addresses: locally the app is Vite on `3010` and the API is `3001`, so a relative redirect would land on the API, which serves no pages. A deployment serving both from one origin can leave it unset.
 
@@ -587,7 +587,7 @@ expired, or whose admin has not granted OpenBot access to the system or to OpenB
 so in those words.
 Marking a server this way needs Microsoft sign-in configured. Adding the same server again without
 `entraScope` keeps the mark; send `"entraScope": null` to reach it on a token again. The server's
-page under Plugins shows the mark and its scope.
+page under Apps shows the mark and its scope.
 
 **Apps can call OpenBot with an Entra token.** An app that signed somebody in with Entra asks for a
 token to `MICROSOFT_OAUTH_API_SCOPE` and sends it as `Authorization: Bearer <token>` on any API or
@@ -810,7 +810,7 @@ them, including a saved off. See [automatic-learning.md](automatic-learning.md).
 ## OpenTelemetry export
 
 Every audit row is also sent as an OTLP log record over HTTP, so a SIEM or an OpenTelemetry
-Collector receives the same events the **Audit** page shows, as they happen. Each record carries
+Collector receives the same events the **Activity** page shows, as they happen. Each record carries
 `openbot.surface`: `bot`, `identity` or `control_plane`. Export never stops a request: when the
 collector cannot be reached, records are dropped after the SDK's retries, and the row in PostgreSQL
 is still the record.

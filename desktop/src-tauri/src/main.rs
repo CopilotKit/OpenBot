@@ -6471,10 +6471,11 @@ fn show_status_window(app: &tauri::AppHandle) {
     }
 }
 
-/// Where OpenBot's Settings → This computer lives, in releases that have it.
+/// The address Desktop opens for what OpenBot runs on this computer.
 ///
-/// Not `/settings/computer`: the personal edition's Computers page (the Bots' computers) has that
-/// address, and its guard sends every other edition to General.
+/// That is a section of Settings → Computer (`/settings/computer`) now, and this address is kept
+/// in the app as a redirect to it. Desktop still opens this one because releases before that
+/// change have only this page, and `show_status_in_app` looks for its route file to know.
 const COMPUTER_SETTINGS_PATH: &str = "/settings/this-computer";
 
 /**

@@ -150,7 +150,7 @@ is something to set there:
 | Apps | Connected accounts and their tools | Connections | Apps | plugins, connected accounts |
 | Computer | Browser, files, commands, folders on your machine | Settings → Computer | Computer | Browsers, This computer |
 | Approvals | What always asks, your rules, auto-review | Settings → Approvals | Approvals | Approval rules, "Ask before making changes" |
-| Activity | Everything allowed, refused and failed | Settings → Activity | The Bot's page | Audit |
+| Activity | Everything allowed, refused and failed | Settings → Activity, or Admin → Activity for a team | The Bot's page | Audit |
 
 The names in the last column may stay as labels inside a page, and "goal" and "check-in" stay as
 words a Bot uses in conversation. They stop being places of their own. Teach a Bot stays as the page
