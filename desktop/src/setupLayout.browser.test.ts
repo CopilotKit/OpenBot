@@ -1281,11 +1281,13 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
   }, 30_000);
 
   /*
-   * Seen on Windows G: the card grew from one line to Docker Desktop's three-line hand-off and back,
-   * and the rows under it moved each time. It holds one height now, with what it says and its bar
-   * at the top as a row's are, and the spare height at the bottom.
+   * Seen on Windows G: the card grew a line and shrank again as what it said changed, and moved the
+   * rows under it. Held at one fixed 130 px instead, its usual one-line form had an empty band under
+   * the bar. It is as tall as what it says, in its own padding, and what changes is said in place:
+   * "Taking longer than usual, still working" takes the time line's place and adds no line.
+   * Docker Desktop's three-line hand-off holds its own height while it shows.
    */
-  test("the card holds one height as what it says comes and goes, and the rows under it stay", async () => {
+  test("the card fits what it says, and nothing moves as its time line changes", async () => {
     const page = await browser.newPage({
       viewport: { width: 1000, height: 800 },
     });
@@ -1299,56 +1301,110 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
           const words = document
             .querySelector(".journey-said")
             ?.getBoundingClientRect();
-          const time = document
-            .querySelector(".journey-time")
-            ?.getBoundingClientRect();
           const bar = document
             .querySelector(".journey progress")
             ?.getBoundingClientRect();
-          const said = document.querySelector(".journey-said") as HTMLElement;
+          const time = document.querySelector(".journey-time") as HTMLElement;
           return {
-            card: card?.height,
+            card: card?.height ?? 0,
             row: document
               .querySelector('[aria-label="Setting up OpenBot"]')
               ?.getBoundingClientRect().top,
-            cut: said.scrollHeight > said.clientHeight + 1,
-            // At the top, in the card's own padding, and the bar right under the words.
-            top: Math.round((words?.top ?? 0) - (card?.top ?? 0)),
-            under: Math.round((bar?.top ?? 0) - (time?.bottom ?? 0)),
-            spare: (card?.bottom ?? 0) - (bar?.bottom ?? 0) >= 13,
+            // The padding above what it says, and under the bar.
+            above: (words?.top ?? 0) - (card?.top ?? 0),
+            below: (card?.bottom ?? 0) - (bar?.bottom ?? 0),
+            time: time.textContent ?? "",
+            cut: time.scrollWidth > time.clientWidth,
           };
         });
-      const plain = await measure();
-      expect(plain).toMatchObject({
-        card: 130,
-        top: 13,
-        under: 10,
-        spare: true,
-        cut: false,
-      });
-      const handOff =
-        "Docker Desktop is starting in its own window. If it asks you to accept its terms or sign in, do that there. OpenBot comes back when Docker is ready.";
+      const emit = (downloads: Record<string, number>) =>
+        emitProgress(page, {
+          step: "images",
+          ok: true,
+          running: true,
+          detail: "Downloading local software.",
+          downloads,
+        });
+      // OpenBot updating itself, its download under way, as on Windows G.
       await emitProgress(page, {
-        step: "engine",
+        step: "release",
         ok: true,
         running: true,
-        elsewhere: true,
-        detail: handOff,
+        detail: "Downloading the update.",
       });
-      await page
-        .locator(".journey-said", { hasText: "Docker Desktop is starting" })
-        .waitFor();
-      expect(await measure()).toEqual(plain);
-      await emitProgress(page, {
-        step: "engine",
-        ok: true,
-        running: false,
-        detail: "The software OpenBot runs on is ready.",
+      await emit({
+        done: 1,
+        total: 5,
+        bytes: 190_900_000,
+        size: 944_400_000,
+        bytesPerSecond: 12_000_000,
       });
-      await page
-        .locator(".journey-said", { hasText: "Docker Desktop is starting" })
-        .waitFor({ state: "hidden" });
-      expect(await measure()).toEqual(plain);
+      await page.getByText(/190\.9 MB of 944\.4 MB/).waitFor();
+      await page.waitForTimeout(600);
+      const usual = await measure();
+      expect(Math.abs(usual.below - usual.above)).toBeLessThanOrEqual(2);
+      expect(usual.time).toMatch(
+        /left · 190\.9 MB of 944\.4 MB · \d+s so far$/,
+      );
+      expect(usual.cut).toBe(false);
+      // Every byte in, its last part unpacking, and fifteen minutes on: taking longer than usual.
+      await emit({
+        done: 4,
+        total: 5,
+        bytes: 944_400_000,
+        size: 944_400_000,
+        bytesPerSecond: 0,
+      });
+      await page.waitForTimeout(1500);
+      await page.evaluate(() => {
+        const real = Date.now;
+        Date.now = () => real() + 900_000;
+      });
+      await page.getByText(/Taking longer than usual/).waitFor();
+      const slow = await measure();
+      expect(slow.time).toBe(
+        "Taking longer than usual, still working · 944.4 MB downloaded",
+      );
+      expect(slow.cut).toBe(false);
+      expect({ card: slow.card, row: slow.row }).toEqual({
+        card: usual.card,
+        row: usual.row,
+      });
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
+  test("Docker Desktop's hand-off holds its three lines while it shows, whatever it says", async () => {
+    const page = await browser.newPage({
+      viewport: { width: 1000, height: 800 },
+    });
+    try {
+      await toStart(page);
+      const card = async () =>
+        (await page.locator(".journey").boundingBox())?.height ?? 0;
+      const usual = await card();
+      const handOff = async (detail: string) => {
+        await emitProgress(page, {
+          step: "engine",
+          ok: true,
+          running: true,
+          elsewhere: true,
+          detail,
+        });
+        await page
+          .locator(".journey-said", { hasText: detail.slice(0, 30) })
+          .waitFor();
+        return card();
+      };
+      const starting = await handOff(
+        "Docker Desktop is starting in its own window. If it asks you to accept its terms or sign in, do that there. OpenBot comes back when Docker is ready.",
+      );
+      const waiting = await handOff(
+        "Docker Desktop hasn't started yet. It may be waiting for you. Accept its terms there.",
+      );
+      expect(starting).toBe(usual + 44);
+      expect(waiting).toBe(starting);
     } finally {
       await page.close();
     }

@@ -1152,11 +1152,11 @@ a:hover {
  * one bar over every row that only moves forward. Drawn as the rows are, above them.
  */
 /*
- * ONE height, whatever it says: its tallest form's, three lines of what is happening (Docker
- * Desktop's hand-off) and one of the time, or one and two, then the bar. On Windows G the card
- * grew from 86 to 130 px as the hand-off came, shrank as it went, and moved the rows under it each
- * time. What it says and its bar sit at the top, as a row's do, and the spare height is at the
- * bottom.
+ * As tall as what it says: what is happening, one line of time, then the bar, in the card's own
+ * padding. What changes is said in place, so nothing in it or under it moves: the time line is one
+ * line whatever it says ("About 3 minutes left", "Taking longer than usual, still working", a
+ * download's bytes). A fixed 130 px card left an empty band under the bar in its usual one-line
+ * form. Docker Desktop's hand-off, three lines, holds its own height while it shows (`.handing-off`).
  */
 .journey {
   margin: 4px 0 12px;
@@ -1166,8 +1166,6 @@ a:hover {
   background: var(--card);
   display: grid;
   gap: 10px;
-  align-content: start;
-  height: 130px;
 }
 
 .journey-head {
@@ -1176,8 +1174,6 @@ a:hover {
   column-gap: 12px;
   row-gap: 2px;
   align-items: center;
-  max-height: 88px;
-  overflow: hidden;
   font-size: var(--text-base);
   line-height: 22px;
 }
@@ -1197,10 +1193,14 @@ a:hover {
   font-size: var(--text-sm);
   line-height: 20px;
   font-variant-numeric: tabular-nums;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Another app's window wants the person: its three lines held while it shows, whatever it says. */
+.journey.handing-off .journey-said {
+  min-height: 66px;
 }
 
 .journey progress {
