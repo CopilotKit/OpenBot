@@ -13,14 +13,6 @@ export function countLabel(
   return `${count} ${count === 1 ? one : many}`;
 }
 
-export function accessSummary(skills: number, apps: number): string {
-  const parts = [
-    skills ? countLabel(skills, "skill", "skills", "") : "",
-    apps ? countLabel(apps, "app", "apps", "") : "",
-  ].filter(Boolean);
-  return parts.length ? parts.join(", ") : "Nothing granted";
-}
-
 /**
  * Who else can use it. Publishing and visibility are separate records: a public Bot nobody published
  * is still open to everyone in the deployment.

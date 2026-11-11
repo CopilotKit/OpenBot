@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import {
-  accessSummary,
   countLabel,
   memorySummary,
   reachSummary,
@@ -16,13 +15,6 @@ test("counts read as words", () => {
   expect(countLabel(3, "routine", "routines", "No routines")).toBe(
     "3 routines",
   );
-});
-
-test("access names skills and apps, or says there is nothing", () => {
-  expect(accessSummary(0, 0)).toBe("Nothing granted");
-  expect(accessSummary(2, 0)).toBe("2 skills");
-  expect(accessSummary(0, 1)).toBe("1 app");
-  expect(accessSummary(1, 3)).toBe("1 skill, 3 apps");
 });
 
 test("sharing names the audience", () => {
