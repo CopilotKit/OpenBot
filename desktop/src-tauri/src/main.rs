@@ -481,12 +481,157 @@ async fn wake_engine(app: tauri::AppHandle, root: String) -> Result<(), Problem>
     }
     let asked = std::time::Instant::now();
     let saved = preparation::saved_engine(&root);
-    let woken = match wake_installation_engine(&app, saved).await {
-        Ok(()) => heal_installation_engine(&app, saved).await,
-        failed => failed,
-    };
+    let woken = engine_then_machine(
+        async || wake_installation_engine(&app, saved).await,
+        async || heal_installation_engine(&app, saved).await,
+        async || machine_before_back_end(&app, saved).await,
+    )
+    .await;
     logging::outcome("wake engine", asked, &woken);
     woken
+}
+
+/// The engine woken, then healed, then OpenBot's own machine made ready for the back end, in that
+/// order: the machine has to be up before it can be prepared, and the window asks the CLI to set up,
+/// update or start the back end only after all three.
+async fn engine_then_machine(
+    wake: impl AsyncFnOnce() -> Result<(), Problem>,
+    heal: impl AsyncFnOnce() -> Result<(), Problem>,
+    machine: impl AsyncFnOnce() -> Result<(), Problem>,
+) -> Result<(), Problem> {
+    wake().await?;
+    heal().await?;
+    machine().await
+}
+
+/**
+OpenBot's own Podman machine on Windows, made ready before the back end starts in it. The one place
+for that: the window wakes the engine (`wake_engine`) before every run that sets up, updates or
+starts the back end, so whatever runs here runs before the back end does.
+
+First its network, checked and set up again when it is down (`acquire::machine_before_back_end`),
+said on the machine's row while it waits. Setting it up again restarts the machine, which stops
+whatever runs in it: run only at Start, after the back end had started, it stopped the back end's
+cluster on a live Windows run, and OpenBot then couldn't reach its backend. Anything else the
+machine needs before the back end goes after the network, which it may need.
+*/
+async fn machine_before_back_end<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    saved: Option<engine::Engine>,
+) -> Result<(), Problem> {
+    if !cfg!(target_os = "windows") || saved == Some(engine::Engine::Docker) {
+        return Ok(());
+    }
+    let progress_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let found = engine::detect_saved(saved);
+        let Some(address) = found.address.filter(|_| found.responding) else {
+            return Ok(());
+        };
+        let mut said = false;
+        let checked = acquire::machine_before_back_end(&address, || {
+            said = true;
+            report_running_plain(&progress_app, "start-machine", acquire::RECONNECTING);
+        });
+        if said {
+            reconnected(&progress_app, &checked);
+        }
+        checked.map(|_| ())
+    })
+    .await
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot could not start the software it runs on. Try again.",
+            error.to_string(),
+        )
+    })?
+}
+
+/// The machine's row, done, once `acquire::RECONNECTING` was said on it.
+fn reconnected<R: tauri::Runtime, T>(app: &tauri::AppHandle<R>, checked: &Result<T, Problem>) {
+    match checked {
+        Ok(_) => report_plain(app, "start-machine", true, engine::engine_ready_line().said),
+        Err(problem) => report_plain(app, "start-machine", false, problem.said.clone()),
+    }
+}
+
+/// Start's network check, then the back end started again when that check restarted OpenBot's
+/// machine under it. In this order, before Compose: a restart stops the back end's cluster, and
+/// OpenBot's services connect to the back end as they start.
+///
+/// The window makes OpenBot's machine ready before it starts the back end (`machine_before_back_end`), so a
+/// restart here is rare: a network that went down after that, or a back end that was already
+/// running when Start was asked.
+fn network_then_back_end(
+    network: impl FnOnce() -> Result<acquire::Network, Problem>,
+    back_end_again: impl FnOnce() -> Result<(), Problem>,
+) -> Result<(), Problem> {
+    if network()? == acquire::Network::RestartedMachine {
+        log::warn!("[engine] the machine restarted under the backend; starting the backend again");
+        back_end_again()?;
+    }
+    Ok(())
+}
+
+/// How often, and how many times, Start asks whether the back end is ready again after OpenBot's
+/// machine restarted under it: five minutes, as the window waits for it.
+const BACK_END_AGAIN_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
+const BACK_END_AGAIN_POLLS: usize = 100;
+
+/// The back end OpenBot set up, started again and waited for. Nothing for a back end that is not
+/// OpenBot's: OpenBot never starts one it didn't set up.
+fn back_end_after_machine_restart(root: &Path) -> Result<(), Problem> {
+    let Some(stack) = local_eval_state::read(root, None)
+        .filter(|state| state.tied_to_openbot())
+        .map(|state| state.stack_id())
+    else {
+        return Ok(());
+    };
+    back_end_started_again(
+        |action| {
+            let attempt = format!("after-machine-restart-{:016x}", rand::random::<u64>());
+            local_eval::run_installed(&attempt, action, &stack)
+        },
+        &mut || std::thread::sleep(BACK_END_AGAIN_EVERY),
+        BACK_END_AGAIN_POLLS,
+    )
+}
+
+fn back_end_started_again(
+    mut call: impl FnMut(local_eval::Action) -> Result<local_eval::Report, local_eval::Failure>,
+    pause: &mut dyn FnMut(),
+    polls: usize,
+) -> Result<(), Problem> {
+    let failed = |detail: String| {
+        Problem::with(
+            "OpenBot reconnected to the internet, but its backend didn't start again. Try Start again.",
+            detail,
+        )
+    };
+    let started = call(local_eval::Action::Start)
+        .map_err(|failure| failed(format!("local start: {failure:?}")))?;
+    if started.outcome != local_eval::Outcome::Completed {
+        return Err(failed(format!(
+            "local start: {:?} {:?}",
+            started.outcome, started.reason
+        )));
+    }
+    let mut last = String::from("no status yet");
+    for _ in 0..polls {
+        match call(local_eval::Action::Status) {
+            Ok(report)
+                if report.readiness == local_eval::Readiness::Ready
+                    && report.licence == local_eval::Licence::Valid =>
+            {
+                log::info!("[engine] the backend is ready again after the machine restarted");
+                return Ok(());
+            }
+            Ok(report) => last = format!("{:?}", report.readiness),
+            Err(failure) => last = format!("{failure:?}"),
+        }
+        pause();
+    }
+    Err(failed(format!("local status: not ready, last {last}")))
 }
 
 /**
@@ -4004,7 +4149,25 @@ async fn start_stack_inner<R: tauri::Runtime>(
         }
         #[cfg(target_os = "linux")]
         let status = found.status();
-        acquire::prepare_for_compose(&found)?;
+        network_then_back_end(
+            || {
+                let mut said = false;
+                let checked = acquire::prepare_for_compose_saying(&found, || {
+                    said = true;
+                    report_running_plain(&app, "start-machine", acquire::RECONNECTING);
+                });
+                // After a restart the line stays until the back end is ready again.
+                if said && !matches!(checked, Ok(acquire::Network::RestartedMachine)) {
+                    reconnected(&app, &checked);
+                }
+                checked
+            },
+            || {
+                let again = back_end_after_machine_restart(&root);
+                reconnected(&app, &again);
+                again
+            },
+        )?;
         preparation::require(&root, Some(&requested_harness), &found)?;
         // An installation from before engines were saved is pinned to the one its images were
         // just found on. Best effort: Start does not fail over a hint for next time.
@@ -13658,6 +13821,135 @@ mod tests {
         assert_eq!(run(None, true, false, false), none);
         // Linux runs Podman natively: there is no machine to start.
         assert_eq!(run(Some(Podman), false, false, true), none);
+    }
+
+    /// A live Windows run: the machine's network was checked only at Start, after the back end had
+    /// started, and setting it up again restarted the machine under the back end. The window wakes
+    /// the engine before every CLI call that sets up, updates or starts the back end, and the wake
+    /// now makes OpenBot's machine ready last, after the engine is up.
+    #[test]
+    fn the_wake_makes_openbots_machine_ready_after_the_engine_and_before_the_back_end() {
+        use std::cell::RefCell;
+        let run = |wake: Result<(), Problem>| {
+            let done = RefCell::new(Vec::new());
+            let result = tauri::async_runtime::block_on(engine_then_machine(
+                async || {
+                    done.borrow_mut().push("wake");
+                    wake
+                },
+                async || {
+                    done.borrow_mut().push("heal");
+                    Ok(())
+                },
+                async || {
+                    done.borrow_mut().push("machine before the back end");
+                    Ok(())
+                },
+            ));
+            (result, done.into_inner())
+        };
+        let (result, done) = run(Ok(()));
+        assert!(result.is_ok());
+        assert_eq!(done, ["wake", "heal", "machine before the back end"]);
+        // An engine that did not come up is said as it was, and its machine is not touched.
+        let (result, done) = run(Err(Problem::plain("Docker Desktop didn't start.")));
+        assert!(result.is_err());
+        assert_eq!(done, ["wake"]);
+    }
+
+    fn back_end_report(
+        outcome: local_eval::Outcome,
+        readiness: local_eval::Readiness,
+    ) -> local_eval::Report {
+        local_eval::Report {
+            outcome,
+            stack: None,
+            reason: None,
+            readiness,
+            licence: local_eval::Licence::Valid,
+            licence_expires_at: None,
+            update_to: None,
+            checks_passed: readiness == local_eval::Readiness::Ready,
+            shortfall: None,
+        }
+    }
+
+    /// The same run, when Start is where the network is set up again (it went down after the
+    /// wake, or the back end was already running): the back end is started again, and waited for
+    /// until it is ready, before Compose starts OpenBot's services.
+    #[test]
+    fn a_machine_restarted_at_start_starts_the_back_end_again_before_compose() {
+        use local_eval::{Action, Outcome, Readiness};
+        use std::cell::RefCell;
+        let done = RefCell::new(Vec::<String>::new());
+        let mut statuses =
+            vec![Readiness::Stopped, Readiness::Starting, Readiness::Ready].into_iter();
+        let mut pauses = 0;
+        let result = network_then_back_end(
+            || {
+                done.borrow_mut().push("network".into());
+                Ok(acquire::Network::RestartedMachine)
+            },
+            || {
+                back_end_started_again(
+                    |action| {
+                        done.borrow_mut()
+                            .push(format!("local {action:?}").to_lowercase());
+                        Ok(match action {
+                            Action::Start => {
+                                back_end_report(Outcome::Completed, Readiness::Starting)
+                            }
+                            _ => back_end_report(Outcome::Completed, statuses.next().unwrap()),
+                        })
+                    },
+                    &mut || pauses += 1,
+                    BACK_END_AGAIN_POLLS,
+                )
+            },
+        );
+        done.borrow_mut().push("compose".into());
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(
+            done.into_inner(),
+            [
+                "network",
+                "local start",
+                "local status",
+                "local status",
+                "local status",
+                "compose"
+            ]
+        );
+        assert_eq!(pauses, 2);
+
+        // A network that answered restarted nothing, and the back end is left as it is.
+        let mut asked = Vec::new();
+        network_then_back_end(
+            || Ok(acquire::Network::Answered),
+            || {
+                asked.push("back end again");
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(asked.is_empty());
+
+        // A back end that never gets ready again stops Start with a sentence, not Compose.
+        let error = back_end_started_again(
+            |action| {
+                Ok(match action {
+                    Action::Start => back_end_report(Outcome::Completed, Readiness::Starting),
+                    _ => back_end_report(Outcome::Completed, Readiness::Starting),
+                })
+            },
+            &mut || {},
+            3,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.said,
+            "OpenBot reconnected to the internet, but its backend didn't start again. Try Start again."
+        );
     }
 
     /// The tester's Start: Docker Desktop 4.27.2 answered, and Compose v2.24.5 stopped at its first
