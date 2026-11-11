@@ -12,7 +12,13 @@ import type { ToolOutcome } from "./call";
 import { followView, latestView } from "./panel-view";
 
 /**
- * What a Bot has been doing on its computer, other than browsing.
+ * What a Bot has been doing on its computer: the pages it opened and acted on, the commands it ran,
+ * and the files it read and saved.
+ *
+ * BROWSING TOO. The pane used to leave the browser to the screen above it, so a Bot that spent a run
+ * searching and reading pages left it on "Nothing yet" while the screen changed page after page. The
+ * screen shows only where the browser is now; this lists every page opened, every click and every
+ * field filled in, in the words the transcript uses for them.
  *
  * The screen answers "what is it looking at" and nothing answered "what is it doing". A shell
  * command rendered in the transcript as one grey line, `Ran a command  rg --version`, with the output
@@ -47,13 +53,20 @@ export type ComputerActivity = {
    * what was done, not when: the time the page read it would be a guess drawn as a fact.
    */
   at?: number;
-  kind: "command" | "read_file" | "write_file" | "list_files";
-  /** The command, or the path. What the line says it acted on. */
+  kind: "command" | "read_file" | "write_file" | "list_files" | "browser";
+  /**
+   * For a browser step, which one it was (`computer_navigate`, `computer_click` and so on). The pane
+   * names it as the transcript does (`ownToolLabel` in `shared/tool-name.ts`).
+   */
+  step?: BrowserStepName;
+  /** The command, or the path. For a browser step, the page, the element or the key. What the line says it acted on. */
   subject: string;
   /** What came back. Empty when a command printed nothing, which is worth showing as itself. */
   output: string;
   /** Present for a command. Non-zero is drawn as a failure. */
   exitCode?: number;
+  /** A browser step the computer could not carry out: the page would not load, the element was gone. */
+  failed?: boolean;
   /** A boundary refused it, or it was not carried out. Drawn differently from a command that ran and failed. */
   refused?: boolean;
   /** Refused because the person declined it, so the line says declined rather than what it would have done. */
@@ -139,6 +152,8 @@ function notify(): void {
 function sameDetails(entry: ComputerActivity, details: ActivityDetails) {
   return (
     entry.kind === details.kind &&
+    entry.step === details.step &&
+    entry.failed === details.failed &&
     entry.subject === details.subject &&
     entry.output === details.output &&
     entry.exitCode === details.exitCode &&
@@ -350,6 +365,106 @@ const KINDS: Record<string, ComputerActivity["kind"]> = {
   computer_list_files: "list_files",
 };
 
+/**
+ * The browser steps, which the pane lists as well.
+ *
+ * Every step the computer's browser takes for a Bot (`COMPUTER_TOOLS` in `server/src/computer/schema.ts`),
+ * reading a page included: a run that only researches is all reading, and it is still what the Bot did.
+ */
+const BROWSER_STEPS = [
+  "computer_navigate",
+  "computer_read",
+  "computer_snapshot",
+  "computer_screenshot",
+  "computer_click",
+  "computer_type",
+  "computer_key",
+  "computer_scroll",
+] as const;
+export type BrowserStepName = (typeof BROWSER_STEPS)[number];
+const BROWSER: ReadonlySet<string> = new Set(BROWSER_STEPS);
+
+function isBrowserStep(name: string): name is BrowserStepName {
+  return BROWSER.has(name);
+}
+
+/**
+ * The computer turning a browser step away until the Bot looks at the page again, after a person
+ * handed the browser back. An instruction to the Bot, not something it did: the transcript leaves it
+ * out (`awaitingFreshLook` in `browser-activity.ts`), and so does the pane.
+ */
+function awaitingFreshLook(answer: ToolOutcome): boolean {
+  return (
+    answer.ok === false &&
+    answer.snapshotRequired === true &&
+    answer.handoffStatus === undefined
+  );
+}
+
+/** The name the computer resolved for the element a click or a field acted on, if it gave one. */
+function elementName(result: ToolOutcome): string | undefined {
+  const element = result.element;
+  if (!element || typeof element !== "object") return undefined;
+  const name = (element as { name?: unknown }).name;
+  return typeof name === "string" && name.trim() ? name.trim() : undefined;
+}
+
+function textOf(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+/**
+ * What one answered browser step did, as the pane draws it.
+ *
+ * The subject is what it acted on: the page's address, the element's label (its ref when the computer
+ * named none), the key. NEVER WHAT WAS TYPED. The computer declines to echo a field's value back for
+ * that reason, since a form is where a password or a card number goes, and the arguments that carry
+ * it are not read here.
+ */
+export function browserDetails(
+  step: BrowserStepName,
+  args: Record<string, unknown>,
+  result: ToolOutcome,
+): ActivityDetails {
+  const notTheBot = {
+    ...(result.refused === true ? { refused: true } : {}),
+    ...(result.declined === true ? { declined: true } : {}),
+    ...(result.doneByPerson === true ? { doneByPerson: true } : {}),
+  };
+  const failed =
+    result.ok === false &&
+    result.refused !== true &&
+    result.doneByPerson !== true;
+  const page = textOf(result.url);
+  const subject =
+    step === "computer_navigate"
+      ? (page ?? textOf(args.url) ?? "")
+      : step === "computer_click" || step === "computer_type"
+        ? (elementName(result) ?? textOf(args.ref) ?? "")
+        : step === "computer_key"
+          ? (textOf(args.key) ?? "")
+          : step === "computer_scroll"
+            ? typeof args.deltaY === "number" && args.deltaY < 0
+              ? "up"
+              : "down"
+            : (page ?? "");
+  // A step that did not happen says why. One that did says nothing more, except the title of a page opened.
+  const output =
+    failed || result.refused === true || result.doneByPerson === true
+      ? outputOf(result)
+      : step === "computer_navigate"
+        ? (textOf(result.title) ?? "")
+        : "";
+  return {
+    kind: "browser",
+    step,
+    subject,
+    output,
+    ...(failed ? { failed: true } : {}),
+    ...notTheBot,
+  };
+}
+
 /** CopilotKit's stand-in for a frontend tool's answer that has not been given yet. */
 const FORWARDED_TO_CLIENT = "Forwarded to client";
 
@@ -455,6 +570,25 @@ function didOf(
     args: call.function.arguments,
     answer,
     did: detailsOf(kind, argumentsOf(call.function.arguments), answer),
+  }).did;
+}
+
+function browserDidOf(
+  step: BrowserStepName,
+  call: { id: string; function: { arguments: string } },
+  answer: ToolOutcome,
+): ActivityDetails {
+  const known = done.get(call.id);
+  if (
+    known &&
+    known.answer === answer &&
+    known.args === call.function.arguments
+  )
+    return known.did;
+  return remember(done, call.id, {
+    args: call.function.arguments,
+    answer,
+    did: browserDetails(step, argumentsOf(call.function.arguments), answer),
   }).did;
 }
 
@@ -635,11 +769,13 @@ export function conversationActivity(
   messages: readonly Message[],
 ): ConversationCall[] {
   const computerCalls = new Set<string>();
+  const browserCalls = new Set<string>();
   const askingAbout = new Map<string, string>();
   for (const message of messages) {
     if (message.role !== "assistant") continue;
     for (const call of message.toolCalls ?? []) {
       if (KINDS[call.function.name]) computerCalls.add(call.id);
+      else if (isBrowserStep(call.function.name)) browserCalls.add(call.id);
       else if (call.function.name === ASK_APPROVAL) {
         const command = commandAskedAbout(call);
         if (command) askingAbout.set(call.id, command);
@@ -651,7 +787,10 @@ export function conversationActivity(
   const decided = new Map<string, "approved" | "declined">();
   for (const message of messages) {
     if (message.role !== "tool") continue;
-    if (computerCalls.has(message.toolCallId)) {
+    if (
+      computerCalls.has(message.toolCallId) ||
+      browserCalls.has(message.toolCallId)
+    ) {
       const answer = answerOf(message);
       if (answer) answered.set(message.toolCallId, answer);
     } else if (askingAbout.has(message.toolCallId)) {
@@ -673,7 +812,17 @@ export function conversationActivity(
         });
         continue;
       }
-      const kind = KINDS[call.function.name];
+      const name = call.function.name;
+      if (isBrowserStep(name)) {
+        const answer = answered.get(call.id);
+        if (answer && awaitingFreshLook(answer)) continue;
+        calls.push({
+          id: call.id,
+          did: answer ? browserDidOf(name, call, answer) : null,
+        });
+        continue;
+      }
+      const kind = KINDS[name];
       if (!kind) continue;
       const answer = answered.get(call.id);
       calls.push({
@@ -710,7 +859,11 @@ export function useConversationActivity(
       copilotkit.subscribe({
         onToolExecutionStart: ({ toolCallId, toolName }) => {
           // A card's handler starts when it is drawn to be answered, here.
-          if (KINDS[toolName] || toolName === ASK_APPROVAL)
+          if (
+            KINDS[toolName] ||
+            isBrowserStep(toolName) ||
+            toolName === ASK_APPROVAL
+          )
             noteWatched(toolCallId);
         },
       }).unsubscribe,

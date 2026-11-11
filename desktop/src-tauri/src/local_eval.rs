@@ -259,6 +259,24 @@ pub struct Report {
     pub shortfall: Option<Shortfall>,
 }
 
+impl Report {
+    /// The answer for a call made while the engine OpenBot runs on does not answer, without asking
+    /// the CLI: blocked, as the CLI says it (`docker_unavailable`), with nothing known.
+    pub fn engine_not_answering() -> Self {
+        Report {
+            outcome: Outcome::Blocked,
+            stack: None,
+            reason: Some(Reason::DockerUnavailable),
+            readiness: Readiness::Unknown,
+            licence: Licence::Unknown,
+            licence_expires_at: None,
+            update_to: None,
+            checks_passed: false,
+            shortfall: None,
+        }
+    }
+}
+
 /// Which of the engine's resources are below what local setup needs, and whether the engine is
 /// Podman, so the window names the right resource and the right settings.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -292,9 +310,15 @@ pub struct Shortfall {
     /// resources there, and its disk is freed on the drive that holds it.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub wsl: bool,
-    /// That drive, `C:`, when WSL says where the machine's disk is.
+    /// The drive that holds the engine's disk on Windows, `C:`: a Podman machine's, as WSL says,
+    /// or Docker Desktop's (`machine_drive`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub drive: Option<String>,
+    /// `disk_gb` is what is free on that drive, which ran short rather than the machine's own
+    /// disk: the window says it as the person sees it, "This computer has 13.2 GB of free space on
+    /// drive C:" (`EngineCheck::free_on_drive`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub free_on_drive: bool,
 }
 
 /// A number the CLI printed, to one decimal and rounded down as it rounds, without a trailing `.0`.
@@ -996,11 +1020,19 @@ pub enum Terms {
         cpu: bool,
         memory: bool,
         disk: bool,
-        /// Podman on Windows, in WSL (`Shortfall::wsl`), and the drive that holds its disk.
+        /// Podman on Windows, in WSL (`Shortfall::wsl`), and the drive that holds the engine's disk.
         #[serde(skip_serializing_if = "std::ops::Not::not")]
         wsl: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         drive: Option<String>,
+        /// With disk short: the free disk that counts (`EngineCheck::free_disk`), in GiB to one
+        /// decimal as `Shortfall::disk_gb`, so the window says what is free beside what is needed.
+        /// Windows F had 13.2 GiB free on C: and was told only "OpenBot is out of disk space".
+        #[serde(skip_serializing_if = "Option::is_none")]
+        disk_gb: Option<String>,
+        /// That figure is what is free on `drive` (`Shortfall::free_on_drive`).
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        free_on_drive: bool,
         /// What was measured, for the desktop's usage data only. Never sent to the window.
         #[serde(skip)]
         measured: EngineMeasure,
@@ -1632,22 +1664,27 @@ pub fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
     None
 }
 
+/**
+What Windows says of the drive that holds the engine's disk, for the tests, in place of
+`windows::podman_machine_drive` and `windows::docker_data_drive`. For the whole process, so a check
+on another thread reads it too, and a test never reads the drives of the computer it runs on: the
+Windows runner measured its own C: in a check made on another thread. Tests that set it run in a
+process of their own (`StartLab`).
+*/
 #[cfg(test)]
-thread_local! {
-    /// What Windows says of the drive that holds the Podman machine's disk, for the tests: Some
-    /// stands in for `windows::podman_machine_drive` on this thread.
-    static MACHINE_DRIVE: std::cell::RefCell<Option<Option<crate::windows::MachineDrive>>> =
-        const { std::cell::RefCell::new(None) };
-}
+static MACHINE_DRIVE: std::sync::Mutex<Option<crate::windows::MachineDrive>> =
+    std::sync::Mutex::new(None);
 
-/// The drive that holds the Podman machine `address` names, on Windows (`podman_machine_drive`).
+/**
+The drive that holds the engine's disk on Windows, and what is free on it: the Podman machine
+`address` names (`podman_machine_drive`), or Docker Desktop's disks (`docker_data_drive`). Both are
+sparse virtual disks of about a terabyte, so a container's own free space says nothing of the drive.
+Measured whether or not the engine answers: the drive is there either way.
+*/
+#[cfg(not(test))]
 fn machine_drive(address: &crate::engine::Address) -> Option<crate::windows::MachineDrive> {
-    if address.engine != crate::engine::Engine::Podman {
-        return None;
-    }
-    #[cfg(test)]
-    if let Some(said) = MACHINE_DRIVE.with(|drive| drive.borrow().clone()) {
-        return said;
+    if address.engine == crate::engine::Engine::Docker {
+        return crate::windows::docker_data_drive();
     }
     let connection = address
         .connection
@@ -1656,9 +1693,17 @@ fn machine_drive(address: &crate::engine::Address) -> Option<crate::windows::Mac
     crate::windows::podman_machine_drive(crate::acquire::machine_of(&connection))
 }
 
+#[cfg(test)]
+fn machine_drive(_address: &crate::engine::Address) -> Option<crate::windows::MachineDrive> {
+    MACHINE_DRIVE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
+
 /**
 What OpenBot measured of the engine the back end runs on (`[local check]` in the log): its CPUs and
-memory, its disk as a container sees it, on Windows the drive that holds a Podman machine's disk, and
+memory, its disk as a container sees it, on Windows the drive that holds the engine's disk, and
 after a call that failed, whether the back end's node says it is short of disk.
 */
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -1732,6 +1777,14 @@ impl EngineCheck {
         self.pressure == Some(true) && self.free_disk().is_some() && !self.low_on_disk()
     }
 
+    /// The free disk that counts is the drive's, under the machine's disk: what ran short is on
+    /// this computer's drive, not inside the machine.
+    fn free_on_drive(&self) -> bool {
+        self.drive
+            .as_ref()
+            .is_some_and(|drive| Some(drive.free) == self.free_disk())
+    }
+
     /// Podman on Windows, whose machine runs in WSL.
     fn wsl(&self) -> bool {
         self.podman && (cfg!(target_os = "windows") || self.drive.is_some())
@@ -1755,6 +1808,9 @@ impl EngineCheck {
                 .map(|disk| gib(disk.size));
         }
         short.drive = self.drive.as_ref().and_then(|drive| drive.drive.clone());
+        // k3s's own line is inside the machine, whatever the drive has.
+        short.free_on_drive =
+            short.disk && !short.nearly_full && short.drive.is_some() && self.free_on_drive();
         short
     }
 
@@ -1850,7 +1906,15 @@ pub fn engine_size_terms() -> Option<Terms> {
     let address = cli_engine()?;
     let check = EngineCheck::of(&address);
     let (cpus, memory) = check.size?;
-    let short = engine_shortfall(cpus, memory, check.free_disk());
+    let free = check.free_disk();
+    let short = engine_shortfall(cpus, memory, free);
+    // While the person is asked to free space, the downloads behind the step hold, so they do not
+    // fill the disk meanwhile: on Windows F free space went from 15.0 to 11.0 GB on this step.
+    if short.disk {
+        crate::early_downloads::hold_for_room();
+    } else {
+        crate::early_downloads::room_again();
+    }
     if !short.named() {
         return None;
     }
@@ -1861,13 +1925,27 @@ pub fn engine_size_terms() -> Option<Terms> {
         memory: short.memory,
         disk: short.disk,
         wsl: check.wsl(),
+        disk_gb: free.filter(|_| short.disk).map(gib),
+        free_on_drive: short.disk
+            && check.free_on_drive()
+            && check
+                .drive
+                .as_ref()
+                .is_some_and(|drive| drive.drive.is_some()),
         measured: EngineMeasure {
             cpus,
             memory_bytes: memory,
-            free_disk_bytes: check.free_disk(),
+            free_disk_bytes: free,
         },
         drive: check.drive.and_then(|drive| drive.drive),
     })
+}
+
+/// The free disk the account step's check counts (`EngineCheck::free_disk`) on the engine the back
+/// end runs on, for downloads that hold until there is room (`early_downloads::wait_for_room`).
+/// Nothing when no engine is known or its disk is not measured.
+pub fn engine_free_disk() -> Option<u64> {
+    EngineCheck::of(&cli_engine()?).free_disk()
 }
 
 /**
@@ -1895,6 +1973,16 @@ the CLI enforces that only at a first setup. After a call that failed, it is che
 back end's node asked whether it is short of disk, and anything short becomes the report's reason
 with its numbers, so the card names it and says where to raise or free it. A failure the CLI already
 named, or one OpenBot stopped, keeps its own words.
+
+On OpenBot's own machine on Windows, its dead port rules are cleared before the call, so the back end
+it starts is not reached through rules for its containers' addresses from before
+(`acquire::readied_for_backend`).
+
+Except a setup on a drive that is short: the CLI measures its 40 GiB inside a container, where the
+sparse disk of Docker Desktop or a Podman machine on Windows shows about a terabyte free whatever the
+drive under it has. Windows G had 938.3 GiB in a container and 15 GB on C:, and the setup took C:
+down to 11.8 GB. That setup is not started: the report says the drive is short, with its numbers,
+and the downloads behind it hold until there is room (`early_downloads::hold_for_room`).
 */
 fn checked_call(
     command: &str,
@@ -1904,8 +1992,19 @@ fn checked_call(
     let Some(address) = cli_engine() else {
         return call();
     };
-    log_check(&format!("before {command}"), &EngineCheck::of(&address));
-    let result = call();
+    let before = EngineCheck::of(&address);
+    log_check(&format!("before {command}"), &before);
+    if command == "local setup" {
+        let short = before.shortfall();
+        if short.free_on_drive {
+            log::warn!(
+                "[local check] {command} not started: the drive that holds the engine's disk has less than OpenBot needs"
+            );
+            crate::early_downloads::hold_for_room();
+            return Ok(short_of_drive(short));
+        }
+    }
+    let result = crate::acquire::readied_for_backend(Some(&address), call);
     let unexplained = match &result {
         Ok(report) => {
             report.outcome == Outcome::Failed
@@ -1938,6 +2037,22 @@ fn checked_call(
             Ok(report)
         }
         other => other,
+    }
+}
+
+/// A setup OpenBot did not start, for a drive short of disk (`checked_call`): blocked on resources,
+/// with what was measured, as the CLI's own resource check reports it.
+fn short_of_drive(shortfall: Shortfall) -> Report {
+    Report {
+        outcome: Outcome::Blocked,
+        stack: None,
+        reason: Some(Reason::ResourcesShort),
+        readiness: Readiness::Unknown,
+        licence: Licence::Unknown,
+        licence_expires_at: None,
+        update_to: None,
+        checks_passed: false,
+        shortfall: Some(shortfall),
     }
 }
 
@@ -4492,6 +4607,29 @@ pub fn forget_arguments(stack: &StackId) -> [&str; 7] {
         stack.as_str(),
         "--json",
     ]
+}
+
+/// `local delete` for `stack` with the installed CLI, for the Windows uninstaller when the person
+/// deletes OpenBot's data (`uninstall`): the stack's cluster, its private folder and its record go, as
+/// when setup forgets one. Anything but a completed delete is a failure.
+pub fn delete_installed(stack: &StackId) -> Result<(), Failure> {
+    let cli = installed()?;
+    let (code, bytes) = execute(
+        &cli,
+        &forget_arguments(stack),
+        None,
+        Limits::for_action(Action::Stop),
+        &Cancel::default(),
+    )?;
+    let (outcome, _) = parse_envelope("local delete", code, &bytes)?;
+    if outcome != Outcome::Completed {
+        log::warn!(
+            "[uninstall] the CLI did not delete {}: {outcome:?}",
+            stack.as_str()
+        );
+        return Err(Failure::InvalidStatus);
+    }
+    Ok(())
 }
 
 /// Forget `stack` (`forget_arguments`). Anything but a completed delete leaves setup failed.
@@ -9214,6 +9352,8 @@ overlay 164506208 20481024 135620148 14% /
                 disk: true,
                 wsl: false,
                 drive: None,
+                disk_gb: Some("1".into()),
+                free_on_drive: false,
                 measured: EngineMeasure {
                     cpus: 8,
                     memory_bytes: 8 * GIB,
@@ -9221,7 +9361,7 @@ overlay 164506208 20481024 135620148 14% /
                 },
             })
             .unwrap(),
-            json!({ "status": "engine-too-small", "podman": false, "cpu": false, "memory": false, "disk": true })
+            json!({ "status": "engine-too-small", "podman": false, "cpu": false, "memory": false, "disk": true, "diskGb": "1" })
         );
         assert_eq!(
             serde_json::to_value(Terms::EngineTooSmall {
@@ -9231,6 +9371,8 @@ overlay 164506208 20481024 135620148 14% /
                 disk: true,
                 wsl: true,
                 drive: Some("C:".into()),
+                disk_gb: None,
+                free_on_drive: false,
                 measured: EngineMeasure::default(),
             })
             .unwrap(),
@@ -9728,7 +9870,9 @@ fn main() {
                     crate::engine::Address::new(engine, Some("openbot-root".into()))
                 }
             });
-            MACHINE_DRIVE.with(|said| *said.borrow_mut() = Some(drive));
+            *MACHINE_DRIVE
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = drive;
         }
 
         fn start(&self, ends: &str) -> Report {
@@ -9801,10 +9945,33 @@ fn main() {
                 disk: false,
                 wsl: false,
                 drive: None,
+                disk_gb: None,
+                free_on_drive: false,
                 measured: EngineMeasure {
                     cpus: 2,
                     memory_bytes: 22011707392,
                     free_disk_bytes: None,
+                },
+            })
+        );
+        // The drive under the engine's disk is there whether the engine answers or not: it is
+        // measured while the engine's own disk check hangs.
+        *MACHINE_DRIVE.lock().unwrap() = drive(1200);
+        assert_eq!(
+            checked(&["df"]),
+            Some(Terms::EngineTooSmall {
+                podman: false,
+                cpu: true,
+                memory: false,
+                disk: false,
+                wsl: false,
+                drive: Some("C:".into()),
+                disk_gb: None,
+                free_on_drive: false,
+                measured: EngineMeasure {
+                    cpus: 2,
+                    memory_bytes: 22011707392,
+                    free_disk_bytes: drive(1200).map(|drive| drive.free),
                 },
             })
         );
@@ -10074,7 +10241,7 @@ fn main() {
             wire["shortfall"],
             json!({
                 "podman": true, "cpu": false, "memory": false, "disk": true,
-                "diskGb": "30", "wsl": true, "drive": "C:"
+                "diskGb": "30", "wsl": true, "drive": "C:", "freeOnDrive": true
             })
         );
         assert_eq!(
@@ -10088,9 +10255,175 @@ fn main() {
             serde_json::to_value(engine_size_terms()).unwrap(),
             json!({
                 "status": "engine-too-small", "podman": true, "cpu": false, "memory": false,
-                "disk": true, "wsl": true, "drive": "C:"
+                "disk": true, "wsl": true, "drive": "C:", "diskGb": "30", "freeOnDrive": true
             })
         );
+    }
+
+    /// F's 16 CPUs and 30.8 GiB, a container whose `df` OpenBot can't read, and `tenths` of a GiB
+    /// free on C:, as Windows F's account step measured it.
+    fn windows_f(lab: &StartLab, tenths: u64) {
+        lab.engine(
+            crate::engine::Engine::Podman,
+            "16 33100000000\n",
+            "df: /: No such file or directory\n",
+            None,
+            drive(tenths),
+        );
+    }
+
+    /**
+    Windows F, filled to 15.0 GB free, after Install made OpenBot's machine. The account step's
+    check logged no disk measured in a container and 13.2 GiB on C:, and the step said only
+    "OpenBot is out of disk space. It needs 40 GB free.", with 13 GB free. Its answer carries what
+    is free, so the step says it. `local-eval-terms-windows-f-short-of-disk.json` is what the
+    window's own test is given.
+    */
+    #[test]
+    fn the_account_step_says_what_is_free_on_windows_f() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::the_account_step_says_what_is_free_on_windows_f",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("account-windows-f");
+        windows_f(&lab, 132);
+        let window: Value = serde_json::from_str(include_str!(
+            "../test-fixtures/local-eval/local-eval-terms-windows-f-short-of-disk.json"
+        ))
+        .unwrap();
+        assert_eq!(serde_json::to_value(engine_size_terms()).unwrap(), window);
+        assert_eq!(
+            checks_logged(),
+            ["WARN [local check] before local setup: 16 CPUs and 30.8 GiB of memory, free disk not measured, 13.2 GiB free on C:; short of disk (OpenBot needs 40 GiB free)"]
+        );
+        // A machine whose own disk is what ran short, with room on C:, is never said as C:'s.
+        lab.engine(
+            crate::engine::Engine::Podman,
+            "16 33100000000\n",
+            &df(WSL_DISK, 10 * KIB_PER_GIB),
+            None,
+            drive(2000),
+        );
+        let machine = serde_json::to_value(engine_size_terms()).unwrap();
+        assert_eq!(machine["diskGb"], json!("10"));
+        assert!(machine.get("freeOnDrive").is_none(), "{machine}");
+    }
+
+    /**
+    Meanwhile on Windows F the downloads behind the account step went on, and free space fell from
+    15.0 to 11.0 GB while the person was asked to free some. A check that finds the disk short
+    holds them, and one that finds room (Try again, after F freed space) lets them go.
+    */
+    #[test]
+    fn the_account_step_holds_the_downloads_until_a_check_finds_room() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::the_account_step_holds_the_downloads_until_a_check_finds_room",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("account-windows-f-holds");
+        windows_f(&lab, 132);
+        assert!(engine_size_terms().is_some());
+        assert!(crate::early_downloads::held_for_room());
+        // What the held downloads look at: the same free disk, below the same 40 GiB.
+        assert_eq!(engine_free_disk(), Some(132 * GIB / 10 + GIB / 100));
+        windows_f(&lab, 970);
+        assert_eq!(engine_size_terms(), None);
+        assert!(!crate::early_downloads::held_for_room());
+    }
+
+    /// Windows G on Docker Desktop: 16 CPUs and 30.8 GiB, Docker's sparse disk with 938.3 GiB free
+    /// of 1006.8 GiB in a container, and `free` bytes on C:, where Docker keeps that disk.
+    fn windows_g(lab: &StartLab, free: u64) {
+        lab.engine(
+            crate::engine::Engine::Docker,
+            "16 33100000000\n",
+            &df(WSL_DISK, 983_880_000),
+            None,
+            Some(crate::windows::MachineDrive {
+                drive: Some("C:".into()),
+                free,
+            }),
+        );
+    }
+
+    /**
+    Windows G on Docker Desktop, C: filled to 15 GB free. The check measured only the container,
+    "938.3 GiB free of 1006.8 GiB in a container; enough", so the account step never warned and
+    nothing held. Docker's disk is a sparse virtual disk on C:, and C: is what runs out: it is
+    measured, the smaller figure counts, and the step says it as C:'s. The downloads hold.
+    */
+    #[test]
+    fn on_docker_desktop_the_drive_under_its_disk_is_the_free_disk_that_counts() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::on_docker_desktop_the_drive_under_its_disk_is_the_free_disk_that_counts",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("account-windows-g");
+        // "free after: 14999998464 bytes (15 GB, 14 GiB)"
+        windows_g(&lab, 14_999_998_464);
+        assert_eq!(
+            serde_json::to_value(engine_size_terms()).unwrap(),
+            json!({
+                "status": "engine-too-small", "podman": false, "cpu": false, "memory": false,
+                "disk": true, "drive": "C:", "diskGb": "13.9", "freeOnDrive": true
+            })
+        );
+        assert_eq!(
+            checks_logged(),
+            ["WARN [local check] before local setup: 16 CPUs and 30.8 GiB of memory, 938.3 GiB free of 1006.8 GiB in a container, 13.9 GiB free on C:; short of disk (OpenBot needs 40 GiB free)"]
+        );
+        assert!(crate::early_downloads::held_for_room());
+        // What the held downloads look at is C:, below the same 40 GiB.
+        assert_eq!(engine_free_disk(), Some(14_999_998_464));
+        // "filler deleted at 04:46:16; C: free 97796845568 bytes (97.8 GB)"
+        windows_g(&lab, 97_796_845_568);
+        assert_eq!(engine_size_terms(), None);
+        assert!(!crate::early_downloads::held_for_room());
+    }
+
+    /**
+    Windows G again: C: was filled after the account step had passed, while the license agreement
+    was on screen. Then the back end's setup, "Preparing a place on this computer" and "Setting up
+    your data", took C: from 14.5 to 11.8 GB in 90 seconds: the CLI checks its 40 GiB inside the
+    container, which showed 938.3 GiB. A setup on a drive that short is not started. It says what
+    is free on C:, the downloads hold, and once there is room the setup runs.
+    */
+    #[test]
+    fn a_setup_on_a_drive_too_short_for_openbot_is_not_started() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_setup_on_a_drive_too_short_for_openbot_is_not_started",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("setup-windows-g");
+        let installation = lab.fixture.root.join("installation");
+        std::fs::create_dir_all(&installation).unwrap();
+        windows_g(&lab, 14_999_998_464);
+        let Ok((report, _)) = setup_installed("setup-windows-g", &installation, None) else {
+            panic!("the setup answers with a report");
+        };
+        assert_eq!(
+            serde_json::to_value(&report).unwrap(),
+            json!({
+                "outcome": "blocked", "stack": null, "reason": "resources-short",
+                "readiness": "unknown", "licence": "unknown", "licenceExpiresAt": null,
+                "updateTo": null, "checksPassed": false,
+                "shortfall": {
+                    "podman": false, "cpu": false, "memory": false, "disk": true,
+                    "diskGb": "13.9", "drive": "C:", "freeOnDrive": true
+                }
+            })
+        );
+        assert_eq!(lab.fixture.argv(), None, "the CLI's setup was not started");
+        assert!(crate::early_downloads::held_for_room());
+        // Space freed on C:, and Retry.
+        windows_g(&lab, 97_796_845_568);
+        let _ = setup_installed("setup-windows-g-room", &installation, None);
+        let ran = lab.fixture.argv().unwrap_or_default();
+        assert!(ran.contains("setup"), "the setup ran: {ran}");
     }
 
     /**

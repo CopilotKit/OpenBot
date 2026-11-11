@@ -39,11 +39,138 @@
   Pop $0
 !macroend
 
+; Installing over an installed OpenBot with "Uninstall before installing" uninstalls the old version
+; first. Tauri's page ran the old uninstaller itself, with the installer's window hidden, and run
+; silently that left nothing on screen: on a live update from 1.0.1, OpenBot had closed and no window
+; showed for two and a half minutes. So the page only notes the choice ($OpenBotUninstallFirst, in
+; windows/installer.nsi), and the old version is uninstalled on the Installing page, with a line in
+; plain words and the page's progress bar moving (OPENBOT_UNINSTALL_OLD_VERSION).
+Var OpenBotUninstallFirst
+Var OpenBotOldUninstaller
+Var OpenBotOldFolder
+Var OpenBotProgress
+
+; Leaving the page with a running OpenBot asks first, with the words a running OpenBot gets
+; everywhere else (appRunningOkKill in installer-english.nsh), and OK closes it there and then, as the
+; words say, as Tauri's own check does. Cancel stays on the page, where the person can close OpenBot
+; themselves or choose "Do not uninstall". A passive install asks nothing, as Tauri's own check
+; doesn't, and the old uninstaller closes it.
+Var OpenBotRunning
+!macro OPENBOT_BEFORE_OLD_UNINSTALLER
+  ${If} $PassiveMode <> 1
+    !if "${INSTALLMODE}" == "currentUser"
+      nsis_tauri_utils::FindProcessCurrentUser "${MAINBINARYNAME}.exe"
+    !else
+      nsis_tauri_utils::FindProcess "${MAINBINARYNAME}.exe"
+    !endif
+    Pop $OpenBotRunning
+    ${If} $OpenBotRunning = 0
+      nsis_tauri_utils::StrReplace "$(appRunningOkKill)" "{{product_name}}" "${PRODUCTNAME}"
+      Pop $OpenBotRunning
+      ${If} ${Cmd} `MessageBox MB_OKCANCEL "$OpenBotRunning" IDCANCEL`
+        Abort
+      ${EndIf}
+      !if "${INSTALLMODE}" == "currentUser"
+        nsis_tauri_utils::KillProcessCurrentUser "${MAINBINARYNAME}.exe"
+      !else
+        nsis_tauri_utils::KillProcess "${MAINBINARYNAME}.exe"
+      !endif
+      Pop $OpenBotRunning
+      Sleep 500
+      ${If} $OpenBotRunning <> 0
+      ${AndIf} $OpenBotRunning <> 2
+        nsis_tauri_utils::StrReplace "$(failedToKillApp)" "{{product_name}}" "${PRODUCTNAME}"
+        Pop $OpenBotRunning
+        MessageBox MB_OK|MB_ICONEXCLAMATION "$OpenBotRunning"
+        Abort
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+!macroend
+
+; The Installing page's progress bar moving on its own (a marquee) while the installer waits on
+; something that says nothing of how far it has got, then back to the bar NSIS fills. The bar is
+; control 1004 of the page, as MUI2's InstallFiles.nsh reads it, and the installer's Common Controls
+; 6 manifest is what lets it move. The wait runs in the Install section, on its own thread, so the
+; window keeps drawing. A silent install has no page.
+!define /ifndef PBS_MARQUEE 0x08
+!macro OPENBOT_PROGRESS_MOVING on
+  ${IfNot} ${Silent}
+    FindWindow $OpenBotProgress "#32770" "" $HWNDPARENT
+    GetDlgItem $OpenBotProgress $OpenBotProgress 1004
+    !if "${on}" == "1"
+      ${NSD_AddStyle} $OpenBotProgress ${PBS_MARQUEE}
+      SendMessage $OpenBotProgress ${PBM_SETMARQUEE} 1 50
+    !else
+      SendMessage $OpenBotProgress ${PBM_SETMARQUEE} 0 0
+      ${NSD_RemoveStyle} $OpenBotProgress ${PBS_MARQUEE}
+    !endif
+  ${EndIf}
+!macroend
+
+; The old version uninstalled, on the Installing page: as an update (/UPDATE), which keeps the data
+; and shows no "Delete the application data" box, and silently (/S), with no window of its own, in
+; the folder the old version is in (`_?=`, last, as NSIS reads it, so the installer waits for it).
+; Tauri's own check comes first, for an OpenBot opened again since the page: Cancel stops the install
+; before anything is removed. An old uninstaller that fails leaves the new version installed over the
+; old, as "Do not uninstall" would.
+!macro OPENBOT_UNINSTALL_OLD_VERSION
+  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  ReadRegStr $OpenBotOldFolder SHCTX "${MANUPRODUCTKEY}" ""
+  ReadRegStr $OpenBotOldUninstaller SHCTX "${UNINSTKEY}" "UninstallString"
+  ${If} $OpenBotOldUninstaller != ""
+    DetailPrint "Removing the previous version of OpenBot. Your Bots and data stay."
+    !insertmacro OPENBOT_PROGRESS_MOVING 1
+    ClearErrors
+    ; ExecWait says "Execute: <the command>" on the page's status line, over the plain line, for as
+    ; long as it waits (box I). Said to the details list only, so the plain line stays on screen.
+    SetDetailsPrint listonly
+    ExecWait '$OpenBotOldUninstaller /UPDATE /S _?=$OpenBotOldFolder' $0
+    SetDetailsPrint both
+    ${IfThen} ${Errors} ${|} StrCpy $0 2 ${|}
+    !insertmacro OPENBOT_PROGRESS_MOVING 0
+    ${If} $0 <> 0
+      DetailPrint "Couldn't remove the previous version of OpenBot. Installing over it."
+    ${ElseIf} $OpenBotOldFolder != $INSTDIR
+      ; Run in place, the old uninstaller cannot delete itself or its folder.
+      Delete "$OpenBotOldFolder\uninstall.exe"
+      RMDir "$OpenBotOldFolder"
+    ${EndIf}
+  ${EndIf}
+!macroend
+
+; Uninstalling (not updating) stops what OpenBot runs before its files go: OpenBot's containers, the
+; backend when OpenBot created it, and OpenBot's own Podman machine, "openbot". Before this, the
+; uninstaller closed the app and left all of them running with no app to stop them. The app does it
+; headless (src/uninstall.rs), so it stops exactly what Stop stops and never the person's own
+; machines or containers. With "Delete the application data" ticked (--delete-data) it also removes
+; the backend OpenBot created, OpenBot's machine and OpenBot's files in the installation folder, so
+; a new installation starts from nothing. Otherwise all of them stay, stopped, for a reinstall to
+; find. A running OpenBot is closed first (Tauri's own check, which asks), so it cannot start
+; anything again meanwhile. The app's plain lines go to the uninstaller's details and the technical
+; ones to OpenBot's log. It gives up after five minutes, and whatever it could not stop never keeps
+; OpenBot from being uninstalled.
+!macro OPENBOT_STOP_WHAT_OPENBOT_RUNS
+  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  ${If} $DeleteAppDataCheckboxState = 1
+    nsExec::ExecToLog '"$INSTDIR\${MAINBINARYNAME}.exe" --stop-for-uninstall --delete-data'
+  ${Else}
+    nsExec::ExecToLog '"$INSTDIR\${MAINBINARYNAME}.exe" --stop-for-uninstall'
+  ${EndIf}
+  Pop $0
+!macroend
+
 !macro NSIS_HOOK_PREINSTALL
+  ${If} $OpenBotUninstallFirst = 1
+    !insertmacro OPENBOT_UNINSTALL_OLD_VERSION
+  ${EndIf}
   !insertmacro OPENBOT_STOP_BUNDLED_CLI
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
+  ${If} $UpdateMode <> 1
+    !insertmacro OPENBOT_STOP_WHAT_OPENBOT_RUNS
+  ${EndIf}
   !insertmacro OPENBOT_STOP_BUNDLED_CLI
 !macroend
 

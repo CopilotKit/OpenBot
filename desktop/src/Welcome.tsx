@@ -1,5 +1,9 @@
-import type { ReactNode } from "react";
-import { EarlyDownloadsLine } from "./EarlyDownloads";
+import { type ReactNode, useState } from "react";
+import {
+  EarlyDownloadsLine,
+  earlyDownloadsMeasured,
+  useEarlyDownloads,
+} from "./EarlyDownloads";
 import { ExternalLink } from "./ExternalLink";
 
 /** OpenBot's one booking link. */
@@ -16,6 +20,11 @@ export const BOOK_A_DEMO = "https://open.bot/business";
  * The big downloads start while this screen shows, before Install is clicked, and its line says how
  * far they are (`EarlyDownloadsLine`). Once they are done it says nothing: Install is the next step
  * either way.
+ *
+ * On a disk too full for OpenBot, Install waits with the line that says so, and is there once the
+ * download starts by itself. On Windows F it was pressable at 15 GB free: it built OpenBot's machine,
+ * then the next step stopped for space, with less free than before. An Install pressed before the
+ * downloads have looked at the disk asks them first (`earlyDownloadsMeasured`).
  */
 export function Welcome({
   onInstall,
@@ -25,6 +34,16 @@ export function Welcome({
   /** A failure from setup itself, shown inside this card rather than under it. */
   failure?: ReactNode;
 }) {
+  const downloads = useEarlyDownloads();
+  const [checking, setChecking] = useState(false);
+  const short = downloads?.state === "short";
+  const install = () => {
+    setChecking(true);
+    void earlyDownloadsMeasured().then((now) => {
+      setChecking(false);
+      if (now?.state !== "short") onInstall();
+    });
+  };
   return (
     <div className="sheet">
       <div className="lockup">
@@ -52,7 +71,7 @@ export function Welcome({
         access.
       </p>
       <div className="row">
-        <button type="button" onClick={onInstall}>
+        <button type="button" disabled={short || checking} onClick={install}>
           Install
         </button>
       </div>

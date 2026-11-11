@@ -24,7 +24,7 @@ use openbot_desktop_lib::{
     local_eval_state, logging, own_machine, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
-    telemetry, tray, troubleshooting, update_ready, upgrade, windows as win,
+    telemetry, tray, troubleshooting, uninstall, update_ready, upgrade, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -260,6 +260,10 @@ struct Progress {
     /// The engine itself is being updated: see `engine::StepLine::updating`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     updating: bool,
+    /// The step holds until there is room on the disk (`early_downloads::wait_for_room`): the
+    /// window shows it paused, with no spinner and no time running on.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    paused: bool,
 }
 
 #[derive(Serialize)]
@@ -481,12 +485,195 @@ async fn wake_engine(app: tauri::AppHandle, root: String) -> Result<(), Problem>
     }
     let asked = std::time::Instant::now();
     let saved = preparation::saved_engine(&root);
-    let woken = match wake_installation_engine(&app, saved).await {
-        Ok(()) => heal_installation_engine(&app, saved).await,
-        failed => failed,
+    let gone = tauri::async_runtime::spawn_blocking(move || {
+        our_machine_is_gone(
+            saved,
+            engine::own_machine_only(std::env::consts::OS),
+            || engine::detect_saved(saved).responding,
+            || acquire::machine_exists().unwrap_or(false),
+        )
+    })
+    .await
+    .unwrap_or(false);
+    let woken = if gone {
+        log::info!("[wake engine] OpenBot's Podman machine is gone; making it again as setup does");
+        match engine_ready(&app, saved).await {
+            Ok(_) => machine_before_back_end(&app, saved).await,
+            Err(problem) => Err(problem),
+        }
+    } else {
+        engine_then_machine(
+            async || wake_installation_engine(&app, saved).await,
+            async || heal_installation_engine(&app, saved).await,
+            async || machine_before_back_end(&app, saved).await,
+        )
+        .await
     };
     logging::outcome("wake engine", asked, &woken);
     woken
+}
+
+/// The engine woken, then healed, then OpenBot's own machine made ready for the back end, in that
+/// order: the machine has to be up before it can be prepared, and the window asks the CLI to set up,
+/// update or start the back end only after all three.
+async fn engine_then_machine(
+    wake: impl AsyncFnOnce() -> Result<(), Problem>,
+    heal: impl AsyncFnOnce() -> Result<(), Problem>,
+    machine: impl AsyncFnOnce() -> Result<(), Problem>,
+) -> Result<(), Problem> {
+    wake().await?;
+    heal().await?;
+    machine().await
+}
+
+/**
+OpenBot's own Podman machine on Windows, made ready before the back end starts in it. The one place
+for that: the window wakes the engine (`wake_engine`) before every run that sets up, updates or
+starts the back end, so whatever runs here runs before the back end does.
+
+First its network, checked and set up again when it is down (`acquire::machine_before_back_end`),
+said on the machine's row while it waits. Setting it up again restarts the machine, which stops
+whatever runs in it: run only at Start, after the back end had started, it stopped the back end's
+cluster on a live Windows run, and OpenBot then couldn't reach its backend. Anything else the
+machine needs before the back end goes after the network, which it may need.
+*/
+async fn machine_before_back_end<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    saved: Option<engine::Engine>,
+) -> Result<(), Problem> {
+    if !cfg!(target_os = "windows") || saved == Some(engine::Engine::Docker) {
+        return Ok(());
+    }
+    let progress_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let found = engine::detect_saved(saved);
+        let Some(address) = found.address.filter(|_| found.responding) else {
+            return Ok(());
+        };
+        let mut said = false;
+        let checked = acquire::machine_before_back_end(&address, || {
+            said = true;
+            report_running_plain(&progress_app, "start-machine", acquire::RECONNECTING);
+        });
+        if said {
+            reconnected(&progress_app, &checked);
+        }
+        checked.map(|_| ())
+    })
+    .await
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot could not start the software it runs on. Try again.",
+            error.to_string(),
+        )
+    })?
+}
+
+/// The machine's row, done, once `acquire::RECONNECTING` was said on it.
+fn reconnected<R: tauri::Runtime, T>(app: &tauri::AppHandle<R>, checked: &Result<T, Problem>) {
+    match checked {
+        Ok(_) => report_plain(app, "start-machine", true, engine::engine_ready_line().said),
+        Err(problem) => report_plain(app, "start-machine", false, problem.said.clone()),
+    }
+}
+
+/// Start's network check, then the back end started again when that check restarted OpenBot's
+/// machine under it. In this order, before Compose: a restart stops the back end's cluster, and
+/// OpenBot's services connect to the back end as they start.
+///
+/// The window makes OpenBot's machine ready before it starts the back end (`machine_before_back_end`), so a
+/// restart here is rare: a network that went down after that, or a back end that was already
+/// running when Start was asked.
+fn network_then_back_end(
+    network: impl FnOnce() -> Result<acquire::Network, Problem>,
+    back_end_again: impl FnOnce() -> Result<(), Problem>,
+) -> Result<(), Problem> {
+    if network()? == acquire::Network::RestartedMachine {
+        log::warn!("[engine] the machine restarted under the backend; starting the backend again");
+        back_end_again()?;
+    }
+    Ok(())
+}
+
+/// How often, and how many times, Start asks whether the back end is ready again after OpenBot's
+/// machine restarted under it: five minutes, as the window waits for it.
+const BACK_END_AGAIN_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
+const BACK_END_AGAIN_POLLS: usize = 100;
+
+/// The back end OpenBot set up, started again and waited for. Nothing for a back end that is not
+/// OpenBot's: OpenBot never starts one it didn't set up.
+fn back_end_after_machine_restart(root: &Path) -> Result<(), Problem> {
+    let Some(stack) = local_eval_state::read(root, None)
+        .filter(|state| state.tied_to_openbot())
+        .map(|state| state.stack_id())
+    else {
+        return Ok(());
+    };
+    back_end_started_again(
+        |action| {
+            let attempt = format!("after-machine-restart-{:016x}", rand::random::<u64>());
+            local_eval::run_installed(&attempt, action, &stack)
+        },
+        &mut || std::thread::sleep(BACK_END_AGAIN_EVERY),
+        BACK_END_AGAIN_POLLS,
+    )
+}
+
+fn back_end_started_again(
+    mut call: impl FnMut(local_eval::Action) -> Result<local_eval::Report, local_eval::Failure>,
+    pause: &mut dyn FnMut(),
+    polls: usize,
+) -> Result<(), Problem> {
+    let failed = |detail: String| {
+        Problem::with(
+            "OpenBot couldn't start again after reconnecting to the internet. Try Start again.",
+            detail,
+        )
+    };
+    let started = call(local_eval::Action::Start)
+        .map_err(|failure| failed(format!("local start: {failure:?}")))?;
+    if started.outcome != local_eval::Outcome::Completed {
+        return Err(failed(format!(
+            "local start: {:?} {:?}",
+            started.outcome, started.reason
+        )));
+    }
+    let mut last = String::from("no status yet");
+    for _ in 0..polls {
+        match call(local_eval::Action::Status) {
+            Ok(report)
+                if report.readiness == local_eval::Readiness::Ready
+                    && report.licence == local_eval::Licence::Valid =>
+            {
+                log::info!("[engine] the backend is ready again after the machine restarted");
+                return Ok(());
+            }
+            Ok(report) => last = format!("{:?}", report.readiness),
+            Err(failure) => last = format!("{failure:?}"),
+        }
+        pause();
+    }
+    Err(failed(format!("local status: not ready, last {last}")))
+}
+
+/**
+Whether this installation's own Podman machine is gone, so a relaunch makes it again (`wake_engine`).
+
+On Windows OpenBot's engine is only ever its own machine (`engine::own_machine_only`). Uninstalled
+with OpenBot's data, or removed by hand, the machine goes while the installation folder may stay.
+Nothing then answered, the relaunch went on to the backend's check, and the CLI, told no engine,
+took Podman's default connection: on box I that was the person's rootless machine, and OpenBot
+said it couldn't run on this computer, with no way on. Now the machine is made again through
+setup's own engine step, with setup's rows. Never on a Mac, where the installation may have run on
+a rootful machine of the person's.
+*/
+fn our_machine_is_gone(
+    saved: Option<engine::Engine>,
+    own_machine_only: bool,
+    answers: impl FnOnce() -> bool,
+    our_machine_exists: impl FnOnce() -> bool,
+) -> bool {
+    own_machine_only && saved == Some(engine::Engine::Podman) && !answers() && !our_machine_exists()
 }
 
 /**
@@ -730,6 +917,7 @@ fn report_line<R: tauri::Runtime>(
             elsewhere: false,
             asks: false,
             updating: false,
+            paused: false,
         },
     );
 }
@@ -835,6 +1023,28 @@ fn report_running_line<R: tauri::Runtime>(
     line: engine::StepLine,
     download_bytes: Option<u64>,
 ) {
+    report_running_row(app, step, line, download_bytes, false);
+}
+
+/// The images row while downloads hold for room: paused, until there is room and they carry on.
+fn report_holding_for_room<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    report_running_row(
+        app,
+        "images",
+        engine::StepLine::here(HOLDING_FOR_ROOM),
+        None,
+        true,
+    );
+}
+
+/// A running row, and whether it is paused.
+fn report_running_row<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    step: &str,
+    line: engine::StepLine,
+    download_bytes: Option<u64>,
+    paused: bool,
+) {
     RUNNING_SAID
         .lock()
         .unwrap_or_else(|held| held.into_inner())
@@ -872,6 +1082,7 @@ fn report_running_line<R: tauri::Runtime>(
             elsewhere,
             asks,
             updating,
+            paused,
         },
     );
 }
@@ -1147,6 +1358,7 @@ fn report_running_downloads<R: tauri::Runtime>(
             elsewhere: line.elsewhere,
             asks: line.asks,
             updating: line.updating,
+            paused: false,
         },
     );
 }
@@ -1179,6 +1391,7 @@ fn report_downloads<R: tauri::Runtime>(
             elsewhere: false,
             asks: false,
             updating: false,
+            paused: false,
         },
     );
 }
@@ -2604,6 +2817,21 @@ fn early_downloads_now() -> early_downloads::Summary {
     early_downloads::summary()
 }
 
+/// Where the early downloads are once they have looked at the free disk, for Install: nothing is
+/// built on a disk too full for OpenBot, even by an Install clicked before they had looked.
+#[tauri::command]
+async fn early_downloads_measured() -> early_downloads::Summary {
+    tauri::async_runtime::spawn_blocking(|| {
+        early_downloads::measured(std::time::Duration::from_secs(30))
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// The images row while downloads hold for room (`early_downloads::wait_for_room`).
+const HOLDING_FOR_ROOM: &str =
+    "The download is paused until there's enough free space. It carries on by itself.";
+
 /// Complete all local software acquisition before either authentication screen is available.
 #[tauri::command]
 async fn prepare_installation(
@@ -2724,7 +2952,15 @@ async fn prepare_installation_inner(
         acquire::prepare_for_compose(&address)?;
         // The first screen may have started pulling these already: wait for it, showing its
         // download, and the pulls below find them there.
-        early_downloads::wait_for_images(|downloads| report_downloads(&handle, downloads.clone()));
+        let holding = || report_holding_for_room(&handle);
+        let wanted = || attempt.require_current().is_ok();
+        early_downloads::wait_for_images(
+            |downloads| report_downloads(&handle, downloads.clone()),
+            holding,
+        );
+        // Nothing more goes onto a disk the person is asked to free space on.
+        early_downloads::wait_for_room(&holding, &wanted);
+        attempt.require_current()?;
         // Downloaded before the engine answered: loaded into it now, so the pulls below find them.
         early_downloads::load_offline_images(&address, |downloads| {
             report_downloads(&handle, downloads)
@@ -2745,6 +2981,9 @@ async fn prepare_installation_inner(
             pull_metrics::IMAGE_PULLS_AT_ONCE,
             sizes,
             |_, image, on_layer| {
+                // No pull starts while the disk is short; one already running finishes.
+                early_downloads::wait_for_room(&holding, &wanted);
+                attempt.require_current()?;
                 pull_metrics::pull_image(&address, image, on_layer, |metrics| {
                     desktop_telemetry::pull_completed(&handle, metrics)
                 })
@@ -4004,7 +4243,25 @@ async fn start_stack_inner<R: tauri::Runtime>(
         }
         #[cfg(target_os = "linux")]
         let status = found.status();
-        acquire::prepare_for_compose(&found)?;
+        network_then_back_end(
+            || {
+                let mut said = false;
+                let checked = acquire::prepare_for_compose_saying(&found, || {
+                    said = true;
+                    report_running_plain(&app, "start-machine", acquire::RECONNECTING);
+                });
+                // After a restart the line stays until the back end is ready again.
+                if said && !matches!(checked, Ok(acquire::Network::RestartedMachine)) {
+                    reconnected(&app, &checked);
+                }
+                checked
+            },
+            || {
+                let again = back_end_after_machine_restart(&root);
+                reconnected(&app, &again);
+                again
+            },
+        )?;
         preparation::require(&root, Some(&requested_harness), &found)?;
         // An installation from before engines were saved is pinned to the one its images were
         // just found on. Best effort: Start does not fail over a hint for next time.
@@ -4684,6 +4941,7 @@ impl QuitStatus {
             elsewhere: false,
             asks: false,
             updating: false,
+            paused: false,
         };
         match self.steps.iter_mut().find(|known| known.step == row.step) {
             Some(known) => *known = row,
@@ -4918,6 +5176,132 @@ where
             Err("this build has no command-line tool to stop the backend OpenBot created".into())
         }
         Err(failure) => Err(not_stopped(wire_name(failure))),
+    }
+}
+
+/**
+The Windows uninstaller's stop (`uninstall`, run from `windows/hooks.nsh`): what OpenBot runs for the
+installation it last launched is stopped, and OpenBot's machine removed when the person chose to
+delete OpenBot's data. Each line goes to stdout, which the uninstaller shows in its details. Answers
+0 when everything stopped, 1 otherwise; the uninstaller goes on either way.
+*/
+fn stop_for_uninstall(asked: uninstall::Asked) -> i32 {
+    // The details go to OpenBot's own log, as the app's would; the uninstaller shows plain words.
+    if let Some(folder) = headless_log_dir() {
+        logging::append_without_app(&folder);
+    }
+    prepare_for_uninstall();
+    // The uninstaller waits for this, and a step that hangs must not hold it there.
+    std::thread::spawn(|| {
+        std::thread::sleep(uninstall::LIMIT);
+        log::warn!("[uninstall] gave up after {:?}", uninstall::LIMIT);
+        println!("OpenBot didn't finish stopping in time. Uninstalling anyway.");
+        std::process::exit(1);
+    });
+    let root = last_launched_root().unwrap_or_else(stack::default_root);
+    let failures = uninstall::stop_with(&mut ThisComputerAtUninstall, &root, asked, &mut |line| {
+        println!("{line}")
+    });
+    for failure in &failures {
+        println!("{failure}");
+    }
+    i32::from(!failures.is_empty())
+}
+
+/// The app's identifier, the name of each folder Tauri keeps for it.
+const APP_IDENTIFIER: &str = "ai.copilotkit.openbot.desktop";
+
+/// Tauri's `app_local_data_dir`, for a process with no app around it: the same folder, found the
+/// way Tauri 2 finds it (`dirs::data_local_dir`, then the identifier).
+fn headless_local_data_dir() -> Option<PathBuf> {
+    dirs::data_local_dir().map(|dir| dir.join(APP_IDENTIFIER))
+}
+
+/// Tauri's `app_log_dir`, for a process with no app around it: `~/Library/Logs/<identifier>` on a
+/// Mac, `logs` in the local data folder elsewhere, as Tauri 2 finds it.
+fn headless_log_dir() -> Option<PathBuf> {
+    if cfg!(target_os = "macos") {
+        dirs::home_dir().map(|home| home.join("Library/Logs").join(APP_IDENTIFIER))
+    } else {
+        headless_local_data_dir().map(|data| data.join("logs"))
+    }
+}
+
+/**
+What the app's setup gives every engine command, set once per process: the folder of the Compose
+provider OpenBot installed, first on each engine command's PATH (`engine::command_at`), OpenBot's own
+Docker configuration (`docker_config`) and the registry file a new backend node reads
+(`local_images::Mirror`). The app's setup and the uninstaller's stop both set them here, so both run
+Compose the same way. Without the first, `podman compose` finds no provider: OpenBot's
+`docker-compose` is only in that folder.
+*/
+fn use_engine_folders(root: &Path, local_data: Option<&Path>) {
+    engine::tools_live_in(engine::tools_dir_under(&acquire::download_dir(root)));
+    if let Some(data) = local_data {
+        docker_config::lives_in(data.join("docker-config"));
+        openbot_desktop_lib::local_images::registries_file_lives_at(data.join("registries.yaml"));
+    }
+}
+
+/// The uninstaller's stop, set up as the app sets itself up (`use_engine_folders`).
+fn prepare_for_uninstall() {
+    use_engine_folders(&stack::default_root(), headless_local_data_dir().as_deref());
+}
+
+/// `uninstall::Computer` on this computer, with what Stop and Quit use.
+struct ThisComputerAtUninstall;
+
+impl uninstall::Computer for ThisComputerAtUninstall {
+    /// The engine the installation was set up on, as a launch finds it, when it answers. There is
+    /// no app session to say which one its containers are on.
+    fn engine(&mut self, root: &Path) -> Option<engine::Address> {
+        let found = engine::detect_saved(preparation::saved_engine(root));
+        found.address.filter(|_| found.responding)
+    }
+
+    fn compose_down(&mut self, engine: &engine::Address, root: &Path) -> Result<(), String> {
+        stack::down(engine, root)
+    }
+
+    fn stop_backend(&mut self, engine: &engine::Address, root: &Path) -> Result<(), String> {
+        local_eval::use_engine(engine);
+        stop_local_eval(root, local_eval::Limits::for_quit())
+    }
+
+    /// The CLI's `local delete` for the stack OpenBot created, found as the stop finds it. A stack
+    /// that was there before OpenBot may serve other apps, and stays.
+    fn delete_backend(&mut self, engine: &engine::Address, root: &Path) -> Result<(), String> {
+        local_eval::use_engine(engine);
+        let Some(state) =
+            local_eval_state::read(root, None).filter(|state| state.tied_to_openbot())
+        else {
+            return Ok(());
+        };
+        local_eval::delete_installed(&state.stack_id()).map_err(|failure| {
+            format!(
+                "the backend's command-line tool did not delete the backend ({})",
+                wire_name(failure)
+            )
+        })
+    }
+
+    fn machine(&mut self, name: &str) -> Result<Option<bool>, String> {
+        if engine::program(engine::Engine::Podman).is_none() {
+            return Ok(None);
+        }
+        acquire::machine_listed(name)
+    }
+
+    fn stop_machine(&mut self, name: &str) -> Result<(), String> {
+        acquire::stop_machine_named(name)
+    }
+
+    fn remove_machine(&mut self, name: &str) -> Result<(), String> {
+        acquire::remove_machine_named(name)
+    }
+
+    fn remove_installation(&mut self, root: &Path) -> Result<(), String> {
+        uninstall::remove_installation(root, dirs::home_dir().as_deref())
     }
 }
 
@@ -6827,13 +7211,85 @@ mod app_page_tests {
         assert_eq!(open(false, Some("/bots")), None);
     }
 
+    /// The uninstaller's stop (`stop_for_uninstall`) runs with no app around it, so it works out the
+    /// app's folders itself. They are Tauri's own: the local data folder that holds OpenBot's Docker
+    /// configuration, and the log folder.
+    #[test]
+    fn the_uninstallers_stop_finds_the_folders_the_app_uses() {
+        let (app, _) = app();
+        assert!(app.path().app_local_data_dir().is_ok());
+        assert_eq!(
+            headless_local_data_dir(),
+            app.path().app_local_data_dir().ok()
+        );
+        assert_eq!(headless_log_dir(), app.path().app_log_dir().ok());
+    }
+
+    /// Box I: the uninstaller's stop ran `podman compose` with none of what the app sets up when it
+    /// starts. Podman found no Compose provider ("looking up compose provider failed", exit 125),
+    /// since OpenBot's `docker-compose.exe` is only in `~\OpenBot\openbot-engine\bin`, and OpenBot's
+    /// containers were left to the machine's stop. Run in a process of its own, with a home of its
+    /// own, since what the app sets up is set once per process: after the stop's preparation every
+    /// engine command has that folder first on its PATH, and OpenBot's own Docker configuration, as
+    /// in the running app.
+    #[test]
+    fn the_uninstallers_stop_runs_engine_commands_as_the_app_does() {
+        const CHILD: &str = "OPENBOT_TEST_UNINSTALL_ENGINE_CHILD";
+        let Some(home) = std::env::var_os(CHILD).map(PathBuf::from) else {
+            let home = std::env::temp_dir()
+                .join(format!("openbot-uninstall-engine-{}", std::process::id()));
+            std::fs::create_dir_all(&home).unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "app_page_tests::the_uninstallers_stop_runs_engine_commands_as_the_app_does",
+                    "--exact",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env(CHILD, &home)
+                // The installation folder's home (`stack::default_root` reads HOME first). Not
+                // USERPROFILE: Windows finds the app's local data folder through the real profile.
+                .env("HOME", &home)
+                .output()
+                .unwrap();
+            let _ = std::fs::remove_dir_all(&home);
+            let said = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(output.status.success(), "{said}");
+            assert!(said.contains("1 passed"), "{said}");
+            return;
+        };
+        prepare_for_uninstall();
+        let command =
+            engine::Address::new(engine::Engine::Podman, Some("openbot-root".into())).command();
+        let path = command
+            .get_envs()
+            .find(|(name, _)| *name == "PATH")
+            .and_then(|(_, value)| value)
+            .expect("engine commands get a PATH");
+        assert_eq!(
+            std::env::split_paths(path).next(),
+            Some(home.join("OpenBot").join("openbot-engine").join("bin"))
+        );
+        let data = headless_local_data_dir().expect("a local data folder");
+        assert_eq!(
+            docker_config::owned(),
+            Some(data.join("docker-config").as_path())
+        );
+    }
+
     /// A toast from an app Windows did not install from a package is shown under the app whose
     /// AppUserModelID it names, and only when a Start menu shortcut carries that ID. The
     /// notification plugin names the bundle identifier in an installed app (`desktop.rs`,
     /// `notification.app_id(&self.identifier)`), and Tauri's own NSIS template stamps the same
     /// `${BUNDLEID}` on the Start menu shortcut it names after the product (`installer.nsi`,
-    /// `SetLnkAppUserModelId`). So a toast reads "OpenBot" as long as the installer is that template
-    /// and the identifier and product name stay what they are.
+    /// `SetLnkAppUserModelId`). OpenBot's template, `windows/installer.nsi`, is that template with
+    /// OpenBot's lines added (`desktop/scripts/installer-update.test.ts`). So a toast reads "OpenBot"
+    /// as long as the installer keeps those lines and the identifier and product name stay what
+    /// they are.
     #[test]
     fn windows_toasts_name_the_app_the_start_menu_shortcut_carries() {
         let (app, _) = app();
@@ -6853,11 +7309,13 @@ mod app_page_tests {
             let file: serde_json::Value =
                 serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
             let nsis = &file["bundle"]["windows"]["nsis"];
-            assert!(
-                nsis.get("template").is_none(),
-                "{name}: a custom NSIS template has to stamp the Start menu shortcut's \
-                 AppUserModelID itself"
-            );
+            if let Some(template) = nsis.get("template") {
+                assert_eq!(
+                    template, "./windows/installer.nsi",
+                    "{name}: any other NSIS template has to stamp the Start menu shortcut's \
+                     AppUserModelID itself"
+                );
+            }
             if let Some(identifier) = file.get("identifier") {
                 assert_eq!(identifier, "ai.copilotkit.openbot.desktop", "{name}");
             }
@@ -6881,6 +7339,13 @@ mod app_page_tests {
             !hooks.contains("CreateShortcut"),
             "a shortcut the hooks make carries no AppUserModelID"
         );
+        let template = std::fs::read_to_string(folder.join("windows/installer.nsi")).unwrap();
+        for stamped in [
+            r#"CreateShortcut "$SMPROGRAMS\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe""#,
+            r#"!insertmacro SetLnkAppUserModelId "$SMPROGRAMS\${PRODUCTNAME}.lnk""#,
+        ] {
+            assert!(template.contains(stamped), "{stamped}");
+        }
     }
 
     /// Narration listens through the shell's speech recognition from OpenBot's own page, and from
@@ -7568,11 +8033,10 @@ fn recorder_ping_app_answers(port: u16) -> bool {
     .is_some()
 }
 
-/// What the Recorder's native host knows about this computer's OpenBot.
-///
-/// The browser starts the host as a fresh process with no app around it, so it finds the deployment
-/// the way the app's setup does: the root last launched, read from Tauri's config directory.
-fn recorder_host_environment() -> recorder_host::HostEnvironment {
+/// The installation the app last launched, for a process with no app around it (the Recorder's
+/// native host, the uninstaller's stop): read from Tauri's config directory, as the app's setup
+/// reads it.
+fn last_launched_root() -> Option<PathBuf> {
     let home = recorder_home().unwrap_or_else(|| PathBuf::from("."));
     let config = recorder_host::app_config_dir(
         recorder_os(),
@@ -7582,7 +8046,15 @@ fn recorder_host_environment() -> recorder_host::HostEnvironment {
             .map(Path::new),
         std::env::var_os("APPDATA").as_deref().map(Path::new),
     );
-    let root = preparation::selected_root(&config);
+    preparation::selected_root(&config)
+}
+
+/// What the Recorder's native host knows about this computer's OpenBot.
+///
+/// The browser starts the host as a fresh process with no app around it, so it finds the deployment
+/// the way the app's setup does: the root last launched, read from Tauri's config directory.
+fn recorder_host_environment() -> recorder_host::HostEnvironment {
+    let root = last_launched_root();
     if let Some(url) = recorder_host_test_app_url() {
         let port = reqwest::Url::parse(&url)
             .ok()
@@ -8096,6 +8568,17 @@ fn local_eval_answer(
     stack: &local_eval::StackId,
 ) -> Result<local_eval::Report, local_eval::Failure> {
     know_cli_engine(root);
+    if cli_left_to_pick(
+        std::env::consts::OS,
+        local_eval::engine_known(),
+        preparation::saved_engine(root),
+    ) {
+        log::info!(
+            "[local eval] {action:?} not asked: OpenBot's own engine does not answer, and the \
+             backend's tool would take Podman's default connection"
+        );
+        return Ok(local_eval::Report::engine_not_answering());
+    }
     let mut report = local_eval::run_installed(attempt, action, stack)?;
     // An Intelligence an older app installed, behind the release this app's CLI installs, or one
     // whose update did not finish: the window updates it before it starts OpenBot on it.
@@ -8137,6 +8620,17 @@ fn know_cli_engine(root: &Path) {
 }
 
 /**
+Whether asking the CLI now would leave it to pick a Podman machine itself. Told no engine, it takes
+Podman's default connection, and on Windows that can be the person's machine: on box I their
+rootless `mine`, which the backend's check called an engine it can't run on. On Windows, where
+OpenBot runs only on its own machine, the CLI is asked only once that answers (`know_cli_engine`);
+until then the answer is that the engine does not answer, which Retry and the next start repair.
+*/
+fn cli_left_to_pick(os: &str, engine_known: bool, saved: Option<engine::Engine>) -> bool {
+    engine::own_machine_only(os) && !engine_known && saved != Some(engine::Engine::Docker)
+}
+
+/**
 Whether the person's own Podman machine answers while OpenBot's is still on its way, so the CLI must
 not be asked yet.
 
@@ -8147,11 +8641,14 @@ makes its own (`engine::passed_over_machine`), so until that answers, the accoun
 waits for any engine coming up. Asked only while no engine is known, after `know_cli_engine`.
 */
 fn own_machine_on_its_way(root: &Path) -> bool {
-    own_machine_on_its_way_with(
-        local_eval::engine_known(),
-        preparation::saved_engine(root),
-        || engine::passed_over_machine(&engine::Address::new(engine::Engine::Podman, None)),
-    )
+    let (engine_known, saved) = (local_eval::engine_known(), preparation::saved_engine(root));
+    // On Windows nothing of the person's is asked: OpenBot's own machine answers, or it waits.
+    if engine::own_machine_only(std::env::consts::OS) {
+        return cli_left_to_pick(std::env::consts::OS, engine_known, saved);
+    }
+    own_machine_on_its_way_with(engine_known, saved, || {
+        engine::passed_over_machine(&engine::Address::new(engine::Engine::Podman, None))
+    })
 }
 
 /// `own_machine_on_its_way`, with what it reads passed in: whether an engine is known, the engine
@@ -10372,6 +10869,12 @@ fn main() {
             }
         });
     }
+    // The Windows uninstaller stopping what OpenBot runs before it removes it (`uninstall`):
+    // headless, and before the single-instance plugin, which would hand this launch to an OpenBot
+    // still open and exit.
+    if let Some(asked) = uninstall::asked(&args) {
+        std::process::exit(stop_for_uninstall(asked));
+    }
     // The local time's offset from UTC, for the log's first line. Read now, while this is the only
     // thread: on macOS and Linux the time crate refuses to read it once there are others.
     let local_offset = time::UtcOffset::current_local_offset().ok();
@@ -10424,6 +10927,7 @@ fn main() {
             back_end_wait_ended,
             start_early_downloads,
             early_downloads_now,
+            early_downloads_measured,
             record_setup_event,
             bring_setup_to_front,
             allow_podman_install,
@@ -10614,20 +11118,13 @@ fn main() {
             {
                 remember_selected_root(&app.state::<Shell>(), &root);
             }
-            // Where the Compose provider OpenBot installs itself lives, told once so every engine
-            // command can put it on the child's PATH. Before anything asks for an engine.
-            engine::tools_live_in(engine::tools_dir_under(&acquire::download_dir(
+            // Where the Compose provider OpenBot installs itself lives, OpenBot's own Docker
+            // configuration (the one without the person's credential helper) and the registry
+            // mirror k3d writes into a new back end node. Before anything asks for an engine.
+            use_engine_folders(
                 &stack::default_root(),
-            )));
-            // Where OpenBot's own Docker configuration lives, the one without the person's
-            // credential helper (see `docker_config`). Before anything runs a container command.
-            if let Ok(data) = app.path().app_local_data_dir() {
-                docker_config::lives_in(data.join("docker-config"));
-                // The registry mirror k3d writes into a new back end node (`local_images::Mirror`).
-                openbot_desktop_lib::local_images::registries_file_lives_at(
-                    data.join("registries.yaml"),
-                );
-            }
+                app.path().app_local_data_dir().ok().as_deref(),
+            );
 
             remember_setup_url(app.handle())?;
             if let Some(main) = app.get_webview_window("main") {
@@ -13658,6 +14155,207 @@ mod tests {
         assert_eq!(run(None, true, false, false), none);
         // Linux runs Podman natively: there is no machine to start.
         assert_eq!(run(Some(Podman), false, false, true), none);
+    }
+
+    /// Box I, step 7: "Delete the application data" took OpenBot's machine, the installation folder
+    /// stayed, and Podman made the person's rootless `mine` its default connection. The relaunch
+    /// found nothing answering, did nothing, and the backend's tool, told no engine, judged `mine`:
+    /// "OpenBot can't run on this computer as it's set up", with no way on. Now, on Windows, the
+    /// relaunch makes OpenBot's machine again, and the tool is never asked before it answers.
+    #[test]
+    fn a_relaunch_without_openbots_machine_makes_it_again_and_never_judges_the_persons() {
+        use engine::Engine::{Docker, Podman};
+        // `podman machine list --format json` as box I printed it: only the person's machine.
+        let only_theirs = r#"[{"Name":"mine","Default":true,"Running":true,"VMType":"wsl"}]"#;
+        let with_ours = r#"[
+            {"Name":"mine","Default":true,"Running":true,"VMType":"wsl"},
+            {"Name":"openbot","Default":false,"Running":false,"VMType":"wsl"}
+        ]"#;
+        let ours_in = |listing: &str| {
+            acquire::machine_in(listing, acquire::MACHINE)
+                .unwrap()
+                .is_some()
+        };
+        let windows = engine::own_machine_only("windows");
+
+        // Nothing answers and only the person's machine is there: OpenBot's is made again.
+        assert!(our_machine_is_gone(
+            Some(Podman),
+            windows,
+            || false,
+            || ours_in(only_theirs)
+        ));
+        // OpenBot's machine is there, stopped: started as before, never made again.
+        assert!(!our_machine_is_gone(
+            Some(Podman),
+            windows,
+            || false,
+            || ours_in(with_ours)
+        ));
+        // Answering: nothing is done, and the machines are not even listed.
+        assert!(!our_machine_is_gone(
+            Some(Podman),
+            windows,
+            || true,
+            || { panic!("listed while the engine answered") }
+        ));
+        // Docker installations, ones from before engines were saved, and a Mac, where the
+        // installation may have run on a rootful machine of the person's: as before.
+        assert!(!our_machine_is_gone(
+            Some(Docker),
+            windows,
+            || false,
+            || false
+        ));
+        assert!(!our_machine_is_gone(None, windows, || false, || false));
+        assert!(!our_machine_is_gone(
+            Some(Podman),
+            engine::own_machine_only("macos"),
+            || false,
+            || false
+        ));
+
+        // Until OpenBot's own engine answers, the backend's tool is not asked on Windows: the answer
+        // is that the engine doesn't answer, which the relaunch repairs, never "unsupported engine"
+        // from a look at the person's machine.
+        for saved in [Some(Podman), None] {
+            assert!(cli_left_to_pick("windows", false, saved), "{saved:?}");
+        }
+        assert!(!cli_left_to_pick("windows", true, Some(Podman)));
+        assert!(!cli_left_to_pick("windows", false, Some(Docker)));
+        assert!(!cli_left_to_pick("macos", false, Some(Podman)));
+        let answer = local_eval::Report::engine_not_answering();
+        assert_eq!(answer.outcome, local_eval::Outcome::Blocked);
+        assert_eq!(answer.reason, Some(local_eval::Reason::DockerUnavailable));
+    }
+
+    /// A live Windows run: the machine's network was checked only at Start, after the back end had
+    /// started, and setting it up again restarted the machine under the back end. The window wakes
+    /// the engine before every CLI call that sets up, updates or starts the back end, and the wake
+    /// now makes OpenBot's machine ready last, after the engine is up.
+    #[test]
+    fn the_wake_makes_openbots_machine_ready_after_the_engine_and_before_the_back_end() {
+        use std::cell::RefCell;
+        let run = |wake: Result<(), Problem>| {
+            let done = RefCell::new(Vec::new());
+            let result = tauri::async_runtime::block_on(engine_then_machine(
+                async || {
+                    done.borrow_mut().push("wake");
+                    wake
+                },
+                async || {
+                    done.borrow_mut().push("heal");
+                    Ok(())
+                },
+                async || {
+                    done.borrow_mut().push("machine before the back end");
+                    Ok(())
+                },
+            ));
+            (result, done.into_inner())
+        };
+        let (result, done) = run(Ok(()));
+        assert!(result.is_ok());
+        assert_eq!(done, ["wake", "heal", "machine before the back end"]);
+        // An engine that did not come up is said as it was, and its machine is not touched.
+        let (result, done) = run(Err(Problem::plain("Docker Desktop didn't start.")));
+        assert!(result.is_err());
+        assert_eq!(done, ["wake"]);
+    }
+
+    fn back_end_report(
+        outcome: local_eval::Outcome,
+        readiness: local_eval::Readiness,
+    ) -> local_eval::Report {
+        local_eval::Report {
+            outcome,
+            stack: None,
+            reason: None,
+            readiness,
+            licence: local_eval::Licence::Valid,
+            licence_expires_at: None,
+            update_to: None,
+            checks_passed: readiness == local_eval::Readiness::Ready,
+            shortfall: None,
+        }
+    }
+
+    /// The same run, when Start is where the network is set up again (it went down after the
+    /// wake, or the back end was already running): the back end is started again, and waited for
+    /// until it is ready, before Compose starts OpenBot's services.
+    #[test]
+    fn a_machine_restarted_at_start_starts_the_back_end_again_before_compose() {
+        use local_eval::{Action, Outcome, Readiness};
+        use std::cell::RefCell;
+        let done = RefCell::new(Vec::<String>::new());
+        let mut statuses =
+            vec![Readiness::Stopped, Readiness::Starting, Readiness::Ready].into_iter();
+        let mut pauses = 0;
+        let result = network_then_back_end(
+            || {
+                done.borrow_mut().push("network".into());
+                Ok(acquire::Network::RestartedMachine)
+            },
+            || {
+                back_end_started_again(
+                    |action| {
+                        done.borrow_mut()
+                            .push(format!("local {action:?}").to_lowercase());
+                        Ok(match action {
+                            Action::Start => {
+                                back_end_report(Outcome::Completed, Readiness::Starting)
+                            }
+                            _ => back_end_report(Outcome::Completed, statuses.next().unwrap()),
+                        })
+                    },
+                    &mut || pauses += 1,
+                    BACK_END_AGAIN_POLLS,
+                )
+            },
+        );
+        done.borrow_mut().push("compose".into());
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(
+            done.into_inner(),
+            [
+                "network",
+                "local start",
+                "local status",
+                "local status",
+                "local status",
+                "compose"
+            ]
+        );
+        assert_eq!(pauses, 2);
+
+        // A network that answered restarted nothing, and the back end is left as it is.
+        let mut asked = Vec::new();
+        network_then_back_end(
+            || Ok(acquire::Network::Answered),
+            || {
+                asked.push("back end again");
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(asked.is_empty());
+
+        // A back end that never gets ready again stops Start with a sentence, not Compose.
+        let error = back_end_started_again(
+            |action| {
+                Ok(match action {
+                    Action::Start => back_end_report(Outcome::Completed, Readiness::Starting),
+                    _ => back_end_report(Outcome::Completed, Readiness::Starting),
+                })
+            },
+            &mut || {},
+            3,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.said,
+            "OpenBot couldn't start again after reconnecting to the internet. Try Start again."
+        );
     }
 
     /// The tester's Start: Docker Desktop 4.27.2 answered, and Compose v2.24.5 stopped at its first

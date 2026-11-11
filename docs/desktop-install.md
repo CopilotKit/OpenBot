@@ -11,8 +11,11 @@ Intelligence running on the same computer. The person needs no terminal, no deve
 container engine of their own. The app is standalone: there is no hosted or self-hosted
 Intelligence option, no organization sign-in and no Bot picker. It installs the default Bot.
 
-First-release platforms are Apple silicon macOS and Windows x64. Windows on ARM cannot run
-WSL 2 inside a virtual machine on Apple silicon, so test Windows builds on an x64 machine.
+Installers are published for Apple silicon and Intel Macs and for Windows x64. On an Intel Mac the
+app cannot install Podman, because Podman publishes its Mac installer for Apple silicon only, so
+that person needs Docker Desktop or Podman Desktop first (`install::podman_download`). Windows on
+ARM cannot run WSL 2 inside a virtual machine on Apple silicon, so test Windows builds on an x64
+machine.
 
 ## The flow
 
@@ -46,8 +49,11 @@ sequenceDiagram
   Note over W: The window becomes OpenBot
 ```
 
-1. **Welcome.** The first click starts Install in the default folder, `~/OpenBot`. Install needs
-   no account, so it runs while the person signs in.
+1. **Welcome.** The big downloads start as soon as this screen shows, before any click: the
+   engine machine image, Podman's installer and Compose, the deployment and OpenBot's images, each
+   checked against its pin, into a cache Install then uses (`src-tauri/src/early_downloads.rs`).
+   The first click starts Install in the default folder, `~/OpenBot`. Install needs no account, so
+   it runs while the person signs in.
 2. **Account.** The browser sign-in opens as soon as the step does: the CLI's `login` needs no
    container engine, and answers at once for a sign-in it already has. Then the person accepts the
    local evaluation agreement, which the CLI reads only once an engine answers (`onboard
@@ -119,7 +125,7 @@ the local tests.
 |---|---|
 | Window (`desktop/src`) | Screens, order, what the person reads. Holds no credentials. |
 | Native side (`desktop/src-tauri`) | Engine install, deployment layout, images, Compose, host processes, secrets, Stop and Quit. |
-| Intelligence CLI (`copilotkit`, bundled) | Intelligence topology, sign-in, licence, readiness and its endpoints. |
+| Intelligence CLI (`copilotkit`, bundled) | Intelligence topology, sign-in, license, readiness and its endpoints. |
 
 **The CLI owns Intelligence.** The app runs the CLI as a bounded child process
 (`src-tauri/src/local_eval.rs`) and never reads its credential files or probes its containers to
@@ -132,7 +138,7 @@ fill a gap. Three rules hold that boundary:
   `--mode openbot`, so the sign-in page explains OpenBot's setup, only when the CLI's own
   `login --help` lists it: an older CLI refuses an unknown flag.
 - **Only allowlisted facts cross into the window.** Raw stdout and stderr never reach the window or
-  a log. Readiness and licence come only from the exact values of `local status`; anything else
+  a log. Readiness and license come only from the exact values of `local status`; anything else
   reads as unknown, and unknown keeps chat closed.
 
 ## Decisions and the reasons for them
@@ -152,7 +158,7 @@ fill a gap. Three rules hold that boundary:
   a declined administrator prompt is asked again the same way. The restart after it is the one
   step that waits for the person's click: OpenBot never restarts the computer on its own, because
   the person may have unsaved work open.
-- **Licence work after acceptance.** Intelligence setup waits for the evaluation agreement, and
+- **License work after acceptance.** Intelligence setup waits for the evaluation agreement, and
   uses the version of the terms the person accepted.
 - **One engine for both.** OpenBot and Intelligence share one container engine. The app uses, in
   order: a Docker that answers; on macOS and Windows a stopped Docker Desktop that has run before,
@@ -192,7 +198,7 @@ fill a gap. Three rules hold that boundary:
   that Docker is unavailable, and Stop and Quit do it once before both their stops (`compose
   down` and the back end's `local stop`). The install's `engine` row is said done only after this
   check, so the back end's setup, which starts on it, never runs against an engine about to be
-  updated. While a row says the engine is updating, the account's licence check is not asked; one
+  updated. While a row says the engine is updating, the account's license check is not asked; one
   refused before that waits for the engine instead of asking again. A Docker
   Desktop that is too old (4.31 and earlier) is updated to Docker's newest release with Docker's
   own installer command line, after its checksum and Docker's signature are checked
@@ -212,7 +218,8 @@ fill a gap. Three rules hold that boundary:
   runs from the images that release's `container-images.json` names by digest
   (`src-tauri/src/deployment.rs`). Nothing runs on the host: the person's own browser runs on the
   one computer and is shown in the OpenBot window, as hosted OpenBot shows it.
-  A new deployment takes the latest release. An existing one keeps its version through Install
+  A new deployment takes the latest release, or the app's own release when the app is newer
+  (`src-tauri/src/deployment_release.rs`). An existing one keeps its version through Install
   and Repair; the first Start after the app updates itself upgrades it to the app's own release
   (`src-tauri/src/upgrade.rs`, [desktop updates](desktop-updates.md)).
 - **The app's own Compose project.** Every new installation runs as the Compose project
@@ -226,8 +233,10 @@ fill a gap. Three rules hold that boundary:
 - **Images download in parallel, with progress.** Four images download at once
   (`IMAGE_PULLS_AT_ONCE`). The screen shows what is downloading and how fast, so a slow network
   looks slow, not stuck.
-- **A dropped download is tried again.** A file download whose connection fails, or whose server
-  answers 5xx or 429, is tried up to three times (`deployment::get`). A 404 is reported at once.
+- **A dropped download is tried again.** A file that downloads.copilotkit.ai keeps a copy of is
+  asked of it first, once, then of GitHub. A GitHub download whose connection fails, goes 30
+  seconds without a byte, or whose server answers 5xx or 429, is tried up to six times, waiting
+  longer each time, about four minutes at worst (`deployment::get`). A 404 is reported at once.
   `install.rs` still checks the digest of whatever arrives.
 - **Secrets stay out of `.env`.** `.env` holds settings a person can read. Model keys and service
   tokens go to an owner-only file on macOS and Linux and to DPAPI on Windows, and reach processes
@@ -287,8 +296,10 @@ with apps unavailable.
 
 An installer bundles the Intelligence CLI chosen in `desktop/intelligence-cli.json` and a Node
 runtime pinned by version and SHA-256. Internal builds and release candidates also pin the
-deployment and its images to the exact commit they were built from, and refuse to start a
-deployment from another release; see [Releasing](releasing.md) once that change is merged.
+deployment and its images to the exact commit they were built from, and Start moves an
+installation on another release to that pin, as it does for a stable app's own release
+(`src-tauri/src/upgrade.rs`). See [Releasing](releasing.md#internal-builds) and
+[Desktop updates](desktop-updates.md#the-upgrade).
 
 ## Where to start in the code
 
@@ -299,8 +310,8 @@ deployment from another release; see [Releasing](releasing.md) once that change 
 | CLI process boundary | `desktop/src-tauri/src/local_eval.rs`, `local_eval_state.rs` |
 | Engine | `desktop/src-tauri/src/install.rs`, `acquire.rs`, `docker_desktop.rs`, `engine.rs` |
 | Deployment and release | `desktop/src-tauri/src/deployment.rs`, `deployment_release.rs`, `preparation.rs` |
-| Compose and processes | `desktop/src-tauri/src/stack.rs`, `supervise.rs` |
-| Image downloads | `desktop/src-tauri/src/pull_metrics.rs`, `desktop/src/SetupProgress.tsx` |
+| Compose and processes | `desktop/src-tauri/src/stack.rs` |
+| Downloads | `desktop/src-tauri/src/early_downloads.rs`, `early_images.rs`, `pull_metrics.rs`, `desktop/src/SetupProgress.tsx` |
 | Secrets | `desktop/src-tauri/src/vault.rs`, `saved_intent.rs` |
 | Windows installer hooks | `desktop/src-tauri/windows/hooks.nsh` |
 

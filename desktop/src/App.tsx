@@ -269,6 +269,14 @@ function Setup() {
       if (connected) setLocalConnected(true);
     },
   });
+  // The engine's wake found that only a Windows restart fixes OpenBot's machine: the restart
+  // screen, not a Retry that can't work.
+  useEffect(() => {
+    if (local.problem?.restart_windows) {
+      setRestartLede(SETUP_NEEDS_RESTART);
+      setRestartPending(true);
+    }
+  }, [local.problem]);
   /*
    * Whether this Start updates OpenBot itself, asked once the back end is waited on, so the Start
    * journey counts the update from the start rather than learning of it when it begins: on Windows
