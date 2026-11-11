@@ -357,6 +357,21 @@ test("specific wording and actions", () => {
   ).toBe(
     "This computer has 13.2 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.",
   );
+  // Windows G on Docker Desktop: its disk is a sparse virtual disk on C:, and C: ran short. Said
+  // as C:'s, never as Docker's disk limit, which had 938.3 GB free.
+  expect(
+    engineTooSmallSaid({
+      podman: false,
+      cpu: false,
+      memory: false,
+      disk: true,
+      drive: "C:",
+      diskGb: "13.9",
+      freeOnDrive: true,
+    }),
+  ).toBe(
+    "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.",
+  );
   // A disk that is short is never said as out of space, measured or not.
   expect(
     engineTooSmallSaid({
