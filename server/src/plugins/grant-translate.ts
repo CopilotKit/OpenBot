@@ -819,7 +819,7 @@ export function createAppGrantDraftRoutes(options: {
           return context.json(
             {
               error:
-                "OpenBot needs a model key to choose actions from a description. Add one on the Credentials page, or turn actions on by hand.",
+                "OpenBot needs a model key to choose actions from a description. Add one in the Vault, or turn actions on by hand.",
             },
             503,
           );
