@@ -264,6 +264,7 @@ export function useLocalSequence({
   onStart,
   onRecorded = () => {},
   onForgotten = () => {},
+  installAgain = async () => true,
   pollDelays = POLL_DELAYS,
   roomEveryMs = ROOM_EVERY_MS,
 }: {
@@ -277,6 +278,12 @@ export function useLocalSequence({
   onRecorded?: (stack: string, connected: boolean) => void;
   /** The recorded stack is gone and is no longer OpenBot's: set up from the start (`startFresh`). */
   onForgotten?: () => void;
+  /**
+   * Start fresh installs OpenBot's own software again before it sets up: the backend went with
+   * OpenBot's machine, and a machine made again has none of it. False when the install did not
+   * finish, which the window says.
+   */
+  installAgain?: () => Promise<boolean>;
   pollDelays?: number[];
   /** How often a setup paused for room looks again (`ROOM_EVERY_MS`). */
   roomEveryMs?: number;
@@ -290,8 +297,17 @@ export function useLocalSequence({
     onStart,
     onRecorded,
     onForgotten,
+    installAgain,
   });
-  latest.current = { root, stack, connected, onStart, onRecorded, onForgotten };
+  latest.current = {
+    root,
+    stack,
+    connected,
+    onStart,
+    onRecorded,
+    onForgotten,
+    installAgain,
+  };
   // Bumped to stop a run: by Cancel, by leaving, and by any newer run.
   const generation = useRef(0);
   const attempt = useRef<string | null>(null);
@@ -863,15 +879,24 @@ export function useLocalSequence({
 
   /*
    * The backend OpenBot set up is gone with everything in it (`stack-lost`): set up from the start.
-   * Setup forgets the old stack itself when its cluster is gone (`lost_stack` in local_eval.rs) and
-   * sets up a new one, then connect, wait and start follow as on a first setup. The sign-in and the
-   * AI connection are kept: neither was in what went.
+   * OpenBot's own software is installed again first (`installAgain`). On box I the backend went
+   * with OpenBot's machine, the machine made again had none of it, and Start was refused after
+   * setup, so the window went back from Starting to Installing. Setup then forgets the old stack
+   * itself when its cluster is gone (`lost_stack` in local_eval.rs) and sets up a new one, and
+   * connect, wait and start follow as on a first setup: one journey forward. The sign-in and the AI
+   * connection are kept: neither was in what went.
    */
-  function startFresh() {
+  async function startFresh() {
     if (now.current.running) return;
+    halt();
+    const token = generation.current;
     go.current = true;
     latest.current.onForgotten();
-    update({ blocked: null, problem: null });
+    // Nothing of the lost backend's rows is left to show: the install's rows come first.
+    update(idle);
+    if (!(await latest.current.installAgain())) return;
+    // Stopped or left while it installed.
+    if (generation.current !== token) return;
     void run("setup");
   }
 

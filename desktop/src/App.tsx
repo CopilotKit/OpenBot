@@ -273,6 +273,8 @@ function Setup() {
       setLocalStack(null);
       setLocalConnected(false);
     },
+    // And OpenBot's own software is installed again before it sets up (`installAfresh`).
+    installAgain: () => installAfresh(),
   });
   // The engine's wake found that only a Windows restart fixes OpenBot's machine: the restart
   // screen, not a Retry that can't work.
@@ -692,6 +694,34 @@ function Setup() {
       setResumingStart(false);
     }
   }
+
+  /*
+   * Start fresh after the backend was lost installs OpenBot's own software first, on the screen the
+   * person is on, before setup and Start carry on. On box I the backend went with OpenBot's machine,
+   * and the machine made again had none of OpenBot's software: Start was refused after setup, and
+   * the window went back from Starting OpenBot to Installing OpenBot. Installed with the Bot this
+   * installation runs, so it is still the installation the person returns to. Already there, the
+   * install says so and is done at once.
+   */
+  const [installingAfresh, setInstallingAfresh] = useState(false);
+  async function installAfresh(): Promise<boolean> {
+    setInstallingAfresh(true);
+    try {
+      const installed = await install();
+      // Install's rows are done with: Starting's come next.
+      if (installed) setSteps([]);
+      return installed;
+    } finally {
+      setInstallingAfresh(false);
+    }
+  }
+  // Install's rows while Start fresh installs, in place of Starting's.
+  const freshInstall = installingAfresh && (
+    <SetupProgress
+      label="Install progress"
+      steps={plainInstallSteps(steps, busy, installSince)}
+    />
+  );
 
   // OpenBot's own updates. The installation follows the app: Start upgrades it to the app's release.
   const appUpdates = <CheckForUpdates />;
@@ -1136,28 +1166,34 @@ function Setup() {
     return (
       <main>
         <div className="sheet connection-sheet">
-          <h1>{localStarting ? "Starting OpenBot" : "OpenBot is stopped"}</h1>
+          <h1>
+            {localStarting || installingAfresh
+              ? "Starting OpenBot"
+              : "OpenBot is stopped"}
+          </h1>
           <p className="lede">
-            {localStarting
+            {localStarting || installingAfresh
               ? // No time of its own: the card under it says how long is left, from how long each
                 // part takes. "This usually takes a minute or two" sat over "About 3 minutes left"
                 // on Windows G, and the start took four.
                 "OpenBot is getting ready and opens by itself."
               : "Your installation and saved connections are ready to reopen."}
           </p>
-          <LocalIntelligence
-            sequence={local}
-            offerStart
-            handOff={handOff}
-            open={steps}
-            releaseDue={releaseDue}
-          />
+          {freshInstall || (
+            <LocalIntelligence
+              sequence={local}
+              offerStart
+              handOff={handOff}
+              open={steps}
+              releaseDue={releaseDue}
+            />
+          )}
           {goAhead && <PodmanGoAhead asking={goAhead} />}
           {pauseCard}
           {updatingLine}
           {displayedFailure && <Failure problem={displayedFailure} />}
           {/* While a local step runs, its Cancel is the only control. */}
-          {!localStarting && (
+          {!localStarting && !installingAfresh && (
             <>
               <div className="row">
                 <button
@@ -1219,19 +1255,21 @@ function Setup() {
               ? "OpenBot starts once you choose what happens to the data a previous installation left."
               : "OpenBot is setting up on this computer and starts by itself when it’s ready. This can take a few minutes."}
           </p>
-          <LocalIntelligence
-            sequence={local}
-            offerStart
-            handOff={handOff}
-            open={steps}
-            releaseDue={releaseDue}
-            // A choice for the person, not a failure: the step waits on it, with no Retry.
-            waitingOn={
-              leftoverVolumes.length > 0
-                ? "Choose below what happens to the previous installation’s data."
-                : null
-            }
-          />
+          {freshInstall || (
+            <LocalIntelligence
+              sequence={local}
+              offerStart
+              handOff={handOff}
+              open={steps}
+              releaseDue={releaseDue}
+              // A choice for the person, not a failure: the step waits on it, with no Retry.
+              waitingOn={
+                leftoverVolumes.length > 0
+                  ? "Choose below what happens to the previous installation’s data."
+                  : null
+              }
+            />
+          )}
           {/* In the card under its rows, as every other choice the step waits on. On Windows F it
               sat above the card's own header and pushed "Finishing setup" down 300 px. */}
           {leftoverVolumes.length > 0 && (

@@ -30,8 +30,9 @@ Desktop installation:
   data), its backend and database went with it, but the installation still named them. Every start
   then stopped at "Setup stopped partway through with an error. Retry.", and Retry did the same,
   even after reinstalling. OpenBot now says plainly that its saved data on this computer is gone,
-  with your Bots and conversations, and offers **Start fresh**, which sets OpenBot up again and opens
-  it. Your sign-in and AI connection stay. Setting up again also replaces a backend that is gone,
+  with your Bots and conversations, and offers **Start fresh**, which installs OpenBot's software
+  again, sets OpenBot up and opens it, moving forward the whole way, never back a step.
+  Your sign-in and AI connection stay. Setting up again also replaces a backend that is gone,
   where it used to stop the same way.
 - **Installing a new OpenBot over the old one on Windows never offers to delete your data, and
   uninstalling stops what OpenBot runs.** Running a new installer over an installed OpenBot opened
