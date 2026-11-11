@@ -150,6 +150,25 @@ describe("remote Automatic Learning delivery", () => {
     expect(output.at(-1)?.type).toBe(EventType.RUN_FINISHED);
   });
 
+  test("a skill read beside the harness's own tool search goes back to the harness", async () => {
+    // A Claude Agent SDK Bot's `ToolSearch` runs in its next run, once this read's result is back.
+    const remote = new Remote((_request, index) =>
+      of(
+        start,
+        ...(index === 0 ? [...call(), ...call("ToolSearch", "search")] : []),
+        finish,
+      ),
+    );
+    const middleware = new RemoteLearnedSkillsMiddleware("bot", async () =>
+      snapshot(),
+    );
+    await events(middleware, remote);
+    expect(remote.inputs).toHaveLength(2);
+    expect(remote.inputs[1]?.messages).toContainEqual(
+      expect.objectContaining({ role: "tool", toolCallId: "call" }),
+    );
+  });
+
   test("never executes a learning call already answered by the remote", async () => {
     let executions = 0;
     const invocation = {
