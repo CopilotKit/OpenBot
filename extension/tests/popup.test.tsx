@@ -146,7 +146,7 @@ test("not connected shows the connect instructions and no buttons by default", a
   expect(queryByRole("button")).toBeNull();
 });
 
-test("a policy address adds an Open <host> button that opens its Browsers settings", async () => {
+test("a policy address adds an Open <host> button that opens its Computer settings at Browsers", async () => {
   const { findByText } = setup(
     stateResponse({
       ...NOT_CONNECTED,
@@ -156,7 +156,7 @@ test("a policy address adds an Open <host> button that opens its Browsers settin
   fireEvent.click(await findByText("Open openbot.example.test"));
   await waitFor(() =>
     expect(fake.opened).toContain(
-      "https://openbot.example.test/settings/browsers",
+      "https://openbot.example.test/settings/computer#browsers",
     ),
   );
 });

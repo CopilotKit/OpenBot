@@ -25,10 +25,13 @@ function redirectOf(route: { options: { beforeLoad?: unknown } }, input = {}) {
 }
 
 test.each([
-  ["/settings/this-computer", ThisComputerRoute],
-  ["/settings/browsers", BrowsersRoute],
-])("%s opens Settings → Computer", (_from, route) => {
-  expect(redirectOf(route as never)?.to).toBe("/settings/computer");
+  ["/settings/this-computer", ThisComputerRoute, "this-computer"],
+  ["/settings/browsers", BrowsersRoute, "browsers"],
+])("%s opens Settings → Computer at its section", (_from, route, hash) => {
+  expect(redirectOf(route as never)).toMatchObject({
+    to: "/settings/computer",
+    hash,
+  });
 });
 
 test("/settings/skills opens Skills and keeps which panel was open", () => {
