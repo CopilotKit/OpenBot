@@ -72,6 +72,8 @@ export type Progress = {
    * and no time running on, and its status says "Paused".
    */
   paused?: boolean;
+  /** A paused step looks again now: its Try again, under what its detail says to do first. */
+  onTryAgain?: () => void;
   /**
    * What its download's parts are doing once every byte is in, said with the part: "Unpacking
    * OpenBot" reads "Unpacking OpenBot (3 of 5)." Without it the row says its detail.
@@ -388,6 +390,15 @@ function SetupProgressRow({
       {downloads && where && (
         <DownloadProgress downloads={downloads} where={where} />
       )}
+      {paused && step.onTryAgain && (
+        <button
+          type="button"
+          className="text-link step-action"
+          onClick={step.onTryAgain}
+        >
+          Try again
+        </button>
+      )}
     </li>
   );
 }
@@ -575,6 +586,9 @@ export type BackEndNow = {
   /** The CLI's steps its running setup has finished, and when it began (`local_eval_steps`). */
   trail?: readonly string[];
   trailSince?: number | null;
+  /** Its setup is paused until its drive has room, in the account step's words, and Try again. */
+  held?: string | null;
+  tryAgain?: () => void;
 };
 
 /**
@@ -687,6 +701,13 @@ export function installingBehind({
    * "0s elapsed" as the setup moved on.
    */
   const counting = since ?? backEnd.runSince ?? backEnd.since ?? undefined;
+  // Paused for room on its drive: said calmly, as the downloads say it, with Try again.
+  if (backEnd.running && backEnd.at === "setup" && backEnd.held)
+    return row(3, backEnd.held, {
+      paused: true,
+      onTryAgain: backEnd.tryAgain,
+      startedAt: counting,
+    });
   if (backEnd.running && (backEnd.at === "setup" || backEnd.at === "connect")) {
     // What the setup is doing now, from the steps it has finished, and the time left by how long
     // its parts take (`journey.ts`). A download says its own time left from its speed.

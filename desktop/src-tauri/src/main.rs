@@ -8853,6 +8853,16 @@ fn local_eval_download(attempt: String) -> Option<openbot_desktop_lib::local_ima
     local_eval::downloading(&attempt)
 }
 
+/// While a setup waits for room on a drive that is short: that drive's shortfall now, or nothing
+/// once there is room (`local_eval::drive_short`).
+#[tauri::command]
+async fn local_eval_room() -> Option<local_eval::Shortfall> {
+    tauri::async_runtime::spawn_blocking(local_eval::drive_short)
+        .await
+        .ok()
+        .flatten()
+}
+
 /// The step the back end update `attempt` is in and for how long, once it is in one that waits,
 /// so a step that takes minutes is never a silent row. A fixed step name and seconds only.
 #[tauri::command]
@@ -10947,6 +10957,7 @@ fn main() {
             start_early_downloads,
             early_downloads_now,
             early_downloads_measured,
+            local_eval_room,
             record_setup_event,
             bring_setup_to_front,
             allow_podman_install,

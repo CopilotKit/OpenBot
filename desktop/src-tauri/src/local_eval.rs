@@ -1995,8 +1995,7 @@ fn checked_call(
     let before = EngineCheck::of(&address);
     log_check(&format!("before {command}"), &before);
     if command == "local setup" {
-        let short = before.shortfall();
-        if short.free_on_drive {
+        if let Some(short) = drive_short_of(&before) {
             log::warn!(
                 "[local check] {command} not started: the drive that holds the engine's disk has less than OpenBot needs"
             );
@@ -2038,6 +2037,25 @@ fn checked_call(
         }
         other => other,
     }
+}
+
+/// The drive that holds the engine's disk is what is short, by `check`: a setup waits for room.
+fn drive_short_of(check: &EngineCheck) -> Option<Shortfall> {
+    let short = check.shortfall();
+    short.free_on_drive.then_some(short)
+}
+
+/**
+While a setup waits for room on a drive that is short (`checked_call`): that drive's shortfall now,
+measured as the setup measures it, or nothing once there is room. The window asks every few seconds
+and on Try again, and sets up again by itself once there is room. Nothing when no engine is known.
+*/
+pub fn drive_short() -> Option<Shortfall> {
+    let short = drive_short_of(&EngineCheck::of(&cli_engine()?));
+    if short.is_none() {
+        crate::early_downloads::room_again();
+    }
+    short
 }
 
 /// A setup OpenBot did not start, for a drive short of disk (`checked_call`): blocked on resources,
@@ -10419,8 +10437,15 @@ fn main() {
         );
         assert_eq!(lab.fixture.argv(), None, "the CLI's setup was not started");
         assert!(crate::early_downloads::held_for_room());
-        // Space freed on C:, and Retry.
+        // What the window asks every 10 seconds while the setup waits: C: is still short.
+        assert_eq!(
+            drive_short().map(|short| (short.disk_gb, short.drive)),
+            Some((Some("13.9".to_owned()), Some("C:".to_owned())))
+        );
+        // Space freed on C:: there is room, the downloads carry on, and the setup runs.
         windows_g(&lab, 97_796_845_568);
+        assert_eq!(drive_short(), None);
+        assert!(!crate::early_downloads::held_for_room());
         let _ = setup_installed("setup-windows-g-room", &installation, None);
         let ran = lab.fixture.argv().unwrap_or_default();
         assert!(ran.contains("setup"), "the setup ran: {ran}");
