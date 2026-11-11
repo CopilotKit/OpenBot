@@ -86,12 +86,29 @@ export function PausePodman({
     const card = offered.current;
     const sheet = card?.closest(".sheet");
     if (!card || !sheet) return;
-    const foot = sheet.querySelector(".step-footer");
-    const limit = foot
-      ? foot.getBoundingClientRect().top
-      : sheet.getBoundingClientRect().bottom;
-    const over = card.getBoundingClientRect().bottom - limit;
-    if (over > 0) sheet.scrollTop += over;
+    const bring = () => {
+      const foot = sheet.querySelector(".step-footer");
+      const limit = foot
+        ? foot.getBoundingClientRect().top
+        : sheet.getBoundingClientRect().bottom;
+      const over = card.getBoundingClientRect().bottom - limit;
+      if (over > 0) sheet.scrollTop += over;
+    };
+    bring();
+    // Brought into view again when what is above it grows, as the step's lede does once the
+    // account check answers: offered while the check ran, the button went back under the foot.
+    // Not when the person scrolls, nor as the row under it ticks: only when the offer itself moves.
+    let top = card.offsetTop;
+    const moved =
+      typeof MutationObserver === "undefined"
+        ? null
+        : new MutationObserver(() => {
+            if (card.offsetTop === top) return;
+            top = card.offsetTop;
+            bring();
+          });
+    moved?.observe(sheet, { childList: true, subtree: true });
+    return () => moved?.disconnect();
   }, []);
   return (
     <section

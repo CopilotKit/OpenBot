@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
 import {
   type CopilotKitSignInPage,
@@ -22,6 +22,7 @@ export function CopilotKitSignInWait({
   attempt,
   waiting,
   before = waiting,
+  onPage,
   onCancel,
 }: {
   /** The sign-in being waited on (`signInToCopilotKit`). */
@@ -33,9 +34,13 @@ export function CopilotKitSignInWait({
    * opens nothing when it finds one.
    */
   before?: string;
+  /** The CLI has opened its page: the person is signing in. */
+  onPage?: () => void;
   onCancel: () => void;
 }) {
   const [page, setPage] = useState<CopilotKitSignInPage | null>(null);
+  const onPageNow = useRef(onPage);
+  onPageNow.current = onPage;
 
   useEffect(() => {
     let current = true;
@@ -44,7 +49,10 @@ export function CopilotKitSignInWait({
       copilotKitSignInPage(attempt)
         .then(
           (found) => {
-            if (current && found) setPage(found);
+            if (current && found) {
+              setPage(found);
+              onPageNow.current?.();
+            }
           },
           () => {},
         )

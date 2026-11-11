@@ -1468,3 +1468,43 @@ test("a chosen provider's text leaves room for Change", async () => {
   // Change is about 50px wide, 16px in from the edge, with a gap before the text.
   expect(room).toBeGreaterThanOrEqual(80);
 });
+
+/*
+ * Windows G: under "Anthropic API key" the window said "A Claude plan carries a separate monthly
+ * pool of Agent SDK credits...". That is about signing in with a plan, and an API key has no such
+ * pool. It is said with the plan sign-in only.
+ */
+test("the Claude plan's caution is said with the plan sign-in, not under the API key", async () => {
+  const cautioned: Provider[] = [
+    {
+      ...providers[1],
+      caution: {
+        says: "A Claude plan carries a separate monthly pool of Agent SDK credits. When that pool is empty, Bots stop until it renews or you add API credits.",
+        reads_more_at:
+          "https://support.anthropic.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan",
+      },
+    },
+  ];
+  invokeHandler = async (command) => {
+    if (command === "providers") return cautioned;
+    if (command === "cancel_chatgpt_sign_in") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPicker();
+  await pick(view, /^Anthropic/);
+  expect(view.getByRole("tab", { selected: true }).textContent).toBe(
+    "Sign in with my plan",
+  );
+  expect(view.getByText(/separate monthly pool/)).toBeTruthy();
+  expect(view.getByRole("link", { name: "What this means" })).toBeTruthy();
+
+  await userEvent.click(view.getByRole("tab", { name: "Use an API key" }));
+  expect(view.getByLabelText("Anthropic API key")).toBeTruthy();
+  expect(view.queryByText(/separate monthly pool/)).toBeNull();
+  expect(view.queryByRole("link", { name: "What this means" })).toBeNull();
+
+  await userEvent.click(
+    view.getByRole("tab", { name: "Sign in with my plan" }),
+  );
+  expect(view.getByText(/separate monthly pool/)).toBeTruthy();
+});
