@@ -455,7 +455,7 @@ const HOST_GATEWAY_LOOKUP: [&str; 8] = [
     "ssh",
     MACHINE,
     "timeout",
-    "10",
+    "3",
     "getent",
     "ahostsv4",
     "host.containers.internal",
@@ -468,7 +468,10 @@ const MACHINE_NETWORK: [&str; 4] = ["machine", "ssh", MACHINE, "ip route; cat /e
 /// 192.168.127.1, its DNS server.
 const USER_MODE_DEVICE: &str = "podman-usermode";
 /// How long the machine gets for that name to resolve, before it is restarted and again after.
-const HOST_GATEWAY_WAIT: Duration = Duration::from_secs(60);
+/// gvproxy answers the name itself, well inside the 3 s each lookup gets, and after a start the
+/// network comes up within seconds. With a minute and 10 s lookups, a live Windows run waited a
+/// minute before the restart began.
+const HOST_GATEWAY_WAIT: Duration = Duration::from_secs(30);
 const HOST_GATEWAY_RETRY_EVERY: Duration = Duration::from_secs(1);
 /// Said in a failure when the machine's network is still down after restarting it: only a Windows
 /// restart has been seen to bring it back. `explain_machine_error` and `StepOutcome::problem` read it.
@@ -553,14 +556,119 @@ fn configure_owned_windows_podman_for_compose<H>(
 /// Run before Compose even when an existing engine skipped the install/start steps, and before
 /// the images are downloaded: on OpenBot's own machine on Windows, its network has to work first.
 pub fn prepare_for_compose(address: &Address) -> Result<(), crate::problem::Problem> {
+    prepare_for_compose_saying(address, || {}).map(|_| ())
+}
+
+/// `prepare_for_compose`, calling `say` once if the machine's network makes it wait, and saying
+/// whether OpenBot restarted its machine to set the network up again. A restart stops everything
+/// running in the machine, the back end's cluster included.
+pub fn prepare_for_compose_saying(
+    address: &Address,
+    say: impl FnMut(),
+) -> Result<Network, crate::problem::Problem> {
+    let restarted = std::cell::Cell::new(false);
     configure_owned_windows_podman_for_compose(
         address,
         podman,
         cfg!(target_os = "windows"),
-        &mut real_clock(),
-        hold_docker_pipe,
+        &mut saying_once(real_clock(), say),
+        || {
+            restarted.set(true);
+            hold_docker_pipe()
+        },
     )
-    .map_err(|error| machine_problem(&error))
+    .map_err(|error| machine_problem(&error))?;
+    Ok(Network::restarted(restarted.get()))
+}
+
+/// Said on the running step while OpenBot waits for its machine's network or sets it up again.
+pub const RECONNECTING: &str =
+    "Reconnecting OpenBot to the internet. This can take a minute or two.";
+
+/// What checking OpenBot's machine's network did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Network {
+    /// It answered, at once or after a wait, or it isn't OpenBot's machine to check.
+    Answered,
+    /// OpenBot restarted its machine to set the network up again, and it answers now. Whatever was
+    /// running in the machine stopped with it.
+    RestartedMachine,
+}
+
+impl Network {
+    fn restarted(restarted: bool) -> Self {
+        if restarted {
+            Self::RestartedMachine
+        } else {
+            Self::Answered
+        }
+    }
+}
+
+/// OpenBot's own machine on Windows, made ready before the back end starts in it.
+///
+/// First its network: the same wait and restart as `prepare_for_compose`, without the gateway
+/// setting. Run before the back end, so a restart can never stop a back end that was started before
+/// it: on a live Windows run the check ran only at Start, after the back end had started, and the
+/// restart stopped the back end's cluster with nothing to start it again. Whatever else the machine
+/// needs before the back end goes after the network, in `owned_machine_before_back_end`, so it
+/// follows the machine's last start.
+pub fn machine_before_back_end(
+    address: &Address,
+    say: impl FnMut(),
+) -> Result<Network, crate::problem::Problem> {
+    let restarted = std::cell::Cell::new(false);
+    owned_machine_before_back_end(
+        address,
+        podman,
+        cfg!(target_os = "windows"),
+        &mut saying_once(real_clock(), say),
+        || {
+            restarted.set(true);
+            hold_docker_pipe()
+        },
+    )
+    .map_err(|error| machine_problem(&error))?;
+    Ok(Network::restarted(restarted.get()))
+}
+
+fn owned_machine_before_back_end<H>(
+    address: &Address,
+    mut run: impl FnMut(&[&str]) -> Result<String, String>,
+    target_is_windows: bool,
+    clock: &mut Clock<impl Fn() -> Duration, impl FnMut(Duration)>,
+    hold_docker_pipe: impl Fn() -> H,
+) -> Result<(), String> {
+    if !owned_windows_podman_address(address, target_is_windows) {
+        return Ok(());
+    }
+    let networking = owned_machine_networking(&run(&["machine", "inspect", MACHINE])?)?;
+    // A stopped machine, or one without user-mode networking, is said by the checks before Compose.
+    if !networking.user_mode || !networking.state.eq_ignore_ascii_case("running") {
+        return Ok(());
+    }
+    // The network first: setting it up again restarts the machine.
+    host_gateway_restarting_once(&mut run, clock, hold_docker_pipe)?;
+    Ok(())
+}
+
+/// `clock`, calling `say` once, the first time the wait pauses: the network did not answer at once.
+fn saying_once<N>(
+    clock: Clock<N, impl FnMut(Duration)>,
+    mut say: impl FnMut(),
+) -> Clock<N, impl FnMut(Duration)> {
+    let mut pause = clock.pause;
+    let mut said = false;
+    Clock {
+        now: clock.now,
+        pause: move |duration| {
+            if !said {
+                said = true;
+                say();
+            }
+            pause(duration)
+        },
+    }
 }
 
 fn owned_windows_podman_address(address: &Address, target_is_windows: bool) -> bool {
@@ -594,6 +702,11 @@ fn host_gateway_restarting_once<H>(
     clock: &mut Clock<impl Fn() -> Duration, impl FnMut(Duration)>,
     hold_docker_pipe: impl Fn() -> H,
 ) -> Result<Ipv4Addr, String> {
+    // One at a time: setup's check before its downloads and the back end's before it starts can
+    // overlap, and two of them must not both restart the machine.
+    let _one_at_a_time = NETWORK_CHECK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let gave_up = match wait_for_host_gateway(run, clock)? {
         Waited::Resolved(ip) => return Ok(ip),
         Waited::GaveUp(why) => why,
@@ -632,6 +745,8 @@ fn host_gateway_restarting_once<H>(
         }
     }
 }
+
+static NETWORK_CHECK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 enum Waited {
     Resolved(Ipv4Addr),
@@ -1686,7 +1801,7 @@ mod tests {
                 match args {
                     ["machine", "inspect", "openbot"] => Ok(inspect.clone()),
                     ["machine", "start", "openbot"] => Ok(String::new()),
-                    ["machine", "ssh", "openbot", "timeout", "10", "getent", ..] => {
+                    ["machine", "ssh", "openbot", "timeout", "3", "getent", ..] => {
                         Ok("192.168.127.254 STREAM host.containers.internal\n".into())
                     }
                     ["machine", "ssh", "openbot", _] => Ok(String::new()),
@@ -1728,7 +1843,7 @@ mod tests {
                 match args {
                     ["machine", "inspect", "openbot"] => Ok(inspect.clone()),
                     ["machine", "start", "openbot"] => Ok(String::new()),
-                    ["machine", "ssh", "openbot", "timeout", "10", "getent", ..] => {
+                    ["machine", "ssh", "openbot", "timeout", "3", "getent", ..] => {
                         Ok("192.168.127.254 STREAM host.containers.internal\n".into())
                     }
                     ["machine", "ssh", "openbot", _] => Ok(String::new()),
@@ -1783,7 +1898,7 @@ mod tests {
                     }
                     match args {
                         ["machine", "inspect", "openbot"] => Ok(inspect.clone()),
-                        ["machine", "ssh", "openbot", "timeout", "10", "getent", ..] => {
+                        ["machine", "ssh", "openbot", "timeout", "3", "getent", ..] => {
                             Ok("192.168.127.254 STREAM host.containers.internal\n".into())
                         }
                         _ => Ok(String::new()),
@@ -1914,7 +2029,7 @@ mod tests {
                         Ok(String::new())
                     }
                     ["machine", "start", "openbot"] => Ok(String::new()),
-                    ["machine", "ssh", "openbot", "timeout", "10", "getent", "ahostsv4", "host.containers.internal"] => {
+                    ["machine", "ssh", "openbot", "timeout", "3", "getent", "ahostsv4", "host.containers.internal"] => {
                         Ok("192.168.127.254 STREAM host.containers.internal\n".into())
                     }
                     ["machine", "ssh", "openbot", script]
@@ -1951,7 +2066,7 @@ mod tests {
                     "ssh",
                     "openbot",
                     "timeout",
-                    "10",
+                    "3",
                     "getent",
                     "ahostsv4",
                     "host.containers.internal",
@@ -1980,7 +2095,7 @@ mod tests {
                 calls.push(args.iter().map(|arg| (*arg).to_string()).collect());
                 match args {
                     ["machine", "inspect", "openbot"] => Ok(inspect.clone()),
-                    ["machine", "ssh", "openbot", "timeout", "10", "getent", "ahostsv4", "host.containers.internal"] => {
+                    ["machine", "ssh", "openbot", "timeout", "3", "getent", "ahostsv4", "host.containers.internal"] => {
                         Ok("192.168.127.254 STREAM host.containers.internal\n".into())
                     }
                     ["machine", "ssh", "openbot", script]
@@ -2002,11 +2117,11 @@ mod tests {
 
     /// getent's "not found" for the lookup, as `podman machine ssh` reported it on a brand-new
     /// Windows Server right after the machine's first start.
-    const HOST_NAME_NOT_FOUND: &str = "podman machine ssh openbot timeout 10 getent ahostsv4 \
+    const HOST_NAME_NOT_FOUND: &str = "podman machine ssh openbot timeout 3 getent ahostsv4 \
                                        host.containers.internal exited with status 2";
     /// The same lookup a few minutes later on that computer: no DNS server answered, and `timeout`
     /// stopped it.
-    const HOST_NAME_TIMED_OUT: &str = "podman machine ssh openbot timeout 10 getent ahostsv4 \
+    const HOST_NAME_TIMED_OUT: &str = "podman machine ssh openbot timeout 3 getent ahostsv4 \
                                        host.containers.internal exited with status 124";
     const HOST_NAME_RESOLVED: &str = "192.168.127.254 STREAM host.containers.internal\n";
     /// `ip route; cat /etc/resolv.conf` in the machine on that computer: resolv.conf names gvproxy,
@@ -2016,7 +2131,7 @@ mod tests {
          192.168.240.0/20 dev eth0 proto kernel scope link src 192.168.250.127\n\
          nameserver 192.168.127.1";
     /// The time one lookup took when it timed out.
-    const LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+    const LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
     /// `podman machine list --format json`, with OpenBot's machine and, when asked, one of the
     /// person's own, both on user-mode networking.
@@ -2069,7 +2184,7 @@ mod tests {
             &mut |args: &[&str]| {
                 calls.push(args.iter().map(|arg| (*arg).to_string()).collect());
                 match args {
-                    ["machine", "ssh", "openbot", "timeout", "10", "getent", "ahostsv4", "host.containers.internal"] => {
+                    ["machine", "ssh", "openbot", "timeout", "3", "getent", "ahostsv4", "host.containers.internal"] => {
                         lookups += 1;
                         if lookups <= 3 {
                             Err(HOST_NAME_NOT_FOUND.into())
@@ -2116,7 +2231,7 @@ mod tests {
                 calls.push(args.join(" "));
                 match args {
                     ["machine", "inspect", "openbot"] => Ok(machine_inspect("running", true)),
-                    ["machine", "ssh", "openbot", "timeout", "10", "getent", "ahostsv4", "host.containers.internal"] => {
+                    ["machine", "ssh", "openbot", "timeout", "3", "getent", "ahostsv4", "host.containers.internal"] => {
                         lookups += 1;
                         if lookups == 1 {
                             return Err(HOST_NAME_NOT_FOUND.into());
@@ -2185,7 +2300,7 @@ mod tests {
             &mut |args: &[&str]| {
                 calls.push(args.join(" "));
                 match args {
-                    ["machine", "ssh", "openbot", "timeout", "10", "getent", "ahostsv4", "host.containers.internal"] => {
+                    ["machine", "ssh", "openbot", "timeout", "3", "getent", "ahostsv4", "host.containers.internal"] => {
                         if started {
                             return Ok(HOST_NAME_RESOLVED.into());
                         }
@@ -2231,7 +2346,7 @@ mod tests {
             &mut |args: &[&str]| {
                 calls.push(args.join(" "));
                 match args {
-                    ["machine", "ssh", "openbot", "timeout", "10", "getent", "ahostsv4", "host.containers.internal"] => {
+                    ["machine", "ssh", "openbot", "timeout", "3", "getent", "ahostsv4", "host.containers.internal"] => {
                         time.set(time.get() + LOOKUP_TIMEOUT);
                         Err(HOST_NAME_TIMED_OUT.into())
                     }
@@ -2254,10 +2369,87 @@ mod tests {
         assert!(!shares_user_mode_network(&machine_list(false)).unwrap());
     }
 
+    /// A live Windows run broke OpenBot's machine's network the way the brand-new Windows Server
+    /// had it. The check before the back end starts finds it, says it is reconnecting once, and
+    /// restarts OpenBot's machine, with nothing else written to the machine: the gateway setting is
+    /// Start's (`prepare_for_compose`).
+    #[test]
+    fn the_check_before_the_back_end_sets_the_network_up_again_and_says_so_once() {
+        let time = std::cell::Cell::new(std::time::Duration::ZERO);
+        let mut said = 0;
+        let mut started = false;
+        let mut calls = Vec::<String>::new();
+        let restarted = std::cell::Cell::new(false);
+        owned_machine_before_back_end(
+            &Address::new(Engine::Podman, Some("openbot-root".into())),
+            |args: &[&str]| {
+                calls.push(args.join(" "));
+                match args {
+                    ["machine", "inspect", "openbot"] => Ok(machine_inspect("running", true)),
+                    ["machine", "ssh", "openbot", "timeout", "3", "getent", "ahostsv4", "host.containers.internal"] => {
+                        if started {
+                            return Ok(HOST_NAME_RESOLVED.into());
+                        }
+                        time.set(time.get() + LOOKUP_TIMEOUT);
+                        Err(HOST_NAME_TIMED_OUT.into())
+                    }
+                    ["machine", "ssh", "openbot", "ip route; cat /etc/resolv.conf"] => {
+                        Ok(NETWORK_WITHOUT_USER_MODE.into())
+                    }
+                    ["machine", "list", "--format", "json"] => Ok(machine_list(false)),
+                    ["machine", "stop", "openbot"] => Ok(String::new()),
+                    ["machine", "start", "openbot"] => {
+                        started = true;
+                        Ok(String::new())
+                    }
+                    _ => Err(format!("unexpected args: {args:?}")),
+                }
+            },
+            true,
+            &mut saying_once(test_clock(&time), || said += 1),
+            || restarted.set(true),
+        )
+        .expect("a network that comes back after the restart is ready for the back end");
+
+        assert_eq!(said, 1);
+        assert!(restarted.get());
+        assert!(calls.contains(&"machine start openbot".to_string()));
+        assert!(
+            !calls.iter().any(|call| call.contains("containers.conf.d")),
+            "{calls:?}"
+        );
+        assert_eq!(
+            RECONNECTING,
+            "Reconnecting OpenBot to the internet. This can take a minute or two."
+        );
+    }
+
+    /// A network that answers at once says nothing and restarts nothing.
+    #[test]
+    fn a_network_that_answers_at_once_is_not_said() {
+        let time = std::cell::Cell::new(std::time::Duration::ZERO);
+        let mut said = 0;
+        owned_machine_before_back_end(
+            &Address::new(Engine::Podman, Some("openbot-root".into())),
+            |args: &[&str]| match args {
+                ["machine", "inspect", "openbot"] => Ok(machine_inspect("running", true)),
+                ["machine", "ssh", "openbot", "timeout", "3", "getent", "ahostsv4", "host.containers.internal"] => {
+                    Ok(HOST_NAME_RESOLVED.into())
+                }
+                _ => Err(format!("unexpected args: {args:?}")),
+            },
+            true,
+            &mut saying_once(test_clock(&time), || said += 1),
+            || panic!("no machine is started"),
+        )
+        .unwrap();
+        assert_eq!(said, 0);
+    }
+
     /// A failure waiting can't fix is Podman's own, at once: a machine that is not running.
     #[test]
     fn a_failure_waiting_cannot_fix_is_returned_at_once() {
-        let stopped = "podman machine ssh openbot timeout 10 getent ahostsv4 \
+        let stopped = "podman machine ssh openbot timeout 3 getent ahostsv4 \
                        host.containers.internal exited with status 125; stderr: Error: vm \
                        \"openbot\" is not running";
         let time = std::cell::Cell::new(std::time::Duration::ZERO);

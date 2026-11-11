@@ -125,10 +125,14 @@ Desktop installation:
   boot after Windows Subsystem for Linux was turned on, the machine's network could fail to come
   up. Accepting the license agreement stopped at "OpenBot couldn't prepare this computer to run it.
   Try again.", and Try again then failed the downloads, again and again, until Windows restarted.
-  OpenBot now waits up to a minute for the machine's network, checks it again before the
+  OpenBot now waits up to half a minute for the machine's network, checks it again before the
   downloads, and restarts its own machine once when it is still down, which sets the network up
   from scratch. A Podman machine of yours that shares that network is never stopped. If it is still
-  down, setup shows "Restart Windows to finish", with Restart now, instead of Try again.
+  down, setup shows "Restart Windows to finish", with Restart now, instead of Try again. OpenBot
+  checks the network every time it opens or starts, before its backend starts, so restarting the
+  machine never stops a running backend, and the screen says "Reconnecting OpenBot to the
+  internet" while it waits. If Start still has to restart the machine, it starts the backend again
+  and waits for it before it starts OpenBot.
 - **OpenBot stays behind your browser while you sign in, and opens where you left it.** On
   Windows, OpenBot came in front of the browser partway through setup while you were typing your
   email to sign in. While the browser sign-in is open it now stays where it is, and comes forward
