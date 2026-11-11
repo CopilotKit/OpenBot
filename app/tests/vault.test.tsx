@@ -106,7 +106,9 @@ describe("the Vault", () => {
     const view = draw("team");
     await view.findByText("https://example.com");
     expect(
-      view.getByText("Your saved website logins are kept here. Bots never see them, and you approve each use."),
+      view.getByText(
+        "Your saved website logins are kept here. Bots never see them, and you approve each use.",
+      ),
     ).toBeTruthy();
     expect(view.queryByText(/logins and keys/)).toBeNull();
     // One section: the page title already names it.
