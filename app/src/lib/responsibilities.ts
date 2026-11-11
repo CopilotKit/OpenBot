@@ -334,15 +334,23 @@ export function responsibilityActionMutationOptions(queryClient: QueryClient) {
 
 /**
  * Delete a goal. The server deletes the routines that run it too, so both lists are refreshed.
+ * The goal's own runs and triggers stop existing, so they are removed rather than refetched: a
+ * refetch would ask for a goal that is gone and answer 404.
  */
 export function deleteResponsibilityMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (id: string) => deleteResponsibility(id),
-    onSuccess: () =>
-      Promise.all([
-        settleResponsibilities(queryClient)(),
+    onSuccess: (_result, id) => {
+      queryClient.removeQueries({ queryKey: responsibilityKeys.runs(id) });
+      queryClient.removeQueries({ queryKey: responsibilityKeys.triggers(id) });
+      return Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: responsibilityKeys.all,
+          predicate: (query) => query.queryKey[1] !== id,
+        }),
         queryClient.invalidateQueries({ queryKey: routineKeys.all }),
-      ]),
+      ]);
+    },
   });
 }
 
