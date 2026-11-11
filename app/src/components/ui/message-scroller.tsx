@@ -6,6 +6,7 @@ import {
 } from "@shadcn/react/message-scroller";
 import { IconArrowDown } from "@tabler/icons-react";
 import type * as React from "react";
+import { useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -52,14 +53,74 @@ function MessageScrollerViewport({
   );
 }
 
+/**
+ * KEEP THE ROOM THE SCROLLER MADE FOR A TURN UNTIL SOMETHING FILLS IT.
+ *
+ * When a person sends a message, the scroller lifts it to the top of the view and puts a spacer
+ * under it, so the reply streams into empty room below the question instead of pushing the
+ * conversation up. The scroller gives that room back the moment anything asks it to scroll to the
+ * end: it hides the spacer and then scrolls to what is left. A view standing at the end is standing
+ * in that room, so the conversation got shorter under it and the browser pulled everything down by
+ * the spacer's height in one frame. The reply jumped from the top of the view to sit on the
+ * composer. A touch of the trackpad after a reply was enough, because a downward wheel at the end
+ * asks for the end (see `follow-intent.tsx`), and so does the scroller's own following once any
+ * input has moved it off the anchored turn.
+ *
+ * So the content keeps the height the room gave it. Whenever the spacer is shown, the content's
+ * least height is set to where the room ends; when the scroller hides the spacer, that least height
+ * stays. Going to the end then lands exactly where the view already is, and nothing moves. The room
+ * is only ever used up by the reply growing into it, or replaced by the room for the next turn,
+ * which ends further down.
+ *
+ * Observed rather than computed, because the spacer is the scroller's: it writes the spacer's
+ * height and `hidden` itself, and this only reads them. A mutation observer runs before the next
+ * frame is painted, so the least height is in place before anything can scroll to the end.
+ */
+function holdTheRoom(content: HTMLDivElement): () => void {
+  const spacer = content.querySelector<HTMLElement>(
+    ":scope > [data-message-scroller-spacer]",
+  );
+  if (!spacer) return () => {};
+  const hold = () => {
+    if (spacer.hidden) return;
+    const end =
+      spacer.getBoundingClientRect().bottom -
+      content.getBoundingClientRect().top +
+      (Number.parseFloat(getComputedStyle(content).paddingBottom) || 0);
+    content.style.minHeight = `max(100%, ${end}px)`;
+  };
+  const observer = new MutationObserver(hold);
+  observer.observe(spacer, {
+    attributes: true,
+    attributeFilter: ["hidden", "style"],
+  });
+  return () => observer.disconnect();
+}
+
 function MessageScrollerContent({
   className,
+  ref,
   ...props
 }: React.ComponentProps<typeof MessageScrollerPrimitive.Content>) {
+  /*
+   * Released on the call with `null`, not by returning a cleanup: the primitive forwards this ref
+   * through its own callback, which drops whatever a ref callback returns.
+   */
+  const release = useRef<(() => void) | null>(null);
+  const content = useCallback(
+    (element: HTMLDivElement | null) => {
+      release.current?.();
+      release.current = element ? holdTheRoom(element) : null;
+      if (typeof ref === "function") ref(element);
+      else if (ref) ref.current = element;
+    },
+    [ref],
+  );
   return (
     <MessageScrollerPrimitive.Content
       data-slot="message-scroller-content"
       className={cn("flex h-max min-h-full flex-col gap-6", className)}
+      ref={content}
       {...props}
     />
   );
