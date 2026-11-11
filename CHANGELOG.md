@@ -234,6 +234,10 @@ Desktop installation:
 - In OpenBot Desktop's setup, the row for what's installing in the background keeps one height
   whatever it says, so the step's button under it (such as Continue on the AI step) no longer moves
   up and back on its own.
+- OpenBot and OpenBot for Business carry a small trademark sign (™) where they stand as a brand:
+  the name beside the logo in the sidebar and in each skin, the onboarding header, the OpenBot for
+  Business title and menu entry, and the OpenBot Desktop setup window. Mentions in sentences stay
+  plain, a deployment with its own product name shows none, and screen readers read the name once.
 
 ## 1.0.1
 
