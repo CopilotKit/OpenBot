@@ -198,36 +198,70 @@ const refusedSchedule = {
   },
 };
 
-test("a refused schedule pauses the goal and says so", async () => {
+test("a refused schedule takes back the goal and its conversation, and says what was refused", async () => {
   const calls = stub(refusedSchedule);
+  const { error } = await run(
+    goalPlan(NEW_CONVERSATION, { schedule: true, runNow: true }),
+  );
+  expect(methodsAndPaths(calls)).toEqual([
+    "POST /api/channels",
+    "PUT /api/channels/c9/title",
+    "POST /api/responsibilities",
+    "POST /api/routines",
+    "DELETE /api/responsibilities/g1",
+    "DELETE /api/channels/c9",
+  ]);
+  // Nothing is kept, so the form stays editable and Create can be pressed again.
+  expect(error).toBeDefined();
+  expect(error).not.toBeInstanceOf(SavedButRefused);
+  expect(error?.message).toBe("You have 20 routines switched on.");
+});
+
+test("a refused schedule in a conversation the person chose leaves that conversation", async () => {
+  const calls = stub(refusedSchedule);
+  const { error } = await run(goalPlan("c1", { schedule: true }));
+  expect(methodsAndPaths(calls)).toEqual([
+    "POST /api/responsibilities",
+    "POST /api/routines",
+    "DELETE /api/responsibilities/g1",
+  ]);
+  expect(error).not.toBeInstanceOf(SavedButRefused);
+  expect(error?.message).toBe("You have 20 routines switched on.");
+});
+
+const goalNotDeleted = {
+  "DELETE /api/responsibilities/g1": { status: 500, body: { error: "down" } },
+};
+
+test("a refused schedule whose goal can't be taken back pauses it and says so", async () => {
+  const calls = stub({ ...refusedSchedule, ...goalNotDeleted });
   const { error } = await run(
     goalPlan(NEW_CONVERSATION, { schedule: true, runNow: true }),
   );
   const seen = methodsAndPaths(calls);
   expect(seen).toContain("POST /api/responsibilities/g1/pause");
-  expect(seen.some((line) => line.startsWith("DELETE"))).toBe(false);
+  expect(seen).not.toContain("DELETE /api/channels/c9");
   expect(seen).not.toContain("POST /api/responsibilities/g1/run");
   expect(error).toBeInstanceOf(SavedButRefused);
   expect(error?.message).toBe(
-    "It's saved but paused, on the Routines page. Its schedule was refused: You have 20 routines switched on.",
+    "It's saved but paused, on the Routines page. Its schedule was refused. You have 20 routines switched on.",
   );
 });
 
 test("a failed pause still says the goal was saved", async () => {
   const calls = stub({
     ...refusedSchedule,
+    ...goalNotDeleted,
     "POST /api/responsibilities/g1/pause": {
       status: 500,
       body: { error: "down" },
     },
   });
   const { error } = await run(goalPlan(NEW_CONVERSATION, { schedule: true }));
-  expect(methodsAndPaths(calls).some((l) => l.startsWith("DELETE"))).toBe(
-    false,
-  );
+  expect(methodsAndPaths(calls)).not.toContain("DELETE /api/channels/c9");
   expect(error).toBeInstanceOf(SavedButRefused);
   expect(error?.message).toBe(
-    "It's saved on the Routines page, but it won't run on its own. Its schedule was refused: You have 20 routines switched on.",
+    "It's saved on the Routines page, but it won't run on its own. Its schedule was refused. You have 20 routines switched on.",
   );
 });
 
@@ -291,7 +325,7 @@ test("a goal that fails to start says it was saved", async () => {
   const calls = stub({
     "POST /api/responsibilities/g1/run": {
       status: 400,
-      body: { error: "Busy." },
+      body: { error: "This goal is busy." },
     },
   });
   const { error } = await run(goalPlan(NEW_CONVERSATION, { runNow: true }));
@@ -300,7 +334,18 @@ test("a goal that fails to start says it was saved", async () => {
   );
   expect(error).toBeInstanceOf(SavedButRefused);
   expect(error?.message).toBe(
-    "It's saved on the Routines page, but it didn't start: Busy.",
+    "It's saved on the Routines page, but it didn't start. This goal is busy.",
+  );
+});
+
+test("a goal that fails to start with no word from the server says where to run it", async () => {
+  stub({
+    "POST /api/responsibilities/g1/run": { status: 400, body: {} },
+  });
+  const { error } = await run(goalPlan(NEW_CONVERSATION, { runNow: true }));
+  expect(error).toBeInstanceOf(SavedButRefused);
+  expect(error?.message).toBe(
+    "It's saved on the Routines page, but it didn't start. Open it there to run it.",
   );
 });
 

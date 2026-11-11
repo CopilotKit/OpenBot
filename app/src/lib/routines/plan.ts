@@ -50,6 +50,23 @@ export function runGoalInstruction(title: string, goalId: string): string {
 }
 
 /**
+ * What an Only tell you is called: its Name, else its instruction on one line, cut as a goal's title
+ * is to the 120 the check-in store takes.
+ *
+ * FOUND IN REVIEW: a check-in with no Name went in with an empty subject, and the server counts a
+ * check-in with no link and the same subject as the same one. A Bot's default check-in has an empty
+ * subject, so every unnamed Only tell you landed on it and was refused as already there.
+ */
+export function checkInSubject(
+  values: Pick<RoutineFormValues, "title" | "instruction">,
+): string {
+  return (
+    values.title.trim() ||
+    cutToUnits(values.instruction.trim().replace(/\s+/g, " "), 120).trim()
+  );
+}
+
+/**
  * What the form's answers make. TanStack Form hands `onSubmit` the raw values, not zod's trimmed
  * output, so the text answers are trimmed here.
  */
@@ -69,7 +86,7 @@ export function planRoutine(
         agentId,
         channelId,
         focus: instruction,
-        subject: title,
+        subject: checkInSubject(values),
         intervalMinutes: Number(values.interval),
       },
     };

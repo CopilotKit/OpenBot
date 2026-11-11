@@ -131,10 +131,21 @@ describe("planRoutine", () => {
         agentId: "bot",
         channelId: "c1",
         focus: "Send the numbers",
-        subject: "",
+        subject: "Send the numbers",
         intervalMinutes: 1440,
       },
     });
+  });
+
+  test("an unnamed check-in is called by its instruction, on one line, within 120 UTF-16 units", () => {
+    // A Bot's default check-in has no subject, and the server counts the same subject as the same one.
+    const plan = planRoutine(
+      { ...base, does: "tell", instruction: `  Watch\n${"😀".repeat(70)}` },
+      "UTC",
+    );
+    if (plan.kind !== "check-in") throw new Error("Expected a check-in.");
+    expect(plan.checkIn.subject).toBe(`Watch ${"😀".repeat(57)}`);
+    expect(plan.checkIn.subject.length).toBeLessThanOrEqual(120);
   });
 
   test("a schedule ignores a stale event type", () => {
