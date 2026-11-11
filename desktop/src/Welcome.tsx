@@ -32,7 +32,12 @@ export function Welcome({
     <div className="sheet">
       <div className="lockup">
         <div className="orb" aria-hidden="true" />
-        <span>OpenBot</span>
+        <span>
+          OpenBot
+          <sup className="trademark" aria-hidden="true">
+            ™
+          </sup>
+        </span>
       </div>
       <h1>Set up OpenBot</h1>
       <p className="lede big">

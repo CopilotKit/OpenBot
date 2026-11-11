@@ -4,6 +4,7 @@ import { Link, type LinkOptions, useParams } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type * as React from "react";
 import { useRef, useState } from "react";
+import { BrandName } from "@/components/edition/brand-name";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -238,7 +239,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               className="font-semibold text-[14px] tracking-tighter h-full leading-tight hover:bg-foreground/5 hover:text-sidebar-foreground active:bg-foreground/5 active:text-sidebar-foreground"
               render={(props) => (
                 <Link {...appLinkOptions} {...props}>
-                  {appConfig.brand.productName}
+                  <BrandName>{appConfig.brand.productName}</BrandName>
                 </Link>
               )}
             />
@@ -402,7 +403,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                       )}
                     >
                       <item.icon />
-                      {item.label}
+                      <BrandName>{item.label}</BrandName>
                     </DropdownMenuItem>
                   ))}
                 {signOutOffered ? (
