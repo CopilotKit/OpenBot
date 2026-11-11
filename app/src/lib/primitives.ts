@@ -18,7 +18,8 @@ import {
  *
  * The order is not a quota. A list leaves out a primitive that has nothing to set where it is
  * drawn (Conversations is never a settings row; Memory only where OpenBot offers it), and never
- * reorders the rest or adds a row to complete the set. Sort with `byPrimitive` rather than by hand.
+ * reorders the rest or adds a row to complete the set. `app/tests/primitives-order.test.ts` holds
+ * Settings and Admin to it.
  */
 export type PrimitiveId =
   | "conversations"
@@ -107,24 +108,6 @@ export function primitive(id: PrimitiveId): Primitive {
   const found = BY_ID.get(id);
   if (!found) throw new Error(`Unknown primitive: ${id}`);
   return found;
-}
-
-/** Where a primitive sits in the order, from 0 for Conversations. */
-export function primitiveIndex(id: PrimitiveId): number {
-  return PRIMITIVES.findIndex((primitive) => primitive.id === id);
-}
-
-/**
- * A comparator that puts things tagged with a primitive into the fixed order. Anything without one
- * (Setup, Sharing, Team) sorts after the eight and keeps the order it came in.
- */
-export function byPrimitive<T extends { primitive?: PrimitiveId }>(
-  a: T,
-  b: T,
-): number {
-  const at = a.primitive ? primitiveIndex(a.primitive) : PRIMITIVES.length;
-  const bt = b.primitive ? primitiveIndex(b.primitive) : PRIMITIVES.length;
-  return at - bt;
 }
 
 /** Beside the eight: a Bot's name and instructions. */
