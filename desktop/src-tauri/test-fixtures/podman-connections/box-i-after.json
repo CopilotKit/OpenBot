@@ -1,35 +1,34 @@
 [
-    {
-        "Name": "mine",
-        "URI": "ssh://user@127.0.0.1:62515/run/user/1000/podman/podman.sock",
-        "Identity": "C:\\Users\\Administrator\\.local\\share\\containers\\podman\\machine\\machine",
-        "IsMachine": true,
-        "Default": false,
-        "ReadWrite": true
-    },
-    {
-        "Name": "mine-root",
-        "URI": "ssh://root@127.0.0.1:62515/run/podman/podman.sock",
-        "Identity": "C:\\Users\\Administrator\\.local\\share\\containers\\podman\\machine\\machine",
-        "IsMachine": true,
-        "Default": true,
-        "ReadWrite": true
-    },
-    {
-        "Name": "openbot",
-        "URI": "ssh://user@127.0.0.1:56970/run/user/1000/podman/podman.sock",
-        "Identity": "C:\\Users\\Administrator\\.local\\share\\containers\\podman\\machine\\machine",
-        "IsMachine": true,
-        "Default": false,
-        "ReadWrite": true
-    },
-    {
-        "Name": "openbot-root",
-        "URI": "ssh://root@127.0.0.1:56970/run/podman/podman.sock",
-        "Identity": "C:\\Users\\Administrator\\.local\\share\\containers\\podman\\machine\\machine",
-        "IsMachine": true,
-        "Default": false,
-        "ReadWrite": true
-    }
+  {
+    "Name": "mine",
+    "URI": "ssh://user@127.0.0.1:62515/run/user/1000/podman/podman.sock",
+    "Identity": "C:\\Users\\Administrator\\.local\\share\\containers\\podman\\machine\\machine",
+    "IsMachine": true,
+    "Default": false,
+    "ReadWrite": true
+  },
+  {
+    "Name": "mine-root",
+    "URI": "ssh://root@127.0.0.1:62515/run/podman/podman.sock",
+    "Identity": "C:\\Users\\Administrator\\.local\\share\\containers\\podman\\machine\\machine",
+    "IsMachine": true,
+    "Default": true,
+    "ReadWrite": true
+  },
+  {
+    "Name": "openbot",
+    "URI": "ssh://user@127.0.0.1:56970/run/user/1000/podman/podman.sock",
+    "Identity": "C:\\Users\\Administrator\\.local\\share\\containers\\podman\\machine\\machine",
+    "IsMachine": true,
+    "Default": false,
+    "ReadWrite": true
+  },
+  {
+    "Name": "openbot-root",
+    "URI": "ssh://root@127.0.0.1:56970/run/podman/podman.sock",
+    "Identity": "C:\\Users\\Administrator\\.local\\share\\containers\\podman\\machine\\machine",
+    "IsMachine": true,
+    "Default": false,
+    "ReadWrite": true
+  }
 ]
-
