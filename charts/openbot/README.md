@@ -84,8 +84,9 @@ connection errors. `kubectl -n openbot logs deploy/openbot-server -c wait-for-da
 is waiting for.
 
 `kubectl -n openbot get pods,jobs` shows it coming up, and the log of the
-`openbot-intelligence-bootstrap` Job says what Intelligence set up. The browser reaches Intelligence's
-gateway through OpenBot's own address, so the one port-forward is all it needs.
+`openbot-intelligence-bootstrap-1` Job (its suffix is the release revision) says what Intelligence
+set up. The browser reaches Intelligence's gateway through OpenBot's own address, so the one
+port-forward is all it needs.
 
 **Routines run.** A Bot asked to do something on a schedule stores a routine, and the
 `openbot-routines` CronJob fires whatever is due every five minutes. It proves itself to the server
@@ -115,14 +116,16 @@ explains every value the bundle sets.
 Four things this chart assumes and does not create.
 
 **An image the cluster can pull.** A release publishes `ghcr.io/copilotkit/openbot:vX.Y.Z`
-publicly, and that tag is what `image.tag` wants. It is built for **`linux/amd64` only**, so an
+publicly, and that tag is what `image.tag` wants. Left empty, `image.tag` is `v` followed by the
+chart's `appVersion` (`appVersion: "1.0.1"` deploys `v1.0.1`), so upgrading the chart moves the
+image with it. It is built for **`linux/amd64` only**, so an
 arm64 node group (Graviton on EKS, Tau T2A on GKE, Ampere on AKS) cannot run it: the pods sit in
 `ImagePullBackOff`, which is the same thing a wrong tag or a missing pull secret looks like, so the
 node pool being the wrong shape is the last thing anybody checks. Either run amd64 nodes, or build the image for the
 architecture you have and push it somewhere the cluster can reach. Check before assuming:
 
 ```sh
-docker manifest inspect ghcr.io/copilotkit/openbot:v0.0.9 | grep architecture
+docker manifest inspect ghcr.io/copilotkit/openbot:v1.0.1 | grep architecture
 ```
 
 **On kind, on an Apple Silicon Mac**, the node is arm64 and the vanilla install has two amd64-only
@@ -335,9 +338,9 @@ A tag can be moved; a digest cannot. Each release's `container-images.json` name
 tested, and `image.digest` deploys exactly that:
 
 ```sh
-gh release download v0.2.0 --pattern container-images.json
+gh release download v1.0.1 --pattern container-images.json
 helm upgrade --install openbot charts/openbot ... \
-  --set image.tag=v0.2.0 \
+  --set image.tag=v1.0.1 \
   --set-string image.digest="$(jq -r '.images.openbot.reference | split("@")[1]' container-images.json)"
 ```
 
@@ -1016,6 +1019,5 @@ hook has finished before the new pods exist, so `--wait` works either way.
 
 Roll back a failed upgrade rather than leaving half a rollout: `helm upgrade --install --atomic` on
 Helm 3, and `--rollback-on-failure` on Helm 4, which renamed the flag. Helm 4 still accepts
-`--atomic` on `upgrade` as a deprecated alias and prints a warning, so the Helm 3 spelling keeps
-working on both today; it is `helm install --atomic` that Helm 4 removed outright, which is one more
-reason this is written as `upgrade --install`.
+`--atomic` on both `install` and `upgrade` as a deprecated alias and prints a warning (checked on
+Helm 4.2.0), so the Helm 3 spelling keeps working on both today.
