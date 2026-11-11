@@ -218,14 +218,16 @@ export function NewRoutinePage({
   // The same request as `allowed`: both read one key.
   const checkIns = useQuery(proactiveSettingsQueryOptions());
   const timeZone = browserTimeZone();
-  // The goal exists but its schedule or first run was refused. The form is read-only from here: the
-  // goal is made for the Bot that was picked, and a second submit would make another one.
+  // A write was saved, or its answer was lost. Lock the form to prevent duplicate work.
   const saved = createFromPlan.error instanceof SavedButRefused;
-  // Only a goal can be saved and then refused, so its plan names the Bot it was saved for.
-  const savedFor =
-    createFromPlan.variables?.kind === "goal"
-      ? createFromPlan.variables.goal.agentId
-      : "";
+  const plan = createFromPlan.variables;
+  const savedFor = plan
+    ? plan.kind === "goal"
+      ? plan.goal.agentId
+      : plan.kind === "routine"
+        ? plan.routine.agentId
+        : plan.checkIn.agentId
+    : "";
 
   const defaultValues: RoutineFormValues = {
     ...ROUTINE_FORM_DEFAULTS,
@@ -309,14 +311,14 @@ export function NewRoutinePage({
         <PageCard
           footer={
             <>
-              {/* Cancel says nothing was kept. After a partial save the goal is kept, and Go to
+              {/* Cancel says nothing was kept. After a partial or uncertain save the work is kept, and Go to
                   Routines goes to the same list. */}
               {saved ? (
                 <Button
                   render={(props) => (
                     <Link
                       {...props}
-                      // The Bot the goal was saved for, not the one the picker shows.
+                      // The Bot the work was saved for, not the one the picker shows.
                       {...after(savedFor)}
                     />
                   )}

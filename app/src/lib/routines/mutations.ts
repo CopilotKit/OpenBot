@@ -49,7 +49,7 @@ function createRoutine(body: RoutineInput & { goalId?: string }) {
   });
 }
 
-/** The goal exists but its routine or first run did not happen, or may not have: the screen must not offer to create it again. */
+/** A write was saved or may have been saved: the screen must not offer to create it again. */
 export class SavedButRefused extends Error {}
 
 /**
@@ -57,7 +57,7 @@ export class SavedButRefused extends Error {}
  *
  * With `NEW_CONVERSATION`, the conversation is started first, as the person and the Bot, and named
  * after `name`. `write` gets the channel to use and a `saved` callback it calls once the write has
- * landed. If `write` throws before `saved` was called, the started conversation is removed (best
+ * landed. If the server refuses `write` before `saved` was called, the started conversation is removed (best
  * effort) and the error is rethrown: an empty conversation nobody asked for is not what a refused
  * form should leave behind.
  */
@@ -89,6 +89,14 @@ async function withConversation<T>(
       kept = true;
     });
   } catch (error) {
+    // An uncertain create may already have committed. Keep its conversation and prevent a retry,
+    // even with an existing conversation: retrying could duplicate the saved work.
+    const refused =
+      error instanceof ClientError && error.status >= 400 && error.status < 500;
+    if (!kept && !refused)
+      throw new SavedButRefused(
+        "It may have been saved on the Routines page. Open it there to check before creating another one.",
+      );
     if (started && !kept) {
       await client(`/api/channels/${started}`, {
         method: "DELETE",

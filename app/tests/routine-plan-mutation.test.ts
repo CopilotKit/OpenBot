@@ -338,3 +338,48 @@ test("onSettled refreshes the lists even after a refusal", async () => {
     { queryKey: ["channels"] },
   ]);
 });
+
+for (const kind of ["routine", "goal", "check-in"] as const) {
+  for (const failure of ["server", "network"] as const) {
+    test(`an uncertain ${kind} create (${failure}) keeps its conversation and prevents retry`, async () => {
+      const path =
+        kind === "routine"
+          ? "/api/routines"
+          : kind === "goal"
+            ? "/api/responsibilities"
+            : "/api/proactive/settings";
+      const calls = stub({
+        [`POST ${path}`]: { status: 503, body: { error: "Unavailable" } },
+      });
+      if (failure === "network") {
+        const respond = globalThis.fetch;
+        globalThis.fetch = Object.assign(
+          async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+            if (String(input) === path) throw new TypeError("Response lost");
+            return respond(input, init);
+          },
+          { preconnect: respond.preconnect },
+        );
+      }
+      const plan: RoutinePlan =
+        kind === "goal"
+          ? goalPlan(NEW_CONVERSATION)
+          : kind === "check-in"
+            ? checkInPlan(NEW_CONVERSATION)
+            : {
+                kind: "routine",
+                routine: {
+                  agentId: "a1",
+                  channelId: NEW_CONVERSATION,
+                  instruction: "Send the digest",
+                  cron,
+                  timezone,
+                },
+              };
+      const { error } = await run(plan);
+      expect(methodsAndPaths(calls)).not.toContain("DELETE /api/channels/c9");
+      expect(error).toBeInstanceOf(SavedButRefused);
+      expect(error?.message).toContain("may have been saved");
+    });
+  }
+}

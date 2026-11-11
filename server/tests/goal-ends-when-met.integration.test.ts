@@ -12,6 +12,7 @@ import {
   goalShownFor,
   parseResponsibilityInput,
 } from "../src/responsibilities/types";
+import { createRoutineStore, RoutineRefusedError } from "../src/routines/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -550,4 +551,35 @@ test("a completed goal is not among the goals that repeat", async () => {
   const repeating = await store.repeatingGoals(ownerId, botId);
   expect(repeating.has(done.id)).toBe(false);
   expect(repeating.get(open.id)).toBe("recurring");
+});
+
+test("an older schedule cannot be re-enabled after its last goal completes", async () => {
+  const done = await store.create(ownerId, {
+    ...valid,
+    title: `Done ${randomUUID()}`,
+  });
+  const id = await olderRoutine(`Run the goal "${done.title}"`);
+  await store.transition(ownerId, done.id, "completed");
+  expect((await routineRow(id))?.enabled).toBe(false);
+  await expect(
+    createRoutineStore(database).setEnabled(ownerId, id, true),
+  ).rejects.toBeInstanceOf(RoutineRefusedError);
+  expect((await routineRow(id))?.enabled).toBe(false);
+});
+
+test("an older schedule may be enabled while another named goal remains open", async () => {
+  const done = await store.create(ownerId, {
+    ...valid,
+    title: `Done ${randomUUID()}`,
+  });
+  const open = await store.create(ownerId, {
+    ...valid,
+    title: `Open ${randomUUID()}`,
+  });
+  const id = await olderRoutine(`Run "${done.title}" and "${open.title}"`);
+  await store.transition(ownerId, done.id, "completed");
+  const schedules = createRoutineStore(database);
+  await schedules.setEnabled(ownerId, id, false);
+  await schedules.setEnabled(ownerId, id, true);
+  expect((await routineRow(id))?.enabled).toBe(true);
 });

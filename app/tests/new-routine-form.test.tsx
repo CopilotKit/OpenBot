@@ -1256,3 +1256,25 @@ test("Name follows check-ins: turned back on, the clash is back", async () => {
     expect((await createButton(view)).disabled).toBe(true),
   );
 });
+
+test("an uncertain routine save locks the form and links to the chosen Bot", async () => {
+  serving({
+    routines: () => Response.json({ error: "Unavailable" }, { status: 503 }),
+  });
+  const view = draw();
+  const user = userEvent.setup({ document });
+  await user.type(await view.findByLabelText("What to do"), "Send the digest");
+  await choose(view, user, "Bot", "Bot Two");
+  await user.click(await view.findByRole("button", { name: "Create routine" }));
+  const goTo = await view.findByRole("button", { name: "Go to Routines" });
+  expect(goTo.getAttribute("href")).toBe("/bots/bot-2/routines");
+  expect(view.getByLabelText("Bot").hasAttribute("disabled")).toBe(true);
+  expect(view.queryByRole("button", { name: "Create routine" })).toBeNull();
+  expect(
+    writes().some(
+      ([method, path]) =>
+        method === "DELETE" && path.startsWith("/api/channels/"),
+    ),
+  ).toBe(false);
+  expect(view.getByRole("alert").textContent).toContain("may have been saved");
+});

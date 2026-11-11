@@ -841,6 +841,42 @@ export function createRoutineStore(database: Database): RoutineStore {
         values.goalId !== undefined ? values.goalId : existing.goalId;
       if (enabling && recordedGoalId)
         await refuseCompletedGoal(transaction, ownerUserId, recordedGoalId);
+      if (enabling && !recordedGoalId && existing.goalByTitle) {
+        // Older schedules record no goal id. Match their instruction by the same rule that
+        // completion uses, and allow one to run while any named goal is still open.
+        // Share locks keep a concurrent completion from finishing before this enable commits.
+        const goals = await transaction
+          .select({
+            id: responsibilities.id,
+            title: responsibilities.title,
+            status: responsibilities.status,
+          })
+          .from(responsibilities)
+          .where(
+            and(
+              eq(responsibilities.ownerUserId, ownerUserId),
+              eq(responsibilities.agentId, existing.agentId),
+            ),
+          )
+          .for("share");
+        const named = goals.filter((goal) =>
+          routineRunsGoal(
+            {
+              ...existing,
+              instruction: values.instruction ?? existing.instruction,
+            },
+            goal,
+          ),
+        );
+        if (
+          named.length > 0 &&
+          named.every((goal) => goal.status === "completed")
+        )
+          throw new RoutineRefusedError(
+            "The goals this routine runs are complete, so it can't run them again. Ask the person whether to set it up again as a new goal.",
+            "goal_complete",
+          );
+      }
 
       const cron = patch.cron ?? existing.cron;
       const timezone = patch.timezone ?? existing.timezone;
