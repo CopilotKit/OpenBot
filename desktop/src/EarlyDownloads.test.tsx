@@ -140,7 +140,8 @@ test("the big downloads start when the first screen shows, before Install is cli
   // Install moves on to the CopilotKit sign-in. The row for what is installing in the background
   // carries the download on, in the same words, and its bar goes on from where it was.
   await userEvent.click(view.getByRole("button", { name: "Install" }));
-  await view.findByRole("heading", { name: "Self-contained OpenBot" });
+  // The account step, checking the sign-in, which here never answers.
+  await view.findByRole("heading", { name: "Your OpenBot account" });
   const account = { ...welcome, bytes: 2.0 * GB };
   await said(account);
   await steadied(account);

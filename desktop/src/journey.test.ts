@@ -454,3 +454,124 @@ test("a Quit says what it is doing, moves its bar, and says the time left", () =
   expect(seen[26]?.fraction).toBeGreaterThan(0.8);
   expect(seen[26]?.fraction).toBeLessThan(1);
 });
+
+/**
+ * A Start as Windows G's took it: Docker Desktop starting for a minute, then OpenBot updating
+ * itself, its 944.4 MB update downloading at about 12.5 MB a second, its first four parts unpacking
+ * in two seconds each and its last for `lastPart` seconds, then OpenBot starting until 30 seconds
+ * after that.
+ */
+function windowsG(
+  second: number,
+  lastPart: number,
+): { sequence: LocalSequence; open: Progress[] } {
+  const start = 1_000_000;
+  const size = 944_400_000;
+  const allIn = 80 + size / 12_500_000;
+  const unpacked = allIn + 8 + lastPart;
+  const opening = second >= 60;
+  const sequence = {
+    began: "wait",
+    at: opening ? "start" : "wait",
+    running: true,
+    runSince: start,
+    since: opening ? start + 60_000 : start,
+    updating: false,
+    trailKind: null,
+    trail: [],
+    trailSince: null,
+    services: null,
+    download: null,
+  } as unknown as LocalSequence;
+  const open: Progress[] = [];
+  if (opening)
+    open.push({
+      step: "release",
+      ok: true,
+      running: true,
+      startedAt: start + 60_000,
+      detail:
+        second < 66
+          ? "Stopping OpenBot."
+          : second < 80
+            ? "Backing up your data."
+            : second < unpacked
+              ? "Downloading the update."
+              : second < unpacked + 2
+                ? "Installing the update."
+                : "Starting OpenBot.",
+    });
+  if (second >= 80 && second < unpacked) {
+    const bytes = Math.min(size, (second - 80) * 12_500_000);
+    open.push({
+      step: "images",
+      ok: true,
+      running: true,
+      detail: "Downloading local software.",
+      downloads: {
+        bytes,
+        size,
+        done:
+          second < allIn ? 0 : Math.min(4, Math.floor((second - allIn) / 2)),
+        total: 5,
+        bytesPerSecond: bytes < size ? 12_500_000 : 0,
+      },
+    });
+  }
+  return { sequence, open };
+}
+
+function startAsG(lastPart: number, until: number) {
+  let clock: JourneyClock | null = null;
+  const seen: { second: number; said: string; left: number | null }[] = [];
+  for (let second = 0; second <= until; second += 1) {
+    const { sequence, open } = windowsG(second, lastPart);
+    const ticked = journeyTick(
+      clock,
+      sequence,
+      open,
+      1_000_000 + second * 1000,
+      true,
+    );
+    clock = ticked.clock;
+    seen.push({ second, said: ticked.view.said, left: ticked.view.left });
+  }
+  return seen;
+}
+
+/*
+ * Windows G: the card said "About 2 minutes left" at 1m 32s, then "Taking longer than usual, still
+ * working" at 2m 48s while the update's last part was still unpacking, inside the time it had given.
+ * It says so only once the time it last gave has run out, counting that time down meanwhile.
+ */
+test("taking longer than usual is said only once the time the card gave has run out", () => {
+  // The last part takes 50 seconds: long for one part, inside the time the card gave.
+  const onTime = startAsG(50, 240);
+  let due = Number.POSITIVE_INFINITY;
+  for (const moment of onTime) {
+    if (moment.left === null)
+      expect({ second: moment.second, before: moment.second < due }).toEqual({
+        second: moment.second,
+        before: false,
+      });
+    else due = moment.second + moment.left;
+  }
+  expect(onTime.filter((moment) => moment.left === null)).toEqual([]);
+  // While that part runs long, the time left counts down rather than standing still.
+  const unpacking = onTime.filter((moment) =>
+    moment.said.startsWith("Unpacking the update (5 of 5)"),
+  );
+  const last = unpacking[unpacking.length - 1];
+  expect(last?.left ?? 99).toBeLessThan((unpacking[0]?.left ?? 0) - 20);
+
+  // The last part takes five minutes: well past the time the card gave, it says so.
+  const late = startAsG(300, 480);
+  due = Number.POSITIVE_INFINITY;
+  for (const moment of late) {
+    if (moment.left === null) expect(moment.second).toBeGreaterThanOrEqual(due);
+    else due = moment.second + moment.left;
+  }
+  expect(late.some((moment) => moment.left === null)).toBe(true);
+  // And once that part ends, it gives a time again.
+  expect(late[late.length - 1]?.left).not.toBeNull();
+});

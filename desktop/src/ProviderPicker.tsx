@@ -1053,7 +1053,9 @@ export function ProviderPicker({
           {/* Said before it happens rather than diagnosed after the Bots stop answering. */}
           {failure && <InlineFailure problem={failure} />}
 
-          {row.caution && (
+          {/* About a plan's own pool of use, so said only where the person signs in with one. On
+              Windows G it sat under "Anthropic API key", where it does not apply. */}
+          {row.caution && login === "plan" && (
             <p className="caution">
               {row.caution.says}{" "}
               <a

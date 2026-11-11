@@ -4360,7 +4360,8 @@ test("leftover database is offered as a fresh start that carries on into Start",
   expect(view.getByText(/saved chats, Bots, and settings/)).toBeTruthy();
   expect(view.getByText(/permanently deletes/)).toBeTruthy();
   expect(view.getByText(/with its original encryption key/)).toBeTruthy();
-  expect(view.getByText("fixture_postgres-data")).toBeTruthy();
+  expect(view.getByText("Saved chats, Bots and settings")).toBeTruthy();
+  expect(view.queryByText("fixture_postgres-data")).toBeNull();
   expect(resets()).toHaveLength(0);
   await userEvent.click(startFresh);
   expect(resets()).toEqual([
@@ -4385,7 +4386,12 @@ test("leftover database is offered as a fresh start that carries on into Start",
   expect(installationCalls()).toHaveLength(1);
 });
 
-test("starting fresh names every container and volume and removes only that list", async () => {
+/*
+ * Windows F: "What Start fresh deletes" listed the names native setup gives the data
+ * ("openbot-desktop_agent-profiles", "openbot-desktop_postgres-data"). It says what each holds,
+ * and removes exactly the list native setup verified.
+ */
+test("starting fresh says in plain words what it deletes and removes only that list", async () => {
   useCompatibleEndpointSetup({});
   const previous = invokeHandler;
   const volumes = [
@@ -4419,10 +4425,18 @@ test("starting fresh names every container and volume and removes only that list
   expect(
     view.getByText(/Restore the previous installation’s folder/),
   ).toBeTruthy();
-  for (const volume of volumes) expect(view.getByText(volume)).toBeTruthy();
-  expect(view.getByText(/stopped parts of the previous/)).toBeTruthy();
-  for (const container of containers)
-    expect(view.getByText(container)).toBeTruthy();
+  const deletes = within(
+    view
+      .getByText("What Start fresh deletes")
+      .closest("details") as HTMLElement,
+  );
+  expect(deletes.getByText(/permanently/)).toBeTruthy();
+  expect(
+    deletes.getAllByRole("listitem").map((item) => item.textContent),
+  ).toEqual(["Bot files", "Browser sign-ins"]);
+  expect(deletes.getByText(/stopped parts of the previous/)).toBeTruthy();
+  for (const name of [...volumes, ...containers])
+    expect(view.queryByText(name)).toBeNull();
   await userEvent.click(startFresh);
   expect(
     invokeCalls.filter((call) => call.command === "reset_leftover_database"),
@@ -4436,6 +4450,80 @@ test("starting fresh names every container and volume and removes only that list
         confirmed: true,
       },
     },
+  ]);
+});
+
+/*
+ * Windows F: the leftover data's notice sat above the card's own header, pushing "Finishing setup"
+ * down 300 px, and the rows said "Opening OpenBot · Failed · OpenBot did not start" with Retry. It
+ * is a choice for the person: the notice sits in the card under its rows, and the step waits on it.
+ */
+test("leftover data is a choice the Start step waits on, in the card under its header", async () => {
+  useCompatibleEndpointSetup({});
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "start_stack")
+      throw {
+        said: "OpenBot found data from a previous installation.",
+        database_reset: "openbot-desktop_postgres-data",
+        leftover_reset: [
+          "openbot-desktop_agent-profiles",
+          "openbot-desktop_agent-workspace",
+          "openbot-desktop_postgres-data",
+        ],
+      };
+    return previous(command, args);
+  };
+  const view = await enterCompatibleEndpoint(
+    "https://model.example/v1",
+    "synthetic-key",
+  );
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await view.findByRole("button", { name: "Start fresh" });
+  const card = view.getByRole("heading", { name: "Finishing setup" })
+    .parentElement as HTMLElement;
+  const order = [...card.children].map((child) =>
+    child.matches("h1")
+      ? "heading"
+      : child.querySelector("#start-fresh-title")
+        ? "notice"
+        : child.getAttribute("aria-label") === "OpenBot on this computer"
+          ? "rows"
+          : child.matches(".setup-header")
+            ? "header"
+            : null,
+  );
+  expect(order.filter(Boolean)).toEqual([
+    "header",
+    "heading",
+    "rows",
+    "notice",
+  ]);
+  const opening = within(
+    view.getByRole("listitem", { name: "Opening OpenBot" }),
+  );
+  expect(opening.queryByText("Failed")).toBeNull();
+  expect(opening.queryByText("OpenBot did not start.")).toBeNull();
+  expect(opening.getByText("Waiting for you")).toBeTruthy();
+  expect(
+    opening.getByText(
+      "Choose below what happens to the previous installation’s data.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Retry" })).toBeNull();
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(
+    within(
+      view
+        .getByText("What Start fresh deletes")
+        .closest("details") as HTMLElement,
+    )
+      .getAllByRole("listitem")
+      .map((item) => item.textContent),
+  ).toEqual([
+    "Saved chats, Bots and settings",
+    "Bot files",
+    "Browser sign-ins",
   ]);
 });
 

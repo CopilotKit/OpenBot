@@ -158,15 +158,19 @@ export function CopilotKitAccount({
    * What is installing behind this step, as one row: what it is doing, how far along, and for how
    * long (`installingBehind`). Shown under every part of the step, so the person always knows
    * OpenBot is still installing. It carries the engine's line and any hand-off, so those are not
-   * said twice. Its slot is held even while it is null; without it, there is none.
+   * said twice. Its slot is held even while it is null; without it, there is none. Given what the
+   * rest of the install waits on here, which this step knows: signing in only while the person is
+   * not signed in.
    */
-  behind?: Progress | null;
+  behind?: (waitingFor: string) => Progress | null;
   /** Signed in and agreed: the version accepted here, or null when nothing needed accepting. */
   onDone: (acceptedVersion: string | null) => void;
   /** A failure from setup itself, shown inside this card rather than under it. */
   failure?: ReactNode;
 }) {
   const [seen, setSeen] = useState<Seen>({ at: "checking" });
+  /** The CLI's sign-in has opened its page in the browser: the person is signing in now. */
+  const [signInPage, setSignInPage] = useState(false);
   const attempt = useRef<string | null>(null);
   const finished = useRef(false);
   const done = useRef(onDone);
@@ -324,6 +328,7 @@ export function CopilotKitAccount({
   const signIn = useCallback(async () => {
     const started = signInToCopilotKit();
     attempt.current = started.attempt;
+    setSignInPage(false);
     setSeen({ at: "signing-in", attempt: started.attempt });
     const failed = () =>
       setSeen({ at: "failed", said: SIGN_IN_DID_NOT_FINISH, retry: "sign-in" });
@@ -379,6 +384,31 @@ export function CopilotKitAccount({
   // The person closed macOS's password prompt: said in a card of its own, with Try again, on
   // whatever this step shows. Install asks again by itself meanwhile.
   const asking = goAhead !== null;
+  /*
+   * Not known yet whether the person is signed in: the CLI is checking a sign-in it may already
+   * have. On Windows G a signed-in person saw the signed-out pitch ("It requires a free license
+   * key", "does NOT send traffic data") for two seconds before the license agreement. Only the
+   * check is said until there is an answer.
+   */
+  const checkingAccount =
+    seen.at === "checking" || (seen.at === "signing-in" && !signInPage);
+  const signedOut =
+    checkingAccount ||
+    seen.at === "signing-in" ||
+    seen.at === "signed-out" ||
+    (seen.at === "failed" && seen.retry === "sign-in");
+  const behindRow = behind?.(
+    connecting
+      ? "The rest of the install starts once your apps are set up."
+      : appsFailed
+        ? "The rest of the install starts when you connect your apps or continue."
+        : // Not known yet: nothing about signing in to somebody who may be signed in already.
+          checkingAccount
+          ? "The rest of the install starts when this step is done."
+          : signedOut
+            ? "The rest of the install starts after you sign in and accept the license agreement."
+            : "The rest of the install starts after you accept the license agreement.",
+  );
   return (
     <div className="sheet">
       {/* OpenBot is what is being set up, so its mark heads this step as it heads every other,
@@ -398,21 +428,25 @@ export function CopilotKitAccount({
                   : "Change this computer's setup"
                 : waitingForEngine
                   ? "Setting up this computer"
-                  : "Self-contained OpenBot"}
+                  : checkingAccount
+                    ? "Your OpenBot account"
+                    : "Self-contained OpenBot"}
       </h1>
-      <p className="lede">
-        {agreement
-          ? // The organization and the agreement's version are the log's: on Windows F the
-            // lede ended "for CopilotKit🪁." and the link read "(developer-edition-2026-10-01-web)".
-            "To run OpenBot on this computer, accept the OpenBot by CopilotKit license agreement."
-          : connecting || appsFailed
-            ? "OpenBot uses your account to set up apps like Gmail and Slack."
-            : refused
-              ? refused.said
-              : waitingForEngine
-                ? SETTING_UP_ENGINE
-                : SELF_CONTAINED}
-      </p>
+      {!checkingAccount && (
+        <p className="lede">
+          {agreement
+            ? // The organization and the agreement's version are the log's: on Windows F the
+              // lede ended "for CopilotKit🪁." and the link read "(developer-edition-2026-10-01-web)".
+              "To run OpenBot on this computer, accept the OpenBot by CopilotKit license agreement."
+            : connecting || appsFailed
+              ? "OpenBot uses your account to set up apps like Gmail and Slack."
+              : refused
+                ? refused.said
+                : waitingForEngine
+                  ? SETTING_UP_ENGINE
+                  : SELF_CONTAINED}
+        </p>
+      )}
       {refused?.switchEngine && (
         <ol className="blocker-steps">
           <li>
@@ -435,7 +469,8 @@ export function CopilotKitAccount({
         !connecting &&
         !appsFailed &&
         !refused &&
-        !waitingForEngine && (
+        !waitingForEngine &&
+        !checkingAccount && (
           // What signing in sends, in Atai's words. Never "only gets the license key": once
           // signed in, this step also sets up apps. Nothing broader, such as "no data leaves this
           // computer": setup and usage telemetry, the AI provider and connected apps all reach the
@@ -468,6 +503,7 @@ export function CopilotKitAccount({
           attempt={seen.attempt}
           before="Checking your OpenBot account…"
           waiting="Finish signing in to OpenBot in your browser…"
+          onPage={() => setSignInPage(true)}
           onCancel={cancelSignIn}
         />
       )}
@@ -541,8 +577,8 @@ export function CopilotKitAccount({
         {/* Last, under whatever the step asks: OpenBot is still installing meanwhile. */}
         {behind !== undefined && (
           <BehindSlot>
-            {behind && (
-              <SetupProgress steps={[behind]} label="Background install" />
+            {behindRow && (
+              <SetupProgress steps={[behindRow]} label="Background install" />
             )}
           </BehindSlot>
         )}

@@ -308,6 +308,17 @@ h2 {
   margin: 16px 0 0;
 }
 
+/* Where Cancel was, in a button's height, so the card keeps its size as Cancel goes. */
+.cannot-cancel {
+  margin: 0;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+
 /* Controls */
 .row {
   display: flex;
@@ -462,6 +473,24 @@ button.text-link:hover:not(:disabled) {
 
 .local-alert .row {
   margin-top: 12px;
+}
+
+/* Under its button, a line keeps the row's gap rather than touching the button. */
+.local-alert .row + .footnote {
+  margin-top: 12px;
+}
+
+/* What a choice would delete, said as the card's other lines are. */
+.local-alert details > p {
+  margin-top: 8px;
+}
+
+.local-alert details ul {
+  margin: 4px 0 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
 }
 
 /* Local Intelligence setting up behind the screen in front: one line. */
@@ -1122,6 +1151,13 @@ a:hover {
  * One Start, start to finish (`StartJourney`): what is happening now, the time left and so far, and
  * one bar over every row that only moves forward. Drawn as the rows are, above them.
  */
+/*
+ * ONE height, whatever it says: its tallest form's, three lines of what is happening (Docker
+ * Desktop's hand-off) and one of the time, or one and two, then the bar. On Windows G the card
+ * grew from 86 to 130 px as the hand-off came, shrank as it went, and moved the rows under it each
+ * time. What it says and its bar sit at the top, as a row's do, and the spare height is at the
+ * bottom.
+ */
 .journey {
   margin: 4px 0 12px;
   padding: 12px 16px;
@@ -1130,6 +1166,8 @@ a:hover {
   background: var(--card);
   display: grid;
   gap: 10px;
+  align-content: start;
+  height: 130px;
 }
 
 .journey-head {
@@ -1138,12 +1176,18 @@ a:hover {
   column-gap: 12px;
   row-gap: 2px;
   align-items: center;
+  max-height: 88px;
+  overflow: hidden;
   font-size: var(--text-base);
   line-height: 22px;
 }
 
 .journey-said {
   font-weight: 500;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
 }
 
 /* The time left and so far, under what is happening: one quiet line, as a row's detail. */
@@ -1153,6 +1197,10 @@ a:hover {
   font-size: var(--text-sm);
   line-height: 20px;
   font-variant-numeric: tabular-nums;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .journey progress {
@@ -1273,8 +1321,8 @@ a:hover {
 }
 
 /*
- * A plain line, with no download under it, may take up to three lines: the row is then 108 px of
- * the 132 held, so it still never moves anything. Cut at one line, "The Podman on this computer is
+ * A plain line, with no download under it, may take up to three lines: the row is then 130 px of
+ * the 132 held, its badge on a line of its own included, so it still never moves anything. Cut at one line, "The Podman on this computer is
  * too old for OpenBot, so OpenBot is updating it." read "...so OpenBot is u…"; cut at two, Docker
  * Desktop's hand-off read "...OpenBot comes back when Docker is…". The longest line that reaches
  * this row is three lines at 1016x839 and at 720x560 (`setupLayout.browser.test.ts`).
@@ -1365,6 +1413,25 @@ a:hover {
   .step-status {
     justify-self: start;
   }
+}
+
+/*
+ * The background row's name whole, with its step and time on a line of their own under it, as a
+ * narrow window sets every row. On Windows G the badge ("Step 3 of 4 · 4m 18s elapsed") cut the
+ * name to "Installing OpenBot in the backgr…". After the rules it changes. Its tallest forms still
+ * fill the 132 px held and no more: a download (name, badge, line, bar and bytes), or a plain line
+ * of three (`.behind-slot`).
+ */
+.behind-slot .step {
+  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-areas:
+    "mark label"
+    ". status"
+    ". detail";
+}
+
+.behind-slot .step-status {
+  justify-self: start;
 }
 
 .sr-only {
@@ -1767,6 +1834,17 @@ main > .sheet {
   overflow-y: auto;
 }
 
+/*
+ * A step with a pinned foot keeps its scrollbar's room whether the scrollbar shows or not, and
+ * gives it back from its right padding (`--gutter`, which `StepFooter` measures), so what is in it
+ * is as wide either way. On Windows G the background row moved about 15 px sideways as the card's
+ * scrollbar went when a provider was chosen.
+ */
+main > .sheet:has(> .step-footer) {
+  scrollbar-gutter: stable;
+  padding-right: calc(32px - var(--gutter, 0px));
+}
+
 main > .sheet > * {
   flex-shrink: 0;
 }
@@ -1787,6 +1865,26 @@ main > .sheet > .step-footer {
 }
 
 /* Its actions' gap above them is inside it, so what scrolls under it does not show through. */
+/*
+ * While the step goes on under the foot, what is under it fades into the foot, so it plainly goes
+ * on below (`StepFooter`). On Windows G the AI step's last provider sat under the foot with a
+ * sliver of its edge showing, and nothing said the list went on.
+ */
+main > .sheet > .step-footer.more-below::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 56px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--card) 0%, transparent),
+    var(--card)
+  );
+  pointer-events: none;
+}
+
 main > .sheet > .step-footer > .row:first-child {
   margin-top: 0;
   padding-top: 24px;
@@ -1805,6 +1903,10 @@ main > .sheet > .step-footer > .row:first-child:empty:has(+ .behind-slot) {
 }
 
 @media (max-width: 580px) {
+  main > .sheet:has(> .step-footer) {
+    padding-right: calc(24px - var(--gutter, 0px));
+  }
+
   main > .sheet > .step-footer {
     bottom: -24px;
     margin-bottom: -24px;

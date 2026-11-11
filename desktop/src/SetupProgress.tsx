@@ -1,4 +1,10 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   type DownloadWhere,
   downloadWhere,
@@ -743,9 +749,61 @@ export function BehindSlot({ children }: { children?: ReactNode }) {
  * On Windows F the AI step was taller than the window: first the background row sat below the
  * fold, then, with only that row pinned, Continue sat under it with a grey sliver showing until
  * the person scrolled. Both are in view now, on every step that has them.
+ *
+ * While the step goes on under it, the foot says so (`more-below`): what is under it fades into
+ * it. On Windows G the AI step's last provider sat under the foot at the window's default size,
+ * with only a sliver of its edge showing, and nothing said the list went on.
+ *
+ * The card keeps its scrollbar's room whether the scrollbar shows or not, and gives that room back
+ * from its own right padding (`--gutter`), so what is in it is as wide either way. On Windows G
+ * the background row moved about 15 px sideways as the scrollbar went when a provider was chosen.
  */
 export function StepFooter({ children }: { children?: ReactNode }) {
-  return <div className="step-footer">{children}</div>;
+  const foot = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState(false);
+  // Before the first paint, so the step never shows at the narrower width.
+  useLayoutEffect(() => {
+    const card = foot.current?.parentElement;
+    if (!card) return;
+    const style = getComputedStyle(card);
+    const gutter =
+      card.offsetWidth -
+      card.clientWidth -
+      (Number.parseFloat(style.borderLeftWidth) || 0) -
+      (Number.parseFloat(style.borderRightWidth) || 0);
+    card.style.setProperty("--gutter", `${Math.max(0, gutter)}px`);
+    return () => {
+      card.style.removeProperty("--gutter");
+    };
+  }, []);
+  useEffect(() => {
+    // The card the foot is pinned in: the step's one scroll area.
+    const card = foot.current?.parentElement;
+    if (!card) return;
+    const look = () =>
+      setMore(card.scrollTop + card.clientHeight < card.scrollHeight - 1);
+    look();
+    card.addEventListener("scroll", look, { passive: true });
+    // The step grows and shrinks as the person chooses, and the window may be resized.
+    const resized =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(look);
+    resized?.observe(card);
+    const changed =
+      typeof MutationObserver === "undefined"
+        ? null
+        : new MutationObserver(look);
+    changed?.observe(card, { childList: true, subtree: true });
+    return () => {
+      card.removeEventListener("scroll", look);
+      resized?.disconnect();
+      changed?.disconnect();
+    };
+  }, []);
+  return (
+    <div ref={foot} className={`step-footer${more ? " more-below" : ""}`}>
+      {children}
+    </div>
+  );
 }
 
 export function formatDownloadBytes(bytes: number): string {
