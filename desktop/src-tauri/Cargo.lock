@@ -2972,6 +2972,7 @@ version = "1.0.1"
 dependencies = [
  "base64 0.22.1",
  "block2",
+ "dirs",
  "flate2",
  "libc",
  "log",

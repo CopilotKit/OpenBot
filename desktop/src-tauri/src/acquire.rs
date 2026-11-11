@@ -1286,6 +1286,36 @@ pub fn stop_machine_named(name: &str) -> Result<(), String> {
     podman(&["machine", "stop", name]).map(|_| ())
 }
 
+/// The machine `name` as `podman machine list` has it: `None` when there is no such machine, else
+/// whether it is running.
+pub fn machine_listed(name: &str) -> Result<Option<bool>, String> {
+    machine_in(&podman(&["machine", "list", "--format", "json"])?, name)
+}
+
+/// `machine_listed`, read from a listing already taken.
+pub fn machine_in(listing: &str, name: &str) -> Result<Option<bool>, String> {
+    #[derive(Deserialize)]
+    struct Listed {
+        #[serde(rename = "Name")]
+        name: String,
+        #[serde(rename = "Running", default)]
+        running: bool,
+    }
+    let machines: Vec<Listed> = serde_json::from_str(listing).map_err(|error| {
+        format!("could not read podman machine list JSON: {error}; stdout: {listing}")
+    })?;
+    Ok(machines
+        .into_iter()
+        .find(|machine| machine.name == name)
+        .map(|machine| machine.running))
+}
+
+/// Remove the machine `name` and everything in it, stopping it first if it runs. `--force` because
+/// `podman machine rm` otherwise asks at a terminal, and OpenBot's commands have none.
+pub fn remove_machine_named(name: &str) -> Result<(), String> {
+    podman(&["machine", "rm", "--force", name]).map(|_| ())
+}
+
 /// Start the machine `name`, then the containers that were running in it.
 ///
 /// OpenBot's own machine starts as `start_machine` starts it, which also sets up its networking. A
@@ -1609,6 +1639,24 @@ mod tests {
                 expected
             );
         }
+    }
+
+    /// What the uninstaller reads of OpenBot's machine (`uninstall`), from `podman machine list
+    /// --format json` as Podman 6.1.1 on Windows prints it: OpenBot's beside the person's own.
+    #[test]
+    fn the_uninstaller_finds_openbots_machine_by_name_among_the_persons() {
+        let listing = r#"[
+            {"Name":"podman-machine-default","Default":true,"Running":true,"VMType":"wsl"},
+            {"Name":"openbot","Default":false,"Running":true,"VMType":"wsl"}
+        ]"#;
+        assert_eq!(machine_in(listing, MACHINE), Ok(Some(true)));
+        let stopped = r#"[{"Name":"openbot","Default":true,"Running":false,"VMType":"wsl"}]"#;
+        assert_eq!(machine_in(stopped, MACHINE), Ok(Some(false)));
+        let theirs_only =
+            r#"[{"Name":"podman-machine-default","Default":true,"Running":true,"VMType":"wsl"}]"#;
+        assert_eq!(machine_in(theirs_only, MACHINE), Ok(None));
+        assert_eq!(machine_in("[]", MACHINE), Ok(None));
+        assert!(machine_in("not json", MACHINE).is_err());
     }
 
     #[test]
