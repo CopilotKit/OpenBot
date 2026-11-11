@@ -186,6 +186,13 @@ Desktop installation:
 
 ### Conversations
 
+- **An answer that reaches the screen with pieces missing is put right, and the Bot carries on.**
+  Sometimes a run's live stream reached the conversation out of shape while the run itself went
+  fine: the answer drew with words missing mid-sentence until a reload, or a step that asked for
+  several browser actions at once showed "Not completed", took none of them, and the conversation
+  stopped there with nothing said. The conversation now reads such a run back from its stored copy,
+  so the answer shows whole, and browser actions that never ran are retried once. If that breaks
+  again, it says so under the turn.
 - **A new conversation's first message starts one run.** Every first message started a second run
   on the Bot about a second after yours: the CopilotKit runtime named the new conversation by
   running the same Bot again on a title prompt. On a Bot OpenBot runs in a harness, such as the
