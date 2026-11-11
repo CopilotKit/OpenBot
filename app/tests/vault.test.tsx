@@ -101,6 +101,44 @@ describe("the Vault", () => {
     expect(view.queryByRole("heading", { name: "Keys" })).toBeNull();
     expect(view.queryByText("openai")).toBeNull();
   });
+
+  test("in the team edition says it keeps logins alone, under no second heading", async () => {
+    const view = draw("team");
+    await view.findByText("https://example.com");
+    expect(
+      view.getByText("Your saved logins are kept here. Bots never see them."),
+    ).toBeTruthy();
+    expect(view.queryByText(/logins and keys/)).toBeNull();
+    // One section: the page title already names it.
+    expect(view.queryByRole("heading", { name: "Logins" })).toBeNull();
+    expect(view.getAllByRole("heading").map((h) => h.textContent)).toEqual([
+      "Vault",
+    ]);
+  });
+
+  test("in the personal edition says it keeps logins and keys", async () => {
+    const view = draw("personal");
+    expect(
+      await view.findByText(
+        "Your saved logins and keys are kept here. Bots never see them.",
+      ),
+    ).toBeTruthy();
+  });
+
+  test("a key's row has an icon tile, as a login's row above it does", async () => {
+    const view = draw("personal");
+    for (const name of ["https://example.com", "openai"]) {
+      const row = (await view.findByText(name)).closest(
+        "[data-slot=item]",
+      ) as HTMLElement;
+      const media = row.querySelector(
+        "[data-slot=item-media][data-variant=icon]",
+      );
+      expect({ name, icon: media?.querySelector(".tabler-icon-key") }).toEqual(
+        { name, icon: expect.anything() },
+      );
+    }
+  });
 });
 
 function redirectOf(route: { options: { beforeLoad?: unknown } }) {

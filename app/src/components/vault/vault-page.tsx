@@ -19,15 +19,29 @@ export function VaultPage() {
   const personal = paths.edition === "personal";
   return (
     <PageShell
-      description="Your saved logins and keys are kept here. Bots never see them."
+      description={
+        personal
+          ? "Your saved logins and keys are kept here. Bots never see them."
+          : "Your saved logins are kept here. Bots never see them."
+      }
       title="Vault"
     >
-      <PageSection
-        description="Website logins you saved when signing a Bot in. You approve each use."
-        title="Logins"
-      >
-        <SavedLogins />
-      </PageSection>
+      {/*
+       * The team edition's Vault is its logins alone, one section, so it carries no heading: the
+       * page title already names it.
+       */}
+      {personal ? (
+        <PageSection
+          description="Website logins you saved when signing a Bot in. You approve each use."
+          title="Logins"
+        >
+          <SavedLogins />
+        </PageSection>
+      ) : (
+        <PageSection>
+          <SavedLogins />
+        </PageSection>
+      )}
       {personal ? (
         <PageSection
           action={
