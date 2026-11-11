@@ -84,23 +84,23 @@ function serve(body: unknown) {
 
 test("a search has its own key, apart from the roster's, by its normalised text and page size", () => {
   const options = channelSearchInfiniteQueryOptions("  Cafe\u0301 receipts ");
-  expect(options.queryKey).toEqual(
-    channelKeys.search("Caf\u00e9 receipts", 20),
-  );
-  expect(options.queryKey).toEqual([
+  // Spread, to compare the key itself and not the type tag TanStack puts on it.
+  const key = [...options.queryKey];
+  expect(key).toEqual([...channelKeys.search("Caf\u00e9 receipts", 20)]);
+  expect(key).toEqual([
     "channels",
     "search",
     { query: "Caf\u00e9 receipts", limit: 20 },
   ]);
   // Not under the roster's key, so a roster write or invalidation never lands on a search.
   const list = channelListQueryOptions().queryKey;
-  expect(options.queryKey.slice(0, list.length)).not.toEqual([...list]);
+  expect(key.slice(0, list.length)).not.toEqual([...list]);
   // Under the root and its own prefix, so a change to any conversation refreshes it.
-  expect(options.queryKey.slice(0, 1)).toEqual([...channelKeys.all]);
-  expect(options.queryKey.slice(0, 2)).toEqual([...channelKeys.searches()]);
-  expect(channelSearchInfiniteQueryOptions("receipts", 5).queryKey).toEqual(
-    channelKeys.search("receipts", 5),
-  );
+  expect(key.slice(0, 1)).toEqual([...channelKeys.all]);
+  expect(key.slice(0, 2)).toEqual([...channelKeys.searches()]);
+  expect([
+    ...channelSearchInfiniteQueryOptions("receipts", 5).queryKey,
+  ]).toEqual([...channelKeys.search("receipts", 5)]);
 });
 
 test("only two or more characters are searched", () => {

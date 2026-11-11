@@ -21,7 +21,11 @@ import {
 } from "../src/channels/routes";
 import { PAGE_LIMIT_ERROR } from "../src/paging";
 
-const actor = { id: "user-1", role: "user" } as const;
+const actor = {
+  id: "user-1",
+  email: "member@openbot.test",
+  role: "user",
+} as const;
 const position = {
   pinned: false,
   recency: "2026-09-01T00:00:00.123456Z",

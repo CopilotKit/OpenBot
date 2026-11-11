@@ -163,7 +163,7 @@ function appAs(actor: AgentActor) {
     context,
     next,
   ) => {
-    context.set("actor", actor);
+    context.set("actor", { ...actor, email: `${actor.id}@example.test` });
     await next();
   };
   const app = new Hono<{ Variables: AppVariables }>();
