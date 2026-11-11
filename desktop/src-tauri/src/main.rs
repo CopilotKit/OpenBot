@@ -641,9 +641,6 @@ before the back end is asked (`engine_versions::answering_now`).
 The back end's own check reaches the engine through that API and says only "docker_unavailable",
 and setup then waited on it. Setup and Start heal it in their own check (`engine_new_enough`); this
 is the same for a relaunch, and for Retry after it, which runs this again. Said on the machine's row.
-
-Then, on OpenBot's own machine on Windows, its dead port rules are cleared, whether this started it
-or found it running, before the back end is asked through them (`acquire::readied_for_backend`).
 */
 async fn heal_installation_engine<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
@@ -664,7 +661,7 @@ async fn heal_installation_engine<R: tauri::Runtime>(
         let back = || {};
         let cancelled = || false;
         let mut updates = engine_versions::OnThisMachine {
-            address: address.clone(),
+            address,
             cache: stack::default_root(),
             back: &back,
             cancelled: &cancelled,
@@ -692,9 +689,7 @@ async fn heal_installation_engine<R: tauri::Runtime>(
                 }
             }
         }
-        // A machine found running, which no start here cleared: its dead port rules go before the
-        // back end is asked through them (`acquire::readied_for_backend`).
-        healed.map(|_| acquire::readied_for_backend(Some(&address), || ()))
+        healed.map(|_| ())
     })
     .await
     .map_err(|error| {
