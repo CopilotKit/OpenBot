@@ -276,3 +276,25 @@ test("personal edition labels starter Bots as included with OpenBot", async () =
   ).toBeTruthy();
   expect(view.queryByText("Shared with you")).toBeNull();
 });
+
+test("while the roster loads it draws rows' shape, and never says there are no Bots", async () => {
+  serving([bot({ id: "mine", name: "Mine" })], []);
+  const served = global.fetch;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    await gate;
+    return served(input, init);
+  }) as typeof fetch;
+  const view = draw();
+  expect(
+    await view.findByRole("status", { name: "Loading your Bots" }),
+  ).toBeTruthy();
+  expect(view.queryByText("No Bots yet")).toBeNull();
+
+  release();
+  expect(await view.findByText("Mine")).toBeTruthy();
+  expect(view.queryByRole("status", { name: "Loading your Bots" })).toBeNull();
+});

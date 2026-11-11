@@ -10,6 +10,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { LoadingRows } from "@/components/layout/loading-rows";
 import {
   PageEmpty,
   PageRows,
@@ -603,8 +604,13 @@ export function RoutinesList({
         </p>
       ) : null}
 
-      {/* Pending renders nothing: the empty state would otherwise flash for the fetch. */}
-      {pending ? null : rows.length === 0 ? (
+      {/*
+       * Pending draws the list's shape, never the empty state, which would flash for the fetch. A
+       * list that already has rows keeps them while it refetches: `isPending` is the first load only.
+       */}
+      {pending ? (
+        <LoadingRows label="Loading your routines" />
+      ) : rows.length === 0 ? (
         failed.length > 0 ? null : (
           <PageEmpty
             action={<NewRoutineButton agentId={agentId} variant="outline" />}

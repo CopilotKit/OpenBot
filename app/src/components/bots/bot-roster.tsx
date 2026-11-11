@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { LoadingRows } from "@/components/layout/loading-rows";
 import {
   attentionSummary,
   waitingOnYou,
@@ -58,7 +59,12 @@ export function BotRoster() {
   const list = useNeedsYou();
   const byId = new Map((attention.data ?? []).map((bot) => [bot.agentId, bot]));
 
-  if (agents.isPending) return null;
+  if (agents.isPending)
+    return (
+      <PageSection>
+        <LoadingRows label="Loading your Bots" media="avatar" />
+      </PageSection>
+    );
   // Only when nothing ever loaded: a failed background refetch keeps the roster it had.
   if (agents.data === undefined) {
     return (

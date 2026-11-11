@@ -34,6 +34,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Item,
   ItemActions,
@@ -458,7 +459,9 @@ function RouteComponent() {
          * asserting "Connect" over accounts somebody already has, so either failure is one sentence:
          * nothing is listed rather than a list that may be wrong.
          */}
-        {loading ? null : plugins.error || connections.error ? (
+        {loading ? (
+          <ConnectionsLoading />
+        ) : plugins.error || connections.error ? (
           /*
            * A failed read is not missing setup, so Retry comes first. Only the team edition has an
            * admin to ask; a personal owner is pointed at Setup, which is theirs.
@@ -628,6 +631,32 @@ function ConnectionGrid({
         />
       ))}
       {children}
+    </div>
+  );
+}
+
+/**
+ * The page's shape before the apps and your accounts have both answered: the search box and a grid
+ * of tiles as tall as real ones. No tile says Connect or Connected until both reads are in, so an
+ * account you have is never shown as one you don't.
+ */
+function ConnectionsLoading() {
+  return (
+    <div aria-label="Loading your connections" role="status">
+      <div aria-hidden="true">
+        <Skeleton className="h-9 w-full rounded-md bg-muted/60 motion-reduce:animate-none" />
+        <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
+          {["a", "b", "c", "d"].map((key) => (
+            <div
+              className="flex min-h-14 items-center gap-3 rounded-lg border border-border bg-card px-3"
+              key={key}
+            >
+              <Skeleton className="size-8 rounded-md motion-reduce:animate-none" />
+              <Skeleton className="h-3.5 w-28 motion-reduce:animate-none" />
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

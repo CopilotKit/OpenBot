@@ -316,3 +316,27 @@ test("merging keeps a routine whose goal is not listed, and puts working rows fi
     "routine:paused",
   ]);
 });
+
+test("while the list loads it draws the list's shape, never the empty state", async () => {
+  serving({ goals: [] });
+  const served = global.fetch;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    await gate;
+    return served(input, init);
+  }) as typeof fetch;
+  const view = draw();
+  expect(
+    await view.findByRole("status", { name: "Loading your routines" }),
+  ).toBeTruthy();
+  expect(view.queryByText("No routines for this Bot yet")).toBeNull();
+
+  release();
+  expect(await view.findByText("No routines for this Bot yet")).toBeTruthy();
+  expect(
+    view.queryByRole("status", { name: "Loading your routines" }),
+  ).toBeNull();
+});

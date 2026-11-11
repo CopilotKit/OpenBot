@@ -7,6 +7,7 @@ import {
   type WaitingQuestion,
 } from "@/components/approvals/question-notice";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import { Button } from "@/components/ui/button";
 import {
   MessageContent,
   MessageHeader,
@@ -32,6 +33,7 @@ import {
 } from "@/lib/markdown";
 import { newId } from "@/lib/new-id";
 import { ChannelAvatar } from "./avatar";
+import { RestoringTranscript } from "./chat-transcript";
 import { Composer, toAgentOptions } from "./composer";
 import { TeamBotConsentCard } from "./team-bot-consent";
 
@@ -121,12 +123,31 @@ export function GroupChat({ channelId }: { channelId: string }) {
     }
   }, [lastKey, newestIsMine]);
 
-  if (group.isPending) return null;
-  if (group.isError)
+  if (group.isPending)
     return (
-      <p className="p-8 text-sm text-destructive" role="alert">
-        {group.error.message}
-      </p>
+      <div className="mx-auto w-full max-w-3xl px-4 py-6">
+        <RestoringTranscript />
+      </div>
+    );
+  // Only when nothing ever loaded: a refetch that fails keeps the conversation on screen.
+  if (group.data === undefined)
+    return (
+      <div
+        className="mx-auto flex w-full max-w-3xl flex-col items-start gap-3 px-4 py-8"
+        role="alert"
+      >
+        <p className="text-sm text-destructive">
+          Couldn't load this conversation. Try again.
+        </p>
+        <Button
+          disabled={group.isFetching}
+          onClick={() => void group.refetch()}
+          size="sm"
+          variant="outline"
+        >
+          {group.isFetching ? "Retrying…" : "Retry"}
+        </Button>
+      </div>
     );
 
   return (

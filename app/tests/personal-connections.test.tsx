@@ -470,3 +470,30 @@ describe("when Connections can't list apps", () => {
     expect(view.queryByRole("button", { name: "Open Setup" })).toBeNull();
   });
 });
+
+test("while the apps and your accounts load, the page draws tiles' shape and no tile says Connect", async () => {
+  const served = global.fetch;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  global.fetch = Object.assign(
+    async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      await gate;
+      return served(input, init);
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  const { view } = draw("personal", "/connections", { fetchApps: true });
+  expect(
+    await view.findByRole("status", { name: "Loading your connections" }),
+  ).toBeTruthy();
+  expect(view.queryByTestId("account-notion")).toBeNull();
+  expect(view.queryByText("No apps yet")).toBeNull();
+
+  release();
+  expect(await view.findByTestId("account-notion")).toBeTruthy();
+  expect(
+    view.queryByRole("status", { name: "Loading your connections" }),
+  ).toBeNull();
+});
