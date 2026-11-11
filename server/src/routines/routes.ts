@@ -156,8 +156,11 @@ export function createRoutineRoutes(
         channelId,
         goalId: text("goalId"),
       });
-      const summary = (await routineStore.listFor(context.var.actor.id)).find(
-        (candidate) => candidate.id === routine.id,
+      // The routine is saved, so the answer is 201 whatever happens to this read: it only fills
+      // in the row's words. The page treats a failed create as "not saved".
+      const summary = await routineStore.listFor(context.var.actor.id).then(
+        (rows) => rows.find((candidate) => candidate.id === routine.id),
+        () => undefined,
       );
       return context.json(
         { routine: summary ? routineDto(summary) : { id: routine.id } },

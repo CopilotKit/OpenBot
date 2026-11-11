@@ -236,6 +236,29 @@ describe("GET /", () => {
   });
 });
 
+describe("POST /", () => {
+  test("a saved routine answers 201 even when the list can't be read", async () => {
+    const store = fakeStore({
+      create: async () => ({ id: "routine-9" }) as never,
+      listFor: async () => {
+        throw new Error("down");
+      },
+    });
+    const response = await appFor(store).request("http://openbot.test/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        agentId: "agent-1",
+        instruction: "Tidy the leads list",
+        cron: "0 9 * * 1-5",
+        channelId: "channel-1",
+      }),
+    });
+    expect(response.status).toBe(201);
+    expect(await json(response)).toEqual({ routine: { id: "routine-9" } });
+  });
+});
+
 describe("PUT /:id/enabled", () => {
   test("switches a routine on or off through the authenticated actor", async () => {
     const store = fakeStore();
