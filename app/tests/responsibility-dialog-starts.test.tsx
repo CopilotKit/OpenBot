@@ -99,6 +99,7 @@ const routine = (overrides: Partial<RoutineRecord> = {}): RoutineRecord => ({
 function open(
   routines: RoutineRecord[],
   status: ResponsibilityRecord["status"] = "active",
+  overrides: Partial<ResponsibilityRecord> = {},
 ) {
   const root = createRootRoute();
   const router = createRouter({
@@ -109,7 +110,7 @@ function open(
         path: "/",
         component: () => (
           <ResponsibilityDialog
-            goal={{ ...goal, status }}
+            goal={{ ...goal, ...overrides, status }}
             onClose={() => {}}
             routines={routines}
           />
@@ -267,4 +268,35 @@ test("a refused change is said under the schedules", async () => {
   expect((await view.findByRole("alert")).textContent).toBe(
     "You have 20 routines switched on.",
   );
+});
+
+test("every section of a long goal stays in the dialog's one scrolling body", async () => {
+  const view = open([routine()], "active", {
+    progress: Array.from({ length: 12 }, (_, i) => `Step ${i + 1} done.`).join(
+      "\n\n",
+    ),
+    lastResult: "Line one.\n\nLine two.\n\nLine three.",
+    subscriptions: [
+      { source: "github", eventType: "issues.opened" },
+      { source: "github", eventType: "check_run.completed" },
+    ],
+  });
+  await triggersLoaded();
+  const body = view.baseElement.querySelector('[data-slot="dialog-body"]');
+  if (!body) throw new Error("no dialog body");
+  // Layout isn't measurable here. What clipped Run now and the last result was a rounded section
+  // shrinking inside the body's flex column, so each section must keep its own height.
+  expect(body.className).toContain("[&>*]:shrink-0");
+  for (const name of [/Run now/, /Complete/, /Open conversation/]) {
+    expect(body.contains(view.getAllByText(name)[0] ?? null)).toBe(true);
+  }
+  for (const label of ["Progress", "Last result", "Triggers", "Runs"]) {
+    expect(body.contains(view.getByText(label))).toBe(true);
+  }
+  expect(body.contains(view.getByLabelText("Title"))).toBe(true);
+  // The footer sits outside the body, so it is never scrolled away or painted over.
+  const save = view.getByRole("button", { name: "Save" });
+  expect(body.contains(save)).toBe(false);
+  // Opening it starts nothing and saves nothing.
+  expect(sent).toEqual([]);
 });

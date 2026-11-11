@@ -173,7 +173,10 @@ export function ResponsibilityDialog({
             {summaryFor(goal, triggers.data, routines)}
           </DialogDescription>
         </DialogHeader>
-        <DialogBody className="mt-4 overflow-y-auto">
+        {/* Every section keeps its own height and the body scrolls. A rounded section clips with
+            overflow-hidden, and in a flex column that lets it shrink below its content: Run now,
+            the last result and the triggers were cut off on a short screen. */}
+        <DialogBody className="mt-4 overflow-y-auto [&>*]:shrink-0">
           <div className="overflow-hidden rounded-lg">
             {goal.status !== "completed" ? (
               <>
