@@ -54,7 +54,11 @@ const originalWebSocket = globalThis.WebSocket;
 const clients: QueryClient[] = [];
 
 beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
+  // The business dialog's booking calendar keeps its address but never fetches it.
+  GlobalRegistrator.register({
+    url: "http://localhost/",
+    settings: { navigation: { disableChildFrameNavigation: true } },
+  });
   globalThis.WebSocket = OfflineWebSocket as unknown as typeof WebSocket;
 });
 beforeEach(() => {

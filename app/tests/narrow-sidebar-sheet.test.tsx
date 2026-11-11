@@ -60,6 +60,8 @@ beforeAll(() => {
     url: "http://localhost/",
     width: 520,
     height: 840,
+    // The business dialog's booking calendar keeps its address but never fetches it.
+    settings: { navigation: { disableChildFrameNavigation: true } },
   });
   globalThis.WebSocket = OfflineWebSocket as unknown as typeof WebSocket;
 });
