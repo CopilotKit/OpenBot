@@ -25,6 +25,14 @@ Desktop installation:
 
 ### OpenBot Desktop
 
+- **An OpenBot whose saved data is gone says so, and starts fresh.** When OpenBot's Podman machine
+  was removed (`podman machine reset`, a WSL unregister, or an older version uninstalled with its
+  data), its backend and database went with it, but the installation still named them. Every start
+  then stopped at "Setup stopped partway through with an error. Retry.", and Retry did the same,
+  even after reinstalling. OpenBot now says plainly that its saved data on this computer is gone,
+  with your Bots and conversations, and offers **Start fresh**, which sets OpenBot up again and opens
+  it. Your sign-in and AI connection stay. Setting up again also replaces a backend that is gone,
+  where it used to stop the same way.
 - **Installing a new OpenBot over the old one on Windows never offers to delete your data, and
   uninstalling stops what OpenBot runs.** Running a new installer over an installed OpenBot opened
   the old version's uninstaller in the middle of the update, with a "Delete the application data"

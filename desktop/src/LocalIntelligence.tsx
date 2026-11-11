@@ -242,6 +242,8 @@ export type LocalSequence = State & {
   cancel: () => void;
   /** Forgets the rows, as after Stop OpenBot. */
   reset: () => void;
+  /** The backend is gone (`stack-lost`): forget it and set OpenBot up again from the start. */
+  startFresh: () => void;
 };
 
 /**
@@ -261,6 +263,7 @@ export function useLocalSequence({
   connected = false,
   onStart,
   onRecorded = () => {},
+  onForgotten = () => {},
   pollDelays = POLL_DELAYS,
   roomEveryMs = ROOM_EVERY_MS,
 }: {
@@ -272,14 +275,23 @@ export function useLocalSequence({
   onStart: (startable: LocalStartable) => Promise<StartOutcome>;
   /** A stack was set up, or connected. */
   onRecorded?: (stack: string, connected: boolean) => void;
+  /** The recorded stack is gone and is no longer OpenBot's: set up from the start (`startFresh`). */
+  onForgotten?: () => void;
   pollDelays?: number[];
   /** How often a setup paused for room looks again (`ROOM_EVERY_MS`). */
   roomEveryMs?: number;
 }): LocalSequence {
   const [state, setState] = useState<State>(idle);
   const now = useRef(state);
-  const latest = useRef({ root, stack, connected, onStart, onRecorded });
-  latest.current = { root, stack, connected, onStart, onRecorded };
+  const latest = useRef({
+    root,
+    stack,
+    connected,
+    onStart,
+    onRecorded,
+    onForgotten,
+  });
+  latest.current = { root, stack, connected, onStart, onRecorded, onForgotten };
   // Bumped to stop a run: by Cancel, by leaving, and by any newer run.
   const generation = useRef(0);
   const attempt = useRef<string | null>(null);
@@ -849,6 +861,20 @@ export function useLocalSequence({
     lookNow.current?.();
   }
 
+  /*
+   * The backend OpenBot set up is gone with everything in it (`stack-lost`): set up from the start.
+   * Setup forgets the old stack itself when its cluster is gone (`lost_stack` in local_eval.rs) and
+   * sets up a new one, then connect, wait and start follow as on a first setup. The sign-in and the
+   * AI connection are kept: neither was in what went.
+   */
+  function startFresh() {
+    if (now.current.running) return;
+    go.current = true;
+    latest.current.onForgotten();
+    update({ blocked: null, problem: null });
+    void run("setup");
+  }
+
   function acceptTerms(version: string) {
     accepted.current = version;
     retry();
@@ -925,6 +951,7 @@ export function useLocalSequence({
     acceptTerms,
     cancel,
     reset,
+    startFresh,
   };
 }
 
@@ -1007,7 +1034,7 @@ export function LocalIntelligence({
               : "You can't cancel this last step. Stopping it partway could leave OpenBot half started."}
           </p>
         )}
-        {stopped && !waitingOn && (
+        {stopped && !waitingOn && !backendLost(sequence) && (
           <button type="button" onClick={sequence.retry}>
             Retry
           </button>
@@ -1076,7 +1103,7 @@ export function LocalStatus({
             : "Setup stopped"}
       </h2>
       {needs ? (
-        <LocalNeeds sequence={sequence} />
+        <LocalNeeds sequence={sequence} explain />
       ) : (
         <>
           <p>
@@ -1109,11 +1136,25 @@ export function LocalStatus({
  * that click is passed to the CLI as the version they accepted (a product decision of 2026-10-22).
  * Nothing accepts it without the click.
  */
-export function LocalNeeds({ sequence }: { sequence: LocalSequence }) {
+export function LocalNeeds({
+  sequence,
+  explain = false,
+}: {
+  sequence: LocalSequence;
+  /** Says what stopped as well, where no row of the sequence says it (`LocalStatus`). */
+  explain?: boolean;
+}) {
   if (!needsPerson(sequence)) return null;
   const reason = sequence.blocked?.reason;
   if (reason === "authentication-required")
     return <SignInToCopilotKit onSignedIn={sequence.retry} />;
+  if (reason === "stack-lost")
+    return (
+      <StartFresh
+        said={explain ? (sequence.blocked?.said ?? null) : null}
+        onStartFresh={sequence.startFresh}
+      />
+    );
   if (reason === "eula-acceptance-required")
     return (
       <AcceptTerms
@@ -1129,7 +1170,33 @@ function needsPerson(sequence: LocalSequence): boolean {
   const reason = sequence.stopped ? sequence.blocked?.reason : null;
   return (
     reason === "authentication-required" ||
-    reason === "eula-acceptance-required"
+    reason === "eula-acceptance-required" ||
+    reason === "stack-lost"
+  );
+}
+
+/** The backend is gone: Retry would only ask again about it, so Start fresh is the one way on. */
+function backendLost(sequence: LocalSequence): boolean {
+  return sequence.stopped && sequence.blocked?.reason === "stack-lost";
+}
+
+/** The one way on once the backend is gone: set OpenBot up again. What is gone is said with it. */
+function StartFresh({
+  said,
+  onStartFresh,
+}: {
+  said: string | null;
+  onStartFresh: () => void;
+}) {
+  return (
+    <div className="local-needs">
+      {said && <p>{said}</p>}
+      <div className="row">
+        <button type="button" onClick={onStartFresh}>
+          Start fresh
+        </button>
+      </div>
+    </div>
   );
 }
 

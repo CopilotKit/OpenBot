@@ -268,6 +268,11 @@ function Setup() {
       setLocalStack(stack);
       if (connected) setLocalConnected(true);
     },
+    // Start fresh after the backend was lost: nothing recorded is OpenBot's until setup records anew.
+    onForgotten: () => {
+      setLocalStack(null);
+      setLocalConnected(false);
+    },
   });
   // The engine's wake found that only a Windows restart fixes OpenBot's machine: the restart
   // screen, not a Retry that can't work.

@@ -57,6 +57,9 @@ export type LocalReason =
   | "browser-open-failed"
   // The CLI's resource check failed: the report's `shortfall` says which resource is short.
   | "resources-short"
+  // Not the CLI's: OpenBot's own finding that the backend it set up here is gone, cluster and all
+  // (`local_eval::Reason::StackLost`). Start fresh sets it up again.
+  | "stack-lost"
   | "unrecognized";
 
 /** `local_eval::Readiness`: the CLI's own end-to-end check. Running pods are not this. */

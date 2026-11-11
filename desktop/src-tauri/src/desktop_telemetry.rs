@@ -792,6 +792,8 @@ pub fn cli_reason(reason: local_eval::Reason) -> telemetry::CliReason {
         R::BrowserOpenFailed => T::BrowserOpenFailed,
         R::ResourcesShort => T::ResourcesShort,
         R::Unrecognized => T::Unrecognized,
+        // OpenBot's own reading of a failure the CLI reported as this.
+        R::StackLost => T::LocalCommandFailed,
     }
 }
 
