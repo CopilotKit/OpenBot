@@ -258,14 +258,16 @@ test("Now, once makes a goal and runs it", async () => {
   ]);
 });
 
-test("Done when says when a one-off is done", async () => {
+test("When it's done says when a one-off is done", async () => {
   serving();
   const view = draw();
   const user = userEvent.setup({ document });
   await view.findByLabelText("What to do");
   await choose(view, user, "Starts", "Now, once");
   expect(
-    await view.findByText("Leave it empty and it is done when the work is."),
+    await view.findByText(
+      "Optional. Leave it empty and it is done when the work is.",
+    ),
   ).toBeTruthy();
 });
 
