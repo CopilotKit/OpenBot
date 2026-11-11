@@ -253,7 +253,7 @@ function StepDots({ step }: { step: Step }) {
 
 /**
  * The last step once a recording is saved: what it held, what Learning does with it next (Learn now, then Review or
- * Try it once a skill from it is there), and the way on from here, to the skills in Settings, Learning or another
+ * Try it once a skill from it is there), and the way on from here, to the skills in Settings, Skills or another
  * recording. A saved recording is not a skill yet, so the step says what turns it into one.
  */
 function SavedStep({

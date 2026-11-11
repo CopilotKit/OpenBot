@@ -643,7 +643,7 @@ test("a tab with a page open shows the page and no start page", async () => {
   ).toBeNull();
 });
 
-test("Teach a Bot says what it is above the browser, and leads from the recordings to Settings, Learning", async () => {
+test("Teach a Bot says what it is above the browser, and leads from the recordings to Settings, Skills", async () => {
   state = screenState();
   openAnswer = answerFor("screen");
   const view = draw(<BrowserPage />);
@@ -661,7 +661,7 @@ test("Teach a Bot says what it is above the browser, and leads from the recordin
   const learned = await view.findByRole("link", {
     name: "See what your Bots learned",
   });
-  expect(learned.getAttribute("href")).toBe("/settings/learning");
+  expect(learned.getAttribute("href")).toBe("/settings/skills");
   expect(view.queryByRole("switch", { name: /automatically/i })).toBeNull();
 });
 
@@ -914,7 +914,7 @@ function linkNamed(view: ReturnType<typeof draw>, name: string) {
 
 // A teammate on OpenBot Desktop 0.3.3, after Stop: "I'm not sure what to do next. It doesn't tell me to go back."
 // The page said only "Saved to your Learning space: 6 actions and 6 narrated phrases."
-test("on OpenBot Desktop a saved recording says what happens next, Learn now starts Learning on the person's recordings, and See your skills opens Settings, Learning", async () => {
+test("on OpenBot Desktop a saved recording says what happens next, Learn now starts Learning on the person's recordings, and See your skills opens Settings, Skills", async () => {
   state = savedMeeting();
   const view = draw(<BrowserPage />);
   const user = userEvent.setup({ document });
@@ -923,13 +923,13 @@ test("on OpenBot Desktop a saved recording says what happens next, Learn now sta
   ).toBeTruthy();
   expect(
     view.getByText(
-      "OpenBot learns a skill from it, and you'll find it in Settings, Learning. Once it's learned, ask any Bot to do it.",
+      "OpenBot learns a skill from it, and you'll find it in Settings, Skills. Once it's learned, ask any Bot to do it.",
     ),
   ).toBeTruthy();
   expect(await view.findByText("Learning runs on its own")).toBeTruthy();
   expect(view.getByRole("button", { name: "Record another" })).toBeTruthy();
   expect(linkNamed(view, "See your skills").getAttribute("href")).toBe(
-    "/settings/learning",
+    "/settings/skills",
   );
 
   // The same run as Settings, Learning's Learn now, on the person's own recordings.
@@ -946,7 +946,7 @@ test("on OpenBot Desktop a saved recording says what happens next, Learn now sta
 
   await user.click(view.getByText("See your skills", { exact: true }));
   await waitFor(() =>
-    expect(drawnRouter?.state.location.pathname).toBe("/settings/learning"),
+    expect(drawnRouter?.state.location.pathname).toBe("/settings/skills"),
   );
 });
 
@@ -966,7 +966,7 @@ test("on OpenBot Desktop a skill learned from the saved recording says so, with 
   ).toBeTruthy();
   expect(view.getByText("Ready to review")).toBeTruthy();
   expect(linkNamed(view, "Review").getAttribute("href")).toBe(
-    "/settings/learning",
+    "/settings/skills",
   );
   // Asked about this recording, by its name and when it stopped.
   expect(skillsAsked[0]).toMatch(
@@ -1040,7 +1040,7 @@ function savedMeetingOnScreen(): BrowserApiState {
 
 // Teach a Bot became one page with Record in the browser's toolbar (#1306), and after Stop it said only "Saved “Find my
 // meeting” to your Learning space: 6 actions and 6 narrated phrases." under the toolbar.
-test("with the browser in the page, a saved recording says what happens next under the toolbar, Learn now starts Learning, and See your skills opens Settings, Learning", async () => {
+test("with the browser in the page, a saved recording says what happens next under the toolbar, Learn now starts Learning, and See your skills opens Settings, Skills", async () => {
   state = savedMeetingOnScreen();
   openAnswer = answerFor("screen");
   const view = draw(<BrowserPage />);
@@ -1050,12 +1050,12 @@ test("with the browser in the page, a saved recording says what happens next und
   );
   expect(
     await view.findByText(
-      "OpenBot learns a skill from it, and you'll find it in Settings, Learning. Once it's learned, ask any Bot to do it.",
+      "OpenBot learns a skill from it, and you'll find it in Settings, Skills. Once it's learned, ask any Bot to do it.",
     ),
   ).toBeTruthy();
   expect(await view.findByText("Learning runs on its own")).toBeTruthy();
   expect(linkNamed(view, "See your skills").getAttribute("href")).toBe(
-    "/settings/learning",
+    "/settings/skills",
   );
 
   await user.click(view.getByRole("button", { name: "Learn now" }));
@@ -1070,7 +1070,7 @@ test("with the browser in the page, a saved recording says what happens next und
 
   await user.click(view.getByText("See your skills", { exact: true }));
   await waitFor(() =>
-    expect(drawnRouter?.state.location.pathname).toBe("/settings/learning"),
+    expect(drawnRouter?.state.location.pathname).toBe("/settings/skills"),
   );
 });
 
