@@ -632,7 +632,7 @@ test("the first screen says nothing about usage data: that is the last screen's 
   const view = await renderApp();
   await view.findByRole("heading", { name: "Set up OpenBot (self-contained)" });
   expect(view.queryByText(/usage/i)).toBeNull();
-  expect(view.queryByRole("switch")).toBeNull();
+  expect(view.queryByRole("checkbox")).toBeNull();
   expect(view.queryByRole("link", { name: "What OpenBot sends" })).toBeNull();
 });
 
@@ -2120,12 +2120,13 @@ test("Continue during setup shows Finishing setup, which starts and opens OpenBo
 });
 
 /*
- * The usage-data choice is the last thing setup asks, as a switch, and it is Settings' own setting:
- * the same `usage_data` and `set_usage_data` that Settings > General > Privacy > Share usage data
- * asks. On by default, as before; Off turns usage data off there too.
+ * The usage-data choice is the last thing setup asks, as a small checkbox, and it is Settings' own
+ * setting: the same `usage_data` and `set_usage_data` that Settings > General > Privacy > Share
+ * usage data asks. Checked by default, as sharing always was; unchecked turns usage data off there
+ * too.
  */
-test("Finishing setup has a usage analytics switch, on by default, that turns Settings' usage data off", async () => {
-  setupRootConfiguration("/tmp/local-eval-usage-switch", async () =>
+test("Finishing setup has a usage-data checkbox, checked by default, that turns Settings' usage data off", async () => {
+  setupRootConfiguration("/tmp/local-eval-usage-checkbox", async () =>
     emptyConfiguration(),
   );
   // The desktop's setting, as `usage_data.rs` keeps it: shared until it is turned off.
@@ -2143,31 +2144,27 @@ test("Finishing setup has a usage analytics switch, on by default, that turns Se
   });
   const view = await renderApp();
   // Not before the last screen.
-  expect(view.queryByRole("switch")).toBeNull();
+  expect(view.queryByRole("checkbox")).toBeNull();
   await installLocal(view);
   await chooseOpenAi(view);
   await view.findByRole("heading", { name: "Finishing setup" });
-  const toggle = await view.findByRole("switch", {
-    name: "Share usage analytics",
-  });
-  expect(toggle.getAttribute("aria-checked")).toBe("true");
-  expect(
-    view.getByText(
-      /OpenBot shares how it’s used, linked to your OpenBot account\. Your conversations, files and keys are never included\./,
-    ),
-  ).toBeTruthy();
+  const box = (await view.findByRole("checkbox", {
+    name: /^Help make OpenBot better by sharing diagnostics/,
+  })) as HTMLInputElement;
+  expect(box.checked).toBe(true);
+  expect(box.labels?.[0]?.textContent).toBe(
+    "Help make OpenBot better by sharing diagnostics like errors, hangs, updates and available memory, never any content. OpenBot is built to respect your privacy.",
+  );
   expect(
     view.getByRole("link", { name: "What OpenBot sends" }).getAttribute("href"),
   ).toBe(
     "https://github.com/CopilotKit/OpenBot/blob/main/desktop/TELEMETRY.md",
   );
-  // Never called anonymous: it is linked to the account.
-  expect(view.container.textContent).not.toMatch(/anonymous/i);
+  // Never called anonymous: once signed in, it is joined to the account.
+  expect(view.container.textContent).not.toMatch(/anonymi[sz]ed|anonymous/i);
 
-  await userEvent.click(toggle);
-  await waitFor(() =>
-    expect(toggle.getAttribute("aria-checked")).toBe("false"),
-  );
+  await userEvent.click(box);
+  await waitFor(() => expect(box.checked).toBe(false));
   expect(shared).toBe(false);
   expect(
     invokeCalls.filter(
@@ -2179,7 +2176,6 @@ test("Finishing setup has a usage analytics switch, on by default, that turns Se
       args: { share: false },
     },
   ]);
-  expect(view.getByText("Off")).toBeTruthy();
 });
 
 function intelligenceCalls() {

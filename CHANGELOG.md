@@ -30,7 +30,7 @@ Desktop installation:
   backend included, that setup takes between 1 and 10 minutes depending on your internet speed,
   and that in production OpenBot for Business runs on your own infrastructure with Kubernetes, or on
   OpenBot Cloud, with a link to book a demo. The usage-data notice moved off
-  it to the last screen, Finishing setup, as a Share usage analytics switch, on by default as
+  it to the foot of the last screen, Finishing setup, as a small checkbox, checked by default as
   before: it is the same setting as Settings > General > Privacy > Share usage data. The Account
   step's heading is now "Get your free license key".
 - **OpenBot uses its own Podman machine when yours can't run it, and leaves yours as it is.** A

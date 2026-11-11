@@ -18,7 +18,7 @@
 //!
 //! And Settings' Share usage data row (`usage_data`, `set_usage_data`): the opt-out the
 //! environment variables give, as a switch kept for the next launch. Setup's last screen asks the
-//! same two (`capabilities/default.json`), so its switch and Settings' are one setting.
+//! same two (`capabilities/default.json`), so its checkbox and Settings' switch are one setting.
 //!
 //! And Quit (`quit`), for Ctrl+Q in the window on Windows (`QUIT_SHORTCUT_PAGE`), and Zoom
 //! (`zoom`), for the zoom keys no menu carries (`zoom::SHORTCUT_PAGE`). The setup and Status pages
@@ -281,7 +281,7 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 #[cfg(test)]
 mod tests {
     /// Setup's last screen switches usage data with Settings' own commands, so the setup window is
-    /// granted them: without the grant its switch would be refused, and Settings' choice and setup's
+    /// granted them: without the grant its checkbox would be refused, and Settings' choice and setup's
     /// would be two settings.
     #[test]
     fn the_setup_window_may_read_and_switch_usage_data() {
