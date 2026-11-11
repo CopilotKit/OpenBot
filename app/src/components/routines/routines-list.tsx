@@ -445,7 +445,8 @@ function GoalItem({
   onOpen,
 }: {
   goal: ResponsibilityRecord;
-  routines: readonly RoutineRecord[];
+  /** Undefined when the routines read failed: its starts are then not known. */
+  routines: readonly RoutineRecord[] | undefined;
   /** Absent on one Bot's own list. */
   botName?: string;
   onOpen: () => void;
@@ -558,7 +559,11 @@ export function RoutinesList({
   });
   const showBot = agentId === undefined;
   const sweep = routines.data?.sweep;
-  const scheduled = rows.filter((row) => row.kind === "routine").length;
+  // Every routine, including the ones folded into a goal's row: a goal on a schedule is a
+  // schedule the sweep must fire too.
+  const scheduled = (routines.data?.routines ?? []).filter(
+    (routine) => agentId === undefined || routine.agentId === agentId,
+  ).length;
   const noWorker = nothingIsFiring(sweep, scheduled);
   const confirming =
     routines.data?.routines.find((row) => row.id === confirmingId) ?? null;
@@ -631,7 +636,7 @@ export function RoutinesList({
                   }
                   goal={row.goal}
                   onOpen={() => setGoalId(row.id)}
-                  routines={row.routines}
+                  routines={routines.error ? undefined : row.routines}
                 />
               ) : (
                 <SettingRow

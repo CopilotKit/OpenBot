@@ -123,24 +123,24 @@ export function intervalLabel(minutes: number): string {
 
 /**
  * A goal's starts, in words: the events it listens for, its enabled triggers, and the schedule of
- * each routine that runs it. "When you ask" when it has none, once its triggers have loaded;
- * before then, nothing is claimed.
+ * each routine that runs it. "When you ask" when it has none, once its triggers and its routines are
+ * both known; before then, or when either couldn't be read, nothing is claimed.
  */
 export function goalStarts(
   goal: ResponsibilityRecord,
   triggerWords: readonly string[] | undefined,
-  routines: readonly RoutineRecord[],
+  routines: readonly RoutineRecord[] | undefined,
   sourceLabel: (
     source: ResponsibilityRecord["subscriptions"][number],
   ) => string,
 ): string | null {
   const starts = [
-    ...routines
+    ...(routines ?? [])
       .filter((routine) => routine.enabled)
       .map((routine) => routine.schedule),
     ...goal.subscriptions.map(sourceLabel),
     ...(triggerWords ?? []),
   ];
   if (starts.length) return starts.join(", ");
-  return triggerWords ? "When you ask" : null;
+  return triggerWords && routines ? "When you ask" : null;
 }

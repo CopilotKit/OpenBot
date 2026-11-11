@@ -104,6 +104,8 @@ function serving({
   ],
   routines = [] as RoutineRecord[],
   checkIns = [] as ReturnType<typeof checkIn>[],
+  working = true,
+  routinesFail = false,
 } = {}) {
   writes.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -118,11 +120,13 @@ function serving({
     }
     if (url === "/api/responsibilities")
       return Response.json({ responsibilities: goals });
-    if (url === "/api/routines")
+    if (url === "/api/routines") {
+      if (routinesFail) return new Response(null, { status: 500 });
       return Response.json({
         routines,
-        sweep: { lastSweptAt: new Date().toISOString(), working: true },
+        sweep: { lastSweptAt: new Date().toISOString(), working },
       });
+    }
     if (url === "/api/proactive/settings")
       return Response.json({ settings: checkIns, allowed: true });
     if (url.startsWith("/api/channels")) {
@@ -217,6 +221,26 @@ test("a routine that runs a goal is one of that goal's starts, not a row of its 
   ) as HTMLElement;
   expect(row.textContent).toContain("Every day at 08:00");
   expect(view.queryByText("Run the goal.")).toBeNull();
+});
+
+test("a stopped worker is said when the only schedule is a goal's", async () => {
+  serving({
+    working: false,
+    routines: [routine("r1", "expenses", { goalId: "g1" })],
+  });
+  const view = draw();
+  await view.findByText("Reconcile receipts");
+  expect(view.getByText("Routines aren't running.")).toBeTruthy();
+});
+
+test("a goal's row claims no start when routines couldn't be read", async () => {
+  serving({ routinesFail: true });
+  const view = draw();
+  const row = (await view.findByText("Reconcile receipts")).closest(
+    "button",
+  ) as HTMLElement;
+  await view.findByText("Couldn't load your routines. Reload the page.");
+  expect(row.textContent).not.toContain("When you ask");
 });
 
 test("New routine opens the create screen for this Bot", async () => {
