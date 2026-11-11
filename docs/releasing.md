@@ -196,7 +196,7 @@ available.", with **Update and restart** and a close button, and the setup windo
 Nothing installs without that click. Closing either hides both until a newer version comes out,
 through reloads and restarts. The click downloads the archive and verifies its signature while
 OpenBot keeps running, installs it, stops OpenBot (the local Intelligence keeps running), and
-restarts the app; that Start [moves the installation to the app's release](desktop-updates.md#the-deployment-follows-the-app).
+restarts the app; that Start [moves the installation to the app's release](desktop-updates.md#the-upgrade).
 On Windows the order differs, because Windows will not replace a running app: once the installer
 is downloaded and verified, OpenBot is stopped, the installer runs in update mode with a small
 progress window and no questions, and it starts the new version when it is done.
@@ -320,7 +320,7 @@ still holds `REPLACE_WITH_UPDATER_PUBKEY`.
 ## Which Intelligence CLI an installer carries
 
 The desktop installer bundles the Intelligence CLI and the Node runtime that runs it.
-`desktop/intelligence-cli.json` chooses both:
+`desktop/intelligence-cli.json` chooses both, for example:
 
 ```json
 {
@@ -390,8 +390,8 @@ bun desktop/scripts/cli-bundle.ts darwin arm64
 The platform is `darwin` or `win32`, and the architecture is `arm64` or `x64`. The bundle is written
 to `desktop/src-tauri/cli-bundle`.
 
-On a tree without `desktop/src-tauri/tauri.bundled-cli.conf.json`, which is `main` today, CI
-bundles nothing and the installer carries no CLI.
+CI bundles the CLI only on a tree that has `desktop/src-tauri/tauri.bundled-cli.conf.json`, as
+`main` does. On a tree without it, the installer carries no CLI.
 
 ## Internal builds
 
@@ -432,8 +432,9 @@ build, see [Windows signing](windows-signing.md).
 A CLI is bundled only on a tree that has `desktop/src-tauri/tauri.bundled-cli.conf.json`. On a
 branch without it the installer carries no CLI, and the summary says "no CLI bundled".
 
-Opening a customer installer afterwards moves the deployment to the latest release, keeping its
-data. A customer build leaves a deployment alone only when that deployment was not pinned.
+Opening a released installer afterwards moves the deployment to that app's own release at its next
+Start, keeping its data, unless the deployment is a newer release. See
+[Desktop updates](desktop-updates.md#the-upgrade).
 
 ## Release candidates and betas
 
@@ -457,6 +458,14 @@ A fix goes onto `release/X.Y` through its own pull request, and then becomes the
 Merging the release PR is the publish, the same as for a release from `main`. The publish workflow
 also runs on pushes to `release/**`, and decides from the merged pull request that a push is a
 candidate, as it does for `main`. A stable release is never cut from a release branch.
+
+A later release on a line that already shipped, such as `1.0.1` after `1.0.0`, uses the same
+branch: run **Create release PR** from `release/X.Y` with `kind` `rc` and `bump` `patch`, which
+makes `X.Y.(Z+1)-rc.1`. A run from `main` is refused, because the branch exists. Main's changes
+since the last release reach the branch first through a pull request into `release/X.Y` that
+carries main's tree at a chosen commit, so the candidate is what main's CI tested. A plain merge of
+`main` conflicts, because the merge-back was squashed (see
+[Finishing a candidate](#finishing-a-candidate)).
 
 Each candidate or beta is published as a GitHub prerelease. It is never Latest, so customers who
 check for the latest release do not see it. Its images are tagged with the version and
@@ -526,8 +535,10 @@ own choice, such as `latest`. A push to `merge-back/vX.Y.Z` is not a release.
 A PR opened by a workflow does not start CI, so push an empty commit to `merge-back/vX.Y.Z` or close
 and reopen the PR before merging. If the merge conflicts, a person resolves it.
 
-Merge the merge-back PR with a merge commit, not a squash, so main keeps the release branch's
-history and the next merge-back does not conflict.
+The repository allows squash and rebase merges only, so the merge-back PR is squashed, and `main`
+does not gain the release branch's history. A later candidate on the same branch that needs main's
+changes therefore takes them by carrying main's tree, as described under
+[Release candidates and betas](#release-candidates-and-betas), not by merging `main`.
 
 ## Download links
 

@@ -166,7 +166,8 @@ Where `OPENBOT_BROWSER_URL` is set, as `scripts/start.sh` sets it, your browser 
 
 ## What the app shows
 
-The menu is **Bots**, **Connections** and **Settings**. There is no Admin and no Capabilities page.
+The menu is **Bots**, **Routines**, **Connections** and **Settings**. There is no Admin and no
+Capabilities page.
 
 **Connections** is every way a Bot signs in to something, because adding an app and connecting your
 account are the same decision when one person makes both:
