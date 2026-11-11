@@ -9,7 +9,9 @@
 //! - this installation was set up on Docker, so it answered for OpenBot before.
 //!
 //! Anything else gets Podman (see `install::install_engine_with`). OpenBot never installs Docker
-//! Desktop itself. Linux is not handled here: Docker there is the distribution's Docker Engine.
+//! Desktop on a machine without it; one too old to run OpenBot is updated in place
+//! (`docker_desktop_update`). Linux is not handled here: Docker there is the distribution's Docker
+//! Engine.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};

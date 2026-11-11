@@ -26,7 +26,7 @@ Routines under "Apps it can use".
 every Bot all of its tools, including the write tools `create_routine`, `update_routine` and
 `delete_routine`. A Bot made later gets them the first time it runs. Routines can't be turned off, and
 its tools can't be taken from a Bot: the server answers `403`. A Bot still asks before each write
-while Always ask before making changes is on, and before `delete_routine` always (see
+while Extra vigilant is on, and before `delete_routine` always (see
 [Approvals](approvals.md)). See `server/src/plugins/personal-defaults.ts`.
 
 **Goals too.** The same app carries a goal's tools for a conversation: `create_goal`, `list_goals`,

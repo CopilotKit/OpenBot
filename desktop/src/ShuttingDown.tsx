@@ -90,6 +90,14 @@ export const QUIT_PARTS: { step: string; plan: Plan }[] = [
       stages: [{ said: "Closing OpenBot's services", until: 14 }],
     },
   },
+  // Only on a Mac where OpenBot paused the person's own Podman while it ran (`own_machine`).
+  {
+    step: "start-your-podman",
+    plan: {
+      milestones: {},
+      stages: [{ said: "Starting your Podman again", until: 25 }],
+    },
+  },
 ];
 
 /** What a Quit's journey carries from one second to the next. */
@@ -117,7 +125,8 @@ export function quitTick(
   const legs: Leg[] = [];
   for (const { step, plan } of QUIT_PARTS) {
     const row = steps.find((known) => known.step === step);
-    if (!row && step === "finish-update") continue;
+    if (!row && (step === "finish-update" || step === "start-your-podman"))
+      continue;
     if (row?.running && next.started[step] === undefined)
       next.started[step] = now;
     const since = next.started[step] ?? now;

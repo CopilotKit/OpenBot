@@ -213,6 +213,14 @@ start an OpenBot of your own (server and app), and run the binary with
 its own OpenBot. Give the run its own `HOME` as well, so nothing it does can reach an installed
 OpenBot in `~/OpenBot`. Release builds never read the variable.
 
+To try the background download of an update (`desktop/src-tauri/src/update_ready.rs`) on a test
+machine, start an **internal** build with `OPENBOT_TEST_UPDATE_FEED` set to a folder holding a
+`latest.json` (only its `version` is read) and the `desktop-images.json` of the build it names. The
+build reads that folder as its update feed: it logs `[update ready] using a test feed from <folder>`,
+offers the version, and downloads its images in the background. It installs nothing, since an
+internal build has no updater: install the next build by hand. A stable or candidate build never
+reads the variable.
+
 After it attaches `latest.json`, and marks the release Latest when it should (see below), the
 signing workflow fetches the GitHub address the way the app does, following redirects, and fails
 unless the answer is JSON whose `version` is the release version and which lists `darwin-aarch64`,
@@ -607,7 +615,7 @@ all from this address and go to GitHub only when it does not answer
 
 | Key | What | Cache-Control |
 |---|---|---|
-| `releases/<tag>/container-images.json`, `releases/<tag>/OpenBot-darwin-*.app.tar.gz` | the release's image pins and Mac updater archives (in `downloads-sync.sh`) | a year, immutable |
+| `releases/<tag>/container-images.json`, `releases/<tag>/desktop-images.json`, `releases/<tag>/OpenBot-darwin-*.app.tar.gz` | the release's image pins, the list of every image the app may pull for it (which an older app reads to get the release ready before its Update click) and the Mac updater archives (in `downloads-sync.sh`) | a year, immutable |
 | `releases/<tag>/<tag>.tar.gz` | the source archive a deployment is laid out from, as `github.com/CopilotKit/OpenBot/archive/refs/tags/<tag>.tar.gz` serves it | a year, immutable |
 | `tools/podman/v<version>/<file>`, `tools/compose/v<version>/<file>` | every Podman installer and Compose binary the release's `desktop/src-tauri/src/install.rs` pins, under the upstream file name, checked against those pins | a year, immutable |
 | `v2/` | `{}` (`application/json`), so a registry client's first request answers | five minutes |
@@ -629,7 +637,10 @@ it: they hash what they receive. A key that is not there answers 403, not 404 (C
 
 Docker Hub's images are copied the same way under `v2/docker.io/<repo>/`, official images under
 `library/` (`v2/docker.io/library/busybox`), so a client uses `downloads.copilotkit.ai/docker.io` as
-the mirror for `docker.io`. Images on any other registry are left where they are.
+the mirror for `docker.io`. quay.io's are copied under `v2/quay.io/<repo>/`: the Podman engine machine
+images, which the app downloads itself from the first setup screen as plain blobs
+(`v2/quay.io/podman/machine-os/blobs/<digest>`, then quay.io), and builds the machine from
+(`desktop/src-tauri/src/early_downloads.rs`). Images on any other registry are left where they are.
 
 Which images: every image the release's `container-images.json` pins, all of them, and every image
 `desktop-images.json` on the release names. The `image list` job of the publish workflow writes that
@@ -639,7 +650,9 @@ list with the app's own code (`desktop/src-tauri/src/release_images.rs`, run as
 every Bot the app can install (`pgvector` included), the two sign-in images, the bundled CLI's back
 end images (its runtime images at its release's tag, its pinned ones and the Kubernetes system
 images), and the cluster's own images that the host's engine pulls when k3d creates the cluster (the
-k3s node image and k3d's proxy and tools, at the digests the CLI gives k3d). A release published
+k3s node image and k3d's proxy and tools, at the digests the CLI gives k3d), and the engine machine
+images Podman's machine is built from (`quay.io/podman/machine-os`, by the digests
+`early_downloads.rs` pins). A release published
 before this carries no list, and only its `container-images.json` images are copied;
 `DOWNLOADS_IMAGES_FILE` names a list to use instead. Images
 are read with [crane](https://github.com/google/go-containerregistry) (a pinned release, checked by

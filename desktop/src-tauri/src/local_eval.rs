@@ -343,6 +343,25 @@ pub struct Stack {
     /// The update the CLI keeps on record because it did not finish, when its record names it.
     pub unfinished_update: Option<UnfinishedUpdate>,
     pub observed: Option<Observed>,
+    /// The app folders the CLI records the stack for (`appPaths`), as it reported them. Kept only
+    /// to tell OpenBot's own stack from another app's (`lists_folder`); never sent to the window.
+    #[serde(skip)]
+    pub app_paths: Vec<String>,
+}
+
+impl Stack {
+    /// Whether the CLI records this stack for `folder`, compared as real paths, as the CLI keeps
+    /// them. A folder that is not there lists nothing.
+    pub fn lists_folder(&self, folder: &std::path::Path) -> bool {
+        let Ok(folder) = folder.canonicalize() else {
+            return false;
+        };
+        self.app_paths.iter().any(|path| {
+            std::path::Path::new(path)
+                .canonicalize()
+                .is_ok_and(|path| path == folder)
+        })
+    }
 }
 
 /**
@@ -391,6 +410,91 @@ pub struct Service {
     pub name: String,
     pub phase: String,
     pub ready: bool,
+}
+
+/// One `local status` answer as the log says it while Start waits for the back end: its readiness
+/// and licence, whether the CLI's checks of the addresses below passed, and which services are not
+/// ready yet. Service names and loopback addresses only; nothing secret is in a report.
+pub fn status_said(report: &Report) -> String {
+    let name = |value: serde_json::Value| value.as_str().unwrap_or("unknown").to_string();
+    let mut said = format!(
+        "readiness {}, licence {}, checks {}",
+        name(serde_json::json!(report.readiness)),
+        name(serde_json::json!(report.licence)),
+        if report.checks_passed {
+            "passed"
+        } else {
+            "not passed"
+        }
+    );
+    if let Some(reason) = report.reason {
+        said.push_str(&format!(", reason {}", name(serde_json::json!(reason))));
+    }
+    let Some(stack) = &report.stack else {
+        said.push_str(", no stack");
+        return said;
+    };
+    if let Some(observed) = &stack.observed {
+        let waiting: Vec<String> = observed
+            .services
+            .iter()
+            .filter(|service| !service.ready)
+            .map(|service| format!("{} {}", service.name, service.phase))
+            .collect();
+        said.push_str(&format!(
+            ", services {} of {} ready",
+            observed.services.len() - waiting.len(),
+            observed.services.len()
+        ));
+        if !waiting.is_empty() {
+            said.push_str(&format!(" (not ready: {})", waiting.join(", ")));
+        }
+    }
+    said.push_str(&format!(
+        "; API {}, gateway {}, dashboard {}",
+        stack.urls.api, stack.urls.gateway, stack.urls.dashboard
+    ));
+    said
+}
+
+/// A wait for the back end nobody ended (Stop, Quit, a window reloaded) is over after this long
+/// without a status, so the next one starts its own.
+pub const WAIT_FORGOTTEN: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// The lines one `local status` answer adds to Start's wait for the back end
+/// (`logging::WaitLog`): what it answered, when that is new or a minute has passed, and that the
+/// wait ended once the back end is ready with a valid licence. The window ends a wait that gives up
+/// (`back_end_wait_ended`).
+pub fn status_waited(
+    wait: &mut Option<crate::logging::WaitLog>,
+    now: std::time::Instant,
+    answer: &Result<Report, Failure>,
+) -> Vec<String> {
+    if wait
+        .as_ref()
+        .is_some_and(|wait| wait.quiet_for(now) >= WAIT_FORGOTTEN)
+    {
+        *wait = None;
+    }
+    let waiting = wait.get_or_insert_with(|| {
+        crate::logging::WaitLog::new(
+            "the backend, `local status` until it is ready with a valid licence",
+            now,
+        )
+    });
+    let said = match answer {
+        Ok(report) => status_said(report),
+        Err(failure) => format!("the status call failed: {failure:?}"),
+    };
+    let mut lines: Vec<String> = waiting.answered(now, &said).into_iter().collect();
+    let ready = answer.as_ref().is_ok_and(|report| {
+        report.readiness == Readiness::Ready && report.licence == Licence::Valid
+    });
+    if ready {
+        lines.push(waiting.ended(now, "ready"));
+        *wait = None;
+    }
+    lines
 }
 
 /// The fixed argument list for one call. Built only from validated types.
@@ -1487,9 +1591,10 @@ fn engine_size(address: &crate::engine::Address) -> Option<(u64, u64)> {
 /**
 The engine's disk inside a container, the way the CLI measures it: `df -Pk /` in a container of an
 image the engine already has, so nothing is downloaded. An engine with no image that has a shell
-gives no answer, and disk is then not judged.
+gives no answer, and disk is then not judged. Also what `update_ready` measures before it downloads
+an update's images ahead of time.
 */
-fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
+pub fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
     let images = engine_output(
         address,
         &["image", "ls", "--quiet", "--no-trunc"],
@@ -1964,7 +2069,25 @@ fn stack(value: &Value) -> Result<Stack, Failure> {
         update_in_progress,
         unfinished_update,
         observed: observation(saved.get("observed"))?,
+        app_paths: app_paths(saved.get("appPaths")),
     })
+}
+
+/// More app folders than anyone shares one stack with is not a listing.
+const MAX_APP_PATHS: usize = 256;
+
+/// `appPaths` as `local list`, `status`, `setup` and `connect` report it: `[{path, missing}]`. Only
+/// the paths are kept. Anything else lists no folder, so a stack it describes is never OpenBot's.
+fn app_paths(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(MAX_APP_PATHS)
+        .filter_map(|path| path.get("path").and_then(Value::as_str))
+        .filter(|path| !path.is_empty() && path.len() <= 4096)
+        .map(str::to_owned)
+        .collect()
 }
 
 fn observation(value: Option<&Value>) -> Result<Option<Observed>, Failure> {
@@ -2597,8 +2720,27 @@ fn command_inheriting(
         command.current_dir(folder);
     }
     command.args(arguments);
+    if let (Some(folder), ["local", ..]) = (folder, arguments) {
+        // Absolute, as `current_dir` reads it: the CLI resolves a relative one inside the folder.
+        let folder = std::path::absolute(folder).unwrap_or_else(|_| folder.to_path_buf());
+        command.arg(APP_PATH).arg(folder);
+    }
     command
 }
+
+/**
+`--app-path <folder>`, added to every `local` call that runs in OpenBot's folder (`local setup` and
+`local connect`): the CLI acts for exactly that folder.
+
+Without it the CLI finds a folder's stack through `.copilotkit/local.json` in the folder or in any
+folder above it. Someone who once ran `copilotkit local setup` in their home folder had that stack
+resumed for `~/OpenBot`, and `local connect` wrote the home folder's `.env`, so Start found
+`~/OpenBot/.env` naming no stack it set up. With it, setup creates or resumes the stack the CLI
+records for OpenBot's folder, and connect writes OpenBot's `.env` (Intelligence
+`apps/cli/src/commands/local.ts`, in the CLI pinned since `desktop/intelligence-cli.json` named
+f5c45eb).
+*/
+pub const APP_PATH: &str = "--app-path";
 
 /// The container engine the CLI runs on, with the environment the CLI itself gets: for
 /// `local_images`, which pulls into the same k3d node the CLI pulls into.
@@ -2612,6 +2754,13 @@ fn engine_command(engine: Option<&CliEngine>) -> std::process::Command {
         crate::docker_config::owned(),
     );
     command
+}
+
+/// `engine_command` on the engine the app last named, for `update_ready`, which downloads into
+/// the back end's node as `local update` does.
+pub fn node_engine() -> impl Fn() -> std::process::Command + Send + Sync + 'static {
+    let engine = recorded_engine();
+    move || engine_command(engine.as_ref())
 }
 
 /// Only `INHERITED`, OpenBot's Docker configuration, the engines' directories on `PATH` and the
@@ -3098,8 +3247,8 @@ fn execute_child(
             if !letting_finish {
                 letting_finish = true;
                 log::warn!(
-                    "[local update] asked to stop after it began changing the back end with Helm: \
-                     letting it finish, since stopping it there leaves the back end half updated"
+                    "[local update] asked to stop after it began changing the backend with Helm: \
+                     letting it finish, since stopping it there leaves the backend half updated"
                 );
             }
         }
@@ -3238,7 +3387,7 @@ impl UpdateWatch {
         }
         if self.log.committed() && self.finishing.is_none() {
             log::info!(
-                "[local update] it is changing the back end with Helm now; Cancel and Quit let it finish"
+                "[local update] it is changing the backend with Helm now; Cancel and Quit let it finish"
             );
             self.finishing = Some(Finishing::begin());
         }
@@ -3532,7 +3681,7 @@ pub fn close_for_quit_reporting(finishing: impl FnOnce()) -> bool {
     loop {
         if update_finishing() {
             if let Some(say) = finishing.take() {
-                log::info!("[quit] letting the back end update finish before OpenBot quits");
+                log::info!("[quit] letting the backend update finish before OpenBot quits");
                 say();
             }
         } else if RUNNING.load(Ordering::SeqCst) == 0 || Instant::now() >= until {
@@ -3542,7 +3691,7 @@ pub fn close_for_quit_reporting(finishing: impl FnOnce()) -> bool {
     }
     let waited = finishing.is_none();
     if waited {
-        log::info!("[quit] the back end update ended");
+        log::info!("[quit] the backend update ended");
     }
     waited
 }
@@ -3723,7 +3872,7 @@ fn run_attempt(
 ) -> Result<Report, Failure> {
     one_at_a_time(&attempt.0, limits, |remaining| {
         // Its turn: the CLI's log from here on is this call's (`Trail`).
-        let _trail = Trail::begin(id);
+        let _trail = Trail::begin(id, action.into());
         let cli = installed()?;
         run_with(
             &cli,
@@ -3818,7 +3967,7 @@ fn update_repairing(
         return first;
     }
     log::warn!(
-        "[local update] failed; checking whether an update stopped earlier left the back end needing repair"
+        "[local update] failed; checking whether an update stopped earlier left the backend needing repair"
     );
     match repair_stack(stack) {
         Ok(repaired) if repaired.changed() => {
@@ -3846,7 +3995,7 @@ fn uncordoned(stack: &StackId, when: &str) {
         || engine_command(engine.as_ref()),
         stack.as_str(),
     ) {
-        Ok(true) => log::info!("[local update] uncordoned the back end's node {when}"),
+        Ok(true) => log::info!("[local update] uncordoned the backend's node {when}"),
         Ok(false) => {}
         Err(why) => log::info!("[local update] node not checked {when}: {why}"),
     }
@@ -3955,6 +4104,13 @@ fn cli_images_of(cli: &PinnedCli) -> Option<crate::local_images::CliImages> {
     crate::local_images::cli_images(&String::from_utf8_lossy(&bytes))
 }
 
+/// What the CLI this app runs pulls when it updates a stack (`cli_images_of`), for `update_ready`,
+/// which downloads the next release's images by the same repositories. None without a CLI whose
+/// images can be read.
+pub fn bundled_cli_images() -> Option<crate::local_images::CliImages> {
+    cli_images_of(&installed().ok()?)
+}
+
 /**
 Download `images` into `stack`'s node before the CLI pulls them. True when it downloaded, false when
 there was nothing it could do, which leaves the pull to the CLI as before: a release other than
@@ -4049,7 +4205,7 @@ fn repaired_before(stack: &StackId, saved: Stack) -> Stack {
         .is_some_and(|observed| observed.running);
     if past_first_step && running {
         log::info!(
-            "[update repair] an update is on record past its first step; checking the back end before it resumes"
+            "[update repair] an update is on record past its first step; checking the backend before it resumes"
         );
         match repair_stack(stack) {
             Ok(repaired) => log::info!("[update repair] {repaired:?}"),
@@ -4131,7 +4287,7 @@ pub fn setup_installed(
     let attempt = Attempt::register(attempt);
     one_at_a_time(&attempt.0, Limits::for_setup(), |remaining| {
         // Its turn: the CLI's log from here on is this setup's (`Trail`).
-        let _trail = Trail::begin(id);
+        let _trail = Trail::begin(id, TrailKind::Setup);
         let cli = installed()?;
         let set_up = || {
             setup_with(
@@ -4356,7 +4512,7 @@ fn forget(cli: &PinnedCli, stack: &StackId, cancel: &Cancel) -> Result<(), Failu
         return Err(Failure::InvalidStatus);
     }
     log::info!(
-        "[local setup] forgot {}, whose private files were gone; setting the back end up again",
+        "[local setup] forgot {}, whose private files were gone; setting the backend up again",
         stack.as_str()
     );
     Ok(())
@@ -4635,9 +4791,30 @@ struct Trail(String);
 
 struct Followed {
     attempt: String,
+    kind: TrailKind,
     log: crate::local_update::StepLog,
     ended: Vec<String>,
     since: Instant,
+}
+
+/// Which CLI call a trail follows, for the journey its steps belong to (`stall`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrailKind {
+    /// `local setup`.
+    Setup,
+    /// `local update`.
+    Update,
+    /// Any other call: `local start`, `stop` or `status`.
+    Other,
+}
+
+impl From<Action> for TrailKind {
+    fn from(action: Action) -> Self {
+        match action {
+            Action::Update => TrailKind::Update,
+            Action::Status | Action::Start | Action::Stop => TrailKind::Other,
+        }
+    }
 }
 
 static TRAILS: std::sync::Mutex<Vec<Followed>> = std::sync::Mutex::new(Vec::new());
@@ -4649,12 +4826,13 @@ fn trails() -> std::sync::MutexGuard<'static, Vec<Followed>> {
 }
 
 impl Trail {
-    fn begin(attempt: &str) -> Self {
+    fn begin(attempt: &str, kind: TrailKind) -> Self {
         if let Some(path) = crate::local_update::cli_log() {
             let mut held = trails();
             held.retain(|followed| followed.attempt != attempt);
             held.push(Followed {
                 attempt: attempt.to_owned(),
+                kind,
                 log: crate::local_update::StepLog::at_end_of(path),
                 ended: Vec::new(),
                 since: Instant::now(),
@@ -4685,14 +4863,46 @@ pub fn steps(attempt: &str) -> Option<Steps> {
     let followed = held
         .iter_mut()
         .find(|followed| followed.attempt == attempt)?;
-    let ended = followed.log.poll();
-    if !ended.is_empty() {
-        followed.since = Instant::now();
-        followed.ended.extend(ended);
-    }
+    followed.catch_up();
     Some(Steps {
         ended: followed.ended.clone(),
         quiet_seconds: followed.since.elapsed().as_secs(),
+    })
+}
+
+impl Followed {
+    /// Read the steps logged since the last look.
+    fn catch_up(&mut self) {
+        let ended = self.log.poll();
+        if !ended.is_empty() {
+            self.since = Instant::now();
+            self.ended.extend(ended);
+        }
+    }
+}
+
+/// The setup or update running now, as `stall` times its steps: its attempt, the steps it has
+/// finished, and when the last of them ended (or the call began).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrailNow {
+    pub kind: TrailKind,
+    pub attempt: String,
+    pub ended: Vec<String>,
+    pub since: Instant,
+}
+
+/// The `local setup` or `local update` running now, if one is.
+pub fn trail_now() -> Option<TrailNow> {
+    let mut held = trails();
+    let followed = held
+        .iter_mut()
+        .find(|followed| followed.kind != TrailKind::Other)?;
+    followed.catch_up();
+    Some(TrailNow {
+        kind: followed.kind,
+        attempt: followed.attempt.clone(),
+        ended: followed.ended.clone(),
+        since: followed.since,
     })
 }
 
@@ -5105,6 +5315,69 @@ mod tests {
         input
     }
 
+    /// Start's wait for the back end, from the CLI's own status answers: each new answer said with
+    /// what is not ready and the addresses the CLI checks, a repeat not said again, a failed call
+    /// said as one, and the wait ended once the back end is ready with a valid licence.
+    #[test]
+    fn the_back_end_wait_says_each_status_and_ends_when_ready() {
+        let start = std::time::Instant::now();
+        let at = |seconds: u64| start + std::time::Duration::from_secs(seconds);
+        let mut starting = canonical("starting", "valid", json!(null));
+        starting["stack"]["observed"]["services"] = json!([
+            { "name": "cpki-app-api", "phase": "Running", "ready": true },
+            { "name": "cpki-gateway", "phase": "Pending", "ready": false }
+        ]);
+        let starting = status(&starting).unwrap();
+        let mut wait = None;
+
+        let first = status_waited(&mut wait, at(0), &Ok(starting.clone()));
+        assert_eq!(first.len(), 1, "{first:#?}");
+        assert!(first[0].starts_with(
+            "[wait] the backend, `local status` until it is ready with a valid licence: readiness starting, licence valid"
+        ), "{first:#?}");
+        assert!(
+            first[0].contains("services 1 of 2 ready (not ready: cpki-gateway Pending)"),
+            "{first:#?}"
+        );
+        assert!(
+            first[0].contains(
+                "API http://localhost:8082, gateway ws://[::1]:4401, dashboard http://intelligence.localhost:8080"
+            ),
+            "{first:#?}"
+        );
+        assert!(!first[0].contains(SECRET), "{first:#?}");
+        assert!(status_waited(&mut wait, at(15), &Ok(starting.clone())).is_empty());
+        let failed = status_waited(&mut wait, at(30), &Err(Failure::Timeout));
+        assert!(
+            failed[0].contains("the status call failed: Timeout"),
+            "{failed:#?}"
+        );
+
+        // What the window gives up with, and the last answer it had.
+        let gave_up = wait.as_ref().unwrap().ended(
+            at(40),
+            "gave up: OpenBot didn't get ready in time. Retry to check again.",
+        );
+        assert!(gave_up.contains("after 40.0s and 3 checks"), "{gave_up}");
+        assert!(gave_up.ends_with("last answer: the status call failed: Timeout"));
+
+        let ready = status(&canonical("ready", "valid", json!(null))).unwrap();
+        let ended = status_waited(&mut wait, at(45), &Ok(ready));
+        assert!(
+            ended
+                .last()
+                .unwrap()
+                .contains(": ready after 45.0s and 4 checks"),
+            "{ended:#?}"
+        );
+        assert!(wait.is_none());
+
+        // A wait nobody ended is not carried on by the next one.
+        status_waited(&mut wait, at(400), &Ok(starting.clone()));
+        let next = status_waited(&mut wait, at(400 + 121), &Ok(starting));
+        assert!(next[0].contains("(0.0s in, check 1)"), "{next:#?}");
+    }
+
     #[test]
     fn each_readiness_state_is_read() {
         for (wire, expected) in [
@@ -5429,9 +5702,13 @@ mod tests {
         .unwrap();
         assert_eq!(report.outcome, Outcome::Blocked);
         assert_eq!(report.reason, Some(Reason::EulaAcceptanceRequired));
+        // `--app-path`: the installation folder exactly, never a folder above it with its own stack.
         assert_eq!(
             fixture.argv().unwrap(),
-            "local\nsetup\n--defer-model\n--json"
+            format!(
+                "local\nsetup\n--defer-model\n--json\n--app-path\n{}",
+                installation.display()
+            )
         );
         assert_eq!(fixture.cwd(), installation.canonicalize().unwrap());
     }
@@ -5567,7 +5844,11 @@ mod tests {
         assert_eq!(report.outcome, Outcome::Completed);
         assert_eq!(
             fixture.argv().unwrap(),
-            format!("local\nsetup\n--model-config\n{}\n--json", file.display())
+            format!(
+                "local\nsetup\n--model-config\n{}\n--json\n--app-path\n{}",
+                file.display(),
+                installation.display()
+            )
         );
         assert_eq!(fixture.cwd(), installation.canonicalize().unwrap());
 
@@ -5581,7 +5862,10 @@ mod tests {
         .unwrap();
         assert_eq!(
             fixture.argv().unwrap(),
-            "local\nsetup\n--defer-model\n--json"
+            format!(
+                "local\nsetup\n--defer-model\n--json\n--app-path\n{}",
+                installation.display()
+            )
         );
 
         for refused in [Path::new("model.json"), Path::new("-x/model.json")] {
@@ -5640,7 +5924,10 @@ mod tests {
         assert_eq!(connection.stack.unwrap().id, "local-abc123");
         assert_eq!(
             fixture.argv().unwrap(),
-            "local\nconnect\n--approve-connection\n--json"
+            format!(
+                "local\nconnect\n--approve-connection\n--json\n--app-path\n{}",
+                installation.display()
+            )
         );
         assert_eq!(fixture.cwd(), installation.canonicalize().unwrap());
     }
@@ -7242,6 +7529,34 @@ printf '%s' '{completed}'
             engine_variables(Some(&engine)).get("CONTAINER_CONNECTION"),
             Some(Some(_))
         ));
+    }
+
+    /// With the person's own machine passed over (`engine::passed_over_machine`), OpenBot runs on
+    /// its own, and the CLI is told that machine's API and connection. The machine behind Podman's
+    /// default connection, which is the person's, is never the one asked about.
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn the_cli_is_told_openbots_own_machine_and_never_the_default_one() {
+        use crate::acquire::MachineFacts;
+        use crate::engine::{Address, Engine};
+        let pipe = "npipe:////./pipe/podman-openbot";
+        let address = Address::new(Engine::Podman, Some("openbot-root".into()));
+        let mut asked = Vec::new();
+        let engine = CliEngine::of_with(&address, |connection| {
+            asked.push(connection.to_string());
+            Ok(MachineFacts {
+                rootful: Some(true),
+                api: Some(pipe.into()),
+            })
+        });
+        assert_eq!(asked, ["openbot-root"]);
+        assert!(!engine.rootless);
+        let variables = engine_variables(Some(&engine));
+        assert_eq!(variables.get("DOCKER_HOST"), Some(&Some(pipe.to_string())));
+        assert_eq!(
+            variables.get("CONTAINER_CONNECTION"),
+            Some(&Some("openbot-root".to_string()))
+        );
     }
 
     #[test]
@@ -9544,7 +9859,7 @@ fn main() {
 
         let text = crate::troubleshooting::gather(crate::troubleshooting::Sources {
             desktop: "OpenBot Desktop 1.0.0 (Built 2026-11-08 06:40 UTC from 52ea4b5)".into(),
-            failure: Some("The back end could not start.".into()),
+            failure: Some("The backend could not start.".into()),
             log_folder: Some(&logs),
             home: Some(&home),
             engine: engine_in_use(),
@@ -9553,7 +9868,7 @@ fn main() {
         // `~/.copilotkit/cli.log`, with Windows' separators on Windows.
         let cli_log = format!("~{0}.copilotkit{0}cli.log", std::path::MAIN_SEPARATOR);
         for expected in [
-            "Failed: The back end could not start.",
+            "Failed: The backend could not start.",
             "Container engine: docker 28.5.1. 10 CPUs and 20.5 GiB of memory, 0 GiB free of 1006.8 GiB in a container; short of disk (nearly full).",
             "$ docker system df\nTYPE",
             "Images          14        3         18.2GB    12.1GB (66%)",

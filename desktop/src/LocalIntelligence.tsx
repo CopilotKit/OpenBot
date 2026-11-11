@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { CopilotKitLogo } from "./CopilotKitLogo";
 import { CopilotKitSignInWait } from "./CopilotKitSignInWait";
 import { ExternalLink } from "./ExternalLink";
 import {
+  backEndWaitEnded,
   cancelLocalEval,
   chatGate,
   connectLocalEval,
@@ -30,6 +30,7 @@ import {
   type Problem,
   TroubleshootingLogs,
 } from "./Problem";
+import { Lockup } from "./Sections";
 import {
   type Downloads,
   type Progress,
@@ -510,6 +511,7 @@ export function useLocalSequence({
     };
     const stuck = (found: LocalReport) => {
       if (generation.current === token) {
+        backEndWaitEnded(said(found));
         update({ blocked: { said: said(found), reason: found.reason } });
       }
       return null;
@@ -610,12 +612,11 @@ export function useLocalSequence({
         return stuck(found);
       }
       if (tries >= pollDelays.length) {
-        update({
-          blocked: {
-            said: "OpenBot didn't get ready in time. Retry to check again.",
-            reason: null,
-          },
-        });
+        const timedOut =
+          "OpenBot didn't get ready in time. Retry to check again.";
+        // The log says how long it waited and what the back end last said (`back_end_wait_ended`).
+        backEndWaitEnded(timedOut);
+        update({ blocked: { said: timedOut, reason: null } });
         return null;
       }
       if (!(await pause(pollDelays[tries], token))) return null;
@@ -1002,8 +1003,8 @@ export function LocalStatus({
 }
 
 /**
- * What the person does when local setup stops for them, in the window where it stopped: sign in to
- * CopilotKit, or read and accept the evaluation agreement. Setup then carries on by itself.
+ * What the person does when local setup stops for them, in the window where it stopped: sign in,
+ * or read and accept the evaluation agreement. Setup then carries on by itself.
  *
  * The agreement is the person's to accept. They read it at its own address and click Accept here;
  * that click is passed to the CLI as the version they accepted (a product decision of 2026-10-22).
@@ -1081,18 +1082,18 @@ function SignInToCopilotKit({ onSignedIn }: { onSignedIn: () => void }) {
 
   return (
     <div className="local-needs">
-      <CopilotKitLogo />
-      <p>OpenBot needs your CopilotKit account to finish setting up.</p>
+      <Lockup byCopilotKit />
+      <p>Sign in to finish setting up OpenBot.</p>
       {waiting ? (
         <CopilotKitSignInWait
           attempt={waiting}
-          waiting="Finish signing in in your browser…"
+          waiting="Finish signing in to OpenBot in your browser…"
           onCancel={cancel}
         />
       ) : (
         <div className="row">
           <button type="button" onClick={signIn}>
-            Sign in to CopilotKit
+            Sign in to OpenBot
           </button>
         </div>
       )}
@@ -1159,8 +1160,8 @@ function AcceptTerms({
     <div className="local-needs">
       {/* The organization and the agreement's version are the log's, as on the Account step. */}
       <p>
-        To run OpenBot on this computer, accept the CopilotKit license
-        agreement.
+        To run OpenBot on this computer, accept the OpenBot by CopilotKit
+        license agreement.
       </p>
       <p className="footnote">
         <ExternalLink href={terms.url}>Read the license agreement</ExternalLink>

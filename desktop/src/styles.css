@@ -797,27 +797,6 @@ button.sign-in-with {
   height: 100%;
 }
 
-/*
- * CopilotKit's logotype, leading the screens that sign in to a CopilotKit account. 30px, so the
- * drawn logotype clears the brand's 28px minimum, with half its height kept clear below it.
- */
-.copilotkit-logo {
-  display: block;
-  align-self: flex-start;
-  margin: 0 0 16px;
-}
-
-.copilotkit-logo img {
-  display: block;
-  height: 30px;
-  width: auto;
-}
-
-/* Under a card's heading, the same half-height kept clear above it as below. */
-.local-needs .copilotkit-logo {
-  margin-top: 12px;
-}
-
 /* The app's tabs: a muted track with the active tab raised in the card colour. */
 .segmented {
   display: inline-flex;
@@ -1202,13 +1181,21 @@ a:hover {
 }
 
 /*
- * The background install's row, last in the step (`BehindSlot`). Its height is held for the row's
- * tallest form, a line of three rows or a download bar under two, so the row coming, changing or
- * going never moves anything or grows the window.
+ * The background install's row, last in the step (`BehindSlot`). ONE height, its tallest form's
+ * (its name, one line, and a download bar with its bytes under them), whatever it says: a plain
+ * line, a download, unpacking, waiting for you, installed. Each line is one line, cut short with
+ * an ellipsis rather than wrapping onto a second. On Windows F, Continue, pinned in the same foot,
+ * moved up 14 px and back with no input as the row went from a plain line (118 px) to a download
+ * (132 px) and back. A card that says setup stopped is the one thing that may make it taller.
  */
 .behind-slot {
   margin-top: 24px;
-  min-height: 118px;
+  height: 132px;
+}
+
+.behind-slot:has(> .local-alert) {
+  height: auto;
+  min-height: 132px;
 }
 
 .behind-slot > .steps {
@@ -1273,6 +1260,30 @@ a:hover {
   font-size: var(--text-sm);
   line-height: 20px;
   font-variant-numeric: tabular-nums;
+}
+
+/* The background row's lines stay on one line each (see `.behind-slot`). After the rules they cut. */
+.behind-slot .step-label,
+.behind-slot .step .detail,
+.behind-slot .step .downloads > span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/*
+ * A plain line, with no download under it, may take up to three lines: the row is then 108 px of
+ * the 132 held, so it still never moves anything. Cut at one line, "The Podman on this computer is
+ * too old for OpenBot, so OpenBot is updating it." read "...so OpenBot is u…"; cut at two, Docker
+ * Desktop's hand-off read "...OpenBot comes back when Docker is…". The longest line that reaches
+ * this row is three lines at 1016x839 and at 720x560 (`setupLayout.browser.test.ts`).
+ */
+.behind-slot .step:not(:has(> .downloads)) .detail {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  white-space: normal;
 }
 
 .downloads progress {
@@ -1435,6 +1446,20 @@ a:hover {
   margin-bottom: 28px;
 }
 
+/*
+ * The trademark sign on OpenBot's name, as open.bot sets it and as the app's `Trademark` does: a
+ * small superscript in the name's own colour, its top level with the capitals, that leaves the line
+ * where it was. Never under 8px, so it still reads beside the header's 16px name.
+ */
+.lockup .trademark {
+  vertical-align: 0.4em;
+  letter-spacing: 0;
+  margin-left: 0.1em;
+  font-size: max(0.45em, 8px);
+  font-weight: 500;
+  line-height: 0;
+}
+
 .lockup span {
   font-size: var(--text-lg);
   line-height: 22px;
@@ -1442,22 +1467,41 @@ a:hover {
   letter-spacing: -0.015em;
 }
 
-/* The lockup at the top of every setup step: smaller, as the app's sidebar header sets it. */
-.setup-header .lockup {
+/*
+ * The lockup at the top of every setup step, and on the sign-in a stopped setup asks for: smaller,
+ * as the app's sidebar header sets it.
+ */
+.setup-header .lockup,
+.local-needs .lockup {
   margin: 0;
   gap: 8px;
 }
 
-.setup-header .orb {
+.setup-header .orb,
+.local-needs .orb {
   width: 22px;
   height: 22px;
 }
 
-.setup-header .lockup span {
+.setup-header .lockup span,
+.local-needs .lockup span {
   font-size: var(--text-base);
   line-height: 20px;
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+
+/* "by CopilotKit" beside the name: the same size, quieter, so OpenBot still leads. */
+.setup-header .lockup span.lockup-by,
+.local-needs .lockup span.lockup-by {
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin-left: -2px;
+}
+
+/* On the sign-in card, under its heading: the same space above it as below. */
+.local-needs .lockup {
+  margin: 12px 0;
 }
 
 /* The developer half of a failure: present, and never the headline. */
@@ -1507,6 +1551,27 @@ a:hover {
 
 .status-line .step-spinner {
   flex: none;
+}
+
+/*
+ * On the first screen the line keeps the height of its tallest state, the line, the bar and the
+ * bytes under it, whatever it says: the usage-data text under it never moves (`EarlyDownloadsLine`).
+ * Its own box, so the line's top margin is inside the height it holds.
+ */
+.early-downloads.first-screen {
+  display: flow-root;
+  min-height: 72px;
+}
+
+/* The downloads the first screen started: their line, and its bar under it. */
+.early-downloads .downloads {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* The Status window: one card per part, each with its memory and its actions. */
@@ -1729,6 +1794,14 @@ main > .sheet > .step-footer > .row:first-child {
 
 main > .sheet > .step-footer > .row:first-child:empty {
   padding-top: 0;
+}
+
+/*
+ * With its own actions above the foot, as Cancel is while the account step signs in, the foot's
+ * empty row still holds the card's one gap above the background row. It sat flush against Cancel.
+ */
+main > .sheet > .step-footer > .row:first-child:empty:has(+ .behind-slot) {
+  padding-top: 24px;
 }
 
 @media (max-width: 580px) {

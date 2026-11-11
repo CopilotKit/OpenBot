@@ -156,7 +156,7 @@ test("specific wording and actions", () => {
     said(report({ outcome: "blocked", reason: "authentication-required" })),
   ).toEqual({
     state: "blocked",
-    said: "Sign in to CopilotKit.",
+    said: "Sign in to OpenBot.",
     action: "sign-in",
   });
   expect(said("cancelled").action).toBe("retry");

@@ -1,11 +1,15 @@
-import { DOESNT_UPDATE_ITSELF } from "@openbot/shared/desktop-updates";
+import {
+  DOESNT_UPDATE_ITSELF,
+  type UpdateReadiness,
+  updateOffered,
+} from "@openbot/shared/desktop-updates";
 import {
   IconBox,
-  IconBrandDocker,
   IconCpu,
   IconFileText,
   IconFolder,
   IconInfoCircle,
+  IconServer,
   IconSparkles,
   IconTerminal2,
 } from "@tabler/icons-react";
@@ -68,6 +72,10 @@ const READINESS: Record<IntelligenceReadiness, string> = {
 /**
  * What OpenBot runs on this computer, what each part costs in memory, and Restart and Stop for each.
  *
+ * In the words the desktop app's Status window uses for the same parts: the local Intelligence is
+ * "OpenBot's services", and Docker or Podman is "Software OpenBot runs on". Their technical names,
+ * the stack id and the build are in Copy diagnostics, for support.
+ *
  * Only inside OpenBot Desktop: the desktop app is what can see and control the containers, Docker and
  * the local Intelligence stack. In a browser there is nothing here to read.
  */
@@ -75,7 +83,7 @@ function ComputerPage() {
   const inDesktop = desktopShell() !== null;
   return (
     <PageShell
-      description="What OpenBot runs on this computer and how much memory it uses. Restart a part when it gets stuck."
+      description="See what OpenBot runs on this computer and how much memory it uses. Restart a part when it gets stuck."
       title="This computer"
     >
       {inDesktop ? (
@@ -153,11 +161,13 @@ function OpenBotSection({
                   : [
                       // Nothing until the containers are measured: a total of the processes alone
                       // would be a smaller number that then jumps.
-                      !measured
-                        ? null
-                        : memory !== null
-                          ? `${formatBytes(memory)} in use`
-                          : "Memory could not be measured.",
+                      !status.openbotRunning
+                        ? "Not using memory while stopped."
+                        : !measured
+                          ? null
+                          : memory !== null
+                            ? `${formatBytes(memory)} in use`
+                            : "Memory could not be measured.",
                       // Restart is the desktop app's supervisor bringing its own processes back.
                       status.openbotRunning && !status.openbotHeld
                         ? "Started before the desktop app last opened; Stop it and start again to restart."
@@ -223,8 +233,8 @@ function IntelligenceSection({
   const memory = totalMemory(status.intelligenceContainers);
   return (
     <PageSection
-      description="Keeps your Bots' conversations and skills. OpenBot uses it while it runs."
-      title="Back end"
+      description="These keep your Bots' conversations and skills. OpenBot needs them while it runs."
+      title="OpenBot's services"
     >
       <PageRows>
         <Item size="sm">
@@ -325,12 +335,17 @@ function MachineSection({
       <PageRows>
         <Item size="sm">
           <RowMark>
-            <IconBrandDocker className="size-4" />
+            <IconServer className="size-4" />
           </RowMark>
           <ItemContent>
-            <ItemTitle>
-              {status.engine === "podman" ? "Podman" : "Docker"}
-            </ItemTitle>
+            {/* Docker or Podman, said as setup says it. Which one is in Copy diagnostics. */}
+            <ItemTitle>Software OpenBot runs on</ItemTitle>
+            {!status.engine && (
+              <ItemDescription className="line-clamp-none">
+                OpenBot needs this to run. If you use Docker Desktop, open it
+                and wait for it to start.
+              </ItemDescription>
+            )}
           </ItemContent>
           <ItemActions>
             <span className="text-muted-foreground text-sm">
@@ -413,15 +428,24 @@ function LogsRow({ folder }: { folder: string }) {
  *
  * A build that never updates itself (internal, candidate, or without the updater) says so up front
  * in the setup window's words, with no button: the tray and the menus don't offer the check either.
+ *
+ * A newer version found says how ready it is, as the banner does: downloading in the background
+ * while this version keeps running, then ready to install in a few minutes.
  */
 function VersionRow({ status }: { status: DesktopStatus }) {
   const check = useMutation(checkAppUpdateMutationOptions(queryClient));
   const install = useMutation(installAppUpdateMutationOptions(queryClient));
   // The download's progress, asked twice a second from the click on, as the banner asks once it
-  // sees an install under way.
+  // sees an install under way; and every five seconds while the new version downloads in the
+  // background, so its share moves.
   const offer = useQuery({
     ...desktopAppUpdateQueryOptions(),
-    refetchInterval: install.isPending ? 500 : false,
+    refetchInterval: (query) =>
+      install.isPending
+        ? 500
+        : query.state.data?.ready?.state === "preparing"
+          ? 5_000
+          : false,
   });
   const progress = offer.data?.installing ?? null;
   const installing = install.isPending || progress !== null;
@@ -435,10 +459,8 @@ function VersionRow({ status }: { status: DesktopStatus }) {
         <IconInfoCircle className="size-4" />
       </RowMark>
       <ItemContent>
+        {/* The build it was made from is for support, in Copy diagnostics. */}
         <ItemTitle>Version {status.version}</ItemTitle>
-        <ItemDescription className="line-clamp-none">
-          {status.build}
-        </ItemDescription>
         {!updatesItself && (
           <ItemDescription className="line-clamp-none text-foreground">
             {DOESNT_UPDATE_ITSELF}
@@ -449,7 +471,7 @@ function VersionRow({ status }: { status: DesktopStatus }) {
             className="line-clamp-none text-foreground"
             role="status"
           >
-            {checked(found)}
+            {checked(found, offer.data?.ready)}
           </ItemDescription>
         )}
         {check.error && (
@@ -495,11 +517,17 @@ function VersionRow({ status }: { status: DesktopStatus }) {
   );
 }
 
-/** What a check found, in a sentence. */
-function checked(found: DesktopAppUpdateCheck): string {
+/**
+ * What a check found, in a sentence. A newer version says how ready it is now (`ready`, from the
+ * app's offer, which moves on after the check), or as the check found it.
+ */
+function checked(
+  found: DesktopAppUpdateCheck,
+  ready?: UpdateReadiness | null,
+): string {
   switch (found.found) {
     case "available":
-      return `OpenBot ${found.version} is available.`;
+      return updateOffered(found.version, ready ?? found.ready);
     case "upToDate":
       return `OpenBot ${found.current} is up to date.`;
     case "installing":
@@ -540,7 +568,9 @@ function PartRows({
         </ItemContent>
         <ItemActions>
           <span className="text-muted-foreground text-sm tabular-nums">
-            {part.memoryBytes === null ? "—" : formatBytes(part.memoryBytes)}
+            {part.memoryBytes === null
+              ? "Not measured"
+              : formatBytes(part.memoryBytes)}
           </span>
         </ItemActions>
       </Item>

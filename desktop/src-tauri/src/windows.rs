@@ -1005,6 +1005,42 @@ pub fn drive_of(path: &str) -> Option<String> {
 #[cfg(target_os = "windows")]
 const LXSS: &str = r"Software\Microsoft\Windows\CurrentVersion\Lxss";
 
+/// WSL's note, under `LXSS`, that this person has had its welcome window: a DWORD, 1 once shown.
+#[cfg(target_os = "windows")]
+const WSL_WELCOME_SHOWN: &str = "OOBEComplete";
+
+/**
+Keep WSL's own "Welcome to Windows Subsystem for Linux" window from opening when Podman makes
+OpenBot's machine.
+
+WSL's service opens that window (`wslsettings.exe`, `wsl-settings://oobe`) when a person registers
+a distribution, unless `OOBEComplete` under their own `HKCU\...\Lxss` key is set or they already
+had another distribution (`LxssUserSessionImpl::_LaunchOOBEIfNeeded` in microsoft/WSL).
+`podman machine init` registers one through `wsl --import`, so on a computer that has never had a
+distribution the window opens in the middle of OpenBot's setup. Nothing on the command line stops
+it: `--import` turns off only the distribution's own first run, `wsl --install --no-launch` is about
+starting a distribution after installing one, and `.wslconfig` has no such key. Setting the value
+is what the WSL team gives as the way to stop the window (microsoft/WSL#13223), and Microsoft's
+WindowsDeveloperConfig sets it for the same reason.
+
+The value is the person's own, so it is written here, in their session, just before the machine is
+made. Not in the elevated `ENABLE_WSL`, which runs as whoever approved the prompt. Best effort: a
+value that cannot be written costs only the window.
+*/
+pub fn skip_wsl_welcome() {
+    #[cfg(target_os = "windows")]
+    if let Err(error) = skip_wsl_welcome_in(LXSS) {
+        log::warn!("[wsl] could not turn off WSL's welcome window: {error}");
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn skip_wsl_welcome_in(registry: &str) -> windows_registry::Result<()> {
+    windows_registry::CURRENT_USER
+        .create(registry)?
+        .set_u32(WSL_WELCOME_SHOWN, 1)
+}
+
 #[cfg(target_os = "windows")]
 fn machine_drive_in(registry: &str, distribution: &str) -> Option<MachineDrive> {
     let folder = distribution_folder(registry, distribution)?;
@@ -1032,7 +1068,7 @@ fn distribution_folder(registry: &str, distribution: &str) -> Option<String> {
 
 /// The bytes free to this account on the volume that holds `folder`.
 #[cfg(target_os = "windows")]
-fn free_space(folder: &str) -> Option<u64> {
+pub(crate) fn free_space(folder: &str) -> Option<u64> {
     use std::os::windows::ffi::OsStrExt;
     let folder = folder.strip_prefix(r"\\?\").unwrap_or(folder);
     let wide: Vec<u16> = std::ffi::OsStr::new(folder)
@@ -1115,6 +1151,37 @@ mod tests {
         assert_eq!(found.drive, drive_of(&folder.display().to_string()));
         assert!(found.free > 0, "{found:?}");
         assert_eq!(missing, None);
+    }
+
+    /// WSL reads `OOBEComplete` as a DWORD under the person's own Lxss key, and opens its welcome
+    /// window while it is missing or 0 (`LXSS_REGISTRY_PATH`, `LXSS_OOBE_COMPLETE_NAME` in
+    /// microsoft/WSL's wslservice.idl). Written here under a key of this test's own, from missing
+    /// and from 0, in the person's real hive.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn the_wsl_welcome_window_is_marked_shown_where_wsl_reads_it() {
+        assert_eq!(LXSS, r"Software\Microsoft\Windows\CurrentVersion\Lxss");
+        assert_eq!(WSL_WELCOME_SHOWN, "OOBEComplete");
+
+        let registry = format!(r"Software\OpenBot\Tests\LxssWelcome-{}", std::process::id());
+        let fresh = skip_wsl_welcome_in(&registry);
+        let after_fresh = windows_registry::CURRENT_USER
+            .open(&registry)
+            .and_then(|key| key.get_u32(WSL_WELCOME_SHOWN));
+        let reset = windows_registry::CURRENT_USER
+            .create(&registry)
+            .and_then(|key| key.set_u32(WSL_WELCOME_SHOWN, 0));
+        let again = skip_wsl_welcome_in(&registry);
+        let after_reset = windows_registry::CURRENT_USER
+            .open(&registry)
+            .and_then(|key| key.get_u32(WSL_WELCOME_SHOWN));
+        let _ = windows_registry::CURRENT_USER.remove_tree(&registry);
+
+        fresh.expect("the value was written to a key that did not exist");
+        assert_eq!(after_fresh.expect("the value reads back as a DWORD"), 1);
+        reset.expect("the test set the value back to 0");
+        again.expect("the value was written over 0");
+        assert_eq!(after_reset.expect("the value reads back as a DWORD"), 1);
     }
 
     const PROBE_OUTPUTS: [&str; 6] = [

@@ -56,7 +56,7 @@ fn main() {
                     "check_update",
                     "dismiss_update",
                     "install_update",
-                    // Narration's speech recognition, on this computer. See `src/speech.rs`.
+                    // Dictation's and narration's speech recognition, on this computer. See `src/speech.rs`.
                     "speech_available",
                     "speech_start",
                     "speech_stop",

@@ -508,6 +508,15 @@ export async function wakeEngine(root: string): Promise<void> {
   await invoke("wake_engine", { root });
 }
 
+/**
+ * The wait for the back end to report ready ended without it, and why, in the sentence the window
+ * shows. The log then says how long it waited and what the last status was (`back_end_wait_ended`).
+ * Never fails the step it is about.
+ */
+export function backEndWaitEnded(why: string): void {
+  invoke("back_end_wait_ended", { why }).catch(() => {});
+}
+
 /** Whether the OpenBot app's page may offer the back end dashboard for `root`. */
 export function offerLocalIntelligence(
   root: string,
@@ -600,7 +609,7 @@ export function licenceExpiresSoon(
 }
 
 /** How main.rs starts an Intelligence stop failure (`INTELLIGENCE_STOP_FAILED`). */
-export const intelligenceStopFailed = "Back end stop failed: ";
+export const intelligenceStopFailed = "Backend stop failed: ";
 
 /**
  * Splits a Stop failure into OpenBot's own lines and the local Intelligence stack's. OpenBot has

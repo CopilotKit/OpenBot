@@ -288,23 +288,47 @@ pub fn machine_exists() -> Result<bool, String> {
 /// `--rootful`, for local Intelligence: see the module comment.
 ///
 /// AN EXISTING MACHINE IS NEVER SWITCHED TO ROOTFUL, OURS INCLUDED. `podman machine set --rootful`
-/// would do it, on a stopped machine, which is the person's to stop. A rootless machine keeps its
-/// containers and volumes in the rootless engine's storage, and the rootful engine in the same VM
-/// does not see them. Releases up to 0.2.0 created this machine rootless, so "ours" is not
-/// "empty". A rootless machine is left as it is and OpenBot keeps running on it; local
-/// Intelligence then declines to start there with a sentence that names the switch (see
-/// `local_eval::Failure::RootlessPodman`). After the switch OpenBot stays in the rootless storage
-/// its database is in (see `connection_keeping_openbot`), and Intelligence runs on the rootful
-/// engine of the same machine.
-pub fn create_machine(cpus: u32, memory_mib: u32, disk_gib: u32) -> StepOutcome {
-    create_machine_with(cpus, memory_mib, disk_gib, machine_exists, podman)
+/// would do it, on a stopped machine, which is the person's to stop. A machine of the person's own
+/// that OpenBot can't run on is passed over instead, and this one made beside it (see
+/// `own_machine`). A rootless machine keeps its containers and volumes in the rootless engine's
+/// storage, and the rootful engine in the same VM does not see them. Releases up to 0.2.0 created
+/// this machine rootless, so "ours" is not "empty". Ours, made rootless, is left as it is and
+/// OpenBot keeps running on it; local Intelligence then declines to start there with a sentence
+/// that names the switch (see `local_eval::Failure::RootlessPodman`). After the switch OpenBot
+/// stays in the rootless storage its database is in (see `connection_keeping_openbot`), and
+/// Intelligence runs on the rootful engine of the same machine.
+///
+/// `image` is the machine image already downloaded (`early_downloads`), which Podman builds the
+/// machine from instead of pulling its own from quay.io: `--image` takes a local path, and unpacks a
+/// compressed one itself. `None` leaves the pull to Podman, as before.
+///
+/// On Windows, `machine init` registers a WSL distribution, and the first one a person registers
+/// opens WSL's own welcome window. `before_init` turns that window off first: see
+/// `windows::skip_wsl_welcome`.
+pub fn create_machine(
+    cpus: u32,
+    memory_mib: u32,
+    disk_gib: u32,
+    image: Option<&Path>,
+) -> StepOutcome {
+    create_machine_with(
+        cpus,
+        memory_mib,
+        disk_gib,
+        image,
+        machine_exists,
+        crate::windows::skip_wsl_welcome,
+        podman,
+    )
 }
 
 fn create_machine_with(
     cpus: u32,
     memory_mib: u32,
     disk_gib: u32,
+    image: Option<&Path>,
     exists: impl FnOnce() -> Result<bool, String>,
+    before_init: impl FnOnce(),
     mut run: impl FnMut(&[&str]) -> Result<String, String>,
 ) -> StepOutcome {
     match exists() {
@@ -314,8 +338,12 @@ fn create_machine_with(
         Ok(false) => {}
         Err(error) => return StepOutcome::stopped(Step::CreateMachine, &error),
     }
-    let args = create_machine_args(cpus, memory_mib, disk_gib, cfg!(target_os = "windows"));
+    let mut args = create_machine_args(cpus, memory_mib, disk_gib, cfg!(target_os = "windows"));
+    if let Some(image) = image {
+        args.extend(["--image".to_string(), image.to_string_lossy().into_owned()]);
+    }
     let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+    before_init();
     match run(&refs) {
         Ok(_) => StepOutcome::went(Step::CreateMachine, format!("{MACHINE} created.")),
         Err(error) => StepOutcome::stopped(Step::CreateMachine, &error),
@@ -523,15 +551,34 @@ fn rootful_host_gateway_config_script(ip: Ipv4Addr) -> String {
     )
 }
 
-fn start_machine_with(
+/**
+The named pipe Docker's clients use by default on Windows, `\\.\pipe\docker_engine`.
+
+Docker Desktop serves it, and so does the first Podman machine to start while it is free:
+`launchWinProxy` (Podman 6.1.1, `pkg/machine/machine_windows.go`) hands it to that machine's
+`win-sshproxy` whenever `PipeNameAvailable("docker_engine", 250ms)` finds no pipe by that name, and
+no setting turns that off. OpenBot's machine runs beside the person's on Windows (see
+`own_machine`). On a live Windows run it started first after a Podman update and took the pipe, so
+the person's Docker clients reached OpenBot's machine, and Docker Desktop would have found its pipe
+taken. So the name is held while OpenBot's machine starts, and Podman gives OpenBot's machine its
+own pipe only, `\\.\pipe\podman-openbot`, the one OpenBot uses (`MachineFacts::api`).
+*/
+pub const DOCKER_PIPE: &str = "docker_engine";
+
+fn start_machine_with<H>(
     mut run: impl FnMut(&[&str]) -> Result<String, String>,
     target_is_windows: bool,
+    hold_docker_pipe: impl FnOnce() -> H,
 ) -> StepOutcome {
     let rootful = match prepare_user_mode_networking_before_start(&mut run, target_is_windows) {
         Ok(networking) => networking.is_some_and(|networking| networking.rootful),
         Err(error) => return StepOutcome::stopped(Step::StartMachine, &error),
     };
-    let started = match run(&["machine", "start", MACHINE]) {
+    // Held only for the start itself, then let go for Docker Desktop or the person's own machine.
+    let held = target_is_windows.then(hold_docker_pipe);
+    let started = run(&["machine", "start", MACHINE]);
+    drop(held);
+    let started = match started {
         Ok(_) => format!("{MACHINE} started."),
         Err(error) if error.contains("already running") => {
             format!("{MACHINE} was already running.")
@@ -545,7 +592,68 @@ fn start_machine_with(
 }
 
 pub fn start_machine() -> StepOutcome {
-    start_machine_with(podman, cfg!(target_os = "windows"))
+    start_machine_with(podman, cfg!(target_os = "windows"), || {
+        let held = hold_pipe_name(DOCKER_PIPE);
+        log::info!(
+            "[engine] {DOCKER_PIPE} {} while {MACHINE} starts",
+            if held.is_some() {
+                "held, so Podman gives it to no machine,"
+            } else {
+                "already served by another program"
+            }
+        );
+        held
+    })
+}
+
+/// A named pipe this process holds by name, and lets go of when dropped.
+#[cfg(windows)]
+pub struct HeldPipe(windows::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl Drop for HeldPipe {
+    fn drop(&mut self) {
+        // SAFETY: the handle is the pipe `hold_pipe_name` created, closed once, here.
+        unsafe {
+            let _ = windows::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+
+/// Hold `\\.\pipe\<name>` by creating it, or None when something already serves that name.
+///
+/// One instance, created as the first one, so it is never a second instance of somebody else's
+/// pipe. Nothing ever connects to it on purpose: a client that tries is turned away once it closes,
+/// and the name is free again the moment this is dropped.
+#[cfg(windows)]
+pub fn hold_pipe_name(name: &str) -> Option<HeldPipe> {
+    use windows::core::HSTRING;
+    use windows::Win32::Storage::FileSystem::{FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX};
+    use windows::Win32::System::Pipes::{
+        CreateNamedPipeW, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
+    };
+    let path = HSTRING::from(format!(r"\\.\pipe\{name}"));
+    // SAFETY: a plain call with a valid wide string and no security attributes; the handle is
+    // checked before it is kept.
+    let handle = unsafe {
+        CreateNamedPipeW(
+            &path,
+            PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+            PIPE_TYPE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+            1,
+            0,
+            0,
+            0,
+            None,
+        )
+    };
+    (!handle.is_invalid()).then_some(HeldPipe(handle))
+}
+
+/// Named pipes are Windows'. Nothing to hold elsewhere.
+#[cfg(not(windows))]
+pub fn hold_pipe_name(_name: &str) -> Option<()> {
+    None
 }
 
 /// Turn Podman's own words into an instruction, where we know one.
@@ -695,6 +803,311 @@ pub fn download_dir(cache: &Path) -> std::path::PathBuf {
     cache.join("openbot-engine")
 }
 
+/*
+ * A MACHINE WHOSE API HAS GONE, AND HOW IT COMES BACK.
+ *
+ * `podman` reaches a machine over SSH. Compose does not: `podman compose` sets `DOCKER_HOST` to the
+ * machine's own Docker API, the named pipe on Windows and the socket on macOS that `machine inspect`
+ * names (Podman's `cmd/podman/compose.go`, `composeDockerHost`, and `getMachineConn`, which ends in
+ * `extractConnectionString`). So a machine can answer `podman` while every pull and every Compose
+ * call fails, which is what a live Windows run found: Podman's 6.1.1 MSI, run over 5.8.9, stopped
+ * the person's own machine's `win-sshproxy.exe` and left the machine running. Pulls then failed at
+ * "failed to connect to the docker API at npipe:////./pipe/podman-machine-default".
+ *
+ * Nothing but `podman machine start` starts that proxy (`WSLStubber.PostStartNetworking`, which
+ * calls `machine.LaunchWinProxy`), and a machine that is already running refuses to start ("unable to
+ * start: already running", `shim.Start`). `machine stop` carries on past a proxy that is already gone
+ * (`WSLStubber.StopVM` only warns). So the way back is to stop the machine and start it again. On a
+ * Mac the API socket is `gvproxy`'s, which `machine start` starts in the same way.
+ *
+ * Stopping a machine stops the containers in it, the person's own included. The ones that were
+ * running are started again with it, so the machine comes back as it was.
+ */
+
+/// The machines running now, by name: OpenBot's and the person's own alike.
+pub fn running_machines() -> Result<Vec<String>, String> {
+    running_in(&podman(&["machine", "list", "--format", "json"])?)
+}
+
+pub(crate) fn running_in(listing: &str) -> Result<Vec<String>, String> {
+    #[derive(Deserialize)]
+    struct Listed {
+        #[serde(rename = "Name")]
+        name: String,
+        #[serde(rename = "Running", default)]
+        running: bool,
+    }
+    let machines: Vec<Listed> = serde_json::from_str(listing).map_err(|error| {
+        format!("could not read podman machine list JSON: {error}; stdout: {listing}")
+    })?;
+    Ok(machines
+        .into_iter()
+        .filter(|machine| machine.running)
+        .map(|machine| machine.name)
+        .collect())
+}
+
+/// The containers running in a machine, by connection, to start again after it restarts.
+///
+/// Both of its connections: a machine has a rootless engine and a rootful one (see
+/// `connection_for`), and somebody's containers may be in either.
+pub type Containers = Vec<(String, Vec<String>)>;
+
+/// The containers running in the machine `name` now. Asked over SSH, which still answers when the
+/// machine's API has gone.
+pub fn running_containers(name: &str) -> Containers {
+    [connection_for(name, false), connection_for(name, true)]
+        .into_iter()
+        .filter_map(|connection| {
+            let ids = podman(&["--connection", &connection, "ps", "--quiet"]).ok()?;
+            let ids: Vec<String> = ids.lines().map(str::to_string).collect();
+            (!ids.is_empty()).then_some((connection, ids))
+        })
+        .collect()
+}
+
+/// Stop the machine `name`.
+pub fn stop_machine_named(name: &str) -> Result<(), String> {
+    podman(&["machine", "stop", name]).map(|_| ())
+}
+
+/// Start the machine `name`, then the containers that were running in it.
+///
+/// OpenBot's own machine starts as `start_machine` starts it, which also sets up its networking. A
+/// container that will not start again is the log's: the machine and its API are what OpenBot
+/// needs, and the person's container is still there to start.
+pub fn start_machine_named(name: &str, containers: &Containers) -> Result<(), String> {
+    if name == MACHINE {
+        let started = start_machine();
+        if !started.ok {
+            return Err(started.detail.unwrap_or(started.said));
+        }
+    } else {
+        match podman(&["machine", "start", name]) {
+            Ok(_) => {}
+            Err(error) if error.contains("already running") => {}
+            Err(error) => return Err(error),
+        }
+    }
+    for (connection, ids) in containers {
+        let mut args = vec!["--connection", connection.as_str(), "start"];
+        args.extend(ids.iter().map(String::as_str));
+        match podman(&args) {
+            Ok(_) => log::info!(
+                "[engine] started {} container(s) on {connection} again",
+                ids.len()
+            ),
+            Err(error) => log::warn!("[engine] could not start containers again: {error}"),
+        }
+    }
+    Ok(())
+}
+
+/// The machine `name` is running and its Docker API answers, or why not.
+pub fn machine_api_answers(name: &str) -> Result<(), String> {
+    api_answers_in(&podman(&["machine", "inspect", name])?, name, ping_api)
+}
+
+/// The engine at `address` answers, and so does the Docker API Compose will use through it, or why
+/// not. Only a Podman machine has an API of its own to ask; anything else is asked as before.
+pub fn engine_answers(address: &Address) -> Result<(), String> {
+    engine_answers_with(
+        address,
+        Address::responds,
+        Address::pin,
+        |machine| podman(&["machine", "inspect", machine]),
+        ping_api,
+    )
+}
+
+/**
+The Podman machine `address` reaches, by name.
+
+Through its own connection, or else through the default one, named as `Address::pin` names it.
+Detection asks Podman's default connection first and keeps no name for it, so a person's own
+`podman-machine-default`, found that way, came with none, and its API was never asked: on a live
+Windows run a relaunch with that machine's pipe gone checked nothing and failed at the back end.
+*/
+pub fn machine_reached(address: &Address) -> Option<String> {
+    connection_reached(address, Address::pin).map(|connection| machine_of(&connection).to_string())
+}
+
+fn connection_reached(
+    address: &Address,
+    pin: impl FnOnce(&Address) -> Result<Address, String>,
+) -> Option<String> {
+    if address.engine != Engine::Podman {
+        return None;
+    }
+    address
+        .connection
+        .clone()
+        .or_else(|| pin(address).ok().and_then(|pinned| pinned.connection))
+}
+
+fn engine_answers_with(
+    address: &Address,
+    responds: impl FnOnce(&Address) -> bool,
+    pin: impl FnOnce(&Address) -> Result<Address, String>,
+    inspect: impl FnOnce(&str) -> Result<String, String>,
+    ping: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    if !responds(address) {
+        return Err(format!(
+            "{} does not answer on {}",
+            address.engine.binary(),
+            address
+                .connection
+                .as_deref()
+                .unwrap_or("its default connection")
+        ));
+    }
+    // Docker, or a Podman reached through a URL, has no machine of its own to ask.
+    let Some(connection) = connection_reached(address, pin) else {
+        return Ok(());
+    };
+    let machine = machine_of(&connection);
+    match inspect(machine) {
+        Ok(listing) => api_answers_in(&listing, machine, ping),
+        // Not a machine's connection (a remote host somebody added): there is no API of its own.
+        Err(_) => Ok(()),
+    }
+}
+
+fn api_answers_in(
+    listing: &str,
+    machine: &str,
+    ping: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    let machines: Vec<Value> = serde_json::from_str(listing)
+        .map_err(|error| format!("could not read podman machine inspect JSON: {error}"))?;
+    // A machine inspect does not list is not one OpenBot knows to be broken: nothing is restarted
+    // on a guess.
+    if !machines
+        .iter()
+        .any(|entry| entry.get("Name").and_then(Value::as_str) == Some(machine))
+    {
+        return Ok(());
+    }
+    if let Some(state) = machine_state(listing, machine)? {
+        if !state.eq_ignore_ascii_case("running") {
+            return Err(format!("{machine} is {state}"));
+        }
+    }
+    match machine_facts(listing, machine)?.api {
+        Some(api) => ping(&api),
+        // An API inspect does not name is not one OpenBot can ask, nor one Compose can find.
+        None => Ok(()),
+    }
+}
+
+fn machine_state(listing: &str, machine: &str) -> Result<Option<String>, String> {
+    let machines: Vec<Value> = serde_json::from_str(listing)
+        .map_err(|error| format!("could not read podman machine inspect JSON: {error}"))?;
+    Ok(machines
+        .iter()
+        .find(|entry| entry.get("Name").and_then(Value::as_str) == Some(machine))
+        .and_then(|entry| entry.get("State"))
+        .and_then(Value::as_str)
+        .map(str::to_string))
+}
+
+/// How long one `/_ping` has to be answered.
+const PING_WITHIN: std::time::Duration = std::time::Duration::from_secs(5);
+
+const PING: &[u8] = b"GET /_ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+
+/// Ask the Docker API at `api` (`unix://` or `npipe://`) for `/_ping`, as a Docker client does.
+///
+/// On a thread of its own: a named pipe opened as a file has no read timeout, and an API that
+/// accepts and never answers must not hold setup.
+pub fn ping_api(api: &str) -> Result<(), String> {
+    let (sent, answer) = std::sync::mpsc::channel();
+    let address = api.to_string();
+    std::thread::spawn(move || {
+        let _ = sent.send(ask_api(&address));
+    });
+    let status = answer.recv_timeout(PING_WITHIN).map_err(|_| {
+        format!(
+            "{api}: no answer to /_ping within {}s",
+            PING_WITHIN.as_secs()
+        )
+    })??;
+    if status.starts_with("HTTP/1.1 200 ") || status.starts_with("HTTP/1.0 200 ") {
+        Ok(())
+    } else {
+        Err(format!("{api}: /_ping answered \"{status}\""))
+    }
+}
+
+/// The status line the API at `api` answers `/_ping` with.
+fn ask_api(api: &str) -> Result<String, String> {
+    let failed = |error: std::io::Error| format!("{api}: {error}");
+    if let Some(path) = api.strip_prefix("unix://") {
+        return ask_socket(path).map_err(failed);
+    }
+    if let Some(pipe) = api.strip_prefix("npipe://") {
+        // `npipe:////./pipe/name` is `\\.\pipe\name`: see `pipe_address`.
+        return ask_pipe(&pipe.replace('/', "\\")).map_err(failed);
+    }
+    Err(format!("{api}: not an API address OpenBot can ask"))
+}
+
+#[cfg(unix)]
+fn ask_socket(path: &str) -> std::io::Result<String> {
+    let mut stream = std::os::unix::net::UnixStream::connect(path)?;
+    stream.set_read_timeout(Some(PING_WITHIN))?;
+    stream.set_write_timeout(Some(PING_WITHIN))?;
+    status_line(&mut stream)
+}
+
+#[cfg(not(unix))]
+fn ask_socket(_: &str) -> std::io::Result<String> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "a Unix socket is not an API this computer opens",
+    ))
+}
+
+/// A named pipe, opened as Windows opens any file. ERROR_FILE_NOT_FOUND is the pipe gone.
+#[cfg(windows)]
+fn ask_pipe(path: &str) -> std::io::Result<String> {
+    let mut pipe = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)?;
+    status_line(&mut pipe)
+}
+
+#[cfg(not(windows))]
+fn ask_pipe(_: &str) -> std::io::Result<String> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "a named pipe is not an API this computer opens",
+    ))
+}
+
+/// Send the ping, and read until the status line is in. The rest of the answer is not needed, so a
+/// server that keeps the connection open after it is not waited on.
+fn status_line(stream: &mut (impl std::io::Read + std::io::Write)) -> std::io::Result<String> {
+    stream.write_all(PING)?;
+    let mut said = Vec::new();
+    let mut chunk = [0u8; 512];
+    while !said.windows(2).any(|pair| pair == b"\r\n") && said.len() < 4096 {
+        let read = stream.read(&mut chunk)?;
+        if read == 0 {
+            break;
+        }
+        said.extend_from_slice(&chunk[..read]);
+    }
+    Ok(String::from_utf8_lossy(&said)
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -793,7 +1206,9 @@ mod tests {
             2,
             4096,
             20,
+            None,
             || machine_exists_with(|| Ok(listing.into())),
+            || {},
             |_args| {
                 init_called = true;
                 Err("machine openbot already exists".into())
@@ -814,11 +1229,13 @@ mod tests {
             2,
             4096,
             20,
+            None,
             || {
                 machine_exists_with(|| {
                     Err("podman machine list exited with status 125; stdout: denied".into())
                 })
             },
+            || {},
             |_args| {
                 init_called = true;
                 Ok(String::new())
@@ -851,7 +1268,9 @@ mod tests {
                 2,
                 4096,
                 20,
+                None,
                 || machine_exists_with(|| Ok(listing.into())),
+                || {},
                 |_args| panic!("machine init must not run after malformed list output"),
             );
             assert!(!result.ok, "{result:?}");
@@ -873,7 +1292,9 @@ mod tests {
             4,
             8192,
             64,
+            None,
             || Ok(false),
+            || {},
             |args| {
                 captured = args.iter().map(|arg| (*arg).to_string()).collect();
                 Ok(String::new())
@@ -885,6 +1306,67 @@ mod tests {
             captured,
             create_machine_args(4, 8192, 64, cfg!(target_os = "windows"))
         );
+    }
+
+    /// The machine image the first screen downloaded is what the machine is built from: Podman is
+    /// given the file, and pulls nothing from quay.io (see `early_downloads`).
+    #[test]
+    fn a_downloaded_machine_image_is_what_the_machine_is_built_from() {
+        let image = std::path::Path::new("/cache/podman-machine.aarch64.applehv.raw.zst");
+        let mut captured = Vec::new();
+        let result = create_machine_with(
+            4,
+            6144,
+            60,
+            Some(image),
+            || Ok(false),
+            || {},
+            |args| {
+                captured = args.iter().map(|arg| (*arg).to_string()).collect();
+                Ok(String::new())
+            },
+        );
+        assert!(result.ok, "{result:?}");
+        assert_eq!(&captured[..3], ["machine", "init", "openbot"]);
+        assert_eq!(
+            &captured[captured.len() - 2..],
+            ["--image", "/cache/podman-machine.aarch64.applehv.raw.zst"]
+        );
+    }
+
+    /// WSL opens its own "Welcome to Windows Subsystem for Linux" window the first time a person
+    /// registers a distribution, and `podman machine init` registers one. It is turned off first,
+    /// and only when a machine is about to be made: an existing machine registers nothing.
+    #[test]
+    fn wsl_welcome_window_is_turned_off_before_the_machine_is_made() {
+        let calls = std::cell::RefCell::new(Vec::<String>::new());
+        let result = create_machine_with(
+            4,
+            6144,
+            60,
+            None,
+            || Ok(false),
+            || calls.borrow_mut().push("wsl welcome off".into()),
+            |args| {
+                calls.borrow_mut().push(args[..2].join(" "));
+                Ok(String::new())
+            },
+        );
+        assert!(result.ok, "{result:?}");
+        assert_eq!(*calls.borrow(), ["wsl welcome off", "machine init"]);
+
+        calls.borrow_mut().clear();
+        let existing = create_machine_with(
+            4,
+            6144,
+            60,
+            None,
+            || Ok(true),
+            || calls.borrow_mut().push("wsl welcome off".into()),
+            |args| panic!("nothing runs against an existing machine: {args:?}"),
+        );
+        assert!(existing.ok, "{existing:?}");
+        assert!(calls.borrow().is_empty(), "{:?}", calls.borrow());
     }
 
     #[test]
@@ -941,7 +1423,9 @@ mod tests {
             4,
             6144,
             60,
+            None,
             || machine_exists_with(|| Ok(listing.into())),
+            || {},
             |args| panic!("nothing runs against an existing machine: {args:?}"),
         );
         assert!(result.ok, "{result:?}");
@@ -968,6 +1452,7 @@ mod tests {
                 }
             },
             true,
+            || (),
         );
         assert!(started.ok, "{started:?}");
         assert!(
@@ -1009,6 +1494,7 @@ mod tests {
                 }
             },
             true,
+            || (),
         );
         assert!(started.ok, "{started:?}");
         let script = calls.last().unwrap().last().unwrap().clone();
@@ -1022,6 +1508,80 @@ mod tests {
             "{script}"
         );
         assert!(!script.contains("--user"), "{script}");
+    }
+
+    /// The live Windows run: OpenBot's machine started first after a Podman update and Podman gave
+    /// it `\\.\pipe\docker_engine`, so the person's Docker clients reached OpenBot's machine. The
+    /// name is held for exactly the `machine start`, and only on Windows.
+    #[test]
+    fn docker_pipe_is_held_for_exactly_the_machine_start_on_windows() {
+        struct Held(std::rc::Rc<std::cell::Cell<bool>>);
+        impl Drop for Held {
+            fn drop(&mut self) {
+                self.0.set(false);
+            }
+        }
+        for target_is_windows in [true, false] {
+            let holding = std::rc::Rc::new(std::cell::Cell::new(false));
+            let mut during_start = None;
+            let mut held_elsewhere = false;
+            let inspect = serde_json::json!([{
+                "Name": "openbot",
+                "State": "stopped",
+                "UserModeNetworking": true,
+                "Rootful": true
+            }])
+            .to_string();
+            let started = start_machine_with(
+                |args| {
+                    if args == ["machine", "start", "openbot"] {
+                        during_start = Some(holding.get());
+                    } else if holding.get() {
+                        held_elsewhere = true;
+                    }
+                    match args {
+                        ["machine", "inspect", "openbot"] => Ok(inspect.clone()),
+                        ["machine", "ssh", "openbot", "getent", ..] => {
+                            Ok("192.168.127.254 STREAM host.containers.internal\n".into())
+                        }
+                        _ => Ok(String::new()),
+                    }
+                },
+                target_is_windows,
+                || {
+                    holding.set(true);
+                    Held(holding.clone())
+                },
+            );
+            assert!(started.ok, "{started:?}");
+            assert_eq!(during_start, Some(target_is_windows));
+            assert!(!held_elsewhere, "held only for the start");
+            assert!(!holding.get(), "let go once it started");
+        }
+    }
+
+    /// The real pipe, as Podman looks for it: `PipeNameAvailable` asks whether
+    /// `\\.\pipe\<name>` exists and treats anything but "not found" as taken. Held, it is there and
+    /// cannot be held twice; let go, it is gone.
+    #[cfg(windows)]
+    #[test]
+    fn a_held_pipe_name_is_taken_until_it_is_let_go() {
+        let name = format!("openbot-held-pipe-test-{}", std::process::id());
+        let path = format!(r"\\.\pipe\{name}");
+        let not_found = |path: &str| {
+            std::fs::metadata(path)
+                .err()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        };
+        assert!(not_found(&path));
+        let held = hold_pipe_name(&name).expect("the name is free");
+        assert!(!not_found(&path), "Podman would find it taken");
+        assert!(hold_pipe_name(&name).is_none(), "never a second instance");
+        drop(held);
+        assert!(
+            not_found(&path),
+            "free again for Docker Desktop or the person's machine"
+        );
     }
 
     #[test]
@@ -1124,6 +1684,7 @@ mod tests {
                 }
             },
             true,
+            || (),
         );
 
         assert!(result.ok, "{result:?}");
@@ -1432,6 +1993,213 @@ mod tests {
             &Address::new(Engine::Podman, Some("openbot-root".into())),
             false
         ));
+    }
+
+    /// `podman machine inspect` as Podman 6.1.1 prints it on a Mac (`openbot-s1`, captured), and
+    /// the same machine running.
+    fn inspected(state: &str) -> String {
+        serde_json::json!([{
+            "Name": "openbot-s1",
+            "State": state,
+            "Rootful": false,
+            "ConnectionInfo": {
+                "PodmanSocket": {
+                    "Path": "/var/folders/15/cbm93f0549jbtwnp4vn063r00000gn/T/podman/openbot-s1-api.sock"
+                },
+                "PodmanPipe": null
+            },
+            "UserModeNetworking": true
+        }])
+        .to_string()
+    }
+
+    /// A machine's API is asked where Compose will reach it, and only while the machine runs.
+    #[test]
+    fn a_machines_api_is_asked_where_compose_reaches_it() {
+        let mut asked = None;
+        api_answers_in(&inspected("running"), "openbot-s1", |api| {
+            asked = Some(api.to_string());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            asked.as_deref(),
+            Some("unix:///var/folders/15/cbm93f0549jbtwnp4vn063r00000gn/T/podman/openbot-s1-api.sock")
+        );
+        let stopped = api_answers_in(&inspected("stopped"), "openbot-s1", |_| {
+            panic!("a stopped machine has no API to ask")
+        });
+        assert_eq!(stopped.unwrap_err(), "openbot-s1 is stopped");
+        assert!(
+            api_answers_in(&inspected("running"), "openbot-s1", |_| Err("gone".into())).is_err()
+        );
+        // Not listed: nothing is known to be broken, and nothing is asked.
+        assert!(api_answers_in("[]", "openbot-s1", |_| panic!("not asked")).is_ok());
+    }
+
+    /// `podman machine inspect podman-machine-default` on Windows: running, rootless, its API on
+    /// its own pipe, as the live Windows run's machine was.
+    fn windows_default_machine() -> String {
+        serde_json::json!([{
+            "Name": "podman-machine-default",
+            "State": "running",
+            "Rootful": false,
+            "ConnectionInfo": {
+                "PodmanSocket": {
+                    "Path": "C:\\Users\\Administrator\\.local\\share\\containers\\podman\\machine\\podman.sock"
+                },
+                "PodmanPipe": { "Path": "\\\\.\\pipe\\podman-machine-default" }
+            },
+            "UserModeNetworking": false
+        }])
+        .to_string()
+    }
+
+    fn pinned_to_default(_: &Address) -> Result<Address, String> {
+        Ok(Address::new(
+            Engine::Podman,
+            Some("podman-machine-default".into()),
+        ))
+    }
+
+    /// Detection finds the person's default machine through Podman's default connection and keeps
+    /// no name for it. Its API is asked all the same, through the name `pin` gives the default.
+    #[test]
+    fn a_machine_found_through_the_default_connection_has_its_api_asked() {
+        let found = Address::new(Engine::Podman, None);
+        let mut inspected = None;
+        let mut pinged = None;
+        let answered = engine_answers_with(
+            &found,
+            |_| true,
+            pinned_to_default,
+            |machine| {
+                inspected = Some(machine.to_string());
+                Ok(windows_default_machine())
+            },
+            |api| {
+                pinged = Some(api.to_string());
+                Err(format!(
+                    "{api}: The system cannot find the file specified. (os error 2)"
+                ))
+            },
+        );
+        assert_eq!(inspected.as_deref(), Some("podman-machine-default"));
+        assert_eq!(
+            pinged.as_deref(),
+            Some("npipe:////./pipe/podman-machine-default")
+        );
+        assert!(answered.unwrap_err().contains("(os error 2)"));
+        assert_eq!(
+            connection_reached(&found, pinned_to_default).as_deref(),
+            Some("podman-machine-default")
+        );
+
+        // The same machine with its pipe there answers.
+        assert!(engine_answers_with(
+            &found,
+            |_| true,
+            pinned_to_default,
+            |_| Ok(windows_default_machine()),
+            |_| Ok(()),
+        )
+        .is_ok());
+        // Docker has no machine to ask, and a `podman` that does not answer is said as that.
+        assert!(engine_answers_with(
+            &Address::new(Engine::Docker, None),
+            |_| true,
+            |_| panic!("Docker is not pinned to a machine"),
+            |_| panic!("Docker has no machine"),
+            |_| panic!("Docker has no machine API"),
+        )
+        .is_ok());
+        assert!(engine_answers_with(
+            &found,
+            |_| false,
+            |_| panic!("not asked"),
+            |_| panic!("not asked"),
+            |_| panic!("not asked"),
+        )
+        .unwrap_err()
+        .contains("does not answer on its default connection"));
+    }
+
+    /// The ping, against a real socket: an API that answers 200, one that has gone, and one that
+    /// answers something else.
+    #[test]
+    #[cfg(unix)]
+    fn the_api_ping_tells_an_answering_api_from_a_gone_one() {
+        use std::io::{Read, Write};
+        use std::os::unix::net::UnixListener;
+        let root = temp_root("ping");
+        std::fs::create_dir_all(&root).unwrap();
+        let serve = |name: &str, answer: &'static [u8]| {
+            let socket = root.join(name);
+            let listener = UnixListener::bind(&socket).unwrap();
+            std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0u8; 256];
+                let read = stream.read(&mut request).unwrap();
+                assert!(request[..read].starts_with(b"GET /_ping HTTP/1.1\r\n"));
+                stream.write_all(answer).unwrap();
+                // Held open after the status line: the ping does not wait for the rest.
+                std::thread::sleep(std::time::Duration::from_secs(10));
+            });
+            format!("unix://{}", socket.display())
+        };
+        let answering = serve(
+            "answering.sock",
+            b"HTTP/1.1 200 OK\r\nApi-Version: 1.41\r\nContent-Length: 2\r\n\r\nOK",
+        );
+        let started = std::time::Instant::now();
+        ping_api(&answering).unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+
+        let refusing = serve(
+            "refusing.sock",
+            b"HTTP/1.1 500 Internal Server Error\r\n\r\n",
+        );
+        assert!(ping_api(&refusing).unwrap_err().contains("500"));
+
+        // The socket file gone, as the pipe was on Windows: a Docker client cannot connect.
+        let gone = format!("unix://{}", root.join("gone.sock").display());
+        assert!(ping_api(&gone).unwrap_err().starts_with(&gone));
+        assert!(ping_api("tcp://127.0.0.1:2375").is_err());
+    }
+
+    /// The ping, against a real named pipe served by PowerShell's `NamedPipeServerStream`, and a
+    /// pipe that is not there, which is what the live Windows run found after the update.
+    #[test]
+    #[cfg(windows)]
+    fn the_api_ping_opens_a_named_pipe() {
+        let name = format!("openbot-ping-test-{}", std::process::id());
+        let script = format!(
+            "$pipe = New-Object System.IO.Pipes.NamedPipeServerStream('{name}', \
+             [System.IO.Pipes.PipeDirection]::InOut); \
+             $pipe.WaitForConnection(); \
+             $buffer = New-Object byte[] 256; [void]$pipe.Read($buffer, 0, 256); \
+             $crlf = [string][char]13 + [char]10; \
+             $answer = [System.Text.Encoding]::ASCII.GetBytes('HTTP/1.1 200 OK' + $crlf + \
+             'Content-Length: 2' + $crlf + $crlf + 'OK'); \
+             $pipe.Write($answer, 0, $answer.Length); $pipe.Flush(); Start-Sleep -Seconds 5; $pipe.Dispose()"
+        );
+        let mut server = crate::quiet::command("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .spawn()
+            .unwrap();
+        let api = pipe_address(&format!("\\\\.\\pipe\\{name}"));
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let answered = loop {
+            match ping_api(&api) {
+                Ok(()) => break Ok(()),
+                Err(error) if std::time::Instant::now() > until => break Err(error),
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(200)),
+            }
+        };
+        let _ = server.kill();
+        answered.unwrap();
+        let gone = ping_api("npipe:////./pipe/openbot-ping-test-gone").unwrap_err();
+        assert!(gone.contains("(os error 2)"), "{gone}");
     }
 
     #[test]

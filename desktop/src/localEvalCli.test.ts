@@ -155,14 +155,14 @@ test("connects this installation as its own cancellable attempt", async () => {
 test("a connection OpenBot would not take up arrives as a Problem; CLI failures as categories", async () => {
   invokeHandler = async () => {
     throw {
-      said: "A different back end was connected. OpenBot did not use it.",
+      said: "A different backend was connected. OpenBot did not use it.",
     };
   };
   const problem = await connectLocalEval("/tmp/openbot").connection.catch(
     (e) => e,
   );
   expect(problem).toEqual({
-    said: "A different back end was connected. OpenBot did not use it.",
+    said: "A different backend was connected. OpenBot did not use it.",
   });
   invokeHandler = async () => {
     throw "timeout";
@@ -288,13 +288,13 @@ test("the Stop failure prefix is the one the native side writes", async () => {
     `const INTELLIGENCE_STOP_FAILED: &str = "${intelligenceStopFailed}";`,
   );
   // The line a person can open under Technical details names the part, not the product.
-  expect(intelligenceStopFailed).toBe("Back end stop failed: ");
+  expect(intelligenceStopFailed).toBe("Backend stop failed: ");
   // A real native line, as Stop returns it after OpenBot's own, is still the back end's part.
   const said = native.match(
     /Err\(local_eval::Failure::Unavailable\) => \{?\s*Err\(\s*"([^"]+)"/,
   )?.[1];
   expect(said).toBe(
-    "this build has no command-line tool to stop the back end OpenBot created",
+    "this build has no command-line tool to stop the backend OpenBot created",
   );
   const line = `${intelligenceStopFailed}${said}`;
   expect(splitStopFailure(`Compose down failed: busy\n${line}`)).toEqual({

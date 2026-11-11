@@ -56,7 +56,7 @@ export function noLearningModel(
 ): string {
   return unavailable === "unsupported"
     ? "Learning can't run on the model you signed in with. To use it, sign OpenBot in with an OpenAI or Anthropic API key, or a Claude or ChatGPT plan."
-    : "The back end has no Learning model yet. Give its Learning agent a model and key, then try again.";
+    : "The backend has no Learning model yet. Give its Learning agent a model and key, then try again.";
 }
 
 /** What to tell an admin when Intelligence refused a Learning request, and with which status. */
@@ -72,17 +72,17 @@ export function learningFailure(
     return {
       status: 409,
       error:
-        "Learning is switched off in the back end. Turn it on there (learning.enabled in its Helm chart).",
+        "Learning is switched off in the backend. Turn it on there (learning.enabled in its Helm chart).",
     };
   if (code === "LEARNING_CONTAINER_NOT_FOUND")
     return {
       status: 404,
-      error: "This Learning container doesn't exist in the back end yet.",
+      error: "This Learning container doesn't exist in the backend yet.",
     };
   if (code === "LEARNING_CANDIDATE_NOT_FOUND")
     return {
       status: 404,
-      error: "The back end no longer has this skill. Refresh the list.",
+      error: "The backend no longer has this skill. Refresh the list.",
     };
   if (code === "LEARNING_CANDIDATE_CONFLICT")
     return {
@@ -92,7 +92,7 @@ export function learningFailure(
   if (code === "LEARNING_NOT_ENABLED")
     return {
       status: 403,
-      error: "The back end's licence doesn't include Learning.",
+      error: "The backend's licence doesn't include Learning.",
     };
   if (code === "LEARNING_MODEL_NOT_CONFIGURED")
     return {
@@ -102,11 +102,11 @@ export function learningFailure(
   if (status === 429 || code === "RATE_LIMIT_EXCEEDED")
     return {
       status: 429,
-      error: "The back end is busy. Try again in a minute.",
+      error: "The backend is busy. Try again in a minute.",
     };
   return {
     status: 502,
-    error: "Couldn't reach Learning in the back end. Try again.",
+    error: "Couldn't reach Learning in the backend. Try again.",
   };
 }
 

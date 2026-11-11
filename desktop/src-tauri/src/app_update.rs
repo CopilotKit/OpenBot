@@ -51,6 +51,57 @@ pub fn offered_against(version: &Version, pinned: bool) -> Option<Version> {
     (!pinned && version.pre.is_empty()).then(|| version.clone())
 }
 
+/**
+The variable that points an internal build at a test feed, so the background download of an update
+(`update_ready`) can be tried on a test machine before any release names one: a folder holding a
+`latest.json`, of which only `version` is read, and that version's `desktop-images.json`.
+
+Only an internal build reads it (`internal`). A stable or candidate build never does, whatever its
+environment says. It installs nothing: an internal build has no updater, so Update and restart
+refuses, and the next build is installed by hand.
+*/
+pub const TEST_FEED: &str = "OPENBOT_TEST_UPDATE_FEED";
+
+/// An internal build: `X.Y.Z-internal.<commits>.g<commit>`, or `X.Y.Z-rc.N.internal.…` when it was
+/// built after a candidate.
+pub fn internal(version: &Version) -> bool {
+    version
+        .pre
+        .as_str()
+        .split('.')
+        .any(|part| part == "internal")
+}
+
+/// The test feed folder `TEST_FEED` names, read through `var`, for an internal build only. None for
+/// a stable or candidate build, and when it is not set.
+pub fn test_feed(
+    version: &Version,
+    var: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> Option<std::path::PathBuf> {
+    if !internal(version) {
+        return None;
+    }
+    let folder = std::path::PathBuf::from(var(TEST_FEED)?);
+    (!folder.as_os_str().is_empty()).then_some(folder)
+}
+
+/// What a test feed in `folder` offers `current`: the version its `latest.json` names, when it is
+/// newer by its whole version, so a later internal build is newer than an earlier one.
+pub fn test_newer(current: &Version, folder: &Path) -> Result<Option<Version>, String> {
+    let file = folder.join("latest.json");
+    let text = std::fs::read(&file)
+        .map_err(|error| format!("could not read {}: {error}", file.display()))?;
+    let feed: Value = serde_json::from_slice(&text)
+        .map_err(|error| format!("{} is not JSON: {error}", file.display()))?;
+    let named = feed
+        .get("version")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("{} names no version", file.display()))?;
+    let version = Version::parse(named.strip_prefix('v').unwrap_or(named))
+        .map_err(|error| format!("{named:?} in {} is not a version: {error}", file.display()))?;
+    Ok((version > *current).then_some(version))
+}
+
 /// The feed's addresses, in the updater's order, from its `plugins.updater` block. `None` when the
 /// build has no updater, since nothing could install what a banner offered.
 ///
@@ -213,6 +264,8 @@ pub enum Asked {
     Available {
         version: String,
         current: String,
+        /// How far it is from installing quickly (`Readiness`), when OpenBot has started on it.
+        ready: Option<Readiness>,
     },
     UpToDate {
         current: String,
@@ -250,6 +303,7 @@ pub fn ask(feed: Option<&Feed>, current: &Version, known: &Known) -> Result<Aske
     known.record(&answer);
     Ok(match answer? {
         Some(version) => Asked::Available {
+            ready: known.readiness(&version),
             version: version.to_string(),
             current: current_text,
         },
@@ -281,7 +335,9 @@ pub fn prompt(asked: &Result<Asked, String>) -> Prompt {
         buttons: None,
     };
     match asked {
-        Ok(Asked::Available { version, current }) => Prompt {
+        Ok(Asked::Available {
+            version, current, ..
+        }) => Prompt {
             title: format!("OpenBot {version} is available"),
             message: format!(
                 "You are running {current}. Updating downloads the new version and restarts OpenBot."
@@ -363,6 +419,20 @@ pub fn watch(
     }
 }
 
+/**
+How far the newer version is from installing in a few minutes: its images downloading in the
+background while this version runs, or all of them here (`update_ready`). Tagged `state` for the
+page.
+*/
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum Readiness {
+    /// `done` of `total` bytes have arrived.
+    Preparing { done: u64, total: u64 },
+    /// Everything it downloads before it starts is here.
+    Ready,
+}
+
 /// An update on its way in: how much of the archive has arrived, and whether it is restarting.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -372,11 +442,13 @@ pub struct Installing {
     pub restarting: bool,
 }
 
-/// What the shell knows: the last good answer from the feed, and an install under way.
+/// What the shell knows: the last good answer from the feed, an install under way, and how ready
+/// the newer version is.
 #[derive(Default)]
 pub struct Known {
     newer: Mutex<Option<Version>>,
     installing: Mutex<Option<Installing>>,
+    ready: Mutex<Option<(Version, Readiness)>>,
 }
 
 impl Known {
@@ -412,6 +484,31 @@ impl Known {
     pub fn end_install(&self) {
         *self.installing.lock().unwrap() = None;
     }
+
+    /// Whether an install is under way, from the click on Update and restart.
+    pub fn installing(&self) -> bool {
+        self.installing.lock().unwrap().is_some()
+    }
+
+    /// How ready `version` is now. Replaces what was said of any other version.
+    pub fn readying(&self, version: &Version, readiness: Readiness) {
+        *self.ready.lock().unwrap() = Some((version.clone(), readiness));
+    }
+
+    /// Nothing is being got ready, or what was is no longer there.
+    pub fn not_ready(&self) {
+        *self.ready.lock().unwrap() = None;
+    }
+
+    /// How ready `version` is, when it is the version being got ready.
+    pub fn readiness(&self, version: &Version) -> Option<Readiness> {
+        self.ready
+            .lock()
+            .unwrap()
+            .as_ref()
+            .filter(|(ready, _)| ready == version)
+            .map(|(_, readiness)| readiness.clone())
+    }
 }
 
 /// What a page shows.
@@ -426,6 +523,8 @@ pub struct Status {
     /// Whether this build updates itself (`Feed::of` finds it a feed). An internal or candidate
     /// build, or one without the updater, never does, and a window says so up front.
     pub updates_itself: bool,
+    /// How ready the offered version is to install (`Readiness`), when OpenBot has started on it.
+    pub ready: Option<Readiness>,
 }
 
 /// What to offer, given what the feed said and what this person closed.
@@ -452,6 +551,7 @@ pub fn status(
         to_offer(newer.as_ref(), config.and_then(dismissed).as_ref())
     };
     Status {
+        ready: version.as_ref().and_then(|v| known.readiness(v)),
         version: version.map(|v| v.to_string()),
         current: current.to_string(),
         installing,
@@ -889,6 +989,100 @@ mod tests {
         let _ = std::fs::remove_dir_all(&config);
     }
 
+    /// The page says how ready the offered version is, and only of that version: a newer one the
+    /// feed names since starts again from nothing.
+    #[test]
+    fn the_offer_says_how_ready_the_offered_version_is() {
+        let known = Known::default();
+        known.record(&Ok(Some(v("0.3.2"))));
+        assert_eq!(status(&known, &v("0.3.1"), None, true).ready, None);
+        known.readying(
+            &v("0.3.2"),
+            Readiness::Preparing {
+                done: 40,
+                total: 100,
+            },
+        );
+        let shown = status(&known, &v("0.3.1"), None, true);
+        assert_eq!(
+            shown.ready,
+            Some(Readiness::Preparing {
+                done: 40,
+                total: 100
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&shown).unwrap()["ready"],
+            serde_json::json!({"state": "preparing", "done": 40, "total": 100})
+        );
+        known.readying(&v("0.3.2"), Readiness::Ready);
+        assert_eq!(
+            serde_json::to_value(status(&known, &v("0.3.1"), None, true)).unwrap()["ready"],
+            serde_json::json!({"state": "ready"})
+        );
+        known.record(&Ok(Some(v("0.3.3"))));
+        assert_eq!(status(&known, &v("0.3.1"), None, true).ready, None);
+        known.not_ready();
+        assert_eq!(known.readiness(&v("0.3.2")), None);
+    }
+
+    /// The test feed is for internal builds only: a stable or candidate build never reads it,
+    /// whatever its environment says, and an internal build reads it only when it is set.
+    #[test]
+    fn only_an_internal_build_reads_the_test_feed() {
+        let set = |name: &str| (name == TEST_FEED).then(|| "C:\\OpenBotTestFeed".into());
+        for build in ["1.0.1", "1.0.0", "1.0.1-rc.2", "1.0.1-beta.1"] {
+            assert_eq!(test_feed(&v(build), set), None, "{build}");
+        }
+        for build in [
+            "1.0.1-internal.731.gabc123456789",
+            "1.0.1-rc.2.internal.731.gabc123456789",
+        ] {
+            assert_eq!(
+                test_feed(&v(build), set),
+                Some(std::path::PathBuf::from("C:\\OpenBotTestFeed")),
+                "{build}"
+            );
+        }
+        let internal = v("1.0.1-internal.731.gabc123456789");
+        assert_eq!(test_feed(&internal, |_| None), None);
+        assert_eq!(test_feed(&internal, |_| Some("".into())), None);
+    }
+
+    /// A test feed offers the build its `latest.json` names when it is a later build, by the
+    /// commit count an internal version carries, and says what is wrong with one it cannot read.
+    #[test]
+    fn a_test_feed_offers_a_later_internal_build() {
+        let folder = crate::test_support::temp_root("app-update-test-feed");
+        std::fs::create_dir_all(&folder).unwrap();
+        let running = v("1.0.1-internal.731.gabc123456789");
+        assert!(test_newer(&running, &folder)
+            .unwrap_err()
+            .contains("could not read"));
+        std::fs::write(
+            folder.join("latest.json"),
+            r#"{"version": "1.0.1-internal.735.gdef123456789"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            test_newer(&running, &folder),
+            Ok(Some(v("1.0.1-internal.735.gdef123456789")))
+        );
+        assert_eq!(
+            test_newer(&v("1.0.1-internal.735.gdef123456789"), &folder),
+            Ok(None)
+        );
+        assert_eq!(
+            test_newer(&v("1.0.1-internal.740.g0123456789ab"), &folder),
+            Ok(None)
+        );
+        std::fs::write(folder.join("latest.json"), "{}").unwrap();
+        assert!(test_newer(&running, &folder)
+            .unwrap_err()
+            .contains("names no version"));
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+
     /// A one-shot HTTP server on 127.0.0.1 answering each request with the next of `answers`.
     fn serve(answers: Vec<(u16, String)>) -> (reqwest::Url, std::thread::JoinHandle<usize>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1015,7 +1209,8 @@ mod tests {
             ask(feed.as_ref(), &v("0.3.2"), &known),
             Ok(Asked::Available {
                 version: "0.3.3".into(),
-                current: "0.3.2".into()
+                current: "0.3.2".into(),
+                ready: None,
             })
         );
         server.join().unwrap();
@@ -1059,6 +1254,7 @@ mod tests {
                 "current": "0.3.2-internal.731.gabc1234",
                 "installing": null,
                 "updatesItself": false,
+                "ready": null,
             })
         );
         let release = status(&Known::default(), &v("0.3.2"), None, true);
@@ -1106,9 +1302,10 @@ mod tests {
         assert_eq!(
             as_json(Asked::Available {
                 version: "0.3.3".into(),
-                current: "0.3.2".into()
+                current: "0.3.2".into(),
+                ready: None,
             }),
-            serde_json::json!({"found": "available", "version": "0.3.3", "current": "0.3.2"})
+            serde_json::json!({"found": "available", "version": "0.3.3", "current": "0.3.2", "ready": null})
         );
         assert_eq!(
             as_json(Asked::UpToDate {
@@ -1129,7 +1326,8 @@ mod tests {
         assert_eq!(
             prompt(&Ok(Asked::Available {
                 version: "0.3.3".into(),
-                current: "0.3.2".into()
+                current: "0.3.2".into(),
+                ready: None,
             })),
             Prompt {
                 title: "OpenBot 0.3.3 is available".into(),

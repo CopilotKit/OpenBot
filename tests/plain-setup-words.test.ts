@@ -7,13 +7,17 @@ import ts from "typescript";
  * Guard: what OpenBot Desktop says while it sets up, starts or updates, and when that stops, is in
  * plain words. A tester waited minutes on "Preparing the engine machine" and could not tell
  * whether setup was stuck, and a failure read "The back end's disk is nearly full. Podman has…".
- * The log keeps the technical parts; the screen says what happened and what to do.
+ * The log keeps the technical parts; the screen says what happened and what to do. The Status
+ * window, opened from the tray or the menu, is held to the same: it said "Back end" and "Container
+ * engine" on a live Windows run. So is Settings > This computer in the app (`THIS_COMPUTER`), which
+ * shows the same parts inside OpenBot Desktop.
  *
  * Read are the sentences of the desktop window (string literals, template text and JSX text with a
  * space in them, so identifiers and command names are not) and the native side's sentences that
  * reach it: a `Problem`'s headline, a setup row's line (`StepLine`), and the sentences
  * `explain_machine_error`, `missing_compose` and `said_about` choose. Not read: comments, tests,
- * log calls, a `Problem`'s detail and a `StepLine`'s `logged` detail, which are the log's.
+ * log calls, Copy diagnostics (`SUPPORT`), a `Problem`'s detail and a `StepLine`'s `logged`
+ * detail, which are the log's.
  */
 const REPO = join(import.meta.dir, "..");
 
@@ -23,7 +27,8 @@ const TECHNICAL: RegExp[] = [
   /Windows Subsystem for Linux/,
   /engine machine/i,
   /\bengines?\b/i,
-  /back ?end/i,
+  /back[ -]?end/i,
+  /front[ -]?end/i,
   /\bk3[sd]\b/i,
   /\bHelm\b/,
   /\bkubectl\b/,
@@ -67,7 +72,32 @@ const ALLOWED: { file: string; word: RegExp; why: string }[] = [
   {
     file: "desktop/src-tauri/src/install.rs",
     word: /Podman/,
-    why: "the person installs Podman Desktop or the podman package, or asks IT to allow it",
+    why: "the person installs Podman Desktop or the podman package, or asks IT to allow it, or sees the Podman they installed being updated",
+  },
+  {
+    file: "desktop/src-tauri/src/engine_versions.rs",
+    word: /Podman/,
+    why: "the person updates or removes a Podman they installed, which OpenBot can't update for them, or is told the Podman OpenBot updated isn't answering",
+  },
+  {
+    file: "desktop/src-tauri/src/own_machine.rs",
+    word: /Podman/,
+    why: "the person's own Podman, which OpenBot pauses on a Mac only once they say yes, and starts again on Quit",
+  },
+  {
+    file: "desktop/src/PodmanGoAhead.tsx",
+    word: /Podman/,
+    why: "the person says yes to pausing their own Podman",
+  },
+  {
+    file: "desktop/src/SetupProgress.tsx",
+    word: /Podman/,
+    why: "the rows for pausing the person's own Podman and starting it again",
+  },
+  {
+    file: "desktop/src/ShuttingDown.tsx",
+    word: /Podman/,
+    why: "Quit starts the person's own Podman again",
   },
   {
     file: "desktop/src-tauri/src/acquire.rs",
@@ -86,11 +116,20 @@ const ALLOWED: { file: string; word: RegExp; why: string }[] = [
   },
 ];
 
+/** Settings > This computer, and the names and messages it shows from the desktop app. */
+const THIS_COMPUTER = [
+  "app/src/routes/_authed/settings/this-computer.tsx",
+  "app/src/lib/desktop/part-names.ts",
+  "app/src/lib/desktop/mutations.ts",
+  "app/src/lib/desktop/queries.ts",
+];
+
 /**
- * Not read: the Status window, opened from the tray once OpenBot is running, names each part for
- * whoever is troubleshooting. It is not part of setup, start or update.
+ * What goes to support and never to the screen: Copy diagnostics, in the Status window and on This
+ * computer, which names the engine, the back end's stack and Docker's containers for whoever is
+ * troubleshooting.
  */
-const NOT_SETUP = ["desktop/src/StatusWindow.tsx"];
+const SUPPORT = /^diagnostics$/;
 
 const LOGGING = /^(console\.\w+|log|logger\.\w+|this\.log|options\.log)$/;
 
@@ -112,6 +151,8 @@ function logged(node: ts.Node): boolean {
     if (ts.isCallExpression(at) && LOGGING.test(at.expression.getText()))
       return true;
     if (ts.isImportDeclaration(at) || ts.isExportDeclaration(at)) return true;
+    if (ts.isFunctionDeclaration(at) && SUPPORT.test(at.name?.text ?? ""))
+      return true;
   }
   return false;
 }
@@ -205,9 +246,10 @@ function nativeSentences(path: string): Said[] {
 
 function sentences(): Said[] {
   return [
-    ...[...files(join(REPO, "desktop/src"), /\.tsx?$/)]
-      .filter((path) => !NOT_SETUP.includes(relative(REPO, path)))
-      .flatMap(windowSentences),
+    ...[...files(join(REPO, "desktop/src"), /\.tsx?$/)].flatMap(
+      windowSentences,
+    ),
+    ...THIS_COMPUTER.map((path) => join(REPO, path)).flatMap(windowSentences),
     ...[...files(join(REPO, "desktop/src-tauri/src"), /\.rs$/)].flatMap(
       nativeSentences,
     ),
@@ -230,8 +272,29 @@ function technical(said: Said): string[] {
     );
 }
 
-test("what OpenBot Desktop says while it sets up, starts or updates, and when that stops, is plain words", () => {
+test("what OpenBot Desktop says while it sets up, starts or updates, when that stops, on its Status window and on This computer, is plain words", () => {
   expect(sentences().flatMap(technical)).toEqual([]);
+});
+
+/**
+ * The company alone. Product copy says OpenBot, and OpenBot by CopilotKit where the company has to
+ * be named (see .claude/skills/openbot-copy). An address is not read: `github.com/CopilotKit/...`.
+ */
+const COMPANY_ALONE = /(?<!OpenBot\s+by\s+)(?<![\w/.-])CopilotKit(?![\w/-])/;
+
+/** "by CopilotKit" in the lockup, where it follows OpenBot's name on screen (`Lockup`). */
+const BESIDE_THE_NAME = (said: Said) =>
+  said.file === "desktop/src/Sections.tsx" && said.text === "by CopilotKit";
+
+test("OpenBot Desktop and This computer say OpenBot, or OpenBot by CopilotKit, never CopilotKit alone", () => {
+  const all = sentences();
+  expect(
+    all
+      .filter((said) => COMPANY_ALONE.test(said.text) && !BESIDE_THE_NAME(said))
+      .map((said) => `${said.file}:${said.line}  ${said.text}`),
+  ).toEqual([]);
+  // The lockup is read, so the exception above still has something to excuse.
+  expect(all.some(BESIDE_THE_NAME)).toBe(true);
 });
 
 test("every word kept for the person to act in is still needed", () => {
