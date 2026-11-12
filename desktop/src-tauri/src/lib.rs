@@ -24,6 +24,7 @@ pub mod local_eval_state;
 pub mod local_images;
 pub mod local_update;
 pub mod logging;
+pub mod machine_size;
 #[cfg(target_os = "macos")]
 pub mod native_alert;
 pub mod netavark_rules;
