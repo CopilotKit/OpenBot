@@ -7,7 +7,6 @@ import {
   IconCheck,
   IconInfoCircle,
   IconLock,
-  IconPlugConnected,
   IconUsers,
 } from "@tabler/icons-react";
 import {
@@ -17,6 +16,7 @@ import {
 } from "@tanstack/react-query";
 import { MotionConfig, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
+import { CustomAgentCta } from "@/components/agents/custom-agent-cta";
 import { HarnessMark } from "@/components/agents/harness-mark";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BusinessComputerLink } from "@/components/edition/team-features-dialog";
@@ -333,6 +333,18 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       return custom ? go("runtime") : create({ kind: "builtin" });
   };
 
+  /** Into the custom-agent steps, once the Bot has a name. */
+  const toCustom = () => {
+    const parsed = agentFormSchema.shape.name.safeParse(name);
+    if (!parsed.success) {
+      setNameError(parsed.error.issues[0]?.message);
+      document.getElementById("new-bot-name")?.focus();
+      return;
+    }
+    setNameError(undefined);
+    go("runtime");
+  };
+
   /** Back returns to the previous screen without resetting any answers. */
   const previous = (): Step => (step === "endpoint" ? "runtime" : "about");
 
@@ -401,7 +413,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         submit();
       }}
     >
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 pt-8 pb-6">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-6 pt-8 pb-6">
         <MotionConfig reducedMotion="user">
           {/* Shares its layout id with the orb on the created view, so it travels there. */}
           <div className="flex items-center gap-3">
@@ -489,6 +501,12 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
           </motion.div>
         </MotionConfig>
 
+        {step === "about" && builtInAvailable ? (
+          <div className="mt-auto pt-10">
+            <CustomAgentCta disabled={busy} onConnect={toCustom} />
+          </div>
+        ) : null}
+
         {createAgent.error ? (
           <p className="mt-6 text-destructive text-sm" role="alert">
             {createAgent.error.message}
@@ -516,27 +534,6 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
           </Button>
         )}
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-          {step === "about" && builtInAvailable && (
-            <Button
-              type="button"
-              variant="outline"
-              size="lg"
-              disabled={busy}
-              onClick={() => {
-                const parsed = agentFormSchema.shape.name.safeParse(name);
-                if (!parsed.success) {
-                  setNameError(parsed.error.issues[0]?.message);
-                  document.getElementById("new-bot-name")?.focus();
-                  return;
-                }
-                setNameError(undefined);
-                go("runtime");
-              }}
-            >
-              <IconPlugConnected className="size-4" />
-              Connect a custom agent
-            </Button>
-          )}
           {step !== "runtime" && (
             <Button
               className="px-4"

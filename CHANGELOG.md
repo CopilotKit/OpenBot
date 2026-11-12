@@ -40,6 +40,11 @@ every deployment:
   and your own servers. The two for Business are shown but can't be chosen yet, and "you can set
   up a call" under them opens the booking page. Install is unchanged.
 
+- **On a Mac, the window's buttons no longer cover a skin's controls.** With the OpenDuet skin the
+  close, minimise and zoom buttons sat on the "OpenBot" name at the top of the menu, and on the back
+  button of every page opened over the app. OpenDots and OpenMuse had their own controls under them
+  too, in some window sizes. Each skin now leaves that corner clear, as OpenBot's own sidebar does.
+  In a browser and on Windows nothing moves.
 - **An OpenBot whose saved data is gone says so, and starts fresh.** When OpenBot's Podman machine
   was removed (`podman machine reset`, a WSL unregister, or an older version uninstalled with its
   data), its backend and database went with it, but the installation still named them. Every start
@@ -400,6 +405,9 @@ every deployment:
 
 ### Smaller changes
 
+- New Bot's first screen ends with a **Bring your own agent** card showing the mark of every
+  framework a custom agent can run on. It opens the same list the **Connect a custom agent** button
+  in the sheet's footer did, and that button is gone.
 - The Bots page lists the Bots you can use first and leaves out empty sections. Bots, Routines,
   Connections and group conversations draw their rows' shape while they load, and a group
   conversation that fails to load offers Retry. Needs you says which part didn't load, with Retry,
