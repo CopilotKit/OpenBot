@@ -34,6 +34,12 @@ every deployment:
 
 ### OpenBot Desktop
 
+- **The first setup screen says where OpenBot runs.** It is headed "Set up OpenBot" and lists three
+  places: self-contained on this computer, the one setup installs and the only one to choose;
+  OpenBot for Business Cloud; and OpenBot for Business on your VPC, with AWS, Azure, Google Cloud
+  and your own servers. The two for Business are shown but can't be chosen yet, and "you can set
+  up a call" under them opens the booking page. Install is unchanged.
+
 - **An OpenBot whose saved data is gone says so, and starts fresh.** When OpenBot's Podman machine
   was removed (`podman machine reset`, a WSL unregister, or an older version uninstalled with its
   data), its backend and database went with it, but the installation still named them. Every start

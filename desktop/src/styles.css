@@ -580,6 +580,20 @@ fieldset.picker.providers {
   position: relative;
 }
 
+/* Where OpenBot runs, on the first screen: all three places show, without a list of their own. */
+fieldset.picker.places {
+  max-height: none;
+  overflow-y: visible;
+}
+
+/* A place shown but not offered yet: the row at a disabled button's strength, with nothing to click. */
+.tile:has(.tile-input:disabled),
+.tile:has(.tile-input:disabled):hover {
+  opacity: 0.5;
+  cursor: default;
+  background: var(--card);
+}
+
 /* The chosen row's own text stops short of Change rather than running under it. */
 .tile.beside-change {
   padding-right: 84px;
@@ -696,6 +710,20 @@ button.text-link.change-provider {
 .mark-icon svg {
   width: 100%;
   height: 100%;
+}
+
+/* Where a place deploys to, as a row of small marks under its line. */
+.deploy-marks {
+  grid-column: 2;
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.deploy-marks .mark-tile {
+  width: 26px;
+  height: 26px;
+  padding: 4px;
 }
 
 .mark-wordmark {

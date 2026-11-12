@@ -110,11 +110,6 @@ const ALLOWED: { file: string; word: RegExp; why: string }[] = [
     why: "an advanced field for a model the person hosts: the address OpenBot's containers use",
   },
   {
-    file: "desktop/src/Welcome.tsx",
-    word: /\bbackend\b/i,
-    why: "the first screen says OpenBot's backend runs on this computer too, which is what self-contained means",
-  },
-  {
     file: "desktop/src/localEvalCli.ts",
     word: /back ?end/i,
     why: "the marker a native stop failure line starts with, matched and never the headline",

@@ -26,6 +26,10 @@ the linter rejects an SVG without one.
 Renamed to the harness or provider id they belong to, so a row finds its mark by its own id and
 there is no second mapping to keep in step.
 
+`aws.svg`, `azure.svg` and `google-cloud.svg` are lobehub's single-colour marks (`aws`, `azure`,
+`googlecloud`, from `@lobehub/icons-static-svg` 1.102.0, unchanged). Desktop's first setup screen
+shows them under "OpenBot for Business on your VPC", for the clouds it deploys to.
+
 Each mark is its owner's trademark, used to identify that product in a picker and for nothing else.
 **Nothing here is invented.** A brand that publishes no mark shows its name alone. A monogram we
 drew would read as the vendor's own, which is the thing a trademark holder actually objects to.

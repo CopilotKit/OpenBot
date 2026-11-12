@@ -595,31 +595,45 @@ async function chooseOpenAi(view: Awaited<ReturnType<typeof renderApp>>) {
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
 }
 
-test("the first screen is Install, with nothing to choose", async () => {
+test("the first screen offers this computer, and shows OpenBot for Business as early access", async () => {
   setupRootConfiguration("/tmp/local-eval-welcome", async () =>
     emptyConfiguration(),
   );
   withLocalCli({});
   const view = await renderApp();
-  expect(
-    view.getByRole("heading", { name: "Set up OpenBot (self-contained)" }),
-  ).toBeTruthy();
-  // Three short paragraphs: what it is, how long setup takes, and production, in that order.
-  expect(
-    [...view.container.querySelectorAll(".lede")].map((p) => p.textContent),
-  ).toEqual([
-    "This version of OpenBot is fully self-contained and runs entirely on your computer, including the OpenBot backend.",
-    "Depending on your internet speed, setup can take between 1 and 10 minutes.",
-    "In production, OpenBot for Business runs on your own infrastructure with Kubernetes, or on OpenBot Cloud. Book a demo for early access.",
+  expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
+  // Three places, in a group a screen reader names. Only this computer can be chosen, and it is.
+  const group = view.getByRole("group", { name: "Where OpenBot runs" });
+  const places = within(group)
+    .getAllByRole("radio")
+    .map((radio) => ({
+      name: radio.closest("label")?.querySelector(".tile-name")?.textContent,
+      checked: (radio as HTMLInputElement).checked,
+      disabled: (radio as HTMLInputElement).disabled,
+    }));
+  expect(places).toEqual([
+    { name: "Self-contained on this computer", checked: true, disabled: false },
+    { name: "OpenBot for Business Cloud", checked: false, disabled: true },
+    {
+      name: "OpenBot for Business on your VPC",
+      checked: false,
+      disabled: true,
+    },
   ]);
-  expect(view.getByText("OpenBot for Business").tagName).toBe("STRONG");
-  // The one booking link, never a scheduling page of its own.
+  // The places it deploys to are said in words, and their marks are only pictures of them.
   expect(
-    view.getByRole("link", { name: "Book a demo" }).getAttribute("href"),
-  ).toBe("https://open.bot/business");
+    within(group).getByText(
+      "Deploy in one click to AWS, Azure, Google Cloud or your own servers. Early access.",
+    ),
+  ).toBeTruthy();
+  expect(
+    group.querySelector(".deploy-marks")?.getAttribute("aria-hidden"),
+  ).toBe("true");
+  // The one booking link, outside the disabled rows so it stays a link of its own.
+  const call = view.getByRole("link", { name: "you can set up a call" });
+  expect(call.getAttribute("href")).toBe("https://open.bot/business");
+  expect(group.contains(call)).toBe(false);
   expect(buttons(view)).toEqual(["Install"]);
-  expect(view.queryByRole("radio")).toBeNull();
-  expect(view.queryByText(/hosted/i)).toBeNull();
   expectPlain(view);
   expect(localCliCalls()).toEqual([]);
 });
@@ -630,7 +644,7 @@ test("the first screen says nothing about usage data: that is the last screen's 
   );
   withLocalCli({});
   const view = await renderApp();
-  await view.findByRole("heading", { name: "Set up OpenBot (self-contained)" });
+  await view.findByRole("heading", { name: "Set up OpenBot" });
   expect(view.queryByText(/usage/i)).toBeNull();
   expect(view.queryByRole("checkbox")).toBeNull();
   expect(view.queryByRole("link", { name: "What OpenBot sends" })).toBeNull();
@@ -1407,12 +1421,9 @@ function behindNow(view: ReturnType<typeof render>): string | null {
 
 function technicalOn(beats: Beat[]) {
   return beats.flatMap(({ beat, text }) =>
-    TECHNICAL.filter(
-      // The first screen says the backend runs on this computer too: that is what
-      // self-contained means. Every later screen is held to plain words.
-      (word) =>
-        word.test(text) && !(beat === "welcome" && word.test("backend")),
-    ).map((word) => `${beat}: ${text.match(word)?.[0]}`),
+    TECHNICAL.filter((word) => word.test(text)).map(
+      (word) => `${beat}: ${text.match(word)?.[0]}`,
+    ),
   );
 }
 
@@ -3799,7 +3810,7 @@ test("an installation an earlier app connected to hosted Intelligence starts at 
   );
   withLocalCli(readyLocal());
   const view = await renderApp();
-  await view.findByRole("heading", { name: "Set up OpenBot (self-contained)" });
+  await view.findByRole("heading", { name: "Set up OpenBot" });
   expect(buttons(view)).toEqual(["Install"]);
   await new Promise((resolve) => setTimeout(resolve, 20));
   // Nothing hosted is started, and nothing local either, until Install.
@@ -3840,7 +3851,7 @@ test("a previously hosted installation of another Bot installs the default Bot",
   );
   withLocalCli(readyLocal());
   const view = await renderApp();
-  await view.findByRole("heading", { name: "Set up OpenBot (self-contained)" });
+  await view.findByRole("heading", { name: "Set up OpenBot" });
   expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
     false,
   );
