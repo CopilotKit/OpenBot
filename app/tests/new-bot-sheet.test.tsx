@@ -480,13 +480,17 @@ test("personal Bot creation hides team visibility and isolation controls and lin
   await view.findByLabelText("Name");
   expect(view.queryByText("Who can see it")).toBeNull();
   expect(view.queryByRole("checkbox", { name: "Isolated" })).toBeNull();
+  // It opens the OpenBot for Business dialog over the sheet, never the website.
   expect(
-    view
-      .getByRole("link", {
-        name: "Give each Bot its own computer with OpenBot for Business.",
-      })
-      .getAttribute("href"),
-  ).toBe("https://open.bot/business");
+    view.queryByRole("link", {
+      name: "Give each Bot its own computer with OpenBot for Business.",
+    }),
+  ).toBeNull();
+  expect(
+    view.getByRole("button", {
+      name: "Give each Bot its own computer with OpenBot for Business.",
+    }),
+  ).toBeTruthy();
   const user = userEvent.setup({ document: view.baseElement.ownerDocument });
   const name = view.getByLabelText("Name");
   await user.type(name, "Personal Research");
