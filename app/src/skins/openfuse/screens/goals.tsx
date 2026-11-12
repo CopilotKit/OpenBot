@@ -1,6 +1,6 @@
 import { RoutinesList } from "@/components/routines/routines-list";
-import { useMuse } from "../context";
-import { MuseScreen } from "../ui";
+import { useFuse } from "../context";
+import { FuseScreen } from "../ui";
 import { NoBot } from "./activity";
 
 /**
@@ -9,10 +9,10 @@ import { NoBot } from "./activity";
  * offer. The tab keeps its id, `goals`, so an old `/s/goals` link still opens it.
  */
 export function GoalsScreen() {
-  const { bot } = useMuse();
+  const { bot } = useFuse();
   return (
-    <MuseScreen title="Routines">
+    <FuseScreen title="Routines">
       {bot ? <RoutinesList agentId={bot.id} embedded /> : <NoBot />}
-    </MuseScreen>
+    </FuseScreen>
   );
 }

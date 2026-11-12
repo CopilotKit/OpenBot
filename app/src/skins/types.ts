@@ -6,6 +6,7 @@ import type { ComponentType, ReactNode } from "react";
  * checks it. They are re-exported here so a skin reads them from beside its own type.
  */
 export {
+  currentSkinId,
   DEFAULT_SKIN,
   SKIN_IDS,
   type SkinId,

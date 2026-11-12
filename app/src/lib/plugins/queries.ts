@@ -85,6 +85,11 @@ export type PluginServer = {
    */
   dynamicClient: boolean;
   /**
+   * A server added by its address that signs each person in: each person connects their own account
+   * in their browser, and a Bot's call runs on theirs. Absent from a server older than the field.
+   */
+  signIn?: boolean;
+  /**
    * How this server's authorization config was CREATED, for the brokered rows that have one.
    *
    * What was written down when somebody enabled the app, not what the catalogue publishes today.

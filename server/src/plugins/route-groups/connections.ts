@@ -33,6 +33,10 @@ import {
   sealConnectState,
 } from "../oauth";
 import {
+  RemoteServerRefusedError,
+  startRemoteAuthorization,
+} from "../remote-oauth";
+import {
   type AccountRef,
   anotherArcadeAccount,
   asAccountRef,
@@ -932,6 +936,95 @@ export function mountConnectionRoutes({
       );
     }
 
+    /*
+     * Where to come back to, as one of three names rather than a URL the caller chose.
+     *
+     * Read from the query and narrowed immediately, so an unrecognised value is the default rather
+     * than something carried into a sealed state. See {@link ConnectOrigin}: a destination that could
+     * name another origin is an open redirect with a consent screen in front of it. A press from
+     * OpenBot Desktop's window (`?from=desktop`) comes back to the page that hands the person back to
+     * that window, because the consent ran in their own browser.
+     */
+    const returnTo: ConnectOrigin =
+      context.req.query("from") === "desktop"
+        ? "desktop"
+        : context.req.query("returnTo") === "admin"
+          ? "admin"
+          : "settings";
+
+    /*
+     * A SERVER ADDED BY URL THAT SIGNS EACH PERSON IN. Its endpoints were discovered from the server's
+     * own OAuth challenge when it was added and are read off the row, never from this request; the
+     * MCP SDK builds the consent address with PKCE and the `resource` the token is for.
+     */
+    const remote = catalogueEntry(serverId)
+      ? null
+      : await store.remoteSignIn(serverId);
+    if (remote) {
+      let remoteClient: OAuthClient | null;
+      try {
+        remoteClient = await store.ensureOAuthClient(
+          serverId,
+          actorEmail(context),
+        );
+      } catch (error) {
+        if (error instanceof RemoteServerRefusedError) {
+          return context.json({ error: error.message }, 502);
+        }
+        if (error instanceof OAuthClientReadError) {
+          await store.recordOAuthClientReadFailure({
+            serverId,
+            actorId: context.var.actor.id,
+          });
+          return context.json(
+            {
+              error: `Couldn't connect ${remote.title}. Try again, or ask an admin if it keeps happening.`,
+            },
+            503,
+          );
+        }
+        throw error;
+      }
+      if (!remoteClient) {
+        return context.json(
+          {
+            error: `Couldn't set up ${remote.title}. Try again in a moment.`,
+          },
+          502,
+        );
+      }
+      let started: Awaited<ReturnType<typeof startRemoteAuthorization>>;
+      try {
+        started = await startRemoteAuthorization({
+          config: remote.config,
+          client: remoteClient,
+          redirectUri: redirectUriFor(connect.publicUrl),
+        });
+      } catch {
+        return context.json(
+          {
+            error: `${remote.title} signs people in a way OpenBot doesn't support yet.`,
+          },
+          502,
+        );
+      }
+      started.authorizationUrl.searchParams.set(
+        "state",
+        await sealConnectState(
+          {
+            userId: context.var.actor.id,
+            serverId,
+            verifier: started.verifier,
+            returnTo,
+          },
+          connect.encryptionKey,
+        ),
+      );
+      return context.json({
+        authorizationUrl: started.authorizationUrl.toString(),
+      });
+    }
+
     const entry = catalogueEntry(serverId);
     if (entry?.auth.kind !== "user-oauth") {
       return context.json(
@@ -1001,16 +1094,6 @@ export function mountConnectionRoutes({
         409,
       );
     }
-
-    /*
-     * Where to come back to, as one of two names rather than a URL the caller chose.
-     *
-     * Read from the query and narrowed immediately, so an unrecognised value is the default rather
-     * than something carried into a sealed state. See {@link ConnectOrigin}: a destination that could
-     * name another origin is an open redirect with a consent screen in front of it.
-     */
-    const returnTo =
-      context.req.query("returnTo") === "admin" ? "admin" : "settings";
 
     const verifier = createVerifier();
     return context.json({
