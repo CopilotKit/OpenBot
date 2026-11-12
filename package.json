@@ -23,6 +23,8 @@
     "typecheck": "bun run --filter '*' typecheck && bun run typecheck:e2e",
     "typecheck:e2e": "tsc --noEmit -p e2e/tsconfig.json",
     "typecheck:tests": "bun scripts/typecheck-tests.ts",
+    "api:lint": "REDOCLY_TELEMETRY=off REDOCLY_SUPPRESS_UPDATE_NOTICE=true redocly lint",
+    "api:generate": "orval --config app/orval.config.ts",
     "test:ci": "bun scripts/test-ci.ts",
     "test:server:sharded": "bun scripts/test-server-sharded.ts",
     "test:mutations": "bun scripts/mutation-register.ts",
@@ -43,7 +45,9 @@
     "@biomejs/biome": "2.5.10",
     "@copilotkit/aimock": "1.48.0",
     "@playwright/test": "1.62.1",
+    "@redocly/cli": "2.72.1",
     "@types/bun": "^1.3.3",
+    "orval": "8.45.0",
     "roughjs": "^4.6.6",
     "typescript": "^5.9.3",
     "yaml": "^2.9.0"

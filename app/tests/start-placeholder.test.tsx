@@ -37,6 +37,9 @@ import { settleReactWork } from "./settle-react-work";
 const originalFetch = globalThis.fetch;
 
 const knowledge: AgentProfile = {
+  assignedToMe: false,
+  runsOnOpenBotModel: false,
+  keyFromOpenBot: false,
   avatarSeed: "seed",
   builtIn: true,
   canManage: true,
