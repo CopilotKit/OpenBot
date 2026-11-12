@@ -6,6 +6,11 @@ import { useSyncExternalStore } from "react";
  * own default Bot rather than the last person's choice. Choosing a Bot changes nothing on the server.
  */
 export function chosenBotKey(userId: string): string {
+  return `openfuse-bot:${userId}`;
+}
+
+/** Where the choice was kept while the skin was called OpenMuse, read until the person chooses again. */
+function renamedChosenBotKey(userId: string): string {
   return `openmuse-bot:${userId}`;
 }
 
@@ -17,7 +22,9 @@ function read(userId: string): string | null {
     let stored: string | null = null;
     // localStorage throws in some privacy modes; the frame then starts from the default Bot.
     try {
-      stored = window.localStorage.getItem(chosenBotKey(userId));
+      stored =
+        window.localStorage.getItem(chosenBotKey(userId)) ??
+        window.localStorage.getItem(renamedChosenBotKey(userId));
     } catch {}
     choices.set(userId, stored);
   }
