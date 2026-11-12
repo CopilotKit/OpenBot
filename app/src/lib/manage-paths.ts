@@ -30,20 +30,19 @@ export function managePaths(edition: "team" | "personal") {
         directory === "composio"
           ? linkOptions({ to: "/connections/browse/composio" })
           : linkOptions({ to: "/connections/browse/arcade" }),
-      skills: () => linkOptions({ to: "/settings/skills" }),
-      newSkill: () => linkOptions({ to: "/settings/skills/new" }),
+      skills: () => linkOptions({ to: "/skills" }),
+      newSkill: () => linkOptions({ to: "/skills/new" }),
       skill: (slug: string) =>
-        linkOptions({ to: "/settings/skills/$slug", params: { slug } }),
-      // Under Settings, and linked from Connections beside the apps that use them.
-      credentialsLabel: "Keys",
-      credentials: () => linkOptions({ to: "/settings/credentials" }),
-      newCredential: () => linkOptions({ to: "/settings/credentials/new" }),
+        linkOptions({ to: "/skills/$slug", params: { slug } }),
+      // The Keys section of the Vault, under Settings, and linked from Connections.
+      credentialsLabel: "Vault",
+      credentials: () => linkOptions({ to: "/settings/vault" }),
+      newCredential: () => linkOptions({ to: "/settings/vault/new" }),
       computers: () => linkOptions({ to: "/settings/computer" }),
       /*
        * What the trail is called, on its page, in the sidebar and wherever another page sends a
-       * person to it. Activity here, where one person reads what their own Bots did; Audit under
-       * Admin, where an admin reviews everybody's Bots for policy. Two names, each kept the same
-       * everywhere in its edition, so a page never reads "Audit" under a sidebar entry "Activity".
+       * person to it. Activity in both editions, one of the eight (`lib/primitives.ts`), so a page
+       * never reads one name under a sidebar entry of another.
        */
       auditLabel: "Activity",
       audit: () => linkOptions({ to: "/settings/activity" }),
@@ -58,7 +57,7 @@ export function managePaths(edition: "team" | "personal") {
     };
   }
   return {
-    pluginsLabel: "Plugins",
+    pluginsLabel: "Apps",
     plugins: () => linkOptions({ to: "/admin/plugins" }),
     plugin: (key: string) =>
       linkOptions({ to: "/admin/plugins/$key", params: { key } }),
@@ -80,11 +79,11 @@ export function managePaths(edition: "team" | "personal") {
     newSkill: () => linkOptions({ to: "/admin/skills/new" }),
     skill: (slug: string) =>
       linkOptions({ to: "/admin/skills/$slug", params: { slug } }),
-    credentialsLabel: "Credentials",
+    credentialsLabel: "Vault",
     credentials: () => linkOptions({ to: "/admin/credentials" }),
     newCredential: () => linkOptions({ to: "/admin/credentials/new" }),
     computers: () => linkOptions({ to: "/admin/computers" }),
-    auditLabel: "Audit",
+    auditLabel: "Activity",
     audit: () => linkOptions({ to: "/admin/audit" }),
     deploymentName: "this deployment",
     edition: "team" as const,
@@ -111,15 +110,15 @@ export function personalAppsAddress(rest: string): string {
 
 /** Each other Admin page the personal edition keeps, and where it is now. */
 const MOVED: readonly (readonly [admin: string, settings: string])[] = [
-  ["/admin/skills", "/settings/skills"],
-  ["/admin/credentials", "/settings/credentials"],
+  ["/admin/skills", "/skills"],
+  ["/admin/credentials", "/settings/vault"],
   ["/admin/computers", "/settings/computer"],
   ["/admin/audit", "/settings/activity"],
 ];
 
 /**
  * Where an old Admin address goes in the personal edition: an app's page under Connections, the
- * same page under Settings with whatever followed it (`/admin/credentials/new` keeps `/new`), or
+ * same page under Settings or Skills with whatever followed it (`/admin/credentials/new` keeps `/new`), or
  * Settings itself for a page the personal edition does not have.
  */
 export function personalAdminRedirect(pathname: string): string {

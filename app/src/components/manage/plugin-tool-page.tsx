@@ -75,7 +75,7 @@ export function PluginToolPage({
   const tool = server?.tools.find((row) => row.name === toolName);
 
   const back = {
-    label: server?.title ?? "Plugin",
+    label: server?.title ?? "App",
     linkProps: paths.plugin(key),
   };
 

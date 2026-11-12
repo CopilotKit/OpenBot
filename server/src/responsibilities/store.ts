@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { routines } from "../db/schema/coworker";
 import {
@@ -15,16 +15,22 @@ import {
   parseResponsibilityEvent,
   parseResponsibilityInput,
   parseResponsibilityPatch,
+  ENDS_WITHOUT_OUTCOME,
+  instructionNamesGoal,
+  RECURS_AND_ENDS,
   type Responsibility,
   ResponsibilityNotFoundError,
   ResponsibilityRefusedError,
   type ResponsibilityStore,
+  type RoutineGoalLink,
   routineRunsGoal,
   whyItRepeats,
 } from "./types";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type Connection = Database | Transaction;
+/** An enabled routine, with what `routinesRunning` reads to tell which goal it runs. */
+type EnabledRoutine = RoutineGoalLink & { id: string; agentId: string };
 export type ResponsibilityTargetResolver = (
   ownerUserId: string,
   agentId: string,
@@ -65,22 +71,178 @@ export function createResponsibilityStore(
       .onConflictDoNothing();
   }
   /**
-   * Why this goal runs again and again (`GoalRepeats`), read where it already lives: its own flag,
-   * its subscriptions, its enabled triggers, and the enabled routines of its Bot that run it
-   * (`routineRunsGoal`: the goal a routine records, or for an older routine its id or whole quoted
-   * title).
+   * The enabled routines that may run a goal of this Bot: this Bot's, plus any routine that records
+   * one of `goalIds` whatever its Bot. `routinesRunning` narrows them to one goal; `repeatingGoals`
+   * reads them once for all of a Bot's goals. One query for both, so a goal's repeat check and its
+   * completion read the same routines.
+   *
+   * A person keeps at most 20 routines switched on (`MAX_ENABLED_ROUTINES`), so this read is small.
    */
-  async function repeatsOf(
+  function enabledRoutines(
     connection: Connection,
-    goal: Pick<
-      Responsibility,
-      "id" | "ownerUserId" | "agentId" | "title" | "recurring" | "subscriptions"
-    >,
-  ): Promise<GoalRepeats | null> {
-    if (goal.recurring) return "recurring";
-    // A person keeps at most 20 routines switched on (`MAX_ENABLED_ROUTINES`), so this read is small.
-    const enabled = await connection
+    ownerUserId: string,
+    agentId: string,
+    goalIds: readonly string[],
+  ): Promise<EnabledRoutine[]> {
+    return connection
       .select({
+        id: routines.id,
+        agentId: routines.agentId,
+        goalId: routines.goalId,
+        goalByTitle: routines.goalByTitle,
+        instruction: routines.instruction,
+      })
+      .from(routines)
+      .where(
+        and(
+          eq(routines.ownerUserId, ownerUserId),
+          eq(routines.enabled, true),
+          goalIds.length > 0
+            ? or(
+                eq(routines.agentId, agentId),
+                inArray(routines.goalId, [...goalIds]),
+              )
+            : eq(routines.agentId, agentId),
+        ),
+      );
+  }
+  /**
+   * The ids of the enabled routines that run this goal, by `routineRunsGoal`: the goal a routine
+   * records, or for an older routine its id or whole quoted title. The one place the goal store asks
+   * which routines run a goal, so what makes it repeat is what its completion switches off, less a
+   * routine that still runs another open goal, which that goal still repeats by
+   * (`switchOffRoutinesOf`).
+   *
+   * FOUND IN REVIEW: completion switched off only the routines whose `goal_id` named the goal, while
+   * `repeatsOf` also counted an older routine that names it in its instruction. That routine stayed
+   * on after the goal was complete, kept firing, and every `run_goal` it made was refused.
+   *
+   * Read from this Bot's routines, plus any routine that records this goal whatever its Bot, which is
+   * what completion switched off before. `enabled` is `enabledRoutines` already read for many goals
+   * (`repeatingGoals`); absent, it is read for this goal.
+   */
+  async function routinesRunning(
+    connection: Connection,
+    goal: Pick<Responsibility, "id" | "ownerUserId" | "agentId" | "title">,
+    enabled?: readonly EnabledRoutine[],
+  ): Promise<string[]> {
+    const candidates =
+      enabled ??
+      (await enabledRoutines(connection, goal.ownerUserId, goal.agentId, [
+        goal.id,
+      ]));
+    return candidates
+      .filter(
+        (routine) =>
+          (routine.agentId === goal.agentId || routine.goalId === goal.id) &&
+          routineRunsGoal(routine, goal),
+      )
+      .map((routine) => routine.id);
+  }
+  /**
+   * Completing a goal switches off the routines that run it (`routinesRunning`), but not one that
+   * still runs another goal of its Bot that is not completed. Only an older routine can: a routine
+   * that records its goal (`goal_id`) runs that goal alone, whatever its instruction quotes
+   * (`routineRunsGoal`), so it is switched off with it. A paused goal is not completed, and can be
+   * resumed, so a routine that runs one stays on.
+   *
+   * FOUND IN REVIEW: completion switched off every routine that ran the goal, including an older
+   * routine that also named a second goal ("Weekly report" and "Inbox zero"). The second goal, still
+   * active, silently stopped being run, and since nothing made it repeat any more, a run could then
+   * complete it. What is left on is what `routinesRunning` still finds for that open goal, so it
+   * still repeats (`repeatsOf`, `repeatingGoals`); the completed goal's `run_goal` is refused.
+   *
+   * Serialized per Bot, so two goals one routine runs, completed at once, can't each read the other
+   * as still open and both leave it on: the second reads the first as completed, and switches it off.
+   *
+   * FOUND IN REVIEW: a broad routine ("Summarise my inbox, and if a release shipped run the goal")
+   * records the goal its firing ran through run_goal (`linkGoal` in the routine store), though its
+   * instruction never names it. Completing that goal switched the routine off, and switching it back
+   * on was refused as `goal_complete`, so the rest of what it did stopped for good. A routine that
+   * records this goal but whose instruction doesn't name it (`instructionNamesGoal`) is unlinked and
+   * left on; one that names it is switched off.
+   */
+  async function switchOffRoutinesOf(
+    transaction: Transaction,
+    goal: Pick<Responsibility, "id" | "ownerUserId" | "agentId" | "title">,
+  ) {
+    await transaction.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${`goal-completion-${goal.ownerUserId}-${goal.agentId}`}))`,
+    );
+    const enabled = await enabledRoutines(
+      transaction,
+      goal.ownerUserId,
+      goal.agentId,
+      [goal.id],
+    );
+    const running = new Set(await routinesRunning(transaction, goal, enabled));
+    const linkedOnly = enabled.filter(
+      (routine) =>
+        running.has(routine.id) &&
+        routine.goalId === goal.id &&
+        !instructionNamesGoal(routine.instruction, goal),
+    );
+    if (linkedOnly.length > 0)
+      await transaction
+        .update(routines)
+        .set({ goalId: null, updatedAt: new Date() })
+        .where(
+          inArray(
+            routines.id,
+            linkedOnly.map((routine) => routine.id),
+          ),
+        );
+    const runs = enabled.filter(
+      (routine) => running.has(routine.id) && !linkedOnly.includes(routine),
+    );
+    const stillOpen = runs.some((routine) => !routine.goalId)
+      ? await transaction
+          .select({ id: responsibilities.id, title: responsibilities.title })
+          .from(responsibilities)
+          .where(
+            and(
+              eq(responsibilities.ownerUserId, goal.ownerUserId),
+              eq(responsibilities.agentId, goal.agentId),
+              ne(responsibilities.status, "completed"),
+              ne(responsibilities.id, goal.id),
+            ),
+          )
+      : [];
+    const ids = runs
+      .filter(
+        (routine) =>
+          !stillOpen.some((other) => routineRunsGoal(routine, other)),
+      )
+      .map((routine) => routine.id);
+    if (ids.length === 0) return;
+    await transaction
+      .update(routines)
+      .set({ enabled: false, updatedAt: new Date() })
+      .where(inArray(routines.id, ids));
+  }
+  /**
+   * The routines deleting this goal deletes with it, switched on or off: those that run it
+   * (`routineRunsGoal`), less an older routine that still runs another goal of its Bot that is not
+   * completed, as completion leaves one on (`switchOffRoutinesOf`). The page draws an older routine
+   * under the goal it still runs (`goalShownFor`), so that one moves to the other goal's row.
+   *
+   * FOUND IN REVIEW: delete removed only the routines whose `goal_id` named the goal. An older routine
+   * that runs it by its quoted title (`goalByTitle`) was drawn under the goal and named in the delete
+   * confirm, but stayed on after it, firing `run_goal` at a goal that was gone.
+   *
+   * Serialized per Bot with completion, so a goal deleted while another completes can't each read the
+   * other as still open and leave a routine behind that runs neither.
+   */
+  async function routinesDeletedWith(
+    transaction: Transaction,
+    goal: Pick<Responsibility, "id" | "ownerUserId" | "agentId" | "title">,
+  ): Promise<string[]> {
+    await transaction.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${`goal-completion-${goal.ownerUserId}-${goal.agentId}`}))`,
+    );
+    const candidates = await transaction
+      .select({
+        id: routines.id,
         goalId: routines.goalId,
         goalByTitle: routines.goalByTitle,
         instruction: routines.instruction,
@@ -89,13 +251,68 @@ export function createResponsibilityStore(
       .where(
         and(
           eq(routines.ownerUserId, goal.ownerUserId),
-          eq(routines.agentId, goal.agentId),
-          eq(routines.enabled, true),
+          or(
+            eq(routines.goalId, goal.id),
+            and(
+              eq(routines.agentId, goal.agentId),
+              isNull(routines.goalId),
+              eq(routines.goalByTitle, true),
+            ),
+          ),
         ),
       );
-    if (enabled.some((routine) => routineRunsGoal(routine, goal)))
+    const runs = candidates.filter((routine) => routineRunsGoal(routine, goal));
+    const stillOpen = runs.some((routine) => !routine.goalId)
+      ? await transaction
+          .select({ id: responsibilities.id, title: responsibilities.title })
+          .from(responsibilities)
+          .where(
+            and(
+              eq(responsibilities.ownerUserId, goal.ownerUserId),
+              eq(responsibilities.agentId, goal.agentId),
+              ne(responsibilities.status, "completed"),
+              ne(responsibilities.id, goal.id),
+            ),
+          )
+      : [];
+    return runs
+      .filter(
+        (routine) =>
+          !stillOpen.some((other) => routineRunsGoal(routine, other)),
+      )
+      .map((routine) => routine.id);
+  }
+  /**
+   * Why this goal runs again and again (`GoalRepeats`), read where it already lives: its own flag,
+   * its subscriptions, its enabled triggers, and the enabled routines that run it (`routinesRunning`).
+   * A goal that ends when met (`endsWhenMet`) does not repeat, whatever runs it.
+   *
+   * `known` is `enabledRoutines` and the goals with an enabled trigger, read once for all of a Bot's
+   * goals (`repeatingGoals`); absent, they are read for this goal.
+   */
+  async function repeatsOf(
+    connection: Connection,
+    goal: Pick<
+      Responsibility,
+      | "id"
+      | "ownerUserId"
+      | "agentId"
+      | "title"
+      | "recurring"
+      | "endsWhenMet"
+      | "subscriptions"
+    >,
+    known?: {
+      enabled: readonly EnabledRoutine[];
+      triggered: ReadonlySet<string>;
+    },
+  ): Promise<GoalRepeats | null> {
+    if (goal.recurring) return "recurring";
+    if (goal.endsWhenMet) return null;
+    if ((await routinesRunning(connection, goal, known?.enabled)).length > 0)
       return "routine";
     if (goal.subscriptions.length > 0) return "event";
+    if (known) return known.triggered.has(goal.id) ? "event" : null;
     const [trigger] = await connection
       .select({ id: responsibilityTriggers.id })
       .from(responsibilityTriggers)
@@ -143,7 +360,17 @@ export function createResponsibilityStore(
     async update(ownerUserId, id, input) {
       const patch = parseResponsibilityPatch(input);
       return database.transaction(async (transaction) => {
-        await owned(transaction, ownerUserId, id, true);
+        const existing = await owned(transaction, ownerUserId, id, true);
+        if (
+          (patch.recurring ?? existing.recurring) &&
+          (patch.endsWhenMet ?? existing.endsWhenMet)
+        )
+          throw new ResponsibilityRefusedError(RECURS_AND_ENDS);
+        if (
+          (patch.endsWhenMet ?? existing.endsWhenMet) &&
+          !(patch.successCriteria ?? existing.successCriteria)
+        )
+          throw new ResponsibilityRefusedError(ENDS_WITHOUT_OUTCOME);
         const [row] = await transaction
           .update(responsibilities)
           .set({ ...patch, updatedAt: new Date() })
@@ -177,7 +404,22 @@ export function createResponsibilityStore(
           .where(eq(responsibilities.id, id))
           .returning();
         if (!row) throw new ResponsibilityNotFoundError();
+        if (status === "completed") await switchOffRoutinesOf(transaction, row);
         return row;
+      });
+    },
+    async delete(ownerUserId, id) {
+      await database.transaction(async (transaction) => {
+        const goal = await owned(transaction, ownerUserId, id, true);
+        // Its routines exist to run it. Left behind, `goal_id` would clear and each would become a
+        // routine of its own, firing `run_goal` at a goal that is gone.
+        const ids = await routinesDeletedWith(transaction, goal);
+        if (ids.length > 0)
+          await transaction.delete(routines).where(inArray(routines.id, ids));
+        // Its runs and triggers go with it, by foreign key.
+        await transaction
+          .delete(responsibilities)
+          .where(eq(responsibilities.id, id));
       });
     },
     async recordProgress(ownerUserId, id, input, agentId) {
@@ -230,11 +472,75 @@ export function createResponsibilityStore(
           .where(eq(responsibilities.id, id))
           .returning();
         if (!row) throw new ResponsibilityNotFoundError();
+        if (input.complete) await switchOffRoutinesOf(transaction, row);
         return row;
       });
     },
     repeats: async (ownerUserId, id) =>
       repeatsOf(database, await owned(database, ownerUserId, id)),
+    async renameUnlinksRoutine(ownerUserId, id, title) {
+      const goal = await owned(database, ownerUserId, id);
+      const enabled = await enabledRoutines(
+        database,
+        ownerUserId,
+        goal.agentId,
+        [id],
+      );
+      const renamed = new Set(
+        await routinesRunning(database, { ...goal, title }, enabled),
+      );
+      return (await routinesRunning(database, goal, enabled)).some(
+        (routine) => !renamed.has(routine),
+      );
+    },
+    async repeatingGoals(ownerUserId, agentId) {
+      // Only what `repeatsOf` reads, and not the completed ones: a completed goal stays completed
+      // (`transition`), so no run or turn can be asked whether it may complete one. They are never
+      // deleted, so reading them here would grow for as long as the Bot is used.
+      const goals = await database
+        .select({
+          id: responsibilities.id,
+          ownerUserId: responsibilities.ownerUserId,
+          agentId: responsibilities.agentId,
+          title: responsibilities.title,
+          recurring: responsibilities.recurring,
+          endsWhenMet: responsibilities.endsWhenMet,
+          subscriptions: responsibilities.subscriptions,
+        })
+        .from(responsibilities)
+        .where(
+          and(
+            eq(responsibilities.ownerUserId, ownerUserId),
+            eq(responsibilities.agentId, agentId),
+            ne(responsibilities.status, "completed"),
+          ),
+        );
+      const ids = goals.map((goal) => goal.id);
+      const [enabled, triggered] = await Promise.all([
+        enabledRoutines(database, ownerUserId, agentId, ids),
+        ids.length > 0
+          ? database
+              .selectDistinct({ id: responsibilityTriggers.responsibilityId })
+              .from(responsibilityTriggers)
+              .where(
+                and(
+                  inArray(responsibilityTriggers.responsibilityId, ids),
+                  eq(responsibilityTriggers.enabled, true),
+                ),
+              )
+          : [],
+      ]);
+      const known = {
+        enabled,
+        triggered: new Set(triggered.map((trigger) => trigger.id)),
+      };
+      const repeating = new Map<string, GoalRepeats>();
+      for (const goal of goals) {
+        const repeats = await repeatsOf(database, goal, known);
+        if (repeats) repeating.set(goal.id, repeats);
+      }
+      return repeating;
+    },
     async listRuns(ownerUserId, id) {
       await owned(database, ownerUserId, id);
       return database
@@ -454,12 +760,15 @@ export function createResponsibilityStore(
       });
     },
     async settleRun(runId, outcome) {
-      await database.transaction(async (transaction) => {
+      return database.transaction(async (transaction) => {
+        // FOUND IN REVIEW: deleting a goal deletes its runs, a running one too. That run's turn kept
+        // going, and settling it threw not found, which escaped the engine's dispatch and left the
+        // other runs it had claimed for the lease to time out. A run that is gone settles as gone.
         const [reference] = await transaction
           .select({ responsibilityId: responsibilityRuns.responsibilityId })
           .from(responsibilityRuns)
           .where(eq(responsibilityRuns.id, runId));
-        if (!reference) throw new ResponsibilityNotFoundError();
+        if (!reference) return false;
         await transaction
           .select({ id: responsibilities.id })
           .from(responsibilities)
@@ -470,7 +779,8 @@ export function createResponsibilityStore(
           .from(responsibilityRuns)
           .where(eq(responsibilityRuns.id, runId))
           .for("update");
-        if (run?.status !== "running")
+        if (!run) return false;
+        if (run.status !== "running")
           throw new ResponsibilityRefusedError(
             "This goal's run is no longer running.",
           );
@@ -494,6 +804,7 @@ export function createResponsibilityStore(
             .update(responsibilities)
             .set({ lastResult: replyText, updatedAt: new Date() })
             .where(eq(responsibilities.id, run.responsibilityId));
+        return true;
       });
     },
     async requeueRun(runId) {

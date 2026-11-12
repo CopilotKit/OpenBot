@@ -37,15 +37,20 @@ const store = createResponsibilityStore(database, {
       : null;
   },
 });
-const toolsFor = (runId?: string) =>
-  responsibilityTools({
+const toolsFor = (runId?: string) => {
+  const base = {
     store,
     engine: { ingest: async () => ({}) as never },
     ownerUserId: ownerId,
     agentId: botId,
     channelId,
-    ...(runId ? { responsibilityRunId: runId } : {}),
-  });
+  };
+  return responsibilityTools(
+    runId
+      ? { ...base, responsibilityRunId: runId, repeatedWhenRunBegan: new Map() }
+      : base,
+  );
+};
 const call = (name: string, args: unknown, runId?: string) => {
   const tool = toolsFor(runId).find((each) => each.name === name);
   if (!tool) throw new Error(`${name} is not one of a goal's tools`);
@@ -146,10 +151,10 @@ describe("a goal's run", () => {
 });
 
 describe("a goal's triggers, in a conversation", () => {
-  test("are offered in a goal's words, pointing at the Goals page", () => {
+  test("are offered in a goal's words, pointing at the Routines page", () => {
     const offered = JSON.stringify(TRIGGER_TOOLS);
     expect(offered).not.toMatch(SAYS_RESPONSIBILITY);
-    expect(offered).toContain("the Bot's Goals page");
+    expect(offered).toContain("the Bot's Routines page");
   });
 });
 

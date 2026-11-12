@@ -176,37 +176,33 @@ afterAll(async () => {
   await server.close();
 });
 
-test.each([
-  ["nobody has turned Notion on", false],
-  ["an earlier press turned Notion on and listed nothing", true],
-])(
-  "one press on Connect opens Notion's sign-in in the person's browser: %s",
-  async (_, turnedOnAlready) => {
-    if (turnedOnAlready) await server.addApp("notion");
-    const browser = inTheDesktop();
-    serving();
-    const view = drawCard();
+/*
+ * Only once an earlier press turned Notion on. The personal edition no longer offers its own Notion
+ * to somebody who hasn't added it, since Composio's carries it there, so a card for an app nobody
+ * turned on finds nothing to connect (`offeredHere`). One already added is still served.
+ */
+test("one press on Connect opens Notion's sign-in in the person's browser once an earlier press turned it on and listed nothing", async () => {
+  await server.addApp("notion");
+  const browser = inTheDesktop();
+  serving();
+  const view = drawCard();
 
-    fireEvent.click(
-      await view.findByRole("button", { name: "Connect Notion" }),
-    );
+  fireEvent.click(await view.findByRole("button", { name: "Connect Notion" }));
 
-    await waitFor(() => expect(browser).toHaveLength(1), { timeout: 5_000 });
-    const signIn = new URL(browser[0] ?? "");
-    expect(`${signIn.origin}${signIn.pathname}`).toBe(
-      "https://mcp.notion.com/authorize",
-    );
-    expect(signIn.searchParams.get("client_id")).toBe(CLIENT_ID);
-    expect(view.queryByRole("alert")).toBeNull();
-    expect(sent).toContain(
-      `POST /api/plugins/for/${server.botId}/apps/notion/approve`,
-    );
-    expect(sent).toContain(
-      "POST /api/plugins/servers/notion/connect?returnTo=settings",
-    );
-    await view.findByText("Finish in the tab that opened.");
-    // Nothing to give yet: signing in lists Notion's tools and gives them to every Bot.
-    expect(await server.botHolds("notion")).toEqual([]);
-  },
-  15_000,
-);
+  await waitFor(() => expect(browser).toHaveLength(1), { timeout: 5_000 });
+  const signIn = new URL(browser[0] ?? "");
+  expect(`${signIn.origin}${signIn.pathname}`).toBe(
+    "https://mcp.notion.com/authorize",
+  );
+  expect(signIn.searchParams.get("client_id")).toBe(CLIENT_ID);
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(sent).toContain(
+    `POST /api/plugins/for/${server.botId}/apps/notion/approve`,
+  );
+  expect(sent).toContain(
+    "POST /api/plugins/servers/notion/connect?returnTo=settings",
+  );
+  await view.findByText("Finish in the tab that opened.");
+  // Nothing to give yet: signing in lists Notion's tools and gives them to every Bot.
+  expect(await server.botHolds("notion")).toEqual([]);
+}, 15_000);

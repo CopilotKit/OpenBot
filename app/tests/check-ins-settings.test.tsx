@@ -123,7 +123,9 @@ test("turning check-ins off for all Bots saves it and says so", async () => {
   });
   expect(toggle.getAttribute("aria-checked")).toBe("true");
   expect(
-    view.getByText("On. Each Bot's own check-ins are on its Memory page."),
+    view.getByText(
+      "On. Your Bots check what they can read and tell you when something needs you, at most once an hour.",
+    ),
   ).toBeTruthy();
   fireEvent.click(toggle);
   await waitFor(() =>
@@ -140,7 +142,7 @@ test("turning check-ins off for all Bots saves it and says so", async () => {
   expect(toggle.getAttribute("aria-checked")).toBe("false");
 });
 
-test("in the personal edition, each Bot's own check-ins are on its What it can do page", async () => {
+test("in the personal edition, the switch reads the same and names no page", async () => {
   serving();
   // No memory there, so no Memory page: see `offersMemory`.
   queryClient.setQueryData(deploymentKeys.capabilities(), {
@@ -152,10 +154,10 @@ test("in the personal edition, each Bot's own check-ins are on its What it can d
   const view = await draw(<CheckInsSection />);
   expect(
     await view.findByText(
-      "On. Each Bot's own check-ins are on its What it can do page.",
+      "On. Your Bots check what they can read and tell you when something needs you, at most once an hour.",
     ),
   ).toBeTruthy();
-  expect(view.queryByText(/Memory page/)).toBeNull();
+  expect(view.queryByText(/Memory page|What it can do/)).toBeNull();
 });
 
 test("turned off by an admin, the switch says who and can't be turned back on", async () => {
@@ -177,8 +179,10 @@ test("a Bot's own check-ins say they are off for all your Bots, and won't run no
   expect(
     await view.findByText(/You turned off check-ins for all your Bots in/),
   ).toBeTruthy();
-  expect(view.getByRole("link", { name: "Notifications" })).toBeTruthy();
-  expect(view.getByText("Every hour · Off for all your Bots")).toBeTruthy();
+  expect(view.getByRole("link", { name: "Routines" })).toBeTruthy();
+  expect(
+    view.getByText("Every hour · Tells you · Off for all your Bots"),
+  ).toBeTruthy();
 });
 
 test("a Bot's own check-ins say an admin turned them off", async () => {
@@ -188,5 +192,7 @@ test("a Bot's own check-ins say an admin turned them off", async () => {
   expect(
     await view.findByText("Your admin turned off check-ins for you."),
   ).toBeTruthy();
-  expect(view.getByText("Every hour · Turned off by your admin")).toBeTruthy();
+  expect(
+    view.getByText("Every hour · Tells you · Turned off by your admin"),
+  ).toBeTruthy();
 });

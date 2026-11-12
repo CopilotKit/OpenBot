@@ -500,7 +500,7 @@ export function createSignInService(deps: SignInServiceDependencies) {
           waiting.origin,
           credential.username,
           credential.password,
-          "The site accepted the password, but the login could not be saved. Enter the code to finish, then save it again from Passwords.",
+          "The site accepted the password, but the login could not be saved. Enter the code to finish, then save it again from the Vault.",
         );
       return waiting;
     }
@@ -536,7 +536,7 @@ export function createSignInService(deps: SignInServiceDependencies) {
         claimed.origin,
         credential.username,
         credential.password,
-        "You are signed in, but the login could not be saved. Save it again from Passwords.",
+        "You are signed in, but the login could not be saved. Save it again from the Vault.",
       );
     return done;
   }

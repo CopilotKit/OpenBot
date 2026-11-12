@@ -106,8 +106,10 @@ class ScrollObserver implements IntersectionObserver {
 let originalFetch: typeof fetch;
 let originalWebSocket: typeof WebSocket;
 let originalObserver: typeof IntersectionObserver;
-let respond: () => Promise<Response>;
+let respond: (url: string) => Promise<Response>;
 const requests: string[] = [];
+/** The signal each request was sent with, by position in `requests`. */
+const signals: (AbortSignal | undefined)[] = [];
 const clients: QueryClient[] = [];
 
 beforeAll(() => {
@@ -118,15 +120,17 @@ beforeAll(() => {
   globalThis.WebSocket = OfflineWebSocket;
   globalThis.IntersectionObserver = ScrollObserver;
   globalThis.fetch = Object.assign(
-    async (input: RequestInfo | URL) => {
+    async (input: RequestInfo | URL, init?: RequestInit) => {
       requests.push(String(input));
-      return respond();
+      signals.push(init?.signal ?? undefined);
+      return respond(String(input));
     },
     { preconnect: originalFetch.preconnect },
   );
 });
 beforeEach(() => {
   requests.length = 0;
+  signals.length = 0;
   respond = async () => {
     throw new Error("Unexpected request");
   };
@@ -322,31 +326,179 @@ test("a failed page preserves rows and waits for an explicit retry", async () =>
   expect(requests.at(-1)).toBe("/api/channels?cursor=last-page");
 });
 
-test("search loads older history explicitly and includes new matches", async () => {
+/** The request a sidebar search makes: the server's search, never the roster's pages. */
+function searchUrl(q: string, cursor?: string) {
+  const params = new URLSearchParams({ q, limit: "20" });
+  if (cursor) params.set("cursor", cursor);
+  return `/api/channels/search?${params}`;
+}
+
+function results(names: string[], nextCursor: string | null = null) {
+  return Response.json({ channels: names.map(channel), nextCursor });
+}
+
+function searchBox(view: ReturnType<typeof renderSidebar>) {
+  return view.getByRole("textbox", { name: "Search conversations" });
+}
+
+test("two characters search the whole history on the server and page its results, never the roster", async () => {
+  respond = async (url) =>
+    url.includes("cursor=")
+      ? results(["Older archived match"])
+      : results(["Archived conversation"], "search/next");
   const view = renderSidebar();
   const user = userEvent.setup({ document: view.container.ownerDocument });
   await view.findByText("Recent conversation");
-  const search = view.getByRole("textbox", { name: "Search conversations" });
-  await user.type(search, "Archived");
-  expect(
-    await view.findByText("No loaded conversations match your search"),
-  ).toBeTruthy();
-  expect(ScrollObserver.active.size).toBe(0);
-  expect(requests).toEqual([]);
-  respond = async () =>
-    Response.json({
-      channels: [channel("Archived conversation")],
-      nextCursor: null,
-    });
-  fireEvent.click(
-    view.getByRole("button", { name: "Load older conversations" }),
-  );
+  await user.type(searchBox(view), "Archived");
+
   expect(await view.findByText("Archived conversation")).toBeTruthy();
   expect(
-    view.queryByText("No loaded conversations match your search"),
+    view.getByText("Search conversation names and recent messages"),
+  ).toBeTruthy();
+  // The roster is not what is on screen, and nothing pages it looking for a match.
+  expect(view.queryByText("Recent conversation")).toBeNull();
+  expect(
+    view.queryByRole("button", { name: "Load older conversations" }),
   ).toBeNull();
-  await user.click(search);
+  expect(ScrollObserver.active.size).toBe(0);
+  // One request for the pause in typing, not one per keystroke.
+  expect(requests).toEqual([searchUrl("Archived")]);
+
+  fireEvent.click(view.getByRole("button", { name: "Load more results" }));
+  expect(await view.findByText("Older archived match")).toBeTruthy();
+  expect(view.getByText("Archived conversation")).toBeTruthy();
+  expect(requests).toEqual([
+    searchUrl("Archived"),
+    searchUrl("Archived", "search/next"),
+  ]);
+  expect(view.queryByRole("button", { name: "Load more results" })).toBeNull();
+  expect(requests.some((url) => url.startsWith("/api/channels?"))).toBe(false);
+});
+
+test("one character asks for another instead of searching", async () => {
+  const view = renderSidebar();
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await view.findByText("Recent conversation");
+  await user.type(searchBox(view), " A ");
+
+  expect(
+    await view.findByText("Type at least 2 characters to search history"),
+  ).toBeTruthy();
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(requests).toEqual([]);
+  expect(view.queryByText("Searching…")).toBeNull();
+  expect(view.queryByText("No conversations match your search")).toBeNull();
+});
+
+test("a search on its way says so, and only an answer says nothing matched", async () => {
+  const pending = Promise.withResolvers<Response>();
+  respond = () => pending.promise;
+  const view = renderSidebar();
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await view.findByText("Recent conversation");
+  await user.type(searchBox(view), "zz");
+
+  expect(await view.findByText("Searching…")).toBeTruthy();
+  await waitFor(() => expect(requests).toEqual([searchUrl("zz")]));
+  expect(view.getByText("Searching…")).toBeTruthy();
+  expect(view.queryByText("No conversations match your search")).toBeNull();
+
+  pending.resolve(results([]));
+  expect(
+    await view.findByText("No conversations match your search"),
+  ).toBeTruthy();
+  expect(view.queryByText("Searching…")).toBeNull();
+});
+
+test("a failed search says so with Retry, never as no matches", async () => {
+  respond = async () =>
+    Response.json({ error: "Search is unavailable." }, { status: 503 });
+  const view = renderSidebar();
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await view.findByText("Recent conversation");
+  await user.type(searchBox(view), "zz");
+
+  expect(await view.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "Search is unavailable.",
+  );
+  expect(view.queryByText("No conversations match your search")).toBeNull();
+
+  respond = async () => results(["Recovered match"], "more");
+  fireEvent.click(view.getByRole("button", { name: "Retry" }));
+  expect(await view.findByText("Recovered match")).toBeTruthy();
+  expect(requests).toEqual([searchUrl("zz"), searchUrl("zz")]);
+
+  // A later page that fails keeps the results already found.
+  respond = async () =>
+    Response.json({ error: "Search is unavailable." }, { status: 503 });
+  fireEvent.click(view.getByRole("button", { name: "Load more results" }));
+  expect(await view.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "Couldn't load more results.",
+  );
+  expect(view.getByText("Recovered match")).toBeTruthy();
+  respond = async () => results(["Last match"]);
+  fireEvent.click(view.getByRole("button", { name: "Retry" }));
+  expect(await view.findByText("Last match")).toBeTruthy();
+  expect(requests.at(-1)).toBe(searchUrl("zz", "more"));
+});
+
+test("a slow answer to an earlier search is abandoned and never replaces the current one", async () => {
+  const slow = Promise.withResolvers<Response>();
+  respond = async (url) =>
+    url === searchUrl("ab") ? slow.promise : results(["Current match"]);
+  const view = renderSidebar();
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await view.findByText("Recent conversation");
+  await user.type(searchBox(view), "ab");
+  await waitFor(() => expect(requests).toEqual([searchUrl("ab")]));
+
+  await user.type(searchBox(view), "c");
+  expect(await view.findByText("Current match")).toBeTruthy();
+  expect(requests).toEqual([searchUrl("ab"), searchUrl("abc")]);
+  expect(signals[0]?.aborted).toBe(true);
+
+  slow.resolve(results(["Stale match"]));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(view.queryByText("Stale match")).toBeNull();
+  expect(view.getByText("Current match")).toBeTruthy();
+});
+
+test("clearing the search puts back the loaded history where it was scrolled, paging as before", async () => {
+  respond = async () => results(["Archived conversation"]);
+  const view = renderSidebar();
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await view.findByText("Recent conversation");
+  const root = view.container.querySelector(
+    '[data-sidebar="content"]',
+  ) as HTMLElement;
+  root.scrollTop = 120;
+
+  await user.type(searchBox(view), "Archived");
+  expect(await view.findByText("Archived conversation")).toBeTruthy();
+  root.scrollTop = 0;
+
+  await user.click(searchBox(view));
   await user.keyboard("{Control>}a{/Control}{Backspace}");
   expect(await view.findByText("Recent conversation")).toBeTruthy();
-  expect(view.getByText("Archived conversation")).toBeTruthy();
+  expect(view.queryByText("Archived conversation")).toBeNull();
+  expect(root.scrollTop).toBe(120);
+  expect(
+    view.queryByText("Search conversation names and recent messages"),
+  ).toBeNull();
+
+  // The roster's own paging is back, from the cursor it had.
+  await waitFor(() => expect(ScrollObserver.active.size).toBe(1));
+  respond = async () =>
+    Response.json({
+      channels: [channel("Older conversation")],
+      nextCursor: null,
+    });
+  act(() => activeObserver().intersect());
+  expect(await view.findByText("Older conversation")).toBeTruthy();
+  expect(requests).toEqual([
+    searchUrl("Archived"),
+    "/api/channels?cursor=older%2Fpage",
+  ]);
 });

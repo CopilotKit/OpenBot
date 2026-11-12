@@ -221,27 +221,25 @@ async function waitForFailedRead(client: QueryClient) {
   });
 }
 
-test("a connector's admin page says the plugin list failed, not that there is no such plugin", async () => {
+test("a connector's admin page says the list of apps failed, not that there is no such app", async () => {
   const client = failingQueryClient();
   const view = renderAdmin(client, `/admin/plugins/${APP_KEY}`);
   await waitForFailedRead(client);
 
   expect(
-    await view.findByText("Couldn't load plugins. Reload the page."),
+    await view.findByText("Couldn't load apps. Reload the page."),
   ).toBeTruthy();
-  expect(view.queryByText("Not a plugin")).toBeNull();
+  expect(view.queryByText("Not an app")).toBeNull();
   expect(view.queryByText("Nothing to configure.")).toBeNull();
 });
 
-test("a list that genuinely lacks the connector still says it is not a plugin", async () => {
+test("a list that genuinely lacks the connector still says it is not an app", async () => {
   const client = answeredWithout();
   const view = renderAdmin(client, `/admin/plugins/${APP_KEY}`);
   await waitForFailedRead(client);
 
-  expect(await view.findByText("Not a plugin")).toBeTruthy();
-  expect(
-    view.queryByText("Couldn't load plugins. Reload the page."),
-  ).toBeNull();
+  expect(await view.findByText("Not an app")).toBeTruthy();
+  expect(view.queryByText("Couldn't load apps. Reload the page.")).toBeNull();
 });
 
 test("a tool's admin page says the plugin list failed, not that the connector is off", async () => {

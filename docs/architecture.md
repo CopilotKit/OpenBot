@@ -117,7 +117,7 @@ Each row therefore also names what caused it:
 | `memory`         | the memory source's id | Memory read a connected app to import facts, as the source's owner. |
 | `handoff`        | the Bot that handed on | Another Bot asked for this, on the person's behalf.     |
 
-The Audit screen filters on it, and **Nobody watching** is `routine`, `handoff`, `responsibility` and
+The Activity page filters on it, and **Nobody watching** is `routine`, `handoff`, `responsibility` and
 `memory` together, which is
 the question of what ran on somebody's authority while they were away. `deployment` is deliberately
 outside that filter: a boundary held at start-up is not work done on anybody's behalf.
@@ -141,7 +141,7 @@ model supplies any arguments, and the gateway writes that run's initiator on eve
 
 ### Taking the trail out
 
-The Audit screen's **Export CSV** downloads the current filter as
+The Activity page's **Export CSV** downloads the current filter as
 `GET /api/admin/audit-events?format=csv`: the same filtered query as the table, walked page by
 page up to 5,000 rows and returned as RFC 4180 CSV with the redacted payload as one JSON column.
 An export that hits the cap holds the newest 5,000 and answers with `X-Audit-Export-Truncated`
@@ -339,7 +339,7 @@ Whether a person can use an app through a Bot is answered once, on the server, f
 
 ### Writing a skill in a conversation
 
-A skill can be written from the composer as well as from `/capabilities/skills`. The deployment ships a skill called `skill-creator` whose instruction is how to interview somebody about the skill they want; a Bot holding it is also offered four tools the app registers — `list_skills`, `read_skill`, `list_skill_tools`, and `save_skill`, which suspends the run on a card showing the command, the title and the whole instruction. Nothing is written until the person presses the button.
+A skill can be written from the composer as well as from `/skills`. The deployment ships a skill called `skill-creator` whose instruction is how to interview somebody about the skill they want; a Bot holding it is also offered four tools the app registers — `list_skills`, `read_skill`, `list_skill_tools`, and `save_skill`, which suspends the run on a card showing the command, the title and the whole instruction. Nothing is written until the person presses the button.
 
 The grant is the gate. Those four tools are offered only while the Bot holds `skill-creator`, because four extra tools on every run costs the narrowing above what it exists to buy, and a Bot for looking up transactions has no business drafting skills.
 

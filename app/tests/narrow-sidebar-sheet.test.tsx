@@ -23,7 +23,6 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
-import { browserKeys } from "@/lib/browser/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
@@ -135,14 +134,6 @@ function renderNarrowApp(start = "/channel/models") {
     bots: [],
     lastPingId: null,
   });
-  // OpenBot can run a browser here, so Teach a Bot is in the sidebar.
-  queryClient.setQueryDefaults(browserKeys.state, { refetchInterval: false });
-  queryClient.setQueryData(browserKeys.state, {
-    available: true,
-    computerId: "",
-    open: false,
-    tabs: [],
-  });
   queryClient.setQueryData(channelKeys.list(), {
     pages: [
       {
@@ -207,7 +198,6 @@ test.each([
   ],
   ["Bots", "link", /^Bots/, "/bots"],
   ["Connections", "link", /^Connections/, "/connections"],
-  ["Teach a Bot", "link", /^Teach a Bot/, "/browser"],
   // A link drawn as a button: it still goes somewhere.
   ["New conversation", "button", /^New conversation$/, "/channel/new"],
 ] as const)(

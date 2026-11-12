@@ -185,6 +185,13 @@ async function serve(path: string, init?: RequestInit): Promise<Response> {
       sweep: { lastSweptAt: null, working: true },
     });
   }
+  // The Routines list draws goals and check-ins too; none here.
+  if (url.pathname === "/api/responsibilities") {
+    return Response.json({ responsibilities: [] });
+  }
+  if (url.pathname === "/api/proactive/settings") {
+    return Response.json({ settings: [], allowed: true });
+  }
   if (url.pathname === "/api/memory") {
     return Response.json({ memories: [] });
   }
@@ -378,7 +385,6 @@ describe("OpenDots frame", () => {
       "/bots/cass",
       "/s/routines", // routines
       "/s/memories", // memory
-      "/capabilities", // skills and memory
       "/connections",
       "/settings", // the skin picker, approvals and reachability
     ]) {
@@ -413,7 +419,6 @@ describe("OpenDots frame", () => {
         "/bots",
         "/s/routines",
         "/s/memories",
-        "/capabilities",
         "/connections",
         "/settings",
       ]) {
@@ -447,10 +452,10 @@ describe("OpenDots frame", () => {
     async (_who, signedIn) => {
       actor = signedIn;
       const { view } = draw("/");
-      // Routines is OpenDots' own rail button, to its own screen, so the list's entry is left out.
+      // Routines and Memories are OpenDots' own screens, so the shared list's are left out.
       const expected = navigationFor(signedIn.role)
         .filter(isNavigationLink)
-        .filter((item) => item.id !== "routines");
+        .filter((item) => item.id !== "routines" && item.id !== "memory");
       const rail = await view.findByRole("navigation", {
         name: "Workspace navigation",
       });

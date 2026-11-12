@@ -35,7 +35,7 @@ export function NotificationsSheet({ onClose }: { onClose: () => void }) {
           icon={IconHandStop}
           render={<Link onClick={onClose} to="/settings/approvals" />}
           tint="lavender"
-          title="Approval rules"
+          title="Approvals"
         />
       </div>
     </MuseSheet>

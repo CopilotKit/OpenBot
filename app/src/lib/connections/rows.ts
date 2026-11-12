@@ -194,16 +194,13 @@ export const ALWAYS_ON_APP = "routines";
  *
  * One person adds an app and connects their account, so the two are one press: a tile says what
  * that press does. An app reached as you is Connect. An app with no account at all (a free search
- * provider, Routines) is Add, and On once added. An app that needs a key typed first is Set up,
- * and is On once added with it.
+ * provider) is Add, and On once added. An app that needs a key typed first is Set up, and is On
+ * once added with it.
  *
- * ONE PRESS OR NOT AT ALL, UNLESS ASKED. An app that needs a key or an OAuth client typed before it
- * connects is where a person gets stuck, so it is left out unless `everything` is set or it is
- * already in use. Slack is left out too: the personal edition has no Slack.
+ * Routines is left out: it is on for every Bot and has its own page in the main menu, so there is
+ * nothing to add or connect. Slack is left out too: the personal edition has no Slack.
  */
 export function personalConnectionRows(input: {
-  /** Also the apps that need something typed before they connect. */
-  everything?: boolean;
   catalogue: CatalogueItem[];
   added: ReadonlySet<string>;
   brokered: PluginServer[];
@@ -211,12 +208,9 @@ export function personalConnectionRows(input: {
   links: LinkedAccount[];
   providers: IdentityProviders | undefined;
 }): ConnectionRow[] {
-  const apps = input.catalogue.flatMap((entry): ConnectionRow[] => {
-    const row = personalAppRow(entry, input);
-    return input.everything || entry.oneStep || row.state !== "available"
-      ? [row]
-      : [];
-  });
+  const apps = input.catalogue
+    .filter((entry) => entry.key !== ALWAYS_ON_APP)
+    .map((entry) => personalAppRow(entry, input));
   const rest = connectionRows({
     catalogue: [],
     brokered: input.brokered,
@@ -228,18 +222,6 @@ export function personalConnectionRows(input: {
   const rows = [...apps, ...rest];
   const inUse = (row: ConnectionRow) => row.state !== "available";
   return [...rows.filter(inUse), ...rows.filter((row) => !inUse(row))];
-}
-
-/** How many apps the personal Connections leaves out until asked: see {@link personalConnectionRows}. */
-export function personalAppsNeedingSetup(input: {
-  catalogue: CatalogueItem[];
-  added: ReadonlySet<string>;
-  connected: ReadonlySet<string>;
-}): number {
-  return input.catalogue.filter(
-    (entry) =>
-      !entry.oneStep && personalAppRow(entry, input).state === "available",
-  ).length;
 }
 
 function personalAppRow(

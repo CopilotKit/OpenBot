@@ -8,7 +8,6 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment } from "react";
-import { HandoffPanel } from "@/components/agents/handoff-panel";
 import {
   PageEmpty,
   PageRows,
@@ -98,18 +97,28 @@ export function connectorCount(plugins: GrantedPlugins): number {
   return connectorTools(plugins).size;
 }
 
-/** What this Bot may reach: your skills on it, everything granted to it, and who it may ask. */
-export function AccessSections({ agent }: { agent: AgentProfile }) {
+/**
+ * A Bot's Apps page: your own apps it may use, one switch each, and every app it holds. Which other
+ * Bots it may hand work to is on its Setup page (`components/bot-profile/setup.tsx`).
+ */
+export function AppsSections({ agent }: { agent: AgentProfile }) {
   // Every Bot has every connected app in the personal edition, so there is no switch per app here.
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   return (
     <>
       {agent.mine && !personal ? <YourApps agent={agent} /> : null}
+      <Granted agentId={agent.id} kind="apps" mine={agent.mine} />
+    </>
+  );
+}
+
+/** A Bot's Skills page: your own skills on it, one switch each, and every skill it holds. */
+export function SkillsSections({ agent }: { agent: AgentProfile }) {
+  return (
+    <>
       {agent.mine ? <YourSkills agentId={agent.id} /> : null}
-      <Granted agentId={agent.id} mine={agent.mine} />
-      {/* Every Bot can ask every other in the personal edition, so there is no switch per Bot. */}
-      {personal ? null : <HandoffPanel agentId={agent.id} />}
+      <Granted agentId={agent.id} kind="skills" mine={agent.mine} />
     </>
   );
 }
@@ -270,7 +279,7 @@ function YourSkills({ agentId }: { agentId: string }) {
         <PageEmpty
           action={
             <Button
-              render={(props) => <Link {...props} to="/capabilities/skills" />}
+              render={(props) => <Link {...props} to="/skills" />}
               size="sm"
               variant="outline"
             >
@@ -336,14 +345,29 @@ function YourSkills({ agentId }: { agentId: string }) {
  * whoever is asking, exactly as the connections read does, so this cannot become a list of who has
  * connected what.
  */
-function Granted({ agentId, mine }: { agentId: string; mine: boolean }) {
+function Granted({
+  agentId,
+  kind,
+  mine,
+}: {
+  agentId: string;
+  /** Which half of what it holds: its apps (on its Apps page) or its skills (on its Skills page). */
+  kind: "apps" | "skills";
+  mine: boolean;
+}) {
   const me = useQuery(currentUserQueryOptions()).data;
   const edition =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition ?? "team";
   const plugins = useQuery(agentPluginsQueryOptions(agentId));
-  const apps = useQuery(botAppsQueryOptions(agentId));
-  // Both, so no row is drawn without its state and then redrawn with one a moment later.
-  if (plugins.isPending || apps.isPending) return null;
+  // Only on the Apps page: the Skills page draws no app, and this read can wait on the app
+  // directory, so the skills waited for it for nothing. A query that is not enabled stays pending.
+  const apps = useQuery({
+    ...botAppsQueryOptions(agentId),
+    enabled: kind === "apps",
+  });
+  // Both on the Apps page, so no row is drawn without its state and then redrawn with one a moment
+  // later.
+  if (plugins.isPending || (kind === "apps" && apps.isPending)) return null;
   if (!plugins.data) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
@@ -360,20 +384,34 @@ function Granted({ agentId, mine }: { agentId: string; mine: boolean }) {
    * keeps a row from vanishing on one where the second read failed.
    */
   const described = new Set(states.map((app) => app.key));
-  const rest = [...tools.entries()].filter(([key]) => !described.has(key));
-  const skills = plugins.data.skills;
-  const count = states.length + rest.length + skills.length;
+  const rest =
+    kind === "apps"
+      ? [...tools.entries()].filter(([key]) => !described.has(key))
+      : [];
+  const shownStates = kind === "apps" ? states : [];
+  const skills = kind === "skills" ? plugins.data.skills : [];
+  const count = shownStates.length + rest.length + skills.length;
   return (
     <PageSection
-      description="Review this Bot’s available apps and skills, and check which apps are ready to use. The Bot cannot use apps or skills outside this list."
-      title="What it can use"
+      description={
+        kind === "apps"
+          ? "Review the apps this Bot can use, and check which are ready for you. It can't use apps outside this list."
+          : "These are the skills this Bot can use. It can't use skills outside this list."
+      }
+      title={kind === "apps" ? "Apps it can use" : "Skills it has"}
     >
-      {apps.error ? (
+      {kind === "apps" && apps.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           Couldn't check whether each app is ready for you. Reload the page.
         </p>
       ) : null}
-      {count === 0 ? (
+      {count === 0 && kind === "skills" ? (
+        <PageEmpty icon={IconBox} title="No skills yet">
+          {mine
+            ? "Turn one on under Your skills, or write one on the Skills page."
+            : "The Bot's owner or an admin gives it skills."}
+        </PageEmpty>
+      ) : count === 0 ? (
         <PageEmpty icon={IconApps} title="No apps yet">
           {mine
             ? "Turn one on under Your apps, or ask an admin. Until then this Bot can only talk with you."
@@ -381,7 +419,7 @@ function Granted({ agentId, mine }: { agentId: string; mine: boolean }) {
         </PageEmpty>
       ) : (
         <PageRows>
-          {states.map((app, index) => {
+          {shownStates.map((app, index) => {
             const labels = tools.get(app.key) ?? [];
             return (
               <Fragment key={app.key}>
@@ -424,7 +462,7 @@ function Granted({ agentId, mine }: { agentId: string; mine: boolean }) {
           })}
           {rest.map(([key, labels], index) => (
             <Fragment key={key}>
-              {states.length + index > 0 ? <Separator /> : null}
+              {shownStates.length + index > 0 ? <Separator /> : null}
               <Item size="sm">
                 <ItemMedia variant="icon">
                   <IconApps />
@@ -448,7 +486,9 @@ function Granted({ agentId, mine }: { agentId: string; mine: boolean }) {
           ))}
           {skills.map((skill, index) => (
             <Fragment key={skill.slug}>
-              {states.length + rest.length + index > 0 ? <Separator /> : null}
+              {shownStates.length + rest.length + index > 0 ? (
+                <Separator />
+              ) : null}
               <Item size="sm">
                 <ItemMedia variant="icon">
                   <IconBox />

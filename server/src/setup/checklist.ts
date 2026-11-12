@@ -371,8 +371,8 @@ function modelRow(
     names: [KEY_NAME[model.provider]],
     docsUrl: QUICK_START,
     page: personal
-      ? { label: "Keys", path: "/settings/credentials" }
-      : { label: "Credentials", path: "/admin/credentials" },
+      ? { label: "Vault", path: "/settings/vault" }
+      : { label: "Vault", path: "/admin/credentials" },
   };
   const readyDetail = `Lets ${product} answer you.`;
   if (model.source === null)

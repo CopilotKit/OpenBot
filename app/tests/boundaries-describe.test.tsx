@@ -363,7 +363,7 @@ test("with no model set up, the server's sentence is shown and nothing is filled
   translation = {
     status: 503,
     error:
-      "OpenBot needs a model key to write a rule from a description. Add one on the Credentials page, or write the rule in CEL.",
+      "OpenBot needs a model key to write a rule from a description. Add one in the Vault, or write the rule in CEL.",
   };
   const { view } = open("/admin/boundaries/new");
 
@@ -372,7 +372,7 @@ test("with no model set up, the server's sentence is shown and nothing is filled
 
   expect(
     await view.findByText(
-      "OpenBot needs a model key to write a rule from a description. Add one on the Credentials page, or write the rule in CEL.",
+      "OpenBot needs a model key to write a rule from a description. Add one in the Vault, or write the rule in CEL.",
     ),
   ).toBeTruthy();
   expect((view.getByLabelText("Rule") as HTMLTextAreaElement).value).toBe("");

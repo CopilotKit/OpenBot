@@ -74,6 +74,7 @@ function fakeStore(
   const base: ChannelStore = {
     direct: unexpected,
     list: unexpected,
+    search: unexpected,
     recordActivity: unexpected,
     signalBusy: unexpected,
     signalChannelBusy: unexpected,

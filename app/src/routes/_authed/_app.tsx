@@ -31,7 +31,7 @@ function RouteComponent() {
      * rounded corners on screen. A growable shell lets the transcript's scroller size against the
      * page, grow it, and grow again. Admin and settings use the same panel.
      */
-    <SidebarShell className="h-svh overflow-hidden" name="app" width="340px">
+    <SidebarShell className="h-svh overflow-hidden">
       <AppSidebar />
       <SidebarInset className="min-h-0 overflow-hidden">
         <UpdateBanner />

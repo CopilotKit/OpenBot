@@ -97,18 +97,18 @@ export function editionHasMemory(edition: Edition): boolean {
 
 /**
  * The name of the page where apps are turned on and set up, for a sentence the browser shows:
- * Admin's Plugins in the team edition, Connections in the personal one, which has no Plugins page.
+ * Admin's Apps in the team edition, Connections in the personal one.
  * The browser names the same two pages (`pluginsLabel` in the app's `lib/manage-paths.ts`).
  */
-export function appsPage(): "Plugins" | "Connections" {
-  return currentEdition() === "personal" ? "Connections" : "Plugins";
+export function appsPage(): "Apps" | "Connections" {
+  return currentEdition() === "personal" ? "Connections" : "Apps";
 }
 
-/** One app's own page, as a sentence names it: "its Plugins page", or "its page under Connections". */
+/** One app's own page, as a sentence names it: "its page under Apps", or "its page under Connections". */
 export function itsAppPage(): string {
   return currentEdition() === "personal"
     ? "its page under Connections"
-    : "its Plugins page";
+    : "its page under Apps";
 }
 
 /**

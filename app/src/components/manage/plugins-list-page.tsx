@@ -162,12 +162,12 @@ export function PluginsListPage({
   return (
     <PageShell
       description="Connect services for your company, then choose which Bots can use each service’s tools."
-      title="Plugins"
+      title="Apps"
     >
       {/* Pending, error, empty, rows — pending first, so no sentence asserts anything mid-fetch. */}
       {plugins.isPending ? null : plugins.error ? (
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load plugins. Reload the page.
+          Couldn't load apps. Reload the page.
         </p>
       ) : (
         <>
@@ -251,11 +251,11 @@ export function PluginsListPage({
 
           <PageSection
             description="Reviewed, first-party servers. Open one to add it."
-            title="Explore plugins"
+            title="Explore apps"
           >
             {explore.length === 0 ? (
               <PageEmpty icon={IconCircleCheck} title="All connected">
-                Every plugin in the catalogue is connected.
+                Every app in the catalogue is connected.
               </PageEmpty>
             ) : (
               <PageRows>

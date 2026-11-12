@@ -513,7 +513,7 @@ export function createApprovalRuleDraftRoutes(options: {
         return context.json(
           {
             error:
-              "OpenBot needs a model key to write rules from a description. Add one on the Credentials page, or add the rule by hand.",
+              "OpenBot needs a model key to write rules from a description. Add one in the Vault, or add the rule by hand.",
           },
           503,
         );

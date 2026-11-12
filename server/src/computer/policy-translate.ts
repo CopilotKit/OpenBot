@@ -508,7 +508,7 @@ export function createPolicyTranslateRoutes(options: {
         return context.json(
           {
             error:
-              "OpenBot needs a model key to write a rule from a description. Add one on the Credentials page, or write the rule in CEL.",
+              "OpenBot needs a model key to write a rule from a description. Add one in the Vault, or write the rule in CEL.",
           },
           503,
         );

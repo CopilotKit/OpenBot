@@ -337,7 +337,7 @@ export function SignInForm({
                 checked={save}
                 onCheckedChange={(checked) => setSave(checked === true)}
               />
-              Save to Passwords
+              Save to Vault
             </label>
           ) : null}
           {failure ? (

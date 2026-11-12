@@ -51,7 +51,7 @@ const CHECKLIST = {
         kind: "env",
         names: ["OPENAI_API_KEY"],
         docsUrl: "https://github.com/CopilotKit/openbot#quick-start",
-        page: { label: "Credentials", path: "/admin/credentials" },
+        page: { label: "Vault", path: "/admin/credentials" },
       },
     },
   ],
@@ -190,7 +190,7 @@ test("an admin reopens the setup checklist in Settings, and can check again", as
 test("a fix's page opens straight from Settings", async () => {
   const view = open("/settings/setup");
 
-  fireEvent.click(await view.findByRole("link", { name: "Credentials" }));
+  fireEvent.click(await view.findByRole("link", { name: "Vault" }));
 
   expect(await view.findByText("Credentials page")).toBeTruthy();
   expect(view.router.state.location.pathname).toBe("/admin/credentials");

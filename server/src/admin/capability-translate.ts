@@ -608,7 +608,7 @@ export function createCapabilityChangeRoutes(options: {
         return context.json(
           {
             error:
-              "OpenBot needs a model key to write changes from a description. Add one on the Credentials page, or set the switches by hand.",
+              "OpenBot needs a model key to write changes from a description. Add one in the Vault, or set the switches by hand.",
           },
           503,
         );

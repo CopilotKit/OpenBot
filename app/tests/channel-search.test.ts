@@ -1,6 +1,14 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
+import { QueryClient } from "@tanstack/react-query";
 import { matchingChannels } from "../src/components/app-sidebar/app-sidebar";
-import type { ChannelSummary } from "../src/lib/channels/queries";
+import {
+  type ChannelSummary,
+  channelKeys,
+  channelListQueryOptions,
+  channelSearchInfiniteQueryOptions,
+  isChannelSearchable,
+  normalizeChannelSearch,
+} from "../src/lib/channels/queries";
 
 /** A roster row as the search box sees it. */
 function channel(overrides: Partial<ChannelSummary>): ChannelSummary {
@@ -54,4 +62,81 @@ test("an empty query returns the very same array, not a copy", () => {
   const rows = [channel({})];
 
   expect(matchingChannels(rows, "   ")).toBe(rows);
+});
+
+const originalFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
+
+/** Answer every request with `body`, and keep what was asked for and with which signal. */
+function serve(body: unknown) {
+  const seen: { url: string; signal: AbortSignal | undefined }[] = [];
+  globalThis.fetch = Object.assign(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push({ url: String(input), signal: init?.signal ?? undefined });
+      return Response.json(body);
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  return seen;
+}
+
+test("a search has its own key, apart from the roster's, by its normalised text and page size", () => {
+  const options = channelSearchInfiniteQueryOptions("  Cafe\u0301 receipts ");
+  // Spread, to compare the key itself and not the type tag TanStack puts on it.
+  const key = [...options.queryKey];
+  expect(key).toEqual([...channelKeys.search("Caf\u00e9 receipts", 20)]);
+  expect(key).toEqual([
+    "channels",
+    "search",
+    { query: "Caf\u00e9 receipts", limit: 20 },
+  ]);
+  // Not under the roster's key, so a roster write or invalidation never lands on a search.
+  const list = channelListQueryOptions().queryKey;
+  expect(key.slice(0, list.length)).not.toEqual([...list]);
+  // Under the root and its own prefix, so a change to any conversation refreshes it.
+  expect(key.slice(0, 1)).toEqual([...channelKeys.all]);
+  expect(key.slice(0, 2)).toEqual([...channelKeys.searches()]);
+  expect([
+    ...channelSearchInfiniteQueryOptions("receipts", 5).queryKey,
+  ]).toEqual([...channelKeys.search("receipts", 5)]);
+});
+
+test("only two or more characters are searched", () => {
+  expect(isChannelSearchable("a")).toBe(false);
+  expect(isChannelSearchable("  a  ")).toBe(false);
+  // One code point, though it is two UTF-16 units.
+  expect(isChannelSearchable("🚀")).toBe(false);
+  expect(isChannelSearchable("ab")).toBe(true);
+  expect(channelSearchInfiniteQueryOptions("a").enabled).toBe(false);
+  expect(channelSearchInfiniteQueryOptions("ab").enabled).toBe(true);
+  expect(normalizeChannelSearch("  e\u0301cole ")).toBe("\u00e9cole");
+});
+
+test("asks the search endpoint with the query, the page size, the cursor and the query's signal", async () => {
+  const seen = serve({
+    channels: [channel({ id: "found" })],
+    nextCursor: "next/page",
+  });
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const options = channelSearchInfiniteQueryOptions("100% & more", 5);
+
+  const first = await queryClient.fetchInfiniteQuery(options);
+  expect(seen[0]?.url).toBe("/api/channels/search?q=100%25+%26+more&limit=5");
+  expect(seen[0]?.signal).toBeInstanceOf(AbortSignal);
+  expect(first.pages[0]?.nextCursor).toBe("next/page");
+  // Flattened for the caller, like the roster.
+  expect(options.select?.(first).map((row) => row.id)).toEqual(["found"]);
+
+  // Two pages: the first again, then the one its cursor names.
+  await queryClient.fetchInfiniteQuery({ ...options, pages: 2 });
+  expect(seen.at(-1)?.url).toBe(
+    "/api/channels/search?q=100%25+%26+more&limit=5&cursor=next%2Fpage",
+  );
+  // A search never writes into the roster's cache.
+  expect(queryClient.getQueryData(channelKeys.list())).toBeUndefined();
+  queryClient.clear();
 });

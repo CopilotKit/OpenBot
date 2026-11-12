@@ -365,7 +365,7 @@ describe("POST /api/approvals/team/rules/translate", () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
       error:
-        "OpenBot needs a model key to write rules from a description. Add one on the Credentials page, or add the rule by hand.",
+        "OpenBot needs a model key to write rules from a description. Add one in the Vault, or add the rule by hand.",
     });
     expect(mock.getRequests()).toHaveLength(0);
     expect(audit.map((event) => event.payload)).toEqual([

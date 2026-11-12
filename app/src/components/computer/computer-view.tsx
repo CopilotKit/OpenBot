@@ -1,8 +1,8 @@
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
 import { IconLock, IconWorld, IconX } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useFittedWidth } from "@/components/browser/fitted-window";
 import {
   botBrowserKeys,
@@ -585,16 +585,29 @@ export function ComputerView({
     return () => clearTimeout(timer);
   }, [waitingForFrame, startupGraceMs]);
 
-  // Input forwarding lives in LiveScreen on the socket.
-  // Escape is bound to the window so it works regardless of overlay focus.
-  useEffect(() => {
-    if (!expanded) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setExpanded(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [expanded]);
+  /*
+   * Input forwarding lives in LiveScreen on the socket. The full-size view is a Base UI dialog, so
+   * it closes on Escape, keeps Tab inside itself and makes the page behind it inert. A screen being
+   * driven takes Tab as a key for the Bot's browser and lets Escape through, which takes the
+   * keyboard off it on the way out.
+   */
+  const opener = useRef<HTMLElement | null>(null);
+  const expandButton = useRef<HTMLButtonElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const openExpanded = () => {
+    opener.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    setExpanded(true);
+  };
+  /** Back to what opened it, or to the picture that opens it when that has gone. */
+  const focusAfterClose = () =>
+    opener.current?.isConnected
+      ? opener.current
+      : expandButton.current?.isConnected
+        ? expandButton.current
+        : true;
 
   /*
    * The Bot's browser as the person working in it sees it: the bar above the screen and Record under it. Read only
@@ -782,7 +795,8 @@ export function ComputerView({
           {/* Inline preview remains in transcript; click opens a readable full-size view. */}
           <button
             type="button"
-            onClick={() => setExpanded(true)}
+            onClick={openExpanded}
+            ref={expandButton}
             /*
              * Opens whether or not there is a picture in it. It used to be disabled without one, and
              * the wheel is down there: a blank browser, a screen that had not arrived yet, or a
@@ -839,7 +853,7 @@ export function ComputerView({
               </span>
               <ComputerControlButton
                 computerId={computerId}
-                onTakeControl={() => setExpanded(true)}
+                onTakeControl={openExpanded}
                 prominent
               />
             </div>
@@ -958,44 +972,55 @@ export function ComputerView({
             </span>
             <ComputerControlButton
               computerId={computerId}
-              onTakeControl={() => setExpanded(true)}
+              onTakeControl={openExpanded}
             />
           </div>
         ) : null}
       </figure>
 
       {/*
-        Portal to body so fixed positioning is measured against the viewport, not containing panes.
+        Portalled to the body so fixed positioning is measured against the viewport, not containing
+        panes. Opened from the Computer drawer on a phone it is a dialog nested in that one, so only
+        one of them traps focus at a time, and closing it hands focus back to the drawer.
       */}
-      {expanded && typeof document !== "undefined"
-        ? createPortal(
-            /*
-             * Scrolls when the card is taller than the window (a narrow window, with Record under the screen), and the
-             * card's auto margins centre it when it is not. Centring with justify-content instead put the card's top out
-             * of reach above the window. A live view keeps only a thin margin: the window is for the Bot's browser.
-             */
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-label="The Bot's screen"
-              className={`fixed inset-0 z-50 flex flex-col overflow-y-auto ${settled ? "p-4 sm:p-8" : "p-2 sm:p-4"}`}
-            >
-              {/*
+      <DialogPrimitive.Root
+        open={expanded}
+        onOpenChange={(next) => {
+          if (!next) setExpanded(false);
+        }}
+      >
+        <DialogPrimitive.Portal>
+          {/*
+           * Scrolls when the card is taller than the window (a narrow window, with Record under the screen), and the
+           * card's auto margins centre it when it is not. Centring with justify-content instead put the card's top out
+           * of reach above the window. A live view keeps only a thin margin: the window is for the Bot's browser.
+           *
+           * Focus starts on Close. A person who opened it to drive gets the keyboard on the screen once it connects
+           * (LiveScreen's autoFocus), as before.
+           */}
+          <DialogPrimitive.Popup
+            aria-label="The Bot's screen"
+            initialFocus={closeButton}
+            finalFocus={focusAfterClose}
+            className={`fixed inset-0 z-50 flex flex-col overflow-y-auto outline-none ${settled ? "p-2 sm:p-8" : "p-2 sm:p-4"}`}
+          >
+            {/*
                 Backdrop closes only while read-only, so a click that misses the page while driving
                 does not throw the person out of it. A turn that is over is always read-only, whoever
                 is holding the live browser. It is a mouse shortcut only: the close button in the
                 card is the way out a person can see and reach from the keyboard, as Escape is.
               */}
-              <button
-                type="button"
-                onClick={() => !wheelHere && setExpanded(false)}
-                aria-hidden
-                tabIndex={-1}
-                className={`fixed inset-0 bg-black/80 ${wheelHere ? "cursor-default" : "cursor-zoom-out"}`}
-              />
-              {/*
+            <button
+              type="button"
+              onClick={() => !wheelHere && setExpanded(false)}
+              aria-hidden
+              tabIndex={-1}
+              className={`fixed inset-0 bg-black/80 ${wheelHere ? "cursor-default" : "cursor-zoom-out"}`}
+            />
+            {/*
                 A card holding the screen, with who and the wheel beneath it. A turn that is over is
-                only a picture, sized to its width as it always was.
+                only a picture, sized to its width. On a phone it takes the whole width but an 8px
+                gutter: capped at 70vw inside the padding it was a thumbnail on a 390px screen.
 
                 A live view fills the window, because the Bot's browser is what it is for: the bar and
                 the page take everything but a column beside them for the wheel and Record (under them
@@ -1003,10 +1028,10 @@ export function ComputerView({
                 Never less than a screen a person can work in: in a short, narrow window the card grows
                 past it and the view scrolls, so Record is always reachable.
               */}
-              <div
-                className={`relative m-auto flex w-full min-w-0 shrink-0 flex-col rounded-2xl bg-background shadow-2xl ring-1 ring-black/5 dark:ring-white/10 ${settled ? "max-w-[70vw] p-4" : "min-h-[calc(100svh-1rem)] gap-4 p-3 sm:min-h-[calc(100svh-2rem)] lg:h-[calc(100svh-2rem)] lg:flex-row"}`}
-              >
-                {/*
+            <div
+              className={`relative m-auto flex w-full min-w-0 shrink-0 flex-col rounded-2xl bg-background shadow-2xl ring-1 ring-black/5 dark:ring-white/10 ${settled ? "p-3 sm:max-w-[70vw] sm:p-4" : "min-h-[calc(100svh-1rem)] gap-4 p-3 sm:min-h-[calc(100svh-2rem)] lg:h-[calc(100svh-2rem)] lg:flex-row"}`}
+            >
+              {/*
                   The way back to the conversation. A live view fills the window, so the backdrop
                   around it is a thin strip, and it does nothing while the person is driving: without
                   this, Escape was the only way out and nothing on screen said so. Closing is what
@@ -1014,184 +1039,179 @@ export function ComputerView({
                   top of the wheel's column, which leaves it the room; otherwise it is a row of its
                   own above the screen.
                 */}
-                <div
-                  className={`flex justify-end ${settled ? "mb-2" : "lg:absolute lg:top-3 lg:right-3 lg:z-10"}`}
+              <div
+                className={`flex justify-end ${settled ? "mb-2" : "lg:absolute lg:top-3 lg:right-3 lg:z-10"}`}
+              >
+                <button
+                  type="button"
+                  ref={closeButton}
+                  onClick={() => setExpanded(false)}
+                  aria-label="Close the Bot's screen"
+                  title="Close (Esc)"
+                  className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <button
-                    type="button"
-                    onClick={() => setExpanded(false)}
-                    aria-label="Close the Bot's screen"
-                    title="Close (Esc)"
-                    className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <IconX className="size-5" aria-hidden />
-                  </button>
-                </div>
-                <BrowserWindow
-                  live={!settled}
-                  botId={computerId}
-                  bar={barState}
-                  aspectRatio={aspectRatio}
-                  onNavigated={() => screen.current?.focus()}
-                >
-                  {/*
+                  <IconX className="size-5" aria-hidden />
+                </button>
+              </div>
+              <BrowserWindow
+                live={!settled}
+                botId={computerId}
+                bar={barState}
+                aspectRatio={aspectRatio}
+                onNavigated={() => screen.current?.focus()}
+              >
+                {/*
                   Overlay uses the live socket; the inline card keeps low-cost polling. With no page
                   to draw it reserves the same frame and says the same thing the card does — the
                   wheel below is the reason this view opens at all in that state.
                 */}
-                  <div
-                    className={`relative min-h-0 ${settled ? "max-h-[75vh] overflow-auto rounded-xl bg-muted" : "w-full overflow-hidden"} ${showLiveScreen ? "bg-black" : settled ? "" : "bg-background"}`}
-                  >
-                    {settled && drawn ? (
-                      /*
-                       * A record, opened larger. Not a window on the browser.
-                       *
-                       * Zooming a past turn used to mount the live stream and offer Take control, so
-                       * the one gesture for looking closer at what a turn did was also the one that
-                       * replaced it with whatever the Bot has open now. The kept frame exists to stop
-                       * exactly that; its own zoom control was undoing it.
-                       */
-                      <div className="relative w-full" style={{ aspectRatio }}>
-                        <img
-                          alt="What this turn had open"
-                          className="absolute inset-0 h-full w-full object-contain"
-                          src={`data:image/png;base64,${drawn.base64}`}
-                        />
-                      </div>
-                    ) : showLiveScreen ? (
-                      <div className="relative w-full" style={{ aspectRatio }}>
-                        <LiveScreen
-                          // The person opened this view to drive: taking control puts the keyboard on the screen.
-                          autoFocus
-                          ref={screen}
-                          computerId={computerId}
-                          driving={driving}
-                          onProblem={setStreamProblem}
-                          onReconnecting={setReconnecting}
-                          retryKey={retryKey}
-                        />
-                        {/*
+                <div
+                  className={`relative min-h-0 ${settled ? "max-h-[75vh] overflow-auto rounded-xl bg-muted" : "w-full overflow-hidden"} ${showLiveScreen ? "bg-black" : settled ? "" : "bg-background"}`}
+                >
+                  {settled && drawn ? (
+                    /*
+                     * A record, opened larger. Not a window on the browser.
+                     *
+                     * Zooming a past turn used to mount the live stream and offer Take control, so
+                     * the one gesture for looking closer at what a turn did was also the one that
+                     * replaced it with whatever the Bot has open now. The kept frame exists to stop
+                     * exactly that; its own zoom control was undoing it.
+                     */
+                    <div className="relative w-full" style={{ aspectRatio }}>
+                      <img
+                        alt="What this turn had open"
+                        className="absolute inset-0 h-full w-full object-contain"
+                        src={`data:image/png;base64,${drawn.base64}`}
+                      />
+                    </div>
+                  ) : showLiveScreen ? (
+                    <div className="relative w-full" style={{ aspectRatio }}>
+                      <LiveScreen
+                        // The person opened this view to drive: taking control puts the keyboard on the screen.
+                        autoFocus
+                        ref={screen}
+                        computerId={computerId}
+                        driving={driving}
+                        onProblem={setStreamProblem}
+                        onReconnecting={setReconnecting}
+                        retryKey={retryKey}
+                      />
+                      {/*
                         A drop being retried, said quietly in a corner. The stream retries on its
                         own with a backoff, and the screen under it is usually back in a second;
                         covering it with the Retry panel made a routine reconnect look like a dead
                         one. The panel below is for when the retries have run out.
                       */}
-                        {reconnecting && !streamProblem ? (
-                          <span
-                            role="status"
-                            className="absolute top-2 left-2 rounded-full bg-black/60 px-2.5 py-1 font-medium text-white text-xs backdrop-blur-sm"
-                          >
-                            Reconnecting…
-                          </span>
-                        ) : null}
-                        {/*
+                      {reconnecting && !streamProblem ? (
+                        <span
+                          role="status"
+                          className="absolute top-2 left-2 rounded-full bg-black/60 px-2.5 py-1 font-medium text-white text-xs backdrop-blur-sm"
+                        >
+                          Reconnecting…
+                        </span>
+                      ) : null}
+                      {/*
                         A live screen that ends reports why through `onProblem`, and this is the
                         branch that is mounted when it does. Without drawing it here the message
                         landed in `problem`, which only the sibling `NothingToSee` reads, so the
                         screen ended with the stale last frame frozen on the canvas and nothing said.
                       */}
-                        {streamProblem ? (
-                          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/85 p-4 text-center text-sm text-muted-foreground">
-                            <span>{streamProblem}</span>
-                            <button
-                              type="button"
-                              className="underline"
-                              onClick={() => {
-                                setStreamProblem(null);
-                                setRetryKey((value) => value + 1);
-                              }}
-                            >
-                              Retry
-                            </button>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="relative w-full" style={{ aspectRatio }}>
-                        <NothingToSee
-                          blankBrowser={blankBrowser}
-                          owner={owner}
-                          page={knownPage}
-                          problem={shownProblem}
-                          settled={settled}
-                          waiting={waiting}
-                        />
-                      </div>
-                    )}
-                  </div>
-                </BrowserWindow>
-                {/*
+                      {streamProblem ? (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/85 p-4 text-center text-sm text-muted-foreground">
+                          <span>{streamProblem}</span>
+                          <button
+                            type="button"
+                            className="underline"
+                            onClick={() => {
+                              setStreamProblem(null);
+                              setRetryKey((value) => value + 1);
+                            }}
+                          >
+                            Retry
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="relative w-full" style={{ aspectRatio }}>
+                      <NothingToSee
+                        blankBrowser={blankBrowser}
+                        owner={owner}
+                        page={knownPage}
+                        problem={shownProblem}
+                        settled={settled}
+                        waiting={waiting}
+                      />
+                    </div>
+                  )}
+                </div>
+              </BrowserWindow>
+              {/*
                   NOT ON A TURN THAT IS OVER. Every past turn used to carry the wheel and the
                   standing "who is driving" prose under a picture of a page it opened an hour ago,
                   offering control of whatever the Bot has open now. Those sentences are about the
                   present and this view is a record; a record does not get a steering wheel.
                 */}
-                <WheelColumn live={!settled}>
-                  {control?.transitioning ? (
-                    <p
-                      className={
-                        settled ? "mt-3 text-center text-sm" : "text-sm"
-                      }
-                    >
-                      {someoneElse
-                        ? "Finishing the current action…"
-                        : "Finishing the current action before giving you control…"}
-                    </p>
-                  ) : null}
-                  {settled ? null : (
-                    <div className="flex items-center justify-center gap-4 lg:flex-col lg:items-start lg:gap-3">
-                      <span className="flex min-w-0 items-center gap-2 text-sm lg:flex-col lg:items-start lg:gap-1">
-                        {name ? (
-                          <span className="flex shrink-0 items-center gap-1.5 font-medium">
-                            <ChannelAvatar
-                              participantIds={[computerId]}
-                              size={20}
-                            />
-                            {name}
-                          </span>
-                        ) : null}
-                        {driving ? (
-                          <span className="truncate text-muted-foreground lg:whitespace-normal">
-                            You have control. Click and type on the page.
-                            {reason ? ` ${reason}` : null}
-                          </span>
-                        ) : someoneElse ? (
-                          <span className="truncate text-muted-foreground lg:whitespace-normal">
-                            Someone else has control.
-                          </span>
-                        ) : control?.requested ? (
-                          <span className="truncate text-muted-foreground lg:whitespace-normal">
-                            <strong className="font-medium text-foreground">
-                              The Bot needs you.
-                            </strong>{" "}
-                            {reason}
-                          </span>
-                        ) : null}
-                      </span>
-                      <ComputerControlButton computerId={computerId} />
-                    </div>
-                  )}
-                  {/*
+              <WheelColumn live={!settled}>
+                {control?.transitioning ? (
+                  <p
+                    className={settled ? "mt-3 text-center text-sm" : "text-sm"}
+                  >
+                    {someoneElse
+                      ? "Finishing the current action…"
+                      : "Finishing the current action before giving you control…"}
+                  </p>
+                ) : null}
+                {settled ? null : (
+                  <div className="flex items-center justify-center gap-4 lg:flex-col lg:items-start lg:gap-3">
+                    <span className="flex min-w-0 items-center gap-2 text-sm lg:flex-col lg:items-start lg:gap-1">
+                      {name ? (
+                        <span className="flex shrink-0 items-center gap-1.5 font-medium">
+                          <ChannelAvatar
+                            participantIds={[computerId]}
+                            size={20}
+                          />
+                          {name}
+                        </span>
+                      ) : null}
+                      {driving ? (
+                        <span className="truncate text-muted-foreground lg:whitespace-normal">
+                          You have control. Click and type on the page.
+                          {reason ? ` ${reason}` : null}
+                        </span>
+                      ) : someoneElse ? (
+                        <span className="truncate text-muted-foreground lg:whitespace-normal">
+                          Someone else has control.
+                        </span>
+                      ) : control?.requested ? (
+                        <span className="truncate text-muted-foreground lg:whitespace-normal">
+                          <strong className="font-medium text-foreground">
+                            The Bot needs you.
+                          </strong>{" "}
+                          {reason}
+                        </span>
+                      ) : null}
+                    </span>
+                    <ComputerControlButton computerId={computerId} />
+                  </div>
+                )}
+                {/*
                   Record, under the wheel, because it is only for the person holding it. Branched on
                   the data first, so a read that fails after one has answered keeps what it showed.
                 */}
-                  {settled ? null : botBrowser.data ? (
-                    <BotRecordPanel
-                      botId={computerId}
-                      state={botBrowser.data}
-                    />
-                  ) : botBrowser.error ? (
-                    <p className="text-destructive text-sm" role="alert">
-                      Couldn't load the Bot's browser. Close this and open it
-                      again.
-                    </p>
-                  ) : null}
-                </WheelColumn>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
+                {settled ? null : botBrowser.data ? (
+                  <BotRecordPanel botId={computerId} state={botBrowser.data} />
+                ) : botBrowser.error ? (
+                  <p className="text-destructive text-sm" role="alert">
+                    Couldn't load the Bot's browser. Close this and open it
+                    again.
+                  </p>
+                ) : null}
+              </WheelColumn>
+            </div>
+          </DialogPrimitive.Popup>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
     </>
   );
 }

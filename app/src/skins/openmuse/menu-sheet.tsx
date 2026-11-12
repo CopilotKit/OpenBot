@@ -35,6 +35,11 @@ import {
   channelListQueryOptions,
 } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
+import {
+  COMMAND_MENU_KEYS,
+  openCommandMenu,
+  useBeforeCommandNavigate,
+} from "@/components/navigation/command-menu";
 import { useNavigationItems } from "@/lib/navigation";
 import { relativeTime } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
@@ -63,6 +68,8 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
   const signOut = useMutation(signOutMutationOptions(queryClient));
   const signOutOffered = useSignOutOffered();
   const navigation = useNavigationItems();
+  // Opened over this sheet with Cmd/Ctrl+K, the menu closes it before it navigates.
+  useBeforeCommandNavigate(onClose);
   const [search, setSearch] = useState("");
   const body = useRef<HTMLDivElement>(null);
   const searching = search.trim().length > 0;
@@ -90,6 +97,21 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
         >
           New chat
         </MuseLinkButton>
+        <LinkRow
+          detail="Open any page, Bot or conversation"
+          icon={IconSearch}
+          render={
+            <button
+              aria-keyshortcuts={COMMAND_MENU_KEYS}
+              onClick={() => {
+                onClose();
+                openCommandMenu();
+              }}
+              type="button"
+            />
+          }
+          title="Command palette"
+        />
         <div className="mt-3 flex items-center justify-between">
           <h2 className={museText.heading}>Conversations</h2>
           <MuseLinkButton

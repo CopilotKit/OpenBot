@@ -14,6 +14,7 @@ import {
   type ComposerDraft,
   toAgentOptions,
 } from "@/components/channels/composer";
+import { heldFileOf } from "@/components/channels/composer/attachments";
 import { WorkingNow } from "@/components/channels/working-now";
 import { BusinessLink } from "@/components/edition/business-link";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
@@ -139,7 +140,13 @@ function RouteComponent() {
       if (draft.agentId) {
         // Recorded and started as one sequence, shared with `/channel/new`: the person already
         // decided, and the trail has to say so wherever they decided it.
-        await startChosen(draft.agentId, draft.text, undefined, pendingId);
+        await startChosen(
+          draft.agentId,
+          draft.text,
+          undefined,
+          pendingId,
+          draft.attachments,
+        );
         return;
       }
       let agentId: string | undefined;
@@ -156,7 +163,7 @@ function RouteComponent() {
       }
       if (!agentId)
         throw new Error("There's no Bot to send this to. Reload the page.");
-      await start(agentId, draft.text, undefined, pendingId);
+      await start(agentId, draft.text, undefined, pendingId, draft.attachments);
     } catch (caught) {
       stashFailedStart({
         text: draft.text,
@@ -164,6 +171,9 @@ function RouteComponent() {
           caught instanceof Error
             ? caught.message
             : "Couldn't start the conversation. Try again.",
+        files: draft.attachments
+          .map(heldFileOf)
+          .filter((file) => file !== undefined),
       });
       if (router.state.location.pathname === pendingStartPath(pendingId))
         await navigate({ replace: true, to: "/" });
@@ -213,8 +223,13 @@ function RouteComponent() {
             // The box reads its words once, when it mounts; a start that fails while this page is
             // open is a new box with them in it.
             key={restores}
+            // Files wait in the box until the message has a conversation to go to; see `start`.
+            holdsFilesUntilSent
             {...(restored
-              ? { initialValue: restored.text }
+              ? {
+                  initialValue: restored.text,
+                  ...(restored.files ? { initialFiles: restored.files } : {}),
+                }
               : asked
                 ? { initialValue: asked, autoFocus: true }
                 : {})}

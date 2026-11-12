@@ -1,0 +1,220 @@
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+} from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { environmentManager, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
+import { cleanup, render, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { GoalPage } from "@/components/responsibilities/goal-page";
+import type { ResponsibilityRecord } from "@/lib/responsibilities";
+import { queryClient } from "@/query-client";
+
+let wasServer = true;
+beforeAll(() => {
+  GlobalRegistrator.register();
+  wasServer = environmentManager.isServer();
+  environmentManager.setIsServer(() => false);
+});
+afterAll(() => {
+  environmentManager.setIsServer(() => wasServer);
+  GlobalRegistrator.unregister();
+});
+
+const originalFetch = global.fetch;
+const sent: { method: string; url: string; body: unknown }[] = [];
+
+beforeEach(() => {
+  queryClient.clear();
+  sent.length = 0;
+  global.fetch = Object.assign(
+    async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = String(path);
+      const method = init?.method ?? "GET";
+      if (method !== "GET") {
+        sent.push({
+          method,
+          url,
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
+        return Response.json({});
+      }
+      return Response.json({ triggers: [], runs: [] });
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+});
+afterEach(() => {
+  cleanup();
+  global.fetch = originalFetch;
+});
+
+const goal: ResponsibilityRecord = {
+  id: "goal-1",
+  agentId: "bot-1",
+  channelId: "c1",
+  threadId: "t1",
+  title: "Watch the queue",
+  instruction: "Tell me when the queue backs up.",
+  successCriteria: "",
+  status: "active",
+  progress: "",
+  lastResult: null,
+  subscriptions: [],
+  recurring: false,
+  endsWhenMet: false,
+  updatedAt: "2026-11-10T10:00:00Z",
+};
+
+const ENDS_WHEN_MET_ERROR =
+  "It ends when this is met, so say what done looks like.";
+
+function renderPage(record: ResponsibilityRecord) {
+  const root = createRootRoute();
+  const router = createRouter({
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+    routeTree: root.addChildren([
+      createRoute({
+        getParentRoute: () => root,
+        path: "/",
+        component: () => (
+          <GoalPage back={{ to: "/" }} goal={record} routines={[]} />
+        ),
+      }),
+    ]),
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+}
+
+test("a goal with no outcome can be saved after changing only its title", async () => {
+  const view = renderPage(goal);
+  const criteria = (await view.findByLabelText(
+    "Success criteria",
+  )) as HTMLTextAreaElement;
+  expect(criteria.getAttribute("aria-required")).toBeNull();
+  expect(criteria.value).toBe("");
+  const user = userEvent.setup({ document });
+  const title = view.getByLabelText("Title");
+  await user.clear(title);
+  await user.type(title, "Watch the support queue");
+  await user.click(view.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(sent.length).toBe(1));
+  expect(sent[0]).toEqual({
+    method: "PATCH",
+    url: "/api/responsibilities/goal-1",
+    body: {
+      title: "Watch the support queue",
+      instruction: "Tell me when the queue backs up.",
+      successCriteria: "",
+    },
+  });
+  expect(view.queryByText(ENDS_WHEN_MET_ERROR)).toBeNull();
+  expect(criteria.getAttribute("aria-invalid")).toBeNull();
+});
+
+test("a goal that ends when met can't have its outcome cleared", async () => {
+  const view = renderPage({ ...goal, endsWhenMet: true, successCriteria: "X" });
+  const criteria = (await view.findByLabelText(
+    "Success criteria",
+  )) as HTMLTextAreaElement;
+  const user = userEvent.setup({ document });
+  await user.click(criteria);
+  await user.keyboard("{Backspace}");
+  expect(criteria.getAttribute("aria-required")).toBe("true");
+  expect(criteria.value).toBe("");
+  await user.click(view.getByRole("button", { name: "Save" }));
+  await view.findByText(ENDS_WHEN_MET_ERROR);
+  expect(criteria.getAttribute("aria-invalid")).toBe("true");
+  expect(sent.length).toBe(0);
+  // Typing an outcome clears the error and lets it save.
+  await user.type(criteria, "Queue is empty");
+  expect(view.queryByText(ENDS_WHEN_MET_ERROR)).toBeNull();
+  await user.click(view.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(sent.length).toBe(1));
+  expect(sent[0]).toEqual({
+    method: "PATCH",
+    url: "/api/responsibilities/goal-1",
+    body: {
+      title: "Watch the queue",
+      instruction: "Tell me when the queue backs up.",
+      successCriteria: "Queue is empty",
+    },
+  });
+});
+
+test("a goal that ends when met treats whitespace-only criteria as blank", async () => {
+  const view = renderPage({ ...goal, endsWhenMet: true, successCriteria: "X" });
+  const criteria = (await view.findByLabelText(
+    "Success criteria",
+  )) as HTMLTextAreaElement;
+  const user = userEvent.setup({ document });
+  await user.clear(criteria);
+  await user.type(criteria, "   ");
+  expect(criteria.value).toBe("   ");
+  await user.click(view.getByRole("button", { name: "Save" }));
+  await view.findByText(ENDS_WHEN_MET_ERROR);
+  expect(criteria.getAttribute("aria-invalid")).toBe("true");
+  expect(sent.length).toBe(0);
+});
+
+test("a goal that ends when met saves normally when it has an outcome", async () => {
+  const view = renderPage({ ...goal, endsWhenMet: true, successCriteria: "X" });
+  const user = userEvent.setup({ document });
+  const title = await view.findByLabelText("Title");
+  await user.clear(title);
+  await user.type(title, "Watch the support queue");
+  await user.click(view.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(sent.length).toBe(1));
+  expect(sent[0]?.body).toEqual({
+    title: "Watch the support queue",
+    instruction: "Tell me when the queue backs up.",
+    successCriteria: "X",
+  });
+  expect(view.queryByText(ENDS_WHEN_MET_ERROR)).toBeNull();
+});
+
+test("saving keeps the page open, and Discard changes puts the saved wording back", async () => {
+  const view = renderPage(goal);
+  const user = userEvent.setup({ document });
+  const save = (await view.findByRole("button", {
+    name: "Save",
+  })) as HTMLButtonElement;
+  const discard = view.getByRole("button", {
+    name: "Discard changes",
+  }) as HTMLButtonElement;
+  // Nothing to save until something changes.
+  expect(save.disabled).toBe(true);
+  expect(discard.disabled).toBe(true);
+
+  const title = view.getByLabelText("Title") as HTMLInputElement;
+  await user.type(title, " today");
+  expect(save.disabled).toBe(false);
+  await user.click(discard);
+  expect(title.value).toBe("Watch the queue");
+  expect(save.disabled).toBe(true);
+  expect(sent).toEqual([]);
+
+  await user.type(title, " today");
+  await user.click(save);
+  await waitFor(() => expect(sent.length).toBe(1));
+  // Still on the goal, its fields where they were.
+  expect(view.getByRole("heading", { level: 1 }).textContent).toBe(
+    "Watch the queue",
+  );
+  expect(title.value).toBe("Watch the queue today");
+});
