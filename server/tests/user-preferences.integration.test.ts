@@ -40,6 +40,7 @@ test("database defaults and writes survive a new store and remain scoped to the 
     narration: null,
     skin: "openbot",
     proactive: "on",
+    sidebarSections: { group: false, direct: false, projects: false },
   });
   expect(await store.patch(alice, { messageListEmphasis: "agent" })).toEqual({
     messageListEmphasis: "agent",
@@ -47,6 +48,7 @@ test("database defaults and writes survive a new store and remain scoped to the 
     narration: null,
     skin: "openbot",
     proactive: "on",
+    sidebarSections: { group: false, direct: false, projects: false },
   });
   expect(await createUserPreferencesStore(database).read(alice)).toEqual({
     messageListEmphasis: "agent",
@@ -54,6 +56,7 @@ test("database defaults and writes survive a new store and remain scoped to the 
     narration: null,
     skin: "openbot",
     proactive: "on",
+    sidebarSections: { group: false, direct: false, projects: false },
   });
   expect(await store.read(bob)).toEqual({
     messageListEmphasis: "thread",
@@ -61,6 +64,7 @@ test("database defaults and writes survive a new store and remain scoped to the 
     narration: null,
     skin: "openbot",
     proactive: "on",
+    sidebarSections: { group: false, direct: false, projects: false },
   });
 });
 
@@ -99,6 +103,7 @@ test("the narration choice is kept in the database beside the others", async () 
     narration: "on",
     skin: "openbot",
     proactive: "on",
+    sidebarSections: { group: false, direct: false, projects: false },
   });
 });
 
@@ -110,6 +115,7 @@ test("the skin is saved on the account and survives a new store", async () => {
     narration: null,
     skin: "openmuse",
     proactive: "on",
+    sidebarSections: { group: false, direct: false, projects: false },
   });
   expect((await createUserPreferencesStore(database).read(id)).skin).toBe(
     "openmuse",
@@ -140,6 +146,7 @@ test("check-ins are on for a person who never chose, and their off is kept in th
     narration: null,
     skin: "openduet",
     proactive: "off",
+    sidebarSections: { group: false, direct: false, projects: false },
   });
   // The jsonb key the check-in claim filters on, as Postgres holds it.
   const [row] = await database

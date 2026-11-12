@@ -252,6 +252,9 @@ describe("channel activity", () => {
         // The person who started it.
         canRename: true,
         task: false,
+        // One person, one Bot: a direct chat. The creator is its only member.
+        memberCount: 1,
+        projectId: null,
       },
     ]);
   });

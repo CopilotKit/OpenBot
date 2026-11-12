@@ -229,6 +229,8 @@ describe("what a channel is waiting on", () => {
       lastReadAt: null,
       canRename: true,
       task: false,
+      memberCount: 1,
+      projectId: null,
     });
     const store = fakeStore({
       list: async () => ({
@@ -263,6 +265,8 @@ describe("what a channel is waiting on", () => {
       lastReadAt: null,
       canRename: true,
       task,
+      memberCount: 1,
+      projectId: null,
     });
     const store = fakeStore({
       list: async () => ({
