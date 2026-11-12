@@ -486,6 +486,11 @@ button.text-link:hover:not(:disabled) {
   margin-top: 12px;
 }
 
+/* A Podman machine too small for setup: under the rows that said so, apart from them. */
+.steps + .podman-too-small {
+  margin-top: 16px;
+}
+
 /* What a choice would delete, said as the card's other lines are. */
 .local-alert details > p {
   margin-top: 8px;
@@ -962,6 +967,14 @@ a:hover {
 .blocker-steps li::marker {
   font-family: var(--mono);
   color: var(--text-secondary);
+}
+
+/* The same steps inside a setup card (`PodmanTooSmall`), at the card's own text size. */
+.podman-too-small .blocker-steps {
+  margin-top: 12px;
+  gap: 14px;
+  font-size: var(--text-sm);
+  line-height: 20px;
 }
 
 .blocker-asks {
@@ -1637,6 +1650,12 @@ a:hover {
 
 .status-line .step-spinner {
   flex: none;
+}
+
+/* "Restarting your Podman machine" keeps the gap the buttons it replaces had under the paragraph:
+   `.local-alert p` takes every margin off, the status line's own included. */
+.podman-too-small .status-line {
+  margin-top: 12px;
 }
 
 /*

@@ -826,6 +826,22 @@ function readsAsCredential(name: string): boolean {
 }
 
 /**
+ * The one exception to the floor below, and only when an operator turns it on: an MCP server on this
+ * machine's own loopback address, `127.0.0.1` or `[::1]`, over http or https.
+ *
+ * For developing an MCP server against OpenBot and for the end-to-end tests that run one, never for
+ * a deployment people use: `OPENBOT_ALLOW_LOOPBACK_MCP=1` in the environment, and nothing a request
+ * carries, turns it on. Every other address keeps every rule, and a loopback address with userinfo
+ * in it is still refused.
+ */
+function loopbackServerAdmitted(url: URL): boolean {
+  if (process.env.OPENBOT_ALLOW_LOOPBACK_MCP !== "1") return false;
+  if (url.username || url.password) return false;
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  return url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+}
+
+/**
  * Is this a URL an administrator may point the deployment at?
  *
  * A curated entry is reviewed in code; this is the other path, and it needs its own floor because
@@ -847,6 +863,8 @@ export function customUrlRefusal(raw: string): string | null {
   } catch {
     return "That is not a URL.";
   }
+
+  if (loopbackServerAdmitted(url)) return null;
 
   if (url.protocol !== "https:") {
     return "An MCP server must be reached over https.";

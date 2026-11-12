@@ -392,6 +392,11 @@ export function accessFor(
      * person, or null for one reached on the deployment's own credential. See the last branch below.
      */
     entraScope?: string | null;
+    /**
+     * How a server added by URL signs each person in, when it asked for a sign-in when it was added.
+     * See the branch above the Entra one below.
+     */
+    oauth?: unknown;
   },
   entry: CatalogueEntry | null,
 ): ServerAccess {
@@ -462,6 +467,22 @@ export function accessFor(
       // The person's own account at the app, and only that: a Shared app's account is the team's.
       ownCredential: reachedAs === "person",
       toolkit: TOOLKIT_OF[provider](row.url),
+    };
+  }
+
+  /*
+   * A server added by URL that answered with an OAuth challenge when it was added: each person signs
+   * in to it in their own browser, and each call goes out on that person's own token, exactly as a
+   * catalogue `user-oauth` vendor's does. Only for a row the catalogue says nothing about, which the
+   * entry branch above has already settled.
+   */
+  if (row.oauth) {
+    return {
+      transport: "mcp",
+      credential: "person-oauth",
+      reachedAs: "person",
+      ownCredential: true,
+      toolkit: null,
     };
   }
 

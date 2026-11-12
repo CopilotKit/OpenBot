@@ -235,11 +235,11 @@ export function accountOf(facts: AccountFacts): AppAccount {
     if (schemeKind(facts.authScheme) === "none") return "deployment";
     return facts.accountMode === "shared" ? "shared" : "personal";
   }
-  if (facts.provider === "catalogue")
-    return facts.catalogueAuth?.kind === "user-oauth"
-      ? "personal"
-      : "deployment";
-  return "deployment";
+  /*
+   * A catalogue vendor, or a server added by URL that signs each person in: either way the call runs
+   * on the asker's own grant when the auth says so.
+   */
+  return facts.catalogueAuth?.kind === "user-oauth" ? "personal" : "deployment";
 }
 
 /**

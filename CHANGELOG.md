@@ -34,6 +34,18 @@ every deployment:
 
 ### OpenBot Desktop
 
+- **A Podman machine too small for setup is resized for you on a Mac.** Setup needs 4 CPUs and
+  4 GB of free memory. A Podman machine with less stopped at one sentence with a command squeezed
+  into it: "OpenBot has 2 CPUs. It needs 4. Stop your Podman machine, run podman machine set
+  --cpus 6, start it again, then Retry." The row now says only what happened ("Your Podman machine
+  has 2 CPUs. OpenBot needs 4."), and OpenBot offers **Resize my Podman**: once you click it, it
+  stops your machine, raises whichever of its CPUs and memory is short to what setup needs (at
+  least 6 CPUs or 8 GB, never more than your Mac has), starts it again with the containers that
+  were running in it, and carries on setting up. Nothing else about your machine changes. Where
+  OpenBot can't do it (your disk is short too, or Podman refused the change), the same fix is three
+  numbered steps, each command in its own block with Copy, then Retry. Setup's other messages about
+  CPUs now count them as setup does, in all: "Docker Desktop has 2 CPUs. OpenBot needs 4.", where
+  they said "free CPUs".
 - **On a Mac, the window's buttons no longer cover a skin's controls.** With the OpenDuet skin the
   close, minimise and zoom buttons sat on the "OpenBot" name at the top of the menu, and on the back
   button of every page opened over the app. OpenDots and OpenFuse had their own controls under them
@@ -339,6 +351,12 @@ every deployment:
 
 ### Conversations
 
+- **A file you attach stays a file once the Bot answers.** On a Bot OpenBot runs in a harness, such
+  as the Personal Assistant on LangChain, a text file you sent turned into one giant block of its
+  own contents when the answer finished, and an image's thumbnail disappeared. A reload showed the
+  same. The message now keeps the file as you sent it, during the answer, after it and after a
+  reload, and the Bot still reads the whole file. Messages already turned into text stay as they
+  are.
 - **Switching back to a conversation the Bot is working in shows it working.** Leave a conversation
   right after sending, or while the Bot takes a browser step, and come back: the conversation could
   be empty, your message gone, no sign of the Bot working and the message box open, until the whole

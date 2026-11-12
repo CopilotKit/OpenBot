@@ -36,6 +36,15 @@ import { type Decides, type SchemeKind, schemeKind } from "../broker";
 import { type CatalogueEntry, catalogueEntry } from "../catalogue";
 import { registerDynamicClient } from "../oauth";
 import {
+  accessTokenLive,
+  parseTokenSet,
+  RemoteGrantEndedError,
+  type RemoteOAuthConfig,
+  type RemoteTokenSet,
+  refreshRemoteTokens,
+  serializeTokenSet,
+} from "../remote-oauth";
+import {
   type AccountAnswer,
   type AccountMode,
   type AccountRef,
@@ -566,6 +575,8 @@ export function createStoreContext(options: PluginStoreOptions) {
        * column is the near-miss that reading replaced. A field kept here for convenience would be
        * the wrong answer sitting in the parameter list of the function that must not use it.
        */
+      /** How a server added by URL signs each person in; see `mcpServers.oauth`. */
+      oauth?: RemoteOAuthConfig | null;
     },
     entry: CatalogueEntry | null,
     actorId: string,
@@ -844,6 +855,11 @@ export function createStoreContext(options: PluginStoreOptions) {
           )
         : undefined;
       return { token };
+    }
+
+    // A server added by URL that signs each person in. Its tokens are a set, not a refresh token.
+    if (!entry && row.oauth) {
+      return { token: await remoteAccessTokenFor(row, row.oauth, actorId) };
     }
 
     /*
@@ -1277,6 +1293,110 @@ export function createStoreContext(options: PluginStoreOptions) {
 
     await persistOAuthClient({ serverId, client: fresh, by: "deployment" });
     throw new PluginRefusedError(input.refusal, null);
+  }
+
+  /**
+   * One person's access token for a server added by URL that signs people in.
+   *
+   * The catalogue's vendors hold a refresh token and mint an access token per call. A server added
+   * by URL may never issue a refresh token, so its whole token set is held (`remote-oauth.ts`): the
+   * access token is presented while it lives, and refreshed through the MCP SDK when it does not.
+   * Serialised per person and server, like the catalogue path, so two calls at once refresh once.
+   */
+  async function remoteAccessTokenFor(
+    row: { id: string; title: string },
+    config: RemoteOAuthConfig,
+    actorId: string,
+  ): Promise<string> {
+    const title = row.title;
+    if (!actorId) {
+      throw new PluginRefusedError(
+        `${title} answers as the person asking, and this run is not attributed to anybody.`,
+        null,
+      );
+    }
+    const reconnect = (message: string) =>
+      new PluginRefusedError(
+        connectAppRefusal({
+          serverId: row.id,
+          title,
+          message,
+          reason: "reconnect",
+          at: new Date().toISOString(),
+        }),
+        null,
+      );
+    return await serialized(`${row.id}:${actorId}`, async () => {
+      const [held] = await database
+        .select({ credentialId: mcpUserCredentials.credentialId })
+        .from(mcpUserCredentials)
+        .where(
+          and(
+            eq(mcpUserCredentials.serverId, row.id),
+            eq(mcpUserCredentials.userId, actorId),
+          ),
+        )
+        .limit(1);
+      if (!held) {
+        throw new PluginRefusedError(
+          connectAppRefusal({
+            serverId: row.id,
+            title,
+            message: `You have not connected your ${title} account. Connect it and ask again.`,
+          }),
+          null,
+        );
+      }
+      const [locked] = await database
+        .select({
+          encryptedValue: credentialRows.encryptedValue,
+          revokedAt: credentialRows.revokedAt,
+        })
+        .from(credentialRows)
+        .where(eq(credentialRows.id, held.credentialId))
+        .limit(1);
+      if (!locked || locked.revokedAt) {
+        throw reconnect(
+          `Your ${title} access was withdrawn. Connect it again.`,
+        );
+      }
+      const set = parseTokenSet(
+        await decryptSecret(encryptionKey, locked.encryptedValue),
+      );
+      if (!set) {
+        throw reconnect(
+          `${title} needs connecting again. Reconnect it and ask again.`,
+        );
+      }
+      if (accessTokenLive(set)) return set.accessToken;
+
+      const client = await storedOAuthClient(row.id);
+      if (!client) {
+        throw reconnect(
+          `${title} needs connecting again. Reconnect it and ask again.`,
+        );
+      }
+      let fresh: RemoteTokenSet;
+      try {
+        fresh = await refreshRemoteTokens({ config, client, set });
+      } catch (error) {
+        if (error instanceof RemoteGrantEndedError) {
+          await credentials.revoke(held.credentialId);
+          throw reconnect(
+            `Your ${title} sign-in has ended, so this wasn't done. Reconnect it and ask again.`,
+          );
+        }
+        throw new PluginRefusedError(
+          `Couldn't reach ${title} to renew your sign-in. Try again in a moment.`,
+          null,
+        );
+      }
+      await rotateConnectionToken({
+        credentialId: held.credentialId,
+        refreshToken: serializeTokenSet(fresh),
+      });
+      return fresh.accessToken;
+    });
   }
 
   /**
