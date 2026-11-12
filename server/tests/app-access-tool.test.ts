@@ -191,6 +191,15 @@ describe("show_app_access", () => {
     expect(answer).toContain("no app called Frobnicator");
   });
 
+  test("tells the model an MCP server can be added by its address, never that it can't", async () => {
+    const { tool } = toolOver(null);
+    expect(tool.description).toContain(
+      "never say a server cannot be used by its URL",
+    );
+    const answer = await tool.execute({ app: "Figma" });
+    expect(answer).toContain("add it on Connections with Add server");
+  });
+
   test("arguments that name no app are refused before the store is asked", async () => {
     const { tool, asked } = toolOver(access("ready"));
     expect(await tool.execute({})).toBe("Name the app to show.");

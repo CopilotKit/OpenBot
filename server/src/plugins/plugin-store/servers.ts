@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { recordAuditEvent } from "../../audit";
+import { encryptSecret } from "../../credentials";
 import {
   databaseComplaint,
   isQueryFailure,
@@ -43,6 +44,7 @@ import {
   type AccountRef,
   asAccountRef,
 } from "../shared-accounts";
+import { authOf, type RemoteOAuthConfig } from "../remote-oauth";
 import { transportFor } from "../transport";
 import type { StoreContext } from "./context";
 import {
@@ -73,6 +75,7 @@ export function serverMethods(context: StoreContext) {
     database,
     auditStore,
     credentials,
+    encryptionKey,
     broker,
     mcpGrantsForServers,
     accountRefFor,
@@ -235,6 +238,41 @@ export function serverMethods(context: StoreContext) {
     },
 
     /**
+     * Keep the key a server added by URL is reached with, in the vault, as that server's own `mcp`
+     * credential, and answer its id for {@link addCustomServer} to point the row at.
+     *
+     * Minted here rather than through `POST /api/admin/credentials`, because the person adding a
+     * server from Connections is not always an admin. The credential is named for the server, which
+     * is the rule `requireCredentialOfKind` then holds the add to: it is spent at this server and
+     * nowhere else.
+     */
+    async storeServerKey(input: {
+      serverId: string;
+      token: string;
+    }): Promise<string> {
+      const key = {
+        kind: "mcp" as const,
+        provider: input.serverId,
+        keyId: `mcp-${input.serverId}`,
+      };
+      const value = {
+        ...key,
+        metadata: { server: input.serverId },
+        encryptedValue: await encryptSecret(encryptionKey, input.token.trim()),
+      };
+      return database.transaction(async (transaction) => {
+        const live = await credentials.findLiveByKey(key, transaction);
+        const stored = live
+          ? await credentials.rotate(
+              { ...value, previousCredentialId: live.id },
+              transaction,
+            )
+          : await credentials.create(value, transaction);
+        return stored.id;
+      });
+    },
+
+    /**
      * Add a server that is not in the catalogue, by URL.
      *
      * The administrator's path is different from pressing Add on a curated entry. That
@@ -261,6 +299,11 @@ export function serverMethods(context: StoreContext) {
        * as the admin adding it, since there is no deployment credential to ask with.
        */
       actorId?: string;
+      /**
+       * How the server signs each person in, as `probeRemoteServer` discovered it from the server's
+       * own OAuth challenge. Absent keeps what the row already has; null says it signs nobody in.
+       */
+      oauth?: RemoteOAuthConfig | null;
     }): Promise<ServerRecord> {
       const refusal = customUrlRefusal(input.url);
       if (refusal) throw new CustomServerRefusedError(refusal);
@@ -415,6 +458,12 @@ export function serverMethods(context: StoreContext) {
       const entraScope =
         (namedScope === undefined ? existing?.entraScope : namedScope) ||
         undefined;
+      // A server reached on each person's own sign-in has no deployment token and no Entra scope.
+      if (input.oauth && (input.credentialId?.trim() || entraScope)) {
+        throw new CustomServerRefusedError(
+          "A server that signs each person in takes no token.",
+        );
+      }
       if (entraScope) {
         if (!options.entra) {
           throw new CustomServerRefusedError(
@@ -477,6 +526,7 @@ export function serverMethods(context: StoreContext) {
           provenance: "custom",
           credentialId: credentialId ?? null,
           entraScope: entraScope ?? null,
+          oauth: input.oauth ?? null,
           addedBy: input.by,
         })
         .onConflictDoUpdate({
@@ -518,6 +568,7 @@ export function serverMethods(context: StoreContext) {
             ...(credentialId ? { credentialId } : {}),
             // Kept when the caller names none, for the reason given where `entraScope` is decided.
             ...(namedScope !== undefined ? { entraScope: namedScope } : {}),
+            ...(input.oauth !== undefined ? { oauth: input.oauth } : {}),
             addedBy: input.by,
             updatedAt: new Date(),
           },
@@ -539,10 +590,20 @@ export function serverMethods(context: StoreContext) {
         },
       });
 
-      await this.refreshTools(
-        input.id,
-        entraScope ? (input.actorId ?? "") : undefined,
-      );
+      /*
+       * A server that signs each person in has nobody signed in yet, so there is nobody to ask what
+       * it offers as. Its tools are listed when the first person connects (`discoverToolsOnConnect`).
+       */
+      const [stored] = await database
+        .select({ oauth: mcpServers.oauth })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, input.id));
+      if (!stored?.oauth) {
+        await this.refreshTools(
+          input.id,
+          entraScope ? (input.actorId ?? "") : undefined,
+        );
+      }
       const added = (await this.listServers()).find(
         (server) => server.id === input.id,
       );
@@ -2231,9 +2292,14 @@ export function serverMethods(context: StoreContext) {
           lastError: row.lastError,
           skippedTools: row.skippedTools ?? [],
           addedBy: row.addedBy,
-          dynamicClient:
-            entry?.auth.kind === "user-oauth" &&
-            entry.auth.clientRegistration === "dynamic",
+          dynamicClient: (() => {
+            const auth = authOf(entry, row);
+            return (
+              auth?.kind === "user-oauth" &&
+              auth.clientRegistration === "dynamic"
+            );
+          })(),
+          signIn: !entry && row.oauth !== null,
           // The app's, for a row whose url names one; this row's own column for everything else,
           // which is a null on every server that is not brokered. See the read above.
           authScheme: toolkit
@@ -2264,7 +2330,7 @@ export function serverMethods(context: StoreContext) {
             accountMode: toolkit
               ? (brokeredApps.get(row.url)?.accountMode ?? null)
               : row.accountMode,
-            catalogueAuth: entry?.auth ?? null,
+            catalogueAuth: authOf(entry, row),
             ownerGrants: row.ownerGrants,
           }),
           ownerGrantsChosen: row.ownerGrants,
@@ -2366,6 +2432,23 @@ export function serverMethods(context: StoreContext) {
         authScheme: app?.authScheme ?? null,
         accountMode: app?.accountMode ?? null,
       };
+    },
+
+    /**
+     * How a server added by URL signs each person in, or null for any other server: one the
+     * catalogue describes, one reached on its own key, or no server at all. Read by the connect
+     * route and the OAuth callback, which take the endpoints from here and never from a request.
+     */
+    async remoteSignIn(
+      serverId: string,
+    ): Promise<{ title: string; config: RemoteOAuthConfig } | null> {
+      if (catalogueEntry(serverId)) return null;
+      const [row] = await database
+        .select({ title: mcpServers.title, oauth: mcpServers.oauth })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, serverId))
+        .limit(1);
+      return row?.oauth ? { title: row.title, config: row.oauth } : null;
     },
 
     /**
