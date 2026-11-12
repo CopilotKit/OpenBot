@@ -21,7 +21,7 @@ mod test_support;
 use openbot_desktop_lib::{
     acquire, app_update, deployment, deployment_release, docker_config, early_downloads, engine,
     engine_versions, env as openbot_env, harness, host_access, install, local_eval,
-    local_eval_state, logging, own_machine, preparation,
+    local_eval_state, logging, machine_size, own_machine, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
     telemetry, tray, troubleshooting, uninstall, update_ready, upgrade, windows as win,
@@ -9043,6 +9043,33 @@ async fn local_eval_room() -> Option<local_eval::Shortfall> {
         .flatten()
 }
 
+/// How the Podman machine OpenBot runs on would be made big enough for what local setup found
+/// short, and whether OpenBot can do it for the person (`machine_size::plan_here`). Nothing when
+/// it isn't a Podman machine on a Mac, or a bigger one isn't the answer.
+#[tauri::command]
+async fn podman_machine_plan(short: machine_size::Short) -> Option<machine_size::Plan> {
+    tauri::async_runtime::spawn_blocking(move || machine_size::plan_here(&short))
+        .await
+        .ok()
+        .flatten()
+}
+
+/// The person said yes: stop the Podman machine OpenBot runs on, give it `cpus` CPUs and
+/// `memory_mib` MiB, and start it again with the containers that were running in it. The window
+/// then retries the setup. A failure is said plainly; Podman's own words are in the log.
+#[tauri::command]
+async fn resize_podman_machine(cpus: u64, memory_mib: u64) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        machine_size::resize_here(machine_size::Size { cpus, memory_mib })
+    })
+    .await
+    .map_err(|error| error.to_string())
+    .and_then(|resized| resized)
+    .map_err(|_| {
+        "OpenBot couldn't resize your Podman machine. Use the steps below instead.".to_string()
+    })
+}
+
 /// The step the back end update `attempt` is in and for how long, once it is in one that waits,
 /// so a step that takes minutes is never a silent row. A fixed step name and seconds only.
 #[tauri::command]
@@ -11180,6 +11207,8 @@ fn main() {
             early_downloads_now,
             early_downloads_measured,
             local_eval_room,
+            podman_machine_plan,
+            resize_podman_machine,
             record_setup_event,
             bring_setup_to_front,
             allow_podman_install,
