@@ -64,9 +64,10 @@ test("a person browses apps, connects Gmail through its sign-in, then disconnect
     await expect(
       main.getByRole("button", { name: /^Exa Search Public-web/ }),
     ).toContainText("Add");
-    await expect(
-      main.getByRole("link", { name: /^Browse apps/ }),
-    ).toBeVisible();
+    // No count it can't keep true: the real directory is well past "a few hundred" apps.
+    const browse = main.getByRole("link", { name: /^Browse apps/ });
+    await expect(browse).toContainText("More apps you can connect.");
+    await expect(browse).not.toContainText(/hundred|\d/);
     await shot("connections");
   });
 
@@ -187,9 +188,21 @@ test("a person browses apps, connects Gmail through its sign-in, then disconnect
     await expect(
       main.getByRole("switch", { name: "Turn Gmail on or off" }),
     ).toBeChecked();
-    await expect(
-      main.getByText("Signed in with Gmail. Connected."),
-    ).toBeVisible();
+    // The whole sentence is readable, up to what Disconnect also does, with nothing clamped away.
+    const yourAccount = main.getByText("Signed in with Gmail. Connected.");
+    await expect(yourAccount).toBeVisible();
+    await expect(yourAccount).toContainText(
+      "Disconnecting also removes OpenBot's access to your account.",
+    );
+    await expect
+      .poll(
+        () =>
+          yourAccount.evaluate(
+            (sentence) => sentence.scrollHeight <= sentence.clientHeight,
+          ),
+        { message: "the Your account sentence is shown whole" },
+      )
+      .toBe(true);
     await expect(
       main.getByRole("button", { name: "Connect another account" }),
     ).toBeVisible();

@@ -24,7 +24,6 @@ const page = (provider?: "composio" | "arcade") =>
 const everythingSaid = (provider: "composio" | "arcade") =>
   JSON.stringify([
     providerVocabulary(provider).directoryLabel,
-    providerVocabulary(provider).directoryDescription,
     moreAppsRow(provider, true),
     moreAppsRow(provider, false).title,
     moreAppsSectionDescription(provider),
@@ -47,15 +46,14 @@ test("a Composio deployment's words are OpenBot's", () => {
   expect(providerVocabulary("composio")).toEqual({
     directoryLabel: "Browse apps",
     envVar: "COMPOSIO_API_KEY",
-    directoryDescription:
-      "A few hundred apps. Each person connects their own account.",
   });
   expect(moreAppsSectionDescription("composio")).toBe(
     "More apps people can connect through OpenBot. Nobody here has reviewed them.",
   );
   expect(moreAppsRow("composio", true)).toEqual({
     title: "Browse apps",
-    description: "A few hundred apps. Each person connects their own account.",
+    description:
+      "Apps nobody here has reviewed. Each person connects their own account.",
     linked: true,
   });
   expect(moreAppsRow("composio", false)).toEqual({
@@ -93,7 +91,7 @@ test("the variable an admin sets follows the provider rather than being hard-cod
 test("a configured deployment links to its own directory, whichever provider it is", () => {
   expect(moreAppsRow("arcade", true)).toEqual({
     title: "Browse apps",
-    // Arcade's own sentence: it claims no app count, because nobody here has counted Arcade's.
+    // No app count, on either provider: nobody here counts the directory, and it keeps growing.
     description:
       "Apps nobody here has reviewed. Each person connects their own account.",
     linked: true,

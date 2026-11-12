@@ -15,6 +15,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemFooter,
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
@@ -1163,6 +1164,15 @@ export function BrokeredAccountRow({
     }
     account.connectAnother();
   };
+  /* Whether a connected account has anything to press: see the footer below. */
+  const connectedActions =
+    account.configured &&
+    account.connected &&
+    account.kind !== "no-auth" &&
+    ((account.kind === "fields" && account.checkable) ||
+      (account.reconnectsInPlace && account.kind === "consent") ||
+      canAddAnother ||
+      !several);
 
   return (
     <>
@@ -1175,11 +1185,10 @@ export function BrokeredAccountRow({
               ? "Your accounts"
               : (heading ?? "Your account")}
           </ItemTitle>
-          {/* Unclamped where the key is missing: that sentence is the only place the setting is
-              named, so it is the point rather than a hint. */}
-          <ItemDescription
-            className={account.configured ? undefined : "line-clamp-none"}
-          >
+          {/* Never clamped. It is the point rather than a hint: where the key is missing it is the
+              only place the setting is named, and once connected it says what Disconnect also
+              ends, which was cut off mid-word beside the buttons. */}
+          <ItemDescription className="line-clamp-none">
             {several
               ? `You connected ${accounts.length} ${title} accounts. Bots use your default account unless you ask for another.`
               : accountSentence({
@@ -1229,91 +1238,6 @@ export function BrokeredAccountRow({
                 />
                 {/* The same word for both kinds. The line beneath says what it rests on. */}
                 <span className="text-muted-foreground text-xs">Connected</span>
-                {/*
-                 * OFFERED ONLY ON A KEY APP, BECAUSE THAT IS THE ONLY KIND A RE-CHECK IS AN ACT ON.
-                 * A consent connection is written verified by the confirm, with no probe behind it,
-                 * and migration 0038 backfilled every consent row that came before — see
-                 * {@link BrokeredAccount.verified} — so a gate that asked only about a check would
-                 * draw Re-check on every connected Gmail a deployment already had, where pressing it
-                 * could only fail.
-                 *
-                 * AND THE SECOND HALF ASKS WHETHER THERE IS ANYTHING TO CHECK WITH, WHICH IS NOT
-                 * "HAS A CHECK PASSED". Gating on `verified` withheld the button in the one state
-                 * somebody reaches for it hardest: a key the vendor has just rejected, which they
-                 * have gone and corrected and now want tried again. An app with nothing to spend
-                 * the key on is the only state with nothing to press, because the button could only
-                 * ask for the same answer again.
-                 *
-                 * AND IT ASKS `checkable`, NOT `probe`, WHICH IS THE WHOLE OF THE DIFFERENCE. This
-                 * is a question about the app TODAY, and `probe` is the record of what the last
-                 * check spent — a fact about the past that no later listing can move. The two
-                 * agreed while the probe was derived on every read. Once it became a record they
-                 * stopped: a key accepted against an app that published nothing records null for
-                 * good, so a gate on that record withheld the button for good, even after a Refresh
-                 * gave the app something to try — and pressing this button is the only thing in the
-                 * product that could ever write an action into that record, so nothing could ever
-                 * end the state from inside it. The sentence above still reads the record, because
-                 * what to SAY is what happened; what to OFFER is what is possible now.
-                 */}
-                {account.kind === "fields" && account.checkable ? (
-                  <Button
-                    disabled={account.rechecking}
-                    onClick={account.recheck}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    {account.rechecking ? "Checking…" : "Re-check"}
-                  </Button>
-                ) : null}
-                {/*
-                 * RECONNECT OVER THE ACCOUNT THAT STANDS, where the broker adds a consent to it.
-                 * This is where a Bot's card sends somebody whose call the vendor refused, and on
-                 * Arcade one press asks for everything the app needs. The arrow says it leaves
-                 * OpenBot for the vendor's consent page, as Connect's does.
-                 */}
-                {account.reconnectsInPlace && account.kind === "consent" ? (
-                  <Button
-                    disabled={account.connecting}
-                    onClick={account.connect}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    Reconnect
-                    <IconArrowUpRight />
-                  </Button>
-                ) : null}
-                {/*
-                 * ONE MORE ACCOUNT BESIDE THE ONES CONNECTED, where the app can tell a person's
-                 * accounts apart. A key app opens the form; a sign-in app leaves for its page.
-                 */}
-                {canAddAnother && account.kind !== "no-auth" ? (
-                  <Button
-                    disabled={
-                      account.connectingAnother || account.requestingFields
-                    }
-                    onClick={addAnother}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    Connect another account
-                    {account.kind === "consent" ? <IconArrowUpRight /> : null}
-                  </Button>
-                ) : null}
-                {/* With several accounts each has its own Disconnect, in its row below. */}
-                {several ? null : (
-                  <Button
-                    disabled={account.disconnecting}
-                    onClick={account.disconnect}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    Disconnect
-                  </Button>
-                )}
               </>
             ) : (
               <>
@@ -1347,6 +1271,98 @@ export function BrokeredAccountRow({
             )}
           </ItemActions>
         )}
+        {/*
+         * WHAT CAN BE DONE TO A CONNECTED ACCOUNT, ON A LINE OF ITS OWN under the sentence. Beside
+         * it, with the status, up to three buttons squeezed the sentence to a clamp at the default
+         * desktop width, and the part about what Disconnect also ends was the part cut away.
+         */}
+        {connectedActions ? (
+          <ItemFooter className="flex-wrap justify-start">
+            {/*
+             * OFFERED ONLY ON A KEY APP, BECAUSE THAT IS THE ONLY KIND A RE-CHECK IS AN ACT ON.
+             * A consent connection is written verified by the confirm, with no probe behind it,
+             * and migration 0038 backfilled every consent row that came before — see
+             * {@link BrokeredAccount.verified} — so a gate that asked only about a check would
+             * draw Re-check on every connected Gmail a deployment already had, where pressing it
+             * could only fail.
+             *
+             * AND THE SECOND HALF ASKS WHETHER THERE IS ANYTHING TO CHECK WITH, WHICH IS NOT
+             * "HAS A CHECK PASSED". Gating on `verified` withheld the button in the one state
+             * somebody reaches for it hardest: a key the vendor has just rejected, which they
+             * have gone and corrected and now want tried again. An app with nothing to spend
+             * the key on is the only state with nothing to press, because the button could only
+             * ask for the same answer again.
+             *
+             * AND IT ASKS `checkable`, NOT `probe`, WHICH IS THE WHOLE OF THE DIFFERENCE. This
+             * is a question about the app TODAY, and `probe` is the record of what the last
+             * check spent — a fact about the past that no later listing can move. The two
+             * agreed while the probe was derived on every read. Once it became a record they
+             * stopped: a key accepted against an app that published nothing records null for
+             * good, so a gate on that record withheld the button for good, even after a Refresh
+             * gave the app something to try — and pressing this button is the only thing in the
+             * product that could ever write an action into that record, so nothing could ever
+             * end the state from inside it. The sentence above still reads the record, because
+             * what to SAY is what happened; what to OFFER is what is possible now.
+             */}
+            {account.kind === "fields" && account.checkable ? (
+              <Button
+                disabled={account.rechecking}
+                onClick={account.recheck}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {account.rechecking ? "Checking…" : "Re-check"}
+              </Button>
+            ) : null}
+            {/*
+             * RECONNECT OVER THE ACCOUNT THAT STANDS, where the broker adds a consent to it.
+             * This is where a Bot's card sends somebody whose call the vendor refused, and on
+             * Arcade one press asks for everything the app needs. The arrow says it leaves
+             * OpenBot for the vendor's consent page, as Connect's does.
+             */}
+            {account.reconnectsInPlace && account.kind === "consent" ? (
+              <Button
+                disabled={account.connecting}
+                onClick={account.connect}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Reconnect
+                <IconArrowUpRight />
+              </Button>
+            ) : null}
+            {/*
+             * ONE MORE ACCOUNT BESIDE THE ONES CONNECTED, where the app can tell a person's
+             * accounts apart. A key app opens the form; a sign-in app leaves for its page.
+             */}
+            {canAddAnother && account.kind !== "no-auth" ? (
+              <Button
+                disabled={account.connectingAnother || account.requestingFields}
+                onClick={addAnother}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Connect another account
+                {account.kind === "consent" ? <IconArrowUpRight /> : null}
+              </Button>
+            ) : null}
+            {/* With several accounts each has its own Disconnect, in its row below. */}
+            {several ? null : (
+              <Button
+                disabled={account.disconnecting}
+                onClick={account.disconnect}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Disconnect
+              </Button>
+            )}
+          </ItemFooter>
+        ) : null}
       </Item>
 
       {/*
