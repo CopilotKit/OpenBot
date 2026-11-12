@@ -1353,3 +1353,109 @@ describe("a turn picked up after the person decides one of several steps", () =>
     ]);
   });
 });
+
+describe("a turn picked up after the person decides one of several app calls that ran together", () => {
+  /*
+   * A built-in Bot's app calls in one step all start at once. The rename waited for the person, and
+   * the two adds were allowed and went on to the app while it did. The run that stopped for the
+   * rename let them finish and kept their results in the thread, so the picked-up turn answers them
+   * with what the app said. Told "Not run", the Bot added both tabs again (found live, a sheet left
+   * with "Summary_2" and "How to Use_2").
+   */
+  const asked = ["call_rename", "call_add_summary", "call_add_guide"];
+  const ask = {
+    id: "a1",
+    role: "assistant" as const,
+    content: "Setting up the tabs.",
+    toolCalls: asked.map((id) => ({
+      id,
+      type: "function" as const,
+      function: { name: "sheets_tab", arguments: "{}" },
+    })),
+  };
+  const continuation = {
+    snapshot: {
+      runId: "run_sheet",
+      threadId: THREAD_ID,
+      toolCallId: "call_rename",
+      toolName: "sheets_tab",
+      args: {},
+      // The conversation as it stood when the rename was asked about, before the adds came back.
+      messages: [
+        { id: "u1", role: "user" as const, content: "Build me a template." },
+        ask,
+      ],
+      state: {},
+      context: [],
+      forwardedProps: undefined,
+    },
+    result: { content: '{"renamed":"Template"}' },
+    messageId: "approval:request_2",
+  };
+  const history: HistoryRow[] = [
+    { id: "u1", role: "user", content: "Build me a template." },
+    {
+      id: "a1",
+      role: "assistant",
+      content: "Setting up the tabs.",
+      toolCalls: asked.map((id) => ({ id, name: "sheets_tab", args: "{}" })),
+    },
+    {
+      id: "t_summary",
+      role: "tool",
+      toolCallId: "call_add_summary",
+      content: '{"added":"Summary"}',
+    },
+  ];
+  const waitsForEveryStep: Driver = ({ agent, observer, request }) => {
+    const answered = new Set(
+      (
+        request.input as unknown as {
+          messages: { role: string; toolCallId?: string }[];
+        }
+      ).messages.flatMap((message) =>
+        message.role === "tool" && message.toolCallId
+          ? [message.toolCallId]
+          : [],
+      ),
+    );
+    if (asked.every((id) => answered.has(id)))
+      agent.messages = [
+        ...agent.messages,
+        { id: "assistant_reply", role: "assistant", content: "Done." },
+      ] as typeof agent.messages;
+    observer.complete();
+  };
+
+  test("a call the thread holds a result for is answered with it, not as not run", async () => {
+    const { run, calls } = harness({
+      history,
+      continuation,
+      drive: waitsForEveryStep,
+    });
+
+    expect(await run()).toEqual({ replyText: "Done." });
+    const [first] = calls.runs;
+    if (!first) throw new Error("The turn never ran.");
+    const sent = first.input.messages as unknown as {
+      role: string;
+      toolCallId?: string;
+      content?: unknown;
+    }[];
+    expect(
+      sent
+        .filter((message) => message.role === "tool")
+        .map((message) => [message.toolCallId, message.content]),
+    ).toEqual([
+      ["call_rename", '{"renamed":"Template"}'],
+      ["call_add_summary", '{"added":"Summary"}'],
+      // Nothing in the thread says this one came back, so it is still not run.
+      ["call_add_guide", NOT_RUN_WHILE_WAITING],
+    ]);
+    // The result the thread already holds is not written to it a second time.
+    expect(first.persistedInputMessages?.map((message) => message.id)).toEqual([
+      "approval:request_2",
+      "approval:request_2:call_add_guide",
+    ]);
+  });
+});
