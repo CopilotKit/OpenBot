@@ -21,8 +21,6 @@ export interface Bot {
   visibility: BotVisibility;
   /** Whether the caller hid it from their own list. */
   hidden: boolean;
-  /** Whether the caller pinned it to the top of their own list. */
-  pinned: boolean;
   /** Whether it comes with OpenBot rather than belonging to a person. */
   systemOwned: boolean;
   /**

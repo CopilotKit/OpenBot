@@ -67,11 +67,6 @@ export const ListBotsResponse = zod.object({
         hidden: zod
           .boolean()
           .describe("Whether the caller hid it from their own list."),
-        pinned: zod
-          .boolean()
-          .describe(
-            "Whether the caller pinned it to the top of their own list.",
-          ),
         systemOwned: zod
           .boolean()
           .describe(
@@ -285,9 +280,6 @@ export const CreateBotResponse = zod.object({
       hidden: zod
         .boolean()
         .describe("Whether the caller hid it from their own list."),
-      pinned: zod
-        .boolean()
-        .describe("Whether the caller pinned it to the top of their own list."),
       systemOwned: zod
         .boolean()
         .describe(
@@ -408,9 +400,6 @@ export const GetBotResponse = zod.object({
       hidden: zod
         .boolean()
         .describe("Whether the caller hid it from their own list."),
-      pinned: zod
-        .boolean()
-        .describe("Whether the caller pinned it to the top of their own list."),
       systemOwned: zod
         .boolean()
         .describe(
@@ -613,9 +602,6 @@ export const UpdateBotResponse = zod.object({
       hidden: zod
         .boolean()
         .describe("Whether the caller hid it from their own list."),
-      pinned: zod
-        .boolean()
-        .describe("Whether the caller pinned it to the top of their own list."),
       systemOwned: zod
         .boolean()
         .describe(

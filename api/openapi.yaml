@@ -157,28 +157,6 @@ paths:
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
           $ref: '#/components/responses/ServerError'
-  /api/v2/organizations/{organizationId}/threads:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-    get:
-      tags: [Bots]
-      operationId: listThreads
-      summary: List threads
-      description: A deliberate lint error, to prove the gate. Intelligence serves threads.
-      security:
-        - webSession: []
-      parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Cursor'
-      responses:
-        '200':
-          description: One page.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BotPage'
-        '400':
-          $ref: '#/components/responses/InvalidRequest'
   /api/v2/organizations/{organizationId}/bots/{botId}:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -417,7 +395,6 @@ components:
         - avatarSeed
         - visibility
         - hidden
-        - pinned
         - systemOwned
         - endpoint
         - hasAuth
@@ -452,9 +429,6 @@ components:
         hidden:
           type: boolean
           description: Whether the caller hid it from their own list.
-        pinned:
-          type: boolean
-          description: Whether the caller pinned it to the top of their own list.
         systemOwned:
           type: boolean
           description: Whether it comes with OpenBot rather than belonging to a person.
@@ -913,7 +887,6 @@ components:
             avatarSeed: general-assistant
             visibility: public
             hidden: false
-            pinned: false
             systemOwned: true
             endpoint: null
             hasAuth: false
@@ -940,7 +913,6 @@ components:
           avatarSeed: general-assistant
           visibility: public
           hidden: false
-          pinned: false
           systemOwned: true
           endpoint: null
           hasAuth: false
@@ -966,7 +938,6 @@ components:
           avatarSeed: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
           visibility: private
           hidden: false
-          pinned: false
           systemOwned: false
           endpoint: null
           hasAuth: false
@@ -992,7 +963,6 @@ components:
           avatarSeed: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
           visibility: public
           hidden: false
-          pinned: false
           systemOwned: false
           endpoint: null
           hasAuth: false
