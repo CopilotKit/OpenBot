@@ -110,6 +110,9 @@ export function stackEnvironment(): Record<string, string> {
     // The MCP server a journey adds by its address is aimock's, on this machine's loopback over http,
     // which OpenBot refuses unless this is set (`server/src/plugins/catalogue.ts`). For tests only.
     OPENBOT_ALLOW_LOOPBACK_MCP: "1",
+    // A local stack's agents, test site and stand-ins are all at private addresses on this machine,
+    // as on any developer's laptop. Set here rather than left to whatever `.env` says.
+    AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS: "true",
 
     // Every model provider OpenBot calls, pointed at aimock before the server builds a client.
     BOT_PROVIDER: "openai",

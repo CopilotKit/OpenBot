@@ -1,6 +1,5 @@
-import { readFileSync } from "node:fs";
 import type { Locator } from "@playwright/test";
-import { SERVER_LOG } from "../harness/stack";
+import { serverLog } from "../harness/stack";
 import { expect, type Page } from "../harness/test";
 
 /**
@@ -129,7 +128,7 @@ export async function answerOf(
 
 /** The models the server ran a Bot's turns on, from its `run-model` log lines after `mark`. */
 export function modelsRunSince(mark: number, agentId: string): string[] {
-  const text = readFileSync(SERVER_LOG).subarray(mark).toString("utf8");
+  const text = serverLog().slice(mark);
   const models: string[] = [];
   for (const line of text.split("\n")) {
     if (!line.startsWith("{") || !line.includes('"run-model"')) continue;
