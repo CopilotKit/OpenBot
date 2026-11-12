@@ -27,6 +27,7 @@ import { deploymentKeys } from "@/lib/deployment/queries";
 import { isNavigationLink, NAVIGATION, navigationFor } from "@/lib/navigation";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
 import { settleReactWork } from "./settle-react-work";
+import { makeUserPreferences } from "./user-preferences.fixture";
 
 /*
  * OpenBot's destinations live in one list (`lib/navigation.ts`) that the sidebar and every skin draw
@@ -109,13 +110,10 @@ function renderSidebar(
   } else {
     queryClient.setQueryData(authKeys.currentUser(), person);
   }
-  queryClient.setQueryData(userPreferencesQueryOptions("maya").queryKey, {
-    messageListEmphasis: "thread",
-    selfHostBannerDismissed: true,
-    narration: null,
-    skin: "openbot",
-    proactive: "on",
-  });
+  queryClient.setQueryData(
+    userPreferencesQueryOptions("maya").queryKey,
+    makeUserPreferences({ selfHostBannerDismissed: true }),
+  );
   queryClient.setQueryData(agentKeys.list(false), []);
   queryClient.setQueryDefaults(botLifecycleKeys.attention, {
     staleTime: Number.POSITIVE_INFINITY,

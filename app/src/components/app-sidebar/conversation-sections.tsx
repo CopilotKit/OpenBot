@@ -22,8 +22,6 @@ import { pinnedFirst } from "@/lib/channels/order";
 import type { ChannelSummary } from "@/lib/channels/queries";
 import {
   collapsedSections,
-  CONVERSATION_SECTION_IDS,
-  type ConversationSections as SectionedChannels,
   conversationSections,
   type ProjectFolder as Folder,
   SECTION_EMPTY,

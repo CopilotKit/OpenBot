@@ -16,6 +16,7 @@ import {
   saveUserPreferencesMutationOptions,
   userPreferencesQueryOptions,
 } from "@/lib/settings/message-list";
+import { makeUserPreferences } from "./user-preferences.fixture";
 
 const originalFetch = globalThis.fetch;
 const clients: QueryClient[] = [];
@@ -96,13 +97,13 @@ test("successful writes update only the current account cache; failures preserve
   const { client, view } = setup();
   await view.findByText("General Assistant");
   const bobKey = userPreferencesQueryOptions("bob").queryKey;
-  client.setQueryData(bobKey, {
-    messageListEmphasis: "agent",
-    selfHostBannerDismissed: false,
-    narration: null,
-    skin: "opendots",
-    proactive: "on",
-  });
+  client.setQueryData(
+    bobKey,
+    makeUserPreferences({
+      messageListEmphasis: "agent",
+      skin: "opendots",
+    }),
+  );
   const mutation = client
     .getMutationCache()
     .build(client, saveUserPreferencesMutationOptions(client, "alice"));
@@ -125,13 +126,12 @@ test("successful writes update only the current account cache; failures preserve
     method: "PATCH",
     body: JSON.stringify({ messageListEmphasis: "thread" }),
   });
-  expect(client.getQueryData<UserPreferences>(bobKey)).toEqual({
-    messageListEmphasis: "agent",
-    selfHostBannerDismissed: false,
-    narration: null,
-    skin: "opendots",
-    proactive: "on",
-  });
+  expect(client.getQueryData<UserPreferences>(bobKey)).toEqual(
+    makeUserPreferences({
+      messageListEmphasis: "agent",
+      skin: "opendots",
+    }),
+  );
   response = async () =>
     Response.json({ error: "Could not save" }, { status: 500 });
   await expect(
@@ -141,11 +141,5 @@ test("successful writes update only the current account cache; failures preserve
     client.getQueryData<UserPreferences>(
       userPreferencesQueryOptions("alice").queryKey,
     ),
-  ).toEqual({
-    messageListEmphasis: "thread",
-    selfHostBannerDismissed: false,
-    narration: null,
-    skin: "openbot",
-    proactive: "on",
-  });
+  ).toEqual(makeUserPreferences());
 });

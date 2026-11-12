@@ -31,7 +31,6 @@ import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { matchingChannels } from "@/lib/channels/order";
 import {
-  type ChannelSummary,
   channelListQueryOptions,
 } from "@/lib/channels/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";

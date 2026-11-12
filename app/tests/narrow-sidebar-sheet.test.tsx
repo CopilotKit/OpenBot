@@ -28,6 +28,7 @@ import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
 import { settleReactWork } from "./settle-react-work";
+import { makeUserPreferences } from "./user-preferences.fixture";
 
 /*
  * In a narrow window (under 768px) the sidebar is a sheet over the page. Picking a conversation in
@@ -117,13 +118,10 @@ function renderNarrowApp(start = "/channel/models") {
     role: "admin",
     onboarding: null,
   });
-  queryClient.setQueryData(userPreferencesQueryOptions("dana").queryKey, {
-    messageListEmphasis: "thread",
-    selfHostBannerDismissed: true,
-    narration: null,
-    skin: "openbot",
-    proactive: "on",
-  });
+  queryClient.setQueryData(
+    userPreferencesQueryOptions("dana").queryKey,
+    makeUserPreferences({ selfHostBannerDismissed: true }),
+  );
   queryClient.setQueryData(agentKeys.list(false), []);
   queryClient.setQueryDefaults(botLifecycleKeys.attention, {
     staleTime: Number.POSITIVE_INFINITY,

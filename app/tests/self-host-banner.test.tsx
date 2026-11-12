@@ -14,6 +14,7 @@ import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
+import { makeUserPreferences } from "./user-preferences.fixture";
 
 const originalFetch = globalThis.fetch;
 const clients: QueryClient[] = [];
@@ -80,13 +81,9 @@ function setup({
     generativeUi: true,
     selfHostBanner: enabled,
   });
-  const preferences: UserPreferences = {
-    messageListEmphasis: "thread",
+  const preferences: UserPreferences = makeUserPreferences({
     selfHostBannerDismissed: dismissed,
-    narration: null,
-    skin: "openbot",
-    proactive: "on",
-  };
+  });
   client.setQueryData(
     userPreferencesQueryOptions("alice").queryKey,
     preferences,

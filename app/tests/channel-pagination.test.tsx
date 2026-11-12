@@ -31,6 +31,7 @@ import { browserKeys } from "@/lib/browser/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
+import { makeUserPreferences } from "./user-preferences.fixture";
 
 // Keep the sidebar's live-update socket offline; these tests exercise HTTP pagination.
 class OfflineWebSocket extends EventTarget implements WebSocket {
@@ -166,13 +167,10 @@ function renderSidebar() {
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
   clients.push(queryClient);
-  queryClient.setQueryData(userPreferencesQueryOptions("user").queryKey, {
-    messageListEmphasis: "thread",
-    selfHostBannerDismissed: false,
-    narration: null,
-    skin: "openbot",
-    proactive: "on",
-  });
+  queryClient.setQueryData(
+    userPreferencesQueryOptions("user").queryKey,
+    makeUserPreferences(),
+  );
   queryClient.setQueryData(authKeys.currentUser(), {
     id: "user",
     email: "user@example.com",
@@ -239,13 +237,10 @@ test("message emphasis updates mounted rows from the account preferences cache",
   const thread = view.getByText("New conversation");
   expect(thread.className).toContain("text-sm");
   act(() =>
-    clients[0]?.setQueryData(userPreferencesQueryOptions("user").queryKey, {
-      messageListEmphasis: "agent",
-      selfHostBannerDismissed: false,
-      narration: null,
-      skin: "openbot",
-      proactive: "on",
-    }),
+    clients[0]?.setQueryData(
+      userPreferencesQueryOptions("user").queryKey,
+      makeUserPreferences({ messageListEmphasis: "agent" }),
+    ),
   );
   await waitFor(() => expect(agent.className).toContain("text-sm"));
   expect(thread.className).toContain("text-muted-foreground");

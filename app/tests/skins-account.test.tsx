@@ -38,6 +38,7 @@ import {
   useSkinId,
 } from "@/skins/store";
 import { settleReactWork } from "./settle-react-work";
+import { makeUserPreferences } from "./user-preferences.fixture";
 
 /*
  * The skin is saved on the person's account. These drive it the way a person does: the picker on
@@ -71,13 +72,7 @@ const alice = {
 };
 
 function preferences(skin: UserPreferences["skin"]): UserPreferences {
-  return {
-    messageListEmphasis: "thread",
-    selfHostBannerDismissed: true,
-    narration: null,
-    skin,
-    proactive: "on",
-  };
+  return makeUserPreferences({ skin });
 }
 
 const originalFetch = globalThis.fetch;
