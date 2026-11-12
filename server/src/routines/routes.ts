@@ -7,8 +7,8 @@ import { MINIMUM_INTERVAL_MS } from "./schedule";
 import {
   NO_SHARED_CHANNEL,
   RoutineNotFoundError,
-  RoutineRefusedError,
   type RoutineRefusalCode,
+  RoutineRefusedError,
   type RoutineRunOutcome,
   type RoutineStore,
   type RoutineSummary,
@@ -307,7 +307,8 @@ type RefusalRoute = "create" | "enable" | "run" | "runs" | "delete";
  * store keeps its own sentence for the Bot's tools; the rest read well as they are.
  *
  * KEYED BY ROUTE, THEN CODE, because the same refusal asks for different things on different
- * screens. Only the create form offers a goal or a time zone to choose again; the enable switch
+ * screens. Only the create form offers a goal to choose again, and its time zone is the browser's,
+ * so a time zone OpenBot doesn't know is set up by asking a Bot instead; the enable switch
  * offers nothing to choose, and there is no edit endpoint, so a routine with a time zone OpenBot
  * doesn't know can only be replaced. A code a route can't raise has no entry there, and an entry
  * missing for a coded refusal falls back to the store's own sentence.
@@ -323,8 +324,9 @@ const PERSON_REFUSALS: Record<
     goal_not_found: "This Bot doesn't have that goal. Choose another one.",
     goal_complete:
       "That goal is complete, so a routine can't run it. Choose another one.",
+    // The time zone is the browser's own, and New routine has nothing to choose it with.
     unknown_timezone:
-      "OpenBot doesn't know that time zone. Choose another one.",
+      "Your browser's time zone isn't one OpenBot knows. Ask your Bot to set this up instead.",
   },
   enable: {
     goal_complete:

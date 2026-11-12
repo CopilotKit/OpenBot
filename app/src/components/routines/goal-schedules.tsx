@@ -30,11 +30,18 @@ import { LastRunChip, RoutineRuns } from "./routine-runs";
  */
 export function GoalSchedules({
   paused = false,
+  completed = false,
   routines,
 }: {
   /** The goal is paused, so an enabled schedule waits for it to resume. */
   paused?: boolean;
-  routines: readonly RoutineRecord[];
+  /**
+   * The goal is completed. Nothing starts it again, and the server refuses to switch its schedules
+   * back on, so they have no switch: they keep their history and Delete.
+   */
+  completed?: boolean;
+  /** Undefined when the routines couldn't be read: the section says so, and lists nothing. */
+  routines: readonly RoutineRecord[] | undefined;
 }) {
   const setEnabled = useMutation(setRoutineEnabledMutationOptions(queryClient));
   const remove = useMutation(deleteRoutineMutationOptions(queryClient));
@@ -42,6 +49,14 @@ export function GoalSchedules({
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   /** Which schedule's run history is open. One at a time, as on the Routines list. */
   const [historyId, setHistoryId] = useState<string | null>(null);
+  if (routines === undefined)
+    return (
+      <PageSection title="Schedules">
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          Couldn't load this goal's schedules. Reload the page.
+        </p>
+      </PageSection>
+    );
   if (routines.length === 0) return null;
   return (
     <PageSection title="Schedules">
@@ -56,25 +71,29 @@ export function GoalSchedules({
               <ItemContent>
                 <ItemTitle>{routine.schedule}</ItemTitle>
                 <ItemDescription>
-                  {routine.enabled
-                    ? paused
-                      ? `Starts it again when you resume it · ${routine.timezone}`
-                      : `Starts it on a schedule · ${routine.timezone}`
-                    : "Off. This schedule won't start it."}
+                  {completed
+                    ? "The goal is completed, so this schedule won't start it again."
+                    : routine.enabled
+                      ? paused
+                        ? `Starts it again when you resume it · ${routine.timezone}`
+                        : `Starts it on a schedule · ${routine.timezone}`
+                      : "Off. This schedule won't start it."}
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
-                <Switch
-                  aria-label={`Start it ${routine.schedule}`}
-                  checked={routine.enabled}
-                  disabled={
-                    setEnabled.isPending &&
-                    setEnabled.variables?.id === routine.id
-                  }
-                  onCheckedChange={(next) =>
-                    setEnabled.mutate({ id: routine.id, enabled: next })
-                  }
-                />
+                {completed ? null : (
+                  <Switch
+                    aria-label={`Start it ${routine.schedule}`}
+                    checked={routine.enabled}
+                    disabled={
+                      setEnabled.isPending &&
+                      setEnabled.variables?.id === routine.id
+                    }
+                    onCheckedChange={(next) =>
+                      setEnabled.mutate({ id: routine.id, enabled: next })
+                    }
+                  />
+                )}
                 <Button
                   aria-label={
                     confirmingId === routine.id

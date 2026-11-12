@@ -356,7 +356,7 @@ describe("New routine from the Routines page", () => {
     });
     expect(refused.status).toBe(400);
     expect(((await refused.json()) as { error: string }).error).toBe(
-      "OpenBot doesn't know that time zone. Choose another one.",
+      "Your browser's time zone isn't one OpenBot knows. Ask your Bot to set this up instead.",
     );
     expect(await listed(app)).toEqual([]);
   });

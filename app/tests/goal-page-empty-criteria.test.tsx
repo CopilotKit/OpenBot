@@ -104,12 +104,16 @@ function renderPage(record: ResponsibilityRecord) {
 test("a goal with no outcome can be saved after changing only its title", async () => {
   const view = renderPage(goal);
   const criteria = (await view.findByLabelText(
-    "Success criteria",
+    "Done when (optional)",
   )) as HTMLTextAreaElement;
   expect(criteria.getAttribute("aria-required")).toBeNull();
   expect(criteria.value).toBe("");
+  // The words New routine asks with: Name, What to do, Done when.
+  expect((view.getByLabelText("What to do") as HTMLTextAreaElement).value).toBe(
+    "Tell me when the queue backs up.",
+  );
   const user = userEvent.setup({ document });
-  const title = view.getByLabelText("Title");
+  const title = view.getByLabelText("Name");
   await user.clear(title);
   await user.type(title, "Watch the support queue");
   await user.click(view.getByRole("button", { name: "Save" }));
@@ -130,7 +134,7 @@ test("a goal with no outcome can be saved after changing only its title", async 
 test("a goal that ends when met can't have its outcome cleared", async () => {
   const view = renderPage({ ...goal, endsWhenMet: true, successCriteria: "X" });
   const criteria = (await view.findByLabelText(
-    "Success criteria",
+    "Done when",
   )) as HTMLTextAreaElement;
   const user = userEvent.setup({ document });
   await user.click(criteria);
@@ -160,7 +164,7 @@ test("a goal that ends when met can't have its outcome cleared", async () => {
 test("a goal that ends when met treats whitespace-only criteria as blank", async () => {
   const view = renderPage({ ...goal, endsWhenMet: true, successCriteria: "X" });
   const criteria = (await view.findByLabelText(
-    "Success criteria",
+    "Done when",
   )) as HTMLTextAreaElement;
   const user = userEvent.setup({ document });
   await user.clear(criteria);
@@ -175,7 +179,7 @@ test("a goal that ends when met treats whitespace-only criteria as blank", async
 test("a goal that ends when met saves normally when it has an outcome", async () => {
   const view = renderPage({ ...goal, endsWhenMet: true, successCriteria: "X" });
   const user = userEvent.setup({ document });
-  const title = await view.findByLabelText("Title");
+  const title = await view.findByLabelText("Name");
   await user.clear(title);
   await user.type(title, "Watch the support queue");
   await user.click(view.getByRole("button", { name: "Save" }));
@@ -201,7 +205,7 @@ test("saving keeps the page open, and Discard changes puts the saved wording bac
   expect(save.disabled).toBe(true);
   expect(discard.disabled).toBe(true);
 
-  const title = view.getByLabelText("Title") as HTMLInputElement;
+  const title = view.getByLabelText("Name") as HTMLInputElement;
   await user.type(title, " today");
   expect(save.disabled).toBe(false);
   await user.click(discard);

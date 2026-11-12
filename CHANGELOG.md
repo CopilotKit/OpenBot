@@ -8,11 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** One migration runs at start, and the database moves from
-`0088_approval_reviewer_guidance` to `0089_goal_ends_when_met`. It adds an `ends_when_met` column to
-`responsibilities`, false on every existing goal, so existing goals behave as before. No existing
-row is rewritten and nothing is dropped. Upgrading from 1.0.0 or 0.3.x also runs the migrations
-listed under 1.0.1. A database that has run them does not go back: restore the backup taken before
+**Before upgrading.** Two migrations run at start, and the database moves from
+`0088_approval_reviewer_guidance` to `0090_routine_goal_linked_by_run`. `0089_goal_ends_when_met`
+adds an `ends_when_met` column to `responsibilities`, false on every existing goal, so existing
+goals behave as before. `0090_routine_goal_linked_by_run` adds a `goal_linked_by_run` column to
+`routines`, false on every existing routine, so a routine that already records a goal is read as
+made for that goal. Linking a broad routine to a goal one of its firings ran is new in this release,
+so a deployment upgrading from a tagged release has no such routine; one running `main` since that
+change has its broad routines read as made for their goal too, so completing that goal switches
+them off, and deleting it deletes them, rather than unlinking them. No existing row is rewritten
+and nothing is dropped. Upgrading from 1.0.0 or 0.3.x also runs the migrations listed under 1.0.1. A database that has run them does not go back: restore the backup taken before
 the upgrade instead. Three things change for an existing OpenBot Desktop installation, and one for
 every deployment:
 - On Windows OpenBot now always runs in a Podman machine of its own, `openbot`, beside any of
@@ -266,13 +271,47 @@ every deployment:
   what its dialog held: a schedule's switch, Run now, its runs and Delete; a check-in's switch, Run
   now and how often; a goal's actions, wording, schedules, events, triggers and runs. Delete and
   Remove still ask first. A goal can be deleted, and deleting it also deletes every routine that
-  runs it, the ones that name it by its title included, unless one still runs another open goal.
+  runs it, the ones that name it by its title included, unless one still runs another open goal or
+  only ran it on some of its firings (below).
 - **New routine is in sections**: what it does, when it starts, when it's done, and where it shows
   up, as New skill is. Nothing it asks or saves changed.
 - **Routines say what starts a goal in words**, such as "When a GitHub check finishes", and keep
   the exact event under them on the goal's page.
 - **A Bot's Routines row counts what the Routines page lists**: a goal and the routine that runs it
   once, and the check-ins that are on.
+- **Completing or deleting a goal does the right thing to its routines, whatever the goal is called
+  now.** A routine made for a goal is switched off when the goal is completed, even after you
+  renamed the goal; it used to stay on and ask a completed goal to run every time it fired. A broad
+  routine that only sometimes runs a goal ("Summarize my inbox, and if a release shipped run the
+  goal") is kept when that goal is completed or deleted, and loses only the link; deleting the goal
+  used to delete it. A routine is never linked to a goal that is already complete or paused, so one
+  that fired as you completed its goal can still be switched back on. A routine made before 0.3.3
+  runs a goal only where its instruction clearly does (the goal's id, or `the goal "Title"`), not
+  wherever it quotes the title, so completing or deleting a goal no longer switches off or deletes a
+  routine that only mentions it. And a Bot is told never to make work you want every time, such as
+  "tell me what changed every morning", end when it is met, which ended it after its first run.
+- **Fixes to Routines and New routine.**
+  - A goal made to start **Now, once** with a Done when ends once that is met, as one on a schedule
+    or an event does. When a schedule or a trigger was added to it later, it repeated, and only you
+    could end it.
+  - Routines are read again every 10 seconds, as goals already were. A goal a run had completed
+    still showed its schedule on, and a goal a Bot had given a schedule said it runs when you ask,
+    until the page was opened again. When routines can't be read, a goal's page says it couldn't
+    load its schedules, where it left them out.
+  - New routine no longer takes over a check-in the Bot already has. If the Bot already checks in
+    on the same thing, Create says so and nothing changes. Before, when the screen hadn't read that
+    check-in yet, it changed it in place and kept it in its own conversation. Accepting a Bot's
+    offer still turns a matching check-in back on.
+  - **Create routine** stays enabled while a field has a message. Pressing it moves to the first
+    field with one, and a screen reader reads each message with its field. After a partial save,
+    focus moves to **Go to Routines**.
+  - A routine that runs a goal, listed on its own when its goal isn't, says "Runs a goal" on its
+    row and its page, where it showed the instruction written for the Bot.
+  - A goal's page asks for Name, What to do and Done when, as New routine does, and a schedule's
+    page calls its instruction What to do. A completed goal's schedules have no switch, since they
+    can't be switched back on.
+  - When your browser's time zone isn't one OpenBot knows, New routine says to ask your Bot to set
+    the routine up. It asked you to choose a time zone the screen doesn't offer.
 
 ### Finding things
 
@@ -392,6 +431,9 @@ every deployment:
   the name beside the logo in the sidebar and in each skin, the onboarding header, the OpenBot for
   Business title and menu entry, and the OpenBot Desktop setup window. Mentions in sentences stay
   plain, a deployment with its own product name shows none, and screen readers read the name once.
+- In the personal edition, a Bot's Apps page with no app connected says "Connect one on
+  Connections." and links there. It said to turn one on under Your apps or ask an admin, and the
+  personal edition has neither.
 
 ## 1.0.1
 

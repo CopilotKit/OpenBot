@@ -132,12 +132,12 @@ admin sets the eight for everyone.
 
 ## Where you find each one
 
-The eight keep one order wherever they are listed: on a Bot's page, in Settings, in Admin, in these
-docs and in the first-run tour. The order is not a quota. A list shows a primitive only when there
-is something to set there:
+The eight keep one order wherever they are listed: on a Bot's page, in Settings, in Admin and in
+these docs. The order is not a quota. A list shows a primitive only when there is something to set
+there:
 
 - **Conversations** has nothing to configure. It is where the work happens, so it leads the docs and
-  the tour and is not a settings row.
+  is not a settings row.
 - **Activity** for one Bot opens from the Bot's page itself, beside what it is working on, and is not
   a settings row either.
 - **Memory** is listed only where OpenBot offers it. The personal edition does not yet.
