@@ -507,7 +507,24 @@ export type CredentialInput = {
   actorUserId?: string;
 };
 
+/**
+ * The one vault entry the built-in Bots read their model key from: a `model` credential for the
+ * provider they run on, under the tenant package's `model.credential_secret_ref`
+ * (`openai-api-key` in the shipped packages). See `resolveModelApiKey`.
+ *
+ * A model key saved under any other provider or name is stored and never read, and nothing on
+ * screen said so: the Vault's form asked for a free-text provider and key ID, and a person who
+ * followed its placeholders ("OpenAI", "production") saved a key OpenBot never answered with. So
+ * the form asks only which provider, and a model key that arrives without a name is filed here.
+ */
+export type ModelKeyName = {
+  provider: "openai" | "anthropic";
+  keyId: string;
+};
+
 export type CredentialAdminService = CredentialStatusReader & {
+  /** Where the built-in Bots read their model key. Absent where nobody told the service. */
+  modelKey?: ModelKeyName;
   create: (input: CredentialInput) => Promise<CredentialStatus>;
   rotate: (
     input: CredentialInput & { previousCredentialId: string },
@@ -694,10 +711,12 @@ export function createCredentialAdminService(
   encryptionKey: string,
   store: CredentialStore & CredentialStatusReader,
   auditStore: AuditStore,
+  modelKey?: ModelKeyName,
 ): CredentialAdminService {
   const service = { encryptionKey, store, auditStore };
 
   return {
+    ...(modelKey ? { modelKey } : {}),
     list: store.list,
     create: (input) => createCredential(service, input),
     rotate: (input) => rotateCredential(service, input),

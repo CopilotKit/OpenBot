@@ -3,7 +3,10 @@
 # single_user=True), so every run in this harness fails at startup. 1.6.0 works. Lift this once
 # the harness declares how it authorizes.
 agent-framework-ag-ui<1.7
-agent-framework-anthropic
+# agent-framework-anthropic 1.0.0b261112, released 2026-11-12, moves to anthropic 2.x, and a Bot on
+# an Anthropic key then sends its request without the key (test_main.py's blank-URL test catches
+# it). 1.0.0b261106 works. Lift this once a newer release sends the key again.
+agent-framework-anthropic<=1.0.0b261106
 agent-framework-openai
 fastapi
 python-multipart

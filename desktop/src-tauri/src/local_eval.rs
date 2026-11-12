@@ -1512,6 +1512,11 @@ fn on_podman() -> bool {
     cli_engine().is_some_and(|address| address.engine == crate::engine::Engine::Podman)
 }
 
+/// The Podman machine the CLI runs on, by name, when it runs on one (`acquire::machine_reached`).
+pub fn engine_machine() -> Option<String> {
+    cli_engine().and_then(|address| crate::acquire::machine_reached(&address))
+}
+
 const GIB: u64 = 1024 * 1024 * 1024;
 
 /**

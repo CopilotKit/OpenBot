@@ -136,7 +136,10 @@ export function TabHeader({
       : `Talk to ${appConfig.brand.productName}`;
 
   return (
+    // The window's title bar in OpenBot Desktop on macOS: a press on it outside its buttons moves the
+    // window (`data-desktop-drag`, read by the desktop on macOS only).
     <header
+      data-desktop-drag="deep"
       className={cn(
         "z-20 flex items-start justify-between px-4 pt-3",
         floating
@@ -269,7 +272,11 @@ export function PageHeader({ main }: { main: HTMLElement | null }) {
   const canGoBack = useCanGoBack();
   const { title, back } = usePageFacts(main);
   return (
-    <header className="relative z-20 flex h-[72px] shrink-0 items-start gap-2 px-4 pt-3">
+    // The window's title bar in OpenBot Desktop on macOS, as the tab header's is.
+    <header
+      className="relative z-20 flex h-[72px] shrink-0 items-start gap-2 px-4 pt-3"
+      data-desktop-drag="deep"
+    >
       <button
         aria-label={back?.label ? `Back to ${back.label}` : "Back"}
         className={DISC}

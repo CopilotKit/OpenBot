@@ -366,13 +366,15 @@ function modelRow(
   personal: boolean,
 ) {
   const provider = PROVIDER_NAME[model.provider];
+  // The Vault's Add key form itself, which starts on the provider the Bots run on and files the
+  // key under the name they read. The Vault's list only offered a form to fill in by hand.
   const fix: SetupFix = {
     kind: "env",
     names: [KEY_NAME[model.provider]],
     docsUrl: QUICK_START,
     page: personal
-      ? { label: "Vault", path: "/settings/vault" }
-      : { label: "Vault", path: "/admin/credentials" },
+      ? { label: "Vault", path: "/settings/vault/new" }
+      : { label: "Vault", path: "/admin/credentials/new" },
   };
   const readyDetail = `Lets ${product} answer you.`;
   if (model.source === null)

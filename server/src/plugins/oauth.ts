@@ -58,7 +58,7 @@ const CALLBACK_PATH = "/api/plugins/oauth/callback";
  * It lives in the SEALED state rather than on the callback URL because the callback is a request
  * somebody else's server sent the browser on. Nothing on it is believable by itself.
  */
-export type ConnectOrigin = "settings" | "admin";
+export type ConnectOrigin = "settings" | "admin" | "desktop";
 
 export type ConnectState = {
   /** Who is connecting. Taken from their session when the flow starts, never from the callback. */
@@ -120,6 +120,15 @@ export function connectedAccountsUrlFor(
   returnTo: ConnectOrigin = "settings",
 ): string {
   const origin = appUrl?.replace(/\/+$/, "") ?? "";
+
+  /*
+   * A consent started in OpenBot Desktop's window ran in the person's own browser, so success lands
+   * on the page that hands them back to the window ({@link desktopReturnUrlFor}). A failure has no
+   * account to name and falls through to the list, as the admin origin's does.
+   */
+  if (returnTo === "desktop" && "serverId" in where) {
+    return desktopReturnUrlFor(appUrl, where.serverId);
+  }
 
   if (returnTo === "admin") {
     /*
@@ -240,8 +249,11 @@ export async function readConnectState(
       userId: payload.userId,
       serverId: payload.serverId,
       verifier: payload.verifier,
-      // Only the one name is recognised; anything else becomes the default rather than being carried.
-      returnTo: payload.returnTo === "admin" ? "admin" : "settings",
+      // Only these names are recognised; anything else becomes the default rather than being carried.
+      returnTo:
+        payload.returnTo === "admin" || payload.returnTo === "desktop"
+          ? payload.returnTo
+          : "settings",
     };
   } catch {
     return null;

@@ -83,10 +83,12 @@ time = { version = "0.3", features = ["formatting", "macros", "local-offset"] }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# The macOS quit OpenBot did not start (Dock, AppleScript, log out) routed through its own Quit.
-# The version Tauri already uses. See `macos_quit` in main.rs.
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
+# The macOS quit OpenBot did not start (Dock, AppleScript, log out) routed through its own Quit.
+# The version Tauri already uses. See `macos_quit` in main.rs. `exception`: an AppKit exception
+# caught as an error, never unwound into a Rust thread (`reveal_in_file_manager`); Tauri's objc2
+# already builds it.
+objc2 = { version = "0.6", features = ["exception"] }
 # Narration on the Mac: on-device speech recognition from the microphone. See `speech/macos.rs`.
 # The same objc2 generation Tauri and wry already use.
 block2 = "0.6"

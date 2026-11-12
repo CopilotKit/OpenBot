@@ -21,7 +21,7 @@ mod test_support;
 use openbot_desktop_lib::{
     acquire, app_update, deployment, deployment_release, docker_config, early_downloads, engine,
     engine_versions, env as openbot_env, harness, host_access, install, local_eval,
-    local_eval_state, logging, own_machine, preparation,
+    local_eval_state, logging, machine_size, own_machine, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
     telemetry, tray, troubleshooting, uninstall, update_ready, upgrade, windows as win,
@@ -6769,7 +6769,8 @@ fn show_window_title<R: tauri::Runtime>(window: &tauri::Window<R>, shown: bool) 
 /**
 Marks OpenBot's page for the overlay title bar: its styles pad the sidebar's header for the window
 buttons, and the header becomes the drag handle, as does the strip the main column keeps above
-itself while the sidebar is hidden, and onboarding's header, which has no sidebar beside it. The
+itself while the sidebar is hidden, onboarding's header, which has no sidebar beside it, and every
+place a skin marks `data-desktop-drag` (its top bar, its rail). The
 sidebar renders after the page loads and again on navigation, so new headers are marked as they
 appear, at most once a frame. Run on macOS only: Windows has its own title bar to drag.
 */
@@ -6780,6 +6781,12 @@ const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
     // Bare attributes: only a press on the element itself drags, never on its contents.
     for (const header of document.querySelectorAll(`[data-slot="sidebar-header"]:not([${DRAG}])`)) {
       header.setAttribute(DRAG, "");
+    }
+    // A skin draws its own frame, with no sidebar header, and names its own handles: its top bar,
+    // and the rail and sidebar strip under the window's buttons. `data-desktop-drag` carries Tauri's
+    // value: "deep" drags from anywhere inside but a button or link, bare from the element itself.
+    for (const handle of document.querySelectorAll(`[data-desktop-drag]:not([${DRAG}])`)) {
+      handle.setAttribute(DRAG, handle.dataset.desktopDrag);
     }
     // Onboarding has no sidebar. Its header starts below the window's buttons, and that strip is
     // the header's own, so it drags while Back and the steps inside it stay buttons.
@@ -7737,9 +7744,74 @@ fn save_troubleshooting_logs_now<R: tauri::Runtime>(
     // The stamp, not the file name: the log's own scrubbing takes a name that long and mixed for a
     // key.
     log::info!("[logs] saved troubleshooting logs in the log folder, stamped {stamp}");
-    tauri_plugin_opener::reveal_item_in_dir(&saved)
-        .map_err(|error| error.to_string())
-        .inspect_err(|error| log::warn!("[logs] could not show the saved logs: {error}"))
+    reveal_saved_logs(app, saved);
+    Ok(())
+}
+
+/**
+Show the saved logs in Finder or Explorer, on the main thread, and never as a failure of the save:
+the file is in the log folder whether or not the file manager opens on it.
+
+On the main thread because of a crash. On macOS the opener calls NSWorkspace's
+`activateFileViewerSelectingURLs:`, which on its way to failing can present the error in an alert.
+An alert made off the main thread throws an Objective-C exception ("NSWindow should only be
+instantiated on the main thread!"), and an exception unwinding through a Rust thread aborts the app.
+OpenBot Desktop 1.0.2 did exactly that from the menu's own thread, after the gathering had already
+taken seconds. Apple documents the call as safe from any thread, calls the crash a bug (FB22340592)
+and gives this as the workaround. The gathering stays off the main thread; only the reveal moves.
+
+Elsewhere the reveal stays where it was, on the thread that saved: Explorer's and the Linux file
+manager's answers are calls that can wait, and the main thread runs every window.
+*/
+fn reveal_saved_logs<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved: PathBuf) {
+    reveal_through(
+        |task| {
+            if cfg!(target_os = "macos") {
+                app.run_on_main_thread(task)
+                    .map_err(|error| error.to_string())
+            } else {
+                task();
+                Ok(())
+            }
+        },
+        saved,
+        reveal_in_file_manager,
+    );
+}
+
+/// The reveal, run by `on_main_thread`: on macOS the app's main thread. A failure, to hand the task
+/// over or to reveal, is a warning in the log and nothing else.
+fn reveal_through<Reveal>(
+    on_main_thread: impl FnOnce(Box<dyn FnOnce() + Send>) -> Result<(), String>,
+    saved: PathBuf,
+    reveal: Reveal,
+) where
+    Reveal: FnOnce(&Path) -> Result<(), String> + Send + 'static,
+{
+    let handed_over = on_main_thread(Box::new(move || {
+        if let Err(error) = reveal(&saved) {
+            log::warn!("[logs] could not show the saved logs: {error}");
+        }
+    }));
+    if let Err(error) = handed_over {
+        log::warn!("[logs] could not show the saved logs: {error}");
+    }
+}
+
+/// `tauri_plugin_opener::reveal_item_in_dir`. On macOS an Objective-C exception from AppKit is
+/// caught and returned as the error, so even on the main thread a reveal cannot take the app down.
+fn reveal_in_file_manager(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let revealed = objc2::exception::catch(std::panic::AssertUnwindSafe(|| {
+        tauri_plugin_opener::reveal_item_in_dir(path)
+    }))
+    .map_err(|exception| match exception {
+        Some(exception) => format!("the file manager threw {exception}"),
+        None => "the file manager threw an exception".to_owned(),
+    })?;
+    #[cfg(not(target_os = "macos"))]
+    let revealed = tauri_plugin_opener::reveal_item_in_dir(path);
+    revealed.map_err(|error| error.to_string())
 }
 
 fn gather_troubleshooting_logs<R: tauri::Runtime>(
@@ -8978,6 +9050,33 @@ async fn local_eval_room() -> Option<local_eval::Shortfall> {
         .flatten()
 }
 
+/// How the Podman machine OpenBot runs on would be made big enough for what local setup found
+/// short, and whether OpenBot can do it for the person (`machine_size::plan_here`). Nothing when
+/// it isn't a Podman machine on a Mac, or a bigger one isn't the answer.
+#[tauri::command]
+async fn podman_machine_plan(short: machine_size::Short) -> Option<machine_size::Plan> {
+    tauri::async_runtime::spawn_blocking(move || machine_size::plan_here(&short))
+        .await
+        .ok()
+        .flatten()
+}
+
+/// The person said yes: stop the Podman machine OpenBot runs on, give it `cpus` CPUs and
+/// `memory_mib` MiB, and start it again with the containers that were running in it. The window
+/// then retries the setup. A failure is said plainly; Podman's own words are in the log.
+#[tauri::command]
+async fn resize_podman_machine(cpus: u64, memory_mib: u64) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        machine_size::resize_here(machine_size::Size { cpus, memory_mib })
+    })
+    .await
+    .map_err(|error| error.to_string())
+    .and_then(|resized| resized)
+    .map_err(|_| {
+        "OpenBot couldn't resize your Podman machine. Use the steps below instead.".to_string()
+    })
+}
+
 /// The step the back end update `attempt` is in and for how long, once it is in one that waits,
 /// so a step that takes minutes is never a silent row. A fixed step name and seconds only.
 #[tauri::command]
@@ -10196,12 +10295,7 @@ fn chose(app: &tauri::AppHandle, item: &str) {
         // who wants it stopped does not necessarily want the application gone.
         "stop" => stop_from_menu(app.clone(), AskedFrom::Menu),
         "status" => show_status_window(app),
-        "logs" => {
-            let app = app.clone();
-            std::thread::spawn(move || {
-                let _ = save_troubleshooting_logs_now(&app, None);
-            });
-        }
+        "logs" => save_troubleshooting_logs_from_menu(app.clone()),
         app_update::MENU_ID => check_for_updates_from_menu(app.clone()),
         // Exit rather than hide: quitting is a decision to stop, and the exit handler is what stops
         // the processes with it.
@@ -10214,6 +10308,37 @@ fn chose(app: &tauri::AppHandle, item: &str) {
             }
         }
     }
+}
+
+/// Whether Get Troubleshooting Logs… chosen from a menu is still gathering. See
+/// `save_troubleshooting_logs_from_menu`.
+static GATHERING_LOGS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/**
+Get Troubleshooting Logs… from a menu: gathered on a thread of its own, since asking the container
+engine takes seconds, and the file then shown in Finder or Explorer (`reveal_saved_logs`).
+
+Until then both menus say Gathering Logs… and the item can't be chosen again. Before, nothing
+showed for those seconds, and somebody who chose it again started a second gathering.
+*/
+fn save_troubleshooting_logs_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    use std::sync::atomic::Ordering::SeqCst;
+    if GATHERING_LOGS.swap(true, SeqCst) {
+        return;
+    }
+    refresh_menus(&app);
+    std::thread::spawn(move || {
+        // Cleared however the gathering ends, a panic included, so the item is never stuck.
+        struct Gathered<R: tauri::Runtime>(tauri::AppHandle<R>);
+        impl<R: tauri::Runtime> Drop for Gathered<R> {
+            fn drop(&mut self) {
+                GATHERING_LOGS.store(false, SeqCst);
+                refresh_menus(&self.0);
+            }
+        }
+        let gathered = Gathered(app);
+        let _ = save_troubleshooting_logs_now(&gathered.0, None);
+    });
 }
 
 /**
@@ -10422,6 +10547,18 @@ fn utc_minute(seconds: u64) -> String {
 /// window's menu alike.
 const TROUBLESHOOTING_MENU_LABEL: &str = "Get Troubleshooting Logs…";
 
+/// The same item while the logs it asked for are being gathered, which can't be chosen.
+const TROUBLESHOOTING_MENU_GATHERING: &str = "Gathering Logs…";
+
+/// The troubleshooting item's label, and whether it can be chosen.
+fn troubleshooting_menu_item(gathering: bool) -> (&'static str, bool) {
+    if gathering {
+        (TROUBLESHOOTING_MENU_GATHERING, false)
+    } else {
+        (TROUBLESHOOTING_MENU_LABEL, true)
+    }
+}
+
 /**
 The tray menu and the window's menu bar.
 
@@ -10436,6 +10573,8 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
     let running = app.state::<Shell>().root.lock().unwrap().is_some();
     // Check for Updates… only in a build offered updates: anywhere else it could only say no.
     let updates = app_update_feed(app).is_some();
+    let (logs_label, logs_enabled) =
+        troubleshooting_menu_item(GATHERING_LOGS.load(std::sync::atomic::Ordering::SeqCst));
     let check_for_updates = || {
         MenuItem::with_id(
             app,
@@ -10492,8 +10631,8 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
         entries.push(MenuEntry::Plain(MenuItem::with_id(
             app,
             "logs",
-            TROUBLESHOOTING_MENU_LABEL,
-            true,
+            logs_label,
+            logs_enabled,
             None::<&str>,
         )?));
         entries.push(MenuEntry::Native(PredefinedMenuItem::separator(app)?));
@@ -10549,8 +10688,8 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
         entries.push(MenuEntry::Plain(MenuItem::with_id(
             app,
             "logs",
-            TROUBLESHOOTING_MENU_LABEL,
-            true,
+            logs_label,
+            logs_enabled,
             None::<&str>,
         )?));
         entries.push(MenuEntry::Plain(MenuItem::with_id(
@@ -11075,6 +11214,8 @@ fn main() {
             early_downloads_now,
             early_downloads_measured,
             local_eval_room,
+            podman_machine_plan,
+            resize_podman_machine,
             record_setup_event,
             bring_setup_to_front,
             allow_podman_install,
@@ -11856,6 +11997,150 @@ mod runtime_update_tests {
 
 #[cfg(test)]
 mod tests {
+    /// Saved logs are shown in the file manager only from the task handed to the main thread,
+    /// never on the thread that saved them, and with the file that was saved.
+    #[test]
+    fn saved_logs_are_revealed_only_from_the_main_thread_task() {
+        use std::sync::mpsc;
+        let (reveals, revealed) = mpsc::channel::<(PathBuf, Option<String>)>();
+        let mut handed = None;
+        let saved = PathBuf::from("/logs/openbot-troubleshooting-2026-11-12T10-00-00Z.txt");
+
+        reveal_through(
+            |task| {
+                handed = Some(task);
+                Ok(())
+            },
+            saved.clone(),
+            move |path| {
+                let thread = std::thread::current().name().map(str::to_owned);
+                reveals.send((path.to_owned(), thread)).unwrap();
+                Ok(())
+            },
+        );
+        assert!(
+            revealed.try_recv().is_err(),
+            "revealed on the saving thread"
+        );
+
+        let task = handed.expect("a task for the main thread");
+        std::thread::Builder::new()
+            .name("main-thread-stand-in".into())
+            .spawn(task)
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(
+            revealed.try_iter().collect::<Vec<_>>(),
+            vec![(saved, Some("main-thread-stand-in".to_owned()))]
+        );
+    }
+
+    /// A reveal that fails, or a main thread that can't be reached, is a warning in the log. The
+    /// save itself has already succeeded, and nothing panics.
+    #[test]
+    fn a_reveal_that_fails_is_never_a_crash() {
+        let saved = PathBuf::from("/logs/openbot-troubleshooting.txt");
+        reveal_through(
+            |task| {
+                task();
+                Ok(())
+            },
+            saved.clone(),
+            |_| Err("Finder is not responding".into()),
+        );
+
+        let ran = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = ran.clone();
+        reveal_through(
+            |_task| Err("the event loop has closed".into()),
+            saved,
+            move |_| {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            },
+        );
+        assert!(!ran.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    /// OpenBot Desktop 1.0.2 aborted when Get Troubleshooting Logs… revealed the file from the
+    /// menu's own thread: macOS's `activateFileViewerSelectingURLs:` can throw off the main
+    /// thread. The opener's reveal is called in one place, which catches AppKit's exceptions, and
+    /// on macOS that place is reached only through `run_on_main_thread`.
+    #[test]
+    fn the_file_manager_reveal_runs_only_on_the_main_thread() {
+        let main = include_str!("main.rs");
+        let tests = main.find("#[cfg(test)]\nmod tests").unwrap();
+        let shipped = &main[..tests];
+        let body = |name: &str| {
+            let start = shipped
+                .find(&format!("\nfn {name}"))
+                .unwrap_or_else(|| panic!("fn {name}"));
+            let body = &shipped[start..];
+            &body[..body.find("\n}\n").unwrap()]
+        };
+
+        let call = ["reveal_item", "_in_dir("].concat();
+        let reveal = body("reveal_in_file_manager(");
+        assert_eq!(
+            shipped.matches(&call).count(),
+            2,
+            "{call} outside one place"
+        );
+        assert_eq!(reveal.matches(&call).count(), 2, "{call} outside one place");
+        assert!(reveal.contains("objc2::exception::catch("), "{reveal}");
+        assert!(!shipped.contains(&["reveal_items", "_in_dir"].concat()));
+        assert!(!shipped.contains(&["NS", "Workspace::"].concat()));
+
+        let passed = ["reveal_in_file_manager", ",\n"].concat();
+        assert_eq!(shipped.matches(&passed).count(), 1);
+        let saved = body("reveal_saved_logs<");
+        assert!(saved.contains(&passed), "{saved}");
+        let mac = &saved[saved.find("if cfg!(target_os = \"macos\") {").unwrap()..];
+        let mac = &mac[..mac.find("} else {").unwrap()];
+        assert!(mac.contains("app.run_on_main_thread(task)"), "{saved}");
+
+        let save = body("save_troubleshooting_logs_now<");
+        assert!(save.contains("reveal_saved_logs(app, saved);"), "{save}");
+        assert!(!save.contains(&call), "{save}");
+        assert!(main.contains("\"logs\" => save_troubleshooting_logs_from_menu(app.clone()),"));
+
+        // And no other source file in the shell reveals a file or reaches NSWorkspace.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = vec![dir];
+        while let Some(path) = files.pop() {
+            if path.is_dir() {
+                files.extend(std::fs::read_dir(&path).unwrap().map(|e| e.unwrap().path()));
+            } else if path.extension().is_some_and(|ext| ext == "rs")
+                && path.file_name().is_some_and(|name| name != "main.rs")
+            {
+                let source = std::fs::read_to_string(&path).unwrap();
+                for found in ["reveal_item", "reveal_items", "NSWorkspace"] {
+                    assert!(!source.contains(found), "{found} in {}", path.display());
+                }
+            }
+        }
+    }
+
+    /// While the logs chosen from a menu are gathered, the item says so and can't be chosen.
+    #[test]
+    fn the_troubleshooting_item_says_it_is_gathering() {
+        assert_eq!(
+            troubleshooting_menu_item(false),
+            ("Get Troubleshooting Logs…", true)
+        );
+        assert_eq!(troubleshooting_menu_item(true), ("Gathering Logs…", false));
+        let main = include_str!("main.rs");
+        let menus = &main[main.find("fn install_menus").unwrap()..];
+        let menus = &menus[..menus.find("app.set_menu(").unwrap()];
+        assert_eq!(
+            menus
+                .matches("\"logs\",\n            logs_label,\n            logs_enabled,")
+                .count(),
+            2
+        );
+    }
+
     /// The window says "Updating OpenBot" and where an update stopped in plain words; the log
     /// keeps the releases and the CLI's own name for the step.
     #[test]
