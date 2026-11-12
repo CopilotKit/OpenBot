@@ -693,7 +693,15 @@ export function useLocalSequence({
           updateFailed: updateFailedSaid(failedStep ?? null, !leftNotWorking),
         });
       }
-      failedTo = null;
+      /*
+       * Kept while the back end still says `starting`, and with the update on record: whether it
+       * runs the version it had is known only once it settles. Found on Windows: an update stopped
+       * after pausing the services, the first answer after it said `starting` and the next
+       * `degraded`, and the row kept "so it runs the version it had" over a back end that did not.
+       */
+      if (!(found.readiness === "starting" && unfinished !== null)) {
+        failedTo = null;
+      }
       if (isReady(found)) {
         if (!found.stack) {
           update({ blocked: { said: said("missing-stack"), reason: null } });
