@@ -60,6 +60,7 @@
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.0.4",
     "happy-dom": "^20.11.2",
+    "msw": "2.15.0",
     "tailwindcss": "^4.3.3",
     "vite": "^7.1.12"
   }

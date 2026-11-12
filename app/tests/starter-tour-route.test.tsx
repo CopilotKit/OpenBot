@@ -35,6 +35,8 @@ const NativeResponse = globalThis.Response;
 const BOT = "picked-harness";
 
 const bot: AgentProfile = {
+  assignedToMe: false,
+  keyFromOpenBot: false,
   avatarSeed: "seed",
   builtIn: true,
   canManage: true,
