@@ -394,6 +394,9 @@ every deployment:
 
 ### Smaller changes
 
+- New Bot's first screen ends with a **Bring your own agent** card showing the mark of every
+  framework a custom agent can run on. It opens the same list the **Connect a custom agent** button
+  in the sheet's footer did, and that button is gone.
 - The Bots page lists the Bots you can use first and leaves out empty sections. Bots, Routines,
   Connections and group conversations draw their rows' shape while they load, and a group
   conversation that fails to load offers Retry. Needs you says which part didn't load, with Retry,
