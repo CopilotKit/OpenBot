@@ -12,7 +12,6 @@ import {
 import { cleanup, render, within } from "@testing-library/react";
 import { AppsSections } from "@/components/bot-profile/access";
 import type { AgentProfile } from "@/lib/agents/queries";
-import { DEV_ACTOR } from "../../server/src/auth/dev-actor";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -60,6 +59,13 @@ const BOT: AgentProfile = {
 };
 
 /** The personal edition's server, as its one person sees it, with no app connected yet. */
+/** The one person of a deployment nobody signs in to, as `/api/me` answers for them. */
+const PERSONAL_USER = {
+  id: "dev-local-user",
+  email: "dev@openbot.local",
+  role: "admin",
+};
+
 function servePersonal() {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const path = new URL(String(input), "http://127.0.0.1").pathname;
@@ -69,7 +75,7 @@ function servePersonal() {
       return Response.json({ apps: [] });
     if (path === `/api/plugins/for/${BOT.id}`)
       return Response.json({ tools: [], skills: [] });
-    if (path === "/api/me") return Response.json({ user: DEV_ACTOR });
+    if (path === "/api/me") return Response.json({ user: PERSONAL_USER });
     return Response.json({});
   }) as unknown as typeof fetch;
 }

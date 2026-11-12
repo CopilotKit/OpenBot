@@ -435,6 +435,16 @@ every deployment:
   message box. A model with thinking levels keeps the picker open on its levels alone, with the
   other models and the search gone, and picking a level closes it.
 
+### Running from source
+
+- **The server runs from the published OpenBot images.** `bash scripts/start.sh` pulls the server,
+  routine worker, computer and supervisor images at the tag in `backend-images.env` and runs them as
+  Compose services, with the app served from the checkout as before. The server's log is
+  `docker compose logs server`. A server and worker an earlier start left running on the host are
+  stopped first. The personal edition's own browser now shows in the page, as in OpenBot Desktop.
+- **The Helm chart is the one published with each release**, installed from its URL; there is no
+  chart in the checkout to build from.
+
 ### Smaller changes
 
 - In the OpenDots skin, the badge on Bots sits on the corner of the Bots icon. It used to hang

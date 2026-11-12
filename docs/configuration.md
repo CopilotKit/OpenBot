@@ -67,7 +67,7 @@ at `agent-langgraph` on a laptop.
 | `PORT`               | `3001`                             | API server port. `SERVER_PORT` names the same port; set either, or both to the same value, or the server refuses to start. |
 | `OPENBOT_EDITION`    | `team`                             | `personal` runs OpenBot for one person with no sign-in and one computer, who is its admin. See [personal-edition.md](personal-edition.md). Any value other than `team` or `personal` refuses to start. `personal` also refuses to start with a sign-in provider or `OPENBOT_ORGANIZATION_AUTH_URL` configured, without `OPENBOT_SINGLE_USER=true`, or without one shared computer (`AGENT_COMPUTER_URL`, with no `COMPUTER_SUPERVISOR_URL` or `COMPUTER_SANDBOX_NAMESPACE`). |
 | `NODE_ENV`           | unset                              | `production` refuses the example `KEY_ENCRYPTION_KEY` and `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=true`. It does not decide whether sign-in is required; see `OPENBOT_SINGLE_USER`. |
-| `TENANT_PACKAGE_DIR` | `../examples/fintech`              | Tenant package directory, resolved from `server/`.                  |
+| `TENANT_PACKAGE_DIR` | `../examples/fintech`              | Tenant package directory, resolved from the server's working directory (`/app/server` in its image). |
 | `DEPLOYMENT_ID`      | the tenant package's id            | Names this deployment inside a shared Intelligence project, and prefixes the identity a Shared app's account is held under at the vendor. That identity is fixed when the app is made Shared, so changing this later does not move it. |
 | `OPENAI_API_KEY`     | unset                              | Default model key for built-in agents and both shipped Bots.        |
 | `OPENAI_BASE_URL`    | unset                              | OpenAI-compatible endpoint that key is spent against. See below.    |
@@ -174,7 +174,7 @@ copied into every Bot container, and a framework Bot holding it may be running o
 own, so a fixed default there would be no boundary at all. Production deployments must set a real
 `WORKER_SHARED_SECRET`; the Helm chart generates one and gives it to both the server and its routines
 CronJob, unless one is supplied (see
-[the chart's routines sweep](../charts/openbot/README.md#the-routines-sweep)).
+the chart's routines sweep, in the Helm guide that comes with the chart).
 
 **`SERVER_INTERNAL_URL`** is read by the worker, not by the API server, so it is not in the table
 above: it says where the worker's own process can reach this deployment's API, which is a fact about
@@ -867,7 +867,7 @@ is still the record.
 `COMPUTER_SANDBOX` is not the cluster sandbox provider. A Kubernetes deployment can instead run each
 computer as a sandboxed pod, selected by `COMPUTER_SANDBOX_NAMESPACE` with `COMPUTER_SANDBOX_IDLE_AFTER`
 and `COMPUTER_SANDBOX_TEMPLATE_FILE` beside it; those are set by the Helm chart, not by Compose, and
-are covered in [charts/openbot/README.md](../charts/openbot/README.md). The chart sets them for
+are covered in the Helm guide that comes with the chart (`helm show readme`). The chart sets them for
 `computers.mode: sandbox`, from `computers.sandbox.namespace` (the release's namespace by default) and
 `computers.sandbox.idleAfter`. The server's own defaults are `30m` for the idle time, written as
 `30s`, `30m`, `2h` or a plain number of milliseconds, and `/etc/openbot/sandbox-template.json` for the
@@ -899,7 +899,7 @@ To run headless instead, set `COMPUTER_BROWSER_MODE=headless` for Compose and re
 computer or supervisor as applicable:
 
 ```sh
-docker compose up -d --force-recreate agent-computer supervisor
+docker compose --env-file backend-images.env --env-file .env up -d --force-recreate agent-computer supervisor
 ```
 
 Existing supervisor-created computers retain their mode until recreated as described above. The
@@ -915,80 +915,16 @@ computers through your deployment's lifecycle controls while keeping their persi
 headless computer no longer calls itself `HeadlessChrome`: its user agent and client hints report what
 the same browser reports headed.
 
-### Installed Chrome for a local API deployment
+### The person's browser
 
-This source/deployment-checkout option launches a separate installed Google Chrome window for each
-active Bot on macOS or Windows. The existing in-app viewer, browser tools, authentication, and Bot
-access policy still apply. Linux uses a private Xvfb display and the viewer. This is not a packaged
-desktop toggle or a bridge from a hosted API: the API must run on the same machine and reach the
-helper through loopback.
-
-Install [Bun](https://bun.com/docs/installation) and [Google Chrome](https://www.google.com/chrome/)
-in its standard location, then install dependencies from the checkout root:
-
-```sh
-bun install --frozen-lockfile
-bun install --cwd agent-computer --frozen-lockfile
-```
-
-Use the same existing `COMPUTER_TOKEN` for the API and helper. It can be set in the checkout's `.env`
-(Bun loads it) or supplied securely in each process environment; the helper never prints it. Set the
-following API configuration and clear both supervisor selectors, including any inherited process
-environment values, because either selector takes precedence over the shared URL:
-
-```dotenv
-AGENT_COMPUTER_URL=http://127.0.0.1:4101
-COMPUTER_SUPERVISOR_URL=
-COMPUTER_SANDBOX_NAMESPACE=
-```
-
-In the helper's environment, leave `COMPUTER_BROWSER_BACKEND` and `COMPUTER_BROWSER_MODE` unset, or
-set them to `local-chrome` and `headed`. An inherited `managed` or `headless` setting is an error.
-Leave `PORT` unset for 4101, or explicitly choose another port and update the API URL to match. Start:
-
-```sh
-bun scripts/start-local-chrome-computer.ts
-```
-
-Restart the API with the configuration above. Open a Bot's computer and navigate to a website; its
-dedicated Chrome window starts on first use. Use **Take control** in the app before interacting and
-**Hand back** when finished. Closing a viewer does not close the Bot's browser or erase its logins.
-The helper exits with an error for a missing token, a missing browser (neither Chrome nor Microsoft
-Edge installed), or an occupied port instead of silently selecting another browser or port. With
-only Edge installed it starts, and a person's own browser opens in Edge; a Bot's browser still
-needs Chrome. Ctrl-C shuts down its computer process and browsers.
-
-The helper ignores inherited `PROFILES_DIR` and `WORKSPACE_DIR`. Its defaults are:
-
-- macOS: `~/Library/Application Support/OpenBot/local-computer`
-- Windows: `%LOCALAPPDATA%\OpenBot\local-computer`
-- Linux: `${XDG_DATA_HOME:-~/.local/share}/openbot/local-computer`
-
-Set `OPENBOT_LOCAL_COMPUTER_DIR` to an absolute, dedicated app-owned directory to change that root.
-Do not point it at your personal Chrome data. Each Bot uses a separate persistent subdirectory under
-`profiles/`; no existing Chrome session is attached, and no TCP debugging endpoint is exposed.
-Native Chrome retains its process sandbox and OS credential store. File tools remain confined to
-the helper's `workspace/`, and shell execution is refused: use OpenBot's separately approved host
-access tools for host commands. Native Chrome runs with your OS account's network access; this mode
-is not a container or an OS network sandbox. Keep the API's private-host browsing opt-in off unless
-you intentionally need it for your local deployment.
-
-To switch back, stop the helper, restore your prior `AGENT_COMPUTER_URL` and supervisor/sandbox
-selectors, and restart the API. Unset `COMPUTER_BROWSER_BACKEND` (or set `managed`) on the managed
-computer process; choose `headless` or `headed` as before. Local Chrome profiles remain in the local
-data root, separate from managed computer volumes.
-
-#### OpenBot Desktop
-
-OpenBot Desktop does not run this helper. Its person's browser runs on the personal edition's one
-computer and shows inside the OpenBot window, as on hosted OpenBot (see
-[Personal edition](personal-edition.md#openbot-desktop)), so it writes no `OPENBOT_BROWSER_URL`, and
-a Start takes out the `OPENBOT_BROWSER_URL`, `OPENBOT_BROWSER_CONTAINER_URL`, `BROWSER_PORT` and
-`OPENBOT_BROWSER_ABSENT` an earlier version wrote. Earlier versions ran this helper as a host-side
-browser, a separate Chrome or Edge window, with its profile in the data root above; uninstalling
-OpenBot Desktop still removes that data root and the Recorder's native messaging host manifests on
-Windows and from the .deb and .rpm packages. On macOS, and for an AppImage, it stays until removed
-by hand.
+The personal edition's person's browser runs on its one computer and shows inside the page, as on
+hosted OpenBot (see [Personal edition](personal-edition.md#openbot-desktop)). OpenBot Desktop writes
+no `OPENBOT_BROWSER_URL`, and a Start takes out the `OPENBOT_BROWSER_URL`,
+`OPENBOT_BROWSER_CONTAINER_URL`, `BROWSER_PORT` and `OPENBOT_BROWSER_ABSENT` an earlier version
+wrote. Earlier versions ran a host-side browser, a separate Chrome or Edge window, with its profile
+under `OpenBot/local-computer` in the platform's data directory; uninstalling OpenBot Desktop still
+removes that folder and the Recorder's native messaging host manifests on Windows and from the .deb
+and .rpm packages. On macOS, and for an AppImage, it stays until removed by hand.
 
 `agent-computer` also reads:
 

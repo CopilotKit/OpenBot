@@ -50,24 +50,6 @@ function composeServices() {
   ).services;
 }
 
-function serverDockerfile() {
-  return readFileSync(
-    join(import.meta.dir, "..", "server", "Dockerfile"),
-    "utf8",
-  );
-}
-
-function rootDockerfile() {
-  return readFileSync(join(import.meta.dir, "..", "Dockerfile"), "utf8");
-}
-
-function agentComputerDockerfile() {
-  return readFileSync(
-    join(import.meta.dir, "..", "agent-computer", "Dockerfile"),
-    "utf8",
-  );
-}
-
 function runLangGraphAguiModelProbe(
   openaiBaseUrl: string | undefined,
   options: {
@@ -460,14 +442,16 @@ test("publishes every service on a settable port with the documented default", (
     ["SUPERVISOR_PORT", "4500", "4300"],
     ["BOT_PORT", "4200", "4200"],
     ["LANGGRAPH_PORT", "4201", "4201"],
-    // One process behind both: the server serves the built app on its own port.
-    ["APP_PORT", "3010", "3001"],
     ["SERVER_PORT", "3001", "3001"],
   ] as const;
 
   for (const [name, host, container] of published) {
     expect(compose).toContain(`\${${name}:-${host}}:${container}`);
   }
+  // One process behind both: the server serves the built app on its own port, unless
+  // SERVER_APP_PORT is set empty, which is how scripts/start.sh leaves APP_PORT to the checkout's app.
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture.
+  expect(compose).toContain("${SERVER_APP_PORT-${APP_PORT:-3010}}:3001");
 });
 
 /**
@@ -498,7 +482,10 @@ test("publishes every service that holds a secret on loopback only", () => {
   ]) {
     const published = [
       ...compose.matchAll(
-        new RegExp(`^\\s*- "([^"\\n]*)\\$\\{${name}:-\\d+\\}:[^"\\n]+"`, "gm"),
+        new RegExp(
+          `^\\s*- "([^"\\n]*?)\\$\\{(?:SERVER_APP_PORT-\\$\\{)?${name}:-\\d+\\}\\}?:[^"\\n]+"`,
+          "gm",
+        ),
       ),
     ];
     expect(published.length).toBeGreaterThan(0);
@@ -654,19 +641,48 @@ test("mounts the ChatGPT token store directory into the picked harness", () => {
   );
 });
 
-test("enables pgvector before creating vector columns", () => {
-  const migration = readFileSync(
-    join(import.meta.dir, "..", "server", "drizzle", "0000_schema.sql"),
-    "utf8",
+/**
+ * The server, the worker, the migrations, the computer and the supervisor are pulled, never built:
+ * the published OpenBot images, at the one tag backend-images.env names, read as OPENBOT_BACKEND_TAG.
+ * Each image is still overridable, which is how OpenBot Desktop pins a release's digests.
+ */
+test("runs the server, worker, migrations, computer and supervisor from the published images", () => {
+  const services = composeServices();
+  const images = {
+    migrate: "openbot-server",
+    server: "openbot-server",
+    worker: "openbot-server",
+    "agent-computer": "openbot-agent-computer",
+    supervisor: "openbot-supervisor",
+  } as const;
+  const variables = {
+    "openbot-server": "SERVER_IMAGE",
+    "openbot-agent-computer": "COMPUTER_IMAGE",
+    "openbot-supervisor": "SUPERVISOR_IMAGE",
+  } as const;
+  for (const [name, image] of Object.entries(images)) {
+    expect(services[name].build).toBeUndefined();
+    expect(services[name].image).toBe(
+      `\${${variables[image]}:-ghcr.io/copilotkit/${image}:\${OPENBOT_BACKEND_TAG:-see-backend-images.env}}`,
+    );
+    expect(services[name].pull_policy).toBe(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture.
+      "${IMAGE_PULL_POLICY:-missing}",
+    );
+  }
+  // Each Bot's computer runs the image the shared one does.
+  expect(services.supervisor.environment?.COMPUTER_IMAGE).toBe(
+    services["agent-computer"].image,
   );
 
-  // The order is the property, not the first line. A `vector` column cannot be created before the
-  // extension that defines the type, and a generated migration has no reason to put them in that
-  // order on its own.
-  const extension = migration.indexOf("CREATE EXTENSION IF NOT EXISTS vector;");
-  const firstVectorColumn = migration.search(/"embedding" vector\(/);
-  expect(extension).toBeGreaterThanOrEqual(0);
-  expect(firstVectorColumn).toBeGreaterThan(extension);
+  const pinned = /^OPENBOT_BACKEND_TAG=(\S+)$/m.exec(
+    readFileSync(join(import.meta.dir, "..", "backend-images.env"), "utf8"),
+  )?.[1];
+  expect(pinned).toMatch(/^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/);
+  const config = runComposeConfig({ OPENBOT_BACKEND_TAG: pinned ?? "" });
+  expect(config.services["agent-computer"].image).toBe(
+    `ghcr.io/copilotkit/openbot-agent-computer:${pinned}`,
+  );
 });
 
 test("runs the server migrator after PostgreSQL becomes healthy", () => {
@@ -675,66 +691,6 @@ test("runs the server migrator after PostgreSQL becomes healthy", () => {
   expect(services.migrate.depends_on?.postgres).toEqual({
     condition: "service_healthy",
   });
-});
-
-test("builds the deployment image with Playwright's Chromium payload only", () => {
-  for (const dockerfile of [rootDockerfile(), agentComputerDockerfile()]) {
-    expect(dockerfile).toContain(
-      "FROM node:24.18.1-bookworm-slim AS node-toolchain",
-    );
-    expect(dockerfile).toContain("FROM ubuntu:24.04");
-    expect(dockerfile).not.toContain("mcr.microsoft.com/playwright");
-    expect(dockerfile).toContain("ARG PLAYWRIGHT_VERSION=1.62.1");
-    expect(dockerfile).toContain("ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright");
-    expect(dockerfile).toContain(
-      "COPY --from=node-toolchain /usr/local /usr/local",
-    );
-    expect(dockerfile).toContain(
-      'bunx --bun "playwright@' +
-        "$" +
-        "{PLAYWRIGHT_VERSION}" +
-        '" install --with-deps --no-shell chromium',
-    );
-    expect(dockerfile).not.toMatch(/\bnodejs\b|\bnpm\b/);
-    expect(dockerfile).not.toMatch(
-      /\binstall(?:\s+--with-deps)?\s+(firefox|webkit)\b/,
-    );
-  }
-
-  const compose = composeFile();
-  expect(compose).toContain(
-    [
-      "agent-computer:",
-      "    build:",
-      "      context: .",
-      "      dockerfile: agent-computer/Dockerfile",
-    ].join("\n"),
-  );
-});
-
-test("takes Bun from the same immutable release in both computer images", () => {
-  const { packageManager } = JSON.parse(
-    readFileSync(join(import.meta.dir, "..", "package.json"), "utf8"),
-  );
-  const bunVersion = packageManager.replace("bun@", "");
-  const sources = [];
-  for (const dockerfile of [rootDockerfile(), agentComputerDockerfile()]) {
-    const source = dockerfile.match(
-      /^FROM (oven\/bun:\S+) AS bun-toolchain$/m,
-    )?.[1];
-    expect(source).toMatch(
-      new RegExp(
-        `^oven/bun:${bunVersion.replaceAll(".", "\\.")}@sha256:[a-f0-9]{64}$`,
-      ),
-    );
-    expect(dockerfile).toContain(
-      "COPY --from=bun-toolchain /usr/local/bin/bun /usr/local/bin/bun",
-    );
-    expect(dockerfile).not.toContain("bun.sh/install");
-    expect(dockerfile).not.toMatch(/\b(?:curl|wget)\b[^\n]*\|\s*(?:bash|sh)\b/);
-    sources.push(source);
-  }
-  expect(sources[0]).toBe(sources[1]);
 });
 
 /**
@@ -853,11 +809,11 @@ test("sends host.docker.internal where OPENBOT_HOST_GATEWAY says", () => {
 });
 
 /**
- * OpenBot's own server and worker, for an installed OpenBot, and out of a developer's way.
+ * OpenBot's own server and worker, started by name.
  *
- * `scripts/start.sh` runs both on the host, so a plain `docker compose up -d` that also started them
- * would put a second server on port 3001 and a second worker on the routines. The profile is what
- * keeps that from happening; naming the service is still enough to start it.
+ * A plain `docker compose up -d` starts what it always did; `scripts/start.sh` and an installed
+ * OpenBot name the two. The profile is what keeps them out of the plain run; naming the service is
+ * still enough to start it.
  */
 test("keeps OpenBot's own server and worker behind a profile", () => {
   const services = composeServices();
@@ -872,7 +828,6 @@ test("runs the server and the worker from the image migrations already use", () 
 
   for (const name of ["server", "worker"]) {
     expect(services[name].image).toBe(services.migrate.image);
-    expect(services[name].build).toEqual(services.migrate.build);
     expect(services[name].depends_on?.migrate).toEqual({
       condition: "service_completed_successfully",
     });
@@ -880,16 +835,6 @@ test("runs the server and the worker from the image migrations already use", () 
     expect(services[name].restart).toBe("unless-stopped");
   }
   expect(services.worker.command).toEqual(["bun", "../worker/src/index.ts"]);
-});
-
-test("ships the worker in the server image", () => {
-  const dockerfile = serverDockerfile();
-
-  expect(dockerfile).toContain("COPY worker/src worker/src");
-  // The isolated install's link to `@openbot/shared`. Without it the worker's first import fails.
-  expect(dockerfile).toContain(
-    "COPY --from=deps /app/worker/node_modules worker/node_modules",
-  );
 });
 
 /**
@@ -903,7 +848,10 @@ test("gives the server container addresses, not the host's loopback", () => {
   const server = composeServices().server;
   const environment = server.environment ?? {};
 
-  expect(server.env_file).toEqual([{ path: "./.env", required: false }]);
+  expect(server.env_file).toEqual([
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture.
+    { path: "${OPENBOT_SERVER_ENV_FILE:-./.env}", required: false },
+  ]);
   expect(environment).toMatchObject({
     PORT: "3001",
     SERVER_PORT: "3001",

@@ -19,11 +19,11 @@ const STAMP: &str = ".openbot-deployment";
 
 /// The release asset that says which images this version runs.
 ///
-/// Kept beside the deployment because the tree does not contain it: `docker-compose.yml` names
-/// `openbot-supervisor:latest` and friends as defaults, which are local build names that exist on a
-/// developer's machine and nowhere else. A desktop install has never built anything, so without
-/// this file Compose asks Docker Hub for images that are not there and reports a denial, which
-/// reads as an authentication problem and is not one.
+/// Kept beside the deployment because the tree does not contain it: `docker-compose.yml` names the
+/// Bots by local build names that exist on a developer's machine and nowhere else, and the server's
+/// images by a tag only a checkout's `backend-images.env` carries. A desktop install has neither, so
+/// without this file Compose asks for images that are not there and reports a denial, which reads
+/// as an authentication problem and is not one.
 const IMAGES: &str = "container-images.json";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

@@ -44,7 +44,7 @@ function npmViewVersion(spec: string): string {
   return view.stdout.toString().trim();
 }
 
-// Writes the version, the chart's appVersion, the Cargo files and the
+// Writes the version, the Cargo files and the
 // changelog for one release, and says what the release is called, which branch
 // it is cut from, and what its notes say.
 export function prepareRelease(
@@ -86,18 +86,6 @@ export function prepareRelease(
   if (sync.exitCode !== 0) {
     throw new Error(`desktop-version sync failed: ${sync.stderr.toString()}`);
   }
-
-  // The chart's default image tag is its appVersion, so a release that moves package.json
-  // without moving this leaves a default `helm install` pulling the previous image, or an
-  // image tag that was never pushed. Move them together, every time.
-  const chartPath = join(root, "charts/openbot/Chart.yaml");
-  writeFileSync(
-    chartPath,
-    readFileSync(chartPath, "utf8").replace(
-      /^appVersion:.*/m,
-      `appVersion: "${version}"`,
-    ),
-  );
 
   carryReleasePolicy(root, version);
 
