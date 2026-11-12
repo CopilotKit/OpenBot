@@ -115,6 +115,9 @@ test("successful writes update only the current account cache; failures preserve
         narration: null,
         skin: "openbot",
         proactive: "on",
+        // The server answers with every field, so the mock has to as well: whatever it leaves out
+        // is what the cache would be missing after the write.
+        sidebarSections: { group: false, direct: false, projects: false },
       },
     });
   await mutation.execute({ messageListEmphasis: "thread" });

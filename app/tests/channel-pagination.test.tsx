@@ -30,6 +30,7 @@ import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { browserKeys } from "@/lib/browser/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { projectKeys } from "@/lib/projects/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
 import { makeUserPreferences } from "./user-preferences.fixture";
 
@@ -194,6 +195,9 @@ function renderSidebar() {
     bots: [],
     lastPingId: null,
   });
+  // The Projects section is drawn from its own read; seeded empty for the same reason, so only
+  // channel requests reach `requests`.
+  queryClient.setQueryData(projectKeys.list(), []);
   // The Browser button reads whether there is a browser once; answered here so only channel requests are counted.
   queryClient.setQueryData(browserKeys.state, {
     available: false,
