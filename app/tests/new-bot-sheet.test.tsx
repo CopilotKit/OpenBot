@@ -173,14 +173,14 @@ async function customFlow() {
   const result = await opened();
   await result.user.type(result.view.getByLabelText("Name"), "Expense Review");
   await result.user.click(
-    result.view.getByRole("button", { name: /^Connect a custom agent/ }),
+    result.view.getByRole("button", { name: /^Bring your own agent/ }),
   );
   return result;
 }
 async function connected(address = "https://agent.example.com/ag-ui") {
   const { view, user } = await customFlow();
   expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
-  await user.click(view.getByRole("button", { name: /LangChain/ }));
+  await user.click(view.getByRole("button", { name: /^LangChain/ }));
   if (address)
     await user.type(await view.findByLabelText("Agent address"), address);
   return { view, user };
@@ -199,9 +199,15 @@ test("opens on New Bot details and creates locally without another screen", asyn
   expect(view.queryByRole("button", { name: /^Run here/ })).toBeNull();
   expect(
     view
-      .getByRole("button", { name: /^Connect a custom agent/ })
+      .getByRole("button", { name: /^Bring your own agent/ })
       .hasAttribute("aria-pressed"),
   ).toBe(false);
+  // The card names the frameworks it stands for, so the support is visible before it is opened.
+  expect(
+    view.getByRole("button", {
+      name: /Claude Agent SDK, LangChain, Google ADK or \d+ other frameworks\.$/,
+    }),
+  ).toBeTruthy();
   expect(
     view.getByRole("button", { name: "Create Bot" }).hasAttribute("disabled"),
   ).toBe(true);
@@ -217,7 +223,7 @@ test("unavailable hosting still permits the custom path", async () => {
   await settle();
   expect(view.queryByRole("button", { name: /^Run here/ })).toBeNull();
   expect(
-    view.queryByRole("button", { name: /^Connect a custom agent/ }),
+    view.queryByRole("button", { name: /^Bring your own agent/ }),
   ).toBeNull();
   expect(
     view.getByRole("button", { name: "Continue" }).hasAttribute("disabled"),
@@ -227,7 +233,7 @@ test("unavailable hosting still permits the custom path", async () => {
     view.getByRole("button", { name: "Continue" }).hasAttribute("disabled"),
   ).toBe(false);
   await user.click(view.getByRole("button", { name: "Continue" }));
-  const framework = view.getByRole("button", { name: /LangChain/ });
+  const framework = view.getByRole("button", { name: /^LangChain/ });
   expect(framework.hasAttribute("aria-pressed")).toBe(false);
   expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
   await user.click(framework);
@@ -314,7 +320,7 @@ test("preserves every entry across back navigation and hosting switches", async 
   await user.click(view.getByRole("button", { name: "Back" }));
   expect(
     view
-      .getByRole("button", { name: /LangChain/ })
+      .getByRole("button", { name: /^LangChain/ })
       .getAttribute("aria-pressed"),
   ).toBeNull();
   await user.click(view.getByRole("button", { name: "Back" }));
@@ -326,10 +332,8 @@ test("preserves every entry across back navigation and hosting switches", async 
   expect(
     (view.getByLabelText(/^Instructions/) as HTMLTextAreaElement).value,
   ).toBe("Review carefully");
-  await user.click(
-    view.getByRole("button", { name: /^Connect a custom agent/ }),
-  );
-  await user.click(view.getByRole("button", { name: /LangChain/ }));
+  await user.click(view.getByRole("button", { name: /^Bring your own agent/ }));
+  await user.click(view.getByRole("button", { name: /^LangChain/ }));
   expect((view.getByLabelText("Agent address") as HTMLInputElement).value).toBe(
     "https://agent.example.com/ag-ui",
   );
@@ -457,19 +461,15 @@ test("somebody an admin has not allowed sees Isolated disabled, and why", async 
 test("custom-agent selection validates the name before advancing", async () => {
   const { view, user } = await opened();
   await user.type(view.getByLabelText("Name"), "   ");
-  await user.click(
-    view.getByRole("button", { name: /^Connect a custom agent/ }),
-  );
+  await user.click(view.getByRole("button", { name: /^Bring your own agent/ }));
   expect((await view.findByRole("alert")).textContent).toBe(
     "Name is required.",
   );
   expect(document.activeElement).toBe(view.getByLabelText("Name"));
-  expect(view.queryByRole("button", { name: /LangChain/ })).toBeNull();
+  expect(view.queryByRole("button", { name: /^LangChain/ })).toBeNull();
   await user.type(view.getByLabelText("Name"), "My Bot");
-  await user.click(
-    view.getByRole("button", { name: /^Connect a custom agent/ }),
-  );
-  expect(await view.findByRole("button", { name: /LangChain/ })).toBeTruthy();
+  await user.click(view.getByRole("button", { name: /^Bring your own agent/ }));
+  expect(await view.findByRole("button", { name: /^LangChain/ })).toBeTruthy();
 });
 
 test("personal Bot creation hides team visibility and isolation controls and links to Business", async () => {

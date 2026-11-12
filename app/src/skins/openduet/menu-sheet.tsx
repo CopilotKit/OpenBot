@@ -134,7 +134,12 @@ export function MenuSheet({
         showCloseButton={false}
         side="left"
       >
-        <SheetHeader className="px-5 pt-5 pb-3">
+        {/*
+         * In OpenBot Desktop on macOS the window's buttons sit over the drawer's top-left corner,
+         * about 21–37px down (`data-desktop-titlebar`, macOS only), so the header then starts 48px
+         * down, below them, as onboarding's does.
+         */}
+        <SheetHeader className="px-5 pt-5 pb-3 in-data-[desktop-titlebar=overlay]:pt-12">
           <SheetTitle className="openduet-type-display font-semibold text-openduet-ink">
             <BrandName>{appConfig.brand.productName}</BrandName>
           </SheetTitle>
