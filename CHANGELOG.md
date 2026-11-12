@@ -34,6 +34,11 @@ every deployment:
 
 ### OpenBot Desktop
 
+- **Get Troubleshooting Logs… no longer quits OpenBot Desktop on a Mac.** Chosen from the OpenBot
+  menu, it could seem to do nothing for a few seconds and then close the app, after saving the
+  file. macOS refused to show the file in Finder from where OpenBot asked. It now asks from the
+  right place, and a Finder that can't open is noted in the log. While the logs are gathered, the
+  menu says Gathering Logs… and the item can't be chosen again.
 - **A Podman machine too small for setup is resized for you on a Mac.** Setup needs 4 CPUs and
   4 GB of free memory. A Podman machine with less stopped at one sentence with a command squeezed
   into it: "OpenBot has 2 CPUs. It needs 4. Stop your Podman machine, run podman machine set
@@ -48,9 +53,13 @@ every deployment:
   they said "free CPUs".
 - **On a Mac, the window's buttons no longer cover a skin's controls.** With the OpenDuet skin the
   close, minimise and zoom buttons sat on the "OpenBot" name at the top of the menu, and on the back
-  button of every page opened over the app. OpenDots and OpenMuse had their own controls under them
+  button of every page opened over the app. OpenDots and OpenFuse had their own controls under them
   too, in some window sizes. Each skin now leaves that corner clear, as OpenBot's own sidebar does.
   In a browser and on Windows nothing moves.
+- **On a Mac, a skin's top bar moves the window.** With OpenDots, OpenDuet or OpenFuse, only a few
+  pixels at the top of the window could drag it, and a press on the bar selected its text. Now a
+  press anywhere along the top, outside a button or link, moves the window, and a double-click
+  zooms it, as in OpenBot's own layout.
 - **An OpenBot whose saved data is gone says so, and starts fresh.** When OpenBot's Podman machine
   was removed (`podman machine reset`, a WSL unregister, or an older version uninstalled with its
   data), its backend and database went with it, but the installation still named them. Every start
@@ -417,6 +426,12 @@ every deployment:
 
 ### Smaller changes
 
+- In the OpenDots skin, the badge on Bots sits on the corner of the Bots icon. It used to hang
+  off the button's corner, past the icon and almost on the rail's edge. A count is now a smaller
+  circle, so the icon still shows under it. The badge on the menu button in a narrow window
+  sits the same way.
+- The OpenMuse skin is now called OpenFuse. Anyone who picked it keeps it, with nothing to
+  choose again.
 - New Bot's first screen ends with a **Bring your own agent** card showing the mark of every
   framework a custom agent can run on. It opens the same list the **Connect a custom agent** button
   in the sheet's footer did, and that button is gone.

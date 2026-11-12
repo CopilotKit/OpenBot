@@ -657,9 +657,13 @@ export function OpenDotsSidebar({
     /*
      * In OpenBot Desktop on macOS the window's buttons sit over the sidebar's top-left corner
      * (`data-desktop-titlebar`, macOS only), so it then starts 32px lower, below them, level with
-     * the rail beside it. The drawer a narrow window opens is this sidebar too.
+     * the rail beside it, and that strip moves the window, as the rail's does (`data-desktop-drag`).
+     * The drawer a narrow window opens is this sidebar too.
      */
-    <div className="flex h-full min-h-0 flex-col px-3 pt-[23px] pb-3 max-md:overflow-y-auto in-data-[desktop-titlebar=overlay]:pt-[55px]">
+    <div
+      data-desktop-drag=""
+      className="flex h-full min-h-0 flex-col px-3 pt-[23px] pb-3 max-md:overflow-y-auto in-data-[desktop-titlebar=overlay]:pt-[55px]"
+    >
       <Wordmark onNavigate={onNavigate} />
       <Link
         {...newChat}

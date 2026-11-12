@@ -5,8 +5,8 @@ import {
   SuggestionsInbox,
 } from "@/components/suggestions/proactive-panel";
 import { proactiveSuggestionsQueryOptions } from "@/lib/proactive";
-import { useMuse } from "../context";
-import { MuseEmpty, MuseScreen } from "../ui";
+import { useFuse } from "../context";
+import { FuseEmpty, FuseScreen } from "../ui";
 import { NoBot } from "./activity";
 
 /**
@@ -14,23 +14,23 @@ import { NoBot } from "./activity";
  * sections, so starting, hiding and running a check-in behave as on the Bot's page.
  */
 export function IdeasScreen() {
-  const { bot } = useMuse();
+  const { bot } = useFuse();
   const suggestions = useQuery(proactiveSuggestionsQueryOptions());
   if (!bot) {
     return (
-      <MuseScreen title="Ideas">
+      <FuseScreen title="Ideas">
         <NoBot />
-      </MuseScreen>
+      </FuseScreen>
     );
   }
   const none =
     suggestions.data !== undefined &&
     !suggestions.data.some((suggestion) => suggestion.agentId === bot.id);
   return (
-    <MuseScreen title="Ideas">
+    <FuseScreen title="Ideas">
       <div className="[&>section:first-child]:mt-0">
         {none ? (
-          <MuseEmpty
+          <FuseEmpty
             detail={`When ${bot.name}'s check-ins find something that needs you, it shows up here.`}
             icon={IconBulb}
             title="Nothing needs you right now"
@@ -40,6 +40,6 @@ export function IdeasScreen() {
         )}
         <ProactiveResearchSettings agentId={bot.id} />
       </div>
-    </MuseScreen>
+    </FuseScreen>
   );
 }

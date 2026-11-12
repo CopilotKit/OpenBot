@@ -9,6 +9,7 @@ import {
   type RunFinishedEvent,
   type ToolCall,
 } from "@ag-ui/client";
+import { HARNESS_OWN_TOOLS } from "@openbot/shared/harness-own-tools";
 import { RUN_ENDED_EARLY } from "@openbot/toolkit/headless-tools";
 import { map, Observable, type Subscription } from "rxjs";
 import type { AcquireLearnedSkills, LearnedSkillInvocation } from "./runtime";
@@ -219,8 +220,14 @@ export class RemoteLearnedSkillsMiddleware extends Middleware {
           );
           // A UI or governed tool still belongs to its existing executor. Return
           // the boundary with our reads answered, without inventing its result.
+          // A call the harness runs itself is not one: it runs once our reads
+          // are back (see `HARNESS_OWN_TOOLS`).
           if (
-            reads.length !== pending.length ||
+            pending.some(
+              (call) =>
+                !reads.includes(call) &&
+                !HARNESS_OWN_TOOLS.has(call.function.name),
+            ) ||
             unansweredInterrupts.length > 0
           ) {
             subscriber.next(

@@ -6,6 +6,11 @@ import {
   redeemAuthorizationCode,
   redirectUriFor,
 } from "../oauth";
+import {
+  issuerMatches,
+  type RemoteTokenSet,
+  redeemRemoteCode,
+} from "../remote-oauth";
 import type { PluginRouteContext } from "./context";
 
 /** Where a vendor sends a person back after consent. */
@@ -85,6 +90,87 @@ export function mountOAuthCallbackRoute({
        */
       if (!(await connect.personHasAccess(state.userId))) {
         return context.redirect(failed);
+      }
+
+      /*
+       * A SERVER ADDED BY URL THAT SIGNS EACH PERSON IN. The token endpoint, the resource and the
+       * issuer come off the row, which took them from the server's own OAuth challenge when it was
+       * added. The `iss` the consent came back with must be that issuer where the server sends one
+       * (RFC 9207); the MCP SDK redeems the code with the verifier sealed in the state.
+       */
+      const remote = catalogueEntry(state.serverId)
+        ? null
+        : await store.remoteSignIn(state.serverId);
+      if (remote) {
+        if (!issuerMatches(remote.config, context.req.query("iss"))) {
+          console.error(
+            JSON.stringify({
+              type: "remote-oauth-issuer-mismatch",
+              serverId: state.serverId,
+              note: "A consent came back naming a different authorization server than the one it was sent to, so the code was not redeemed.",
+            }),
+          );
+          return context.redirect(failed);
+        }
+        const remoteClient = await store.oauthClientFor(state.serverId);
+        if (!remoteClient) return context.redirect(failed);
+        let tokens: RemoteTokenSet;
+        try {
+          tokens = await redeemRemoteCode({
+            config: remote.config,
+            client: remoteClient,
+            code,
+            verifier: state.verifier,
+            redirectUri: redirectUriFor(connect.publicUrl),
+          });
+        } catch (error) {
+          console.error(
+            JSON.stringify({
+              type: "remote-oauth-code-not-redeemed",
+              serverId: state.serverId,
+              note: "A person consented and the server would not redeem the code. They were sent back with a failure.",
+              error: error instanceof Error ? error.message.slice(0, 400) : "",
+            }),
+          );
+          return context.redirect(failed);
+        }
+        try {
+          await store.recordRemoteConnection({
+            serverId: state.serverId,
+            userId: state.userId,
+            tokens,
+            scope: remote.config.scope ?? "",
+          });
+        } catch (error) {
+          console.error(
+            JSON.stringify({
+              type: "oauth-connection-not-recorded",
+              serverId: state.serverId,
+              note: "A person consented and the grant could not be stored. They were sent back with a failure and will have to connect again.",
+              error: reasonWithoutStatement(error),
+            }),
+          );
+          return context.redirect(failed);
+        }
+        try {
+          await store.discoverToolsOnConnect(state.serverId, state.userId);
+        } catch (error) {
+          console.error(
+            JSON.stringify({
+              type: "oauth-connection-tools-not-listed",
+              serverId: state.serverId,
+              note: "A person connected and their account was recorded, but asking the server what it offers failed. Refresh tools on its page asks again.",
+              error: reasonWithoutStatement(error),
+            }),
+          );
+        }
+        return context.redirect(
+          connectedAccountsUrlFor(
+            connect.appUrl,
+            { serverId: state.serverId },
+            state.returnTo,
+          ),
+        );
       }
 
       const entry = catalogueEntry(state.serverId);

@@ -78,8 +78,84 @@ type Snapshot = {
   groupsByUser: Map<string, string[]>;
   settings: EnterpriseSettings;
   network: NetworkPolicyRow[];
+  /**
+   * The servers the MCP allowlist approves by their address rather than by their id: an admin can
+   * approve `https://mcp.example.com/mcp` before anybody has added it, and whichever server is then
+   * added at that address is approved. Absent reads as none.
+   */
+  addressApproved?: ReadonlySet<string>;
   loadedAt: Date;
 };
+
+/**
+ * A server address as the MCP allowlist compares it: scheme, host and path, without a trailing
+ * slash, a query or a fragment, the host in lower case. Null for anything that is not an http(s)
+ * address, which is how an entry that is a server id is told apart from one that is an address.
+ */
+export function normalizedServerAddress(raw: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  const path = url.pathname.replace(/\/+$/, "");
+  return `${url.protocol}//${url.host.toLowerCase()}${path}`;
+}
+
+/** The ids of the servers standing at an address the allowlist names. */
+function addressApprovedServers(
+  servers: readonly string[],
+  rows: readonly { id: string; url: string }[],
+): Set<string> {
+  const addresses = new Set(
+    servers
+      .map(normalizedServerAddress)
+      .filter((value): value is string => value !== null),
+  );
+  if (addresses.size === 0) return new Set();
+  return new Set(
+    rows
+      .filter((row) => {
+        const address = normalizedServerAddress(row.url);
+        return address !== null && addresses.has(address);
+      })
+      .map((row) => row.id),
+  );
+}
+
+/**
+ * Whether the MCP allowlist lets somebody add a server at this address. Null when it does: the
+ * allowlist is off, or the address is on it. Otherwise the reason, in a sentence for the person.
+ *
+ * Only where enterprise controls are installed; the personal edition's settings fix the allowlist
+ * off, so it never refuses there. Controls that are installed and have not loaded yet refuse, as
+ * every other control does before its first read.
+ */
+export function mcpAddressRefusal(url: string): string | null {
+  const controls = installed;
+  if (!controls) return null;
+  const snapshot = controls.snapshot();
+  if (!snapshot) {
+    return "OpenBot's admin controls haven't loaded yet, so no server can be added. Try again in a moment.";
+  }
+  const allowlist = snapshot.settings.mcpAllowlist;
+  if (!allowlist.enabled) return null;
+  const address = normalizedServerAddress(url);
+  const approved = allowlist.servers.some(
+    (entry) => address !== null && normalizedServerAddress(entry) === address,
+  );
+  if (approved) return null;
+  const host = (() => {
+    try {
+      return new URL(url).host;
+    } catch {
+      return "that server";
+    }
+  })();
+  return `Your admin only allows approved MCP servers, and ${host} isn't one of them. Ask an admin to approve it.`;
+}
 
 export type EnterpriseDeps = {
   database: Database;
@@ -294,7 +370,9 @@ export function* enterpriseChecks(
      * Bot offered tools refused on every call, which nobody could remove.
      */
     const builtIn = isAlwaysOn(context.mcp.server);
-    const approved = allowlist.servers.includes(context.mcp.server);
+    const approved =
+      allowlist.servers.includes(context.mcp.server) ||
+      (snapshot.addressApproved?.has(context.mcp.server) ?? false);
     yield {
       control: "app_allowlist",
       server: context.mcp.server,
@@ -398,6 +476,14 @@ async function loadSnapshot(store: EnterpriseStore): Promise<Snapshot> {
   const admins = await store.adminIds();
   const settings = await store.settings();
   const network = await store.networkPolicies();
+  const addressApproved = addressApprovedServers(
+    settings.mcpAllowlist.servers,
+    settings.mcpAllowlist.servers.some(
+      (entry) => normalizedServerAddress(entry) !== null,
+    )
+      ? await store.serverAddresses()
+      : [],
+  );
   const groups = [
     ...new Set([
       ...rows
@@ -415,6 +501,7 @@ async function loadSnapshot(store: EnterpriseStore): Promise<Snapshot> {
     groupsByUser,
     settings,
     network,
+    addressApproved,
     loadedAt: new Date(),
   };
 }

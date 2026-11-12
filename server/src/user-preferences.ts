@@ -1,6 +1,6 @@
 import {
   DEFAULT_USER_PREFERENCES,
-  isSkinId,
+  currentSkinId,
   type UserPreferences,
 } from "@openbot/shared/user-preferences";
 import { and, eq, sql } from "drizzle-orm";
@@ -9,13 +9,15 @@ import { users } from "./db/schema";
 
 /*
  * What is stored, over the defaults. A skin a later build no longer ships stays in the row, so going
- * back to a build that has it brings it back, but this build answers with its default.
+ * back to a build that has it brings it back, but this build answers with its default. A skin saved
+ * under an id it has since been renamed from is answered with its new id.
  */
 function withDefaults(stored: Partial<UserPreferences>): UserPreferences {
   const preferences = { ...DEFAULT_USER_PREFERENCES, ...stored };
-  return isSkinId(preferences.skin)
-    ? preferences
-    : { ...preferences, skin: DEFAULT_USER_PREFERENCES.skin };
+  return {
+    ...preferences,
+    skin: currentSkinId(preferences.skin) ?? DEFAULT_USER_PREFERENCES.skin,
+  };
 }
 
 export type UserPreferencesStore = {
