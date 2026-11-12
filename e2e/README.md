@@ -33,6 +33,10 @@ What it does:
 The app under test is at `http://127.0.0.1:46010`. Set `E2E_KEEP_STACK=1` to leave it running after
 the run to look around; the next run replaces it either way.
 
+Two runs at once, from two checkouts, each need their own stack: set `E2E_PORT_OFFSET=1000` (or 2000,
+a multiple of 1000) on one of them, and its ports and compose project move with it (`47010`,
+`openbot-e2e-1000`), so neither run reuses or stops the other's.
+
 Results, all gitignored, in `e2e/.artifacts/`:
 
 | What | Where |
@@ -95,13 +99,20 @@ made-up names). Re-record when a journey's words or OpenBot's prompts change.
   when journeys run together.
 - Fixtures are recorded from the real product, never written by hand: OpenBot and the CopilotKit
   runtime add structure to every request that a hand-written fixture gets wrong.
-- OpenBot's model list comes from aimock, which lists the models the fixtures name, so in replay the
-  composer offers one model (gpt-5.6-terra) and no model picker. A journey about the model picker
-  needs fixtures that name more than one model.
+- OpenBot's model list comes from aimock, which lists the models the fixtures name. The model-picker
+  journey's fixtures name gpt-4o as well as gpt-5.6-terra, so in replay the composer offers both, with
+  gpt-5.6-terra the default. In record mode, before any fixture exists, aimock lists its own default
+  models, and gpt-4o is among them.
 - **A tool call that names a record by its id can't be replayed.** A recorded fixture holds the id
   the record had in the recording run; the one a replay makes has another. Changing a routine by
   asking a Bot (`update_routine`) is one: replayed, the change is refused while the replayed answer
   says it was made. Keep such a step out of a journey rather than assert half of it.
+- **Every journey shares one stack**, so a request that quotes the stack's state changes with the
+  journeys before it: the skill chooser lists every skill, and a message sent from the home page with
+  several Bots is routed by a call that lists every Bot. A journey that adds a skill or a Bot changes
+  those calls for the journeys after it. Name the Bot (the To: field, or `@` on the home page) rather
+  than leaving the choice to OpenBot, and re-record the suite when one journey's additions reach
+  another's requests.
 
 ## Add a journey
 
@@ -119,7 +130,8 @@ made-up names). Re-record when a journey's words or OpenBot's prompts change.
 
    It runs in the `journeys` project, after the core loop, on a stack where a person (Sam Rivera)
    has been through first-run setup and has an AI key. Use words in its messages that no other
-   journey uses.
+   journey uses. A journey that starts a conversation waits for OpenBot to name it before it ends
+   (`generatedName` in `journeys/chat.ts`), or the naming call lands in the next journey.
 2. `bun run test:e2e:record -- --grep "renames a conversation"` records its fixtures into
    `e2e/fixtures/<name>/`.
 3. `bun run test:e2e` twice: it passes both times, and the grep above prints 0.
