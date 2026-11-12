@@ -790,6 +790,8 @@ export function humanise(tool: string): string {
 
 /**
  * `google-drive`, `google_drive` and `googleDrive` all split to the same `["google", "drive"]`.
+ * An initialism ends where the next capitalised word starts: `getHTMLContent` is
+ * `["get", "html", "content"]`, not `["get", "htmlcontent"]`.
  *
  * The same splitting `humanise` does for a tool name, pulled out so a server key can be broken into
  * words too rather than compared as one opaque token.
@@ -798,6 +800,7 @@ function wordsOf(text: string): string[] {
   return text
     .replace(/[_-]+/g, " ")
     .replace(/([a-z\d])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
     .trim()
     .toLowerCase()
     .split(" ")
