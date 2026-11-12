@@ -10,7 +10,7 @@ import type { ChannelSummary } from "@/lib/channels/queries";
  * which of OpenBot's records to put where.
  */
 
-export type MuseTab = "chat" | "activity" | "ideas" | "goals" | "apps";
+export type FuseTab = "chat" | "activity" | "ideas" | "goals" | "apps";
 
 /**
  * The Bot at the centre of the frame.
@@ -56,7 +56,7 @@ export function mainChannel(
  * routes; Apps is OpenBot's Connections, the apps a Bot uses as you. A Bot's page, Routines,
  * Capabilities and the rest light no tab, because they are not that tab's screen.
  */
-export function tabFor(pathname: string): MuseTab | null {
+export function tabFor(pathname: string): FuseTab | null {
   if (pathname === "/s/activity") return "activity";
   if (pathname === "/s/ideas") return "ideas";
   if (pathname === "/s/goals") return "goals";

@@ -10,10 +10,10 @@ import { IdeasScreen } from "./screens/ideas";
  * Chat is OpenBot's own conversation, and Apps is OpenBot's own Connections page. Activity, Ideas
  * and Goals put OpenBot's own sections for the centre Bot under OpenFuse's titles.
  */
-export const openmuse: Skin = {
+export const openfuse: Skin = {
   // The id predates the name OpenFuse. It is what accounts have saved and what `data-skin` keys on,
   // so it stays.
-  id: "openmuse",
+  id: "openfuse",
   name: "OpenFuse",
   description:
     "One Bot at the centre of a phone-shaped column, with five tabs.",

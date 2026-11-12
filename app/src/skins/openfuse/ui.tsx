@@ -25,9 +25,9 @@ import { cn } from "@/lib/utils";
  * so dark mode follows without a branch here.
  */
 
-export type MuseIcon = React.ComponentType<IconProps>;
+export type FuseIcon = React.ComponentType<IconProps>;
 
-export const museText = {
+export const fuseText = {
   body: "text-[15px] leading-[23px] text-foreground",
   muted: "text-[14px] leading-[21px] text-muted-foreground",
   small: "text-[11px] leading-[17px] text-muted-foreground",
@@ -35,26 +35,26 @@ export const museText = {
   title: "text-[23px] font-semibold tracking-[-0.7px] text-foreground",
 } as const;
 
-type MuseButtonLook = { primary?: boolean; small?: boolean; danger?: boolean };
+type FuseButtonLook = { primary?: boolean; small?: boolean; danger?: boolean };
 
 /** OpenFuse's pill: pale blue when it is the one thing to do, soft grey otherwise. */
-export function museButtonClass({
+export function fuseButtonClass({
   primary = false,
   small = false,
   danger = false,
-}: MuseButtonLook = {}) {
+}: FuseButtonLook = {}) {
   return cn(
     buttonVariants({ variant: "secondary" }),
     "h-auto min-h-[42px] gap-2 rounded-full border-0 px-[17px] py-2.5 font-semibold text-[14px] shadow-none active:translate-y-0 active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 [&_svg]:size-[15px]",
     primary
-      ? "bg-primary text-primary-foreground hover:bg-[var(--openmuse-primary-hover)]"
-      : "bg-secondary text-secondary-foreground hover:bg-[var(--openmuse-pressed)]",
+      ? "bg-primary text-primary-foreground hover:bg-[var(--openfuse-primary-hover)]"
+      : "bg-secondary text-secondary-foreground hover:bg-[var(--openfuse-pressed)]",
     danger && "text-destructive",
     small && "min-h-[38px] px-[13px] py-[7px]",
   );
 }
 
-export function MuseButton({
+export function FuseButton({
   children,
   className,
   icon: Icon,
@@ -63,12 +63,12 @@ export function MuseButton({
   danger,
   ...props
 }: React.ComponentProps<typeof Button> &
-  MuseButtonLook & {
-    icon?: MuseIcon;
+  FuseButtonLook & {
+    icon?: FuseIcon;
   }) {
   return (
     <Button
-      className={cn(museButtonClass({ primary, small, danger }), className)}
+      className={cn(fuseButtonClass({ primary, small, danger }), className)}
       variant="secondary"
       {...props}
     >
@@ -82,7 +82,7 @@ export function MuseButton({
  * A pill that goes somewhere. Base UI's Button gives an anchor the button role, so a destination is
  * an anchor of its own wearing the same pill, and keeps its link role.
  */
-export function MuseLinkButton({
+export function FuseLinkButton({
   children,
   className,
   icon: Icon,
@@ -90,17 +90,17 @@ export function MuseLinkButton({
   small,
   danger,
   render,
-}: MuseButtonLook & {
+}: FuseButtonLook & {
   children: React.ReactNode;
   className?: string;
-  icon?: MuseIcon;
+  icon?: FuseIcon;
   render: React.ReactElement<{
     className?: string;
     children?: React.ReactNode;
   }>;
 }) {
   return React.cloneElement(render, {
-    className: cn(museButtonClass({ primary, small, danger }), className),
+    className: cn(fuseButtonClass({ primary, small, danger }), className),
     children: (
       <>
         {Icon ? <Icon aria-hidden="true" stroke={1.9} /> : null}
@@ -117,12 +117,12 @@ export function RoundButton({
   className,
   children,
   ...props
-}: React.ComponentProps<"button"> & { icon: MuseIcon; label: string }) {
+}: React.ComponentProps<"button"> & { icon: FuseIcon; label: string }) {
   return (
     <button
       aria-label={label}
       className={cn(
-        "relative flex size-11 shrink-0 items-center justify-center rounded-full bg-card text-foreground outline-none transition-colors hover:bg-[var(--openmuse-pressed)] focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none",
+        "relative flex size-11 shrink-0 items-center justify-center rounded-full bg-card text-foreground outline-none transition-colors hover:bg-[var(--openfuse-pressed)] focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none",
         className,
       )}
       type="button"
@@ -135,10 +135,10 @@ export function RoundButton({
 }
 
 const TILE_TINTS = {
-  sky: "bg-[var(--openmuse-sky)]",
-  green: "bg-[var(--openmuse-green)]",
-  lavender: "bg-[var(--openmuse-lavender)]",
-  orange: "bg-[var(--openmuse-orange)]",
+  sky: "bg-[var(--openfuse-sky)]",
+  green: "bg-[var(--openfuse-green)]",
+  lavender: "bg-[var(--openfuse-lavender)]",
+  orange: "bg-[var(--openfuse-orange)]",
   plain: "bg-secondary",
 } as const;
 
@@ -152,7 +152,7 @@ export function IconTile({
   accent = false,
   className,
 }: {
-  icon: MuseIcon;
+  icon: FuseIcon;
   tint?: TileTint;
   size?: 34 | 42 | 55;
   accent?: boolean;
@@ -167,7 +167,7 @@ export function IconTile({
         size === 42 && "size-[42px]",
         size === 34 && "size-[34px]",
         TILE_TINTS[tint],
-        accent ? "text-[var(--openmuse-accent)]" : "text-foreground",
+        accent ? "text-[var(--openfuse-accent)]" : "text-foreground",
         className,
       )}
     >
@@ -193,7 +193,7 @@ export function LinkRow({
   render,
   trailing,
 }: {
-  icon: MuseIcon;
+  icon: FuseIcon;
   title: React.ReactNode;
   detail?: React.ReactNode;
   tint?: TileTint;
@@ -202,7 +202,7 @@ export function LinkRow({
 }) {
   return (
     <Item
-      className="flex-nowrap gap-3.5 rounded-[10px] border-0 px-0 py-[13px] hover:bg-transparent active:bg-[var(--openmuse-pressed)] [a]:hover:bg-transparent"
+      className="flex-nowrap gap-3.5 rounded-[10px] border-0 px-0 py-[13px] hover:bg-transparent active:bg-[var(--openfuse-pressed)] [a]:hover:bg-transparent"
       render={render}
     >
       <ItemMedia className="translate-y-0! self-center!">
@@ -214,7 +214,7 @@ export function LinkRow({
         </ItemTitle>
         {detail ? (
           <ItemDescription
-            className={cn(museText.small, "line-clamp-1 text-[11px]")}
+            className={cn(fuseText.small, "line-clamp-1 text-[11px]")}
           >
             {detail}
           </ItemDescription>
@@ -231,13 +231,13 @@ export function LinkRow({
   );
 }
 
-export function MuseEmpty({
+export function FuseEmpty({
   icon,
   title,
   detail,
   children,
 }: {
-  icon: MuseIcon;
+  icon: FuseIcon;
   title: string;
   detail: React.ReactNode;
   children?: React.ReactNode;
@@ -245,8 +245,8 @@ export function MuseEmpty({
   return (
     <div className="flex flex-col items-center gap-[13px] p-10 text-center">
       <IconTile accent icon={icon} size={55} />
-      <h3 className={museText.heading}>{title}</h3>
-      <p className={cn(museText.muted, "max-w-[360px] text-pretty")}>
+      <h3 className={fuseText.heading}>{title}</h3>
+      <p className={cn(fuseText.muted, "max-w-[360px] text-pretty")}>
         {detail}
       </p>
       {children}
@@ -258,7 +258,7 @@ export function ErrorNotice({ error }: { error?: string | null }) {
   if (!error) return null;
   return (
     <div
-      className="my-2.5 rounded-[14px] bg-[var(--openmuse-danger-tint)] p-4 text-[15px] text-destructive leading-[23px]"
+      className="my-2.5 rounded-[14px] bg-[var(--openfuse-danger-tint)] p-4 text-[15px] text-destructive leading-[23px]"
       role="alert"
     >
       {error}
@@ -278,8 +278,8 @@ export function StatusDot({ tone }: { tone: "green" | "blue" }) {
       className={cn(
         "size-4 shrink-0 rounded-full border-[5px]",
         tone === "green"
-          ? "border-[var(--openmuse-green-ring)] bg-[var(--openmuse-green-dot)]"
-          : "border-[var(--openmuse-blue-ring)] bg-[var(--openmuse-blue-dot)]",
+          ? "border-[var(--openfuse-green-ring)] bg-[var(--openfuse-green-dot)]"
+          : "border-[var(--openfuse-blue-ring)] bg-[var(--openfuse-blue-dot)]",
       )}
     />
   );
@@ -290,7 +290,7 @@ export function StatusDot({ tone }: { tone: "green" | "blue" }) {
  * the middle on anything wider. Built on OpenBot's Dialog, so focus, Escape and the backdrop behave
  * the way every other OpenBot dialog does.
  */
-export function MuseSheet({
+export function FuseSheet({
   title,
   subtitle,
   children,
@@ -307,26 +307,26 @@ export function MuseSheet({
     <Dialog onOpenChange={(open) => !open && onClose()} open>
       <DialogContent
         className={cn(
-          "openmuse-sheet gap-0 overflow-hidden border border-border bg-background p-0 text-foreground shadow-none motion-reduce:transition-none",
+          "openfuse-sheet gap-0 overflow-hidden border border-border bg-background p-0 text-foreground shadow-none motion-reduce:transition-none",
           // A phone: pinned to the bottom edge, full width, square at the bottom.
           "top-auto bottom-0 left-0 max-h-[94svh] w-full max-w-none translate-x-0 translate-y-0 rounded-[26px] rounded-b-none pb-3",
           // Wider: centred, OpenFuse's 790px card.
           "min-[600px]:top-1/2 min-[600px]:bottom-auto min-[600px]:left-1/2 min-[600px]:w-[calc(100%-40px)] min-[600px]:max-w-[790px] min-[600px]:-translate-x-1/2 min-[600px]:-translate-y-1/2 min-[600px]:rounded-[26px] min-[600px]:pb-0",
         )}
-        overlayClassName="bg-[var(--openmuse-scrim)] supports-backdrop-filter:backdrop-blur-none motion-reduce:transition-none"
+        overlayClassName="bg-[var(--openfuse-scrim)] supports-backdrop-filter:backdrop-blur-none motion-reduce:transition-none"
         showCloseButton={false}
       >
         <span
           aria-hidden="true"
-          className="mx-auto mt-2.5 block h-1 w-[34px] shrink-0 rounded-[3px] bg-[var(--openmuse-handle)] min-[600px]:hidden"
+          className="mx-auto mt-2.5 block h-1 w-[34px] shrink-0 rounded-[3px] bg-[var(--openfuse-handle)] min-[600px]:hidden"
         />
         <div className="flex shrink-0 items-center justify-between gap-4 border-border border-b p-5 min-[600px]:p-6">
           <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <DialogTitle className={cn(museText.title, "font-semibold")}>
+            <DialogTitle className={cn(fuseText.title, "font-semibold")}>
               <BrandName>{title}</BrandName>
             </DialogTitle>
             {subtitle ? (
-              <DialogDescription className={museText.muted}>
+              <DialogDescription className={fuseText.muted}>
                 {subtitle}
               </DialogDescription>
             ) : null}
@@ -345,7 +345,7 @@ export function MuseSheet({
 }
 
 /** The scrolling page every OpenFuse tab is drawn on, with its 25px title. */
-export function MuseScreen({
+export function FuseScreen({
   title,
   children,
 }: {

@@ -29,24 +29,24 @@ import { appConfig } from "@/lib/generated/application-config";
 import { cn } from "@/lib/utils";
 import { BotsSheet } from "./bots-sheet";
 import { chooseBot, useChosenBotId } from "./chosen-bot";
-import { MuseContext, type MuseSheetKind } from "./context";
+import { FuseContext, type FuseSheetKind } from "./context";
 import { MainChatLink } from "./links";
 import { MenuSheet } from "./menu-sheet";
 import {
   centreBot,
   inColumn,
-  type MuseTab,
+  type FuseTab,
   statusLine,
   tabFor,
   waitingOnYou,
 } from "./model";
 import { NotificationsSheet } from "./notifications-sheet";
-import { type MuseIcon, RoundButton } from "./ui";
+import { type FuseIcon, RoundButton } from "./ui";
 
 /** The deployment's own name, from its brand.yaml: the name OpenBot's sidebar shows. */
 const PRODUCT = appConfig.brand.productName;
 
-const TABS: { id: MuseTab; label: string; icon: MuseIcon }[] = [
+const TABS: { id: FuseTab; label: string; icon: FuseIcon }[] = [
   { id: "chat", label: "Chat", icon: IconMessageCircle },
   { id: "activity", label: "Activity", icon: IconTable },
   { id: "ideas", label: "Ideas", icon: IconBulb },
@@ -89,7 +89,7 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
   const user = useQuery(currentUserQueryOptions());
   const userId = user.data?.id;
   const chosenId = useChosenBotId(userId);
-  const [sheet, setSheet] = useState<MuseSheetKind | null>(null);
+  const [sheet, setSheet] = useState<FuseSheetKind | null>(null);
 
   /*
    * The Bot this screen is about, when it is about one: the Bot of a one-to-one conversation, the Bot
@@ -132,23 +132,23 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
   });
 
   return (
-    <MuseContext.Provider value={{ bot, userId, openSheet: setSheet }}>
+    <FuseContext.Provider value={{ bot, userId, openSheet: setSheet }}>
       <div
-        className="openmuse-frame flex h-svh flex-col overflow-hidden bg-background text-foreground"
-        data-openmuse-tab={tab ?? "none"}
+        className="openfuse-frame flex h-svh flex-col overflow-hidden bg-background text-foreground"
+        data-openfuse-tab={tab ?? "none"}
       >
         <UpdateBanner />
         <SelfHostBanner />
         <div className="mx-auto w-full max-w-[760px] shrink-0">
           <header className="relative mx-5 h-[122px] shrink-0 pt-0.5 min-[900px]:h-[146px] min-[900px]:pt-3.5">
-            <div className="absolute top-4 left-0" data-openmuse-menu="">
+            <div className="absolute top-4 left-0" data-openfuse-menu="">
               <RoundButton
                 icon={IconMenu2}
                 label="Open conversations and menu"
                 onClick={() => setSheet("menu")}
               >
                 {/* OpenBot's own "a Bot needs you" mark, worn as OpenFuse's dot. */}
-                <span className="openmuse-menu-badge">
+                <span className="openfuse-menu-badge">
                   <BotsNavBadge />
                 </span>
               </RoundButton>
@@ -187,7 +187,7 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
                 </span>
                 <span
                   className="mb-1.5 max-w-full truncate text-[11px] text-muted-foreground"
-                  data-testid="openmuse-status"
+                  data-testid="openfuse-status"
                 >
                   {bot ? status : agents.isPending ? "" : "No Bots yet"}
                 </span>
@@ -202,7 +202,7 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
                 {waiting > 0 ? (
                   <span
                     aria-hidden="true"
-                    className="pointer-events-none absolute top-[7px] right-[9px] size-1.5 rounded-full bg-[var(--openmuse-accent)]"
+                    className="pointer-events-none absolute top-[7px] right-[9px] size-1.5 rounded-full bg-[var(--openfuse-accent)]"
                   />
                 ) : null}
               </RoundButton>
@@ -215,10 +215,10 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
          */}
         <main
           className={cn(
-            "openmuse-stage mx-auto flex min-h-0 w-full max-w-[760px] flex-1 flex-col overflow-hidden",
+            "openfuse-stage mx-auto flex min-h-0 w-full max-w-[760px] flex-1 flex-col overflow-hidden",
             !column && "min-[1100px]:max-w-none",
           )}
-          data-openmuse-width={column ? "column" : "page"}
+          data-openfuse-width={column ? "column" : "page"}
         >
           {children}
         </main>
@@ -227,14 +227,14 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
             aria-label={PRODUCT}
             className="flex shrink-0 justify-center px-[22px] pt-2.5 pb-[max(7px,env(safe-area-inset-bottom))] min-[900px]:pb-[22px]"
           >
-            <div className="flex w-full max-w-[370px] rounded-[40px] border border-[var(--openmuse-pill-border)] bg-[var(--openmuse-pill)] p-[5px] shadow-[0_2px_18px_0_var(--openmuse-pill-shadow)]">
+            <div className="flex w-full max-w-[370px] rounded-[40px] border border-[var(--openfuse-pill-border)] bg-[var(--openfuse-pill)] p-[5px] shadow-[0_2px_18px_0_var(--openfuse-pill-shadow)]">
               {TABS.map((item) => {
                 const active = item.id === tab;
                 const className = cn(
                   "flex h-[47px] flex-1 items-center justify-center rounded-[28px] text-foreground outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none",
                   active
-                    ? "bg-[var(--openmuse-tab-active)]"
-                    : "hover:bg-[var(--openmuse-tab-hover)]",
+                    ? "bg-[var(--openfuse-tab-active)]"
+                    : "hover:bg-[var(--openfuse-tab-hover)]",
                 );
                 return item.id === "chat" ? (
                   <MainChatLink
@@ -267,7 +267,7 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
         <NotificationsSheet onClose={() => setSheet(null)} />
       ) : null}
       {sheet === "bots" ? <BotsSheet onClose={() => setSheet(null)} /> : null}
-    </MuseContext.Provider>
+    </FuseContext.Provider>
   );
 }
 
@@ -279,7 +279,7 @@ function TabLink({
   className,
   children,
 }: {
-  tab: Exclude<MuseTab, "chat">;
+  tab: Exclude<FuseTab, "chat">;
   label: string;
   active: boolean;
   className: string;

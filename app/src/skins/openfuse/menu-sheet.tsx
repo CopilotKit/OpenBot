@@ -44,16 +44,16 @@ import { useNavigationItems } from "@/lib/navigation";
 import { relativeTime } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
-import { useMuse } from "./context";
+import { useFuse } from "./context";
 import { MainChatLink, NewChatLink } from "./links";
 import {
   Divider,
   ErrorNotice,
   LinkRow,
-  MuseButton,
-  MuseLinkButton,
-  MuseSheet,
-  museText,
+  FuseButton,
+  FuseLinkButton,
+  FuseSheet,
+  fuseText,
 } from "./ui";
 
 /**
@@ -61,7 +61,7 @@ import {
  * other OpenBot surface. Nothing here is OpenFuse's own data; each row opens an OpenBot route.
  */
 export function MenuSheet({ onClose }: { onClose: () => void }) {
-  const { bot } = useMuse();
+  const { bot } = useFuse();
   const user = useQuery(currentUserQueryOptions());
   const channels = useInfiniteQuery(channelListQueryOptions());
   const navigate = useNavigate();
@@ -77,7 +77,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
   const botName = bot?.name ?? "your Bot";
 
   return (
-    <MuseSheet
+    <FuseSheet
       bodyRef={body}
       onClose={onClose}
       subtitle={user.data?.name || user.data?.email}
@@ -90,13 +90,13 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
           render={<MainChatLink agentId={bot?.id} onClick={onClose} />}
           title="Main chat"
         />
-        <MuseLinkButton
+        <FuseLinkButton
           icon={IconPlus}
           primary
           render={<NewChatLink agentId={bot?.id} onClick={onClose} />}
         >
           New chat
-        </MuseLinkButton>
+        </FuseLinkButton>
         <LinkRow
           detail="Open any page, Bot or conversation"
           icon={IconSearch}
@@ -113,14 +113,14 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
           title="Command palette"
         />
         <div className="mt-3 flex items-center justify-between">
-          <h2 className={museText.heading}>Conversations</h2>
-          <MuseLinkButton
+          <h2 className={fuseText.heading}>Conversations</h2>
+          <FuseLinkButton
             icon={IconUsersGroup}
             render={<Link onClick={onClose} to="/channel/new" />}
             small
           >
             New group
-          </MuseLinkButton>
+          </FuseLinkButton>
         </div>
         <label className="relative block">
           <IconSearch
@@ -129,7 +129,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
           />
           <input
             aria-label="Search conversations"
-            className="min-h-[45px] w-full rounded-[19px] border border-border bg-card py-3 pr-4 pl-10 text-[16px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-[var(--openmuse-focus)]"
+            className="min-h-[45px] w-full rounded-[19px] border border-border bg-card py-3 pr-4 pl-10 text-[16px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-[var(--openfuse-focus)]"
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search conversations"
             value={search}
@@ -138,7 +138,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
         {channels.isPending ? null : channels.error ? (
           <ErrorNotice error="Couldn't load your conversations." />
         ) : shown.length === 0 ? (
-          <p className={museText.muted}>
+          <p className={fuseText.muted}>
             {searching
               ? `No conversation has “${search.trim()}” in its name or latest message.`
               : `Start a conversation with ${botName} and it shows up here.`}
@@ -159,7 +159,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
           scrollRoot={body}
           searching={searching}
         />
-        <p className={museText.small}>
+        <p className={fuseText.small}>
           A conversation stays with the Bots in it. Pin one to keep it at the
           top.
         </p>
@@ -183,7 +183,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
         </div>
         {signOutOffered ? (
           <>
-            <MuseButton
+            <FuseButton
               className="self-start"
               danger
               disabled={signOut.isPending}
@@ -195,12 +195,12 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
               small
             >
               Sign out
-            </MuseButton>
+            </FuseButton>
             <ErrorNotice error={signOut.error?.message} />
           </>
         ) : null}
       </div>
-    </MuseSheet>
+    </FuseSheet>
   );
 }
 
@@ -262,20 +262,20 @@ function ConversationRow({
         <ItemContent className="min-w-0 gap-0.5">
           <ItemTitle
             className={cn(
-              museText.body,
+              fuseText.body,
               "line-clamp-1 block",
               unread && "font-semibold",
             )}
           >
             {title}
           </ItemTitle>
-          <span className={cn(museText.small, "flex items-center gap-1.5")}>
+          <span className={cn(fuseText.small, "flex items-center gap-1.5")}>
             <span className="truncate">
               {who}
               {when ? ` · ${when}` : ""}
             </span>
             {busy ? (
-              <span className="shrink-0 text-[var(--openmuse-accent)]">
+              <span className="shrink-0 text-[var(--openfuse-accent)]">
                 · working
               </span>
             ) : null}
@@ -283,7 +283,7 @@ function ConversationRow({
         </ItemContent>
         {unread ? (
           <span
-            className="mt-2 size-2 shrink-0 rounded-full bg-[var(--openmuse-accent)]"
+            className="mt-2 size-2 shrink-0 rounded-full bg-[var(--openfuse-accent)]"
             role="img"
             aria-label="Unread"
           />
@@ -296,7 +296,7 @@ function ConversationRow({
         ) : null}
       </Item>
       <div className="flex gap-2">
-        <MuseButton
+        <FuseButton
           disabled={setPinned.isPending}
           icon={channel.pinned ? IconPinnedOff : IconPin}
           onClick={() =>
@@ -305,10 +305,10 @@ function ConversationRow({
           small
         >
           {channel.pinned ? "Unpin" : "Pin"}
-        </MuseButton>
-        <MuseButton icon={IconTrash} onClick={() => setConfirming(true)} small>
+        </FuseButton>
+        <FuseButton icon={IconTrash} onClick={() => setConfirming(true)} small>
           Delete
-        </MuseButton>
+        </FuseButton>
       </div>
       <ErrorNotice error={setPinned.error?.message} />
       <DeleteConversationDialog

@@ -1,4 +1,4 @@
-import { SKIN_IDS } from "@openbot/shared/user-preferences";
+import { currentSkinId, SKIN_IDS } from "@openbot/shared/user-preferences";
 import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import type { AppVariables } from "./auth/guards";
@@ -7,14 +7,15 @@ import type { UserPreferencesStore } from "./user-preferences";
 /*
  * Each preference is optional so one control can save its own without restating the others, and
  * the merge in Postgres keeps the rest. Strict, so an unknown key is refused rather than stored, and
- * at least one key, so an empty body is a mistake rather than a no-op write.
+ * at least one key, so an empty body is a mistake rather than a no-op write. A skin sent under the id
+ * it was renamed from (a tab opened before the rename) is saved under its new id.
  */
 const preferencesPatch = z
   .strictObject({
     messageListEmphasis: z.enum(["agent", "thread"]).optional(),
     selfHostBannerDismissed: z.boolean().optional(),
     narration: z.enum(["on", "off"]).optional(),
-    skin: z.enum(SKIN_IDS).optional(),
+    skin: z.string().transform(currentSkinId).pipe(z.enum(SKIN_IDS)).optional(),
     proactive: z.enum(["on", "off"]).optional(),
   })
   .refine((patch) => Object.keys(patch).length > 0);

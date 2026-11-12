@@ -36,19 +36,19 @@ import type { PluginsPage } from "@/lib/plugins/queries";
 import type { ProactiveSetting, ProactiveSuggestion } from "@/lib/proactive";
 import type { ResponsibilityRecord } from "@/lib/responsibilities";
 import type { RoutineRecord } from "@/lib/routines/queries";
-import { openmuse } from "@/skins/openmuse";
+import { openfuse } from "@/skins/openfuse";
 import {
   chooseBot,
   chosenBotKey,
   forgetChosenBots,
-} from "@/skins/openmuse/chosen-bot";
-import { OpenFuseFrame } from "@/skins/openmuse/frame";
+} from "@/skins/openfuse/chosen-bot";
+import { OpenFuseFrame } from "@/skins/openfuse/frame";
 import {
   centreBot,
   mainChannel,
   statusLine,
   tabFor,
-} from "@/skins/openmuse/model";
+} from "@/skins/openfuse/model";
 import { SKINS } from "@/skins/registry";
 
 /*
@@ -122,17 +122,17 @@ function channel(
 
 const scout = agent({ id: "scout", name: "Scout", title: "Research" });
 // OpenBot's default Bot: `defaultAgentProfile` prefers the picked harness over list order.
-const muse = agent({
+const fuse = agent({
   id: "picked-harness",
-  name: "Muse",
+  name: "Fuse",
   title: "Your helper",
 });
 
 const channels = [
   channel({
-    id: "c-muse",
-    agentIds: [muse.id],
-    name: "Muse",
+    id: "c-fuse",
+    agentIds: [fuse.id],
+    name: "Fuse",
     summary: "Planning the week",
   }),
   channel({
@@ -144,7 +144,7 @@ const channels = [
   }),
   channel({
     id: "g-team",
-    agentIds: [muse.id, scout.id],
+    agentIds: [fuse.id, scout.id],
     name: "Team",
     summary: "Launch plan",
   }),
@@ -161,11 +161,11 @@ const inbox: ApprovalInboxData = {
       status: "pending",
       createdAt: now,
       action: {
-        botId: muse.id,
+        botId: fuse.id,
         toolRef: "computer_open_url",
         effect: "read",
         scope: "https://example.com",
-        threadId: "thread-c-muse",
+        threadId: "thread-c-fuse",
         args: { url: "https://example.com" },
         target: null,
       },
@@ -175,11 +175,11 @@ const inbox: ApprovalInboxData = {
       status: "consumed",
       createdAt: earlier,
       action: {
-        botId: muse.id,
+        botId: fuse.id,
         toolRef: "send_email",
         effect: "write",
         scope: "mail",
-        threadId: "thread-c-muse",
+        threadId: "thread-c-fuse",
         args: {},
         target: null,
       },
@@ -189,8 +189,8 @@ const inbox: ApprovalInboxData = {
 
 const attention: BotAttention[] = [
   {
-    agentId: muse.id,
-    name: muse.name,
+    agentId: fuse.id,
+    name: fuse.name,
     questions: 0,
     approvals: 1,
     handoffs: 0,
@@ -223,7 +223,7 @@ const activity: BotActivity = {
       detail: "Reading the overnight news",
       status: "running",
       at: now,
-      channelId: "c-muse",
+      channelId: "c-fuse",
       needsYou: false,
       stoppable: false,
       cancellable: false,
@@ -248,9 +248,9 @@ const activity: BotActivity = {
 
 const settings: ProactiveSetting[] = [
   {
-    id: "p-muse",
-    agentId: muse.id,
-    channelId: "c-muse",
+    id: "p-fuse",
+    agentId: fuse.id,
+    channelId: "c-fuse",
     focus: "",
     enabled: true,
     intervalMinutes: 240,
@@ -263,8 +263,8 @@ const settings: ProactiveSetting[] = [
 
 const suggestions: ProactiveSuggestion[] = [
   {
-    id: "s-muse",
-    agentId: muse.id,
+    id: "s-fuse",
+    agentId: fuse.id,
     title: "Book a table for Friday dinner",
     detail: "Jamie asked about Friday.\nThe thread is in your inbox.",
     sourceApp: "Gmail",
@@ -289,14 +289,14 @@ const suggestions: ProactiveSuggestion[] = [
 const routines: RoutineRecord[] = [
   {
     id: "rt-1",
-    agentId: muse.id,
+    agentId: fuse.id,
     schedule: "Every weekday at 9:00",
     timezone: "Europe/London",
     instruction: "Send me the headlines",
     title: null,
     channel: {
-      id: "c-muse",
-      name: "Muse",
+      id: "c-fuse",
+      name: "Fuse",
       title: "Morning headlines",
       gone: false,
     },
@@ -309,9 +309,9 @@ const routines: RoutineRecord[] = [
 const responsibilities: ResponsibilityRecord[] = [
   {
     id: "g-1",
-    agentId: muse.id,
-    channelId: "c-muse",
-    threadId: "thread-c-muse",
+    agentId: fuse.id,
+    channelId: "c-fuse",
+    threadId: "thread-c-fuse",
     title: "Keep my inbox at zero",
     instruction: "Triage new mail each morning",
     successCriteria: "Nothing unread by noon",
@@ -345,7 +345,7 @@ const memories: MemoryRecord[] = [
   {
     id: "m-1",
     content: "Prefers morning meetings",
-    provenance: "You told Muse",
+    provenance: "You told Fuse",
     sourceId: null,
     enabled: true,
     reviewState: "confirmed",
@@ -404,11 +404,11 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
         onboarding: null,
       },
     },
-    "/api/agents": { agents: [scout, muse] },
+    "/api/agents": { agents: [scout, fuse] },
     "/api/channels": { channels, nextCursor: null },
     "/api/approvals": inbox,
     "/api/bots/attention": { bots: attention, lastPingId: null },
-    [`/api/bots/${muse.id}/activity`]: { activity },
+    [`/api/bots/${fuse.id}/activity`]: { activity },
     [`/api/bots/${scout.id}/activity`]: {
       activity: { inProgress: [], scheduled: [], completed: [] },
     },
@@ -484,7 +484,7 @@ function renderAt(path: string) {
     component: function SkinScreen() {
       // The same lookup `/s/$screen` makes for the active skin.
       const { screen: key } = skinScreen.useParams();
-      const Screen = openmuse.screens?.[key];
+      const Screen = openfuse.screens?.[key];
       return Screen ? <Screen /> : <Page />;
     },
   });
@@ -547,9 +547,9 @@ async function openMenu() {
 
 describe("OpenFuse is a registered skin with its own frame", () => {
   test("the registry hands OpenBot the frame and the three skin screens", () => {
-    expect(SKINS.openmuse.Frame).toBe(OpenFuseFrame);
+    expect(SKINS.openfuse.Frame).toBe(OpenFuseFrame);
     // Apps is OpenBot's own Connections page, so the skin adds three screens, not four.
-    expect(Object.keys(SKINS.openmuse.screens ?? {}).sort()).toEqual([
+    expect(Object.keys(SKINS.openfuse.screens ?? {}).sort()).toEqual([
       "activity",
       "goals",
       "ideas",
@@ -562,10 +562,10 @@ describe("the frame", () => {
     serve();
     renderAt("/connections");
     const centre = await page().findByRole("button", {
-      name: /^Muse, Ready to review · 1 approval\. Switch Bot$/,
+      name: /^Fuse, Ready to review · 1 approval\. Switch Bot$/,
     });
-    expect(centre.textContent).toContain("Muse");
-    expect(page().getByTestId("openmuse-status").textContent).toBe(
+    expect(centre.textContent).toContain("Fuse");
+    expect(page().getByTestId("openfuse-status").textContent).toBe(
       "Ready to review · 1 approval",
     );
     // The bell carries the one pending approval.
@@ -580,7 +580,7 @@ describe("the frame", () => {
     await page().findByRole("button", { name: /^Scout, .*Switch Bot$/ });
     // Scout has a turn running in its channel; the line says so.
     await waitFor(() =>
-      expect(page().getByTestId("openmuse-status").textContent).toBe(
+      expect(page().getByTestId("openfuse-status").textContent).toBe(
         "Working on Competitor notes…",
       ),
     );
@@ -598,7 +598,7 @@ describe("the frame", () => {
     await waitFor(() =>
       expect(
         tabs.getByRole("link", { name: "Chat" }).getAttribute("href"),
-      ).toBe("/channel/c-muse"),
+      ).toBe("/channel/c-fuse"),
     );
     expect(
       tabs.getByRole("link", { name: "Activity" }).getAttribute("href"),
@@ -619,7 +619,7 @@ describe("the frame", () => {
     ["/s/ideas", "Ideas"],
     ["/s/goals", "Routines"],
     ["/connections", "Apps"],
-    ["/channel/c-muse", "Chat"],
+    ["/channel/c-fuse", "Chat"],
     ["/routines", null],
     ["/settings/approvals", null],
     ["/bots/scout/setup", null],
@@ -639,10 +639,10 @@ describe("the frame", () => {
   test.each([
     ["/s/goals", "column"],
     ["/connections", "column"],
-    ["/channel/c-muse", "column"],
+    ["/channel/c-fuse", "column"],
     // The Bot's computer open beside the conversation needs OpenBot's own width.
-    ["/channel/c-muse?watch=true", "page"],
-    ["/channel/c-muse?settings=true", "page"],
+    ["/channel/c-fuse?watch=true", "page"],
+    ["/channel/c-fuse?settings=true", "page"],
     ["/bots/scout/setup", "page"],
     ["/routines", "page"],
   ])("%s is drawn at the %s width", async (path, width) => {
@@ -651,8 +651,8 @@ describe("the frame", () => {
     await page().findByRole("navigation", { name: PRODUCT });
     expect(
       document
-        .querySelector(".openmuse-stage")
-        ?.getAttribute("data-openmuse-width"),
+        .querySelector(".openfuse-stage")
+        ?.getAttribute("data-openfuse-width"),
     ).toBe(width);
   });
 
@@ -672,8 +672,16 @@ describe("the frame", () => {
     forgetChosenBots();
     serve({ userId: "u-2" });
     renderAt("/s/activity");
-    await page().findByRole("button", { name: /^Muse, / });
+    await page().findByRole("button", { name: /^Fuse, / });
     expect(window.localStorage.getItem(chosenBotKey("u-2"))).toBeNull();
+  });
+
+  test("a Bot chosen while the skin was called OpenMuse is still at the centre", async () => {
+    window.localStorage.setItem("openmuse-bot:u-1", scout.id);
+    forgetChosenBots();
+    serve({ userId: "u-1" });
+    renderAt("/s/activity");
+    await page().findByRole("button", { name: /^Scout, / });
   });
 
   test("Chat opens a new conversation with a Bot that has none yet", async () => {
@@ -725,7 +733,7 @@ describe("the frame wears the deployment's brand, not the skin's name", () => {
 
   test.each([
     "/",
-    "/channel/c-muse",
+    "/channel/c-fuse",
     "/s/activity",
     "/s/ideas",
     "/s/goals",
@@ -751,7 +759,7 @@ describe("the frame wears the deployment's brand, not the skin's name", () => {
     renderAt("/connections");
     const centre = await page().findByRole("button", { name: /Switch Bot$/ });
     // AbstractAvatar names the drawing after the Bot, as on its OpenBot page.
-    expect(within(centre).getByRole("img", { name: "Muse" })).toBeTruthy();
+    expect(within(centre).getByRole("img", { name: "Fuse" })).toBeTruthy();
     expect(capybaras()).toEqual([]);
   });
 
@@ -776,7 +784,7 @@ describe("the frame wears the deployment's brand, not the skin's name", () => {
 describe("every OpenBot surface stays reachable", () => {
   // A row's name is its title and then its one line of detail, so each is matched from its start.
   const surfaces: [RegExp, string][] = [
-    [/^Main chat/, "/channel/c-muse"],
+    [/^Main chat/, "/channel/c-fuse"],
     [/^New chat$/, "/channel/new?agent=picked-harness"],
     [/^New group$/, "/channel/new"],
     [/^Home$/, "/"],
@@ -802,7 +810,7 @@ describe("every OpenBot surface stays reachable", () => {
       menu
         .getByRole("link", { name: /Planning the week/ })
         .getAttribute("href"),
-    ).toBe("/channel/c-muse");
+    ).toBe("/channel/c-fuse");
     expect(
       menu.getByRole("link", { name: /Competitor notes/ }).getAttribute("href"),
     ).toBe("/channel/c-scout");
@@ -838,7 +846,7 @@ describe("every OpenBot surface stays reachable", () => {
 
   test.each([
     "/",
-    "/channel/c-muse",
+    "/channel/c-fuse",
     "/s/activity",
     "/s/ideas",
     "/s/goals",
@@ -861,7 +869,7 @@ describe("every OpenBot surface stays reachable", () => {
     renderAt("/connections");
     fireEvent.click(await page().findByRole("button", { name: /Switch Bot$/ }));
     const sheet = within(await page().findByRole("dialog"));
-    expect(hrefOf(/^Muse's page/)).toBe("/bots/picked-harness");
+    expect(hrefOf(/^Fuse's page/)).toBe("/bots/picked-harness");
     expect(
       sheet.getByRole("link", { name: /^All Bots/ }).getAttribute("href"),
     ).toBe("/bots");
@@ -884,7 +892,7 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
     renderAt("/s/activity");
     // OpenBot's Needs you section, under the Bot's name, with its approval's details always shown.
     expect(await page().findByText("Open url")).toBeTruthy();
-    expect(page().getAllByText("Muse").length).toBeGreaterThan(0);
+    expect(page().getAllByText("Fuse").length).toBeGreaterThan(0);
     // Labelled, as the card in OpenBot lists what it would send: the URL is the target and the value.
     expect(page().getByText("URL")).toBeTruthy();
     expect(page().getAllByText("https://example.com").length).toBe(2);
@@ -910,7 +918,7 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
         calls.some(
           (call) =>
             call.method === "POST" &&
-            call.path === "/api/proactive/suggestions/s-muse/start",
+            call.path === "/api/proactive/suggestions/s-fuse/start",
         ),
       ).toBe(true),
     );
@@ -954,7 +962,7 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
       await page().findByRole("button", { name: "Needs you, 1 waiting" }),
     );
     const sheet = within(await page().findByRole("dialog"));
-    expect(await sheet.findByText("Muse wants to open url")).toBeTruthy();
+    expect(await sheet.findByText("Fuse wants to open url")).toBeTruthy();
     // What it will send is always on screen, as in OpenBot.
     expect(sheet.getByText("URL")).toBeTruthy();
     expect(sheet.getAllByText("https://example.com").length).toBe(2);
@@ -972,21 +980,21 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
 
 describe("the rules the frame runs on", () => {
   test("the centre follows the conversation, then the choice, then OpenBot's default", () => {
-    const agents = [scout, muse];
-    expect(centreBot(agents, null, undefined)?.id).toBe(muse.id);
+    const agents = [scout, fuse];
+    expect(centreBot(agents, null, undefined)?.id).toBe(fuse.id);
     expect(centreBot(agents, scout.id, undefined)?.id).toBe(scout.id);
-    expect(centreBot(agents, muse.id, scout.id)?.id).toBe(scout.id);
-    expect(centreBot(agents, "deleted-bot", undefined)?.id).toBe(muse.id);
+    expect(centreBot(agents, fuse.id, scout.id)?.id).toBe(scout.id);
+    expect(centreBot(agents, "deleted-bot", undefined)?.id).toBe(fuse.id);
     expect(centreBot([], null, undefined)).toBeUndefined();
   });
 
   test("a group is never a Bot's main chat", () => {
-    expect(mainChannel(muse.id, channels)?.id).toBe("c-muse");
+    expect(mainChannel(fuse.id, channels)?.id).toBe("c-fuse");
     expect(mainChannel("nobody", channels)).toBeUndefined();
     expect(
       mainChannel(
-        muse.id,
-        channels.filter((row) => row.id !== "c-muse"),
+        fuse.id,
+        channels.filter((row) => row.id !== "c-fuse"),
       ),
     ).toBeUndefined();
   });
