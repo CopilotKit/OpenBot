@@ -34,6 +34,11 @@ every deployment:
 
 ### OpenBot Desktop
 
+- **Get Troubleshooting Logs… no longer quits OpenBot Desktop on a Mac.** Chosen from the OpenBot
+  menu, it could seem to do nothing for a few seconds and then close the app, after saving the
+  file. macOS refused to show the file in Finder from where OpenBot asked. It now asks from the
+  right place, and a Finder that can't open is noted in the log. While the logs are gathered, the
+  menu says Gathering Logs… and the item can't be chosen again.
 - **On a Mac, the window's buttons no longer cover a skin's controls.** With the OpenDuet skin the
   close, minimise and zoom buttons sat on the "OpenBot" name at the top of the menu, and on the back
   button of every page opened over the app. OpenDots and OpenMuse had their own controls under them
