@@ -1097,6 +1097,13 @@ fn explain_machine_error(error: &str) -> String {
                 Windows, then open OpenBot again."
             .into();
     }
+    // WSL keeps this code across display languages (the report in #1513 was Portuguese).
+    // It does not identify the disabled service, so do not guess one or change service settings.
+    if error.to_ascii_lowercase().contains("wsl/0x80070422") {
+        return "Windows couldn't start a service OpenBot needs. Ask your Windows admin to check \
+                that the services for Windows Subsystem for Linux are turned on, then try again."
+            .into();
+    }
     if error.contains("without Podman user-mode networking") {
         return "OpenBot needs to restart the software it runs on, and can't while it runs. Quit \
                 OpenBot, restart your computer, then open OpenBot again."
@@ -3997,6 +4004,35 @@ table ip nat { # handle 5
             explained.contains("restart"),
             "did not mention the restart: {explained}"
         );
+    }
+
+    #[test]
+    fn a_disabled_wsl_service_is_explained_without_matching_localized_words() {
+        let detail = "podman machine init exited with status 125; stdout: \
+            O serviço não pode ser iniciado porque está desativado ou não tem dispositivos \
+            ativados associados. Código de erro: Wsl/0x80070422; \
+            stderr: Error: the WSL import of guest OS failed";
+        let stopped = StepOutcome::stopped(Step::CreateMachine, detail);
+        assert!(!stopped.ok);
+        assert_eq!(
+            stopped.said,
+            "Windows couldn't start a service OpenBot needs. Ask your Windows admin to check \
+             that the services for Windows Subsystem for Linux are turned on, then try again."
+        );
+        assert_eq!(stopped.detail.as_deref(), Some(detail));
+        assert_eq!(stopped.problem().said, stopped.said);
+        assert_eq!(stopped.problem().detail, stopped.detail);
+        assert_eq!(explain_machine_error("WSL/0X80070422"), stopped.said);
+    }
+
+    #[test]
+    fn other_disabled_services_do_not_get_wsl_instructions() {
+        for error in ["Error 0x80070422", "Wsl/0x800701bc", "WSL import failed"] {
+            assert_eq!(
+                explain_machine_error(error),
+                "OpenBot couldn't prepare this computer to run it. Try again."
+            );
+        }
     }
 
     /// A step that stopped keeps the engine's words, and does not make them the headline. This is
