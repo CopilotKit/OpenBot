@@ -26,7 +26,9 @@ if [ -f "$ROOT/.openbot-release.json" ] && [ -z "${OPENBOT_UPDATE_OPERATION:-}" 
     export "$release_setting"
   done <<< "$release_environment"
 fi
-LOGS="$ROOT/.logs"
+# OPENBOT_LOG_DIR, for a second stack from the same checkout: the end-to-end run's (e2e/) keeps its
+# logs beside its screenshots rather than over the logs of a stack a developer already has running.
+LOGS="${OPENBOT_LOG_DIR:-$ROOT/.logs}"
 mkdir -p "$LOGS"
 
 if [ ! -f "$ROOT/.env" ]; then
@@ -365,7 +367,13 @@ fi
 # in the page, on the one computer. The server finds it through `OPENBOT_BROWSER_URL`, exported so the
 # server started below reads it over .env. Never fatal: without Chrome or Edge, or with a Recorder
 # that will not build, OpenBot starts without the person's browser and the line says why.
-if [ "$EDITION" = "personal" ]; then
+#
+# OPENBOT_PERSON_BROWSER=off starts OpenBot without it, as OpenBot Desktop runs: the end-to-end run
+# (e2e/) sets it, so a test run never opens a Chrome window on the desktop of whoever runs it.
+PERSON_BROWSER="$(setting OPENBOT_PERSON_BROWSER on)"
+if [ "$EDITION" = "personal" ] && [ "$PERSON_BROWSER" = "off" ]; then
+  info "  your browser: off (OPENBOT_PERSON_BROWSER=off)"
+elif [ "$EDITION" = "personal" ]; then
   BROWSER_PORT="$(setting BROWSER_PORT 4101)"
   if [ ! -f extension/dist/manifest.json ]; then
     info "  building the Recorder for your browser"
