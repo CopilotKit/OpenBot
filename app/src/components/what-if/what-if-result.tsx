@@ -69,7 +69,7 @@ const BASIS_WORDS: Record<WhatIfLayerId, string> = {
 
 /** The page each control's setting is on, as the sidebar names it. */
 const PAGE_WORDS: Record<NonNullable<WhatIfLayer["page"]>, string> = {
-  "/admin/plugins": "Open Plugins",
+  "/admin/plugins": "Open Apps",
   "/admin/permissions": "Open Permissions",
   "/admin/computers": "Open Computers",
   "/admin/boundaries": "Open Boundaries",

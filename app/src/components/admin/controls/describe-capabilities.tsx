@@ -393,7 +393,7 @@ export function PermissionsPreview({
           </FieldLabel>
           <FieldDescription>
             The newest actions people took with what they would lose, from
-            Audit.
+            Activity.
           </FieldDescription>
           <ReplayRows rows={used} total={usedTotal} />
         </Field>

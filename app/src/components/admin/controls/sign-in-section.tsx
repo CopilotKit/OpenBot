@@ -16,7 +16,7 @@ import { ControlsSection } from "./controls-section";
 export function SignInSection() {
   return (
     <ControlsSection
-      description="Addresses in INITIAL_ADMIN_EMAILS can always use social sign-in as an emergency way in. Each of those sign-ins shows in Audit."
+      description="Addresses in INITIAL_ADMIN_EMAILS can always use social sign-in as an emergency way in. Each of those sign-ins shows in Activity."
       title="Sign-in"
     >
       {({ data, setSetting, saving }) => (

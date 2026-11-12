@@ -7,6 +7,7 @@ import {
   IconPlayerPause,
   IconPlayerPlay,
   IconPlus,
+  IconSearch,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
@@ -20,6 +21,11 @@ import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import { OpenBotVersion } from "@/components/layout/openbot-version";
+import {
+  COMMAND_MENU_KEYS,
+  openCommandMenu,
+  useBeforeCommandNavigate,
+} from "@/components/navigation/command-menu";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
 import {
@@ -165,15 +171,21 @@ function Rail({
   /** Whether the rail carries the Bots badge: at desktop width, where the rail is on screen. */
   showBadge: boolean;
 }) {
-  // OpenDots draws Routines itself, as its own screen just above, so not a second time from the list.
+  // OpenDots draws Routines itself, as its own screen just above, and Memories in its sidebar. The
+  // shared list's Routines and Memory are left out.
   const navigation = useNavigationItems().filter(
-    (item) => item.id !== "routines",
+    (item) => item.id !== "routines" && item.id !== "memory",
   );
   return (
+    /*
+     * In OpenBot Desktop on macOS the window's buttons sit over the rail's top, about 21–37px down
+     * (`data-desktop-titlebar`, macOS only), so the rail then starts 32px lower, below them, and
+     * the sidebar beside it moves down with it.
+     */
     <nav
       aria-label="Workspace navigation"
       data-opendots-chrome
-      className="flex w-12 shrink-0 flex-col items-center gap-3 border-r border-(--opendots-line) bg-(--opendots-rail) px-[5px] py-4 max-md:hidden"
+      className="flex w-12 shrink-0 flex-col items-center gap-3 border-r border-(--opendots-line) bg-(--opendots-rail) px-[5px] py-4 max-md:hidden in-data-[desktop-titlebar=overlay]:pt-12"
     >
       {/* OpenBot's own mark where OpenDots puts its monogram; the deployment owns the identity. */}
       <Link
@@ -199,6 +211,17 @@ function Rail({
         <Link {...newChat} aria-label="New chat" className={railButton}>
           <IconPlus className="size-[19px]!" />
         </Link>
+      </RailTip>
+      <RailTip label="Command palette">
+        <button
+          aria-keyshortcuts={COMMAND_MENU_KEYS}
+          aria-label="Command palette"
+          className={railButton}
+          onClick={openCommandMenu}
+          type="button"
+        >
+          <IconSearch />
+        </button>
       </RailTip>
       <RailTip label="Routines">
         <Link
@@ -274,7 +297,17 @@ function Topbar({
   return (
     <header
       data-opendots-chrome
-      className="flex h-16 shrink-0 items-center gap-4 border-b border-(--opendots-line) bg-(--opendots-topbar) px-[22px] max-md:pr-[15px] max-md:pl-12"
+      className={cn(
+        "flex h-16 shrink-0 items-center gap-4 border-b border-(--opendots-line) bg-(--opendots-topbar) px-[22px] max-md:pr-[15px] max-md:pl-12",
+        /*
+         * In OpenBot Desktop on macOS the window's buttons sit over the page's top-left corner,
+         * ending 81px in (`data-desktop-titlebar`, macOS only). With the sidebar hidden the bar
+         * starts beside the 48px rail, so its first control moves to 88px in; on a narrow window
+         * the menu button moves there, and the bar starts after it.
+         */
+        "max-md:in-data-[desktop-titlebar=overlay]:pl-[136px]",
+        navCollapsed && "md:in-data-[desktop-titlebar=overlay]:pl-10",
+      )}
     >
       <button
         aria-controls="opendots-sidebar"
@@ -342,6 +375,8 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
   const place = usePlace();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Opened over the phone drawer with Cmd/Ctrl+K, the menu closes it before it navigates.
+  useBeforeCommandNavigate(() => setMobileOpen(false));
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [paneOpen, setPaneOpen] = useState(false);
   const href = useRouterState({ select: (state) => state.location.href });
@@ -398,7 +433,7 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
           <button
             aria-expanded={mobileOpen}
             aria-label="Open navigation"
-            className="fixed top-3.5 left-2.5 z-20 grid size-9 place-items-center rounded-lg text-(--opendots-menu-ink) outline-none focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-[21px]"
+            className="fixed top-3.5 left-2.5 z-20 grid size-9 place-items-center rounded-lg text-(--opendots-menu-ink) outline-none focus-visible:ring-2 focus-visible:ring-ring in-data-[desktop-titlebar=overlay]:left-[88px] [&_svg]:size-[21px]"
             data-opendots-chrome
             onClick={() => setMobileOpen(true)}
             type="button"

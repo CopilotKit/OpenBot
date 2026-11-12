@@ -8,7 +8,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { AccessSections } from "@/components/bot-profile/access";
+import { AppsSections, SkillsSections } from "@/components/bot-profile/access";
 import type { AgentProfile } from "@/lib/agents/queries";
 import type { AppAccess } from "@/lib/app-access/queries";
 import { appAccess } from "./app-access-fixture";
@@ -113,7 +113,12 @@ function draw(agent: AgentProfile) {
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({
-      component: () => <AccessSections agent={agent} />,
+      component: () => (
+        <>
+          <AppsSections agent={agent} />
+          <SkillsSections agent={agent} />
+        </>
+      ),
     }),
   });
   return render(
@@ -167,6 +172,6 @@ test("an app an admin gave this Bot is on, and not yours to switch off", async (
 test("somebody else's Bot has no Your apps section", async () => {
   serving([]);
   const view = draw({ ...BOT, mine: false });
-  await view.findByText("What it can use");
+  await view.findByText("Apps it can use");
   expect(view.queryByText("Your apps")).toBeNull();
 });

@@ -7,6 +7,7 @@ import { MINIMUM_INTERVAL_MS } from "./schedule";
 import {
   NO_SHARED_CHANNEL,
   RoutineNotFoundError,
+  type RoutineRefusalCode,
   RoutineRefusedError,
   type RoutineRunOutcome,
   type RoutineStore,
@@ -70,7 +71,7 @@ export function createRoutineRoutes(
         void runner.run(runId).catch(() => {});
         return context.json({ accepted: true, runId }, 202);
       } catch (error) {
-        return mapStoreError(context, error);
+        return mapStoreError(context, error, "run");
       }
     });
   }
@@ -92,7 +93,7 @@ export function createRoutineRoutes(
         })),
       });
     } catch (error) {
-      return mapStoreError(context, error);
+      return mapStoreError(context, error, "runs");
     }
   });
 
@@ -153,9 +154,13 @@ export function createRoutineRoutes(
         cron,
         timezone: text("timezone"),
         channelId,
+        goalId: text("goalId"),
       });
-      const summary = (await routineStore.listFor(context.var.actor.id)).find(
-        (candidate) => candidate.id === routine.id,
+      // The routine is saved, so the answer is 201 whatever happens to this read: it only fills
+      // in the row's words. The page treats a failed create as "not saved".
+      const summary = await routineStore.listFor(context.var.actor.id).then(
+        (rows) => rows.find((candidate) => candidate.id === routine.id),
+        () => undefined,
       );
       return context.json(
         { routine: summary ? routineDto(summary) : { id: routine.id } },
@@ -176,7 +181,7 @@ export function createRoutineRoutes(
           400,
         );
       }
-      return mapStoreError(context, error);
+      return mapStoreError(context, error, "create");
     }
   });
 
@@ -197,7 +202,7 @@ export function createRoutineRoutes(
       await routineStore.setEnabled(context.var.actor.id, id, enabled);
       return context.json({ enabled });
     } catch (error) {
-      return mapStoreError(context, error);
+      return mapStoreError(context, error, "enable");
     }
   });
 
@@ -210,7 +215,7 @@ export function createRoutineRoutes(
       await routineStore.remove(context.var.actor.id, id);
       return context.body(null, 204);
     } catch (error) {
-      return mapStoreError(context, error);
+      return mapStoreError(context, error, "delete");
     }
   });
 
@@ -249,6 +254,8 @@ type RoutineDto = {
   enabled: boolean;
   nextRunAt: string;
   lastRun: { status: RoutineRunOutcome | null; at: string | null } | null;
+  /** The goal it runs, or null. The Routines page shows it as a start of that goal, not a row. */
+  goalId: string | null;
 };
 
 export const SWEEP_SILENCE_MS = MINIMUM_INTERVAL_MS;
@@ -288,17 +295,68 @@ function routineDto(routine: RoutineSummary): RoutineDto {
           at: routine.lastRun.finishedAt?.toISOString() ?? null,
         }
       : null,
+    goalId: routine.goalId,
   };
 }
 
-function mapStoreError(context: Context, error: unknown): Response {
+/** The routes that answer a store refusal, each with its own sentences. */
+type RefusalRoute = "create" | "enable" | "run" | "runs" | "delete";
+
+/**
+ * The refusals the store words for a model (it names a tool, or says "I"), said to a person. The
+ * store keeps its own sentence for the Bot's tools; the rest read well as they are.
+ *
+ * KEYED BY ROUTE, THEN CODE, because the same refusal asks for different things on different
+ * screens. Only the create form offers a goal to choose again, and its time zone is the browser's,
+ * so a time zone OpenBot doesn't know is set up by asking a Bot instead; the enable switch
+ * offers nothing to choose, and there is no edit endpoint, so a routine with a time zone OpenBot
+ * doesn't know can only be replaced. A code a route can't raise has no entry there, and an entry
+ * missing for a coded refusal falls back to the store's own sentence.
+ *
+ * Call sites: POST / (create), PUT /:id/enabled (enable), POST /:id/run (run), GET /:id/runs (runs),
+ * DELETE /:id (delete).
+ */
+const PERSON_REFUSALS: Record<
+  RefusalRoute,
+  Partial<Record<RoutineRefusalCode, string>>
+> = {
+  create: {
+    goal_not_found: "This Bot doesn't have that goal. Choose another one.",
+    goal_complete:
+      "That goal is complete, so a routine can't run it. Choose another one.",
+    // The time zone is the browser's own, and New routine has nothing to choose it with.
+    unknown_timezone:
+      "Your browser's time zone isn't one OpenBot knows. Ask your Bot to set this up instead.",
+  },
+  enable: {
+    goal_complete:
+      "Its goal is complete, so this schedule can't be switched on. To do it again, make a new routine.",
+    unknown_timezone:
+      "This routine's time zone isn't one OpenBot knows. Ask its Bot to change its schedule.",
+  },
+  run: {},
+  runs: {},
+  delete: {},
+};
+
+function mapStoreError(
+  context: Context,
+  error: unknown,
+  route: RefusalRoute,
+): Response {
   // The store's own sentence, verbatim: it already reads the same whether the id belongs to nobody
   // or to somebody else, which is what keeps ownership unprobeable from out here.
   if (error instanceof RoutineNotFoundError) {
     return context.json({ error: error.message }, 404);
   }
   if (error instanceof RoutineRefusedError) {
-    return context.json({ error: error.message }, 400);
+    return context.json(
+      {
+        error:
+          (error.code && PERSON_REFUSALS[route][error.code]) ?? error.message,
+      },
+      400,
+    );
   }
   throw error;
 }

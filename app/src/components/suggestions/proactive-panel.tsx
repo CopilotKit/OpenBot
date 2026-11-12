@@ -2,7 +2,6 @@ import {
   IconBulb,
   IconChevronDown,
   IconChevronRight,
-  IconClock,
   IconPlus,
   IconRadar,
 } from "@tabler/icons-react";
@@ -46,7 +45,6 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
 import { conversationLabel } from "@/lib/channels/label";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import {
-  changeProactiveSettingMutationOptions,
   createProactiveSettingMutationOptions,
   type LastCheckIn,
   type ProactiveSetting,
@@ -55,25 +53,17 @@ import {
   proactiveSuggestionsQueryOptions,
 } from "@/lib/proactive";
 import { relativeTime } from "@/lib/relative-time";
+import { CHECK_IN_INTERVALS, intervalLabel } from "@/lib/routines/merged";
 import { useUserPreferences } from "@/lib/settings/message-list";
-import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import { SuggestionRow } from "./suggestion-row";
 
-const intervals = [
-  { minutes: 60, label: "Every hour" },
-  { minutes: 240, label: "Every 4 hours" },
-  { minutes: 720, label: "Twice a day" },
-  { minutes: 1440, label: "Once a day" },
-];
+export const intervals = CHECK_IN_INTERVALS;
 /** The label map, so a closed trigger says "Every 4 hours" rather than 240. */
-const intervalItems = intervals.map((interval) => ({
+export const intervalItems = intervals.map((interval) => ({
   value: interval.minutes,
   label: interval.label,
 }));
-const intervalLabel = (minutes: number) =>
-  intervals.find((interval) => interval.minutes === minutes)?.label ??
-  `Every ${minutes} minutes`;
 /** How many suggestions show before the rest fold behind "Show more". */
 const SUGGESTIONS_SHOWN = 3;
 
@@ -155,7 +145,7 @@ export function SuggestionsInbox({
  * Why no Bot checks in for this person whatever its own setting says, or null when they do: an
  * admin turned check-ins off for them, or they turned them off for all their Bots.
  */
-function useCheckInsBlocked(): string | null {
+export function useCheckInsBlocked(): string | null {
   const allowed = useQuery(proactiveAllowedQueryOptions());
   const preferences = useUserPreferences();
   if (allowed.data === false) return "Turned off by your admin";
@@ -208,11 +198,8 @@ export function ProactiveResearchSettings({
           {blocked === "Off for all your Bots" ? (
             <>
               You turned off check-ins for all your Bots in{" "}
-              <Link
-                className="underline underline-offset-4"
-                to="/settings/notifications"
-              >
-                Notifications
+              <Link className="underline underline-offset-4" to="/routines">
+                Routines
               </Link>
               .
             </>
@@ -268,7 +255,7 @@ export function ProactiveResearchSettings({
  * check-ins, and only the person's own conversations with the Bot: a task's conversation holds one
  * piece of work, and is no place for check-ins to reach them.
  */
-function TurnOnResearchDialog({
+export function TurnOnResearchDialog({
   fixedBot,
   onClose,
 }: {
@@ -436,7 +423,10 @@ function TurnOnResearchDialog({
  * Whether it is on, and when it runs next. Stated rather than captured, so it follows the query.
  * While check-ins are off for all the person's Bots, that is the answer, whatever this one says.
  */
-function checkInStatus(setting: ProactiveSetting, blocked: string | null) {
+export function checkInStatus(
+  setting: ProactiveSetting,
+  blocked: string | null,
+) {
   return !setting.enabled
     ? "Off"
     : blocked
@@ -473,185 +463,78 @@ export function lastCheckInLine(run: LastCheckIn | null | undefined) {
 }
 
 /**
- * One Bot's check-ins: a summary of its current answer and a chevron, opening a dialog that changes
- * it. The dialog is the row's sibling, not its child, so a click inside it does not bubble back to
- * the row and reopen it.
+ * One Bot's check-ins: a summary of its current answer and a chevron, linking to its page, where it
+ * is changed, run and removed.
  *
  * The summary leads with how often and when it runs next, which always fits. A last check-in that
  * was skipped or couldn't finish says why on a line of its own, since that is something to act on,
  * and the focus, in the person's own words and often long, comes last on one line.
  */
-function SettingRow({
+export function SettingRow({
   setting,
   botName,
   blocked,
+  showBot = true,
+  label,
+  agentId,
 }: {
   setting: ProactiveSetting;
   botName: string;
   blocked: string | null;
+  /** Off on one Bot's own list, where every row is that Bot's. */
+  showBot?: boolean;
+  /** A small word beside the title, as the Routines list marks a check-in among its routines. */
+  label?: string;
+  /** The Bot whose own list this is, so the page's back link returns to it. */
+  agentId?: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const id = useId();
-  const change = useMutation(
-    changeProactiveSettingMutationOptions(queryClient),
-  );
-  const summary = `${intervalLabel(setting.intervalMinutes)} · ${checkInStatus(setting, blocked)}`;
+  // When it starts, what it does, and where it stands: the Routines list's sentence for a check-in.
+  const summary = `${intervalLabel(setting.intervalMinutes)} · Tells you · ${checkInStatus(setting, blocked)}`;
   const last = lastCheckInLine(setting.lastRun);
   const outcome = setting.lastRun?.outcome;
-  /*
-   * Run now was queued and nothing has started since: say it is on its way until the check-in it
-   * queued shows up as the last one, so the press is never followed by nothing.
-   */
-  const queuedAt =
-    change.isSuccess && change.data?.queued ? change.submittedAt : null;
-  const onItsWay =
-    queuedAt !== null &&
-    !(setting.lastRun && Date.parse(setting.lastRun.startedAt) >= queuedAt);
   return (
-    <>
-      <Item
-        render={
-          <button
-            onClick={() => {
-              // Opening starts clean: the last change's failure is not this visit's.
-              change.reset();
-              setOpen(true);
-            }}
-            type="button"
-          />
-        }
-        size="sm"
-      >
-        <ItemMedia variant="icon">
-          <IconRadar />
-        </ItemMedia>
-        <ItemContent>
-          {/* What it watches leads, where it watches one thing; the Bot is who watches it. */}
-          <ItemTitle>{setting.subject || botName}</ItemTitle>
-          <ItemDescription>
-            {setting.subject ? `${botName} · ${summary}` : summary}
+    <Item
+      render={
+        <Link
+          params={{ checkInId: setting.id }}
+          search={agentId ? { agentId } : {}}
+          to="/routines/check-ins/$checkInId"
+        />
+      }
+      size="sm"
+    >
+      <ItemMedia variant="icon">
+        <IconRadar />
+      </ItemMedia>
+      <ItemContent>
+        {/* What it watches leads, where it watches one thing; the Bot is who watches it. */}
+        <ItemTitle>
+          {setting.subject || botName}
+          {label ? (
+            <span className="font-normal text-muted-foreground text-xs">
+              {label}
+            </span>
+          ) : null}
+        </ItemTitle>
+        <ItemDescription>
+          {setting.subject && showBot ? `${botName} · ${summary}` : summary}
+        </ItemDescription>
+        {last && (outcome === "skipped" || outcome === "failed") ? (
+          <ItemDescription
+            className={outcome === "failed" ? "text-destructive" : undefined}
+          >
+            {last}
           </ItemDescription>
-          {last && (outcome === "skipped" || outcome === "failed") ? (
-            <ItemDescription
-              className={outcome === "failed" ? "text-destructive" : undefined}
-            >
-              {last}
-            </ItemDescription>
-          ) : null}
-          {setting.focus ? (
-            <ItemDescription className="line-clamp-1">
-              Looks for: {setting.focus}
-            </ItemDescription>
-          ) : null}
-        </ItemContent>
-        <ItemActions>
-          <IconChevronRight className="size-4 text-muted-foreground" />
-        </ItemActions>
-      </Item>
-      <Dialog onOpenChange={setOpen} open={open}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Check-ins</DialogTitle>
-            <DialogDescription>
-              {[botName, setting.subject, setting.focus]
-                .filter(Boolean)
-                .join(" · ")}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogBody className="mt-4">
-            <Item size="sm" variant="muted">
-              <ItemMedia variant="icon">
-                <IconClock />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>{checkInStatus(setting, blocked)}</ItemTitle>
-                {onItsWay ? (
-                  <ItemDescription>
-                    Queued. It checks in within a minute.
-                  </ItemDescription>
-                ) : last ? (
-                  <ItemDescription
-                    className={cn(
-                      "line-clamp-none",
-                      outcome === "failed" && "text-destructive",
-                    )}
-                  >
-                    {last}
-                  </ItemDescription>
-                ) : null}
-              </ItemContent>
-            </Item>
-            <Field>
-              <FieldLabel htmlFor={`${id}-interval`}>How often</FieldLabel>
-              {/* Writes on pick: one value, no draft worth holding. */}
-              <Select
-                disabled={change.isPending}
-                items={intervalItems}
-                onValueChange={(minutes) => {
-                  if (minutes !== null && minutes !== setting.intervalMinutes)
-                    change.mutate({
-                      setting,
-                      change: { kind: "interval", minutes },
-                    });
-                }}
-                value={setting.intervalMinutes}
-              >
-                <SelectTrigger className="w-full" id={`${id}-interval`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {intervals.map((interval) => (
-                    <SelectItem key={interval.minutes} value={interval.minutes}>
-                      {interval.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            {change.error && (
-              <p role="alert" className="text-destructive text-sm">
-                {change.error.message}
-              </p>
-            )}
-          </DialogBody>
-          <DialogFooter className="mt-4">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={change.isPending}
-              onClick={() =>
-                change.mutate(
-                  { setting, change: { kind: "remove" } },
-                  { onSuccess: () => setOpen(false) },
-                )
-              }
-            >
-              Remove
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={change.isPending}
-              onClick={() =>
-                change.mutate({ setting, change: { kind: "toggle" } })
-              }
-            >
-              {setting.enabled ? "Turn off" : "Turn on"}
-            </Button>
-            <Button
-              size="sm"
-              disabled={!setting.enabled || !!blocked || change.isPending}
-              onClick={() =>
-                change.mutate({ setting, change: { kind: "run" } })
-              }
-            >
-              {change.isPending && change.variables.change.kind === "run"
-                ? "Starting…"
-                : "Run now"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+        ) : null}
+        {setting.focus ? (
+          <ItemDescription className="line-clamp-1">
+            Looks for: {setting.focus}
+          </ItemDescription>
+        ) : null}
+      </ItemContent>
+      <ItemActions>
+        <IconChevronRight className="size-4 text-muted-foreground" />
+      </ItemActions>
+    </Item>
   );
 }

@@ -24,6 +24,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { RoutineRoutePage } from "@/components/routines/routine-page";
 import type { AgentProfile } from "@/lib/agents/queries";
 import type { ApprovalInboxData } from "@/lib/approvals";
 import type { BotActivity, BotAttention } from "@/lib/bot-lifecycle/queries";
@@ -318,6 +319,8 @@ const responsibilities: ResponsibilityRecord[] = [
     progress: "Down to 4 unread",
     lastResult: null,
     subscriptions: [],
+    recurring: false,
+    endsWhenMet: false,
     updatedAt: now,
   },
   {
@@ -332,6 +335,8 @@ const responsibilities: ResponsibilityRecord[] = [
     progress: "",
     lastResult: null,
     subscriptions: [],
+    recurring: false,
+    endsWhenMet: false,
     updatedAt: now,
   },
 ];
@@ -498,9 +503,18 @@ function renderAt(path: string) {
     path: "/",
     component: Page,
   });
+  // A routine's own page, which its row on Routines links to, drawn in the frame as the app does.
+  const routinePage = createRoute({
+    getParentRoute: () => app,
+    path: "/routines/schedules/$routineId",
+    component: function RoutineScreen() {
+      const { routineId } = routinePage.useParams();
+      return <RoutineRoutePage routineId={routineId} />;
+    },
+  });
   const router = createRouter({
     routeTree: root.addChildren([
-      app.addChildren([home, skinScreen, channelRoute, anything]),
+      app.addChildren([home, skinScreen, channelRoute, routinePage, anything]),
     ]),
     history: createMemoryHistory({ initialEntries: [path] }),
   });
@@ -593,7 +607,7 @@ describe("the frame", () => {
       "/s/ideas",
     );
     expect(
-      tabs.getByRole("link", { name: "Goals" }).getAttribute("aria-current"),
+      tabs.getByRole("link", { name: "Routines" }).getAttribute("aria-current"),
     ).toBe("page");
     expect(tabs.getByRole("link", { name: "Apps" }).getAttribute("href")).toBe(
       "/connections",
@@ -603,7 +617,7 @@ describe("the frame", () => {
   test.each([
     ["/s/activity", "Activity"],
     ["/s/ideas", "Ideas"],
-    ["/s/goals", "Goals"],
+    ["/s/goals", "Routines"],
     ["/connections", "Apps"],
     ["/channel/c-muse", "Chat"],
     ["/routines", null],
@@ -768,7 +782,6 @@ describe("every OpenBot surface stays reachable", () => {
     [/^Home$/, "/"],
     // OpenBot's own destinations, from the shared navigation list its sidebar draws.
     [/^Bots$/, "/bots"],
-    [/^Capabilities$/, "/capabilities"],
     [/^Connections$/, "/connections"],
     [/^Admin$/, "/admin"],
     [/^Settings$/, "/settings"],
@@ -903,7 +916,7 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
     );
   });
 
-  test("Goals shows the centre Bot's routines and responsibilities", async () => {
+  test("Routines shows the centre Bot's routines and goals in one list", async () => {
     serve();
     renderAt("/s/goals");
     expect(await page().findByText("Send me the headlines")).toBeTruthy();
@@ -911,11 +924,17 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
     expect(page().queryByText("Watch the competition")).toBeNull();
   });
 
-  test("a routine is paused from Goals through OpenBot's own switch", async () => {
+  test("a routine is paused from Routines through OpenBot's own switch", async () => {
     const calls = serve();
     renderAt("/s/goals");
+    // The switch is on the routine's page, opened from its row.
     fireEvent.click(
-      await page().findByRole("switch", {
+      (await page().findByText("Send me the headlines")).closest(
+        "a",
+      ) as HTMLElement,
+    );
+    fireEvent.click(
+      await within(document.body).findByRole("switch", {
         name: "Enable the routine scheduled Every weekday at 9:00",
       }),
     );

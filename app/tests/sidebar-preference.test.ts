@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   applySidebarOpen,
+  LEGACY_APP_SIDEBAR_WIDTH_KEY,
   parseStoredSidebarOpen,
   SIDEBAR_STORAGE_KEY,
+  SIDEBAR_WIDTH,
+  SIDEBAR_WIDTH_STORAGE_KEY,
+  storedSidebarWidth,
 } from "../src/lib/sidebar";
 
 describe("sidebar preference", () => {
@@ -52,5 +56,46 @@ describe("sidebar preference", () => {
       });
       expect(parseStoredSidebarOpen(stored)).toBe(open);
     }
+  });
+});
+
+describe("sidebar width", () => {
+  const storage = (entries: Record<string, string>) => (key: string) =>
+    entries[key] ?? null;
+
+  test("every shell starts at the app's width until somebody drags one", () => {
+    expect(SIDEBAR_WIDTH).toBe("340px");
+    expect(storedSidebarWidth(storage({}))).toBe("340px");
+  });
+
+  test("a dragged width is shared, ahead of the app's old one", () => {
+    expect(
+      storedSidebarWidth(
+        storage({
+          [SIDEBAR_WIDTH_STORAGE_KEY]: "280",
+          [LEGACY_APP_SIDEBAR_WIDTH_KEY]: "400",
+        }),
+      ),
+    ).toBe("280px");
+  });
+
+  test("the app's old width carries over, and admin's and settings' do not", () => {
+    expect(
+      storedSidebarWidth(storage({ [LEGACY_APP_SIDEBAR_WIDTH_KEY]: "400" })),
+    ).toBe("400px");
+    expect(
+      storedSidebarWidth(
+        storage({
+          "openbot-sidebar-width:settings": "250",
+          "openbot-sidebar-width:admin": "260",
+        }),
+      ),
+    ).toBe("340px");
+  });
+
+  test("a width out of bounds falls back to the default", () => {
+    expect(
+      storedSidebarWidth(storage({ [SIDEBAR_WIDTH_STORAGE_KEY]: "9000" })),
+    ).toBe("340px");
   });
 });

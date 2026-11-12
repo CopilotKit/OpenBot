@@ -2,6 +2,7 @@ import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { BotLookProvider } from "../components/agents/bot-look";
 import { TeamFeaturesDialog } from "../components/edition/team-features-dialog";
+import { CommandMenu } from "../components/navigation/command-menu";
 import { currentUserQueryOptions, needsOnboarding } from "../lib/auth/queries";
 import { CopilotProvider } from "../lib/copilot/provider";
 import { AppHotkeys } from "../lib/hotkeys/app-hotkeys";
@@ -34,6 +35,8 @@ export const Route = createFileRoute("/_authed")({
       <SkinAccountSync />
       {/* Opened by the personal edition's "OpenBot for Business" entry, from whichever skin draws it. */}
       <TeamFeaturesDialog />
+      {/* The command palette, from Cmd/Ctrl+K and from the skins' menus. */}
+      <CommandMenu />
       <SkinBotLook>
         <Outlet />
       </SkinBotLook>

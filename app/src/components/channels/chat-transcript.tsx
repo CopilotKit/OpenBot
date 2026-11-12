@@ -254,7 +254,7 @@ const RESTORING_ANSWER_LINES = [
   { id: "line-8", width: "w-2/3" },
 ] as const;
 
-function RestoringTranscript() {
+export function RestoringTranscript() {
   return (
     // One announcement, with every bar hidden from it: nine empty shapes read aloud is worse.
     <div aria-label="Loading this conversation" role="status">

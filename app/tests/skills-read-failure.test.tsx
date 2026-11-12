@@ -11,16 +11,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
-  createRoute,
   createRouter,
-  Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import type { ComponentType } from "react";
 import { EditSkill } from "@/components/skills/edit-skill";
+import { SkillsSettingsPage } from "@/components/skills/skills-settings-page";
+import { learningKeys } from "@/lib/learning/queries";
 import { type PluginsPage, pluginKeys } from "@/lib/plugins/queries";
-import { Route as SkillsRoute } from "@/routes/_authed/_app/capabilities.skills";
 import { Route as AdminSkillsRoute } from "@/routes/_authed/admin/skills";
 
 /**
@@ -36,7 +35,7 @@ import { Route as AdminSkillsRoute } from "@/routes/_authed/admin/skills";
  * THE HARNESS IS THIS REPOSITORY'S, as in `agent-roster-error.test.tsx` and
  * `boundaries-read-failure.test.tsx`: `GlobalRegistrator` in `beforeAll`/`afterAll`, `cleanup` in
  * `afterEach`, queries off `render()`'s own return, a `QueryClient` with `retry: false`, and the
- * exported `Route` singleton captured and restored around its `.update()`.
+ * page drawn under a root route for its links.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -93,6 +92,13 @@ function answeredEmpty() {
     authorizesPerAction: false,
   };
   client.setQueryData(pluginKeys.page(), page);
+  // Nothing learned either: the person has no skills at all. Held, so only the plugins read fails.
+  client.setQueryDefaults(learningKeys.personal, { staleTime: Infinity });
+  client.setQueryData(learningKeys.personal, {
+    mode: "closed",
+    sharingAllowed: true,
+    skills: [],
+  });
   return client;
 }
 
@@ -102,64 +108,9 @@ async function waitForFailedRead(client: QueryClient) {
   });
 }
 
-function captureRouteState(route: object): Record<string, unknown> {
-  return { ...route, options: { ...(route as { options: object }).options } };
-}
-
-function restoreRouteState(
-  route: object,
-  snapshot: Record<string, unknown>,
-): void {
-  for (const key of Object.keys(route)) {
-    if (!(key in snapshot)) {
-      delete (route as Record<string, unknown>)[key];
-    }
-  }
-  Object.assign(route, snapshot);
-}
-
-const pristineSkillsRouteState = captureRouteState(SkillsRoute);
-let skillsRouteSnapshot: Record<string, unknown>;
-
-beforeEach(() => {
-  skillsRouteSnapshot = captureRouteState(pristineSkillsRouteState);
-});
-
-afterEach(() => {
-  restoreRouteState(SkillsRoute, skillsRouteSnapshot);
-});
-
-/** `/skills`, at the id its `Route.useSearch()` reads: `/_authed/_app/skills`. */
+/** Settings -> Skills, the page a person's skills are listed on. */
 function renderSkills(client: QueryClient) {
-  const rootRoute = createRootRoute({ component: Outlet });
-  const authedRoute = createRoute({
-    id: "/_authed",
-    getParentRoute: () => rootRoute,
-    component: Outlet,
-  });
-  const appRoute = createRoute({
-    id: "/_app",
-    getParentRoute: () => authedRoute,
-    component: Outlet,
-  });
-  const skills = (
-    SkillsRoute as unknown as { update: (options: unknown) => unknown }
-  ).update({
-    path: "/skills",
-    getParentRoute: () => appRoute,
-  });
-  const tree = rootRoute.addChildren([
-    authedRoute.addChildren([appRoute.addChildren([skills as never])]),
-  ]);
-  const router = createRouter({
-    routeTree: tree,
-    history: createMemoryHistory({ initialEntries: ["/skills"] }),
-  });
-  return render(
-    <QueryClientProvider client={client}>
-      <RouterProvider router={router as never} />
-    </QueryClientProvider>,
-  );
+  return renderAlone(client, () => <SkillsSettingsPage creating={false} />);
 }
 
 /** A component that reads no route of its own, drawn under a root route for `Link`/`useNavigate`. */
@@ -181,10 +132,14 @@ test("a person's skills page says the skills failed to load, not that they have 
   await waitForFailedRead(client);
 
   expect(
-    await view.findByText("Couldn't load your skills. Reload the page."),
+    await view.findByText(
+      "Couldn't load the skills you wrote. Reload the page.",
+    ),
   ).toBeTruthy();
   expect(
-    view.queryByText("No skills yet. Write one with New skill."),
+    view.queryByText(
+      "No skills yet. Write one with New skill, or teach a Bot a task.",
+    ),
   ).toBeNull();
 });
 
@@ -194,10 +149,12 @@ test("a person with genuinely no skills is still told so", async () => {
   await waitForFailedRead(client);
 
   expect(
-    await view.findByText("No skills yet. Write one with New skill."),
+    await view.findByText(
+      "No skills yet. Write one with New skill, or teach a Bot a task.",
+    ),
   ).toBeTruthy();
   expect(
-    view.queryByText("Couldn't load your skills. Reload the page."),
+    view.queryByText("Couldn't load the skills you wrote. Reload the page."),
   ).toBeNull();
 });
 

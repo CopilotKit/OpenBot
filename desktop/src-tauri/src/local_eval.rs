@@ -198,8 +198,8 @@ pub enum Reason {
     DashboardUnavailable,
     /// `login`: the CLI could not open the browser. Its fallback is a code approved in a terminal.
     BrowserOpenFailed,
-    /// The CLI's own resource check: the engine has too few free CPUs, or too little free memory
-    /// or disk. Read from `error.code`, since its `nextAction.reason` is only
+    /// The CLI's own resource check: the engine has too few CPUs in total, or too little free
+    /// memory or disk. Read from `error.code`, since its `nextAction.reason` is only
     /// `local_command_failed`. Which of them is short is the report's `shortfall`.
     ResourcesShort,
     /// A reason this build does not know. Treated as blocking, never as success.
@@ -1439,8 +1439,9 @@ fn reason(outcome: Outcome, wire: &Map<String, Value>) -> Result<Option<Reason>,
 
 /**
 The `error.code` the CLI gives when its resource check fails (`LocalResourceShortfallError`): too
-few free CPUs, too little free memory or too little free storage in the engine. A probe that could
-not measure (`LOCAL_DOCKER_RESOURCES_UNMEASURABLE`) is not a shortfall and stays a plain failure.
+few CPUs in total, too little free memory or too little free storage in the engine. A probe that
+could not measure (`LOCAL_DOCKER_RESOURCES_UNMEASURABLE`) is not a shortfall and stays a plain
+failure.
 */
 const RESOURCES_SHORT: &str = "LOCAL_DOCKER_RESOURCES_SHORT";
 const MEMORY_SHORT: &str = "LOCAL_DOCKER_MEMORY_SHORT";
@@ -1517,10 +1518,11 @@ const GIB: u64 = 1024 * 1024 * 1024;
 The smallest engine OpenBot lets through before local setup: 4 CPUs, 4 GiB of memory and 40 GiB of
 free disk.
 
-The CLI's own check wants 4 free CPUs and 4 GiB of free memory inside a container, so an engine
-below those totals can never pass it. Anything larger is left to the CLI at Start: OpenBot's own
-Podman machine is 4 CPUs and 6 GiB and passes there, so a stricter total here would stop every
-Podman install. Free disk is the CLI's own 40 GiB, measured as it measures it, inside a container.
+The CLI's own check wants 4 CPUs in the engine's total, whatever already runs on it, and 4 GiB of
+free memory inside a container, so an engine below those totals can never pass it. Anything larger
+is left to the CLI at Start: OpenBot's own Podman machine is 4 CPUs and 6 GiB and passes there, so
+a stricter total here would stop every Podman install. Free disk is the CLI's own 40 GiB, measured
+as it measures it, inside a container.
 */
 pub const MIN_ENGINE_CPUS: u64 = 4;
 pub const MIN_ENGINE_MEMORY_BYTES: u64 = 4 * GIB;
@@ -9433,7 +9435,7 @@ fn main() {{
                 false,
                 false,
             ),
-            // Fewer than 4 CPUs can never leave the CLI 4 free ones.
+            // Fewer than 4 CPUs can never meet the CLI's 4.
             (
                 "3 8217473024
 ",

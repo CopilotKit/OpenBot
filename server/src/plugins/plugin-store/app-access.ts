@@ -48,6 +48,7 @@ import {
   type CatalogueEntry,
   catalogueEntry,
   classifyTool,
+  offeredHere,
 } from "../catalogue";
 import type { StoreContext } from "./context";
 import { iso } from "./model";
@@ -423,8 +424,10 @@ export function appAccessMethods(context: StoreContext) {
       for (const candidate of enabled)
         if (candidate.toolkit === wanted) return candidate;
 
+    // An app this edition doesn't offer is offered only once added; until then the broker's
+    // directory below answers for it (the personal edition's Notion and Google Drive).
     const keyed = catalogueEntry(lower);
-    if (keyed)
+    if (keyed && (offeredHere(keyed) || byRow.has(keyed.key)))
       return byRow.get(keyed.key) ?? absentFor(keyed.key, undefined, null);
 
     const titled = enabled.filter(
@@ -435,7 +438,9 @@ export function appAccessMethods(context: StoreContext) {
     );
     if (held ?? titled[0]) return held ?? titled[0] ?? null;
 
-    const entry = CATALOGUE.find((item) => item.title.toLowerCase() === lower);
+    const entry = CATALOGUE.find(
+      (item) => item.title.toLowerCase() === lower && offeredHere(item),
+    );
     if (entry) return absentFor(entry.key, undefined, null);
 
     const listed = await readDirectory(directory);
@@ -448,6 +453,9 @@ export function appAccessMethods(context: StoreContext) {
           candidate.slug === slug || candidate.name.toLowerCase() === lower,
       );
     if (named) return absentFor(`${idPrefix}${named.slug}`, undefined, listed);
+    // The key of an entry this edition doesn't offer names nothing here until it is added.
+    const unoffered = catalogueEntry(asked);
+    if (unoffered && !offeredHere(unoffered)) return null;
     return absentFor(isBrokeredId(lower) ? lower : asked, undefined, listed);
   }
 

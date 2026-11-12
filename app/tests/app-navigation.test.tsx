@@ -16,6 +16,7 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { CommandMenu } from "@/components/navigation/command-menu";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { TeamFeaturesDialog } from "@/components/edition/team-features-dialog";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -54,7 +55,11 @@ const originalWebSocket = globalThis.WebSocket;
 const clients: QueryClient[] = [];
 
 beforeAll(() => {
-  GlobalRegistrator.register({ url: "http://localhost/" });
+  // The business dialog's booking calendar keeps its address but never fetches it.
+  GlobalRegistrator.register({
+    url: "http://localhost/",
+    settings: { navigation: { disableChildFrameNavigation: true } },
+  });
   globalThis.WebSocket = OfflineWebSocket as unknown as typeof WebSocket;
 });
 beforeEach(() => {
@@ -150,6 +155,7 @@ function renderSidebar(
           <AppSidebar />
           {/* Mounted once by the signed-in layout; here so the entry has something to open. */}
           <TeamFeaturesDialog />
+          <CommandMenu />
         </SidebarProvider>
       ),
     }),
@@ -195,12 +201,14 @@ test.each(["user", "admin"] as const)(
         to,
       })),
     ).toEqual(expected(role, "primary"));
-    // Scheduled work has its own place beside Bots, where somebody looking for it looks first.
-    expect(
-      within(footer)
-        .getByRole("link", { name: "Routines" })
-        .getAttribute("href"),
-    ).toBe("/routines");
+    // What a person makes and comes back to, beside Bots, in the order of the eight.
+    expect(links(footer).map(({ to }) => to)).toEqual([
+      "/bots",
+      "/routines",
+      "/memory",
+      "/skills",
+      "/connections",
+    ]);
     // Bots keeps its count of what waits on the person, and only Bots has one.
     const badge = within(footer).getByRole("img", {
       name: "1 thing needs you",
@@ -255,23 +263,25 @@ test("Admin is in the list for admins only", () => {
   expect(ids("user")).toEqual([
     "bots",
     "routines",
-    "capabilities",
+    "memory",
+    "skills",
     "connections",
     "settings",
   ]);
 });
 
-test("the personal edition has no Admin or Capabilities, and a feature list in Admin's place", () => {
+test("the personal edition has no Admin, and a feature list in Admin's place", () => {
   const personal = navigationFor("admin", "personal");
   expect(
     personal.some((item) => item.kind !== "dialog" && item.to === "/admin"),
   ).toBe(false);
   const dialogs = personal.filter((item) => item.kind === "dialog");
   expect(dialogs.map((item) => item.id)).toEqual(["team-features"]);
-  // Skills and Memory open from the Bots page instead.
+  // Routines and Skills are in the main menu, as in the team edition. Memory isn't offered.
   expect(personal.map((item) => item.id)).toEqual([
     "bots",
     "routines",
+    "skills",
     "connections",
     "team-features",
     "settings",
@@ -310,4 +320,11 @@ test("a single-person install has no Sign out, because nobody signed in", async 
   const menu = await view.findByRole("menu");
   expect(within(menu).queryByRole("menuitem", { name: "Sign out" })).toBeNull();
   expect(within(menu).getAllByRole("menuitem").length).toBeGreaterThan(0);
+});
+
+test("the sidebar has no command palette row: Cmd/Ctrl+K opens it", async () => {
+  const { view } = renderSidebar("user");
+  await view.findByRole("link", { name: "Routines" });
+  expect(view.queryByRole("button", { name: /Command palette/ })).toBeNull();
+  expect(view.queryByRole("button", { name: /Search and jump/ })).toBeNull();
 });

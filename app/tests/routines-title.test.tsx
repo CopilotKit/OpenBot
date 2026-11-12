@@ -8,13 +8,15 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
+import { scheduleWords } from "@/components/routines/routine-page";
 import { RoutinesList } from "@/components/routines/routines-list";
 import type { RoutinesPage } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
 /**
- * A routine the person named heads its row with their name, and one they didn't keeps its schedule.
+ * A routine the person named heads its row with their name, and one they didn't is headed by what it
+ * does, its instruction. Its schedule is under it either way: what it is, then when it starts.
  *
  * Found on Windows: the Bot was asked for "a daily routine called Morning briefing" and said its tool
  * couldn't take a title. The tool takes one now, and this is where the person reads it.
@@ -76,10 +78,15 @@ const PAGE: RoutinesPage = {
 };
 
 function draw() {
-  global.fetch = (async (input: RequestInfo | URL) =>
-    String(input).startsWith("/api/routines")
-      ? Response.json(PAGE)
-      : Response.json({})) as unknown as typeof fetch;
+  global.fetch = (async (input: RequestInfo | URL) => {
+    const path = String(input);
+    if (path.startsWith("/api/routines")) return Response.json(PAGE);
+    if (path === "/api/responsibilities")
+      return Response.json({ responsibilities: [] });
+    if (path === "/api/proactive/settings")
+      return Response.json({ settings: [], allowed: true });
+    return Response.json({});
+  }) as unknown as typeof fetch;
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({ component: () => <RoutinesList /> }),
@@ -91,8 +98,14 @@ function draw() {
   );
 }
 
+/** A line ending in `text`: on the every-Bot list it opens with the Bot's name. */
+const endsWith = (text: string) =>
+  new RegExp(`${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+
+/** The row's heading, without the small kind label ("Schedule") beside it. */
 function titleOf(element: HTMLElement) {
-  return element.closest('[data-slot="item-title"]')?.textContent;
+  return element.closest('[data-slot="item-title"]')?.firstElementChild
+    ?.textContent;
 }
 
 test("a named routine is headed by its name, with its schedule under it", async () => {
@@ -100,16 +113,37 @@ test("a named routine is headed by its name, with its schedule under it", async 
 
   const named = await view.findByText("Morning briefing");
   expect(titleOf(named)).toBe("Morning briefing");
-  expect(view.getByText("Every day at 08:00 · Europe/Madrid")).toBeTruthy();
+  // The zone is said where it isn't the reader's own; the details always say it.
+  expect(
+    view.getByText(
+      endsWith(
+        `${scheduleWords({ schedule: "Every day at 08:00", timezone: "Europe/Madrid" })} · Acts`,
+      ),
+    ),
+  ).toBeTruthy();
   expect(
     view.getByText("Summarise my unread mail and today's meetings."),
   ).toBeTruthy();
 });
 
-test("a routine with no name is still headed by its schedule", async () => {
+test("a routine with no name is headed by its instruction, with its schedule under it", async () => {
   const view = draw();
 
-  const unnamed = await view.findByText("Weekdays at 18:00");
-  expect(titleOf(unnamed)).toBe("Weekdays at 18:00UTC");
-  expect(view.getByText("Post the day's open pull requests.")).toBeTruthy();
+  const unnamed = await view.findByText("Post the day's open pull requests.");
+  expect(titleOf(unnamed)).toBe("Post the day's open pull requests.");
+  expect(
+    view.getByText(
+      endsWith(
+        `${scheduleWords({ schedule: "Weekdays at 18:00", timezone: "UTC" })} · Acts`,
+      ),
+    ),
+  ).toBeTruthy();
+});
+
+test("a schedule names its time zone only where it isn't the reader's own", () => {
+  const madrid = { schedule: "Every day at 08:00", timezone: "Europe/Madrid" };
+  expect(scheduleWords(madrid, "Europe/Madrid")).toBe("Every day at 08:00");
+  expect(scheduleWords(madrid, "America/New_York")).toBe(
+    "Every day at 08:00 · Europe/Madrid",
+  );
 });

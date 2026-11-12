@@ -32,26 +32,44 @@ export const subscriptionSchema = z.object({
 const goalFields = {
   title: text(160),
   instruction: text(6000),
-  successCriteria: text(3000),
+  successCriteria: z.string().trim().max(3000),
   subscriptions: z.array(subscriptionSchema).max(20),
   /**
    * Done again and again, every morning or each time something happens, and never finished by one
-   * run. A goal a routine runs or an event wakes repeats without it (`GoalRepeats`).
+   * run. Without it a goal can still repeat because a routine runs it or an event wakes it, unless
+   * it is `endsWhenMet` (`GoalRepeats`).
    */
   recurring: z.boolean(),
+  /**
+   * A run that meets its outcome may complete the goal, whatever starts it. Never with `recurring`,
+   * which has no outcome that ends it.
+   */
+  endsWhenMet: z.boolean(),
 };
+/** Shown to the person, and to the model as a refusal: "repeat" is `recurring`. */
+export const RECURS_AND_ENDS =
+  "A goal can't both repeat and end when it's met. Turn one of them off.";
+/**
+ * A run may complete a goal that ends when met by checking its success criteria, so it needs some.
+ * Shown to the person, who knows them as Done when, and to the model, which knows `successCriteria`.
+ */
+export const ENDS_WITHOUT_OUTCOME =
+  "A goal that ends when it's met needs a Done when, its success criteria. Add one, or let it keep going.";
 export const responsibilityInputSchema = z
   .object({
     agentId: text(128),
     channelId: text(128),
     ...goalFields,
+    successCriteria: goalFields.successCriteria.default(""),
     subscriptions: goalFields.subscriptions.default([]),
     recurring: goalFields.recurring.default(false),
+    endsWhenMet: goalFields.endsWhenMet.default(false),
   })
   .strict();
 /**
- * Only what changes. Built from the fields without their defaults: picked from the input schema, a
- * patch of a title alone also set `subscriptions` to [] and would set `recurring` to false.
+ * Only what changes. Built from `goalFields`, which carry no defaults: a patch made from the input
+ * schema would, for a title alone, also set `successCriteria` to "", `subscriptions` to [],
+ * `recurring` to false and `endsWhenMet` to false.
  */
 export const responsibilityPatchSchema = z
   .object(goalFields)
@@ -108,6 +126,10 @@ export function parseResponsibilityInput(input: unknown): ResponsibilityInput {
     throw new ResponsibilityRefusedError(
       result.error.issues[0]?.message ?? "Invalid goal.",
     );
+  if (result.data.recurring && result.data.endsWhenMet)
+    throw new ResponsibilityRefusedError(RECURS_AND_ENDS);
+  if (result.data.endsWhenMet && !result.data.successCriteria)
+    throw new ResponsibilityRefusedError(ENDS_WITHOUT_OUTCOME);
   return result.data;
 }
 export function parseResponsibilityPatch(input: unknown): ResponsibilityPatch {
@@ -143,7 +165,9 @@ export type ResponsibilityContinuation = {
 };
 /**
  * Why a goal runs again and again, so that no run of it is the last: it was made `recurring`, an
- * enabled routine of its Bot names it, or an event wakes it (a subscription or an enabled trigger).
+ * enabled routine runs it (one of its Bot, or one on any Bot that records the goal's id), or an
+ * event wakes it (a subscription or an enabled trigger). A goal made `endsWhenMet` never repeats,
+ * whatever runs it or wakes it, so its runs may complete it.
  *
  * FOUND ON WINDOWS: asked to "check the latest OpenBot release every morning and tell me what
  * changed, and run it now", a Bot made a goal and a daily routine that runs it. The goal's first run
@@ -176,14 +200,17 @@ export type RoutineGoalLink = {
  * Whether this routine runs this goal. One rule, read by the goal store (`GoalRepeats`), by a Bot's
  * Activity, and by the routine store when it names an untitled routine for its goal.
  *
- * BY THE GOAL IT RECORDS. A routine made for a goal records its id, and runs that goal and no other.
+ * BY THE GOAL IT RECORDS. A routine made for a goal records its id, and runs that goal and no other,
+ * whatever its instruction quotes. How it came to record it (`goalLinkedByRun`) decides what
+ * completing or deleting the goal does to it (`switchOffRoutinesOf` and `routinesDeletedWith` in the
+ * goal store). An older routine can name several goals, and stays on while one of them is not
+ * completed.
  *
  * FOUND BEFORE 0.3.3: the rule was "the instruction contains the goal's title anywhere", so a goal
  * titled "Email" was run by any routine that mentioned email. Its runs could then never complete it,
  * and Activity listed it with somebody else's schedule. A routine made before routines recorded their
- * goal (`goalByTitle`) is still read from its instruction, but only by the goal's id or its whole
- * title, exactly, between quotes: `Run the goal "Track OpenBot releases"`, never a word inside a
- * sentence.
+ * goal (`goalByTitle`) is still read from its instruction, but only where the instruction clearly
+ * runs that goal (`instructionRunsGoal`).
  */
 export function routineRunsGoal(
   routine: RoutineGoalLink,
@@ -191,12 +218,72 @@ export function routineRunsGoal(
 ): boolean {
   if (routine.goalId) return routine.goalId === goal.id;
   if (!routine.goalByTitle) return false;
-  return (
-    routine.instruction.includes(goal.id) ||
-    TITLE_QUOTES.some(([open, close]) =>
-      routine.instruction.includes(`${open}${goal.title}${close}`),
-    )
+  return instructionRunsGoal(routine.instruction, goal);
+}
+
+/** A letter or digit: what may not touch a goal's quoted title for it to be the whole title. */
+const WORD_CHARACTER = "[\\p{L}\\p{N}]";
+
+function escapeForPattern(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Whether a routine's instruction clearly runs this goal: it holds the goal's id, or it names the goal
+ * as a goal, the word "goal" (or `run_goal`) right before its whole title between quotes
+ * (`TITLE_QUOTES`). What the page writes (`Run the goal "Title" (id) with run_goal.`), what a Bot
+ * writes (`Run the goal "Title"`), and `run_goal "Title"` all do. The title must end at its closing
+ * quote: no letter or digit follows it.
+ *
+ * FOUND IN REVIEW: the rule was "the whole title between quotes anywhere", so `Ship "Report"` ran the
+ * goal "Report", and a title with a quote in it ("Bob's report" in single quotes) ran the shorter goal
+ * "Bob". Completing such a goal then switched off a routine that never ran it, and it could not be
+ * switched back on. A routine that only quotes a title is left alone.
+ */
+export function instructionRunsGoal(
+  instruction: string,
+  goal: { id: string; title: string },
+): boolean {
+  if (instruction.includes(goal.id)) return true;
+  if (!goal.title.trim()) return false;
+  return TITLE_QUOTES.some(([open, close]) =>
+    new RegExp(
+      `(?<!${WORD_CHARACTER})[Gg][Oo][Aa][Ll]\\s+${escapeForPattern(`${open}${goal.title}${close}`)}(?!${WORD_CHARACTER})`,
+      "u",
+    ).test(instruction),
   );
+}
+
+/**
+ * The per-Bot lock every write that links, unlinks or switches off a goal's routines takes, in one
+ * order: the goal's row first, then this lock, then the routine rows. Completing or deleting a goal
+ * (the goal store) and linking a routine to the goal its firing ran (`linkGoal` in the routine store)
+ * all take it, so none of them reads which routines run which goal while another changes it.
+ */
+export function goalRoutinesLockKey(
+  ownerUserId: string,
+  agentId: string,
+): string {
+  return `goal-completion-${ownerUserId}-${agentId}`;
+}
+
+/**
+ * The goal a page draws this routine under: of the goals of its Bot it runs (`routineRunsGoal`), one
+ * that is not completed, else the first. An older routine can name two goals, and completing one
+ * leaves it on while the other is not completed (`switchOffRoutinesOf` in the goal store), so it is
+ * drawn under the goal it still runs, not one that ended.
+ */
+export function goalShownFor<
+  Goal extends { id: string; title: string; agentId: string; status: string },
+>(
+  routine: RoutineGoalLink & { agentId: string },
+  goals: readonly Goal[],
+): Goal | undefined {
+  const runs = goals.filter(
+    (goal) =>
+      goal.agentId === routine.agentId && routineRunsGoal(routine, goal),
+  );
+  return runs.find((goal) => goal.status !== "completed") ?? runs[0];
 }
 
 /** The reason, for a sentence the model reads: "This goal repeats because ...". */
@@ -267,6 +354,14 @@ export type ResponsibilityStore = {
     id: string,
     status: ResponsibilityStatus,
   ): Promise<Responsibility>;
+  /**
+   * Delete this goal and the routines that run it (`routineRunsGoal`): they exist to run it. An older
+   * routine that still runs another of its Bot's goals that is not completed stays. A routine its
+   * firing linked to the goal (`goalLinkedByRun`) does other work too, so it is unlinked and kept.
+   * Its runs and triggers go with it, a run in progress too, which then settles as gone
+   * (`settleRun`). Not found for another person's goal.
+   */
+  delete(ownerUserId: string, id: string): Promise<void>;
   recordProgress(
     ownerUserId: string,
     id: string,
@@ -275,13 +370,34 @@ export type ResponsibilityStore = {
   ): Promise<Responsibility>;
   /** Why this goal runs again and again, or null when its runs may complete it. */
   repeats(ownerUserId: string, id: string): Promise<GoalRepeats | null>;
+  /**
+   * Whether renaming this goal to `title` leaves an enabled routine that runs it no longer running
+   * it: an older routine that names it by its quoted title (`routineRunsGoal`).
+   */
+  renameUnlinksRoutine(
+    ownerUserId: string,
+    id: string,
+    title: string,
+  ): Promise<boolean>;
+  /**
+   * The goals of this Bot that repeat, and why (`repeats`), read together. A completed goal is never
+   * in it; a paused one can be, which is harmless, since a goal that is not active never runs.
+   */
+  repeatingGoals(
+    ownerUserId: string,
+    agentId: string,
+  ): Promise<ReadonlyMap<string, GoalRepeats>>;
   listRuns(ownerUserId: string, id: string): Promise<ResponsibilityRun[]>;
   ingestEvent(input: unknown): Promise<ResponsibilityEventResult>;
   beginRun(
     runId: string,
     options?: { recovered: boolean },
   ): Promise<ResponsibilityRunContext | null>;
-  settleRun(runId: string, outcome: ResponsibilityRunOutcome): Promise<void>;
+  /**
+   * Record how a run ended. False when the run is gone: its goal was deleted while it ran, so there
+   * is nothing to record and nobody to tell.
+   */
+  settleRun(runId: string, outcome: ResponsibilityRunOutcome): Promise<boolean>;
   /**
    * Put a run that started back in the queue, unrun: its conversation was busy, so nothing happened.
    * False when it is no longer running.

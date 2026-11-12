@@ -10,7 +10,7 @@ export const Route = createFileRoute("/_authed/admin/permissions")({
 export function PermissionsPage() {
   return (
     <PageShell
-      description="Each switch applies to everybody. A role can override it, and a directory group can get a permission the organization has off. All changes appear in Audit."
+      description="Each switch applies to everybody. A role can override it, and a directory group can get a permission the organization has off. All changes appear in Activity."
       title="Permissions"
     >
       <CapabilitiesSection />

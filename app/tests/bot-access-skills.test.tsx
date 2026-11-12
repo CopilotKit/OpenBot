@@ -8,7 +8,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { AccessSections } from "@/components/bot-profile/access";
+import { AppsSections, SkillsSections } from "@/components/bot-profile/access";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { settleReactWork } from "./settle-react-work";
 
@@ -142,7 +142,12 @@ function draw(agent: AgentProfile) {
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({
-      component: () => <AccessSections agent={agent} />,
+      component: () => (
+        <>
+          <AppsSections agent={agent} />
+          <SkillsSections agent={agent} />
+        </>
+      ),
     }),
   });
   return render(
@@ -175,7 +180,7 @@ test("a skill is named by its title, never listed again by its slug", async () =
   await view.findByText("Type / in a conversation to run it.", {
     exact: false,
   });
-  // Once in Your skills and once in What it can use, by the same name.
+  // Once in Your skills and once in Skills it has, by the same name.
   await waitFor(() => expect(view.getAllByText("Tide report").length).toBe(2));
   expect(view.container.textContent).not.toContain("/tide-report");
 });

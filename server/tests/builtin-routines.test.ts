@@ -7,6 +7,7 @@ import {
   useRoutineTools,
 } from "../src/plugins/builtin-routines";
 import { MAX_RESULT_CHARS } from "../src/plugins/mcp";
+import { responsibilityTools } from "../src/responsibilities/tools";
 import {
   type Routine,
   RoutineNotFoundError,
@@ -67,6 +68,7 @@ const SUMMARY: RoutineSummary = {
     status: "succeeded",
     finishedAt: new Date("2026-01-02T08:00:03.000Z"),
   },
+  goalId: null,
 };
 
 type Recorded =
@@ -188,6 +190,27 @@ describe("the tool list", () => {
 
     const update = tools.find((tool) => tool.name === "update_routine");
     expect(update?.description ?? "").toContain("restate the schedule");
+  });
+
+  test("tells the model a goal made with endsWhenMet is completed by a run", async () => {
+    // A goal a routine runs repeats, unless it was made with endsWhenMet: then the run that meets
+    // its success criteria completes it. Descriptions that say only "a goal that repeats is never
+    // completed by one of its runs" kept the model from completing it.
+    const conversation = (await listTools()).find(
+      (tool) => tool.name === "complete_goal",
+    );
+    expect(conversation?.description ?? "").toContain("endsWhenMet");
+    const run = responsibilityTools({
+      store: {} as never,
+      engine: {} as never,
+      ownerUserId: "user_asker",
+      agentId: "bot_helper",
+      channelId: "channel_1",
+    });
+    for (const name of ["complete_goal", "report_goal_progress"])
+      expect(
+        run.find((tool) => tool.name === name)?.description ?? "",
+      ).toContain("endsWhenMet");
   });
 
   test("needs no actor, no arguments and no store", async () => {

@@ -47,6 +47,10 @@ import {
 import { useOffersMemory } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import { memoriesQueryOptions } from "@/lib/memory";
+import {
+  COMMAND_MENU_KEYS,
+  openCommandMenu,
+} from "@/components/navigation/command-menu";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { routinesQueryOptions } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
@@ -484,6 +488,13 @@ function Count({ value }: { value: number | undefined }) {
   );
 }
 
+/** The shared list's entries OpenDots draws its own way: Bots as its list, Routines and Memory as its screens. */
+const OPENDOTS_OWN: ReadonlySet<string> = new Set([
+  "bots",
+  "routines",
+  "memory",
+]);
+
 function WorkspaceLinks({
   place,
   onNavigate,
@@ -511,9 +522,9 @@ function WorkspaceLinks({
    * is no rail. Bots is the row under the list of Bots above.
    */
   const drawerOnly = "md:hidden";
-  // Routines is OpenDots' own row above, so the shared list's entry is not drawn twice.
+  // Routines and Memories are OpenDots' own rows above, so the shared list's are left out.
   const navigation = useNavigationItems().filter(
-    (item) => item.id !== "bots" && item.id !== "routines",
+    (item) => !OPENDOTS_OWN.has(item.id),
   );
   return (
     <nav
@@ -544,6 +555,21 @@ function WorkspaceLinks({
           <Count value={memories.data?.length} />
         </Link>
       ) : null}
+      {/* The rail has its own at desktop width. */}
+      <button
+        aria-keyshortcuts={COMMAND_MENU_KEYS}
+        className={cn(row("search"), drawerOnly)}
+        onClick={() => {
+          onNavigate();
+          openCommandMenu();
+        }}
+        type="button"
+      >
+        <IconSearch />
+        <span className="min-w-0 flex-1 truncate text-left">
+          Command palette
+        </span>
+      </button>
       {/* OpenBot's own destinations, from the one list every frame reads. */}
       {navigation.map((item) => (
         <NavigationTarget
@@ -628,7 +654,12 @@ export function OpenDotsSidebar({
 }) {
   const channels = useInfiniteQuery(channelListQueryOptions());
   return (
-    <div className="flex h-full min-h-0 flex-col px-3 pt-[23px] pb-3 max-md:overflow-y-auto">
+    /*
+     * In OpenBot Desktop on macOS the window's buttons sit over the sidebar's top-left corner
+     * (`data-desktop-titlebar`, macOS only), so it then starts 32px lower, below them, level with
+     * the rail beside it. The drawer a narrow window opens is this sidebar too.
+     */
+    <div className="flex h-full min-h-0 flex-col px-3 pt-[23px] pb-3 max-md:overflow-y-auto in-data-[desktop-titlebar=overlay]:pt-[55px]">
       <Wordmark onNavigate={onNavigate} />
       <Link
         {...newChat}

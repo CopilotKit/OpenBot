@@ -619,6 +619,21 @@ describe("one app, by key or by name, held or not", () => {
     });
   });
 
+  test("the personal edition never offers its own Notion or Google Drive, which its broker carries", async () => {
+    setEdition("personal");
+    try {
+      // This directory has neither, so nothing answers; with them, the broker's would.
+      for (const name of ["notion", "Notion", "google-drive", "Google Drive"]) {
+        const response = await appAs(person).request(
+          `/api/plugins/for/${bot}/apps/${encodeURIComponent(name)}`,
+        );
+        expect(response.status).toBe(404);
+      }
+    } finally {
+      setEdition("team");
+    }
+  });
+
   test("a word that names no app is 404", async () => {
     const response = await appAs(person).request(
       `/api/plugins/for/${bot}/apps/${encodeURIComponent("Not An App")}`,
@@ -1131,9 +1146,10 @@ describe("an administrator's one press on a card", () => {
    * sending the one person to Plugins sends them to a page they cannot find.
    */
   test("names the page apps are set up on, for the edition", async () => {
+    // An app both editions offer: the personal one reaches Google Drive through its broker.
     const said = async () =>
-      (await json<{ error: string }>(await press("google-drive"))).error;
-    expect(await said()).toContain("on its page under Plugins");
+      (await json<{ error: string }>(await press("exa-authenticated"))).error;
+    expect(await said()).toContain("on its page under Apps");
     setEdition("personal");
     try {
       const personal = await said();
@@ -1155,7 +1171,7 @@ describe("an administrator's one press on a card", () => {
       expect(response.status).toBe(409);
       const { error } = await json<{ error: string }>(response);
       expect(error).toBe(
-        "Notion has no tools to give yet. Open its page under Plugins to see why, then try again.",
+        "Notion has no tools to give yet. Open its page under Apps to see why, then try again.",
       );
       expect(eventsOf("app_access.refused").at(-1)?.payload).toMatchObject({
         reason: "no_tools",

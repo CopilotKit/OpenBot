@@ -12,7 +12,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
-import { AccessSections } from "@/components/bot-profile/access";
+import { AppsSections, SkillsSections } from "@/components/bot-profile/access";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { saveSkillMutationOptions } from "@/lib/plugins/mutations";
 import { DEV_ACTOR } from "../../server/src/auth/dev-actor";
@@ -233,7 +233,12 @@ function draw(client: QueryClient, agent: AgentProfile) {
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({
-      component: () => <AccessSections agent={agent} />,
+      component: () => (
+        <>
+          <AppsSections agent={agent} />
+          <SkillsSections agent={agent} />
+        </>
+      ),
     }),
   });
   return render(
@@ -264,7 +269,7 @@ test("a skill written on Settings > Skills shows under a new Bot's Your skills, 
   makeBot(BOT.id);
 
   const view = draw(client, BOT);
-  // By its title, as What it can use names it; never "/tide-report" beside "Tide report".
+  // By its title, as Skills it has names it; never "/tide-report" beside "Tide report".
   const tide = await view.findByRole("switch", { name: "Tide report" });
   expect(tide.getAttribute("aria-checked")).toBe("true");
   expect(view.queryByText("/tide-report")).toBeNull();

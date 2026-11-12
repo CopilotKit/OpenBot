@@ -101,7 +101,9 @@ const skipped = (bot: BotCheckInMetrics) =>
   Object.values(bot.runs.skipped).reduce((sum, count) => sum + count, 0);
 
 /**
- * Admin, Check-ins: the switch and the daily limit, then how each Bot's check-ins went.
+ * Admin, Routines: the check-ins switch and the daily limit, then how each Bot's check-ins went.
+ * Routines and goals are each person's own and have nothing to set here; check-ins are the part an
+ * admin sets for everybody, so they are this page's sections.
  *
  * The switch is the same "Check-ins" capability Permissions lists, at the organization's
  * scope; roles and groups are set there. The numbers are counts only: the server sends no titles
@@ -121,8 +123,8 @@ export function CheckInsPage() {
 
   return (
     <PageShell
-      description="Bots check the apps people connected and tell them when something needs them, at most once an hour. They never act without asking."
-      title="Check-ins"
+      description="People set their own Bots' routines and goals. Check-ins are set here, for everybody: Bots check the apps people connected and say when something needs them, at most once an hour, and never act without asking."
+      title="Routines"
     >
       {overview.isPending ? null : overview.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
@@ -167,7 +169,7 @@ function CheckInSettings({ data }: { data: EnterpriseOverview }) {
           .
         </>
       }
-      title="Settings"
+      title="Check-ins"
     >
       <PageRows>
         <Item size="sm">
@@ -175,7 +177,7 @@ function CheckInSettings({ data }: { data: EnterpriseOverview }) {
             <IconRadar />
           </ItemMedia>
           <ItemContent>
-            <ItemTitle>Check-ins</ItemTitle>
+            <ItemTitle>Check-ins for everybody</ItemTitle>
             <ItemDescription>
               {on
                 ? "Bots check in for everybody."
@@ -187,7 +189,7 @@ function CheckInSettings({ data }: { data: EnterpriseOverview }) {
           </ItemContent>
           <ItemActions>
             <Switch
-              aria-label="Check-ins"
+              aria-label="Check-ins for everybody"
               checked={on}
               disabled={saving}
               onCheckedChange={(checked) =>
@@ -272,7 +274,7 @@ function Activity({
         </Select>
       }
       description="Acceptance is how many items people started, out of the ones they started or hid."
-      title="Activity"
+      title="How check-ins went"
     >
       {metrics.isPending ? null : metrics.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">

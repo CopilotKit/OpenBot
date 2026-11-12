@@ -263,7 +263,7 @@ test("a failed plugin read reports the failure instead of claiming the app is no
   const view = renderScreen(failingQueryClient());
 
   expect(
-    await view.findByText("Couldn't load plugins. Reload the page."),
+    await view.findByText("Couldn't load apps. Reload the page."),
   ).toBeTruthy();
 
   // The whole point: an app that may be enabled, with grants on it right now, must never be
@@ -275,7 +275,7 @@ test("a failed plugin read reports the failure instead of claiming the app is no
 test("a failed plugin read draws no switches, so nothing reads as a Bot holding nothing", async () => {
   const view = renderScreen(failingQueryClient());
 
-  await view.findByText("Couldn't load plugins. Reload the page.");
+  await view.findByText("Couldn't load apps. Reload the page.");
 
   expect(view.container.querySelectorAll('[role="switch"]').length).toBe(0);
   expect(view.queryByText("Turn on every read-only action")).toBeNull();
