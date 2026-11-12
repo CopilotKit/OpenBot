@@ -36,6 +36,7 @@ test("a command exported to the collector is scrubbed of the secrets in it", asy
         // A credential written positionally is the shape that used to survive: it is not a `NAME=value`
         // and not a named flag, so nothing matched it before it reached the wire.
         positional: { command: `redis-cli -a ${secret} SET k v` },
+        passphrase: { command: `gpg --batch --passphrase ${secret} -d s.gpg` },
       },
     });
     await exporter?.shutdown();

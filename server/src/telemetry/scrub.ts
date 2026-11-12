@@ -30,7 +30,7 @@ const TOKEN_SHAPES: RegExp[] = [
 
 /** Names a credential is usually passed under, as an assignment, a flag or a header. */
 const SECRET_NAME =
-  "(?:[A-Za-z0-9_]*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API[_-]?KEY|APIKEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIALS?|AUTH)[A-Za-z0-9_]*)";
+  "(?:[A-Za-z0-9_]*(?:PASSWORD|PASSWD|PASSPHRASE|PWD|SECRET|TOKEN|API[_-]?KEY|APIKEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIALS?|AUTH)[A-Za-z0-9_]*)";
 
 const RULES: [RegExp, (match: string, ...groups: string[]) => string][] = [
   // Authorization headers: `Authorization: Bearer x`, `-H "Authorization: Basic x"`.
