@@ -199,6 +199,41 @@ test("picking a skin draws it at once and saves it on the account", async () => 
   expect(view.queryByRole("alert")).toBeNull();
 });
 
+test("the picker lists OpenFuse, and never OpenMuse", async () => {
+  signedIn();
+  serve("GET /api/settings/preferences", {
+    preferences: preferences("openbot"),
+  });
+  const { view, user } = renderSettings();
+
+  const picker = view.getByRole("combobox", { name: "Skin" });
+  await waitFor(() => expect(picker.getAttribute("data-disabled")).toBeNull());
+  await user.click(picker);
+  const options = await view.findAllByRole("option");
+  const names = options.map((option) => option.textContent ?? "");
+  expect(names.some((name) => name.startsWith("OpenFuse"))).toBe(true);
+  expect(names.join("\n")).not.toMatch(/openmuse/i);
+});
+
+test("an account that saved OpenMuse's id still gets the skin, now named OpenFuse", async () => {
+  signedIn();
+  // The id saved on accounts before the rename is unchanged.
+  serve("GET /api/settings/preferences", {
+    preferences: preferences("openmuse"),
+  });
+  const { view } = renderSettings();
+
+  const picker = view.getByRole("combobox", { name: "Skin" });
+  await waitFor(() => expect(picker.getAttribute("data-disabled")).toBeNull());
+  await waitFor(() =>
+    expect(view.getByLabelText("Drawn skin").textContent).toBe("openmuse"),
+  );
+  expect(document.documentElement.dataset.skin).toBe("openmuse");
+  expect(picker.textContent).toContain("OpenFuse");
+  expect(picker.textContent).not.toMatch(/openmuse/i);
+  expect(sent).toEqual([]);
+});
+
 test("a skin the account could not save is put back, and the picker says so", async () => {
   signedIn();
   setSkin("openduet");
@@ -212,7 +247,7 @@ test("a skin the account could not save is put back, and the picker says so", as
   const picker = view.getByRole("combobox", { name: "Skin" });
   await waitFor(() => expect(picker.getAttribute("data-disabled")).toBeNull());
   await user.click(picker);
-  await user.click(await view.findByRole("option", { name: /^OpenMuse/ }));
+  await user.click(await view.findByRole("option", { name: /^OpenFuse/ }));
   await waitFor(() => expect(getSkinId()).toBe("openmuse"));
 
   await act(async () => {

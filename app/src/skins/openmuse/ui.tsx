@@ -19,8 +19,8 @@ import {
 import { cn } from "@/lib/utils";
 
 /*
- * OpenMuse's primitives, rebuilt on OpenBot's own. Each one is an OpenBot component — Button, Item,
- * Dialog — wearing OpenMuse's measurements: 23px cards, pill buttons, 42px icon tiles, a 44px round
+ * OpenFuse's primitives, rebuilt on OpenBot's own. Each one is an OpenBot component (Button, Item,
+ * Dialog) wearing OpenFuse's measurements: 23px cards, pill buttons, 42px icon tiles, a 44px round
  * icon button, and the 15/14/11px type steps from its stylesheet. Colours come from the skin's tokens,
  * so dark mode follows without a branch here.
  */
@@ -37,7 +37,7 @@ export const museText = {
 
 type MuseButtonLook = { primary?: boolean; small?: boolean; danger?: boolean };
 
-/** OpenMuse's pill: pale blue when it is the one thing to do, soft grey otherwise. */
+/** OpenFuse's pill: pale blue when it is the one thing to do, soft grey otherwise. */
 export function museButtonClass({
   primary = false,
   small = false,
@@ -144,7 +144,7 @@ const TILE_TINTS = {
 
 export type TileTint = keyof typeof TILE_TINTS;
 
-/** OpenMuse's rounded square that holds an icon. */
+/** OpenFuse's rounded square that holds an icon. */
 export function IconTile({
   icon: Icon,
   tint = "sky",
@@ -270,7 +270,7 @@ export function Divider({ className }: { className?: string }) {
   return <div className={cn("h-px bg-border", className)} />;
 }
 
-/** A coloured status dot, as on OpenMuse's Tracking and Goals headings. */
+/** A coloured status dot, as on OpenFuse's Tracking and Goals headings. */
 export function StatusDot({ tone }: { tone: "green" | "blue" }) {
   return (
     <span
@@ -286,7 +286,7 @@ export function StatusDot({ tone }: { tone: "green" | "blue" }) {
 }
 
 /**
- * OpenMuse's sheet: a card that rises from the bottom on a phone, with a grab handle, and settles in
+ * OpenFuse's sheet: a card that rises from the bottom on a phone, with a grab handle, and settles in
  * the middle on anything wider. Built on OpenBot's Dialog, so focus, Escape and the backdrop behave
  * the way every other OpenBot dialog does.
  */
@@ -310,7 +310,7 @@ export function MuseSheet({
           "openmuse-sheet gap-0 overflow-hidden border border-border bg-background p-0 text-foreground shadow-none motion-reduce:transition-none",
           // A phone: pinned to the bottom edge, full width, square at the bottom.
           "top-auto bottom-0 left-0 max-h-[94svh] w-full max-w-none translate-x-0 translate-y-0 rounded-[26px] rounded-b-none pb-3",
-          // Wider: centred, OpenMuse's 790px card.
+          // Wider: centred, OpenFuse's 790px card.
           "min-[600px]:top-1/2 min-[600px]:bottom-auto min-[600px]:left-1/2 min-[600px]:w-[calc(100%-40px)] min-[600px]:max-w-[790px] min-[600px]:-translate-x-1/2 min-[600px]:-translate-y-1/2 min-[600px]:rounded-[26px] min-[600px]:pb-0",
         )}
         overlayClassName="bg-[var(--openmuse-scrim)] supports-backdrop-filter:backdrop-blur-none motion-reduce:transition-none"
@@ -344,7 +344,7 @@ export function MuseSheet({
   );
 }
 
-/** The scrolling page every OpenMuse tab is drawn on, with its 25px title. */
+/** The scrolling page every OpenFuse tab is drawn on, with its 25px title. */
 export function MuseScreen({
   title,
   children,

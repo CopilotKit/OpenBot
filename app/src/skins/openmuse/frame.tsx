@@ -55,11 +55,11 @@ const TABS: { id: MuseTab; label: string; icon: MuseIcon }[] = [
 ];
 
 /**
- * OpenMuse's shell around every OpenBot page: one centred column, the agent at the top, a bell for
+ * OpenFuse's shell around every OpenBot page: one centred column, the agent at the top, a bell for
  * what waits on you, and a floating pill of five tabs. The page itself is OpenBot's, untouched —
  * conversations are OpenBot's own chat routes, rendered as `children`.
  */
-export function OpenMuseFrame({ children }: { children: ReactNode }) {
+export function OpenFuseFrame({ children }: { children: ReactNode }) {
   // The roster's socket. OpenBot opens it in its sidebar, which this frame replaces.
   useChannelEvents();
   const pathname = useRouterState({
@@ -147,7 +147,7 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
                 label="Open conversations and menu"
                 onClick={() => setSheet("menu")}
               >
-                {/* OpenBot's own "a Bot needs you" mark, worn as OpenMuse's dot. */}
+                {/* OpenBot's own "a Bot needs you" mark, worn as OpenFuse's dot. */}
                 <span className="openmuse-menu-badge">
                   <BotsNavBadge />
                 </span>
@@ -210,7 +210,7 @@ export function OpenMuseFrame({ children }: { children: ReactNode }) {
           </header>
         </div>
         {/*
-         * A tab's own screen sits in OpenMuse's 760px column. Any other OpenBot page, and a conversation
+         * A tab's own screen sits in OpenFuse's 760px column. Any other OpenBot page, and a conversation
          * with its side panel open, takes OpenBot's own width on a wide screen; the bars stay centred.
          */}
         <main

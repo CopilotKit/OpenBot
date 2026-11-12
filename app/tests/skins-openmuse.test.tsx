@@ -42,7 +42,7 @@ import {
   chosenBotKey,
   forgetChosenBots,
 } from "@/skins/openmuse/chosen-bot";
-import { OpenMuseFrame } from "@/skins/openmuse/frame";
+import { OpenFuseFrame } from "@/skins/openmuse/frame";
 import {
   centreBot,
   mainChannel,
@@ -52,7 +52,7 @@ import {
 import { SKINS } from "@/skins/registry";
 
 /*
- * The OpenMuse frame against OpenBot's own API shapes. Every payload below is what the server's
+ * The OpenFuse frame against OpenBot's own API shapes. Every payload below is what the server's
  * route returns, envelope and all, so the frame reads it through the same query factories the rest
  * of the app uses. What is checked is what a person sees and can reach.
  */
@@ -473,9 +473,9 @@ function renderAt(path: string) {
     getParentRoute: () => root,
     id: "app",
     component: () => (
-      <OpenMuseFrame>
+      <OpenFuseFrame>
         <Outlet />
-      </OpenMuseFrame>
+      </OpenFuseFrame>
     ),
   });
   const skinScreen = createRoute({
@@ -545,9 +545,9 @@ async function openMenu() {
   return page().findByRole("dialog");
 }
 
-describe("OpenMuse is a registered skin with its own frame", () => {
+describe("OpenFuse is a registered skin with its own frame", () => {
   test("the registry hands OpenBot the frame and the three skin screens", () => {
-    expect(SKINS.openmuse.Frame).toBe(OpenMuseFrame);
+    expect(SKINS.openmuse.Frame).toBe(OpenFuseFrame);
     // Apps is OpenBot's own Connections page, so the skin adds three screens, not four.
     expect(Object.keys(SKINS.openmuse.screens ?? {}).sort()).toEqual([
       "activity",
@@ -703,7 +703,7 @@ describe("the frame", () => {
   });
 });
 
-describe("the frame wears the deployment's brand, not OpenMuse's", () => {
+describe("the frame wears the deployment's brand, not the skin's name", () => {
   /** Everything a person can read or hear: the text, and every name, label and alt text. */
   function readable() {
     const attributes = [...document.body.querySelectorAll("*")].flatMap(
@@ -731,7 +731,7 @@ describe("the frame wears the deployment's brand, not OpenMuse's", () => {
     "/s/goals",
     "/connections",
   ])(
-    "%s shows the deployment's name, never OpenMuse, and no capybara",
+    "%s shows the deployment's name, never the skin's name, and no capybara",
     async (path) => {
       serve();
       renderAt(path);
@@ -741,7 +741,7 @@ describe("the frame wears the deployment's brand, not OpenMuse's", () => {
       expect(menu.getByRole("heading", { name: PRODUCT })).toBeTruthy();
       await menu.findByText("Planning the week");
       expect(readable()).toContain(PRODUCT);
-      expect(readable()).not.toMatch(/openmuse/i);
+      expect(readable()).not.toMatch(/open[fm]use/i);
       expect(capybaras()).toEqual([]);
     },
   );
@@ -768,7 +768,7 @@ describe("the frame wears the deployment's brand, not OpenMuse's", () => {
     renderAt("/s/activity");
     const centre = await page().findByRole("button", { name: "Choose a Bot" });
     await waitFor(() => expect(centre.textContent).toContain(PRODUCT));
-    expect(readable()).not.toMatch(/openmuse/i);
+    expect(readable()).not.toMatch(/open[fm]use/i);
     expect(capybaras()).toEqual([]);
   });
 });

@@ -57,8 +57,8 @@ import {
 } from "./ui";
 
 /**
- * OpenMuse's menu: the main chat, a new chat, every conversation OpenBot keeps, and a way to every
- * other OpenBot surface. Nothing here is OpenMuse's own data; each row opens an OpenBot route.
+ * OpenFuse's menu: the main chat, a new chat, every conversation OpenBot keeps, and a way to every
+ * other OpenBot surface. Nothing here is OpenFuse's own data; each row opens an OpenBot route.
  */
 export function MenuSheet({ onClose }: { onClose: () => void }) {
   const { bot } = useMuse();

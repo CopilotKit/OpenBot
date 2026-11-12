@@ -1,6 +1,6 @@
 /*
- * OpenMuse. Light is OpenMuse's own palette from its `ui.tsx`: a near-white canvas, white cards, a
- * pale sky blue for the primary action and the person's own words, and soft pastel tiles. OpenMuse
+ * OpenFuse. Light is OpenFuse's own palette from its `ui.tsx`: a near-white canvas, white cards, a
+ * pale sky blue for the primary action and the person's own words, and soft pastel tiles. OpenFuse
  * ships no dark theme, so dark is drawn in its spirit: the same airy shapes at night, a deep slate
  * canvas with a blue cast, cards one step up, and the sky blue deepened into a night blue so the
  * person's bubble and the primary pill still read as the one warm accent.
@@ -166,7 +166,7 @@
 }
 
 /*
- * OpenMuse is set in the device's own system font. `--font-sans` above is the token OpenBot's
+ * OpenFuse is set in the device's own system font. `--font-sans` above is the token OpenBot's
  * headings read; the page itself takes it here, because OpenBot names Inter on `html` directly.
  */
 :root[data-skin="openmuse"] {
@@ -174,24 +174,24 @@
 }
 
 /*
- * OpenBot's own pages, worn the OpenMuse way. Every rule below reaches OpenBot's components only
+ * OpenBot's own pages, worn the OpenFuse way. Every rule below reaches OpenBot's components only
  * through the `data-slot` hooks they publish for this, so restyling a component inside OpenBot cannot
  * silently break the skin.
  */
 
-/* OpenMuse's buttons are pills. */
+/* OpenFuse's buttons are pills. */
 :root[data-skin="openmuse"] [data-slot="button"] {
   border-radius: 9999px;
 }
 
-/* Page titles at OpenMuse's 25px, semibold and tight. */
+/* Page titles at OpenFuse's 25px, semibold and tight. */
 :root[data-skin="openmuse"] .openmuse-stage [data-slot="page-title"] {
   font-size: 25px;
   font-weight: 600;
   letter-spacing: -0.7px;
 }
 
-/* OpenBot's "a Bot needs you" badge, drawn as OpenMuse's small blue dot on the menu button. */
+/* OpenBot's "a Bot needs you" badge, drawn as OpenFuse's small blue dot on the menu button. */
 :root[data-skin="openmuse"] .openmuse-menu-badge [role="img"] {
   position: absolute;
   top: 7px;
@@ -208,7 +208,7 @@
   color: transparent;
 }
 
-/* Chat sits in OpenMuse's padded column: 17px on a phone, 42px on a desktop. */
+/* Chat sits in OpenFuse's padded column: 17px on a phone, 42px on a desktop. */
 :root[data-skin="openmuse"]
   .openmuse-frame[data-openmuse-tab="chat"]
   .openmuse-stage {
@@ -251,7 +251,7 @@
   }
 }
 
-/* The person's words: OpenMuse's pale-blue bubble with its tucked corner. */
+/* The person's words: OpenFuse's pale-blue bubble with its tucked corner. */
 :root[data-skin="openmuse"]
   .openmuse-stage
   [data-slot="bubble"][data-align="end"]
@@ -264,7 +264,7 @@
   line-height: 24px;
 }
 
-/* The Bot's words: OpenMuse's soft grey bubble, tucked on the other side. */
+/* The Bot's words: OpenFuse's soft grey bubble, tucked on the other side. */
 :root[data-skin="openmuse"]
   .openmuse-stage
   [data-slot="bubble"][data-variant="ghost"][data-align="start"]
@@ -276,7 +276,7 @@
   line-height: 23px;
 }
 
-/* The composer: OpenMuse's white pill with a soft shadow, a "+" on the left and a round send. */
+/* The composer: OpenFuse's white pill with a soft shadow, a "+" on the left and a round send. */
 :root[data-skin="openmuse"] .openmuse-stage [data-slot="composer"] {
   min-height: 62px;
   padding: 8px;

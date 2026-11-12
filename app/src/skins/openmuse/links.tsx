@@ -34,7 +34,7 @@ export function MainChatLink({
   );
 }
 
-/** A new conversation with this Bot: OpenMuse's "new side chat". */
+/** A new conversation with this Bot: OpenFuse's "new side chat". */
 export function NewChatLink({
   agentId,
   ...props
