@@ -1,8 +1,4 @@
-import {
-  IconFolderMinus,
-  IconFolderPlus,
-  IconPlus,
-} from "@tabler/icons-react";
+import { IconFolderMinus, IconFolderPlus, IconPlus } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import {
@@ -44,11 +40,17 @@ export function MoveToProjectMenu({
   const [creating, setCreating] = useState(false);
   const offers = moveToProjectOffers(projects, currentProjectId);
 
+  /*
+   * Filed through the promise, not through the mutation's per-call callbacks: the click that asks
+   * for the move also closes the menu, and this hook lives in that menu. TanStack Query delivers
+   * `mutate`'s callbacks through the observer, and an unmounted observer has no listeners left — so
+   * a refused move reported that way was reported to nobody and the row said nothing. The promise
+   * settles whether or not this component is still on screen, and `onProblem` belongs to the row.
+   */
   const file = (projectId: string | null) =>
-    move.mutate(
-      { channelId, projectId },
-      { onError: (error) => onProblem(error.message) },
-    );
+    move
+      .mutateAsync({ channelId, projectId })
+      .catch((error: Error) => onProblem(error.message));
 
   return (
     <>
