@@ -699,6 +699,69 @@ describe("GET /api/setup", () => {
     expect(row(read.checklist.rows, "model").status).toBe("needs_setup");
   });
 
+  /*
+   * The row says "Check again to ask OpenAI". Pressed seconds after the last check, it answered
+   * from that check, which was about no key at all, so the key just added stayed unchecked.
+   */
+  test("Check again right after a key is added asks about that key", async () => {
+    const credentials: CredentialStatus[] = [];
+    const app = appWith({
+      who: "admin",
+      environment: { OPENAI_API_KEY: undefined },
+      credentials,
+    });
+    const before = await checklistFrom(app, "POST");
+    expect(row(before.checklist.rows, "model").status).toBe("needs_setup");
+
+    credentials.push({
+      id: "credential-added",
+      kind: "model",
+      provider: "openai",
+      keyId: "openai-api-key",
+      metadata: {},
+      revokedAt: null,
+    });
+    const read = await checklistFrom(app);
+    expect(row(read.checklist.rows, "model").status).toBe("not_checked");
+    const pressed = await checklistFrom(app, "POST");
+    expect(row(pressed.checklist.rows, "model").status).toBe("ready");
+    expect(app.counts.checks).toBe(1);
+  });
+
+  test("Check again asks again when the last check couldn't get an answer", async () => {
+    const answers: ModelCheckOutcome[] = [
+      {
+        kind: "warning",
+        line: {
+          type: "model-check-unreadable",
+          provider: "openai",
+          model: "gpt-5.6-terra",
+          reason: "ECONNRESET",
+          fix: "This is often temporary.",
+        },
+      },
+      { kind: "available" },
+    ];
+    const app = appWith({
+      who: "admin",
+      environment: { OPENAI_API_KEY: "sk-set" },
+      modelCheck: () => answers.shift() ?? { kind: "available" },
+    });
+    const first = await checklistFrom(app, "POST");
+    expect(row(first.checklist.rows, "model")).toMatchObject({
+      status: "not_checked",
+      detail:
+        "The key is set but hasn't been checked. Check again to ask OpenAI.",
+    });
+    const again = await checklistFrom(app, "POST");
+    expect(row(again.checklist.rows, "model").status).toBe("ready");
+    expect(app.counts.checks).toBe(2);
+
+    // A definite answer inside the interval is still shared, so a held button is no flood.
+    await checklistFrom(app, "POST");
+    expect(app.counts.checks).toBe(2);
+  });
+
   test("Check again asks Intelligence again too", async () => {
     let answers = 0;
     const app = appWith({

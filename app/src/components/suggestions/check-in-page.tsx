@@ -14,7 +14,10 @@ import {
 } from "@/components/layout/page-shell";
 import { routinesOf } from "@/components/routines/new-routine-page";
 import { DeleteRow } from "@/components/routines/delete-row";
-import { RoutineDetailMissing } from "@/components/routines/routine-detail-missing";
+import {
+  RoutineDetailMissing,
+  useDeletedHere,
+} from "@/components/routines/routine-detail-missing";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -44,7 +47,9 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
+  changeProactiveSettingMutationKey,
   changeProactiveSettingMutationOptions,
+  type ProactiveChange,
   type ProactiveSetting,
   proactiveSettingsQueryOptions,
 } from "@/lib/proactive";
@@ -76,12 +81,21 @@ export function CheckInRoutePage({
   const bots = useQuery(agentListQueryOptions());
   const hidden = useQuery(agentListQueryOptions(true));
   const blocked = useCheckInsBlocked();
+  const deleted = useDeletedHere<{
+    setting: { id: string };
+    change: ProactiveChange;
+  }>(
+    changeProactiveSettingMutationKey,
+    ({ setting, change }) =>
+      change.kind === "remove" && setting.id === checkInId,
+  );
   const back = routinesOf(agentId);
   const setting = settings.data?.find((row) => row.id === checkInId);
   if (!setting)
     return (
       <RoutineDetailMissing
         back={back}
+        deleted={deleted}
         icon={IconRadar}
         kind="check-in"
         read={settings}
@@ -311,7 +325,9 @@ export function CheckInPage({
               onClick={() =>
                 change.mutate(
                   { setting, change: { kind: "remove" } },
-                  { onSuccess: () => navigate(back) },
+                  // Usually the route has gone back already, on the list without it. This is
+                  // for a list that couldn't be read again.
+                  { onSuccess: () => navigate({ ...back, replace: true }) },
                 )
               }
               size="sm"

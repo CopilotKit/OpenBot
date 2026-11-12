@@ -155,7 +155,11 @@ test("a goal: a routine with Done when, paused, completed and deleted", async ({
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Delete" }).click();
     await expect(dialog).toBeHidden();
-    await page.getByRole("link", { name: "Routines", exact: true }).click();
+    // Delete goes back to Routines on its own, and the goal is gone from it.
+    await expect(
+      page.getByRole("heading", { name: "Routines", level: 1 }),
+    ).toBeVisible();
+    await expect(main.getByText("This goal isn't here")).toHaveCount(0);
     await expect(
       main.getByRole("link", { name: new RegExp(`^${GOAL}`) }),
     ).toHaveCount(0);
@@ -233,11 +237,20 @@ test("a check-in: Only tell you, how often, switched off and removed", async ({
     hasText: "Personal Assistant",
   });
   await expect(row).toBeVisible();
+  // When it looks next, in the words a routine's page uses ("in 6 days"), never a raw date.
+  await expect(row).toContainText(
+    /Once a day · Tells you · Next check (in \d+ hours|tomorrow)/,
+  );
+  await expect(row).not.toContainText(/\d{1,2}\/\d{1,2}\/\d{4}/);
   await shot("check-in-listed");
   await row.click();
 
   const on = main.getByRole("switch", { name: "Check-ins on" });
   await expect(on).toBeChecked();
+  await expect(
+    main.getByText(/^Next check (in \d+ hours|tomorrow)$/),
+  ).toBeVisible();
+  await expect(main).not.toContainText(/\d{1,2}\/\d{1,2}\/\d{4}/);
   await shot("check-in-page");
   await on.click();
   await expect(on).not.toBeChecked();
@@ -250,8 +263,13 @@ test("a check-in: Only tell you, how often, switched off and removed", async ({
   await shot("check-in-remove-asks");
   await dialog.getByRole("button", { name: /^Remove/ }).click();
   await expect(dialog).toBeHidden();
-  await page.getByRole("link", { name: "Routines", exact: true }).click();
+  // Remove goes back to Routines on its own, and the check-in is gone from it.
+  await expect(
+    page.getByRole("heading", { name: "Routines", level: 1 }),
+  ).toBeVisible();
+  await expect(main.getByText("This check-in isn't here")).toHaveCount(0);
   await expect(
     main.getByRole("link").filter({ hasText: "Check-in" }),
   ).toHaveCount(0);
+  await shot("check-in-removed");
 });

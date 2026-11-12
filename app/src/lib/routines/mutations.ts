@@ -266,8 +266,12 @@ export function setRoutineEnabledMutationOptions(queryClient: QueryClient) {
   });
 }
 
+/** Every routine delete, so the routine's page can tell it was deleted from there. */
+export const deleteRoutineMutationKey = [...routineKeys.all, "delete"] as const;
+
 export function deleteRoutineMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
+    mutationKey: deleteRoutineMutationKey,
     mutationFn: (id: string) =>
       client(`/api/routines/${encodeURIComponent(id)}`, {
         method: "DELETE",

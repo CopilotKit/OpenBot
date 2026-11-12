@@ -54,29 +54,21 @@ export type ProviderVocabulary = {
    * under Settings), so `managePaths(...).brokerDirectory(provider)` names it, from the same
    * generated route tree: a path no route file answers still stops compiling.
    */
-  /**
-   * What the "More apps" row says once the key is set.
-   *
-   * A FIELD rather than a `provider === "composio"` branch. Composio's sentence counts its
-   * directory ("a few hundred apps") and that count is Composio's, measured by nobody here; Arcade's
-   * says the same thing about reach without claiming a size this deployment has not counted.
-   */
-  directoryDescription: string;
 };
 
 const VOCABULARY: Record<PluginsProvider, ProviderVocabulary> = {
-  composio: {
-    directoryLabel: "Browse apps",
-    envVar: "COMPOSIO_API_KEY",
-    directoryDescription:
-      "A few hundred apps. Each person connects their own account.",
-  },
-  arcade: {
-    directoryLabel: "Browse apps",
-    envVar: "ARCADE_API_KEY",
-    directoryDescription:
-      "Apps nobody here has reviewed. Each person connects their own account.",
-  },
+  composio: { directoryLabel: "Browse apps", envVar: "COMPOSIO_API_KEY" },
+  arcade: { directoryLabel: "Browse apps", envVar: "ARCADE_API_KEY" },
+};
+
+/*
+ * What the "More apps" row says once the key is set, in each edition. NO APP COUNT, on either
+ * provider: the directory is the vendor's, nobody here counts it, and it keeps growing. Composio's
+ * sentence once said "a few hundred apps" while its directory listed over 1,600.
+ */
+const DIRECTORY_DESCRIPTION: Record<Edition, string> = {
+  team: "Apps nobody here has reviewed. Each person connects their own account.",
+  personal: "More apps you can connect.",
 };
 
 export function providerVocabulary(
@@ -138,16 +130,6 @@ export type MoreAppsRow = {
   linked: boolean;
 };
 
-/**
- * The "More apps" row's sentence in the personal edition, where the one person reading it is the
- * only one who connects anything. The same split as {@link ProviderVocabulary.directoryDescription}:
- * Composio's counts its directory and Arcade's claims no size.
- */
-const PERSONAL_DIRECTORY_DESCRIPTION: Record<PluginsProvider, string> = {
-  composio: "A few hundred more apps you can connect.",
-  arcade: "More apps you can connect.",
-};
-
 /** Where the personal edition's one person turns connecting apps on: Settings, Setup. */
 const PERSONAL_SET_UP = "Set it up in Settings under Setup.";
 
@@ -156,7 +138,7 @@ export function moreAppsRow(
   configured: boolean,
   edition: Edition = "team",
 ): MoreAppsRow {
-  const { directoryLabel, envVar, directoryDescription } = VOCABULARY[provider];
+  const { directoryLabel, envVar } = VOCABULARY[provider];
   if (!configured) {
     return {
       title: directoryLabel,
@@ -169,10 +151,7 @@ export function moreAppsRow(
   }
   return {
     title: directoryLabel,
-    description:
-      edition === "personal"
-        ? PERSONAL_DIRECTORY_DESCRIPTION[provider]
-        : directoryDescription,
+    description: DIRECTORY_DESCRIPTION[edition],
     linked: true,
   };
 }
