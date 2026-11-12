@@ -1,0 +1,46 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Now show the four-month rainfall total as a single metric card, then say one short sentence.",
+        "model": "gpt-5.6-terra",
+        "turnIndex": 2,
+        "hasToolResult": true
+      },
+      "response": {
+        "content": "Your garden received **236 mm** of rainfall from January through April."
+      },
+      "recordedTimings": {
+        "ttftMs": 894,
+        "interChunkDelaysMs": [
+          14,
+          275,
+          0,
+          0,
+          32,
+          3,
+          3,
+          3,
+          1,
+          3,
+          2,
+          0,
+          37,
+          7,
+          9,
+          57,
+          36,
+          61,
+          0,
+          0,
+          148
+        ],
+        "totalDurationMs": 1585
+      },
+      "metadata": {
+        "systemHash": "e006dae3",
+        "toolsHash": "e175874e"
+      }
+    }
+  ]
+}
