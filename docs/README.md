@@ -6,7 +6,7 @@ Start with the root [README](../README.md), then use these references:
 - [Configuration](configuration.md): environment variables and tenant package YAML.
 - [Personal edition](personal-edition.md): OpenBot for one person, with no sign-in and no Admin.
 - [Development](development.md): local setup, migrations, ports, and quality checks.
-- [Coworkers](coworkers.md): durable Bot profiles, channels, visibility, deletion, and external AG-UI registration.
+- [Coworkers](coworkers.md): durable Bot profiles, channels, visibility, deletion, sidebar project folders, and external AG-UI registration.
 - [Approvals](approvals.md): which actions a Bot asks before, the order that decides it, and what an admin can close.
 - [Routines](routines.md): standing instructions a Bot runs on a schedule, the worker that fires them, and who they run as.
 - [Automatic Learning](automatic-learning.md): which Bots contribute conversations to a Learning container, and receive its published skills.

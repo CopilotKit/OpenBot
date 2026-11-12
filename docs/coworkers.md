@@ -74,6 +74,24 @@ Starting a channel creates a new conversation and Intelligence thread. Two chann
 
 Each channel routes through a channel-local proxy agent id, pinned to that channel's thread id, then forwards to the coworker runtime id.
 
+## Grouping conversations into projects
+
+The conversation sidebar draws three collapsible sections in a fixed order: **Group chats**, **Direct chats**, then **Projects**. A conversation is drawn once. One that is filed in one of the reader's projects appears under that project and nowhere else; everything else is a group chat when it has more than one person in it (`memberCount` above one, the reader included) or more than one Bot, and a direct chat otherwise. Both answers come from fields the roster already carries, so classifying the sidebar costs no request per row.
+
+A project is one person's folder, not a property of the conversation. Filing is recorded in `channel_projects` — `(project_id, channel_id, owner_user_id)`, unique per channel and owner, so the same channel can sit in one folder for one reader and in no folder for everybody else. The alternative, a `project_id` column on `channels`, would force a single folder on everyone who can see the channel, which is why it was not used. For the same reason nothing about a project grants access: every channel route still resolves the caller in `channel_memberships`, and a project endpoint names only channels the caller is a member of — ids, never titles, so a folder cannot become a way to read a conversation's name.
+
+| Route                            | What it does                                                                                                        |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/projects`              | The caller's folders with the ids of the conversations filed in them, in the caller's own order.                      |
+| `POST /api/projects`             | Makes a folder for the caller.                                                                                        |
+| `PATCH /api/projects/:id`        | Renames the caller's folder. Anybody else's is `404`, not `403`, so the answer does not confirm it exists.             |
+| `DELETE /api/projects/:id`       | Drops the folder. Its conversations are untouched and return to Group or Direct.                                     |
+| `PATCH /api/channels/:id/project`| Files a conversation into one of the caller's folders, or takes it out (`projectId: null`). Needs channel membership. |
+
+Deleting a folder deletes filing rows through the foreign key; the conversations and their memberships are not touched, so a deleted folder leaves nothing for anybody to clean up and nothing for a member to lose.
+
+Which sections a person keeps folded is saved on their account (`sidebarSections` in their user preferences), not in the browser's storage, so a sidebar folded on a laptop is folded on the desktop too. Typing in the sidebar search opens every section for as long as the box holds text — a match inside a folded section is a result the person would otherwise be told about and not shown — and the fold they chose comes back when the box is cleared, because the search is drawn over the saved state rather than written into it.
+
 ## Deleting and hiding
 
 Deleting is soft. The coworker stops running, but existing channels remain readable for their members and restore as tombstones.
