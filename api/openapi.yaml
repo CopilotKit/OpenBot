@@ -157,6 +157,28 @@ paths:
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
           $ref: '#/components/responses/ServerError'
+  /api/v2/organizations/{organizationId}/threads:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Bots]
+      operationId: listThreads
+      summary: List threads
+      description: A deliberate lint error, to prove the gate. Intelligence serves threads.
+      security:
+        - webSession: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotPage'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
   /api/v2/organizations/{organizationId}/bots/{botId}:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
