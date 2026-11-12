@@ -16,17 +16,20 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
+import type { Project } from "@/lib/projects/queries";
 import type { MessageListEmphasis } from "@/lib/settings/message-list";
 import { useTypedReveal } from "@/lib/typed-reveal";
 import { ChannelItemContent } from "./channel-item-content";
+import { MoveToProjectMenu } from "./move-to-project-menu";
 
 /**
  * Memoized roster row. `use-channel-events` preserves unchanged row identity, and
  * `content-visibility` keeps off-screen rows cheap without virtualization.
  *
- * Right-click opens Pin, Rename and Delete. Rename is offered only to the person who started the
- * conversation, which is who the server lets rename it. Deleting is confirmed in a dialog that
- * names the channel, because the row it was invoked on is one of several identical-looking rows.
+ * Right-click opens Pin, Move to project, Rename and Delete. Rename is offered only to the person
+ * who started the conversation, which is who the server lets rename it. Deleting is confirmed in a
+ * dialog that names the channel, because the row it was invoked on is one of several
+ * identical-looking rows.
  */
 export const Channel = memo(function Channel({
   channelId,
@@ -40,6 +43,8 @@ export const Channel = memo(function Channel({
   unread,
   busy,
   emphasis,
+  projectId,
+  projects,
 }: {
   channelId: string;
   participantIds: string[];
@@ -55,6 +60,10 @@ export const Channel = memo(function Channel({
   unread: boolean;
   busy: boolean;
   emphasis: MessageListEmphasis;
+  /** The folder this conversation is filed in, or null. The caller's own filing, from the roster. */
+  projectId: string | null;
+  /** This person's folders, for the row's "Move to project ▸" submenu. */
+  projects: Project[];
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -72,14 +81,14 @@ export const Channel = memo(function Channel({
   const [confirming, setConfirming] = useState(false);
   const [renaming, setRenaming] = useState(false);
   /**
-   * Why a pin did not take, said on the row it was asked of.
+   * Why a pin or a move did not take, said on the row it was asked of.
    *
-   * Pinning used to fail in total silence: the menu closed, the pin did not move, and nothing on
-   * screen accounted for it — which reads as the app ignoring the click. There is no toast in this
-   * app, and the row is where the person was looking, so the sentence goes here and is replaced by
-   * the next attempt.
+   * Both used to fail in total silence: the menu closed, nothing moved, and nothing on screen
+   * accounted for it — which reads as the app ignoring the click. There is no toast in this app,
+   * and the row is where the person was looking, so the sentence goes here and is replaced by the
+   * next attempt.
    */
-  const [pinProblem, setPinProblem] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
 
   return (
     <>
@@ -116,16 +125,24 @@ export const Channel = memo(function Channel({
         <ContextMenuContent>
           <ContextMenuItem
             onClick={() => {
-              setPinProblem(null);
+              setProblem(null);
               setPinned.mutate(
                 { channelId, pinned: !pinned },
-                { onError: (thrown) => setPinProblem(thrown.message) },
+                { onError: (thrown) => setProblem(thrown.message) },
               );
             }}
           >
             {pinned ? <IconPinnedOff /> : <IconPin />}
             {pinned ? "Unpin conversation" : "Pin conversation"}
           </ContextMenuItem>
+          {/* Filing is this person's own; the folders offered are the ones they own, and the row
+              only exists because they are a member of the conversation. */}
+          <MoveToProjectMenu
+            channelId={channelId}
+            currentProjectId={projectId}
+            onProblem={setProblem}
+            projects={projects}
+          />
           {canRename ? (
             <ContextMenuItem onClick={() => setRenaming(true)}>
               <IconPencil />
@@ -141,9 +158,9 @@ export const Channel = memo(function Channel({
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
-      {pinProblem ? (
+      {problem ? (
         <p className="px-2 pb-1 text-destructive text-xs" role="alert">
-          {pinProblem}
+          {problem}
         </p>
       ) : null}
       <RenameConversationDialog

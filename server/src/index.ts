@@ -115,6 +115,7 @@ import {
 } from "./channels/group";
 import { createModelChoices } from "./channels/model-choice";
 import { type ChannelStore, createChannelStore } from "./channels/routes";
+import { createProjectStore } from "./projects/store";
 import { createStallGuard } from "./channels/stall-guard";
 import {
   forgetSettledSummaries,
@@ -492,6 +493,7 @@ const tenantPackage = await loadTenantPackage(config.tenantPackageDirectory);
 const deploymentId =
   config.deploymentId ?? (await deploymentNameOf(database, tenantPackage));
 const threadIdentity = createThreadIdentity(deploymentId);
+
 const baseChannelStore = createChannelStore(
   database,
   agentProfileStore,
@@ -3369,6 +3371,8 @@ const app = createApp(
   identityStore,
   identityGithubCallback,
   profileStore,
+  // A person's own folders for the sidebar. Owner-scoped, and no permission of its own.
+  createProjectStore(database),
 );
 
 startHttpServer({

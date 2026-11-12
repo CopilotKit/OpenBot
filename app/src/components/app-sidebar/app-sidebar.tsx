@@ -1,7 +1,6 @@
 import { IconLogout, IconPlus, IconSearch } from "@tabler/icons-react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { Link, type LinkOptions, useParams } from "@tanstack/react-router";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { Link, type LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
 import { useRef, useState } from "react";
 import { BrandName } from "@/components/edition/brand-name";
@@ -30,29 +29,34 @@ import {
 } from "@/components/ui/sidebar";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
-import { untitledLine } from "@/lib/channels/label";
+import { matchingChannels } from "@/lib/channels/order";
 import {
   type ChannelSummary,
   channelListQueryOptions,
 } from "@/lib/channels/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
-import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
-import { relativeTimeShort } from "@/lib/relative-time";
-import {
-  type MessageListEmphasis,
-  useMessageListEmphasis,
-} from "@/lib/settings/message-list";
+import { projectsQueryOptions } from "@/lib/projects/queries";
+import { useMessageListEmphasis } from "@/lib/settings/message-list";
+import { useSidebarSections } from "@/lib/settings/sidebar-sections";
 import { BotsNavBadge } from "../bot-profile/attention";
 import { BrowserNavItem } from "../browser/browser-nav-item";
 import { navigationRender } from "../edition/team-features-dialog";
 import { OpenBotVersion } from "../layout/openbot-version";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
-import { Channel } from "./channel";
 import { ChannelPagination } from "./channel-pagination";
+import { ConversationSections } from "./conversation-sections";
 import { useSignOut } from "./use-sign-out";
+
+/*
+ * The roster's two reading rules live in `lib/channels/order.ts` now: the sidebar applies them per
+ * section, and the skins' sheets still import them from here. Re-exported rather than moved out of
+ * sight, because these are what other surfaces already reach for.
+ */
+export { hasUnseenActivity, isUnread } from "@/lib/channels/unread";
+export { matchingChannels, pinnedFirst } from "@/lib/channels/order";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
 
@@ -80,144 +84,22 @@ function UserAvatar() {
  */
 const MAX_ANIMATED_ROWS = 60;
 
-/**
- * The roster, narrowed to what the person typed.
- *
- * Matches the channel's name, its summary, its opening and the last message, because those are the
- * things the row can actually show — searching against something invisible returns results a person
- * cannot account for. The opening and the last message are included because one of them is what the
- * second line draws until the conversation has been named. Message history beyond that line is not
- * here to search: it lives in the thread store, and reaching for it is a server endpoint rather than
- * a filter.
- *
- * An empty query returns the input array unchanged rather than a copy, so typing and clearing does
- * not hand `AnimatePresence` a new array identity and restage the whole list.
- */
-export function matchingChannels(
-  channels: ChannelSummary[] | undefined,
-  query: string,
-): ChannelSummary[] {
-  if (!channels) {
-    return [];
-  }
-  const needle = query.trim().toLowerCase();
-  if (!needle) {
-    return channels;
-  }
-  return channels.filter((channel) =>
-    [channel.name, channel.summary, channel.opening, channel.lastMessage].some(
-      (field) => field?.toLowerCase().includes(needle),
-    ),
-  );
-}
-
-/**
- * Pinned channels first, everything else after, newest activity first within each group.
- *
- * The mirror of a server rule, not the rule itself: the roster query orders pinned-first and its
- * cursor carries the pin, so a pinned channel arrives on page one however long ago it was last
- * spoken in. Sorting here as well is for what happens between refetches — the socket patches a pin
- * onto a loaded row without moving it, and re-sorts a page by recency alone — which is the same
- * reason `byRecency` in use-channel-events.ts mirrors the recency rule. A stable partition, so the
- * recency order inside each group is whatever arrived.
- */
-export function pinnedFirst(channels: ChannelSummary[]): ChannelSummary[] {
-  return [...channels].sort((a, b) => Number(b.pinned) - Number(a.pinned));
-}
-
-/**
- * Whether a Bot has said something this member has not had on screen yet.
- *
- * A Bot's message, and only a Bot's: your own message carries a null agent id and reading your own
- * words needs no marker. ISO-8601 strings compare correctly as strings, which is the same bet the
- * server's recency sort already makes.
- */
-export function hasUnseenActivity(channel: ChannelSummary): boolean {
-  if (channel.lastMessageAgentId === null || channel.lastMessageAt === null) {
-    return false;
-  }
-  return (
-    channel.lastReadAt === null || channel.lastMessageAt > channel.lastReadAt
-  );
-}
-
-/** Unseen activity somewhere you are not looking. The open channel never shows the dot. */
-export function isUnread(
-  channel: ChannelSummary,
-  openChannelId: string | undefined,
-): boolean {
-  return channel.id !== openChannelId && hasUnseenActivity(channel);
-}
-
-/**
- * A roster row that can animate.
- *
- * Two movements only: a channel that did not exist fades in, and a channel that was just spoken in
- * moves to the top. Nothing else animates, a roster that reacts to being read is a roster that
- * moves under the cursor.
- */
-function ChannelRow({
-  channel,
-  animateOrder,
-  emphasis,
-}: {
-  channel: ChannelSummary;
-  animateOrder: boolean;
-  emphasis: MessageListEmphasis;
-}) {
-  const shouldReduceMotion = useReducedMotion();
-  // Whether this row is unread, as a boolean, for the same reason `Channel` computes `isOpen`
-  // that way: navigating re-renders the rows whose answer changed, not the whole roster.
-  const unread = useParams({
-    strict: false,
-    select: (params) =>
-      isUnread(channel, (params as { channelId?: string }).channelId),
-  });
-  return (
-    <motion.div
-      animate={{ opacity: 1, transform: "translateY(0px)" }}
-      initial={{
-        opacity: 0,
-        transform: shouldReduceMotion ? "none" : "translateY(-8px)",
-      }}
-      exit={{ opacity: 0 }}
-      layout={animateOrder && !shouldReduceMotion ? "position" : false}
-      transition={{ duration: ENTRANCE_SECONDS, ease: EASE_OUT }}
-    >
-      <Channel
-        emphasis={emphasis}
-        channelId={channel.id}
-        participantIds={channel.agentIds}
-        name={channel.name}
-        summary={channel.summary ?? undefined}
-        untitled={untitledLine(channel)}
-        lastMessageAt={
-          channel.lastMessageAt
-            ? relativeTimeShort(channel.lastMessageAt)
-            : undefined
-        }
-        pinned={channel.pinned}
-        canRename={channel.canRename ?? false}
-        unread={unread}
-        // A turn running, or work the conversation waits on between turns: a hop, a routine.
-        busy={(channel.busy ?? false) || (channel.work?.length ?? 0) > 0}
-      />
-    </motion.div>
-  );
-}
-
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const emphasis = useMessageListEmphasis();
   const { data: currentUser } = useQuery(currentUserQueryOptions());
   const signOut = useSignOut();
   const signOutOffered = useSignOutOffered();
   const channels = useInfiniteQuery(channelListQueryOptions());
+  // The folders, in the same breath as the roster: the Projects section is drawn from this read and
+  // each channel's own `projectId`, so no row is asked about separately.
+  const projects = useQuery(projectsQueryOptions());
+  const sidebar = useSidebarSections();
   // One socket for the app, opened where the roster is kept live.
   useChannelEvents();
   const [search, setSearch] = useState("");
   const scrollRoot = useRef<HTMLDivElement>(null);
   const searching = search.trim().length > 0;
-  const visibleChannels = pinnedFirst(matchingChannels(channels.data, search));
+  const visibleChannels = matchingChannels(channels.data, search);
   /*
    * FILTERING DOES NOT ANIMATE. Rows exit and relayout on every keystroke otherwise, which is a
    * list thrashing under somebody who is still typing — and the moving target is the very thing
@@ -228,6 +110,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     !searching && (channels.data?.length ?? 0) <= MAX_ANIMATED_ROWS;
   const navigation = useNavigationItems();
   const { setOpenMobile } = useSidebar();
+  const projectsCache = projects.data ?? [];
+  /*
+   * Whether there is anything to section at all. Nothing is drawn until the roster has answered, so
+   * a slow read shows a quiet sidebar rather than three sections announcing they are empty; and a
+   * person with no conversations and no folders keeps the one card that tells them how to start.
+   */
+  const empty =
+    channels.data?.length === 0 && projectsCache.length === 0 && !searching;
 
   return (
     <Sidebar variant="inset" {...props}>
@@ -306,7 +196,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 </Empty>
               </div>
             ) : null}
-            {!searching && channels.data?.length === 0 ? (
+            {empty ? (
               <div className="py-4">
                 <Empty className="border border-dashed min-h-[40dvh]">
                   <EmptyHeader>
@@ -318,16 +208,17 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 </Empty>
               </div>
             ) : null}
-            <AnimatePresence initial={false}>
-              {visibleChannels.map((channel) => (
-                <ChannelRow
-                  emphasis={emphasis}
-                  key={channel.id}
-                  animateOrder={animateOrder}
-                  channel={channel}
-                />
-              ))}
-            </AnimatePresence>
+            {!empty && channels.data !== undefined ? (
+              <ConversationSections
+                animateOrder={animateOrder}
+                channels={visibleChannels}
+                collapsed={sidebar.sections}
+                emphasis={emphasis}
+                onToggle={sidebar.toggle}
+                projects={projectsCache}
+                searching={searching}
+              />
+            ) : null}
             <ChannelPagination
               query={channels}
               scrollRoot={scrollRoot}

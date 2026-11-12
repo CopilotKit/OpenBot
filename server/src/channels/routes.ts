@@ -29,6 +29,7 @@ import {
   botTasks,
   channelAgents,
   channelMemberships,
+  channelProjects,
   channels,
   intelligenceChannelMappings,
   users,
@@ -90,6 +91,22 @@ export type ChannelSummary = AgentChannel & {
    * "a conversation with this Bot", such as where its check-ins reach the person, leave these out.
    */
   task: boolean;
+  /**
+   * How many people are in this channel, the caller included.
+   *
+   * Read with the roster so the sidebar can tell a 1:1 conversation from a group without asking
+   * about every row separately: a channel with more than one person in it is a group chat
+   * whatever its Bot count. It says nothing about who they are.
+   */
+  memberCount: number;
+  /**
+   * The caller's own project folder holding this channel, or null for none.
+   *
+   * Per member, like the pin: the person reading the roster may have filed a conversation that
+   * nobody else has. Read with the page rather than per row, so a sidebar draws its sections from
+   * one request.
+   */
+  projectId: string | null;
 };
 
 /** What a client that ran an agent reports back about the message it just saw. */
@@ -711,6 +728,8 @@ export function createChannelStore(
           lastReadAt: channelMemberships.lastReadAt,
           canRename: sql<boolean>`${starterOf(channels.id)} = ${actor.id}`,
           task: sql<boolean>`exists (select 1 from ${botTasks} where ${botTasks.channelId} = ${channels.id})`,
+          memberCount: sql<number>`(select count(*)::int from ${channelMemberships} where ${channelMemberships.channelId} = ${channels.id})`,
+          projectId: channelProjects.projectId,
         })
         .from(channels)
         .innerJoin(
@@ -731,6 +750,18 @@ export function createChannelStore(
         .innerJoin(
           agentProfiles,
           eq(agentProfiles.agentId, channelAgents.agentId),
+        )
+        /*
+         * The caller's own folder, if any. A left join and not a subquery, because a page holds a
+         * few dozen rows and this reads them in the same statement; the unique index on
+         * (channel_id, owner_user_id) is what keeps it from multiplying the rows.
+         */
+        .leftJoin(
+          channelProjects,
+          and(
+            eq(channelProjects.channelId, channels.id),
+            eq(channelProjects.ownerUserId, actor.id),
+          ),
         )
         .where(
           and(
@@ -773,6 +804,8 @@ export function createChannelStore(
           lastReadAt: row.lastReadAt,
           canRename: row.canRename,
           task: row.task,
+          memberCount: row.memberCount,
+          projectId: row.projectId,
         });
       }
       return { channels: [...summaries.values()], nextCursor };
@@ -1701,6 +1734,9 @@ function channelSummaryDto(
     lastReadAt: channel.lastReadAt?.toISOString() ?? null,
     canRename: channel.canRename,
     task: channel.task,
+    // Read with the roster so the sidebar can draw its sections from one request.
+    memberCount: channel.memberCount,
+    projectId: channel.projectId,
     work: work.map(channelWorkDto),
     /*
      * Only ever true from here. A person's own run is not on any row this can read, so a roster

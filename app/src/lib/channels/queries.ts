@@ -103,6 +103,21 @@ export type ChannelSummary = AgentChannel & {
    * check-in. Absent from a server that predates tasks, which reads as not one.
    */
   task?: boolean;
+  /**
+   * How many people are in this conversation, the caller included.
+   *
+   * What tells a group chat from a 1:1 without asking the server about each row: more than one
+   * person is shared work whatever the Bot count. Absent from a server that predates projects,
+   * which reads as one — the shape a 1:1 has.
+   */
+  memberCount?: number;
+  /**
+   * The caller's own project folder holding this conversation, or null for none.
+   *
+   * Per member, like the pin: two people in the same channel may have filed it in different
+   * folders, or in none. Absent from a server that predates projects, which reads as unfiled.
+   */
+  projectId?: string | null;
 };
 
 export const channelKeys = {

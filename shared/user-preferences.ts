@@ -25,6 +25,27 @@ export function isSkinId(value: unknown): value is SkinId {
   return SKIN_IDS.some((id) => id === value);
 }
 
+/**
+ * The collapsible sections of the conversation sidebar, in the order they are drawn.
+ *
+ * Shared rather than app-local because which sections a person keeps folded is saved on their
+ * account: it follows them to every browser and device they sign in from, and the server has to
+ * know the values it may store.
+ */
+export const SIDEBAR_SECTION_IDS = ["group", "direct", "projects"] as const;
+
+export type SidebarSectionId = (typeof SIDEBAR_SECTION_IDS)[number];
+
+/** One flag per section: true means folded shut. */
+export type SidebarSections = Record<SidebarSectionId, boolean>;
+
+/** Everything open, which is what a person sees before they fold anything. */
+export const DEFAULT_SIDEBAR_SECTIONS: SidebarSections = {
+  group: false,
+  direct: false,
+  projects: false,
+};
+
 export type UserPreferences = {
   /** Server-owned first new eligible conversation; shared by both starter Bots. */
   starterTourChannelId?: string;
@@ -47,6 +68,13 @@ export type UserPreferences = {
    * on, off and interval stay as they were, so turning this back on restores them.
    */
   proactive: ProactivePreference;
+  /**
+   * Which sidebar sections this person has folded shut.
+   *
+   * On the account, not in the browser's storage, for the same reason the skin is: a person who
+   * folds Projects on their laptop expects it folded on their desktop too.
+   */
+  sidebarSections: SidebarSections;
 };
 
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
@@ -55,4 +83,5 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   narration: null,
   skin: DEFAULT_SKIN,
   proactive: "on",
+  sidebarSections: DEFAULT_SIDEBAR_SECTIONS,
 };

@@ -1,4 +1,4 @@
-import { SKIN_IDS } from "@openbot/shared/user-preferences";
+import { SIDEBAR_SECTION_IDS, SKIN_IDS } from "@openbot/shared/user-preferences";
 import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import type { AppVariables } from "./auth/guards";
@@ -16,6 +16,17 @@ const preferencesPatch = z
     narration: z.enum(["on", "off"]).optional(),
     skin: z.enum(SKIN_IDS).optional(),
     proactive: z.enum(["on", "off"]).optional(),
+    /*
+     * All three flags or none: the row is merged as one JSON value, so a single-key object would
+     * replace the others with nothing and every other section would spring open.
+     */
+    sidebarSections: z
+      .strictObject({
+        group: z.boolean(),
+        direct: z.boolean(),
+        projects: z.boolean(),
+      })
+      .optional(),
   })
   .refine((patch) => Object.keys(patch).length > 0);
 
@@ -47,7 +58,7 @@ export function userPreferencesRoutes(
     if (!parsed.success) {
       return context.json(
         {
-          error: `Choose agent or thread for message list emphasis, true or false for the self-host banner, on or off for narration or check-ins, or one of these skins: ${SKIN_IDS.join(", ")}.`,
+          error: `Choose agent or thread for message list emphasis, true or false for the self-host banner, on or off for narration or check-ins, true or false for each of these sidebar sections — ${SIDEBAR_SECTION_IDS.join(", ")} — or one of these skins: ${SKIN_IDS.join(", ")}.`,
         },
         400,
       );

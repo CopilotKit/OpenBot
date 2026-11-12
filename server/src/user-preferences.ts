@@ -1,4 +1,5 @@
 import {
+  DEFAULT_SIDEBAR_SECTIONS,
   DEFAULT_USER_PREFERENCES,
   isSkinId,
   type UserPreferences,
@@ -12,7 +13,19 @@ import { users } from "./db/schema";
  * back to a build that has it brings it back, but this build answers with its default.
  */
 function withDefaults(stored: Partial<UserPreferences>): UserPreferences {
-  const preferences = { ...DEFAULT_USER_PREFERENCES, ...stored };
+  const preferences = {
+    ...DEFAULT_USER_PREFERENCES,
+    ...stored,
+    /*
+     * Merged a level deeper than the rest: the sidebar's flags arrive as one object, and a row
+     * written by a build that knew two sections must not leave the third undefined. A section this
+     * build does not draw is simply not read.
+     */
+    sidebarSections: {
+      ...DEFAULT_SIDEBAR_SECTIONS,
+      ...stored.sidebarSections,
+    },
+  };
   return isSkinId(preferences.skin)
     ? preferences
     : { ...preferences, skin: DEFAULT_USER_PREFERENCES.skin };

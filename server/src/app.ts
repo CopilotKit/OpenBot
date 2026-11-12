@@ -191,6 +191,11 @@ import {
   type UserInstructionsStore,
 } from "./user-instructions";
 import type { UserPreferencesStore } from "./user-preferences";
+import {
+  createChannelProjectRoutes,
+  createProjectRoutes,
+} from "./projects/routes";
+import type { ProjectStore } from "./projects/store";
 import { userPreferencesRoutes } from "./user-preferences-routes";
 import { createVoiceProvider } from "./voice/provider";
 import { createVoiceRoutes } from "./voice/routes";
@@ -568,6 +573,16 @@ export function createApp(
   /** The GitHub sign-in callback, built by the caller; mounted behind requireUser ahead of /api/identity. */
   identityGithubCallback?: Hono<{ Variables: AppVariables }>,
   profileStore?: ProfileStore,
+  /**
+   * The project folders a person files conversations into.
+   *
+   * Appended last, like everything above it: these are positional, so inserting one anywhere else
+   * silently shifts every existing call site's arguments by one.
+   *
+   * Absent leaves `/api/projects` unmounted and the sidebar drawing its two membership sections
+   * only, the same degraded shape every other optional store here takes.
+   */
+  projectStore?: ProjectStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
   // First, in every auth mode: a page from another website changes nothing here and opens no socket.
@@ -1786,6 +1801,19 @@ export function createApp(
         auditStore,
         userPreferences,
       ),
+    );
+  }
+
+  if (projectStore) {
+    app.route("/api/projects", createProjectRoutes(projectStore, requireUser));
+    /*
+     * Filed under the channels prefix, mounted beside the channel routes rather than inside them:
+     * the move route resolves the caller in `channel_memberships` through the project store, and
+     * leaving the channel router alone keeps every existing route's permission check untouched.
+     */
+    app.route(
+      "/api/channels",
+      createChannelProjectRoutes(projectStore, requireUser),
     );
   }
 
