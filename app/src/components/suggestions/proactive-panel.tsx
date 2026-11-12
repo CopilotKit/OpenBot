@@ -69,7 +69,7 @@ const SUGGESTIONS_SHOWN = 3;
 
 /**
  * What the person's Bots found in their check-ins, each with why, its source and its Bot, to Start
- * as a task or Hide. The skins list it on its own (OpenDuet's Up next, OpenMuse's Ideas); OpenBot's
+ * as a task or Hide. The skins list it on its own (OpenDuet's Up next, OpenFuse's Ideas); OpenBot's
  * own pages list the same rows under Needs you.
  */
 export function SuggestionsInbox({

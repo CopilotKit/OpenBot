@@ -26,7 +26,7 @@ Bots are coworkers, and you own them. Each Bot has a computer of its own (a real
 - The web app in `app/` is the main surface. A Tauri desktop app and a mobile client use the same frame.
 - Main areas: chat with a chosen Bot, the Bot's own computer and browser, Bots, skills, routines, connections, memory, approvals, audit, admin and settings.
 - OpenBot is a template. Companies clone the repository and rename it through `brand.yaml`.
-- A person can pick a skin per account: the default `openbot` skin, OpenDuet, OpenDots or OpenMuse.
+- A person can pick a skin per account: the default `openbot` skin, OpenDuet, OpenDots or OpenFuse.
 
 ## Capabilities and Constraints
 

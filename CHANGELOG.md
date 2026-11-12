@@ -48,7 +48,7 @@ every deployment:
   they said "free CPUs".
 - **On a Mac, the window's buttons no longer cover a skin's controls.** With the OpenDuet skin the
   close, minimise and zoom buttons sat on the "OpenBot" name at the top of the menu, and on the back
-  button of every page opened over the app. OpenDots and OpenMuse had their own controls under them
+  button of every page opened over the app. OpenDots and OpenFuse had their own controls under them
   too, in some window sizes. Each skin now leaves that corner clear, as OpenBot's own sidebar does.
   In a browser and on Windows nothing moves.
 - **An OpenBot whose saved data is gone says so, and starts fresh.** When OpenBot's Podman machine
@@ -417,6 +417,8 @@ every deployment:
 
 ### Smaller changes
 
+- The OpenMuse skin is now called OpenFuse. Anyone who picked it keeps it, with nothing to
+  choose again.
 - New Bot's first screen ends with a **Bring your own agent** card showing the mark of every
   framework a custom agent can run on. It opens the same list the **Connect a custom agent** button
   in the sheet's footer did, and that button is gone.
