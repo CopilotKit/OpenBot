@@ -1,0 +1,51 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "In your terminal, run the command echo fernhill-$((40+2)) and tell me what it printed, in one plain sentence with no formatting.",
+        "model": "gpt-5.6-terra",
+        "turnIndex": 0,
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "name": "computer_run_command",
+            "arguments": "{\"command\":\"echo fernhill-$((40+2))\"}",
+            "id": "call_tqHgHodmWv3LRRNsCEkmON6E"
+          }
+        ]
+      },
+      "recordedTimings": {
+        "ttftMs": 953,
+        "interChunkDelaysMs": [
+          11,
+          400,
+          148,
+          9,
+          2,
+          2,
+          1,
+          14,
+          3,
+          7,
+          11,
+          4,
+          12,
+          9,
+          14,
+          5,
+          25,
+          134,
+          10,
+          142
+        ],
+        "totalDurationMs": 1916
+      },
+      "metadata": {
+        "systemHash": "8712e5f3",
+        "toolsHash": "fb6fd309"
+      }
+    }
+  ]
+}
