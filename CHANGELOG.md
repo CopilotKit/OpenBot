@@ -339,6 +339,12 @@ every deployment:
 
 ### Conversations
 
+- **A file you attach stays a file once the Bot answers.** On a Bot OpenBot runs in a harness, such
+  as the Personal Assistant on LangChain, a text file you sent turned into one giant block of its
+  own contents when the answer finished, and an image's thumbnail disappeared. A reload showed the
+  same. The message now keeps the file as you sent it, during the answer, after it and after a
+  reload, and the Bot still reads the whole file. Messages already turned into text stay as they
+  are.
 - **Switching back to a conversation the Bot is working in shows it working.** Leave a conversation
   right after sending, or while the Bot takes a browser step, and come back: the conversation could
   be empty, your message gone, no sign of the Bot working and the message box open, until the whole
